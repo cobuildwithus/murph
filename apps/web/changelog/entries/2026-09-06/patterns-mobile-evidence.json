@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 200,
+  "item": {
+    "id": "patterns-mobile-evidence",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Quieter patterns, clearer evidence",
+    "summary": "On phones, pattern cards focus on changed results, with compact cards for activities showing no clear changes.",
+    "details": "Tap the green coverage bars to see how many days an activity was recorded. Result drawers now show how many days support each average, including separate samples for sleep score and sleep efficiency.",
+    "relevanceTags": ["patterns", "mobile"],
+    "sourcePullRequests": [],
+    "tryIt": { "href": "/patterns", "label": "View your patterns" }
+  }
+}

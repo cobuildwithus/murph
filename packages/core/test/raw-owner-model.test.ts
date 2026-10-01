@@ -2,11 +2,12 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 
-import { CONTRACT_SCHEMA_VERSION } from "@murphai/contracts";
+import { CONTRACT_SCHEMA_VERSION, type RawAssetOwner } from "@murphai/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   buildRawImportManifest,
+  inferRawAssetOwnerFromDirectory,
   initializeVault,
   parseRawImportManifest,
   resolveRawAssetDirectory,
@@ -41,6 +42,78 @@ afterEach(async () => {
 });
 
 describe("raw owner model", () => {
+  const ownerId = "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const ownerLayouts = [
+    ["raw/assessments", { kind: "assessment", id: ownerId }],
+    ["raw/captures", { kind: "capture", id: ownerId }],
+    ["raw/documents", { kind: "document", id: ownerId }],
+    ["raw/meals", { kind: "meal", id: ownerId }],
+    ["raw/measurements", { kind: "measurement", id: ownerId }],
+    ["raw/workouts", { kind: "workout", id: ownerId }],
+    ["raw/workouts/strong", { kind: "workout_batch", partition: "strong", id: ownerId }],
+    ["raw/samples/provider.v2_1", { kind: "sample_batch", partition: "provider.v2_1", id: ownerId }],
+    ["raw/integrations/provider-1", { kind: "device_batch", partition: "provider-1", id: ownerId }],
+  ] satisfies [string, RawAssetOwner][];
+
+  it.each(ownerLayouts)("round-trips the %s owner layout with generic contract IDs", (prefix, owner) => {
+    const rawDirectory = `${prefix}/2026/04/${ownerId}`;
+    expect(resolveRawAssetDirectory({ owner, occurredAt: FIXED_TIME })).toBe(rawDirectory);
+    expect(inferRawAssetOwnerFromDirectory(rawDirectory)).toEqual(owner);
+    expect(rawDirectoryMatchesOwner(rawDirectory, owner)).toBe(true);
+    expect(rawDirectoryMatchesOwner(rawDirectory, { ...owner, id: "doc_01ARZ3NDEKTSV4RRFFQ69G5FAW" })).toBe(false);
+  });
+
+  it.each([
+    ` ./raw//documents/2026/04/${ownerId} `,
+    `raw/documents/discard/../2026/04/${ownerId}`,
+    `raw\\documents\\2026\\04\\${ownerId}`,
+    `raw/documents/0000/00/${ownerId}`,
+    `raw/documents/9999/99/${ownerId}`,
+  ])("preserves relative path normalization and digit-width date matching for %s", (rawDirectory) => {
+    expect(inferRawAssetOwnerFromDirectory(rawDirectory)).toEqual({ kind: "document", id: ownerId });
+  });
+
+  it.each([
+    "",
+    `/raw/documents/2026/04/${ownerId}`,
+    `C:/raw/documents/2026/04/${ownerId}`,
+    `../raw/documents/2026/04/${ownerId}`,
+    `raw/documents/2026/04/${ownerId}\0`,
+    `other/documents/2026/04/${ownerId}`,
+    `raw/unknown/2026/04/${ownerId}`,
+    `raw/toString/2026/04/${ownerId}`,
+    `raw/__proto__/2026/04/${ownerId}`,
+    `raw/documents/26/04/${ownerId}`,
+    `raw/documents/2026/4/${ownerId}`,
+    `raw/documents/2026/xx/${ownerId}`,
+    `raw/documents/year/04/${ownerId}`,
+    `raw/documents/2026/04/${ownerId}/`,
+    `raw/documents/2026/04/${ownerId}/source.pdf`,
+    "raw/documents/2026/04",
+    "raw/documents/2026/04/not-an-id",
+    "raw/documents/2026/04/wkimp_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    `raw/captures/extra/2026/04/${ownerId}`,
+    `raw/documents/extra/2026/04/${ownerId}`,
+    `raw/assessments/extra/2026/04/${ownerId}`,
+    `raw/measurements/extra/2026/04/${ownerId}`,
+    `raw/meals/extra/2026/04/${ownerId}`,
+    `raw/samples/2026/04/${ownerId}`,
+    `raw/integrations/2026/04/${ownerId}`,
+    `raw/workouts/invalid partition/2026/04/${ownerId}`,
+    `raw/samples/provider%2Fother/2026/04/${ownerId}`,
+    `raw/integrations/provider/extra/2026/04/${ownerId}`,
+  ])("rejects malformed or unsupported owner directory %s", (rawDirectory) => {
+    expect(inferRawAssetOwnerFromDirectory(rawDirectory)).toBeNull();
+  });
+
+  it("keeps workout singleton and batch ownership distinct", () => {
+    const singleton = { kind: "workout", id: ownerId } as const;
+    const batch = { kind: "workout_batch", id: ownerId, partition: "strong" } as const;
+    expect(rawDirectoryMatchesOwner(`raw/workouts/2026/04/${ownerId}`, batch)).toBe(false);
+    expect(rawDirectoryMatchesOwner(`raw/workouts/strong/2026/04/${ownerId}`, singleton)).toBe(false);
+    expect(rawDirectoryMatchesOwner(`raw/workouts/strong/2026/04/${ownerId}`, { ...batch, partition: "other" })).toBe(false);
+  });
+
   it("resolves owner-scoped directories for singleton and partitioned owners", () => {
     expect(
       resolveRawAssetDirectory({

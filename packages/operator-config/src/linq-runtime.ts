@@ -312,6 +312,7 @@ export interface SendLinqVoiceMemoResult {
   providerThreadId: string | null
   target: string
   voiceMemoAttachmentId: string | null
+  voiceMemoDurationMs: number | null
   voiceMemoUrl: string | null
 }
 
@@ -457,10 +458,9 @@ export async function sendLinqChatMessage(
     },
     dependencies,
   )
-  const primaryMessageId = requireLinqPrimaryMessageIdForRichLink({
-    messageId: primaryResponse.message?.id,
-    operation: 'send_message',
-  })
+  const primaryMessageId = normalizeNullableString(
+    primaryResponse.message?.id ?? null,
+  )
   let linkResponse: LinqMessageSendResponse
   try {
     linkResponse = await sendLinqChatRichLinkWithTextFallback(
@@ -538,6 +538,7 @@ async function sendLinqChatMessageParts(
     body,
     chatId,
     idempotencyKey,
+    operation: 'send_message',
     replyToMessageId:
       input.nativeReplyRequested === true ? replyToMessageId : null,
   }, dependencies)
@@ -580,6 +581,7 @@ async function sendLinqChatRichLink(
     body,
     chatId,
     idempotencyKey,
+    operation: 'send_message',
     replyToMessageId,
   }, dependencies)
   const providerMessageEffects = buildLinqProviderMessageEffects({
@@ -636,6 +638,7 @@ async function sendLinqChatMessageBody(
     body: MessageSendParams
     chatId: string
     idempotencyKey: string | null
+    operation: 'send_imessage_app_card' | 'send_message'
     replyToMessageId: string | null
   },
   dependencies: {
@@ -644,12 +647,12 @@ async function sendLinqChatMessageBody(
     signal?: AbortSignal
   },
 ): Promise<LinqMessageSendResponse> {
-  return requestLinqSdk<MessageSendResponse>({
+  const response = await requestLinqSdk<MessageSendResponse>({
     body: input.body,
     details: {
       hasIdempotencyKey: input.idempotencyKey !== null,
       hasReplyToMessageId: input.replyToMessageId !== null,
-      operation: 'send_message',
+      operation: input.operation,
       provider: 'linq',
     },
     env: dependencies.env ?? process.env,
@@ -660,6 +663,11 @@ async function sendLinqChatMessageBody(
       client.chats.messages.send(input.chatId, input.body, { signal }),
     signal: dependencies.signal,
   })
+  requireLinqPrimaryMessageId({
+    messageId: response.message?.id,
+    operation: input.operation,
+  })
+  return response
 }
 
 export async function checkLinqIMessageCapability(
@@ -702,6 +710,7 @@ export async function sendLinqIMessageAppCard(
     card: AssistantResponseCard
     chatId: string
     idempotencyKey: string
+    companionMessage?: string | null
   },
   dependencies: {
     env?: NodeJS.ProcessEnv
@@ -717,38 +726,30 @@ export async function sendLinqIMessageAppCard(
   const body: MessageSendParams = {
     message: {
       preferred_service: 'iMessage',
-      idempotency_key: idempotencyKey,
+      idempotency_key: buildLinqProviderIdempotencyKey(idempotencyKey),
       parts: [{
         type: 'imessage_app',
-        // `app_store_id` is intentionally absent. Linq otherwise substitutes
-        // square artwork in app-absent static Messages cards.
         app: {
           name: 'Murph',
           team_id: 'G9DJH2XUMK',
           bundle_id: 'ai.withmurph.app.messages',
+          app_store_id: 6786145859,
         },
         interactive: true,
         url: buildLinqIMessageAppCardUrl(input.card),
         fallback_text: buildLinqIMessageAppFallbackText(input.card),
-        layout: buildLinqIMessageAppLayout(input.card),
+        layout: buildLinqIMessageAppLayout(input.card, input.companionMessage),
       }],
     },
   }
 
-  return requestLinqSdk<MessageSendResponse>({
+  return sendLinqChatMessageBody({
     body,
-    details: {
-      hasIdempotencyKey: true,
-      operation: 'send_imessage_app_card',
-      provider: 'linq',
-    },
-    env: dependencies.env ?? process.env,
-    fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: `/chats/${encodeURIComponent(chatId)}/messages`,
-    request: (client, signal) => client.chats.messages.send(chatId, body, { signal }),
-    signal: dependencies.signal,
-  })
+    chatId,
+    idempotencyKey,
+    operation: 'send_imessage_app_card',
+    replyToMessageId: null,
+  }, dependencies)
 }
 
 async function createLinqAttachmentUpload(
@@ -1214,10 +1215,7 @@ export async function createLinqChat(
     dependencies,
   )
   const chatId = requireLinqCreatedChatIdForRichLink(result)
-  const primaryMessageId = requireLinqPrimaryMessageIdForRichLink({
-    messageId: result.messageId,
-    operation: 'create_chat',
-  })
+  const primaryMessageId = result.messageId
   let linkResponse: LinqMessageSendResponse
   try {
     linkResponse = await sendLinqChatRichLinkWithTextFallback(
@@ -1278,7 +1276,7 @@ async function createLinqChatWithPrimaryMessage(
     fetchImplementation?: LinqFetch
     signal?: AbortSignal
   },
-): Promise<CreateLinqChatResult> {
+): Promise<CreateLinqChatResult & { messageId: string }> {
   const from = normalizeRequiredString(input.from, 'from')
   const recipients = normalizeLinqStringList(input.to, 'recipient')
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
@@ -1309,7 +1307,10 @@ async function createLinqChatWithPrimaryMessage(
     signal: dependencies.signal,
   })
 
-  const messageId = normalizeNullableString(response.chat?.message?.id ?? null)
+  const messageId = requireLinqPrimaryMessageId({
+    messageId: response.chat?.message?.id,
+    operation: 'create_chat',
+  })
   const providerMessageEffects = buildLinqProviderMessageEffects({
     body: messageBody,
     providerMessageId: messageId,
@@ -1341,9 +1342,9 @@ function requireLinqCreatedChatIdForRichLink(result: CreateLinqChatResult): stri
   )
 }
 
-function requireLinqPrimaryMessageIdForRichLink(input: {
+function requireLinqPrimaryMessageId(input: {
   messageId: unknown
-  operation: 'create_chat' | 'send_message'
+  operation: 'create_chat' | 'send_imessage_app_card' | 'send_message'
 }): string {
   const messageId = normalizeNullableString(
     typeof input.messageId === 'string' ? input.messageId : null,
@@ -1355,7 +1356,7 @@ function requireLinqPrimaryMessageIdForRichLink(input: {
   throw Object.assign(
     new VaultCliError(
       'LINQ_API_REQUEST_FAILED',
-      'Linq response was missing the primary message identity for a rich-link follow-up.',
+      'Linq response was missing the primary message identity.',
       {
         failureStage: 'http',
         operation: input.operation,
@@ -2594,6 +2595,19 @@ function parseLinqVoiceMemoResponse(input: {
   const voiceMemoRecord = readRecord(input.response.voice_memo)
   const nestedVoiceMemo = readRecord(voiceMemoRecord?.voice_memo)
   const chatRecord = readRecord(voiceMemoRecord?.chat)
+  const rawDuration = nestedVoiceMemo?.duration_ms
+  const voiceMemoDurationMs = typeof rawDuration === 'number'
+    && Number.isFinite(rawDuration) && rawDuration >= 0
+    ? rawDuration
+    : null
+  if (voiceMemoDurationMs === 0) {
+    // The send is already accepted. Throwing here could duplicate the memo.
+    console.warn('Linq accepted a voice memo with zero duration.', {
+      provider: 'linq',
+      operation: 'send_voice_memo',
+      durationMs: 0,
+    })
+  }
   return {
     providerMessageId: normalizeNullableString(readStringField(voiceMemoRecord, 'id')),
     providerThreadId:
@@ -2602,6 +2616,7 @@ function parseLinqVoiceMemoResponse(input: {
     voiceMemoAttachmentId:
       normalizeNullableString(readStringField(nestedVoiceMemo, 'id')) ??
       input.attachmentId,
+    voiceMemoDurationMs,
     voiceMemoUrl: normalizeNullableString(readStringField(nestedVoiceMemo, 'url')),
   }
 }
@@ -2810,7 +2825,7 @@ function buildLinqRichLinkMessageBody(input: {
     }],
   }
   if (idempotencyKey) {
-    message.idempotency_key = idempotencyKey
+    message.idempotency_key = buildLinqProviderIdempotencyKey(idempotencyKey)
   }
   if (replyToMessageId) {
     message.reply_to = { message_id: replyToMessageId }
@@ -2870,12 +2885,20 @@ function buildLinqMessageBody(input: {
     parts,
   }
   if (idempotencyKey) {
-    message.idempotency_key = idempotencyKey
+    message.idempotency_key = buildLinqProviderIdempotencyKey(idempotencyKey)
   }
   if (replyToMessageId) {
     message.reply_to = { message_id: replyToMessageId }
   }
   return { message }
+}
+
+function buildLinqProviderIdempotencyKey(key: string): string {
+  // Keep persisted authority metadata intact and preserve already-valid wire keys.
+  // Hash the final key, including any rich-link or fallback sibling suffix.
+  return key.length <= 255
+    ? key
+    : `linq-idempotency:sha256:${createHash('sha256').update(key).digest('hex')}`
 }
 
 export function assertLinqMessagePartsWithinLimits(input: {

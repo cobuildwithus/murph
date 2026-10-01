@@ -66,7 +66,7 @@ export interface ComputerHandoffRecord {
   expiresAt: Date;
   id: string;
   memberId: string;
-  purpose: PersistedComputerHandoffPurpose;
+  purpose: HostedComputerHandoffPurpose;
   runId: string;
   returnContactKind: HostedComputerReturnContactKind | null;
   status: HostedComputerHandoffStatus;
@@ -74,10 +74,6 @@ export interface ComputerHandoffRecord {
   tokenHash: string;
   updatedAt: Date;
 }
-
-export type PersistedComputerHandoffPurpose =
-  | HostedComputerHandoffPurpose
-  | "screen_inspection";
 
 export interface ComputerCreateRunResult {
   created: boolean;
@@ -2007,9 +2003,8 @@ function readAwaitingReason(
   }
 }
 
-function readHandoffPurpose(value: string): PersistedComputerHandoffPurpose {
+function readHandoffPurpose(value: string): HostedComputerHandoffPurpose {
   switch (value) {
-    case "screen_inspection":
     case "managed_login":
     case "login":
     case "payment":

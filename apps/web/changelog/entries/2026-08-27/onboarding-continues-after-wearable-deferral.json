@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 50,
+  "item": {
+    "id": "onboarding-continues-after-wearable-deferral",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Onboarding keeps moving when wearables wait",
+    "summary": "If you choose to connect a wearable later, Murph now continues with the next useful onboarding question instead of pausing the whole conversation.",
+    "details": "The connection remains optional, and Murph does not claim that wearable data is connected or syncing until the connection is actually visible.",
+    "relevanceTags": ["assistant", "onboarding", "wearables"],
+    "sourcePullRequests": [2457]
+  }
+}

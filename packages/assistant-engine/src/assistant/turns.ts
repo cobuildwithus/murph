@@ -13,13 +13,13 @@ import {
 import { quarantineAssistantStateFile } from './quarantine.js'
 import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
 import { resolveAssistantOpaqueStateFilePath } from './state-ids.js'
-import { ensureAssistantState } from './store/persistence.js'
 import {
   type AssistantStatePaths,
 } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
   compareAssistantTimestampsAscending,
+  ensureAssistantStateDirectory,
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
@@ -87,7 +87,7 @@ export async function readAssistantTurnReceipt(
   turnId: string,
 ): Promise<AssistantTurnReceipt | null> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await ensureAssistantStateDirectory(paths.turnsDirectory)
     return readAssistantTurnReceiptAtPath(
       paths,
       resolveAssistantTurnReceiptPath(paths, turnId),
@@ -100,7 +100,6 @@ export async function saveAssistantTurnReceipt(
   receipt: AssistantTurnReceipt,
 ): Promise<AssistantTurnReceipt> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
     const parsed = assistantTurnReceiptSchema.parse(
       sanitizeAssistantTurnReceiptForPersistence(receipt),
     )
@@ -118,7 +117,7 @@ export async function appendAssistantTurnReceiptEvent(input: {
   vault: string
 }): Promise<AssistantTurnReceipt | null> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await ensureAssistantStateDirectory(paths.turnsDirectory)
     const receiptPath = resolveAssistantTurnReceiptPath(paths, input.turnId)
     const existing = await readAssistantTurnReceiptAtPath(paths, receiptPath)
     if (!existing) {
@@ -152,7 +151,7 @@ export async function updateAssistantTurnReceipt(input: {
   vault: string
 }): Promise<AssistantTurnReceipt | null> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await ensureAssistantStateDirectory(paths.turnsDirectory)
     const receiptPath = resolveAssistantTurnReceiptPath(paths, input.turnId)
     const existing = await readAssistantTurnReceiptAtPath(paths, receiptPath)
     if (!existing) {
@@ -293,7 +292,7 @@ async function listRecentAssistantTurnReceiptsInternal(
   const lockRequestedAt = Date.now()
   const result = await withAssistantRuntimeWriteLock(vault, async (paths) => {
     const lockWaitMs = Math.max(0, Date.now() - lockRequestedAt)
-    await ensureAssistantState(paths)
+    await ensureAssistantStateDirectory(paths.turnsDirectory)
     const entries = await readdir(paths.turnsDirectory, {
       withFileTypes: true,
     })

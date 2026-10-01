@@ -12,7 +12,7 @@ import {
   type HostedMailboxImportLoopResult,
   type HostedMailboxPostCheckpointEffect,
   type HostedMailboxPrefixPrefetch,
-  type HostedMailboxResolvedImportItem,
+  type HostedMailboxImporter,
   type HostedMailboxItemImportOutcome,
 } from "./mailbox-import.ts";
 import {
@@ -25,7 +25,7 @@ import {
   restoreHostedSystemMailboxCheckpointRollbackState,
 } from "./system-mailbox.ts";
 import {
-  readHostedSystemMailboxHandledThroughSeq,
+  readHostedSystemMailboxProgress,
 } from "./system-mailbox-state.ts";
 import type {
   HostedRuntimeMailboxPort,
@@ -37,7 +37,7 @@ export interface HostedMailboxImportCheckpointInput {
   deferCheckpoint?: boolean;
   expectedUserId: string;
   fetchSignal?: AbortSignal | null;
-  importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
+  importItem: HostedMailboxImporter;
   lanes?: readonly HostedMailboxLane[];
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
@@ -106,20 +106,36 @@ export async function importHostedMailboxPrefixAndCheckpoint(
         vaultRoot: input.vaultRoot,
       });
   const afterCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
+  const importAudioPair = input.importItem.importAudioPair;
+  const collectEffect = (outcome: HostedMailboxItemImportOutcome): void => {
+    if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.afterCheckpoint) {
+      afterCheckpointEffects.push(outcome.afterCheckpoint);
+    }
+  };
   const importResult = await fetchAndProcessHostedMailboxPrefix({
     deferConversationUntil: input.deferConversationUntil ?? null,
     expectedUserId: input.expectedUserId,
     fetchSignal: input.fetchSignal ?? null,
-    importItem: async (item) => {
-      const outcome = await input.importItem(item);
-      if (
-        (outcome.status === "imported" || outcome.status === "skipped")
-        && outcome.afterCheckpoint
-      ) {
-        afterCheckpointEffects.push(outcome.afterCheckpoint);
-      }
-      return outcome;
-    },
+    importItem: Object.assign(
+      async (item: Parameters<HostedMailboxImporter>[0]) => {
+        const outcome = await input.importItem(item);
+        collectEffect(outcome);
+        return outcome;
+      },
+      {
+        importAudioPair: importAudioPair
+          ? async (items: Parameters<NonNullable<HostedMailboxImporter["importAudioPair"]>>[0]) => {
+              const outcomes = await importAudioPair(items);
+              if (outcomes) {
+                for (const outcome of outcomes) {
+                  if (outcome) collectEffect(outcome);
+                }
+              }
+              return outcomes;
+            }
+          : undefined,
+      },
+    ),
     lanes: input.lanes,
     limitPerLane: input.limitPerLane,
     mailboxPort: input.mailboxPort,
@@ -167,13 +183,20 @@ export async function importHostedMailboxPrefixAndCheckpoint(
 
   let checkpoint: HostedWorkspaceCheckpointResponse;
   try {
+    const systemMailboxProgress = await readHostedSystemMailboxProgress({
+      importedSeq: importResult.state.watermarks.system,
+      vaultRoot: input.vaultRoot,
+    });
     const redactedStatus = {
       ...buildHostedMailboxImportRedactedStatus(importResult),
+      hostedMailboxSystemFirstPendingClassifierFailures:
+        systemMailboxProgress.firstPendingClassifierFailures,
       hostedMailboxSystemHandledThroughSeq:
-        await readHostedSystemMailboxHandledThroughSeq({
-          importedSeq: importResult.state.watermarks.system,
-          vaultRoot: input.vaultRoot,
-        }),
+        systemMailboxProgress.handledThroughSeq,
+      hostedMailboxSystemFirstPendingSeq:
+        systemMailboxProgress.firstPendingSeq,
+      hostedMailboxSystemDeviceSyncContinuationSeqs:
+        systemMailboxProgress.deviceSyncContinuationSeqs,
     };
     const checkpointRequest = await input.createCheckpointRequest({
       importResult,

@@ -2,13 +2,16 @@ import {
   parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
-import { HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH } from "@murphai/hosted-execution/routes";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import { requireHostedRuntimeWriteFenceHeaders } from "./authority-headers.ts";
 import { fetchHostedJson, readRequiredField } from "./hosted-http.ts";
-import { fetchHostedWebControlPlaneJson, type HostedWebControlTransport } from "./web-control-transport.ts";
+import {
+  fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
+  type HostedWebControlTransport,
+} from "./web-control-transport.ts";
 
 export function createCloudflareBrowserVaultReplicaPort(input: {
   boundUserId: string;
@@ -34,7 +37,7 @@ export function createCloudflareBrowserVaultReplicaPort(input: {
               headers: await createHostedBrowserVaultReplicaPublishHeaders({
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge,
               }),
-              path: HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.browserVaultReplicaPublish,
               signal: publishInput.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: input.transport!,

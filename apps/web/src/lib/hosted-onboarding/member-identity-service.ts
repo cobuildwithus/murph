@@ -3,6 +3,8 @@ import {
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
+import { HOSTED_ASSISTANT_GPT_6_LUNA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { readHostedLinqProductionCanaryPhoneNumber } from "./linq-production-canary";
 
 import {
   createHostedEmailLookupKeyReadCandidates,
@@ -12,6 +14,7 @@ import {
 } from "./contact-privacy";
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { getPrisma } from "../prisma";
+import { assertHostedLegacyCredentialWriterTx } from "../better-auth/legacy-writer";
 import {
   HostedDomainRootPreparationMismatchError,
   type PreparedHostedDomainRootForWeb,
@@ -38,11 +41,15 @@ import {
   readHostedMemberCoreState,
 } from "./hosted-member-store";
 import {
+  reconcileHostedMemberLinqPhoneBindingsTx,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
   tryCreateHostedMemberPendingLinqParticipantContactTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
 } from "./hosted-member-routing-store";
 import {
+  assertHostedMemberLinqEmailHandleOwnerTx,
+  bindHostedMemberLinqEmailHandleTx,
+  lookupHostedMemberIdentityByLinqEmailHandle,
   lookupHostedMemberIdentityByPhoneLookupKey,
   lookupHostedMemberIdentityByPhoneNumber,
   lookupHostedMemberIdByPhoneNumber,
@@ -66,7 +73,9 @@ import {
   type HostedMemberPrivyIdentityLookup,
 } from "./member-identity-lookup";
 import {
+  acquireHostedLinqParticipantContactLockTx,
   acquireHostedLinqParticipantPhoneLockTx,
+  createHostedLinqParticipantContact,
   type HostedLinqParticipantContact,
 } from "./linq-participant-contact";
 
@@ -198,6 +207,10 @@ export async function ensureHostedMemberForPhoneResolutionTx(input: {
   const memberId = generateHostedMemberId();
 
   const createdMember = await createHostedMember({
+    assistantModelPreference:
+      normalizePhoneNumber(input.phoneNumber) === readHostedLinqProductionCanaryPhoneNumber()
+        ? HOSTED_ASSISTANT_GPT_6_LUNA_MODEL
+        : undefined,
     billingStatus: HostedBillingStatus.not_started,
     memberId,
     prisma: input.prisma,
@@ -255,38 +268,68 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
   contact: HostedLinqParticipantContact;
   observedAt: Date;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedMemberCoreState> {
+}): Promise<{
+  created: boolean;
+  member: HostedMemberCoreState;
+}> {
   if (Number.isNaN(input.observedAt.getTime())) {
     throw new TypeError("Hosted Linq participant contact observed timestamp must be valid.");
   }
 
-  const existingRoutingLookup =
-    await lookupHostedMemberRoutingByPendingLinqParticipantContact({
-      contact: input.contact,
-      prisma: input.prisma,
-    });
-
-  if (existingRoutingLookup) {
-    assertHostedMemberNotSuspended(existingRoutingLookup.core);
-    return existingRoutingLookup.core;
-  }
+  await acquireHostedLinqParticipantContactLockTx({
+    contact: input.contact,
+    tx: input.prisma,
+  });
 
   const existingIdentityLookup = input.contact.kind === "phone"
     ? await lookupHostedMemberIdentityByPhoneNumber({
         phoneNumber: input.contact.value,
         prisma: input.prisma,
       })
-    : null;
+    : await lookupHostedMemberIdentityByLinqEmailHandle({
+        emailAddress: input.contact.value,
+        prisma: input.prisma,
+      });
+  const existingRoutingLookup =
+    await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+      contact: input.contact,
+      prisma: input.prisma,
+    });
 
-  if (existingIdentityLookup) {
-    assertHostedMemberNotSuspended(existingIdentityLookup.core);
+  if (
+    existingIdentityLookup
+    && existingRoutingLookup
+    && existingIdentityLookup.core.id !== existingRoutingLookup.core.id
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PARTICIPANT_IDENTITY_CONFLICT",
+      httpStatus: 409,
+      message:
+        "This iMessage participant conflicts with an existing Murph account. Contact support so we can resolve it safely.",
+    });
+  }
+
+  const existingMember = existingIdentityLookup?.core ?? existingRoutingLookup?.core ?? null;
+  if (existingMember) {
+    assertHostedMemberNotSuspended(existingMember);
+    if (input.contact.kind === "email") {
+      await bindHostedMemberLinqEmailHandleTx({
+        emailAddress: input.contact.value,
+        lookupKey: input.contact.lookupKey,
+        memberId: existingMember.id,
+        prisma: input.prisma,
+      });
+    }
     await upsertHostedMemberPendingLinqParticipantContactTx({
       contact: input.contact,
-      memberId: existingIdentityLookup.core.id,
+      memberId: existingMember.id,
       observedAt: input.observedAt,
       prisma: input.prisma,
     });
-    return existingIdentityLookup.core;
+    return {
+      created: false,
+      member: existingMember,
+    };
   }
 
   const memberId = generateHostedMemberId();
@@ -296,7 +339,12 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
     memberId,
     prisma: input.prisma,
   });
+  // Email-handle writers hold the contact lock across lookup and creation.
+  // An unexpected unique-index conflict aborts this transaction.
   await upsertHostedMemberIdentity({
+    ...(input.contact.kind === "email"
+      ? { linqEmailHandle: input.contact.value }
+      : {}),
     maskedPhoneNumberHint: null,
     memberId,
     phoneLookupKey: null,
@@ -309,6 +357,7 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
   });
+
   const routingCreated = await tryCreateHostedMemberPendingLinqParticipantContactTx({
     contact: input.contact,
     memberId,
@@ -317,7 +366,10 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
   });
 
   if (routingCreated) {
-    return createdMember;
+    return {
+      created: true,
+      member: createdMember,
+    };
   }
 
   await input.prisma.hostedMember.delete({
@@ -333,7 +385,18 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
 
   if (concurrentRoutingLookup) {
     assertHostedMemberNotSuspended(concurrentRoutingLookup.core);
-    return concurrentRoutingLookup.core;
+    if (input.contact.kind === "email") {
+      await bindHostedMemberLinqEmailHandleTx({
+        emailAddress: input.contact.value,
+        lookupKey: input.contact.lookupKey,
+        memberId: concurrentRoutingLookup.core.id,
+        prisma: input.prisma,
+      });
+    }
+    return {
+      created: false,
+      member: concurrentRoutingLookup.core,
+    };
   }
 
   throw new Prisma.PrismaClientKnownRequestError(
@@ -372,24 +435,6 @@ async function refreshHostedMemberForPhoneTx(input: {
     signupPhoneNumber: input.phoneNumber,
   });
   return input.member;
-}
-
-export async function ensureHostedMemberForPrivyIdentity(input: {
-  allowVerifiedEmailRebinding?: boolean;
-  authMethod?: HostedPrivyAuthMethod;
-  identity: HostedPrivyIdentity;
-  now: Date;
-  prisma?: PrismaClient;
-}): Promise<HostedMemberCoreState> {
-  const prisma = input.prisma ?? getPrisma();
-
-  return prisma.$transaction((tx) => ensureHostedMemberForPrivyIdentityTx({
-    allowVerifiedEmailRebinding: input.allowVerifiedEmailRebinding,
-    authMethod: input.authMethod,
-    identity: input.identity,
-    now: input.now,
-    prisma: tx,
-  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function reconcileHostedPrivyIdentityOnMember(input: {
@@ -436,6 +481,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
   authMethod?: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   preparedControlRoot?: PreparedHostedDomainRootForWeb;
+  preparedExistingMemberId?: string | null;
   preparedLiveIdentity?: HostedPrivyIdentity;
   preparedNewMemberId?: string;
   now: Date;
@@ -448,6 +494,12 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
   const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
     authMethod: input.authMethod,
     identity: input.identity,
+  });
+  const emailLockContact = await acquireHostedPrivyEmailIdentityLockTx({
+    authMethod,
+    identity: input.identity,
+    preparedLiveIdentity: input.preparedLiveIdentity,
+    prisma: input.prisma,
   });
   if (
     shouldPersistHostedPrivyPhoneIdentity({ authMethod })
@@ -471,6 +523,13 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
   }))?.core ?? null;
 
   if (
+    input.preparedExistingMemberId !== undefined
+    && (existingMember?.id ?? null) !== input.preparedExistingMemberId
+  ) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
+
+  if (
     existingMember
     && input.preparedControlRoot
     && input.preparedControlRoot.userId !== existingMember.id
@@ -489,7 +548,17 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
       preparedLiveIdentity: input.preparedLiveIdentity,
       requireLiveAuthority: true,
     });
+    assertHostedPrivyEmailIdentityLockMatches({
+      emailLockContact,
+      identity,
+    });
     const memberId = input.preparedNewMemberId ?? generateHostedMemberId();
+
+    await assertHostedPrivyLinqEmailHandleOwnerMatchesTx({
+      emailLockContact,
+      memberId,
+      prisma: input.prisma,
+    });
 
     const createdMember = await createHostedMember({
       billingStatus: HostedBillingStatus.not_started,
@@ -574,6 +643,7 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
   identity: HostedPrivyIdentity;
   member: HostedMemberCoreState;
 }> {
+  const emailLockContact = await acquireHostedPrivyEmailIdentityLockTx(input);
   if (
     input.identity.phone
     && (
@@ -621,6 +691,10 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
     bearerIdentity: input.identity,
     preparedLiveIdentity: input.preparedLiveIdentity,
   });
+  assertHostedPrivyEmailIdentityLockMatches({
+    emailLockContact,
+    identity,
+  });
 
   assertHostedPrivyIdentityMatchesExpectedPhone({
     expectedPhoneHint: input.expectedPhoneHint,
@@ -635,6 +709,12 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
   const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
     authMethod: input.authMethod,
     identity,
+  });
+
+  await assertHostedPrivyLinqEmailHandleOwnerMatchesTx({
+    emailLockContact,
+    memberId: currentMember.id,
+    prisma: input.prisma,
   });
   const verifiedEmailAuthorizesRebinding = privyUserChanged && input.allowVerifiedEmailRebinding
     ? await hasHostedVerifiedEmailRebindingAuthorityTx({
@@ -692,10 +772,81 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
   });
+  await reconcileHostedMemberLinqPhoneBindingsTx({
+    memberId: currentMember.id,
+    previousIdentity: currentIdentity,
+    nextPhone: phoneToPersist,
+    prisma: input.prisma,
+  });
   return {
     identity,
     member: currentMember,
   };
+}
+
+async function acquireHostedPrivyEmailIdentityLockTx(input: {
+  authMethod?: HostedPrivyAuthMethod;
+  expectedEmailLookupKey?: string;
+  identity: HostedPrivyIdentity;
+  preparedLiveIdentity?: HostedPrivyIdentity;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqParticipantContact | null> {
+  const identity = input.preparedLiveIdentity ?? input.identity;
+  const needsEmailLock = input.authMethod === "email"
+    || Boolean(input.expectedEmailLookupKey)
+    || (!input.authMethod && !identity.phone && Boolean(identity.email?.verifiedAt));
+  if (!needsEmailLock) {
+    return null;
+  }
+  const contact = createHostedLinqParticipantContact({
+    kind: "email",
+    value: identity.email?.verifiedAt ? identity.email.address : null,
+  });
+  if (!contact) {
+    throw hostedOnboardingError({
+      code: "PRIVY_EMAIL_REQUIRED",
+      message: "Finish email verification before continuing.",
+      httpStatus: 400,
+    });
+  }
+  await acquireHostedLinqParticipantContactLockTx({
+    contact,
+    tx: input.prisma,
+  });
+  return contact;
+}
+
+async function assertHostedPrivyLinqEmailHandleOwnerMatchesTx(input: {
+  emailLockContact: HostedLinqParticipantContact | null;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  if (!input.emailLockContact) {
+    return;
+  }
+  await assertHostedMemberLinqEmailHandleOwnerTx({
+    emailAddress: input.emailLockContact.value,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+}
+
+function assertHostedPrivyEmailIdentityLockMatches(input: {
+  emailLockContact: HostedLinqParticipantContact | null;
+  identity: HostedPrivyIdentity;
+}): void {
+  if (!input.emailLockContact) {
+    return;
+  }
+  const liveContact = createHostedLinqParticipantContact({
+    kind: "email",
+    value: input.identity.email?.verifiedAt
+      ? input.identity.email.address
+      : null,
+  });
+  if (!liveContact || liveContact.value !== input.emailLockContact.value) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
 }
 
 async function resolveHostedPrivyLiveIdentity(input: {
@@ -817,6 +968,7 @@ async function upsertHostedPrivyMemberIdentity(
   input: HostedMemberIdentityWriteInput,
 ): Promise<void> {
   try {
+    await assertHostedLegacyCredentialWriterTx(input.prisma, input.memberId);
     await upsertHostedMemberIdentity(input);
   } catch (error) {
     throw mapHostedMemberIdentityUniqueConstraintError(error);

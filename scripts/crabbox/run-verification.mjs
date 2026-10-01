@@ -15,16 +15,12 @@ const SUPPORTED_VERIFICATION_PROFILES = new Set([
   DEFAULT_VERIFICATION_PROFILE,
   STATIC_SSH_VERIFICATION_PROFILE,
 ]);
-const TRUSTED_ENTRYPOINT_ENV = "MURPH_CRABBOX_TRUSTED_ENTRYPOINT";
-
 const SENSITIVE_ENVIRONMENT_NAMES = [
   "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
   "ACTIONS_RUNTIME_TOKEN",
   "ANTHROPIC_API_KEY",
   "AWS_ACCESS_KEY_ID",
   "AWS_SECRET_ACCESS_KEY",
-  "BLACKSMITH_ADMIN_KEY",
-  "BLACKSMITH_STICKYDISK_TOKEN",
   "CLOUDFLARE_API_TOKEN",
   "CRABBOX_COORDINATOR_TOKEN",
   "GITHUB_TOKEN",
@@ -113,11 +109,6 @@ export function assertNoSensitiveEnvironment(environment) {
   }
 }
 
-export async function runRemoteVerification(argv, sourceEnvironment = process.env) {
-  assertTrustedEntrypoint(sourceEnvironment);
-  return await runSanitizedVerification(argv, sourceEnvironment);
-}
-
 export async function runSanitizedVerification(
   argv,
   sourceEnvironment = process.env,
@@ -155,14 +146,6 @@ export async function runSanitizedVerification(
     ],
     { cwd: repoRoot, env: environment },
   );
-}
-
-export function assertTrustedEntrypoint(environment) {
-  if (environment[TRUSTED_ENTRYPOINT_ENV] !== "1") {
-    throw new Error(
-      "Crabbox verification must enter through the trusted Testbox entrypoint.",
-    );
-  }
 }
 
 function requireEnvironmentValue(environment, name) {
@@ -288,11 +271,8 @@ function isDirectEntrypoint() {
 }
 
 if (isDirectEntrypoint()) {
-  try {
-    process.exitCode = await runRemoteVerification(process.argv.slice(2));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`[crabbox-verification] ${message}\n`);
-    process.exitCode = 1;
-  }
+  process.stderr.write(
+    "[crabbox-verification] Direct execution is unsupported; use the verification dispatcher.\n",
+  );
+  process.exitCode = 1;
 }

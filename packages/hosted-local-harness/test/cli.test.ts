@@ -265,6 +265,61 @@ describe("hosted-local run CLI", () => {
     expect(startHostedLocalDevStack).not.toHaveBeenCalled();
   });
 
+  test("rejects worktree doctor when Temporal needs a missing worker package", async () => {
+    resolveHostedLocalWorktreeConfig.mockResolvedValueOnce(
+      createHostedLocalWorktreeConfig({ includeTemporalWorkerPackage: false }),
+    );
+
+    await expect(
+      runHostedLocalCli(["worktree", "doctor", "feature-a", "--json"], {
+        env: {},
+        stdout: createBufferedStdout().stdout,
+      }),
+    ).rejects.toThrow("Hosted-local Temporal requires an external worker package.");
+
+    expect(runDoctorCommand).not.toHaveBeenCalled();
+  });
+
+  test("allows doctor without a worker package when Temporal is disabled", async () => {
+    resolveHostedLocalDevConfig.mockReturnValueOnce({
+      ...resolveHostedLocalDevConfig(),
+      temporal: {
+        host: "127.0.0.1",
+        mode: "disabled",
+        namespace: "default",
+        port: 7233,
+        taskQueue: "murph-hosted-runtime",
+      },
+    });
+
+    await runHostedLocalCli(["doctor", "--json"], {
+      env: {},
+      stdout: createBufferedStdout().stdout,
+    });
+
+    expect(runDoctorCommand).toHaveBeenCalledTimes(5);
+  });
+
+  test("reports unavailable Buildx as a doctor prerequisite failure", async () => {
+    const output = createBufferedStdout();
+    resolveHostedLocalDevConfig.mockReturnValueOnce({
+      ...resolveHostedLocalDevConfig(),
+      temporal: { ...resolveHostedLocalDevConfig().temporal, mode: "disabled" },
+    });
+    runDoctorCommand.mockImplementation((command, args) => ({
+      command: [command, ...args].join(" "),
+      ok: args[0] !== "buildx",
+      stderr: args[0] === "buildx" ? "Docker Buildx is unavailable" : "",
+      stdout: "",
+    }));
+
+    await runHostedLocalCli(["doctor"], { env: {}, stdout: output.stdout });
+
+    expect(output.text()).toContain("[fail] docker buildx version");
+    expect(output.text()).toContain("Docker Buildx is unavailable");
+    expect(startHostedLocalDevStack).not.toHaveBeenCalled();
+  });
+
   test("prepares worktree resources before delegating worktree up to the normal stack", async () => {
     const output = createBufferedStdout();
 
@@ -492,6 +547,8 @@ describe("hosted-local run CLI", () => {
       const environment = {
         ...process.env,
         HOSTED_APP_SESSION_HMAC_KEY: authority,
+        MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR:
+          "../murph-cloud/packages/hosted-orchestrator-temporal",
       };
       await runHostedLocalCli(command, {
         env: environment,
@@ -512,6 +569,17 @@ describe("hosted-local run CLI", () => {
     for (const [input] of resolveHostedLocalWorktreeConfig.mock.calls) {
       expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     }
+  });
+
+  test("passes an explicit process shard through the canonical E2E command", async () => {
+    await runHostedLocalCli(["e2e", "foreground-reply-priority", "--no-bundle", "--process-shard", "2/2"], {
+      env: {}, stdout: createBufferedStdout().stdout,
+    });
+    expect(runHostedLocalE2eSuite).toHaveBeenCalledWith(expect.objectContaining({
+      prepareRunnerBundle: false,
+      processShard: "2/2",
+      scenario: ["foreground-reply-priority"],
+    }));
   });
 
   test("marks interrupted hosted-local e2e runs as stopped", async () => {
@@ -715,12 +783,20 @@ function createHostedLocalStack(input: {
   };
 }
 
-function createHostedLocalWorktreeConfig() {
+function createHostedLocalWorktreeConfig(
+  input: { includeTemporalWorkerPackage?: boolean } = {},
+) {
   return {
     buildId: "worktree-feature-a",
     databaseName: "murph_dev_feature_a",
     databaseUrl: "postgresql://postgres@127.0.0.1:5432/murph_dev_feature_a",
     env: {
+      ...(input.includeTemporalWorkerPackage === false
+        ? {}
+        : {
+            MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR:
+              "../murph-cloud/packages/hosted-orchestrator-temporal",
+          }),
       MURPH_DEV_WORKTREE_SCOPE: "feature-a",
       MURPH_DEV_WEB_PORT: "3101",
       MURPH_HOSTED_LOCAL_PROFILE: "dev",

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 300,
+  "item": {
+    "id": "nutrition-cards-honor-existing-goals",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Nutrition cards honor existing calorie goals",
+    "summary": "Daily nutrition cards now recognize complete nutrition goals saved with Murph's earlier calorie-target format, so existing members do not need to repair those goals first.",
+    "details": "Murph distinguishes those nutrition targets from unrelated calorie-burn goals, still uses current meal totals and the full safety check, and returns one card or a concise fallback.",
+    "relevanceTags": ["assistant", "nutrition", "reliability"],
+    "sourcePullRequests": [2110]
+  }
+}

@@ -1,8 +1,8 @@
 import {
+  CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
 } from "../internal-hosts.ts";
 import {
-  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
   HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH,
 } from "../runner-effects-contract.ts";
 import {
@@ -47,6 +47,9 @@ export function readHostedRunnerInternalHostKind(hostname: string): string {
   if (hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
     return "artifact_store";
   }
+  if (hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.mediaStore) {
+    return "media_store";
+  }
   if (hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
     return "browser_vault_replica_store";
   }
@@ -73,6 +76,9 @@ export function readHostedRunnerInternalOperation(input: {
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
     return input.method === "PUT" ? "artifact_upload" : "artifact_fetch";
+  }
+  if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.mediaStore) {
+    return readHostedRunnerMediaOperation(input.method);
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
     return "browser_vault_replica_write";
@@ -102,29 +108,50 @@ export function readHostedRunnerInternalOperation(input: {
     return "workspace_snapshot_unknown";
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl) {
-    return "runner_control";
+    return readHostedRunnerControlOperation(input);
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
     if (matchHostedExecutionRunnerMealPhotoPath(input.pathname)) {
       return input.method === "DELETE" ? "meal_photo_delete" : "meal_photo_read";
     }
-    if (
-      input.method === "POST" &&
-      input.pathname === HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH
-    ) {
-      return "generated_image_upload";
-    }
-    if (
-      input.method === "POST"
-      && input.pathname
-        === HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH
-    ) {
+    if (isHostedRunnerPrivateImagePublishOperation(input)) {
       return "private_image_url_publish";
     }
     return "effects_port";
   }
 
   return "unknown_internal_operation";
+}
+
+function readHostedRunnerMediaOperation(method: string): string {
+  switch (method) {
+    case "DELETE":
+      return "media_delete";
+    case "POST":
+      return "media_record";
+    case "PUT":
+      return "media_upload";
+    default:
+      return "media_fetch";
+  }
+}
+
+function readHostedRunnerControlOperation(input: {
+  method: string;
+  pathname: string;
+}): string {
+  return input.method === "POST"
+    && input.pathname === CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH
+    ? "runtime_completion"
+    : "runner_control";
+}
+
+function isHostedRunnerPrivateImagePublishOperation(input: {
+  method: string;
+  pathname: string;
+}): boolean {
+  return input.method === "POST"
+    && input.pathname === HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH;
 }
 
 export async function readHostedRunnerSafeResponseBodyMetadata(

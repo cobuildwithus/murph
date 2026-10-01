@@ -41,6 +41,14 @@ type RenderClientComponentOptions = {
   visibilityState?: DocumentVisibilityState;
 };
 
+/**
+ * For components that choose browser behavior at module evaluation (such as
+ * Base UI), first render a placeholder with `requireButton: false`, then
+ * dynamically import the component and call `rerender`. A static import runs
+ * before this helper installs DOM globals and can leave controls inert.
+ * See `labs-page.test.tsx` for this sequence, cleanup, and the inline-style
+ * `getComputedStyle` shim needed by its real popup controls in Linkedom.
+ */
 export async function renderClientComponent(
   element: ReactElement,
 ): Promise<RenderClientComponentResult<HTMLButtonElement>>;
@@ -247,6 +255,24 @@ function installGlobals(
   window: Window & typeof globalThis,
   document: Document,
 ) {
+  // React uses its legacy input-event fallback because LinkeDOM does not
+  // advertise native input-event support. Preserve listener registration and
+  // removal so focused controls still exercise React's real change handling.
+  Object.defineProperties(window.HTMLElement.prototype, {
+    attachEvent: {
+      configurable: true,
+      value(this: HTMLElement, eventName: string, listener: EventListener) {
+        this.addEventListener(eventName.replace(/^on/u, ""), listener);
+      },
+    },
+    detachEvent: {
+      configurable: true,
+      value(this: HTMLElement, eventName: string, listener: EventListener) {
+        this.removeEventListener(eventName.replace(/^on/u, ""), listener);
+      },
+    },
+  });
+
   class ResizeObserverMock {
     observe() {}
     unobserve() {}

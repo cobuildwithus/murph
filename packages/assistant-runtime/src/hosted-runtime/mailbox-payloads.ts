@@ -25,6 +25,7 @@ export type HostedMailboxPayloadBlockedCode =
 
 export type HostedMailboxPayloadResolutionResult =
   | {
+      decodedWake?: HostedMailboxItem["decodedWake"];
       payloadCiphertext: string;
       payloadSchema: string;
       requestId: string | null;
@@ -59,6 +60,7 @@ export async function resolveHostedMailboxItemPayload(input: {
 
   if (hasInlinePayload) {
     return {
+      ...(input.item.decodedWake ? { decodedWake: input.item.decodedWake } : {}),
       payloadCiphertext: payloadInlineCiphertext,
       payloadSchema: input.item.payloadSchema,
       requestId: null,

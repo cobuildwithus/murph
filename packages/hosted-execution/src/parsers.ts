@@ -22,6 +22,7 @@ import {
 
 import {
   HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES,
+  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES,
   HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
@@ -39,6 +40,9 @@ import {
 import {
   parseHostedExecutionDailyMetricReportedPayload,
 } from "./daily-metric.ts";
+import {
+  parseHostedExecutionGroupJournalFactPayload,
+} from "./group-journal-fact.ts";
 
 import type {
   HostedExecutionAssistantAskCompletedEvent,
@@ -49,6 +53,7 @@ import type {
   HostedExecutionAssistantNotificationFirstContactPolicy,
   HostedExecutionAssistantNotificationPromptProfile,
   HostedExecutionGroupContextHandoffNotification,
+  HostedExecutionOperatorTaskNotification,
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
   HostedExecutionPrivateAssistantAskCompletionNotification,
   HostedExecutionClinicalRecordsSyncRequestedEvent,
@@ -106,6 +111,7 @@ import {
   buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionDailyMetricReportedWake,
+  buildHostedExecutionGroupJournalFactRecordedWake,
   buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActionRequestedWake,
@@ -195,13 +201,11 @@ export {
   parseHostedRuntimeIssueExportResponse,
   parseHostedCodexAuthUpdate,
   parseHostedCodexAuthUpdateResponse,
+  parseHostedRuntimeLatencyTraceBatchRequest,
+  parseHostedRuntimeLatencyTraceBatchResponse,
   parseHostedRuntimeLatencyTraceEvent,
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
-  parseHostedRuntimeLogEntry,
-  parseHostedRuntimeRedactedJson,
-  parseHostedRuntimeLogRequest,
-  parseHostedRuntimeLogResponse,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
   parseHostedRuntimeAssistantAskControlRequest,
@@ -229,6 +233,16 @@ export {
   parseHostedWorkspaceState,
 } from "./parsers/runtime-control.ts";
 export {
+  assertHostedRuntimeWebProtocolAdmission,
+  parseHostedExternalThreadRouteAuthorityResponse,
+} from "./parsers/runtime-protocol.ts";
+export {
+  parseHostedRuntimeLogEntry,
+  parseHostedRuntimeRedactedJson,
+  parseHostedRuntimeLogRequest,
+  parseHostedRuntimeLogResponse,
+} from "./parsers/runtime-log.ts";
+export {
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
   parseHostedRuntimeReconciliationFacts,
@@ -238,12 +252,82 @@ export {
   parseHostedRuntimeSignal,
 } from "./parsers/orchestration-control.ts";
 
+function parseHostedClinicalEnrichmentWakeJobId(record: Record<string, unknown>): string {
+  assertExactHostedClinicalRecordsKeys(
+    record,
+    ["eventId", "jobId", "kind", "occurredAt", "userId"],
+    "Hosted execution wake clinical-records.enrichment-requested",
+  );
+  if (typeof record.jobId !== "string" || !/^[a-f0-9]{64}$/u.test(record.jobId)) {
+    throw new TypeError("Hosted clinical enrichment job identity is invalid.");
+  }
+  return record.jobId;
+}
+
+function parseHostedExecutionVaultDataWake(input: {
+  eventId: string;
+  kind: string;
+  occurredAt: string;
+  record: Record<string, unknown>;
+  wireUserId: string;
+}): HostedExecutionWake | null {
+  if (input.kind === "clinical-records.enrichment-requested") {
+    return {
+      eventId: input.eventId,
+      jobId: parseHostedClinicalEnrichmentWakeJobId(input.record),
+      occurredAt: input.occurredAt,
+      kind: input.kind,
+      userId: input.wireUserId,
+    };
+  }
+  if (input.kind === "health.daily-metric.reported") {
+    assertExactHostedExecutionKeys(
+      input.record,
+      ["dailyMetric", "eventId", "kind", "occurredAt", "userId"],
+      "Hosted execution health.daily-metric.reported wake",
+    );
+    const dailyMetric = parseHostedExecutionDailyMetricReportedPayload(
+      input.record.dailyMetric,
+    );
+    return buildHostedExecutionDailyMetricReportedWake({
+      ...dailyMetric,
+      eventId: input.eventId,
+      memberId: input.wireUserId,
+      occurredAt: input.occurredAt,
+    });
+  }
+  if (input.kind === "journal.group-fact.recorded") {
+    assertExactHostedExecutionKeys(
+      input.record,
+      ["eventId", "journalFact", "kind", "occurredAt", "userId"],
+      "Hosted execution journal.group-fact.recorded wake",
+    );
+    return buildHostedExecutionGroupJournalFactRecordedWake({
+      eventId: input.eventId,
+      journalFact: parseHostedExecutionGroupJournalFactPayload(
+        input.record.journalFact,
+      ),
+      memberId: input.wireUserId,
+      occurredAt: input.occurredAt,
+    });
+  }
+  return null;
+}
+
 export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
   const record = requireObject(value, "Hosted execution wake");
   const kind = parseHostedExecutionWakeKind(record.kind, "Hosted execution wake kind");
   const eventId = requireString(record.eventId, "Hosted execution wake eventId");
   const occurredAt = requireString(record.occurredAt, "Hosted execution wake occurredAt");
   const wireUserId = requireString(record.userId, "Hosted execution wake userId");
+  const vaultDataWake = parseHostedExecutionVaultDataWake({
+    eventId,
+    kind,
+    occurredAt,
+    record,
+    wireUserId,
+  });
+  if (vaultDataWake) return vaultDataWake;
 
   switch (kind) {
     case "conversation.message":
@@ -271,7 +355,26 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
           record.memberChannels,
           "Hosted execution wake member.activated memberChannels",
         ),
+        ...(record.onboardingFollowupEnrollment === undefined
+          ? {}
+          : {
+              onboardingFollowupEnrollment: requireBoolean(
+                record.onboardingFollowupEnrollment,
+                "Hosted execution wake member.activated onboardingFollowupEnrollment",
+              ),
+            }),
         memberId: wireUserId,
+        ...(record.onboardingFollowupRoute === undefined
+          ? {}
+          : {
+              onboardingFollowupRoute:
+                record.onboardingFollowupRoute === null
+                  ? null
+                  : parseHostedExecutionAssistantNotificationRoute(
+                      record.onboardingFollowupRoute,
+                      "Hosted execution wake member.activated onboardingFollowupRoute",
+                    ),
+            }),
         occurredAt,
         ...(record.signupWelcome === undefined
           ? {}
@@ -484,24 +587,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         memberId: wireUserId,
         occurredAt,
         sha256: mealPhoto.sha256,
-      });
-    }
-    case "health.daily-metric.reported": {
-      assertExactHostedExecutionKeys(record, [
-        "dailyMetric",
-        "eventId",
-        "kind",
-        "occurredAt",
-        "userId",
-      ], "Hosted execution health.daily-metric.reported wake");
-      const dailyMetric = parseHostedExecutionDailyMetricReportedPayload(
-        record.dailyMetric,
-      );
-      return buildHostedExecutionDailyMetricReportedWake({
-        ...dailyMetric,
-        eventId,
-        memberId: wireUserId,
-        occurredAt,
       });
     }
     case "environment-voice.captured": {
@@ -906,6 +991,13 @@ export function parseHostedExecutionConversationMessagePayload(
   );
 
   switch (channel) {
+    case "voice":
+      return {
+        channel,
+        callId: requireString(record.callId, "Voice call id"),
+        inputId: requireString(record.inputId, "Voice input id"),
+        text: requireString(record.text, "Voice input text"),
+      };
     case "linq":
       return parseHostedExecutionLinqConversationMessagePayload(record, channel);
     case "telegram": {
@@ -1527,6 +1619,25 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
           record.memberChannels,
           "Hosted execution member.activated memberChannels",
         ),
+        ...(record.onboardingFollowupEnrollment === undefined
+          ? {}
+          : {
+              onboardingFollowupEnrollment: requireBoolean(
+                record.onboardingFollowupEnrollment,
+                "Hosted execution member.activated onboardingFollowupEnrollment",
+              ),
+            }),
+        ...(record.onboardingFollowupRoute === undefined
+          ? {}
+          : {
+              onboardingFollowupRoute:
+                record.onboardingFollowupRoute === null
+                  ? null
+                  : parseHostedExecutionAssistantNotificationRoute(
+                      record.onboardingFollowupRoute,
+                      "Hosted execution member.activated onboardingFollowupRoute",
+                    ),
+            }),
         ...(record.signupWelcome === undefined
           ? {}
           : {
@@ -1783,6 +1894,14 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
                 `${label}.notificationPromptProfile`,
               ),
         }),
+    ...(record.operatorTask === undefined
+      ? {}
+      : {
+          operatorTask: parseHostedExecutionOperatorTaskNotification(
+            record.operatorTask,
+            `${label}.operatorTask`,
+          ),
+        }),
     ...(record.privateAssistantAskCompletion === undefined
       ? {}
       : {
@@ -1806,6 +1925,23 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
   };
 }
 
+function parseHostedExecutionOperatorTaskNotification(
+  value: unknown,
+  label: string,
+): HostedExecutionOperatorTaskNotification {
+  const record = requireObject(value, label);
+  assertExactHostedExecutionKeys(record, ["expiresAt", "taskId"], label);
+  const expiresAt = requireString(record.expiresAt, `${label}.expiresAt`);
+  const date = new Date(expiresAt);
+  if (!Number.isFinite(date.getTime()) || date.toISOString() !== expiresAt) {
+    throw new TypeError(`${label}.expiresAt must be a canonical timestamp.`);
+  }
+  return {
+    expiresAt,
+    taskId: requireString(record.taskId, `${label}.taskId`),
+  };
+}
+
 function parseHostedExecutionGroupContextHandoffNotification(
   value: unknown,
   label: string,
@@ -1813,7 +1949,7 @@ function parseHostedExecutionGroupContextHandoffNotification(
   const record = requireObject(value, label);
   assertExactHostedExecutionKeys(
     record,
-    ["membershipId", "originAssistantInputId"],
+    ["membershipId", "originAssistantInputId", "sourceDisplayName"],
     label,
   );
   const membershipId = requireString(
@@ -1833,7 +1969,34 @@ function parseHostedExecutionGroupContextHandoffNotification(
       record.originAssistantInputId,
       `${label}.originAssistantInputId`,
     ),
+    ...(record.sourceDisplayName === undefined
+      ? {}
+      : {
+          sourceDisplayName: record.sourceDisplayName === null
+            ? null
+            : parseHostedExecutionGroupContextHandoffDisplayName(
+                record.sourceDisplayName,
+                `${label}.sourceDisplayName`,
+              ),
+        }),
   };
+}
+
+function parseHostedExecutionGroupContextHandoffDisplayName(
+  value: unknown,
+  label: string,
+): string {
+  const displayName = requireString(value, label);
+  if (
+    displayName.trim() !== displayName
+    || !displayName
+    || [...displayName].length
+      > HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS
+    || /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/u.test(displayName)
+  ) {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  return displayName;
 }
 
 function parseHostedExecutionPrivateAssistantAskCompletionNotification(

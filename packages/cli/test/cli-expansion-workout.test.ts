@@ -10,6 +10,7 @@ import {
   listWriteOperationMetadataPaths,
   parseFrontmatterDocument,
   readStoredWriteOperation,
+  upsertMemory,
 } from '@murphai/core'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
@@ -20,6 +21,7 @@ import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
 const WORKOUT_FORMAT_CANONICAL_EVENT_PATH_TIMEOUT_MS = 90_000
+const WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS = 300_000
 
 interface SchemaEnvelope {
   args: {
@@ -45,6 +47,14 @@ interface WorkoutAddEnvelope {
   distanceKm: number | null
   workout: Record<string, unknown> | null
   note: string
+}
+
+interface WorkoutCaptureDefaultsEnvelope {
+  captureDefaults: {
+    durationMinutes: number | null
+  }
+  recordedAt: string | null
+  updated: boolean
 }
 
 interface ShowEnvelope {
@@ -224,7 +234,7 @@ async function runSliceCliRaw(args: string[]) {
   return output.join('').trim()
 }
 
-test('workout add schema exposes the freeform workout capture surface', async () => {
+test('workout add schema exposes a note-only positional text surface', async () => {
   const schema = JSON.parse(
     await runSliceCliRaw(['workout', 'add', '--schema']),
   ) as SchemaEnvelope
@@ -264,7 +274,7 @@ test('workout add help keeps the positional text optional for typed captures', a
   assert.match(help, /Usage: vault-cli workout add \[text\] \[options\]/u)
   assert.match(
     help,
-    /Optional freeform workout text such as "Went for a 30-minute run\."/u,
+    /Optional workout note preserved verbatim; structured facts are never inferred from it\./u,
   )
   assert.doesNotMatch(help, /^\s+--input\s+/mu)
   assert.match(help, /workout import-json --input @workout\.json/u)
@@ -299,6 +309,10 @@ test(
         'save',
         'Push Day A',
         '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
+        '--duration',
+        '20',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -426,21 +440,7 @@ test(
       assert.equal(requireData(logFormat).activityType, 'strength-training')
       assert.equal(requireData(logFormat).durationMinutes, 20)
       assert.equal(requireData(logFormat).title, '20-minute strength training')
-      assert.deepEqual(summarizeWorkoutExercises(requireData(logFormat).workout), [
-        {
-          exercise: 'pushups',
-          setCount: 4,
-          repsPerSet: 20,
-        },
-        {
-          exercise: 'incline bench',
-          setCount: 4,
-          repsPerSet: 12,
-          load: 65,
-          loadUnit: 'lb',
-          loadDescription: '45 lb bar plus 10 lb plates on both sides',
-        },
-      ])
+      assert.equal(summarizeWorkoutExercises(requireData(logFormat).workout), null)
 
       const showLoggedWorkout = await runCli<ShowEnvelope>([
         'event',
@@ -467,27 +467,13 @@ test(
       ])
       assert.equal(editedMediaOnly.ok, true)
       const editedWorkout = requireData(editedMediaOnly).entity.data.workout
-      assert.deepEqual(
+      assert.equal(
         summarizeWorkoutExercises(
           typeof editedWorkout === 'object' && editedWorkout !== null
             ? (editedWorkout as Record<string, unknown>)
             : null,
         ),
-        [
-          {
-            exercise: 'pushups',
-            setCount: 4,
-            repsPerSet: 20,
-          },
-          {
-            exercise: 'incline bench',
-            setCount: 4,
-            repsPerSet: 12,
-            load: 65,
-            loadUnit: 'lb',
-            loadDescription: '45 lb bar plus 10 lb plates on both sides',
-          },
-        ],
+        null,
       )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
@@ -544,6 +530,10 @@ templateText: Garage day template.
         'save',
         'Garage Day',
         '40 min strength training. 5 sets of 15 kettlebell swings.',
+        '--duration',
+        '40',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -582,7 +572,7 @@ templateText: Garage day template.
 )
 
 test(
-  'workout format save validates future loggability up front',
+  'workout format save requires typed duration instead of parsing template text',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
 
@@ -595,20 +585,20 @@ test(
       assert.equal(initResult.ok, true)
       assert.equal(requireData(initResult).created, true)
 
-      const invalidSavedFormat = await runCli([
+      const missingTypedDuration = await runCli([
         'workout',
         'format',
         'save',
-        'Ambiguous Lift',
-        'Strength training for the last 20 or 30 minutes. Did like 80 push-ups and incline bench at 115 lb.',
+        'Morning Lift',
+        '45 minute strength training.',
         '--vault',
         vaultRoot,
       ])
 
-      assert.equal(invalidSavedFormat.ok, false)
-      assert.equal(invalidSavedFormat.error.code, 'invalid_option')
+      assert.equal(missingTypedDuration.ok, false)
+      assert.equal(missingTypedDuration.error.code, 'invalid_option')
       assert.match(
-        invalidSavedFormat.error.message ?? '',
+        missingTypedDuration.error.message ?? '',
         /Pass --duration <minutes> to record it explicitly/u,
       )
     } finally {
@@ -682,6 +672,10 @@ test(
         'save',
         'Push Day A',
         '20 min strength training. 4 sets of 20 pushups.',
+        '--duration',
+        '20',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -694,6 +688,10 @@ test(
         'save',
         'Push Day A',
         '25 min strength training. 5 sets of 10 pushups.',
+        '--duration',
+        '25',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -852,6 +850,10 @@ template:
         'save',
         'Garage Day',
         '40 min strength training. 5 sets of 15 kettlebell swings.',
+        '--duration',
+        '40',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -1168,7 +1170,7 @@ text: Legacy gym day template.
 )
 
 test(
-  'workout add captures activity_session events and fails fast on ambiguous, mixed, or missing durations',
+  'workout add preserves notes and captures only typed structured facts',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-'))
 
@@ -1185,6 +1187,10 @@ test(
         'workout',
         'add',
         'Went for a 30-minute run around the neighborhood.',
+        '--duration',
+        '30',
+        '--type',
+        'running',
         '--vault',
         vaultRoot,
       ])
@@ -1237,6 +1243,10 @@ test(
         'workout',
         'add',
         '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
+        '--duration',
+        '20',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])
@@ -1246,21 +1256,10 @@ test(
         'strength-training',
       )
       assert.equal(requireData(structuredStrengthWorkout).durationMinutes, 20)
-      assert.deepEqual(summarizeWorkoutExercises(requireData(structuredStrengthWorkout).workout), [
-        {
-          exercise: 'pushups',
-          setCount: 4,
-          repsPerSet: 20,
-        },
-        {
-          exercise: 'incline bench',
-          setCount: 4,
-          repsPerSet: 12,
-          load: 65,
-          loadUnit: 'lb',
-          loadDescription: '45 lb bar plus 10 lb plates on both sides',
-        },
-      ])
+      assert.equal(
+        summarizeWorkoutExercises(requireData(structuredStrengthWorkout).workout),
+        null,
+      )
 
       const showStructuredStrengthWorkout = await runCli<ShowEnvelope>([
         'event',
@@ -1270,82 +1269,32 @@ test(
         vaultRoot,
       ])
       assert.equal(showStructuredStrengthWorkout.ok, true)
-      assert.deepEqual(
+      assert.equal(
         summarizeWorkoutExercises(
           requireData(showStructuredStrengthWorkout).entity.data.workout as Record<string, unknown> | null | undefined,
         ),
-        [
-          {
-            exercise: 'pushups',
-            setCount: 4,
-            repsPerSet: 20,
-          },
-          {
-            exercise: 'incline bench',
-            setCount: 4,
-            repsPerSet: 12,
-            load: 65,
-            loadUnit: 'lb',
-            loadDescription: '45 lb bar plus 10 lb plates on both sides',
-          },
-        ],
+        null,
       )
 
-      const ambiguous = await runCli([
-        'workout',
-        'add',
-        'Strength training for the last 20 or 30 minutes. Did like 80 push-ups and incline bench at 115 lb.',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(ambiguous.ok, false)
-      assert.equal(ambiguous.error.code, 'invalid_option')
-      assert.match(
-        ambiguous.error.message ?? '',
-        /Pass --duration <minutes> to record it explicitly/u,
-      )
-
-      const mixedActivities = await runCli([
-        'workout',
-        'add',
-        'Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(mixedActivities.ok, false)
-      assert.equal(mixedActivities.error.code, 'invalid_option')
-      assert.match(
-        mixedActivities.error.message ?? '',
-        /Workout note includes multiple activities or segments/u,
-      )
-
-      const missingDuration = await runCli([
-        'workout',
-        'add',
+      for (const note of [
+        'Strength training for the last 20 or 30 minutes.',
+        'Morning run followed by a swim for 10 minutes.',
         'Easy run around the neighborhood.',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(missingDuration.ok, false)
-      assert.equal(missingDuration.error.code, 'invalid_option')
-      assert.match(
-        missingDuration.error.message ?? '',
-        /Workout duration is missing/u,
-      )
-
-      const segmentedSameSport = await runCli([
-        'workout',
-        'add',
-        '10-minute warmup jog then easy run home.',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(segmentedSameSport.ok, false)
-      assert.equal(segmentedSameSport.error.code, 'invalid_option')
-      assert.match(
-        segmentedSameSport.error.message ?? '',
-        /Workout note includes multiple activities or segments/u,
-      )
+      ]) {
+        const missingDuration = await runCli([
+          'workout',
+          'add',
+          note,
+          '--vault',
+          vaultRoot,
+        ])
+        assert.equal(missingDuration.ok, false)
+        assert.equal(missingDuration.error.code, 'invalid_option')
+        assert.match(
+          missingDuration.error.message ?? '',
+          /Workout duration is missing/u,
+        )
+      }
 
       const mixedWithExplicitDuration = await runCli<WorkoutAddEnvelope>([
         'workout',
@@ -1353,6 +1302,10 @@ test(
         'Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.',
         '--duration',
         '70',
+        '--type',
+        'running',
+        '--distance-km',
+        '8.56',
         '--vault',
         vaultRoot,
       ])
@@ -1389,6 +1342,449 @@ test(
     }
   },
 )
+
+test('workout capture defaults fill only the typed duration field', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
+
+  try {
+    await initializeVault({
+      title: 'Synthetic workout defaults',
+      timezone: 'UTC',
+      vaultRoot,
+    })
+
+    const initial = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'show',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initial.ok, true)
+    assert.deepEqual(requireData(initial).captureDefaults, {
+      durationMinutes: null,
+    })
+
+    const missingSelection = await runCli([
+      'workout',
+      'defaults',
+      'set',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missingSelection.ok, false)
+    assert.equal(missingSelection.error.code, 'invalid_option')
+
+    const conflictingSelection = await runCli([
+      'workout',
+      'defaults',
+      'set',
+      '--duration',
+      '60',
+      '--clear-duration',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(conflictingSelection.ok, false)
+    assert.equal(conflictingSelection.error.code, 'invalid_option')
+
+    const initiallyMissing = await runCli([
+      'workout',
+      'add',
+      'Easy ride.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initiallyMissing.ok, false)
+    assert.match(
+      initiallyMissing.error.message ?? '',
+      /Workout duration is missing/u,
+    )
+
+    const saved = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'set',
+      '--duration',
+      '60',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(saved.ok, true)
+    assert.equal(requireData(saved).updated, true)
+    assert.deepEqual(requireData(saved).captureDefaults, {
+      durationMinutes: 60,
+    })
+
+    const defaulted = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Evening yoga session.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(defaulted.ok, true)
+    assert.equal(requireData(defaulted).durationMinutes, 60)
+
+    const noteWithFacts = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      '20-minute walk covering 5 km.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(noteWithFacts.ok, true)
+    assert.equal(requireData(noteWithFacts).durationMinutes, 60)
+    assert.equal(requireData(noteWithFacts).activityType, 'workout')
+    assert.equal(requireData(noteWithFacts).distanceKm, null)
+
+    const flagOverride = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Morning row.',
+      '--duration',
+      '35',
+      '--type',
+      'rowing',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(flagOverride.ok, true)
+    assert.equal(requireData(flagOverride).durationMinutes, 35)
+    assert.equal(requireData(flagOverride).activityType, 'rowing')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+}, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
+
+test('workout capture ignores note phrasing while imports and cleared defaults stay strict', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
+
+  try {
+    await initializeVault({
+      title: 'Synthetic workout default exclusions',
+      timezone: 'UTC',
+      vaultRoot,
+    })
+    const saved = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'set',
+      '--duration',
+      '60',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(saved.ok, true)
+
+    for (const note of [
+      'Run for 20 or 30 minutes.',
+      'Morning run followed by a swim.',
+    ]) {
+      const defaulted = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'add',
+        note,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(defaulted.ok, true)
+      assert.equal(requireData(defaulted).durationMinutes, 60)
+      assert.equal(requireData(defaulted).activityType, 'workout')
+    }
+
+    const importPayloadPath = path.join(vaultRoot, 'missing-duration.json')
+    await writeFile(
+      importPayloadPath,
+      JSON.stringify({
+        activityType: 'strength-training',
+        note: 'Imported strength session.',
+        title: 'Imported strength session',
+      }),
+      'utf8',
+    )
+    const importedWithoutDuration = await runCli([
+      'workout',
+      'import-json',
+      '--input',
+      `@${importPayloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(importedWithoutDuration.ok, false)
+    assert.match(
+      importedWithoutDuration.error.message ?? '',
+      /Workout duration is missing/u,
+    )
+
+    const cleared = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'set',
+      '--clear-duration',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(cleared.ok, true)
+    assert.deepEqual(requireData(cleared).captureDefaults, {
+      durationMinutes: null,
+    })
+
+    const missing = await runCli([
+      'workout',
+      'add',
+      'Easy ride.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missing.ok, false)
+    assert.match(missing.error.message ?? '', /Workout duration is missing/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+}, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
+
+test('workout capture treats raw text as a note and keeps the manual source boundary', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
+
+  try {
+    await initializeVault({
+      title: 'Synthetic workout default precedence',
+      timezone: 'UTC',
+      vaultRoot,
+    })
+    const saved = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'set',
+      '--duration',
+      '25',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(saved.ok, true)
+
+    const noteOnly = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'One hour of yoga, then 90 minutes of rowing for 8 km; 4 sets of 10 squats.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(noteOnly.ok, true)
+    assert.equal(requireData(noteOnly).durationMinutes, 25)
+    assert.equal(requireData(noteOnly).activityType, 'workout')
+    assert.equal(requireData(noteOnly).distanceKm, null)
+    assert.equal(summarizeWorkoutExercises(requireData(noteOnly).workout), null)
+
+    const explicitManual = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Manual elliptical session.',
+      '--source',
+      'manual',
+      '--duration',
+      '40',
+      '--type',
+      'elliptical',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(explicitManual.ok, true)
+    assert.equal(requireData(explicitManual).durationMinutes, 40)
+    assert.equal(requireData(explicitManual).activityType, 'elliptical')
+
+    for (const source of ['import', 'device', 'derived']) {
+      const nonManual = await runCli([
+        'workout',
+        'add',
+        `${source} ride.`,
+        '--source',
+        source,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(nonManual.ok, false)
+      assert.match(nonManual.error.message ?? '', /Workout duration is missing/u)
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+}, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
+
+test('workout capture promotes one explicit legacy default and rejects conflicts', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
+
+  try {
+    await initializeVault({
+      title: 'Synthetic legacy workout defaults',
+      timezone: 'UTC',
+      vaultRoot,
+    })
+    await upsertMemory(vaultRoot, {
+      section: 'Preferences',
+      text: 'Workouts reported here default to 45 minutes unless another duration is stated.',
+    })
+    const conflictingPreference = await upsertMemory(vaultRoot, {
+      section: 'Preferences',
+      text: 'When workout duration is omitted, the default is 30 minutes.',
+    })
+
+    const conflicting = await runCli([
+      'workout',
+      'add',
+      'Easy ride.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(conflicting.ok, false)
+    assert.match(conflicting.error.message ?? '', /Workout duration is missing/u)
+
+    await upsertMemory(vaultRoot, {
+      recordId: conflictingPreference.record.id,
+      section: 'Preferences',
+      text: 'When workout duration is omitted, the default is 45 minutes.',
+    })
+
+    const migrated = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Afternoon Pilates session.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(migrated.ok, true)
+    assert.equal(requireData(migrated).durationMinutes, 45)
+
+    const migratedPreferences = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'show',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(migratedPreferences.ok, true)
+    assert.deepEqual(requireData(migratedPreferences).captureDefaults, {
+      durationMinutes: 45,
+    })
+
+    const cleared = await runCli<WorkoutCaptureDefaultsEnvelope>([
+      'workout',
+      'defaults',
+      'set',
+      '--clear-duration',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(cleared.ok, true)
+    assert.deepEqual(requireData(cleared).captureDefaults, {
+      durationMinutes: null,
+    })
+
+    const afterClear = await runCli([
+      'workout',
+      'add',
+      'Easy ride.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(afterClear.ok, false)
+    assert.match(afterClear.error.message ?? '', /Workout duration is missing/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+}, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
+
+test('workout capture ignores unsupported legacy prose and non-manual migration', async () => {
+  const unsupportedPreferences = [
+    'Do not default workouts to 60 minutes when duration is omitted.',
+    'No longer default workouts to 60 minutes when duration is omitted.',
+    'I used to default workouts to 60 minutes when duration was omitted.',
+    'Default breakfast is oatmeal when I have a 30-minute workout.',
+    'I prefer 60-minute workouts when possible, and default reminders to off unless I ask.',
+    'My workouts are usually 45 minutes when I do them; default to kilograms unless specified.',
+    'Workouts default to 60 minutes unless specified otherwise, but not anymore.',
+    'I no longer use the rule "workouts default to 60 minutes unless specified otherwise."',
+    'When workout duration is omitted, the default is 45 minutes, but that preference was removed.',
+  ]
+
+  const unsupportedVaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-cli-workout-defaults-'),
+  )
+  try {
+    await initializeVault({
+      title: 'Synthetic unsupported workout default',
+      timezone: 'UTC',
+      vaultRoot: unsupportedVaultRoot,
+    })
+    let preferenceRecordId: string | undefined
+    for (const preference of unsupportedPreferences) {
+      const updated = await upsertMemory(unsupportedVaultRoot, {
+        ...(preferenceRecordId === undefined ? {} : { recordId: preferenceRecordId }),
+        section: 'Preferences',
+        text: preference,
+      })
+      preferenceRecordId = updated.record.id
+
+      const result = await runCli([
+        'workout',
+        'add',
+        'Easy ride.',
+        '--vault',
+        unsupportedVaultRoot,
+      ])
+      assert.equal(result.ok, false)
+      assert.match(result.error.message ?? '', /Workout duration is missing/u)
+      await assert.rejects(
+        access(path.join(unsupportedVaultRoot, 'bank/preferences.json')),
+      )
+    }
+  } finally {
+    await rm(unsupportedVaultRoot, { recursive: true, force: true })
+  }
+
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
+  try {
+    await initializeVault({
+      title: 'Synthetic manual-only workout default',
+      timezone: 'UTC',
+      vaultRoot,
+    })
+    await upsertMemory(vaultRoot, {
+      section: 'Preferences',
+      text: 'Workouts reported here default to one hour unless stated otherwise.',
+    })
+
+    for (const source of ['import', 'device', 'derived']) {
+      const result = await runCli([
+        'workout',
+        'add',
+        `${source} ride.`,
+        '--source',
+        source,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(result.ok, false)
+      assert.match(result.error.message ?? '', /Workout duration is missing/u)
+    }
+    await assert.rejects(access(path.join(vaultRoot, 'bank/preferences.json')))
+
+    const manual = await runCli<WorkoutAddEnvelope>([
+      'workout',
+      'add',
+      'Easy ride.',
+      '--source',
+      'manual',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(manual.ok, true)
+    assert.equal(requireData(manual).durationMinutes, 60)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+}, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
 
 test(
   'workout add surfaces invalid timestamps without needing a custom workout read surface',
@@ -1595,6 +1991,10 @@ test(
         'workout',
         'add',
         'Went for a 45-minute ride.',
+        '--duration',
+        '45',
+        '--type',
+        'cycling',
         '--distance-km',
         '15',
         '--vault',
@@ -1679,6 +2079,10 @@ test(
         'workout',
         'add',
         'Went for a 45-minute walk.',
+        '--duration',
+        '45',
+        '--type',
+        'walking',
         '--media',
         mediaPath,
         '--occurred-at',

@@ -45,9 +45,16 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
-  provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >();
+
+  return {
+    ...actual,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 const NOW = new Date("2026-04-07T01:00:00.000Z");
 
@@ -345,6 +352,47 @@ describe("ensureHostedMemberForPhone", () => {
 });
 
 describe("prepareHostedInvitePhoneCode", () => {
+  it.each([
+    ["missing", null, "INVITE_NOT_FOUND", 404],
+    [
+      "expired",
+      {
+        ...makeInviteRecord(),
+        expiresAt: NOW,
+      },
+      "INVITE_EXPIRED",
+      410,
+    ],
+  ] as const)(
+    "rejects %s invites before private identity reads or transaction entry",
+    async (_label, invite, code, httpStatus) => {
+      const identityFindUnique = vi.fn();
+      const prisma = asRootPrisma({
+        hostedInvite: {
+          findUnique: vi.fn().mockResolvedValue(invite),
+        },
+        hostedMemberIdentity: {
+          findUnique: identityFindUnique,
+          update: vi.fn(),
+        },
+      });
+
+      await expect(
+        prepareHostedInvitePhoneCode({
+          inviteCode: "invite-code",
+          now: NOW,
+          prisma: prisma as never,
+        }),
+      ).rejects.toMatchObject({
+        code,
+        httpStatus,
+      });
+
+      expect(identityFindUnique).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
   it("returns a stored phone for the Privy client send and records the transient send attempt", async () => {
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
@@ -698,50 +746,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         },
       },
     });
-    expect(updateMany).toHaveBeenNthCalledWith(1, {
-      data: {
-        pendingLinqChatIdEncrypted: null,
-        pendingLinqChatLookupKey: null,
-        pendingLinqParticipantContactEncrypted: null,
-        pendingLinqParticipantContactKind: null,
-        pendingLinqParticipantContactLookupKey: null,
-        pendingLinqParticipantContactObservedAt: null,
-        pendingLinqRecipientPhoneEncrypted: null,
-        pendingLinqRecipientPhoneLookupKey: null,
-      },
-      where: {
-        NOT: {
-          memberId: "member_123",
-        },
-        linqChatLookupKey: null,
-        pendingLinqChatLookupKey: {
-          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
-        },
-      },
-    });
-    expect(updateMany).toHaveBeenNthCalledWith(2, {
-      data: {
-        pendingLinqChatIdEncrypted: null,
-        pendingLinqChatLookupKey: null,
-        pendingLinqParticipantContactEncrypted: null,
-        pendingLinqParticipantContactKind: null,
-        pendingLinqParticipantContactLookupKey: null,
-        pendingLinqParticipantContactObservedAt: null,
-        pendingLinqRecipientPhoneEncrypted: null,
-        pendingLinqRecipientPhoneLookupKey: null,
-      },
-      where: {
-        NOT: {
-          memberId: "member_123",
-        },
-        linqChatLookupKey: {
-          not: null,
-        },
-        pendingLinqChatLookupKey: {
-          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
-        },
-      },
-    });
+    expect(updateMany).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).toHaveBeenCalledWith({
@@ -885,9 +890,11 @@ function asRootPrisma<T extends object>(tx: T): T & {
 
   const executeRaw = prisma.$executeRaw ?? vi.fn().mockResolvedValue(0);
   const queryRaw = prisma.$queryRaw ?? vi.fn().mockImplementation((
-    _query: TemplateStringsArray,
+    query: TemplateStringsArray,
     ...values: unknown[]
-  ) => Promise.resolve([{ id: values.at(-1) }]));
+  ) => Promise.resolve(query.join("").includes("hosted_runtime_cutover")
+    ? [{ phase: "legacy" }]
+    : [{ id: values.at(-1) }]));
   prisma.$executeRaw = executeRaw;
   prisma.$queryRaw = queryRaw;
   prisma.hostedMember ??= {};

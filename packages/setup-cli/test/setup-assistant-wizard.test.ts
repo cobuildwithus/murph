@@ -1,17 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'vitest'
 import {
-  buildSetupWizardAssistantMethodBadges,
   buildSetupWizardAssistantProviderBadges,
-  doesSetupWizardAssistantProviderRequireMethod,
   findSetupAssistantWizardProviderIndex,
-  findSetupWizardAssistantMethodIndex,
   findSetupWizardAssistantProviderIndex,
   getDefaultSetupWizardAssistantPreset,
   inferSetupWizardAssistantMethod,
   inferSetupWizardAssistantProvider,
   listSetupAssistantWizardProviderOptions,
-  listSetupWizardAssistantMethodOptions,
   listSetupWizardAssistantProviderOptions,
   normalizeSetupAssistantWizardProvider,
   resolveSetupAssistantWizardInitialProvider,
@@ -160,20 +156,6 @@ test('setup assistant wizard infers Codex cloud, local, and skip selections', ()
 })
 
 test('setup assistant wizard method helpers are pass-through for Codex-only flows', () => {
-  assert.equal(doesSetupWizardAssistantProviderRequireMethod('codex-cloud'), false)
-  assert.equal(doesSetupWizardAssistantProviderRequireMethod('codex-local'), false)
-  assert.equal(doesSetupWizardAssistantProviderRequireMethod('venice'), false)
-  assert.equal(doesSetupWizardAssistantProviderRequireMethod('skip'), false)
-  assert.deepEqual(listSetupWizardAssistantMethodOptions('codex-cloud'), [])
-  assert.deepEqual(listSetupWizardAssistantMethodOptions('codex-local'), [])
-  assert.equal(
-    findSetupWizardAssistantMethodIndex('codex-cloud', 'codex-cloud'),
-    0,
-  )
-  assert.equal(
-    findSetupWizardAssistantMethodIndex('codex-local', 'codex-cloud'),
-    1,
-  )
   assert.equal(
     resolveSetupWizardAssistantMethodForProvider({
       currentMethod: 'codex-cloud',
@@ -316,16 +298,5 @@ test('setup assistant wizard badges reflect Codex kind and current selections', 
       provider: 'skip',
     }),
     [{ label: 'no change', tone: 'muted' }],
-  )
-  assert.deepEqual(
-    buildSetupWizardAssistantMethodBadges({
-      currentMethod: 'codex-local',
-      method: 'codex-local',
-      optionBadges: [{ label: 'local', tone: 'accent' }],
-    }),
-    [
-      { label: 'local', tone: 'accent' },
-      { label: 'current', tone: 'accent' },
-    ],
   )
 })

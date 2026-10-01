@@ -116,24 +116,33 @@ async function runAssistantDoctorAtPaths(
     createDoctorCheck({
       details: {
         parseErrors: sessionScan.parseErrors,
+        readErrors: sessionScan.readErrors,
         sessions: sessionScan.sessions.length,
       },
       message:
-        sessionScan.parseErrors === 0
+        sessionScan.readErrors > 0
+          ? `${sessionScan.readErrors} assistant session file(s) could not be read.`
+          : sessionScan.parseErrors === 0
           ? `${sessionScan.sessions.length} assistant session file(s) parsed cleanly.`
           : `${sessionScan.parseErrors} assistant session file(s) could not be parsed.`,
       name: 'session-files',
-      status: sessionScan.parseErrors === 0 ? 'pass' : 'fail',
+      status:
+        sessionScan.readErrors === 0 && sessionScan.parseErrors === 0
+          ? 'pass'
+          : 'fail',
     }),
     createDoctorCheck({
       details: {
         malformedLines: transcriptScan.malformedLines,
         orphanedTranscripts: transcriptOrphans.length,
+        readErrors: transcriptScan.readErrors,
         salvagedTailLines: transcriptScan.salvagedTailLines,
         transcriptFiles: transcriptScan.fileCount,
       },
       message:
-        transcriptScan.malformedLines > 0
+        transcriptScan.readErrors > 0
+          ? `${transcriptScan.readErrors} transcript file(s) could not be read.`
+          : transcriptScan.malformedLines > 0
           ? `${transcriptScan.malformedLines} malformed transcript line(s) detected across ${transcriptScan.fileCount} transcript file(s).`
           : transcriptScan.salvagedTailLines > 0
             ? `${transcriptScan.salvagedTailLines} torn transcript tail line(s) were recovered during diagnostics.`
@@ -142,7 +151,7 @@ async function runAssistantDoctorAtPaths(
               : `${transcriptScan.fileCount} transcript file(s) look healthy.`,
       name: 'transcript-files',
       status:
-        transcriptScan.malformedLines > 0
+        transcriptScan.readErrors > 0 || transcriptScan.malformedLines > 0
           ? 'fail'
           : transcriptScan.salvagedTailLines > 0
             ? 'warn'
@@ -156,31 +165,37 @@ async function runAssistantDoctorAtPaths(
       details: {
         present: automationScan.present,
         parseError: automationScan.parseError,
+        readError: automationScan.readError,
       },
       message:
         !automationScan.present
           ? 'assistant automation state has not been initialized yet.'
-          : automationScan.parseError
+          : automationScan.readError
+            ? 'assistant automation state could not be read.'
+            : automationScan.parseError
             ? 'assistant automation state could not be parsed.'
             : 'assistant automation state parsed cleanly.',
       name: 'automation-state',
-      status: automationScan.parseError ? 'fail' : 'pass',
+      status: automationScan.readError || automationScan.parseError ? 'fail' : 'pass',
     }),
     createDoctorCheck({
       details: {
         orphanedReceipts: receiptOrphans.length,
         parseErrors: receiptScan.parseErrors,
+        readErrors: receiptScan.readErrors,
         receiptFiles: receiptScan.fileCount,
       },
       message:
-        receiptScan.parseErrors > 0
+        receiptScan.readErrors > 0
+          ? `${receiptScan.readErrors} turn receipt file(s) could not be read.`
+          : receiptScan.parseErrors > 0
           ? `${receiptScan.parseErrors} turn receipt file(s) could not be parsed.`
           : receiptOrphans.length > 0
             ? `${receiptOrphans.length} turn receipt file(s) reference missing sessions.`
             : `${receiptScan.fileCount} turn receipt file(s) parsed cleanly.`,
       name: 'turn-receipts',
       status:
-        receiptScan.parseErrors > 0
+        receiptScan.readErrors > 0 || receiptScan.parseErrors > 0
           ? 'fail'
           : receiptOrphans.length > 0
             ? 'warn'
@@ -189,12 +204,15 @@ async function runAssistantDoctorAtPaths(
     createDoctorCheck({
       details: {
         parseErrors: outboxScan.parseErrors,
+        readErrors: outboxScan.readErrors,
         quarantinedFiles: outboxScan.quarantinedFiles,
         staleOpenIntents: outboxScan.staleOpenIntents.length,
         totalIntents: outboxScan.intents.length,
       },
       message:
-        outboxScan.parseErrors > 0
+        outboxScan.readErrors > 0
+          ? `${outboxScan.readErrors} outbox intent file(s) could not be read.`
+          : outboxScan.parseErrors > 0
           ? `${outboxScan.parseErrors} outbox intent file(s) could not be parsed.`
           : outboxScan.quarantinedFiles > 0
             ? `${outboxScan.quarantinedFiles} outbox intent file(s) were quarantined after parse failure.`
@@ -203,7 +221,7 @@ async function runAssistantDoctorAtPaths(
               : `${outboxScan.intents.length} outbox intent(s) look healthy.`,
       name: 'outbox-intents',
       status:
-        outboxScan.parseErrors > 0
+        outboxScan.readErrors > 0 || outboxScan.parseErrors > 0
           ? 'fail'
           : outboxScan.quarantinedFiles > 0
             ? 'warn'
@@ -215,20 +233,23 @@ async function runAssistantDoctorAtPaths(
       details: {
         malformedLines: diagnosticEventScan.malformedLines,
         present: diagnosticEventScan.present,
+        readError: diagnosticEventScan.readError,
         salvagedTailLines: diagnosticEventScan.salvagedTailLines,
         totalEvents: diagnosticEventScan.totalEvents,
       },
       message:
         !diagnosticEventScan.present
           ? 'assistant diagnostic event log has not been written yet.'
-          : diagnosticEventScan.malformedLines > 0
+          : diagnosticEventScan.readError
+            ? 'assistant diagnostic event log could not be read.'
+            : diagnosticEventScan.malformedLines > 0
             ? `${diagnosticEventScan.malformedLines} malformed diagnostic event line(s) detected.`
             : diagnosticEventScan.salvagedTailLines > 0
               ? `${diagnosticEventScan.salvagedTailLines} torn diagnostic event tail line(s) were recovered during diagnostics.`
               : `${diagnosticEventScan.totalEvents} assistant diagnostic event(s) parsed cleanly.`,
       name: 'diagnostic-events',
       status:
-        diagnosticEventScan.malformedLines > 0
+        diagnosticEventScan.readError || diagnosticEventScan.malformedLines > 0
           ? 'fail'
           : diagnosticEventScan.salvagedTailLines > 0
             ? 'warn'
@@ -238,20 +259,23 @@ async function runAssistantDoctorAtPaths(
       details: {
         malformedLines: runtimeEventScan.malformedLines,
         present: runtimeEventScan.present,
+        readError: runtimeEventScan.readError,
         salvagedTailLines: runtimeEventScan.salvagedTailLines,
         totalEvents: runtimeEventScan.totalEvents,
       },
       message:
         !runtimeEventScan.present
           ? 'assistant runtime event journal has not been written yet.'
-          : runtimeEventScan.malformedLines > 0
+          : runtimeEventScan.readError
+            ? 'assistant runtime event journal could not be read.'
+            : runtimeEventScan.malformedLines > 0
             ? `${runtimeEventScan.malformedLines} malformed runtime event line(s) detected.`
             : runtimeEventScan.salvagedTailLines > 0
               ? `${runtimeEventScan.salvagedTailLines} torn runtime event tail line(s) were recovered during diagnostics.`
               : `${runtimeEventScan.totalEvents} assistant runtime event(s) parsed cleanly.`,
       name: 'runtime-events',
       status:
-        runtimeEventScan.malformedLines > 0
+        runtimeEventScan.readError || runtimeEventScan.malformedLines > 0
           ? 'fail'
           : runtimeEventScan.salvagedTailLines > 0
             ? 'warn'
@@ -272,43 +296,52 @@ async function runAssistantDoctorAtPaths(
       details: {
         present: diagnosticsScan.present,
         parseError: diagnosticsScan.parseError,
+        readError: diagnosticsScan.readError,
       },
       message:
         !diagnosticsScan.present
           ? 'assistant diagnostics snapshot has not been written yet.'
-          : diagnosticsScan.parseError
+          : diagnosticsScan.readError
+            ? 'assistant diagnostics snapshot could not be read.'
+            : diagnosticsScan.parseError
             ? 'assistant diagnostics snapshot could not be parsed.'
             : 'assistant diagnostics snapshot parsed cleanly.',
       name: 'diagnostics-snapshot',
-      status: diagnosticsScan.parseError ? 'fail' : 'pass',
+      status: diagnosticsScan.readError || diagnosticsScan.parseError ? 'fail' : 'pass',
     }),
     createDoctorCheck({
       details: {
         present: statusScan.present,
         parseError: statusScan.parseError,
+        readError: statusScan.readError,
       },
       message:
         !statusScan.present
           ? 'assistant status snapshot has not been written yet.'
-          : statusScan.parseError
+          : statusScan.readError
+            ? 'assistant status snapshot could not be read.'
+            : statusScan.parseError
             ? 'assistant status snapshot could not be parsed.'
             : 'assistant status snapshot parsed cleanly.',
       name: 'status-snapshot',
-      status: statusScan.parseError ? 'fail' : 'pass',
+      status: statusScan.readError || statusScan.parseError ? 'fail' : 'pass',
     }),
     createDoctorCheck({
       details: {
         present: runtimeBudgetScan.present,
         parseError: runtimeBudgetScan.parseError,
+        readError: runtimeBudgetScan.readError,
       },
       message:
         !runtimeBudgetScan.present
           ? 'assistant runtime budget snapshot has not been written yet.'
-          : runtimeBudgetScan.parseError
+          : runtimeBudgetScan.readError
+            ? 'assistant runtime budget snapshot could not be read.'
+            : runtimeBudgetScan.parseError
             ? 'assistant runtime budget snapshot could not be parsed.'
             : 'assistant runtime budget snapshot parsed cleanly.',
       name: 'runtime-budget',
-      status: runtimeBudgetScan.parseError ? 'fail' : 'pass',
+      status: runtimeBudgetScan.readError || runtimeBudgetScan.parseError ? 'fail' : 'pass',
     }),
     createDoctorCheck({
       details: {
@@ -432,10 +465,26 @@ async function scanJsonFile<T>(
 ): Promise<{
   parseError: boolean
   present: boolean
+  readError: boolean
 }> {
+  const file = await readDoctorFile(filePath)
+  if (file.status === 'missing') {
+    return {
+      parseError: false,
+      present: false,
+      readError: false,
+    }
+  }
+  if (file.status === 'error') {
+    return {
+      parseError: false,
+      present: true,
+      readError: true,
+    }
+  }
+
   try {
-    const raw = await readFile(filePath, 'utf8')
-    const parsed = JSON.parse(raw)
+    const parsed = JSON.parse(file.raw)
 
     if (versionedState) {
       parseVersionedJsonStateEnvelope(parsed, {
@@ -453,69 +502,39 @@ async function scanJsonFile<T>(
     return {
       parseError: false,
       present: true,
+      readError: false,
     }
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return {
-        parseError: false,
-        present: false,
-      }
-    }
-
+  } catch {
     return {
       parseError: true,
       present: true,
+      readError: false,
     }
-  }
-}
-
-async function scanJsonDirectory<T>(
-  directory: string,
-  schema: { parse(input: unknown): T },
-): Promise<{
-  fileCount: number
-  parseErrors: number
-}> {
-  const files = await readDirectoryFiles(directory)
-  let fileCount = 0
-  let parseErrors = 0
-
-  for (const file of files) {
-    if (!file.endsWith('.json')) {
-      continue
-    }
-
-    fileCount += 1
-    try {
-      const raw = await readFile(path.join(directory, file), 'utf8')
-      schema.parse(JSON.parse(raw))
-    } catch {
-      parseErrors += 1
-    }
-  }
-
-  return {
-    fileCount,
-    parseErrors,
   }
 }
 
 async function scanSessionFiles(directory: string): Promise<{
   parseErrors: number
+  readErrors: number
   sessions: Array<{ sessionId: string }>
 }> {
   const entries = await readDirectoryFiles(directory)
   const sessions: Array<{ sessionId: string }> = []
   let parseErrors = 0
+  let readErrors = 0
 
   for (const entry of entries) {
     if (!entry.endsWith('.json')) {
       continue
     }
     const filePath = path.join(directory, entry)
+    const file = await readDoctorFile(filePath)
+    if (file.status !== 'ok') {
+      readErrors += 1
+      continue
+    }
     try {
-      const raw = await readFile(filePath, 'utf8')
-      const session = assistantSessionSchema.parse(JSON.parse(raw))
+      const session = assistantSessionSchema.parse(JSON.parse(file.raw))
       sessions.push({ sessionId: session.sessionId })
     } catch {
       parseErrors += 1
@@ -524,6 +543,7 @@ async function scanSessionFiles(directory: string): Promise<{
 
   return {
     parseErrors,
+    readErrors,
     sessions,
   }
 }
@@ -531,11 +551,13 @@ async function scanSessionFiles(directory: string): Promise<{
 async function scanTranscriptFiles(directory: string): Promise<{
   fileCount: number
   malformedLines: number
+  readErrors: number
   salvagedTailLines: number
   sessionIds: string[]
 }> {
   const entries = await readDirectoryFiles(directory)
   let malformedLines = 0
+  let readErrors = 0
   let fileCount = 0
   let salvagedTailLines = 0
   const sessionIds: string[] = []
@@ -547,9 +569,13 @@ async function scanTranscriptFiles(directory: string): Promise<{
     fileCount += 1
     const filePath = path.join(directory, entry)
     sessionIds.push(entry.replace(/\.jsonl$/u, ''))
+    const file = await readDoctorFile(filePath)
+    if (file.status !== 'ok') {
+      readErrors += 1
+      continue
+    }
     try {
-      const raw = await readFile(filePath, 'utf8')
-      const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
+      const parsed = parseAssistantJsonLinesWithTailSalvage(file.raw, (value) =>
         assistantTranscriptEntrySchema.parse(value),
       )
       malformedLines += parsed.malformedLineCount
@@ -562,6 +588,7 @@ async function scanTranscriptFiles(directory: string): Promise<{
   return {
     fileCount,
     malformedLines,
+    readErrors,
     salvagedTailLines,
     sessionIds,
   }
@@ -573,33 +600,46 @@ async function scanJsonLinesFile<T>(
 ): Promise<{
   malformedLines: number
   present: boolean
+  readError: boolean
   salvagedTailLines: number
   totalEvents: number
 }> {
+  const file = await readDoctorFile(filePath)
+  if (file.status === 'missing') {
+    return {
+      malformedLines: 0,
+      present: false,
+      readError: false,
+      salvagedTailLines: 0,
+      totalEvents: 0,
+    }
+  }
+  if (file.status === 'error') {
+    return {
+      malformedLines: 0,
+      present: true,
+      readError: true,
+      salvagedTailLines: 0,
+      totalEvents: 0,
+    }
+  }
+
   try {
-    const raw = await readFile(filePath, 'utf8')
-    const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
+    const parsed = parseAssistantJsonLinesWithTailSalvage(file.raw, (value) =>
       schema.parse(value),
     )
     return {
       malformedLines: parsed.malformedLineCount,
       present: true,
+      readError: false,
       salvagedTailLines: parsed.salvagedTailLineCount,
       totalEvents: parsed.values.length,
     }
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return {
-        malformedLines: 0,
-        present: false,
-        salvagedTailLines: 0,
-        totalEvents: 0,
-      }
-    }
-
+  } catch {
     return {
       malformedLines: 1,
       present: true,
+      readError: false,
       salvagedTailLines: 0,
       totalEvents: 0,
     }
@@ -609,21 +649,27 @@ async function scanJsonLinesFile<T>(
 async function scanTurnReceiptFiles(directory: string): Promise<{
   fileCount: number
   parseErrors: number
+  readErrors: number
   receipts: AssistantTurnReceipt[]
 }> {
   const files = await readDirectoryFiles(directory)
   const receipts: AssistantTurnReceipt[] = []
   let fileCount = 0
   let parseErrors = 0
+  let readErrors = 0
 
   for (const file of files) {
     if (!file.endsWith('.json')) {
       continue
     }
     fileCount += 1
+    const fileResult = await readDoctorFile(path.join(directory, file))
+    if (fileResult.status !== 'ok') {
+      readErrors += 1
+      continue
+    }
     try {
-      const raw = await readFile(path.join(directory, file), 'utf8')
-      receipts.push(assistantTurnReceiptSchema.parse(JSON.parse(raw)))
+      receipts.push(assistantTurnReceiptSchema.parse(JSON.parse(fileResult.raw)))
     } catch {
       parseErrors += 1
     }
@@ -632,6 +678,7 @@ async function scanTurnReceiptFiles(directory: string): Promise<{
   return {
     fileCount,
     parseErrors,
+    readErrors,
     receipts,
   }
 }
@@ -639,6 +686,7 @@ async function scanTurnReceiptFiles(directory: string): Promise<{
 async function scanOutboxFiles(directory: string): Promise<{
   intents: AssistantOutboxIntent[]
   parseErrors: number
+  readErrors: number
   quarantinedFiles: number
   staleOpenIntents: AssistantOutboxIntent[]
 }> {
@@ -648,14 +696,19 @@ async function scanOutboxFiles(directory: string): Promise<{
   ).filter((file) => file.endsWith('.meta.json')).length
   const intents: AssistantOutboxIntent[] = []
   let parseErrors = 0
+  let readErrors = 0
 
   for (const file of files) {
     if (!file.endsWith('.json')) {
       continue
     }
+    const fileResult = await readDoctorFile(path.join(directory, file))
+    if (fileResult.status !== 'ok') {
+      readErrors += 1
+      continue
+    }
     try {
-      const raw = await readFile(path.join(directory, file), 'utf8')
-      intents.push(assistantOutboxIntentSchema.parse(JSON.parse(raw)))
+      intents.push(assistantOutboxIntentSchema.parse(JSON.parse(fileResult.raw)))
     } catch {
       parseErrors += 1
     }
@@ -664,8 +717,26 @@ async function scanOutboxFiles(directory: string): Promise<{
   return {
     intents,
     parseErrors,
+    readErrors,
     quarantinedFiles,
     staleOpenIntents: intents.filter((intent) => isStaleOutboxIntent(intent)),
+  }
+}
+
+async function readDoctorFile(filePath: string): Promise<
+  | { raw: string; status: 'ok' }
+  | { status: 'error' }
+  | { status: 'missing' }
+> {
+  try {
+    return {
+      raw: await readFile(filePath, 'utf8'),
+      status: 'ok',
+    }
+  } catch (error) {
+    return {
+      status: isMissingFileError(error) ? 'missing' : 'error',
+    }
   }
 }
 

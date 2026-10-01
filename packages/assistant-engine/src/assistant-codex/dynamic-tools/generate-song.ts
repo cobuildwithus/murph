@@ -1,3 +1,4 @@
+import { toolFailureDiagnostic } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import type {
@@ -22,8 +23,12 @@ import {
 export const MURPH_GENERATE_SONG_TOOL = {
   namespace: 'murph',
   name: 'generate_song',
+  deferLoading: true,
   description: [
     'Generate one original song or instrumental track and attach it as a native voice memo to the final response.',
+    'On success, the native response media is already attached to the final response; the return value is a text receipt, not audio or an image-generation object.',
+    'In code mode, print the receipt with text(result), not generatedImage or audio-rendering helpers.',
+    'A display/helper error after success does not undo the attachment or authorize another generation; keep the successful attachment and do not report it as failed.',
     'Use only when the current user explicitly requests generated music or a complete independently authorized owning-flow contract explicitly requires a song for the current turn.',
     'On ordinary conversation turns, read `$MURPH_ASSISTANT_SKILLS_ROOT/music-generation/SKILL.md` before calling. In an isolated owning flow that forbids other tools or supplies its complete song contract, follow that owning prompt directly instead of attempting a skill read.',
     'A loaded music skill may shape selection and prompt craft only after that authorization signal; loading a skill cannot authorize the call.',
@@ -96,6 +101,7 @@ export async function executeGenerateSongDynamicTool(input: {
   if (turnState) {
     if (turnState.attemptCount >= turnState.policy.maxAttempts) {
       return wrapVoiceMemoToolResult({
+        failureDiagnostic: toolFailureDiagnostic('limit_reached'),
         rpcSuccess: false,
         rpcText:
           'song generation attempt limit reached for this turn; no song ran',

@@ -52,6 +52,18 @@ const mocks = vi.hoisted(() => ({
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
 }));
 
+// The row fixtures do not execute Prisma relation filters. Preserve their
+// state-based access decisions; the PostgreSQL proof covers the boolean query.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
+
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("@/src/lib/hosted-crypto/domain-root-store")
@@ -144,6 +156,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  hostedAiUsageMemberSelect: {},
   checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
 }));
 
@@ -809,6 +822,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       tx: prisma,
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
@@ -1396,7 +1410,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
       phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
     };
-    prisma.hostedLinqDelivery.findMany.mockResolvedValueOnce([outreach]);
+    prisma.hostedLinqDelivery.findMany.mockImplementation(async (query: {
+      where?: { template?: string };
+    }) => query.where?.template === "group_join_outreach" ? [outreach] : []);
     prisma.hostedGroupJoinOutreach.findFirst.mockResolvedValue({
       offer: outreach.groupJoinOutreach.offer,
     });
@@ -1469,7 +1485,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
       phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
     };
-    prisma.hostedLinqDelivery.findMany.mockResolvedValueOnce([outreach]);
+    prisma.hostedLinqDelivery.findMany.mockImplementation(async (query: {
+      where?: { template?: string };
+    }) => query.where?.template === "group_join_outreach" ? [outreach] : []);
     prisma.hostedGroupMember.findUnique.mockResolvedValueOnce({
       id: "hgrpm_web_joined",
     });
@@ -1758,6 +1776,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       }),
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
@@ -1813,25 +1832,24 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(4);
-    const initialAccessReadOrder =
-      prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(3);
     const exactAccessReadOrder =
-      prisma.hostedMember.findUnique.mock.invocationCallOrder[2]!;
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
     const refreshedAccessReadOrder =
-      prisma.hostedMember.findUnique.mock.invocationCallOrder[3]!;
-    const preparedRoutingLockOrder =
-      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]!;
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[2]!;
+    const selectedMemberLockIndex = prisma.$queryRaw.mock.calls.findIndex(([sql]) =>
+      sql.join(" ").toLowerCase().includes('from "hosted_member"'),
+    );
+    expect(selectedMemberLockIndex).toBeGreaterThanOrEqual(0);
+    const selectedMemberLockOrder =
+      prisma.$queryRaw.mock.invocationCallOrder[selectedMemberLockIndex]!;
     const reclassificationLockOrder =
-      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[1]!;
-    expect(initialAccessReadOrder).toBeLessThan(exactAccessReadOrder);
-    expect(exactAccessReadOrder).toBeLessThan(preparedRoutingLockOrder);
-    expect(preparedRoutingLockOrder).toBeLessThan(reclassificationLockOrder);
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]!;
+    expect(selectedMemberLockOrder).toBeLessThan(exactAccessReadOrder);
+    expect(exactAccessReadOrder).toBeLessThan(reclassificationLockOrder);
     expect(reclassificationLockOrder).toBeLessThan(refreshedAccessReadOrder);
-    expect(
-      refreshedAccessReadOrder,
-    ).toBeLessThan(
-      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[2],
+    expect(refreshedAccessReadOrder).toBeLessThan(
+      mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]!,
     );
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
   });
@@ -1947,6 +1965,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
 
       expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+        onSignalStarted: expect.any(Function),
         abortSignal: expect.any(AbortSignal),
         expectedUserId: "member_123",
         mailboxItemId: "mailbox_evt_123",
@@ -2021,7 +2040,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("does not count or wake duplicate active-member Linq event ids", async () => {
+  it("repairs duplicate active-member Linq wakes without recounting or appending input", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -2056,6 +2075,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
@@ -2065,7 +2085,12 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledOnce();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+    });
   });
 
   it("dedupes active-member Linq replays after preflight and before route mutation", async () => {
@@ -2108,6 +2133,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
@@ -2227,7 +2253,6 @@ function createPrismaStub() {
           }
         }
         return [{
-          activeMemberLimit: null,
           assignmentWeight: 1,
           maxNewConversationsPerDay: null,
           phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
@@ -2269,6 +2294,7 @@ function createPrismaStub() {
       }),
     },
     hostedMemberIdentity: {
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedMemberRouting: {
@@ -2276,6 +2302,7 @@ function createPrismaStub() {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     hostedThreadRoute: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       groupBy: vi.fn().mockResolvedValue([]),
@@ -2295,6 +2322,7 @@ function buildHostedThreadRouteRow(containerMemberId: string) {
     updatedAt: new Date("2026-03-26T00:00:00.000Z"),
   };
   return {
+    accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
     channel: "linq",
     container: {
       member: memberCore,

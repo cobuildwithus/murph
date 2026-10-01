@@ -114,6 +114,20 @@ const SYNTHETIC_FITTING_FOUR_COLUMN_CARD: CompactTablePresentationCardV1 = {
   footer: "Short fields stay in one compact table.",
 };
 
+const SYNTHETIC_WORKOUT_COMPARISON_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Workout set comparison",
+  subtitle: null,
+  rowHeader: "Workout",
+  columns: ["Set 1", "Set 2", "Set 3"],
+  rows: [
+    { label: "Previous Workout", values: ["–", "20 lb × 8", "–"] },
+    { label: "Current Workout", values: ["25 lb × 8", "25 lb × 8", "–"] },
+  ],
+  footer: null,
+};
+
 export function ImessageCompactTableCardStudy() {
   return (
     <div className="rounded-2xl border border-border bg-card p-4 sm:p-8" inert>
@@ -126,9 +140,10 @@ export function ImessageCompactTableCardStudy() {
         </h3>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           The image fallback keeps a targetless first pending set honest and
-          keeps a fitting four-column card in one shared-header table. Genuinely
-          overwide rows use stacked fields with each measured header above its
-          full-width value so contract-limit text cannot collide or clip.
+          keeps short workout comparisons and fitting four-column cards in one
+          shared-header table. Genuinely overwide rows use stacked fields with
+          each measured header above its full-width value so contract-limit text
+          cannot collide or clip.
           The rectangular raster keeps its title and optional supporting text
           beside the canonical Murph badge, while Messages supplies the outer
           corner mask.
@@ -145,6 +160,10 @@ export function ImessageCompactTableCardStudy() {
           card={SYNTHETIC_FITTING_FOUR_COLUMN_CARD}
           scale={0.72}
         />
+        <ScaledCompactTableCard
+          card={SYNTHETIC_WORKOUT_COMPARISON_CARD}
+          scale={0.72}
+        />
         <ScaledCompactTableCard card={SYNTHETIC_DENSE_TABLE_CARD} scale={0.62} />
       </div>
       <div className="flex flex-col gap-5 sm:hidden">
@@ -154,6 +173,10 @@ export function ImessageCompactTableCardStudy() {
         />
         <ScaledCompactTableCard
           card={SYNTHETIC_FITTING_FOUR_COLUMN_CARD}
+          scale={0.25}
+        />
+        <ScaledCompactTableCard
+          card={SYNTHETIC_WORKOUT_COMPARISON_CARD}
           scale={0.25}
         />
         <ScaledCompactTableCard card={SYNTHETIC_DENSE_TABLE_CARD} scale={0.25} />

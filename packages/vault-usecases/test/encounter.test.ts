@@ -80,12 +80,18 @@ function createEncounterPayload(overrides: Record<string, unknown> = {}) {
             metric: "blood pressure systolic",
             value: 128,
             unit: "mmHg",
-            qualifiers: { position: "seated" },
+            qualifiers: {
+              position: " seated ",
+              empty: " ",
+              unspecified: null,
+              verified: true,
+            },
           },
           {
             metric: "heart_rate",
             value: 72,
             unit: "bpm",
+            qualifiers: null,
           },
         ],
         media: [{ kind: "image", relativePath: "raw/imports/vitals.png", mediaType: "image/png" }],
@@ -218,7 +224,7 @@ describe("encounter usecase", () => {
               metric: "blood-pressure-systolic",
               value: 128,
               unit: "mmHg",
-              qualifiers: { position: "seated" },
+              qualifiers: { position: "seated", verified: true },
             },
             {
               metric: "heart-rate",
@@ -592,6 +598,11 @@ describe("encounter usecase", () => {
       name: "VaultCliError",
       code: "invalid_payload",
       message: "encounter payload failed validation.",
+      context: {
+        issues: expect.arrayContaining([
+          expect.objectContaining({ publicPath: expect.any(Array) }),
+        ]),
+      },
     });
     expect(mocks.saveEncounterBundle).not.toHaveBeenCalled();
   });

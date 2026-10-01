@@ -80,8 +80,8 @@ quantities. One subscription contains at most one licensed monthly item for
 each supported Family tier. Murph stores only the hosted read model needed for
 entitlement, settings display, and reconciliation: customer id, subscription
 id, current billing phase/period, a per-tier capacity projection, and the
-legacy total/item fields needed while existing Pulse-only subscriptions roll
-forward.
+subscription-item identity and a legacy billed total temporarily dual-written
+for older Web readers. Current capacity reads use only the per-tier projection.
 
 Internal Family MRR derives from the same per-tier projection and each tier's
 Family offer price. Do not multiply the aggregate seat count by the Pulse
@@ -201,8 +201,8 @@ Pulse-only web response, but the old parser rejects the new `plans` and
 runner-container rollout, verify the new bundle is serving, and then deploy
 hosted web. Hosted web predeploy applies the nullable/defaulted assignment
 columns, nullable pending-plan column, and empty capacity table before the new
-web build. Existing Pulse-only groups read through the live legacy billed total
-until the first new webhook atomically writes exact tier rows. The new member
+web build. The original rollout used the legacy billed total until the first
+new webhook atomically wrote exact tier rows. The new member
 management UI must not receive traffic until the webhook build that understands
 `pendingPlanCode` is live. The post-deploy contract lane adds assignment
 constraints only after the prior web-function window drains.
@@ -239,6 +239,31 @@ current Max assignment and Stripe item back to Pulse or Edge, removed Max
 capacity rows, completed webhook reconciliation, and verified that no
 membership has either current or pending Max and no pending Max invite remains.
 Do not add a compatibility state machine for this boundary.
+
+### Retiring the legacy billed total
+
+Current capacity, draft recovery, and growth readers use the per-tier rows.
+Deploy this reader release only after a bounded aggregate preflight proves no
+legacy-only groups, no invalid tier quantities/totals, and no aggregate-only
+billing authority on owner drafts. Preserve Stripe identifiers, effect claims,
+checkout intent, and billing phase/period/event history as their own authority.
+
+The reader release continues writing `billedSeatCount` atomically with tier
+rows so older growth readers still recognize newly paid groups. After that
+release is the Web reader/rollback floor and prior reader requests have drained,
+a separate release may remove aggregate writes and the Prisma field while
+leaving the physical column present. Do not roll that writer release back below
+the reader floor: aggregates may already be absent or stale.
+
+Only a later contract migration may drop the physical column, after all ordinary
+pre-writer-removal functions and Stripe reconciliation Workflows pinned to those
+deployments have settled. Workflow runs retain their originating deployment;
+the contract lane's ordinary request drain alone does not prove this. Recheck
+running and pending Workflow inventory at that boundary. After contraction,
+the writer-removal release is the rollback floor; an older build requires
+re-expansion or a forward fix. Keep this destructive migration out of the
+writer-removal release because the contract workflow runs automatically after
+deployment.
 
 ## Data Ownership
 

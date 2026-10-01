@@ -17,6 +17,7 @@ import {
   mealAddResultSchema,
   pathSchema,
   showResultSchema,
+  timeZoneSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   inputFileOptionSchema,
@@ -44,8 +45,12 @@ import {
   createEventBackedEntityEditCommandConfig,
   emptyToUndefined,
 } from './record-mutation-command-helpers.js'
-import { commonListLimitOptionSchema } from './command-factory-primitives.js'
+import {
+  assertOrderedDateRange,
+  commonListLimitOptionSchema,
+} from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import { publicValidationIssue } from './public-validation-issue.js'
 
 const mealIngredientsSchema = z
   .array(z.string().trim().min(1).max(4000))
@@ -80,7 +85,7 @@ const mealInputPayloadSchema = z
     ingredients: mealIngredientsSchema,
     nutrition: mealNutritionSchema.optional(),
   })
-  .passthrough()
+  .strict()
 
 type StructuredMealPayload = {
   photo?: string
@@ -102,14 +107,72 @@ const mealInputPayloadShapeDescription = [
 ].join(' ')
 
 function formatSchemaIssues(
-  issues: readonly { path: PropertyKey[]; message: string }[],
+  issues: readonly { code: string; path: PropertyKey[]; message: string }[],
 ): string {
   return issues
     .map((issue) => {
       const path = issue.path.length > 0 ? issue.path.join('.') : 'value'
-      return `${path}: ${issue.message}`
+      const message = issue.code === 'unrecognized_keys' && issue.path.length === 0
+        ? 'contains an unsupported field'
+        : issue.message
+      return `${path}: ${message}`
     })
     .join('; ')
+}
+
+function mealPayloadIssuePublicPath(
+  path: readonly PropertyKey[],
+): readonly (string | number)[] {
+  return path.every(
+    (segment): segment is string | number =>
+      typeof segment === 'string' ||
+      (typeof segment === 'number' &&
+        Number.isSafeInteger(segment) &&
+        segment >= 0),
+  )
+    ? path
+    : []
+}
+
+function throwMealPathAliasConflict(
+  canonicalField: 'audio' | 'photo',
+  aliasField: 'audioPath' | 'photoPath',
+): never {
+  throw new VaultCliError(
+    'invalid_payload',
+    `Meal payload is not valid. ${canonicalField} and ${aliasField} must match when both are provided.`,
+    {
+      hint: `Use either ${canonicalField} or ${aliasField}, or pass the same path in both fields. No meal was written.`,
+      issues: [
+        publicValidationIssue({ code: 'custom' }, [canonicalField]),
+        publicValidationIssue({ code: 'custom' }, [aliasField]),
+      ],
+      retryable: false,
+      stage: 'validation',
+    },
+  )
+}
+
+function assertMatchingMealPathAliases(payload: {
+  audio?: string
+  audioPath?: string
+  photo?: string
+  photoPath?: string
+}): void {
+  if (
+    payload.photo !== undefined &&
+    payload.photoPath !== undefined &&
+    payload.photo !== payload.photoPath
+  ) {
+    throwMealPathAliasConflict('photo', 'photoPath')
+  }
+  if (
+    payload.audio !== undefined &&
+    payload.audioPath !== undefined &&
+    payload.audio !== payload.audioPath
+  ) {
+    throwMealPathAliasConflict('audio', 'audioPath')
+  }
 }
 
 function hasMeaningfulMealNutrition(nutrition: MealNutrition | undefined): boolean {
@@ -238,11 +301,28 @@ async function loadStructuredMealPayload(inputFile: string): Promise<StructuredM
   const parsed = mealInputPayloadSchema.safeParse(payload)
 
   if (!parsed.success) {
+    const unsupportedFieldHint = parsed.error.issues.some(
+      (issue) => issue.code === 'unrecognized_keys',
+    )
+      ? ` ${mealInputPayloadShapeDescription}`
+      : ''
     throw new VaultCliError(
       'invalid_payload',
-      `Meal payload is not valid. ${formatSchemaIssues(parsed.error.issues)}`,
+      `Meal payload is not valid. ${formatSchemaIssues(parsed.error.issues)}${unsupportedFieldHint}`,
+      {
+        issues: parsed.error.issues.map((issue) =>
+          publicValidationIssue(
+            issue,
+            mealPayloadIssuePublicPath(issue.path),
+          )
+        ),
+        retryable: false,
+        stage: 'validation',
+      },
     )
   }
+
+  assertMatchingMealPathAliases(parsed.data)
 
   return {
     photo: parsed.data.photo ?? parsed.data.photoPath,
@@ -297,7 +377,29 @@ const mealNutritionDaySchema = z.object({
   totals: mealNutritionTotalsSchema,
 })
 
+const nutritionTargetResolutionSchema = z.object({
+  status: z.enum(['resolved', 'missing', 'conflict', 'incompatible']),
+  target: z.number().nullable(),
+  provenance: z.array(z.object({
+    goalId: z.string(), targetId: z.string(), metricKey: z.string(), unit: z.string(),
+    window: z.object({ startAt: localDateSchema.optional(), targetAt: localDateSchema.optional() }),
+    startAt: localDateSchema.optional(), targetAt: localDateSchema.optional(),
+  })),
+})
+const mealNutritionGoalContextSchema = z.object({
+  localDate: localDateSchema,
+  status: z.enum(['ready', 'missing', 'conflict', 'incompatible', 'capacity']),
+  activeGoalCount: z.number().int().nonnegative(),
+  compatibility: z.enum(['canonical', 'historical-selected', 'historical-rolling-mean']),
+  targets: z.object({
+    calories: nutritionTargetResolutionSchema, proteinGrams: nutritionTargetResolutionSchema,
+    carbsGrams: nutritionTargetResolutionSchema, fatGrams: nutritionTargetResolutionSchema,
+    fiberGrams: nutritionTargetResolutionSchema,
+  }),
+})
+
 const mealNutritionTotalsResultSchema = z.object({
+  goalContext: mealNutritionGoalContextSchema.optional(),
   vault: pathSchema,
   filters: z.object({
     from: localDateSchema.nullable(),
@@ -306,6 +408,21 @@ const mealNutritionTotalsResultSchema = z.object({
   mealCount: z.number().int().nonnegative(),
   totals: mealNutritionTotalsSchema,
   days: z.array(mealNutritionDaySchema),
+})
+
+const mealAddWithDailyTotalsResultSchema = mealAddResultSchema.extend({
+  dailyTotals: z.discriminatedUnion('status', [
+    z.object({
+      status: z.literal('available'),
+      data: mealNutritionTotalsResultSchema,
+    }),
+    z.object({
+      status: z.literal('unavailable'),
+      localDate: localDateSchema,
+      code: z.string(),
+      hint: z.string(),
+    }),
+  ]).optional(),
 })
 
 const mealNutrientSchema = z.object({
@@ -335,6 +452,9 @@ const mealNutrientTotalsResultSchema = z.object({
 })
 
 const mealAddTypedOptionShape = {
+  withDailyTotals: z.boolean().optional().describe(
+    'After saving, return fresh totals and goal context for the saved meal local date. Replaces a separate meal totals --resolve-goals read; does not attach a card or approve numeric suitability. If the read fails the meal is still saved: retry only meal totals, never meal add.',
+  ),
   photo: pathSchema
     .optional()
     .describe('Optional meal photo path.'),
@@ -397,6 +517,8 @@ const mealAddTypedOptionShape = {
 
 async function runMealAdd(
   options: Record<string, unknown> & { vault: string },
+  services: VaultServices,
+  requestId: string | null,
   inputFile?: string,
 ) {
   const payload = inputFile ? await loadStructuredMealPayload(inputFile) : undefined
@@ -447,9 +569,9 @@ async function runMealAdd(
     ...(photoPath ? { photoPath } : {}),
     ...(audioPath ? { audioPath } : {}),
     ...(note ? { note } : {}),
-    ...(source ? { source } : {}),
-    ...(ingredients ? { ingredients } : {}),
-    ...(nutrition ? { nutrition } : {}),
+    source,
+    ingredients,
+    nutrition,
     ...(occurredAtInput
       ? {
           occurredAt: await normalizeOccurredAtOption({
@@ -461,7 +583,7 @@ async function runMealAdd(
   }
   const result = await importers.addMeal(mealInput)
 
-  return {
+  const saved = {
     vault: vaultRoot,
     mealId: result.mealId,
     eventId: result.event.id,
@@ -474,6 +596,35 @@ async function runMealAdd(
     source: result.event.source ?? null,
     ingredients: result.event.ingredients ?? null,
     nutrition: result.event.nutrition ?? null,
+  }
+  if (options.withDailyTotals !== true) return saved
+
+  // The canonical day key, rather than the CLI process clock or UTC date,
+  // must select the same meal window as an ordinary totals read.
+  const localDate = result.event.dayKey
+  try {
+    const data = mealNutritionTotalsResultSchema.parse(
+      await services.query.showMealNutritionTotals({
+        vault: vaultRoot,
+        requestId,
+        from: localDate,
+        to: localDate,
+        resolveGoals: true,
+      }),
+    )
+    return { ...saved, dailyTotals: { status: 'available' as const, data } }
+  } catch (error) {
+    // The write already succeeded. A read failure must not turn it into a
+    // retryable mutation and cause a duplicate meal.
+    return {
+      ...saved,
+      dailyTotals: {
+        status: 'unavailable' as const,
+        localDate,
+        code: error instanceof VaultCliError ? error.code : 'meal_daily_totals_unavailable',
+        hint: `Meal saved. Retry only meal totals --from ${localDate} --to ${localDate} --resolve-goals; do not repeat meal add.`,
+      },
+    }
   }
 }
 
@@ -511,12 +662,12 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         },
       ],
       hint:
-        'Keep using typed flags for ordinary single-meal logs. Use meal import-json --input @meal.json or meal import-json --input - when importing a structured payload; explicit flags override payload fields.',
+        'Use typed flags for ordinary meal logs; add --with-daily-totals when preparing a daily nutrition card to save and read fresh totals/goal context in one call. The save result is authoritative. Reuse dailyTotals.data when available; if unavailable, retry only meal totals, never the save. Use meal import-json --input @meal.json or meal import-json --input - for a structured payload; explicit flags override payload fields.',
       args: z.object({}),
       options: mealAddTypedOptionShape,
-      output: mealAddResultSchema,
-      async run({ options }) {
-        return runMealAdd(options)
+      output: mealAddWithDailyTotalsResultSchema,
+      async run({ options, requestId }) {
+        return runMealAdd(options, services, typeof requestId === 'string' ? requestId : null)
       },
     },
     show: {
@@ -601,10 +752,12 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
           ),
           ...mealAddTypedOptionShape,
         },
-        output: mealAddResultSchema,
-        async run({ options }) {
+        output: mealAddWithDailyTotalsResultSchema,
+        async run({ options, requestId }) {
           return runMealAdd(
             options,
+            services,
+            typeof requestId === 'string' ? requestId : null,
             typeof options.input === 'string' ? options.input : undefined,
           )
         },
@@ -617,6 +770,7 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         hint:
           'Use `meal totals --from YYYY-MM-DD --to YYYY-MM-DD` when you need practical calories/protein/carbs/fat/fiber totals without a broader reporting layer.',
         options: {
+          resolveGoals: z.boolean().optional().describe('Resolve applicable nutrition goal points with conflicts and provenance. Requires identical explicit from/to dates; read-only and never approves suitability or activates proposals.'),
           from: localDateSchema
             .optional()
             .describe('Optional inclusive lower date bound in YYYY-MM-DD form.'),
@@ -626,11 +780,22 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         },
         output: mealNutritionTotalsResultSchema,
         async run({ options, requestId }) {
+          const from = typeof options.from === 'string' ? options.from : undefined
+          const to = typeof options.to === 'string' ? options.to : undefined
+          assertOrderedDateRange(from, to)
+          if (options.resolveGoals === true && (!from || from !== to)) {
+            throw new VaultCliError('invalid_payload', 'Goal resolution requires identical explicit from and to dates.', {
+              hint: 'Pass --from YYYY-MM-DD --to the same date with --resolve-goals.',
+              retryable: false,
+              stage: 'validation',
+            })
+          }
           return services.query.showMealNutritionTotals({
             vault: String(options.vault ?? ''),
             requestId: typeof requestId === 'string' ? requestId : null,
-            from: typeof options.from === 'string' ? options.from : undefined,
-            to: typeof options.to === 'string' ? options.to : undefined,
+            from,
+            to,
+            resolveGoals: options.resolveGoals === true,
           })
         },
       },
@@ -651,11 +816,14 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         },
         output: mealNutrientTotalsResultSchema,
         async run({ options, requestId }) {
+          const from = typeof options.from === 'string' ? options.from : undefined
+          const to = typeof options.to === 'string' ? options.to : undefined
+          assertOrderedDateRange(from, to)
           return services.query.showMealNutrientTotals({
             vault: String(options.vault ?? ''),
             requestId: typeof requestId === 'string' ? requestId : null,
-            from: typeof options.from === 'string' ? options.from : undefined,
-            to: typeof options.to === 'string' ? options.to : undefined,
+            from,
+            to,
           })
         },
       },
@@ -685,6 +853,9 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         description:
           'Edit one meal event from typed fields.',
         options: {
+          timeZone: timeZoneSchema
+            .optional()
+            .describe('Replace the explicit IANA time zone, such as America/New_York.'),
           ingredient: mealIngredientsSchema
             .describe('Replace saved ingredients. Repeat --ingredient for each item.'),
           nutritionCalories: z.number().nonnegative().optional().describe('Replace meal calorie total.'),

@@ -3,12 +3,36 @@ import { describe, expect, it } from 'vitest'
 import {
   buildAssistantExecutionBehaviorText,
 } from '../src/assistant/model-behavior.ts'
+import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.ts'
 import {
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 
 describe('assistant progress prompt contract', () => {
-  it('orients the member before noticeable multi-source or long work', () => {
+  it('grounds delay updates in observed failure and actual recovery ownership', () => {
+    const prompt = buildAssistantSystemPrompt({
+      assistantCliContract: null, channel: 'linq', conversationScope: 'direct',
+      cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      currentLocalDate: '2026-10-14', currentTimeZone: 'UTC',
+      modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+    })
+    expect(prompt).toContain('exception to quick-task silence')
+    expect(prompt).toContain('send one brief update before continuing recovery')
+    expect(prompt).toContain('using only observed facts')
+    expect(prompt).toContain('A missing result is not proof of a messaging outage')
+    expect(prompt).toContain('only when an accepted durable continuation owns it')
+    expect(prompt).toContain('never invent a completion time')
+    expect(prompt).toContain('explain the blocker in the final reply instead')
+    for (const route of [
+      { progressUpdatesAvailable: false },
+      { progressUpdateMode: 'group' as const },
+    ]) {
+      expect(buildAssistantExecutionBehaviorText({ profile: 'gpt5-agentic', ...route }))
+        .not.toContain('send one brief update before continuing recovery')
+    }
+  })
+
+  it('orients the member only before genuinely noticeable work', () => {
     const prompt = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
     })
@@ -23,22 +47,43 @@ describe('assistant progress prompt contract', () => {
       'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
-      'Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection',
+      'Keep quick answers and one or two straightforward actions quiet',
     )
     expect(prompt).toContain(
-      'Before the first read in that pass, orient the member even when each lookup is routine',
+      'For several record edits, 3+ substantive checks/actions',
     )
     expect(prompt).toContain(
-      'Do not wait until the work is done or the member asks about the delay',
+      'send one update before starting',
     )
     expect(prompt).toContain(
-      'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning',
+      'Honor required skill receipts',
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement',
+      'Routine onboarding/setup needs no preamble',
     )
     expect(prompt).toContain(
-      'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update',
+      'goal capture, context reads, device checks, a save, or the next question',
+    )
+    expect(prompt).toContain(
+      'If a quick task expands into repeated repairs, additional edits, or a noticeable wait, update then',
+    )
+    expect(prompt).toContain(
+      'send a required child-start acknowledgement after spawning',
+    )
+    expect(prompt).toContain(
+      'Background work does not trigger progress by itself',
+    )
+    expect(prompt).toContain(
+      'Routine meal capture and daily nutrition summaries are one short workflow',
+    )
+    expect(prompt).toContain(
+      'Do not send a progress update for those steps or before the card',
+    )
+    expect(prompt).toContain(
+      'Only genuinely extended recovery beyond that routine workflow can justify an outcome-focused update',
+    )
+    expect(prompt).toContain(
+      'never narrate safety, totals, estimates or target resolution',
     )
     expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update',
@@ -60,6 +105,25 @@ describe('assistant progress prompt contract', () => {
     )
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
+    expect(prompt).not.toContain('orient the member even when each lookup is routine')
+    expect(prompt).not.toContain('Source count alone does not trigger it')
+    expect(prompt).not.toContain('only separate user-requested long research or external action')
+    expect(prompt).not.toContain('Routine onboarding/setup does not count by itself')
+  })
+
+  it('does not instruct routes without progress delivery to call the tool', () => {
+    const prompt = buildAssistantExecutionBehaviorText({
+      profile: 'gpt5-agentic',
+      progressUpdatesAvailable: false,
+      progressUpdateMode: 'direct',
+    })
+
+    expect(prompt).toContain(
+      'Member-visible interim progress is unavailable on this route',
+    )
+    expect(prompt).not.toContain('murph.send_progress_update')
+    expect(prompt).not.toContain('Send one early update before direct reply-critical work')
+    expect(prompt).not.toContain('may outlast ordinary response time')
   })
 
   it('keeps the dynamic tool to a concise call contract', () => {

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "foreground-wake-reliability",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer delays while Murph works in the background",
+    "summary": "Messages can interrupt eligible background work without waiting for an unnecessary restart or retry.",
+    "details": "Message notifications use the same immediate wake path for iMessage and Telegram. Wearable cleanup yields when a message arrives or another operation is saving your data.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": []
+  }
+}

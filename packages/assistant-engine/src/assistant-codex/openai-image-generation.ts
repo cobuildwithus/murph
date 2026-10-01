@@ -14,7 +14,7 @@ import type {
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
-export const OPENAI_IMAGE_GENERATION_MODEL = 'gpt-image-2'
+export const OPENAI_IMAGE_GENERATION_MODEL = 'gpt-image-2.5-flare'
 export const OPENAI_IMAGES_BASE_URL = 'https://api.openai.com/v1'
 // Image generation is slow but bounded; complex prompts can exceed two minutes,
 // especially reference-image edits. TimeoutError is deliberately not an
@@ -314,6 +314,13 @@ async function readOpenAiImageGenerationResult(
 
   if (!response.ok) {
     const providerError = readOpenAiImageErrorBody(payload)
+    if (response.status === 403 && providerError.code === 'MURPH_IMAGE_SUBSCRIPTION_REQUIRED') {
+      throw new VaultCliError(
+        'ASSISTANT_IMAGE_SUBSCRIPTION_REQUIRED',
+        'Image generation requires a subscription. Start Pulse or, if eligible, Group at https://www.withmurph.ai/settings#subscription, then ask for the image again. Starter text chat still works within its remaining allowance.',
+        { retryable: false, providerErrorMessage: 'Starter image generation requires a subscription through the normal Pulse or eligible Group signup flow. A saved card alone is not sufficient. Starter text chat still works within its remaining allowance.' },
+      )
+    }
     throw new VaultCliError(
       'ASSISTANT_IMAGE_GENERATION_FAILED',
       `OpenAI image ${operation} request failed with HTTP ${response.status}.`,

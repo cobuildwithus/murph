@@ -2,16 +2,14 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
 import { getPrisma } from "../prisma";
-import { ComputerUseService } from "../computer-use/service";
-import { PrismaComputerUseStore } from "../computer-use/store";
-import { HOSTED_MAILBOX_RETENTION_MS } from "../hosted-mailbox/store";
+import { HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS } from "../hosted-ops/operator-task-retention";
+import {
+  HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION,
+  HOSTED_MAILBOX_RETENTION_MS,
+} from "../hosted-mailbox/store";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
-import {
-  drainHostedAccountDeletionCleanupBatch,
-  type HostedAccountDeletionCleanupBatchResult,
-} from "../hosted-privacy/account-deletion-cleanup";
 
 const DAY_MS = 86_400_000;
 
@@ -23,16 +21,21 @@ export { HOSTED_MAILBOX_RETENTION_MS };
 export const HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS = 7 * DAY_MS;
+export const HOSTED_TYPING_ALERT_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
 // Every batched retention category uses ordered work with an explicit per-run
 // ceiling, so one hourly invocation can never open a long transaction against
-// the production pool.
+// the production pool. High-volume callback nonces keep the same small
+// statement size while using a dedicated catch-up ceiling; unrelated retention
+// categories retain the shared four-batch limit.
 export const HOSTED_RETENTION_BATCH_SIZE = 5_000;
 export const HOSTED_RETENTION_MAX_BATCHES = 4;
+export const HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES =
+  HOSTED_RETENTION_MAX_BATCHES * 100;
 // Short-lived control artifacts are normally tiny and should never inherit the
-// high-volume diagnostic drain budget. Across the seven owners below this caps
-// one hourly pass at 14 statements and 3,500 deleted rows.
+// high-volume diagnostic drain budget. Across the ten categories below this caps
+// one hourly pass at 20 statements and 5,000 deleted or compacted rows.
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE = 250;
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES = 2;
 // Clinical Records started intents remain the completion owner after their
@@ -49,43 +52,41 @@ type HostedRuntimeRecheckSignal = (input: {
   userId: string;
 }) => Promise<unknown>;
 
-export interface HostedRetentionCleanupResult {
-  accountDeletionCleanup: HostedAccountDeletionCleanupBatchResult;
+export interface HostedControlPlaneRetentionCleanupResult {
   compactedLinqProviderEventDiagnostics: number;
   expiredAssistantRuntimeIssuesDeleted: number;
-  expiredCallbackRequestNoncesDeleted: number;
+  expiredAuthRecordsDeleted: number;
   expiredClinicalRecordConnectIntentsDeleted: number;
   expiredClinicalRecordOauthSessionsDeleted: number;
-  expiredComputerRunsCleanedUp: number;
   expiredConnectedAppConnectIntentsDeleted: number;
   expiredConversationPolicyNonRepliesRecorded: number;
   expiredDeviceConnectIntentsDeleted: number;
   expiredDeviceOauthSessionsDeleted: number;
   expiredDeviceWebhookTracesDeleted: number;
   expiredEmailPublicBootstrapAttemptsDeleted: number;
+  expiredGroupParticipantObservationsDeleted: number;
   expiredGroupCurrentSenderClarificationsDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
+  expiredTypingAlertsDeleted: number;
   expiredMailboxContentRetired: number;
   expiredMailboxTombstonesDeleted: number;
+  expiredOperatorTaskResultsRetired: number;
   expiredSensitiveActionChallengesDeleted: number;
   expiredSignupNotificationContextsRetired: number;
-  inboxMediaRetentionRuntimeSignalFailures: number;
-  inboxMediaRetentionRuntimeSignalsSent: number;
-  oldRuntimeLogsDeleted: number;
   staleWebSessionsDeleted: number;
 }
 
-export async function runHostedRetentionCleanup(input: {
+export interface HostedRuntimeSignalRetentionCleanupResult {
+  inboxMediaRetentionRuntimeSignalFailures: number;
+  inboxMediaRetentionRuntimeSignalsSent: number;
+}
+
+export async function runHostedControlPlaneRetentionCleanup(input: {
   now?: Date | string;
   prisma?: PrismaClient;
-  signalRuntimeRecheck?: HostedRuntimeRecheckSignal;
-} = {}): Promise<HostedRetentionCleanupResult> {
+} = {}): Promise<HostedControlPlaneRetentionCleanupResult> {
   const prisma = input.prisma ?? getPrisma();
-  const now = normalizeRetentionDate(input.now ?? new Date());
-  const accountDeletionCleanup = await drainHostedAccountDeletionCleanupBatch({
-    now,
-    prisma,
-  });
+  const now = normalizeHostedRetentionDate(input.now ?? new Date());
   // Serial by design: short-lived control-plane backlog cleanup lives here,
   // never in a member-facing creation transaction. Exact addressed reads may
   // still remove their own expired row while failing closed.
@@ -93,6 +94,7 @@ export async function runHostedRetentionCleanup(input: {
     await deleteExpiredConnectedAppConnectIntents({ now, prisma });
   const expiredSensitiveActionChallengesDeleted =
     await deleteExpiredSensitiveActionChallenges({ now, prisma });
+  const expiredAuthRecordsDeleted = await deleteExpiredHostedAuthRecords({ now, prisma });
   const expiredDeviceConnectIntentsDeleted =
     await deleteExpiredDeviceConnectIntents({ now, prisma });
   const expiredDeviceOauthSessionsDeleted =
@@ -105,20 +107,21 @@ export async function runHostedRetentionCleanup(input: {
     await deleteExpiredEmailPublicBootstrapAttempts({ now, prisma });
   const expiredSignupNotificationContextsRetired =
     await retireExpiredSignupNotificationContexts({ now, prisma });
+  const expiredOperatorTaskResultsRetired =
+    await retireExpiredOperatorTaskResults({ now, prisma });
   const expiredMailboxItems = await retireExpiredMailboxContent({
     now,
     prisma,
   });
-  // These background deletes must never fan out across the same pool that
-  // serves user-facing control-plane work.
-  const expiredCallbackRequestNoncesDeleted =
-    await deleteExpiredHostedCallbackRequestNonces({ prisma });
   const expiredGroupCurrentSenderClarificationsDeleted =
     await deleteExpiredGroupCurrentSenderClarifications({ now, prisma });
+  const expiredGroupParticipantObservationsDeleted =
+    await deleteExpiredGroupParticipantObservations({ now, prisma });
   const expiredIngressLatencyTracesDeleted = await deleteExpiredIngressLatencyTraces({
     now,
     prisma,
   });
+  const expiredTypingAlertsDeleted = await deleteExpiredTypingAlerts({ now, prisma });
   const expiredAssistantRuntimeIssuesDeleted = await deleteExpiredAssistantRuntimeIssues({
     now,
     prisma,
@@ -135,24 +138,13 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
-  const expiredComputerRunsCleanedUp = await new ComputerUseService({
-    now: () => now,
-    store: new PrismaComputerUseStore(prisma),
-  }).cleanupExpiredRuns({ now }).then((result) => result.expiredRuns);
-  const mediaRetentionSignals = await signalDueInboxMediaRetentionRuntimes({
-    now,
-    prisma,
-    signalRuntimeRecheck: input.signalRuntimeRecheck,
-  });
 
   return {
-    accountDeletionCleanup,
     compactedLinqProviderEventDiagnostics,
     expiredAssistantRuntimeIssuesDeleted,
-    expiredCallbackRequestNoncesDeleted,
+    expiredAuthRecordsDeleted,
     expiredClinicalRecordConnectIntentsDeleted,
     expiredClinicalRecordOauthSessionsDeleted,
-    expiredComputerRunsCleanedUp,
     expiredConnectedAppConnectIntentsDeleted,
     expiredConversationPolicyNonRepliesRecorded:
       expiredMailboxItems.policyNonReplies,
@@ -160,17 +152,61 @@ export async function runHostedRetentionCleanup(input: {
     expiredDeviceOauthSessionsDeleted,
     expiredDeviceWebhookTracesDeleted,
     expiredEmailPublicBootstrapAttemptsDeleted,
+    expiredGroupParticipantObservationsDeleted,
     expiredGroupCurrentSenderClarificationsDeleted,
     expiredIngressLatencyTracesDeleted,
+    expiredTypingAlertsDeleted,
     expiredMailboxContentRetired: expiredMailboxItems.retired,
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
+    expiredOperatorTaskResultsRetired,
     expiredSensitiveActionChallengesDeleted,
     expiredSignupNotificationContextsRetired,
-    inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
-    inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
-    oldRuntimeLogsDeleted: 0,
     staleWebSessionsDeleted,
   };
+}
+
+export async function runHostedRuntimeSignalRetentionCleanup(input: {
+  now?: Date | string;
+  prisma?: PrismaClient;
+  signalRuntimeRecheck?: HostedRuntimeRecheckSignal;
+} = {}): Promise<HostedRuntimeSignalRetentionCleanupResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = normalizeHostedRetentionDate(input.now ?? new Date());
+  const mediaRetentionSignals = await signalDueInboxMediaRetentionRuntimes({
+    now,
+    prisma,
+    signalRuntimeRecheck: input.signalRuntimeRecheck,
+  });
+
+  return {
+    inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
+    inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
+  };
+}
+
+// Keep task identity/status as the durable duplicate gate; only results expire.
+export async function retireExpiredOperatorTaskResults(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  const cutoff = new Date(
+    input.now.getTime() - HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS,
+  );
+  return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH expired AS MATERIALIZED (
+      SELECT task."id"
+      FROM "hosted_operator_task" AS task
+      WHERE task."result_encrypted" IS NOT NULL
+        AND task."completed_at" <= ${cutoff}
+      ORDER BY task."completed_at" ASC, task."id" ASC
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF task SKIP LOCKED
+    )
+    UPDATE "hosted_operator_task" AS task
+    SET "result_encrypted" = NULL
+    FROM expired
+    WHERE task."id" = expired."id"
+  `);
 }
 
 // Signup context is optional notification projection data, not member history.
@@ -221,6 +257,25 @@ async function deleteExpiredGroupCurrentSenderClarifications(input: {
     WHERE clarification."group_runtime_member_id" =
         doomed."group_runtime_member_id"
       AND clarification."target_member_id" = doomed."target_member_id"
+  `);
+}
+
+async function deleteExpiredGroupParticipantObservations(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "contact_lookup_key"
+      FROM "hosted_group_participant_observation"
+      WHERE "expires_at" <= ${input.now}
+      ORDER BY "expires_at" ASC, "contact_lookup_key" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM "hosted_group_participant_observation" AS observation
+    USING doomed
+    WHERE observation."contact_lookup_key" = doomed."contact_lookup_key"
   `);
 }
 
@@ -384,7 +439,24 @@ export async function retireExpiredMailboxContent(input: {
         FROM "hosted_mailbox_item"
         WHERE "content_retired_at" IS NULL
           AND (
-            "expires_at" <= ${input.now}
+            (
+              "expires_at" <= ${input.now}
+              AND NOT (
+                "kind" = 'assistant.ask.requested'
+                AND "lane" = 'system'
+                AND "retention_disposition" IS NOT DISTINCT FROM
+                  ${HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION}
+                AND "lane_seq" > COALESCE(
+                  (
+                    SELECT counter."consumed_seq"
+                    FROM "hosted_mailbox_lane_counter" AS counter
+                    WHERE counter."user_id" = "hosted_mailbox_item"."user_id"
+                      AND counter."lane" = 'system'
+                  ),
+                  0
+                )
+              )
+            )
             OR "created_at" <= ${cutoff}
           )
         ORDER BY "created_at" ASC, "id" ASC
@@ -463,27 +535,30 @@ export async function retireExpiredMailboxContent(input: {
         SELECT
           conversation_users."user_id",
           COALESCE(
-            MIN(blocker."lane_seq") - 1,
+            blocker."lane_seq" - 1,
             counter."next_seq" - 1
           ) AS "lane_seq"
         FROM conversation_users
         JOIN "hosted_mailbox_lane_counter" AS counter
           ON counter."user_id" = conversation_users."user_id"
           AND counter."lane" = 'conversation'
-        LEFT JOIN "hosted_mailbox_item" AS blocker
-          ON blocker."user_id" = conversation_users."user_id"
-          AND blocker."lane" = 'conversation'
-          AND blocker."consumed_at" IS NULL
-          AND NOT EXISTS (
-            SELECT 1
-            FROM retired AS policy_non_reply
-            WHERE policy_non_reply."id" = blocker."id"
-              AND policy_non_reply."retention_disposition"
-                = 'policy_non_reply.content_expired'
-          )
-        GROUP BY
-          conversation_users."user_id",
-          counter."next_seq"
+        LEFT JOIN LATERAL (
+          SELECT blocker."lane_seq"
+          FROM "hosted_mailbox_item" AS blocker
+          WHERE blocker."user_id" = conversation_users."user_id"
+            AND blocker."lane" = 'conversation'
+            AND blocker."lane_seq" > counter."consumed_seq"
+            AND blocker."consumed_at" IS NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM retired AS policy_non_reply
+              WHERE policy_non_reply."id" = blocker."id"
+                AND policy_non_reply."retention_disposition"
+                  = 'policy_non_reply.content_expired'
+            )
+          ORDER BY blocker."lane_seq" ASC
+          LIMIT 1
+        ) AS blocker ON TRUE
       ),
       advanced AS (
         UPDATE "hosted_mailbox_lane_counter" AS counter
@@ -554,28 +629,31 @@ export async function retireExpiredMailboxContent(input: {
 export async function deleteExpiredHostedCallbackRequestNonces(input: {
   prisma: Pick<PrismaClient, "$executeRaw">;
 }): Promise<number> {
-  return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH database_clock AS MATERIALIZED (
-      SELECT date_trunc(
-        'milliseconds',
-        clock_timestamp() AT TIME ZONE 'UTC'
-      ) AS "now"
-    ),
-    doomed AS MATERIALIZED (
-      SELECT request_nonce."nonce_hash"
-      FROM "hosted_web_internal_request_nonce" AS request_nonce
-      CROSS JOIN database_clock
-      WHERE request_nonce."expires_at" < database_clock."now"
-      ORDER BY
-        request_nonce."expires_at" ASC,
-        request_nonce."nonce_hash" ASC
-      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-      FOR UPDATE OF request_nonce SKIP LOCKED
-    )
-    DELETE FROM "hosted_web_internal_request_nonce" AS request_nonce
-    USING doomed
-    WHERE request_nonce."nonce_hash" = doomed."nonce_hash"
-  `);
+  return await runRetentionBatches(
+    () => input.prisma.$executeRaw`
+      WITH database_clock AS MATERIALIZED (
+        SELECT date_trunc(
+          'milliseconds',
+          clock_timestamp() AT TIME ZONE 'UTC'
+        ) AS "now"
+      ),
+      doomed AS MATERIALIZED (
+        SELECT request_nonce."nonce_hash"
+        FROM "hosted_web_internal_request_nonce" AS request_nonce
+        CROSS JOIN database_clock
+        WHERE request_nonce."expires_at" < database_clock."now"
+        ORDER BY
+          request_nonce."expires_at" ASC,
+          request_nonce."nonce_hash" ASC
+        LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+        FOR UPDATE OF request_nonce SKIP LOCKED
+      )
+      DELETE FROM "hosted_web_internal_request_nonce" AS request_nonce
+      USING doomed
+      WHERE request_nonce."nonce_hash" = doomed."nonce_hash"
+    `,
+    HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES,
+  );
 }
 
 export async function deleteExpiredConnectedAppConnectIntents(input: {
@@ -620,6 +698,32 @@ export async function deleteExpiredEmailPublicBootstrapAttempts(input: {
     USING doomed
     WHERE attempt."id" = doomed."id"
   `);
+}
+
+export async function deleteExpiredHostedAuthRecords(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  let deleted = 0;
+  // Give sessions and pre-auth OTP/rate-limit state separate indexed budgets.
+  // User/account projections have no expiry and are removed only by their owner.
+  for (const model of ["session", "verification"] as const) {
+    deleted += await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+      WITH doomed AS MATERIALIZED (
+        SELECT record."model", record."id"
+        FROM "hosted_auth_record" AS record
+        WHERE record."model" = ${model}::"HostedAuthModel"
+          AND record."expires_at" <= ${input.now}
+        ORDER BY record."expires_at" ASC, record."id" ASC
+        LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+        FOR UPDATE OF record SKIP LOCKED
+      )
+      DELETE FROM "hosted_auth_record" AS record
+      USING doomed
+      WHERE record."model" = doomed."model" AND record."id" = doomed."id"
+    `);
+  }
+  return deleted;
 }
 
 async function deleteExpiredSensitiveActionChallenges(input: {
@@ -764,6 +868,26 @@ export async function deleteExpiredIngressLatencyTraces(input: {
   `);
 }
 
+export async function deleteExpiredTypingAlerts(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  const cutoff = new Date(input.now.getTime() - HOSTED_TYPING_ALERT_RETENTION_MS);
+  // Keep unsent obligations. Sent identities outlive the seven-day trace scan,
+  // so retiring them cannot recreate an alert for an old message.
+  return runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT id FROM hosted_linq_alert
+      WHERE kind IN ('runtime_warm_typing_slow', 'runtime_cold_typing_slow')
+        AND status = 'sent' AND claimed_at < ${cutoff}
+      ORDER BY claimed_at, id
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM hosted_linq_alert AS alert USING doomed
+    WHERE alert.id = doomed.id
+  `);
+}
+
 // The rows already carry their own expiry; nothing was enforcing it.
 async function deleteExpiredAssistantRuntimeIssues(input: {
   now: Date;
@@ -875,12 +999,14 @@ async function runMailboxRetentionBatches(
 }
 
 // Runs one bounded batch at a time and stops as soon as a batch comes back
-// short, so a normal hour does one statement and a backlog drains over hours.
+// short. The caller-owned ceiling bounds total work without enlarging any one
+// lock-holding statement.
 async function runRetentionBatches(
   mutateBatch: () => Promise<number>,
+  maxBatches = HOSTED_RETENTION_MAX_BATCHES,
 ): Promise<number> {
   let affected = 0;
-  for (let batch = 0; batch < HOSTED_RETENTION_MAX_BATCHES; batch += 1) {
+  for (let batch = 0; batch < maxBatches; batch += 1) {
     const count = await mutateBatch();
     affected += count;
     if (count < HOSTED_RETENTION_BATCH_SIZE) {
@@ -942,7 +1068,7 @@ async function deleteStaleHostedWebSessions(input: {
   return expired + revoked;
 }
 
-function normalizeRetentionDate(value: Date | string): Date {
+export function normalizeHostedRetentionDate(value: Date | string): Date {
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.getTime())) {

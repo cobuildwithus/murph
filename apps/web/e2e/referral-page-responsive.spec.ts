@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const WIDTHS = [320, 375, 390, 768, 1280] as const;
-const REFERRAL_STUDY_WIDTHS = [390, 1440] as const;
+const REFERRAL_STUDY_WIDTHS = [320, 390, 1024, 1440] as const;
 const OVERFLOW_TOLERANCE_PX = 1;
 const RETIRED_USAGE_TERM_PATTERN = new RegExp(
   ["cost", "weighted"].join("-"),
@@ -10,10 +10,11 @@ const RETIRED_USAGE_TERM_PATTERN = new RegExp(
 const REFERRAL_STUDIES = [
   {
     dayLabels: [
-      { count: 2, label: "About 10 more days of Murph usage" },
-      { count: 1, label: "About 14 more days of Murph usage" },
+      { count: 2, label: "10" },
+      { count: 1, label: "14" },
     ],
-    description: "Share your link or start a group with Murph.",
+    description:
+      "Bring someone into Murph—or start a fresh group—and you can earn more room to keep going.",
     rewardCount: 3,
     selector: '[data-design-section="homepage-referral-program"]',
     slug: "mixed",
@@ -25,10 +26,11 @@ const REFERRAL_STUDIES = [
   },
   {
     dayLabels: [
-      { count: 1, label: "About 10 more days of Murph usage" },
-      { count: 1, label: "About 14 more days of Murph usage" },
+      { count: 1, label: "10" },
+      { count: 1, label: "14" },
     ],
-    description: "Start a fresh group with Murph.",
+    description:
+      "Start a fresh group and you can earn more room to keep going.",
     rewardCount: 2,
     selector:
       '[data-design-section="homepage-referral-program-group-only"]',
@@ -37,9 +39,10 @@ const REFERRAL_STUDIES = [
   },
   {
     dayLabels: [
-      { count: 1, label: "About 10 more days of Murph usage" },
+      { count: 1, label: "10" },
     ],
-    description: "Share your personal link with someone new.",
+    description:
+      "Bring someone new into Murph and you can earn more room to keep going.",
     rewardCount: 1,
     selector:
       '[data-design-section="homepage-referral-program-signup-only"]',
@@ -282,6 +285,9 @@ test.describe("homepage referral design proof", () => {
           study.getByText(expected.description, { exact: true }),
         ).toBeVisible();
         await expect(
+          study.getByText("Referral rewards, your way.", { exact: true }),
+        ).toBeVisible();
+        await expect(
           study.getByRole("link", { name: "See ways to earn" }),
         ).toBeVisible();
         for (const title of expected.titles) {
@@ -292,10 +298,13 @@ test.describe("homepage referral design proof", () => {
             study.getByText(dayLabel.label, { exact: true }),
           ).toHaveCount(dayLabel.count);
         }
+        const rewardUnits = study.locator("[data-referral-reward-unit]");
+        await expect(rewardUnits).toHaveCount(expected.rewardCount);
+        for (const unit of await rewardUnits.all()) {
+          await expect(unit).toContainText(/days of\s*Murph/i);
+        }
         await expect(study.getByText(/If eligible/)).toHaveCount(0);
-        await expect(study).not.toContainText(
-          /\$|≈|usage credit/i,
-        );
+        await expect(study).not.toContainText(/\$|usage credit/i);
         await expect(study).not.toContainText(RETIRED_USAGE_TERM_PATTERN);
 
         const overflowPx = await study.evaluate((element) =>
@@ -305,6 +314,39 @@ test.describe("homepage referral design proof", () => {
           overflowPx,
           `${expected.slug} referral study should not overflow at ${width}px`,
         ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+
+        const leadContainment = await study
+          .locator("[data-referral-headline-lead]")
+          .evaluate((lead) => {
+            const pane = lead.closest("section > div > div");
+            const leadRect = lead.getBoundingClientRect();
+            const paneRect = pane?.getBoundingClientRect();
+            const lineHeight = Number.parseFloat(
+              getComputedStyle(lead).lineHeight,
+            );
+            return {
+              leadRight: leadRect.right,
+              lineCount: Math.round(leadRect.height / lineHeight),
+              paneRight: paneRect?.right ?? 0,
+              widthOverflow: lead.scrollWidth - lead.clientWidth,
+            };
+          });
+        expect(
+          leadContainment.widthOverflow,
+          `${expected.slug} headline should wrap within its line box at ${width}px`,
+        ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+        expect(
+          leadContainment.leadRight,
+          `${expected.slug} headline should stay inside its pane at ${width}px`,
+        ).toBeLessThanOrEqual(
+          leadContainment.paneRight + OVERFLOW_TOLERANCE_PX,
+        );
+        if (width >= 390) {
+          expect(
+            leadContainment.lineCount,
+            `${expected.slug} lead phrase should stay on one line at ${width}px`,
+          ).toBe(1);
+        }
 
         const screenshotPath = testInfo.outputPath(
           `homepage-referral-${expected.slug}-${width}.png`,

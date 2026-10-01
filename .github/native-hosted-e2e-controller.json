@@ -1,0 +1,11 @@
+{
+  "contractVersion": 1,
+  "ios": {
+    "privateRef": "native-ios-e2e-v3-20260925-r13",
+    "privateSha": "ce4664fc32a0bd0158a078a681e436bb7021c034"
+  },
+  "android": {
+    "privateRef": "native-android-e2e-v24-20260925",
+    "privateSha": "929d9493e178d12523ac4705963326199bae37a3"
+  }
+}

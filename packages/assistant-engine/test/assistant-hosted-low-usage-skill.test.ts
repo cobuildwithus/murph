@@ -197,8 +197,8 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(skill).toContain('Never put a member ID or')
     expect(skill).toContain('group ID into a model-composed link')
-    expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
-    expect(skill).toContain('`murph.group action="read_usage_referral"` once')
+    expect(skill).toContain('call `murph.group_usage action="read_usage"` once before writing the')
+    expect(skill).toContain('`murph.group_usage action="read_usage_referral"` once')
     expect(normalizedSkill).toContain(
       'In a hosted group, after someone accepts the link-free first heads-up',
     )

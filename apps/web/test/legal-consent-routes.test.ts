@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   cleanupWithdrawnHostedHealthDataConsent: vi.fn(),
+  continueHostedJoinInviteAfterLaunchConsent: vi.fn(),
   getPrisma: vi.fn(),
   grantHostedOptionalFeatureConsent: vi.fn(),
   readHostedHealthDataConsentState: vi.fn(),
@@ -42,6 +43,11 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
   assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/starter-usage-enrollment-service", () => ({
+  continueHostedJoinInviteAfterLaunchConsent:
+    mocks.continueHostedJoinInviteAfterLaunchConsent,
 }));
 
 vi.mock("@/src/lib/legal/consent", async () => {
@@ -89,6 +95,7 @@ let consentRevokeRoute: HostedConsentRevokeRouteModule;
 const memberAuth = {
   member: {
     id: "member_123",
+    suspendedAt: null,
   },
   sessionId: "session_123",
 };
@@ -120,6 +127,13 @@ describe("legal consent routes", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
+    mocks.continueHostedJoinInviteAfterLaunchConsent.mockResolvedValue({
+      disposition: "enrolled",
+      enrollment: {
+        redirectPath: "/home",
+        status: "enrolled",
+      },
+    });
     mocks.requirePrivyMemberAuth.mockResolvedValue(memberAuth);
     mocks.readHostedConsentStatus.mockResolvedValue(currentStatus);
     mocks.readHostedHealthDataConsentState.mockResolvedValue("missing");
@@ -135,9 +149,10 @@ describe("legal consent routes", () => {
       "launch.health-data",
     ]);
     mocks.recordHostedLaunchRequiredConsent.mockResolvedValue(currentStatus);
-    mocks.revokeHostedAppSessionFromRequest.mockResolvedValue(
+    mocks.revokeHostedAppSessionFromRequest.mockResolvedValue([
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
     mocks.grantHostedOptionalFeatureConsent.mockResolvedValue(currentStatus);
     mocks.revokeHostedConsentScope.mockResolvedValue(currentStatus);
     mocks.withdrawHostedHealthDataConsent.mockResolvedValue(currentStatus);
@@ -195,6 +210,187 @@ describe("legal consent routes", () => {
     });
     expect(mocks.grantHostedOptionalFeatureConsent).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual(currentStatus);
+  });
+
+  it("waits for every launch scope before continuing invited Starter enrollment", async () => {
+    const partialStatus = {
+      ...currentStatus,
+      launchGranted: false,
+      launchScopes: currentStatus.launchScopes.map((scope) =>
+        scope.scope === "launch.health-data"
+          ? { ...scope, granted: false }
+          : scope,
+      ),
+    };
+    mocks.recordHostedLaunchRequiredConsent.mockResolvedValueOnce(partialStatus);
+
+    const response = await consentAcceptRoute.POST(
+      new Request("https://join.example.test/api/legal/consent/accept", {
+        body: JSON.stringify({
+          acceptedDocumentVersions: {
+            "health-ai-safety-disclosure": "2026-07-23",
+            "privacy-policy": "2026-07-23",
+            "terms-of-service": "2026-07-23",
+          },
+          inviteCode: "invite_123",
+          scope: "launch.legal",
+          source: "join-invite-phone-verify",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.continueHostedJoinInviteAfterLaunchConsent).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      ...partialStatus,
+      starterEnrollment: null,
+    });
+  });
+
+  it("waits for durable Starter enrollment before acknowledging final launch consent", async () => {
+    let resolveContinuation!: (
+      value: {
+        disposition: "enrolled";
+        enrollment: { redirectPath: string; status: "enrolled" };
+      },
+    ) => void;
+    mocks.continueHostedJoinInviteAfterLaunchConsent.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveContinuation = resolve;
+      }),
+    );
+    let responseSettled = false;
+    const responsePromise = consentAcceptRoute.POST(
+      new Request("https://join.example.test/api/legal/consent/accept", {
+        body: JSON.stringify({
+          acceptedDocumentVersions: {
+            "consumer-health-data-notice": "2026-07-23",
+          },
+          inviteCode: "invite_123",
+          scope: "launch.health-data",
+          source: "join-invite-phone-verify",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    void responsePromise.then(() => {
+      responseSettled = true;
+    });
+    await vi.waitFor(() => {
+      expect(mocks.continueHostedJoinInviteAfterLaunchConsent).toHaveBeenCalledOnce();
+    });
+    expect(responseSettled).toBe(false);
+
+    resolveContinuation({
+      disposition: "enrolled",
+      enrollment: {
+        redirectPath: "/home",
+        status: "enrolled",
+      },
+    });
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    expect(mocks.continueHostedJoinInviteAfterLaunchConsent).toHaveBeenCalledWith({
+      inviteCode: "invite_123",
+      member: {
+        id: "member_123",
+        suspendedAt: null,
+      },
+      source: "web_onboarding",
+    });
+    expect(
+      mocks.recordHostedLaunchRequiredConsent.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.continueHostedJoinInviteAfterLaunchConsent.mock
+        .invocationCallOrder[0] ?? 0,
+    );
+    await expect(response.json()).resolves.toEqual({
+      ...currentStatus,
+      starterEnrollment: {
+        redirectPath: "/home",
+        status: "enrolled",
+      },
+    });
+  });
+
+  it("acknowledges committed consent when another onboarding owner must continue", async () => {
+    mocks.continueHostedJoinInviteAfterLaunchConsent.mockResolvedValueOnce({
+      disposition: "deferred",
+    });
+
+    const response = await consentAcceptRoute.POST(
+      new Request("https://join.example.test/api/legal/consent/accept", {
+        body: JSON.stringify({
+          acceptedDocumentVersions: {
+            "consumer-health-data-notice": "2026-07-23",
+          },
+          inviteCode: "invite_123",
+          scope: "launch.health-data",
+          source: "join-invite-phone-verify",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ...currentStatus,
+      starterEnrollment: null,
+    });
+  });
+
+  it("keeps committed consent retryable when invited Starter enrollment fails", async () => {
+    mocks.continueHostedJoinInviteAfterLaunchConsent.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_STARTER_USAGE_ENROLLMENT_RETRYABLE",
+        httpStatus: 503,
+        message: "Starter setup is temporarily unavailable.",
+        retryable: true,
+      }),
+    );
+
+    const response = await consentAcceptRoute.POST(
+      new Request("https://join.example.test/api/legal/consent/accept", {
+        body: JSON.stringify({
+          acceptedDocumentVersions: {
+            "consumer-health-data-notice": "2026-07-23",
+          },
+          inviteCode: "invite_123",
+          scope: "launch.health-data",
+          source: "join-invite-phone-verify",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.recordHostedLaunchRequiredConsent).toHaveBeenCalledOnce();
+    expect(mocks.continueHostedJoinInviteAfterLaunchConsent).toHaveBeenCalledOnce();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_STARTER_USAGE_ENROLLMENT_RETRYABLE",
+        retryable: true,
+      },
+    });
   });
 
   it("records launch.health-data consent against the launch scope helper", async () => {
@@ -277,9 +473,10 @@ describe("legal consent routes", () => {
     const response = await consentDeclineRoute.POST(request);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Set-Cookie")).toBe(
+    expect(response.headers.getSetCookie()).toEqual([
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
     expect(mocks.recordHostedLaunchConsentDecline).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
@@ -307,9 +504,10 @@ describe("legal consent routes", () => {
     const response = await consentDeclineRoute.POST(request);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Set-Cookie")).toBe(
+    expect(response.headers.getSetCookie()).toEqual([
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
     expect(mocks.revokeHostedAppSessionFromRequest).toHaveBeenCalledWith({
       reason: "consent_declined",
       request,
@@ -575,7 +773,23 @@ describe("legal consent routes", () => {
     await expect(response.json()).resolves.toEqual(currentStatus);
   });
 
-  it("does not schedule stale provider cleanup when concurrent renewal wins", async () => {
+  it("still runs withdrawal cleanup when the runtime stop fails", async () => {
+    mocks.reconcileHostedHealthDataRuntimeConsent.mockRejectedValueOnce(hostedOnboardingError({
+      message: "Runtime unavailable", code: "HOSTED_HEALTH_DATA_RUNTIME_CONSENT_RECONCILIATION_FAILED", httpStatus: 503, retryable: true,
+    }));
+    const response = await consentRevokeRoute.POST(new Request("https://join.example.test/api/legal/consent/revoke", {
+      body: JSON.stringify({ scope: "launch.health-data", source: "settings-health-data" }),
+      headers: { "Content-Type": "application/json", origin: "https://join.example.test" }, method: "POST",
+    }));
+    expect(response.status).toBe(503);
+    expect(mocks.after.mock.invocationCallOrder[0]).toBeLessThan(mocks.reconcileHostedHealthDataRuntimeConsent.mock.invocationCallOrder[0]!);
+    const cleanup = mocks.after.mock.calls[0]?.[0];
+    expect(cleanup).toBeTypeOf("function");
+    await cleanup();
+    expect(mocks.cleanupWithdrawnHostedHealthDataConsent).toHaveBeenCalledTimes(1);
+  });
+
+  it("schedules independently guarded cleanup when concurrent renewal wins", async () => {
     mocks.reconcileHostedHealthDataRuntimeConsent.mockResolvedValueOnce({
       consentState: "granted",
       processingAllowed: true,
@@ -598,7 +812,7 @@ describe("legal consent routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
     expect(mocks.readHostedConsentStatus).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,

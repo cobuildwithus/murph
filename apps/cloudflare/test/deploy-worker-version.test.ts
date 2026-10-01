@@ -10,6 +10,16 @@ import {
   type HostedWorkerDeploymentDependencies,
 } from "../scripts/deploy-worker-version.shared.js";
 
+const releasedContainers = [
+  {
+    applicationName: "hosted-worker-runnercontainer",
+    className: "RunnerContainer",
+    disposition: "updated",
+    imageSha256: "a".repeat(64),
+    version: 8,
+  },
+] as const;
+
 describe("runHostedWorkerDeployment", () => {
   it("runs a direct deploy and records the final deployment traffic", async () => {
     const finalDeployment: DeploymentStatusPayload = {
@@ -34,6 +44,7 @@ describe("runHostedWorkerDeployment", () => {
       env: {
         CF_WORKER_NAME: "hosted-worker",
         GITHUB_OUTPUT: "/tmp/github-output.txt",
+        HOSTED_EXECUTION_DEPLOY_TAG: "run-123-2",
         HOSTED_EXECUTION_DEPLOYMENT_MESSAGE: "manual direct deploy",
       },
       resultPath: "/tmp/deployment-result.json",
@@ -63,10 +74,16 @@ describe("runHostedWorkerDeployment", () => {
       deploymentMessage: "manual direct deploy",
       includeSecrets: true,
       secretsFilePath: "/tmp/worker-secrets.json",
-      versionTag: expect.any(String),
+      versionTag: "run-123-2",
       workerName: "hosted-worker",
     });
     expect(result).toMatchObject({
+      containerReleaseReceipt: {
+        containers: releasedContainers,
+        schemaVersion: 1,
+        versionTag: "run-123-2",
+        workerVersionId: "version-direct",
+      },
       finalDeploymentVersions: [
         {
           percentage: 100,
@@ -78,6 +95,12 @@ describe("runHostedWorkerDeployment", () => {
     expect(dependencies.writeFile).toHaveBeenCalledWith(
       "/tmp/github-output.txt",
       [
+        `container_release_receipt=${JSON.stringify({
+          containers: releasedContainers,
+          schemaVersion: 1,
+          versionTag: "run-123-2",
+          workerVersionId: "version-direct",
+        })}`,
         "final_version_traffic=[{\"percentage\":100,\"versionId\":\"version-direct\"}]",
         "smoke_version_id=version-direct",
         "",
@@ -130,7 +153,7 @@ describe("runHostedWorkerDeployment", () => {
     expect(result.smokeVersionId).toBe("version-direct");
   });
 
-  it("defaults production deploys to immediate container rollout for hard runner floors", async () => {
+  it("defaults compatible production deploys to gradual container rollout", async () => {
     const finalDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:10:00.000Z",
       versions: [
@@ -160,7 +183,7 @@ describe("runHostedWorkerDeployment", () => {
     });
 
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
-      containerRolloutMode: "immediate",
+      containerRolloutMode: "gradual",
       configPath: "/tmp/wrangler.generated.jsonc",
       deploymentMessage: expect.stringContaining("production direct deploy"),
       includeSecrets: true,
@@ -199,6 +222,37 @@ describe("runHostedWorkerDeployment", () => {
     })).rejects.toThrow("Direct deploy did not report a 100% Worker version for smoke.");
 
     expect(dependencies.deployDirect).toHaveBeenCalledTimes(1);
+    expect(dependencies.writeFile).not.toHaveBeenCalledWith(
+      "/tmp/deployment-result.json",
+      expect.any(String),
+      expect.any(Object),
+    );
+  });
+
+  it("rejects a later current deployment that differs from Wrangler's Worker version", async () => {
+    const dependencies = createDependencies({
+      deployDirect: async () => ({
+        containers: releasedContainers,
+        workerVersionId: "version-from-wrangler",
+      }),
+      readCurrentDeployment: vi
+        .fn<HostedWorkerDeploymentDependencies["readCurrentDeployment"]>()
+        .mockResolvedValue({
+          created_on: "2026-03-27T00:10:00.000Z",
+          versions: [{ percentage: 100, version_id: "different-current-version" }],
+        }),
+    });
+
+    await expect(runHostedWorkerDeployment({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      dependencies,
+      env: { CF_WORKER_NAME: "hosted-worker" },
+      resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "hosted-worker",
+    })).rejects.toThrow("Direct deploy did not converge the exact Wrangler Worker version.");
+
     expect(dependencies.writeFile).not.toHaveBeenCalledWith(
       "/tmp/deployment-result.json",
       expect.any(String),
@@ -285,7 +339,7 @@ describe("runHostedWorkerDeployment", () => {
     });
   });
 
-  it("supports explicit immediate container rollout for hotfix deploys", async () => {
+  it.each(["immediate", "worker-only"])("supports explicit %s deployment", async (mode) => {
     const finalDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:10:00.000Z",
       versions: [
@@ -306,7 +360,7 @@ describe("runHostedWorkerDeployment", () => {
       dependencies,
       env: {
         CF_WORKER_NAME: "hosted-worker",
-        HOSTED_EXECUTION_CONTAINER_ROLLOUT: "immediate",
+        HOSTED_EXECUTION_CONTAINER_ROLLOUT: mode,
       },
       resultPath: "/tmp/deployment-result.json",
       runnerBundleDir: "/tmp/runner-bundle",
@@ -315,7 +369,7 @@ describe("runHostedWorkerDeployment", () => {
     });
 
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
-      containerRolloutMode: "immediate",
+      containerRolloutMode: mode,
       configPath: "/tmp/wrangler.generated.jsonc",
       deploymentMessage: expect.stringContaining("direct deploy"),
       includeSecrets: true,
@@ -339,7 +393,7 @@ describe("runHostedWorkerDeployment", () => {
       runnerBundleDir: "/tmp/runner-bundle",
       secretsFilePath: "/tmp/worker-secrets.json",
       workerName: "hosted-worker",
-    })).rejects.toThrow("HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual' or 'immediate'.");
+    })).rejects.toThrow("HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual', 'immediate', or 'worker-only'.");
 
     expect(dependencies.deployDirect).not.toHaveBeenCalled();
     expect(dependencies.validateDeployEnvironment).not.toHaveBeenCalled();
@@ -608,7 +662,10 @@ function createDependencies(
   writeFile: ReturnType<typeof vi.fn>;
 } {
   const deployDirect = vi.fn(
-    overrides.deployDirect ?? (async () => {}),
+    overrides.deployDirect ?? (async () => ({
+      containers: releasedContainers,
+      workerVersionId: "version-direct",
+    })),
   );
   const mkdir = vi.fn(
     overrides.mkdir ?? (async () => {}),

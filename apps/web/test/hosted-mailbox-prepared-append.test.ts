@@ -165,7 +165,8 @@ interface MailboxFixtureTx {
     create: ReturnType<typeof vi.fn>;
   };
   hostedWorkspace: {
-    upsert: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
+    createMany: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -214,21 +215,25 @@ function buildMailboxRow(overrides: Partial<HostedMailboxItemRow> = {}): HostedM
 function createMailboxFixture(input: {
   beforeTransactionRun?: () => void;
   existingBeforePreparation?: HostedMailboxItemRow | null;
+  existingAtTransactionStart?: HostedMailboxItemRow;
 } = {}): MailboxFixture {
   const events: string[] = [];
   const rollbacks = { count: 0 };
-  const rootFindUnique = vi.fn(async () =>
-    input.existingBeforePreparation ?? null
-  );
   const rows: HostedMailboxItemRow[] = input.existingBeforePreparation
     ? [input.existingBeforePreparation]
     : [];
-  const txFindUnique = vi.fn(async (args: {
+  const findRow = (args: {
     where: { userId_dedupeKey: { dedupeKey: string; userId: string } };
   }) => rows.find((row) => (
     row.dedupeKey === args.where.userId_dedupeKey.dedupeKey
     && row.userId === args.where.userId_dedupeKey.userId
-  )) ?? null);
+  )) ?? null;
+  const rootFindUnique = vi.fn(async (args: {
+    where: { userId_dedupeKey: { dedupeKey: string; userId: string } };
+  }) => findRow(args));
+  const txFindUnique = vi.fn(async (args: {
+    where: { userId_dedupeKey: { dedupeKey: string; userId: string } };
+  }) => findRow(args));
   const hostedMailboxPayloadCreate = vi.fn(async () => undefined);
   const executeRaw = vi.fn(async () => {
     events.push("mailbox-lock");
@@ -270,14 +275,23 @@ function createMailboxFixture(input: {
     $queryRaw: queryRaw,
     hostedMailboxItem: { findUnique: txFindUnique },
     hostedMailboxPayload: { create: hostedMailboxPayloadCreate },
-    hostedWorkspace: { upsert: vi.fn(async () => undefined) },
+    hostedWorkspace: {
+      findUnique: vi.fn(async () => null),
+      createMany: vi.fn(async () => ({ count: 0 })),
+    },
   };
+  let addedConcurrentRow = false;
   const transaction = vi.fn(async <T>(
     run: (transactionClient: MailboxFixtureTx) => Promise<T>,
   ): Promise<T> => {
     events.push("transaction-start");
     try {
       input.beforeTransactionRun?.();
+      if (input.existingAtTransactionStart && !addedConcurrentRow) {
+        rows.push(input.existingAtTransactionStart);
+        addedConcurrentRow = true;
+        events.push("concurrent-row-visible");
+      }
       const result = await run(tx);
       events.push("transaction-commit");
       return result;
@@ -513,10 +527,9 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
       });
     });
 
-    expect(fixture.tx.hostedWorkspace.upsert).toHaveBeenCalledWith({
-      create: { userId: USER_ID },
-      update: {},
-      where: { userId: USER_ID },
+    expect(fixture.tx.hostedWorkspace.createMany).toHaveBeenCalledWith({
+      data: [{ userId: USER_ID }],
+      skipDuplicates: true,
     });
     expect(domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx)
       .toHaveBeenCalledTimes(1);
@@ -701,7 +714,106 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
     expect(fixture.events).toContain("retained-root-local");
   });
 
-  it("rejects conflicting reuse through the prepared meal-photo append", async () => {
+  it("retries preparation when a retained ciphertext wins before the transaction read", async () => {
+    const winningWake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:concurrent-retained-root",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
+      memberId: USER_ID,
+      occurredAt: FIXED_NOW.toISOString(),
+      signupWelcome: null,
+    });
+    const serializedWake = JSON.stringify(winningWake);
+    const retainedRootKeyId = "root-concurrent-retained";
+    const winningRow = buildMailboxRow({
+      dedupeKey: winningWake.eventId,
+      id: winningWake.eventId,
+      kind: winningWake.kind,
+      lane: "system",
+      payloadBytes: Buffer.byteLength(serializedWake, "utf8"),
+      payloadHash: hashHostedMailboxStoredPayload({
+        serialized: serializedWake,
+        userId: USER_ID,
+      }),
+      payloadInlineCiphertext: `${retainedRootKeyId}:${serializedWake}`,
+    });
+    const fixture = createMailboxFixture({
+      existingAtTransactionStart: winningRow,
+    });
+    installPreparedRootSequence({
+      rootKeyIds: ["root-active-first", "root-active-retry"],
+    });
+    let retainedRootProviderCalls = 0;
+    const transactionProviderCallFences: boolean[] = [];
+    mailboxEncryptionMocks.decryptHostedMailboxPayloadString.mockImplementation(
+      async (input: { value?: string | null }) => {
+        const value = input.value ?? "";
+        const separator = value.indexOf(":");
+        const rootKeyId = value.slice(0, separator);
+        const cache = getHostedDomainRootUnwrapCache();
+        if (!cache) {
+          throw new Error("Expected request-scoped root cache for retained wake.");
+        }
+        const cacheKey = `${USER_ID}|ingress|${rootKeyId}`;
+        if (!cache.has(cacheKey)) {
+          if (areHostedDomainRootProviderCallsDisabled()) {
+            throw new domainRootMocks.PreparationMismatchError();
+          }
+          retainedRootProviderCalls += 1;
+          fixture.events.push("retained-root-provider");
+          cache.set(cacheKey, Promise.resolve({
+            envelope: buildRootEnvelope({ rootKeyId, userId: USER_ID }),
+            rootKey: new Uint8Array(32).fill(7),
+          }));
+        } else {
+          fixture.events.push("retained-root-local");
+        }
+        return value.slice(separator + 1);
+      },
+    );
+
+    const replayed = await runWithPreparedHostedMailboxItemAppendCrypto({
+      append: () => fixture.prisma.$transaction((tx) =>
+        runWithHostedDomainRootProviderCallsDisabled(async () => {
+          transactionProviderCallFences.push(
+            areHostedDomainRootProviderCallsDisabled(),
+          );
+          return readHostedMailboxWakeByDedupeKey({
+            dedupeKey: winningWake.eventId,
+            prisma: tx as never,
+            userId: USER_ID,
+          });
+        })
+      ),
+      prepareExisting: async () => {
+        await readHostedMailboxWakeByDedupeKey({
+          dedupeKey: winningWake.eventId,
+          prisma: fixture.prisma as never,
+          userId: USER_ID,
+        });
+      },
+      prisma: fixture.prisma as never,
+      userId: USER_ID,
+    });
+
+    expect(replayed).toEqual(winningWake);
+    expect(fixture.prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(fixture.rollbacks.count).toBe(1);
+    expect(transactionProviderCallFences).toEqual([true, true]);
+    expect(retainedRootProviderCalls).toBe(1);
+    expect(fixture.events.indexOf("transaction-rollback")).toBeLessThan(
+      fixture.events.indexOf("retained-root-provider"),
+    );
+    expect(fixture.events.indexOf("retained-root-provider")).toBeLessThan(
+      fixture.events.lastIndexOf("transaction-start"),
+    );
+    expect(fixture.events).toContain("retained-root-local");
+  });
+
+  it("keeps the original payload and returns only its same-capture receipt on conflict", async () => {
     const fixture = createMailboxFixture();
     mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot
       .mockImplementation(async (input: { value?: string | null }) =>
@@ -747,10 +859,30 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
 
       expect(conflict).toMatchObject({
         claimedMealPhotoKey: "meal-photo-attempt-b",
+        captureReceipt: {
+          captureId: firstEnvelope.mealPhoto.captureId,
+          capturedAt: firstEnvelope.mealPhoto.capturedAt,
+        },
         dedupeConflict: true,
         duplicate: true,
         inserted: false,
       });
+      expect(await readHostedMailboxWakeByDedupeKey({
+        dedupeKey: firstEnvelope.eventId,
+        prisma: fixture.tx as never,
+        userId: USER_ID,
+      })).toEqual(firstEnvelope);
+
+      const otherCapture = await appendHostedMealPhotoMailboxEnvelopeTx({
+        envelope: {
+          ...firstEnvelope,
+          mealPhoto: { ...firstEnvelope.mealPhoto, captureId: "d".repeat(64) },
+        },
+        prepared,
+        tx: fixture.tx as never,
+      });
+      expect(otherCapture.dedupeConflict).toBe(true);
+      expect(otherCapture.captureReceipt).toBeUndefined();
     });
   });
 

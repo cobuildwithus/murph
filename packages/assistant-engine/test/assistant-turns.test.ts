@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -39,6 +39,61 @@ afterEach(async () => {
 })
 
 describe('assistant turns', () => {
+  it('prepares only receipt state for an empty read and preserves private writes', async () => {
+    const { paths, vaultRoot } = await createAssistantPaths('assistant-turns-private-path-')
+    await expect(readAssistantTurnReceipt(vaultRoot, 'turn-missing')).resolves.toBeNull()
+    await expect(listRecentAssistantTurnReceipts(vaultRoot)).resolves.toEqual([])
+    expect(await readdir(paths.assistantStateRoot)).toEqual(['receipts'])
+
+    const receipt = await createAssistantTurnReceipt({
+      deliveryRequested: false,
+      prompt: 'Synthetic input',
+      provider: 'codex-cli',
+      providerModel: null,
+      sessionId: 'session-private-path',
+      turnId: 'turn-private-path',
+      vault: vaultRoot,
+    })
+    expect((await readdir(paths.assistantStateRoot)).sort()).toEqual(['journals', 'receipts'])
+    expect((await stat(resolveAssistantTurnReceiptPath(paths, receipt.turnId))).mode & 0o777).toBe(0o600)
+    await chmod(paths.turnsDirectory, 0o755)
+    await expect(readAssistantTurnReceipt(vaultRoot, receipt.turnId)).resolves.toEqual(receipt)
+    expect((await stat(paths.turnsDirectory)).mode & 0o777).toBe(0o700)
+  })
+
+  it('rejects a symlinked receipt directory before reads or writes touch its target', async () => {
+    const { paths, vaultRoot } = await createAssistantPaths('assistant-turns-symlink-')
+    const receiptInput = {
+      deliveryRequested: false,
+      prompt: 'Synthetic input',
+      provider: 'codex-cli' as const,
+      providerModel: null,
+      sessionId: 'session-symlink',
+      turnId: 'turn-symlink',
+      vault: vaultRoot,
+    }
+    const receipt = await createAssistantTurnReceipt(receiptInput)
+    const targetDirectory = path.join(vaultRoot, 'external-receipts')
+    await renameFile(paths.turnsDirectory, targetDirectory)
+    await chmod(targetDirectory, 0o755)
+    await symlink(targetDirectory, paths.turnsDirectory)
+    const targetPath = path.join(targetDirectory, `${receipt.turnId}.json`)
+    const original = await readFile(targetPath, 'utf8')
+    const mutate = vi.fn((value) => value)
+
+    await expect(readAssistantTurnReceipt(vaultRoot, receipt.turnId)).rejects.toThrow('symlinks')
+    await expect(listRecentAssistantTurnReceipts(vaultRoot)).rejects.toThrow('symlinks')
+    await expect(updateAssistantTurnReceipt({
+      mutate,
+      turnId: receipt.turnId,
+      vault: vaultRoot,
+    })).rejects.toThrow('symlinks')
+    await expect(createAssistantTurnReceipt(receiptInput)).rejects.toThrow('symlinks')
+    expect(mutate).not.toHaveBeenCalled()
+    expect(await readFile(targetPath, 'utf8')).toBe(original)
+    expect((await stat(targetDirectory)).mode & 0o777).toBe(0o755)
+  })
+
   it('creates, updates, and finalizes turn receipts with normalized previews and runtime events', async () => {
     const { paths, vaultRoot } = await createAssistantPaths('assistant-turns-roundtrip-')
     const prompt = `  ${'prompt '.repeat(60)}  `

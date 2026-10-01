@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "more-reliable-telegram-exercise-routines",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable Telegram exercise routines",
+    "summary": "When a routine does not need a subtitle or closing note, Murph can now send the complete Rich Message without failing on those empty details.",
+    "details": "Safety guidance remains required, and catalog-backed images and timing still follow the existing routine checks.",
+    "relevanceTags": ["assistant", "exercise", "telegram", "reliability"],
+    "sourcePullRequests": [2331]
+  }
+}

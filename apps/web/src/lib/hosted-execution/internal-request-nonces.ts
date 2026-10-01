@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 export interface HostedCallbackRequestNonceStore {
   consumeHostedCallbackRequestNonce(input: {
@@ -56,10 +56,39 @@ export class PrismaHostedCallbackRequestNonceStore
           'milliseconds',
           clock_timestamp() AT TIME ZONE 'UTC'
         ) AS "admitted"
-    `;
+    `.catch((error: unknown) => {
+      // Concurrent unique-index rebuilds can raise 23505 despite ON CONFLICT.
+      // An exact nonce collision still loses admission; never retry or admit it.
+      if (isNonceUniqueViolation(error)) {
+        return [];
+      }
+      throw error;
+    });
 
     return rows[0]?.admitted === true;
   }
+}
+
+function isNonceUniqueViolation(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2010") {
+    return false;
+  }
+  const adapterError = error.meta?.driverAdapterError;
+  if (!(adapterError instanceof Error)) {
+    return false;
+  }
+  const cause = adapterError.cause;
+  if (
+    !cause || typeof cause !== "object"
+    || !("originalCode" in cause) || cause.originalCode !== "23505"
+    || !("constraint" in cause)
+  ) {
+    return false;
+  }
+  const constraint = cause.constraint;
+  return !!constraint && typeof constraint === "object"
+    && "fields" in constraint && Array.isArray(constraint.fields)
+    && constraint.fields.length === 1 && constraint.fields[0] === "nonce_hash";
 }
 
 export type HostedWebInternalRequestNonceStore = HostedCallbackRequestNonceStore;

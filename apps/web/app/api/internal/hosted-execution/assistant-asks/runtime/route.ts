@@ -11,6 +11,9 @@ import { readHostedRuntimeWriteFence } from "@/src/lib/hosted-execution/runtime-
 import {
   handleHostedRuntimeAssistantAskControl,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
+import {
+  tryHandleHostedOperatorDiagnosticControl,
+} from "@/src/lib/hosted-ops/operator-task";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
@@ -41,7 +44,10 @@ export const POST = withJsonError(async (request: Request) => {
   const requestBody = parseHostedRuntimeAssistantAskControlRequest(
     payloadText.trim() ? JSON.parse(payloadText) : {},
   );
-  const result = await handleHostedRuntimeAssistantAskControl({
+  const result = await tryHandleHostedOperatorDiagnosticControl({
+    boundRuntimeMemberId,
+    request: requestBody,
+  }) ?? await handleHostedRuntimeAssistantAskControl({
     boundRuntimeMemberId,
     request: requestBody,
   });

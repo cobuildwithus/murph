@@ -23,7 +23,10 @@ import {
   isSameAuthenticatedAssistantGroupRoute,
   shouldGroupAdjacentAssistantInputCandidates,
 } from "@murphai/assistant-engine/assistant-automation";
-import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
+import {
+  readHostedIngressLatencySource,
+  type HostedIngressLatencySource,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   compactHostedPendingAssistantInputIds,
@@ -59,32 +62,33 @@ export interface HostedAssistantInputSource extends AssistantInputSource {
   readSelectedInputIds(): string[];
 }
 
-export type HostedConversationActivityObservation =
-  | "not_observed"
-  | "observed"
-  | "uncertain";
-
 export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   assistantInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<{
-  conversationActivity: HostedConversationActivityObservation;
+  conversationActivityReceivedAtEpochMs: number | null;
   currentInputId: string | null;
   foregroundPriorityInputAccepted: boolean;
+  latencyTraceInputGroups: Array<{
+    assistantInputIds: string[];
+    source: HostedIngressLatencySource;
+  }>;
 }> {
   const inputIds = uniqueStrings(input.assistantInputIds);
   if (inputIds.length === 0) {
     return {
-      conversationActivity: "not_observed",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: false,
+      latencyTraceInputGroups: [],
     };
   }
   if (inputIds.length !== input.assistantInputIds.length) {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [],
     };
   }
   let events: AssistantInputEventRecord[];
@@ -95,21 +99,35 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     });
   } catch {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [],
     };
   }
+  const latencyTraceInputGroups = groupHostedAssistantInputLatencyTraceEvents(
+    events,
+  );
   if (events.length !== inputIds.length) {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups,
     };
   }
-  const conversationActivity = events.some(isHostedConversationActivityInputEvent)
-    ? "observed"
-    : "not_observed";
+  // The persisted receipt is admission evidence; execution/replay time and
+  // provider occurredAt are not. Unknown reads keep foreground priority above,
+  // but cannot manufacture a conversation deadline.
+  const nowMs = Date.now();
+  const conversationActivityReceivedAtEpochMs = events
+    .filter(isHostedConversationActivityInputEvent)
+    .reduce<number | null>((latest, event) => {
+      const receivedAt = event.receivedAt === null ? NaN : Date.parse(event.receivedAt);
+      return Number.isSafeInteger(receivedAt) && receivedAt >= 0 && receivedAt <= nowMs
+        ? Math.max(latest ?? receivedAt, receivedAt)
+        : latest;
+    }, null);
   const foregroundPriorityInputAccepted = events.some((event) =>
     isHostedConversationActivityInputEvent(event)
     || isAssistantHostedImageCompletionEvent(event)
@@ -128,27 +146,54 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     });
   } catch {
     return {
-      conversationActivity,
+      conversationActivityReceivedAtEpochMs,
       currentInputId: null,
       foregroundPriorityInputAccepted,
+      latencyTraceInputGroups,
     };
   }
   return {
-    conversationActivity,
+    conversationActivityReceivedAtEpochMs,
     currentInputId: batch.length === events.length
       ? batch.at(-1)?.inputId ?? null
       : null,
     foregroundPriorityInputAccepted,
+    latencyTraceInputGroups,
   };
+}
+
+function groupHostedAssistantInputLatencyTraceEvents(
+  events: readonly AssistantInputEventRecord[],
+): Array<{
+  assistantInputIds: string[];
+  source: HostedIngressLatencySource;
+}> {
+  const inputIdsBySource = new Map<HostedIngressLatencySource, string[]>();
+  for (const event of events) {
+    const source = readHostedIngressLatencySource(event.conversation?.source);
+    if (!source) {
+      continue;
+    }
+    const inputIds = inputIdsBySource.get(source) ?? [];
+    inputIds.push(event.inputId);
+    inputIdsBySource.set(source, inputIds);
+  }
+  return [...inputIdsBySource].map(([source, assistantInputIds]) => ({
+    assistantInputIds,
+    source,
+  }));
 }
 
 function isHostedConversationActivityInputEvent(
   event: AssistantInputEventRecord,
 ): boolean {
-  return event.sourceRef.kind === "inbox-capture"
-    || (
-      event.sourceRef.kind === "hosted-mailbox"
-      && event.sourceRef.lane === "conversation"
+  return event.conversation?.actorIsSelf !== true
+    && (
+      event.sourceRef.kind === "inbox-capture"
+      || (
+        event.sourceRef.kind === "hosted-mailbox"
+        && event.sourceRef.lane === "conversation"
+      )
     );
 }
 
@@ -156,6 +201,7 @@ export function createHostedAssistantInputSource(input: {
   initialPendingInputIds?: readonly string[] | null;
   pendingInputRefreshMode: HostedPendingInputRefreshMode;
   preserveSelectedInputOrder?: boolean;
+  readForegroundInputIds?: (() => readonly string[]) | null;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
 }): HostedAssistantInputSource {
@@ -166,6 +212,7 @@ export function createHostedAssistantInputSource(input: {
     ...(input.initialPendingInputIds ?? []),
     ...selectedInputIds,
   ]);
+  const foregroundInputIds: string[] = [];
   const emittedListInputCandidateCursorKeys = new Set<string>();
   let selectedCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
   const readSelectedCandidates = () => {
@@ -190,9 +237,18 @@ export function createHostedAssistantInputSource(input: {
     async refresh(refreshInput) {
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
       if (input.pendingInputRefreshMode === "none") {
+        let added = 0;
+        for (const inputId of uniqueStrings(input.readForegroundInputIds?.() ?? [])) {
+          if (observedInputIds.has(inputId)) {
+            continue;
+          }
+          observedInputIds.add(inputId);
+          foregroundInputIds.push(inputId);
+          added += 1;
+        }
         return {
-          progressed: false,
-          reason: "no_new_input",
+          progressed: added > 0,
+          reason: added > 0 ? "ingested_input" : "no_new_input",
         };
       }
       await runHostedPendingAssistantInputContentRetention({
@@ -289,10 +345,38 @@ export function createHostedAssistantInputSource(input: {
     },
     async listNewConversationInputs(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);
-      const candidates = await readSelectedCandidates();
+      const selectedCandidates = await readSelectedCandidates();
+      const foregroundEvents = await readHostedAssistantInputEventsById({
+        inputIds: foregroundInputIds,
+        missingInput: "skip",
+        vaultRoot: input.vaultRoot,
+      });
+      const replyableEvents = await filterHostedReplyablePendingAssistantInputEvents({
+        events: foregroundEvents,
+        vaultRoot: input.vaultRoot,
+      });
+      const exactSuccessors = await selectHostedAssistantExactSuccessorEvents({
+        afterCursor: query.afterCursor ?? null,
+        events: foregroundEvents,
+        replyableInputIds: new Set(
+          replyableEvents.map((event) => event.inputId),
+        ),
+        vaultRoot: input.vaultRoot,
+      });
+      const foregroundCandidates = await createHostedAssistantInputCandidates({
+        events: exactSuccessors,
+        vaultRoot: input.vaultRoot,
+      });
+      const conversationAnchor = selectedCandidates.find((candidate) =>
+        isSameAssistantConversationRef(
+          candidate.event.conversation,
+          query.conversation,
+        )
+      );
       assertHostedAssistantInputQueryNotAborted(query.signal);
       return filterHostedAssistantNewConversationInputs({
-        candidates,
+        candidates: [...selectedCandidates, ...foregroundCandidates],
+        conversationAnchor,
         query,
       });
     },
@@ -624,17 +708,25 @@ async function selectHostedAssistantExactSuccessorEvents(input: {
   if (!anchor) {
     return [];
   }
+  const anchorCandidate = assistantInputCandidateFromStoredEvent(anchor);
 
-  // Exact notification avoids a global scan, but it does not weaken the
-  // compound-batch boundary. Ignore duplicate notifications at or behind the
-  // supplied frontier, then stop at the first missing causal successor,
-  // incomplete projection, or non-replyable event and leave later IDs pending.
+  // Exact invocation-local candidates avoid a global scan, but they do not
+  // weaken the compound-batch boundary. Ignore duplicate candidates at or
+  // behind the supplied frontier, then stop at the first missing conversation
+  // successor, incomplete projection, or non-replyable event and leave later
+  // IDs pending.
   const successorEvents = [...input.events]
     .sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
     )
     .filter((event) =>
       compareAssistantInputCursors(event.cursor, afterCursor) > 0
+    )
+    .filter((event) =>
+      shouldGroupAdjacentAssistantInputCandidates(
+        anchorCandidate,
+        assistantInputCandidateFromStoredEvent(event),
+      )
     );
   const selected: AssistantInputEventRecord[] = [];
   let previous = anchor;
@@ -665,23 +757,31 @@ function isHostedAssistantInputEventBatchSuccessor(
     return false;
   }
 
-  const previousCausalSeq = readPositiveHostedAssistantInputCausalSeq(previous);
-  const candidateCausalSeq = readPositiveHostedAssistantInputCausalSeq(candidate);
-  return previousCausalSeq !== null
+  const previousLaneSeq = readPositiveHostedConversationInputSequence(previous, "laneSeq");
+  const candidateLaneSeq = readPositiveHostedConversationInputSequence(candidate, "laneSeq");
+  const previousCausalSeq = readPositiveHostedConversationInputSequence(previous, "causalSeq");
+  const candidateCausalSeq = readPositiveHostedConversationInputSequence(candidate, "causalSeq");
+  // System work shares causal order, but cannot create a missing conversation
+  // message. Effect owners retain their separate causal authority checks.
+  return previousLaneSeq !== null
+    && candidateLaneSeq === previousLaneSeq + 1n
+    && previousCausalSeq !== null
     && candidateCausalSeq !== null
-    && candidateCausalSeq === previousCausalSeq + 1n;
+    && candidateCausalSeq > previousCausalSeq;
 }
 
-function readPositiveHostedAssistantInputCausalSeq(
+function readPositiveHostedConversationInputSequence(
   event: AssistantInputEventRecord,
+  field: "causalSeq" | "laneSeq",
 ): bigint | null {
-  if (event.sourceRef.kind !== "hosted-mailbox") {
+  if (event.sourceRef.kind !== "hosted-mailbox"
+    || event.sourceRef.lane !== "conversation") {
     return null;
   }
-  const causalSeq = BigInt(
-    assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq ?? "0"),
-  );
-  return causalSeq > 0n ? causalSeq : null;
+  const value = event.sourceRef[field] ?? "";
+  if (!/^[1-9][0-9]{0,18}$/u.test(value)) return null;
+  const seq = BigInt(value);
+  return seq <= 9_223_372_036_854_775_807n ? seq : null;
 }
 
 async function readHostedAssistantInputCandidatesById(input: {
@@ -832,6 +932,7 @@ function filterHostedAssistantInputCandidates(input: {
 
 function filterHostedAssistantNewConversationInputs(input: {
   candidates: readonly AssistantInputCandidate[];
+  conversationAnchor?: AssistantInputCandidate;
   query: AssistantTurnConversationInputQuery;
 }): AssistantInputCandidateBatch {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
@@ -854,6 +955,12 @@ function filterHostedAssistantNewConversationInputs(input: {
       return isSameAssistantConversationRef(
         candidate.event.conversation,
         input.query.conversation,
+      ) || (
+        input.conversationAnchor !== undefined
+        && isSameAuthenticatedAssistantGroupRoute(
+          input.conversationAnchor,
+          candidate,
+        )
       );
     }),
     limit: input.query.limit,

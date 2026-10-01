@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "more-accurate-ai-usage",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More accurate AI usage",
+    "summary": "Managed AI usage now reflects the regular Luna model when Luna is selected through Venice, instead of counting the higher Luna Pro rate.",
+    "details": "The selected model, reasoning, and reply behavior are unchanged. Murph also includes exact duplicate attachment text once rather than repeatedly, leaving more of your allowance for useful work.",
+    "relevanceTags": ["assistant", "usage", "reliability"],
+    "sourcePullRequests": [2618]
+  }
+}

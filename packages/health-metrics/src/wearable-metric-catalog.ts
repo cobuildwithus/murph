@@ -249,6 +249,12 @@ metricAliases.set("sleep-awake-minutes", "awakeMinutes");
 metricAliases.set("sleep-light-minutes", "lightMinutes");
 metricAliases.set("sleep-deep-minutes", "deepMinutes");
 metricAliases.set("sleep-rem-minutes", "remMinutes");
+metricAliases.set("activity-lowest-heart-rate", "minimumHeartRate");
+metricAliases.set("skin-temp", "temperatureDeviation");
+metricAliases.set("skin-temperature", "temperatureDeviation");
+metricAliases.set("session-count", "sessionCount");
+metricAliases.set("session-minutes", "sessionMinutes");
+metricAliases.set("workout-minutes", "sessionMinutes");
 
 export function resolveWearableCanonicalMetricKey(metric: string): WearableCanonicalMetricKey | null {
   return metricAliases.get(metric.trim().toLowerCase()) ?? null;
@@ -427,6 +433,7 @@ function normalizeDistanceKilometers(value: number, unit: string | null): number
 
 function normalizeTemperatureCelsius(value: number, unit: string | null): number {
   switch (unit) {
+    case "degf":
     case "f":
     case "fahrenheit":
       return Number((((value - 32) * 5) / 9).toFixed(4));

@@ -105,6 +105,57 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20260915223000_hosted_runtime_legacy_import",
+    // The new cursor/count fields have constant defaults, so existing rows and
+    // old writers retain the empty-inventory shape before cutover begins.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
+    "20260915224500_hosted_runtime_upload_recovery",
+    // All three new fields are nullable. The kind check only widens admission;
+    // old writers produce the accepted all-null upload/key pair. The broad
+    // ADD COLUMN scanner also matches the later pair check's IS NOT NULL.
+    new Set(["ADD COLUMN NOT NULL", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260915230000_hosted_runtime_media_registration",
+    // A constant true default preserves existing registered/imported metadata;
+    // only the new admission writer explicitly creates provisional false rows.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
+    "20260915234500_hosted_runtime_member_cutover",
+    // Backend phase is a new column with a legacy default accepted by its
+    // new check. Predeploy leaves legacy serving unchanged; campaign start is
+    // a separate operation after compatible readers have converged.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
+    "20260915234600_hosted_runtime_rolling_campaign",
+    // This replacement only widens the existing phase vocabulary. Old phase
+    // values remain valid; predeploy does not start the rolling campaign.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260915234700_hosted_runtime_managed_snapshots",
+    // Every new byte-verification field is nullable and the all-null old-writer
+    // shape passes. The broad ADD COLUMN scanner also sees the later check.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
+    "20260916044500_hosted_runtime_member_enrollment",
+    // The phase check widens to pending. The insert trigger grants no new
+    // execution authority and changes ownership only after rolling begins;
+    // both current and older creators remain valid in the legacy deploy window.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260916053000_hosted_runtime_late_sources",
+    // The selection is nullable. Existing source rows receive the baseline
+    // default accepted by the new check; predeploy changes no serving phase.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
     "20260810010000_member_owned_device_provider_applications",
     // Both application-binding columns are introduced nullable in this same
     // migration, so every existing row has the accepted all-null shape. The
@@ -169,6 +220,19 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     // canonical entry before either NOT NULL check runs, so the prior writer
     // remains valid throughout the Vercel deploy window.
     new Set(["ALTER COLUMN SET NOT NULL"]),
+  ],
+  [
+    "20260821120000_hosted_group_sponsorship_fifty_cap",
+    // The replacement check is a strict superset of the existing cap set.
+    // Old writers remain valid, while predeploy makes the new $50 value safe
+    // before a new Web build can present or persist it.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260922170000_hosted_sponsorship_topup_margin",
+    // A strict expansion from the historical $5 grant to $4 or $5 grants.
+    // Preserve old writers and frozen purchases before deploying the new catalog.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
 ]);
 
@@ -370,12 +434,13 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
     }
 
     const sqlPath = path.join(migrationsDir, entry.name, "migration.sql");
-    const sql = stripSqlComments(await readFile(sqlPath, "utf8"));
+    const sqlStatements = splitSqlStatements(await readFile(sqlPath, "utf8"));
     const compatibleReasons =
       hostedWebPrismaPredeployCompatibleMigrationReasons.get(entry.name);
     const destructivePattern = incompatiblePredeploySqlPatterns.find(
       ({ label, pattern }) =>
-        pattern.test(sql) && !compatibleReasons?.has(label),
+        !compatibleReasons?.has(label)
+        && sqlStatements.some((statement) => pattern.test(statement)),
     );
 
     if (destructivePattern !== undefined) {
@@ -417,8 +482,135 @@ function nonEmptyEnv(value: string | undefined): string | undefined {
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
-function stripSqlComments(sql: string): string {
-  return sql.replace(/--.*$/gmu, "").replace(/\/\*[\s\S]*?\*\//gu, "");
+function splitSqlStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let statement = "";
+  let index = 0;
+
+  while (index < sql.length) {
+    const character = sql[index];
+    const nextCharacter = sql[index + 1];
+
+    if (character === "-" && nextCharacter === "-") {
+      statement += " ";
+      index += 2;
+      while (index < sql.length && sql[index] !== "\n" && sql[index] !== "\r") {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (character === "/" && nextCharacter === "*") {
+      statement += " ";
+      index = skipSqlBlockComment(sql, index + 2);
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      const end = findQuotedSqlTokenEnd(sql, index, character);
+      statement += sql.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (character === "$") {
+      const delimiter = readDollarQuoteDelimiter(sql, index);
+      if (delimiter !== undefined) {
+        const bodyStart = index + delimiter.length;
+        const bodyEnd = sql.indexOf(delimiter, bodyStart);
+        const end = bodyEnd === -1 ? sql.length : bodyEnd + delimiter.length;
+        statement += sql.slice(index, end);
+        index = end;
+        continue;
+      }
+    }
+
+    if (character === ";") {
+      if (statement.trim().length > 0) {
+        statements.push(statement);
+      }
+      statement = "";
+      index += 1;
+      continue;
+    }
+
+    statement += character;
+    index += 1;
+  }
+
+  if (statement.trim().length > 0) {
+    statements.push(statement);
+  }
+
+  return statements;
+}
+
+function skipSqlBlockComment(sql: string, start: number): number {
+  let depth = 1;
+  let index = start;
+
+  while (index < sql.length && depth > 0) {
+    if (sql[index] === "/" && sql[index + 1] === "*") {
+      depth += 1;
+      index += 2;
+      continue;
+    }
+
+    if (sql[index] === "*" && sql[index + 1] === "/") {
+      depth -= 1;
+      index += 2;
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return index;
+}
+
+function findQuotedSqlTokenEnd(
+  sql: string,
+  start: number,
+  quote: "'" | '"',
+): number {
+  const prefix = sql[start - 1];
+  const characterBeforePrefix = sql[start - 2];
+  const usesBackslashEscapes =
+    quote === "'"
+    && (prefix === "E" || prefix === "e")
+    && (characterBeforePrefix === undefined
+      || !/[A-Za-z0-9_$]/u.test(characterBeforePrefix));
+  let index = start + 1;
+
+  while (index < sql.length) {
+    if (usesBackslashEscapes && sql[index] === "\\") {
+      index += 2;
+      continue;
+    }
+
+    if (sql[index] !== quote) {
+      index += 1;
+      continue;
+    }
+
+    if (sql[index + 1] === quote) {
+      index += 2;
+      continue;
+    }
+
+    return index + 1;
+  }
+
+  return sql.length;
+}
+
+function readDollarQuoteDelimiter(sql: string, start: number): string | undefined {
+  const previousCharacter = sql[start - 1];
+  if (previousCharacter !== undefined && /[A-Za-z0-9_$]/u.test(previousCharacter)) {
+    return undefined;
+  }
+
+  return /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/u.exec(sql.slice(start))?.[0];
 }
 
 function runCommandInherited(

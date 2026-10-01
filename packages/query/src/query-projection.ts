@@ -1,3 +1,5 @@
+import { withCanonicalWriteLock } from "@murphai/core";
+import { startCliPhase, timeCliPhase } from "@murphai/runtime-state/node/cli-timing";
 import {
   isValidIanaTimeZone,
 } from "@murphai/contracts";
@@ -46,9 +48,9 @@ import {
 } from "./wearables.ts";
 import {
   listCanonicalSourceManifest,
+  readCanonicalEntityFamilySource,
   readVaultSourceStrict,
   readVaultSourceTolerant,
-  type QuerySourceManifestEntry,
   type VaultSourceSnapshot,
 } from "./vault-source.ts";
 import type {
@@ -81,7 +83,8 @@ import {
   extractMetricPointsFromMetricRows,
 } from "./metrics/index.ts";
 import {
-  rebuildQueryProjectionWithManifest,
+  rebuildQueryProjectionFromCanonicalSource,
+  readFreshWearableSummaryRows,
 } from "./projection/rebuild.ts";
 import {
   searchQueryProjection,
@@ -99,6 +102,7 @@ import {
   buildPersonalPatternReportFromWearableBundleAndMetricPoints,
   type PersonalPatternReport,
 } from "./personal-patterns.ts";
+import { readBrowserVaultPersonalPatternVocabulary } from "./browser-replica/source.ts";
 
 export type {
   QueryCanonicalEntityFilters,
@@ -118,8 +122,6 @@ function readStoredPublicWearableSummaryBundle(
   );
 }
 
-const pendingQueryProjectionRebuilds = new Map<string, Promise<void>>();
-
 export async function getQueryProjectionStatus(
   vaultRoot: string,
 ): Promise<QueryProjectionStatus> {
@@ -132,8 +134,7 @@ export async function getQueryProjectionStatus(
 export async function rebuildQueryProjection(
   vaultRoot: string,
 ): Promise<RebuildQueryProjectionResult> {
-  const currentManifest = await listCanonicalSourceManifest(vaultRoot);
-  return rebuildQueryProjectionWithManifest(vaultRoot, currentManifest);
+  return rebuildQueryProjectionFromCanonicalSource(vaultRoot);
 }
 
 export async function loadProjectedVaultSource(
@@ -149,6 +150,51 @@ export async function listCanonicalEntitiesRuntime(
 ): Promise<import("./canonical-entities.ts").CanonicalEntity[]> {
   const location = await ensureFreshQueryProjection(vaultRoot);
   return listStoredCanonicalEntities(location, filters);
+}
+
+/** No global publication for an event list; limits follow tag/experiment filters
+ * in the usecase. Other collection readers keep their existing projection policy.
+ */
+export async function listCanonicalEventEntitiesRuntime(
+  vaultRoot: string,
+  filters: Pick<QueryCanonicalEntityFilters, "kinds" | "from" | "to"> = {},
+): Promise<import("./canonical-entities.ts").CanonicalEntity[]> {
+  const location = currentQueryProjectionLocation(vaultRoot);
+  const readFreshEntities = async () => {
+    const status = await timeCliPhase("query-freshness", async () => {
+      const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+      return timeCliPhase("query-status", () => readProjectionStatus(location, manifest));
+    });
+    return status?.fresh
+      ? listStoredCanonicalEntities(location, { ...filters, family: "event", limit: null })
+      : null;
+  };
+  const indexed = await readFreshEntities();
+  if (indexed !== null) return indexed;
+
+  // Do not join a pending reader: it may be waiting for our reentrant lock.
+  const endWait = startCliPhase("query-wait");
+  try {
+    return await withCanonicalWriteLock(vaultRoot, async () => {
+      endWait();
+      // A global reader may have published while this reader waited.
+      const indexed = await readFreshEntities();
+      if (indexed !== null) return indexed;
+      const entities = await timeCliPhase("query-source-read", () =>
+        readCanonicalEntityFamilySource(vaultRoot, "event"));
+      return entities.filter((entity) => {
+        if (filters.kinds?.length && (entity.kind === null || !filters.kinds.includes(entity.kind))) return false;
+        // Match the indexed COALESCE(date, substr(occurred_at, 1, 10)) predicate,
+        // without changing source-owner ordering, lifecycle or visibility.
+        const date = entity.date ?? entity.occurredAt?.slice(0, 10) ?? null;
+        if (filters.from && (date === null || date < filters.from)) return false;
+        if (filters.to && (date === null || date > filters.to)) return false;
+        return true;
+      });
+    });
+  } finally {
+    endWait();
+  }
 }
 
 export async function loadProjectedVaultSourceTolerant(
@@ -276,8 +322,8 @@ export async function summarizeWearableSleepRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableSleepSummary[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const rows = await readFreshWearableSummaryRows(vaultRoot, { providers: filters.providers });
+  const bundle = composePublicWearableSummaryBundleFromStoredRows(rows, filters);
   return summarizeWearableSleepFromBundle(bundle, filters);
 }
 
@@ -330,11 +376,12 @@ export async function buildPersonalPatternReportRuntime(
     location,
     normalizeMetricPointFilters({ limit: null }),
   );
+  const vocabulary = await readBrowserVaultPersonalPatternVocabulary(vaultRoot);
   return buildPersonalPatternReportFromWearableBundleAndMetricPoints(
     vault,
     wearableBundle,
     metricPoints,
-    options,
+    { ...options, vocabulary },
   );
 }
 
@@ -369,8 +416,10 @@ export async function summarizeWearableSourceHealthRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableSourceHealthSummary[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const rows = await readFreshWearableSummaryRows(vaultRoot, { providers: filters.providers });
+  const bundle = composePublicWearableSummaryBundleFromStoredRows(rows, filters, {
+    sourceHealthOnly: true,
+  });
   return summarizeWearableSourceHealthFromBundle(bundle, filters);
 }
 
@@ -421,65 +470,61 @@ async function ensureFreshQueryProjection(
   vaultRoot: string,
   readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot> = readVaultSourceStrict,
 ): Promise<QueryProjectionLocation> {
-  const location = currentQueryProjectionLocation(vaultRoot);
-  const currentManifest = await listCanonicalSourceManifest(vaultRoot);
-  const status = await readProjectionStatus(location, currentManifest);
+  const endFreshness = startCliPhase("query-freshness");
+  try {
+    const location = currentQueryProjectionLocation(vaultRoot);
+    const currentManifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+    const status = await timeCliPhase("query-status", () => readProjectionStatus(location, currentManifest));
 
-  if (!status?.fresh) {
-    await rebuildQueryProjectionWithManifestOnce({
-      currentManifest,
-      location,
-      readSource,
-      vaultRoot,
-    });
-    const rebuiltStatus = await readProjectionStatus(location, currentManifest);
+    if (!status?.fresh) {
+      await rebuildStaleQueryProjection({
+        location,
+        readSource,
+        vaultRoot,
+      });
+      const rebuiltStatus = await timeCliPhase("query-status", () => readProjectionStatus(location, currentManifest));
 
-    if (!rebuiltStatus?.fresh) {
-      const refreshedManifest = await listCanonicalSourceManifest(vaultRoot);
-      const refreshedStatus = await readProjectionStatus(location, refreshedManifest);
+      if (!rebuiltStatus?.fresh) {
+        const refreshedManifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+        const refreshedStatus = await timeCliPhase("query-status", () => readProjectionStatus(location, refreshedManifest));
 
-      if (!refreshedStatus?.fresh) {
-        await rebuildQueryProjectionWithManifestOnce({
-          currentManifest: refreshedManifest,
-          location,
-          readSource,
-          vaultRoot,
-        });
+        if (!refreshedStatus?.fresh) {
+          await rebuildStaleQueryProjection({
+            location,
+            readSource,
+            vaultRoot,
+          });
+        }
       }
     }
-  }
 
-  return location;
+    return location;
+  } finally {
+    endFreshness();
+  }
 }
 
-async function rebuildQueryProjectionWithManifestOnce(input: {
-  currentManifest: readonly QuerySourceManifestEntry[];
+async function rebuildStaleQueryProjection(input: {
   location: QueryProjectionLocation;
   readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot>;
   vaultRoot: string;
 }): Promise<void> {
-  const key = input.location.absolutePath;
-  const pending = pendingQueryProjectionRebuilds.get(key);
-
-  if (pending) {
-    await pending;
-    return;
-  }
-
-  const rebuild = rebuildQueryProjectionWithManifest(
-    input.vaultRoot,
-    input.currentManifest,
-    input.location,
-    input.readSource,
-  ).then(() => undefined);
-
-  pendingQueryProjectionRebuilds.set(key, rebuild);
-
+  // Acquire the existing reentrant boundary before deciding whether to rebuild.
+  // A shared pending promise can belong to a reader waiting for our own lock.
+  const endWait = startCliPhase("query-wait");
   try {
-    await rebuild;
+    await withCanonicalWriteLock(input.vaultRoot, async () => {
+      endWait();
+      const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(input.vaultRoot));
+      const status = await timeCliPhase("query-status", () => readProjectionStatus(input.location, manifest));
+      if (status?.fresh) return;
+      await timeCliPhase("query-rebuild", () => rebuildQueryProjectionFromCanonicalSource(
+        input.vaultRoot,
+        input.location,
+        input.readSource,
+      ));
+    });
   } finally {
-    if (pendingQueryProjectionRebuilds.get(key) === rebuild) {
-      pendingQueryProjectionRebuilds.delete(key);
-    }
+    endWait();
   }
 }

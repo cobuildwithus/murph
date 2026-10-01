@@ -184,10 +184,11 @@ describe("hosted assistant ask completion", () => {
         session,
       );
       completionMocks.sendAssistantAskContinuation.mockResolvedValue({
+        deliveryOutcome: { intentId: "intent-exact-private" },
         status: "completed",
       });
 
-      await executeHostedAssistantAskCompletedWake({
+      const outcome = await executeHostedAssistantAskCompletedWake({
         executionContext: { hosted: null },
         vaultRoot: vault,
         wake,
@@ -204,6 +205,7 @@ describe("hosted assistant ask completion", () => {
       expect(completionMocks.sendAssistantAskContinuation).toHaveBeenCalledTimes(1);
       expect(completionMocks.sendAssistantAskContinuation).toHaveBeenCalledWith(
         expect.objectContaining({
+          canFinalize: expect.any(Function),
           deliveryIdempotencyKey: buildHostedAssistantAskCompletionDeliveryKey({
             eventId,
           }),
@@ -214,6 +216,7 @@ describe("hosted assistant ask completion", () => {
           threadIsDirect: true,
         }),
       );
+      expect(outcome.deliveryIntentIds).toEqual(["intent-exact-private"]);
     } finally {
       await rm(vault, { force: true, recursive: true });
     }
@@ -224,6 +227,7 @@ describe("hosted assistant ask completion", () => {
       path.join(os.tmpdir(), "hosted-assistant-ask-cannot-answer-"),
     );
 
+    let shouldYield = false;
     try {
       const { origin, session } = await createCompletionOriginSession({
         suffix: "cannot-answer",
@@ -251,19 +255,36 @@ describe("hosted assistant ask completion", () => {
       completionMocks.readAssistantInputEvent.mockResolvedValue(origin);
       completionMocks.readAssistantAskOriginSession.mockResolvedValue(session);
       completionMocks.sendAssistantNotification.mockImplementation(async (input) => {
-        await input.beforeCommit?.({
+        await input.beforeDelivery?.({
           decision: {
             kind: "send_message",
-            privateSummary: "Sent fixed insufficient-context response.",
+            privateSummary: "Queued fixed insufficient-context response.",
             text: HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
           },
           deliveryOutcome: null,
           response: HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
         });
+        shouldYield = true;
+        await input.beforeCommit?.({
+          decision: {
+            kind: "send_message",
+            privateSummary: "Queued fixed insufficient-context response.",
+            text: HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+          },
+          deliveryOutcome: { intentId: "intent-cannot-answer", kind: "queued" },
+          response: HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+        });
+        return {
+          deliveryOutcome: {
+            intentId: "intent-cannot-answer",
+            kind: "queued",
+          },
+        };
       });
 
-      await executeHostedAssistantAskCompletedWake({
+      const outcome = await executeHostedAssistantAskCompletedWake({
         executionContext: { hosted: null },
+        shouldYield: () => shouldYield,
         sourceMailboxItemId: eventId,
         vaultRoot: vault,
         wake,
@@ -274,6 +295,7 @@ describe("hosted assistant ask completion", () => {
       const notificationInput =
         completionMocks.sendAssistantNotification.mock.calls[0]?.[0];
       expect(notificationInput).toMatchObject({
+        beforeDelivery: expect.any(Function),
         beforeCommit: expect.any(Function),
         deferCommitUntilDeliveryAccepted: true,
         deliveryDedupeToken: buildHostedAssistantAskCompletionDeliveryKey({
@@ -295,6 +317,7 @@ describe("hosted assistant ask completion", () => {
       expect(notificationInput).not.toHaveProperty(
         "reviewedAssistantAskCompletionExpiresAt",
       );
+      expect(outcome.deliveryIntentIds).toEqual(["intent-cannot-answer"]);
     } finally {
       await rm(vault, { force: true, recursive: true });
     }
@@ -373,10 +396,11 @@ describe("hosted assistant ask completion", () => {
         currentSession.session,
       );
       completionMocks.sendAssistantAskContinuation.mockResolvedValue({
+        deliveryOutcome: { intentId: "intent-reviewed-group" },
         status: "completed",
       });
 
-      await executeHostedAssistantAskCompletedWake({
+      const outcome = await executeHostedAssistantAskCompletedWake({
         executionContext: { hosted: null },
         sourceMailboxItemId: eventId,
         vaultRoot: vault,
@@ -395,6 +419,7 @@ describe("hosted assistant ask completion", () => {
           eventId,
         }),
         bindingDeliveryTarget: "conversation-reviewed-exact",
+        canFinalize: expect.any(Function),
         channel: "linq",
         deliveryReplyToMessageId: "message-reviewed-exact",
         deliveryTarget: "conversation-reviewed-exact",
@@ -423,6 +448,7 @@ describe("hosted assistant ask completion", () => {
       expect(continuationInput).not.toHaveProperty(
         "outboxExternalThreadRouteAuthority",
       );
+      expect(outcome.deliveryIntentIds).toEqual(["intent-reviewed-group"]);
     } finally {
       await rm(vault, { force: true, recursive: true });
     }

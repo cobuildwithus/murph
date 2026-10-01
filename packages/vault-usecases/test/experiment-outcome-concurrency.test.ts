@@ -4,10 +4,11 @@ import os from "node:os";
 import path from "node:path";
 
 import * as core from "@murphai/core";
+import * as query from "@murphai/query";
 import { experimentFrontmatterSchema } from "@murphai/contracts";
 import { afterEach, test, vi } from "vitest";
 
-import { importWithMocks, mockActualModule } from "./mock-import.ts";
+import * as experimentJournal from "../src/usecases/experiment-journal-vault.ts";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -29,9 +30,7 @@ function deferred<T>(): Deferred<T> {
 }
 
 afterEach(() => {
-  vi.doUnmock("../src/runtime-import.ts");
   vi.restoreAllMocks();
-  vi.resetModules();
 });
 
 test("a concurrent session cannot interpose between outcome evidence analysis and its write", async () => {
@@ -59,44 +58,6 @@ test("a concurrent session cannot interpose between outcome evidence analysis an
       },
     });
 
-    const experimentJournal = await importWithMocks<
-      typeof import("../src/usecases/experiment-journal-vault.ts")
-    >("../src/usecases/experiment-journal-vault.ts", {
-      "../src/runtime-import.ts": mockActualModule(
-        "../src/runtime-import.ts",
-        (actual) => ({
-          ...actual,
-          loadRuntimeModule: vi.fn(async (specifier: string) => {
-            if (specifier === "@murphai/query") {
-              return vi.importActual<typeof import("@murphai/query")>(
-                "@murphai/query",
-              );
-            }
-            if (specifier !== "@murphai/core") {
-              throw new Error(`Unexpected runtime module: ${specifier}`);
-            }
-            return {
-              ...core,
-              withCanonicalWriteLock: async <TResult>(
-                lockVaultRoot: string | undefined,
-                run: () => Promise<TResult>,
-              ) => {
-                closeoutLockAttemptCount += 1;
-                closeoutLockAttempted.resolve();
-                return core.withCanonicalWriteLock(lockVaultRoot, run);
-              },
-              writeExperimentOutcome: async (
-                input: Parameters<typeof core.writeExperimentOutcome>[0],
-              ) => {
-                closeoutWriteAttempted.resolve();
-                return core.writeExperimentOutcome(input);
-              },
-            };
-          }),
-        }),
-      ),
-    });
-
     const sessionLockHeld = deferred<void>();
     const allowSessionWrite = deferred<void>();
     const session = core.withCanonicalWriteLock(vaultRoot, async () => {
@@ -111,6 +72,20 @@ test("a concurrent session cannot interpose between outcome evidence analysis an
       });
     });
     await sessionLockHeld.promise;
+    const withCanonicalWriteLock = core.withCanonicalWriteLock;
+    vi.spyOn(core, "withCanonicalWriteLock").mockImplementation(async <TResult>(
+      lockVaultRoot: string | undefined,
+      run: () => Promise<TResult>,
+    ) => {
+      closeoutLockAttemptCount += 1;
+      closeoutLockAttempted.resolve();
+      return withCanonicalWriteLock(lockVaultRoot, run);
+    });
+    const writeExperimentOutcome = core.writeExperimentOutcome;
+    vi.spyOn(core, "writeExperimentOutcome").mockImplementation(async (input) => {
+      closeoutWriteAttempted.resolve();
+      return writeExperimentOutcome(input);
+    });
 
     const closeout = experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
@@ -155,9 +130,6 @@ test("a next-day outcome retry returns the referenced artifact after supported e
         interventionEnd: "2026-06-07",
       },
     });
-    const experimentJournal = await import(
-      "../src/usecases/experiment-journal-vault.ts"
-    );
     const first = await experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
       lookup: created.experiment.id,
@@ -204,33 +176,10 @@ test("a next-day outcome retry returns the referenced artifact after supported e
     const experimentFile = path.join(vaultRoot, created.experiment.relativePath);
     const editedExperimentBytes = await fs.readFile(experimentFile, "utf8");
     vi.setSystemTime(new Date("2026-06-09T12:00:00.000Z"));
-    const analyzeExperimentOutcome = vi.fn(() => {
+    const analyzeExperimentOutcome = vi.spyOn(query, "analyzeExperimentOutcome").mockImplementation(() => {
       throw new Error("A valid referenced outcome must bypass fresh analysis.");
     });
-    const retryJournal = await importWithMocks<
-      typeof import("../src/usecases/experiment-journal-vault.ts")
-    >("../src/usecases/experiment-journal-vault.ts", {
-      "../src/runtime-import.ts": mockActualModule(
-        "../src/runtime-import.ts",
-        (actual) => ({
-          ...actual,
-          loadRuntimeModule: vi.fn(async (specifier: string) => {
-            if (specifier === "@murphai/core") {
-              return core;
-            }
-            if (specifier === "@murphai/query") {
-              const query = await vi.importActual<typeof import("@murphai/query")>(
-                "@murphai/query",
-              );
-              return { ...query, analyzeExperimentOutcome };
-            }
-            throw new Error(`Unexpected runtime module: ${specifier}`);
-          }),
-        }),
-      ),
-    });
-
-    const retried = await retryJournal.writeExperimentOutcomeRecord({
+    const retried = await experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
       lookup: created.experiment.id,
     });
@@ -266,9 +215,6 @@ test("an active interim outcome advances once to a distinct final artifact", asy
         interventionEnd: "2026-06-07",
       },
     });
-    const experimentJournal = await import(
-      "../src/usecases/experiment-journal-vault.ts"
-    );
 
     const interim = await experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
@@ -331,9 +277,6 @@ test("an on-time stopped run advances its active interim to one final artifact",
         interventionEnd: "2026-06-07",
       },
     });
-    const experimentJournal = await import(
-      "../src/usecases/experiment-journal-vault.ts"
-    );
     const interim = await experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
       lookup: created.experiment.id,
@@ -349,29 +292,8 @@ test("an on-time stopped run advances its active interim to one final artifact",
       title: "Stopped",
     });
 
-    const query = await vi.importActual<typeof import("@murphai/query")>(
-      "@murphai/query",
-    );
-    const analyzeExperimentOutcome = vi.fn(query.analyzeExperimentOutcome);
-    const finalJournal = await importWithMocks<
-      typeof import("../src/usecases/experiment-journal-vault.ts")
-    >("../src/usecases/experiment-journal-vault.ts", {
-      "../src/runtime-import.ts": mockActualModule(
-        "../src/runtime-import.ts",
-        (actual) => ({
-          ...actual,
-          loadRuntimeModule: vi.fn(async (specifier: string) => {
-            if (specifier === "@murphai/core") return core;
-            if (specifier === "@murphai/query") {
-              return { ...query, analyzeExperimentOutcome };
-            }
-            throw new Error(`Unexpected runtime module: ${specifier}`);
-          }),
-        }),
-      ),
-    });
-
-    const final = await finalJournal.writeExperimentOutcomeRecord({
+    const analyzeExperimentOutcome = vi.spyOn(query, "analyzeExperimentOutcome");
+    const final = await experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
       lookup: created.experiment.id,
       asOf: "2026-06-07",
@@ -398,7 +320,7 @@ test("an on-time stopped run advances its active interim to one final artifact",
       final.outcome.outcomeId,
     );
 
-    const repeated = await finalJournal.writeExperimentOutcomeRecord({
+    const repeated = await experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
       lookup: created.experiment.id,
       asOf: "2026-06-08",
@@ -429,9 +351,6 @@ test("an early-stopped run keeps its active interim without fresh analysis", asy
         interventionEnd: "2026-06-07",
       },
     });
-    const experimentJournal = await import(
-      "../src/usecases/experiment-journal-vault.ts"
-    );
     const interim = await experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
       lookup: created.experiment.id,
@@ -447,31 +366,10 @@ test("an early-stopped run keeps its active interim without fresh analysis", asy
       title: "Stopped",
     });
 
-    const analyzeExperimentOutcome = vi.fn(() => {
+    const analyzeExperimentOutcome = vi.spyOn(query, "analyzeExperimentOutcome").mockImplementation(() => {
       throw new Error("An early stop must not refresh its interim result.");
     });
-    const stoppedJournal = await importWithMocks<
-      typeof import("../src/usecases/experiment-journal-vault.ts")
-    >("../src/usecases/experiment-journal-vault.ts", {
-      "../src/runtime-import.ts": mockActualModule(
-        "../src/runtime-import.ts",
-        (actual) => ({
-          ...actual,
-          loadRuntimeModule: vi.fn(async (specifier: string) => {
-            if (specifier === "@murphai/core") return core;
-            if (specifier === "@murphai/query") {
-              const query = await vi.importActual<typeof import("@murphai/query")>(
-                "@murphai/query",
-              );
-              return { ...query, analyzeExperimentOutcome };
-            }
-            throw new Error(`Unexpected runtime module: ${specifier}`);
-          }),
-        }),
-      ),
-    });
-
-    const repeated = await stoppedJournal.writeExperimentOutcomeRecord({
+    const repeated = await experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
       lookup: created.experiment.id,
       asOf: "2026-06-07",
@@ -515,9 +413,6 @@ test("shortening a run plan cannot reclassify an early stop as final", async () 
         interventionEnd: "2026-06-07",
       },
     });
-    const experimentJournal = await import(
-      "../src/usecases/experiment-journal-vault.ts"
-    );
     const interim = await experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
       lookup: created.experiment.id,
@@ -541,33 +436,12 @@ test("shortening a run plan cannot reclassify an early stop as final", async () 
       },
     });
 
-    const analyzeExperimentOutcome = vi.fn(() => {
+    const analyzeExperimentOutcome = vi.spyOn(query, "analyzeExperimentOutcome").mockImplementation(() => {
       throw new Error(
         "A shortened run plan must not refresh an outcome saved against a later horizon.",
       );
     });
-    const stoppedJournal = await importWithMocks<
-      typeof import("../src/usecases/experiment-journal-vault.ts")
-    >("../src/usecases/experiment-journal-vault.ts", {
-      "../src/runtime-import.ts": mockActualModule(
-        "../src/runtime-import.ts",
-        (actual) => ({
-          ...actual,
-          loadRuntimeModule: vi.fn(async (specifier: string) => {
-            if (specifier === "@murphai/core") return core;
-            if (specifier === "@murphai/query") {
-              const query = await vi.importActual<typeof import("@murphai/query")>(
-                "@murphai/query",
-              );
-              return { ...query, analyzeExperimentOutcome };
-            }
-            throw new Error(`Unexpected runtime module: ${specifier}`);
-          }),
-        }),
-      ),
-    });
-
-    const repeated = await stoppedJournal.writeExperimentOutcomeRecord({
+    const repeated = await experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
       lookup: created.experiment.id,
       asOf: "2026-06-06",

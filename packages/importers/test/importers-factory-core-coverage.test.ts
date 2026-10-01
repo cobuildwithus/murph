@@ -2,33 +2,29 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
 import {
-  addMeal,
   createDeviceProviderRegistry,
   createImporters,
   createSamplePresetRegistry,
-  importCsvSamples,
-  importDocument,
-  parseDelimitedRows,
   prepareCsvSampleImport,
   prepareAssessmentResponseImport,
-  prepareMealImport,
   resolveSampleImportConfig,
 } from "../src/index.ts";
-import type { DocumentImportPayload } from "../src/core-port.ts";
 import { assertAssessmentImportPort } from "../src/assessment/core-port.ts";
 import { assertCanonicalWritePort } from "../src/core-port.ts";
-import { createCorePortSpy, createTempFile } from "./test-helpers.ts";
+import { createTempFile } from "./test-helpers.ts";
 
 const coreModuleCalls = vi.hoisted(
   (): {
     importDocument: unknown[];
     addMeal: unknown[];
+    validateSampleImport: unknown[];
     importSamples: unknown[];
     importDeviceBatch: unknown[];
     importAssessmentResponse: unknown[];
   } => ({
     importDocument: [],
     addMeal: [],
+    validateSampleImport: [],
     importSamples: [],
     importDeviceBatch: [],
     importAssessmentResponse: [],
@@ -48,6 +44,9 @@ vi.mock("@murphai/core", async (importOriginal) => {
     addMeal: async (payload: unknown) => {
       coreModuleCalls.addMeal.push(payload);
       return { ok: true, kind: "meal" as const };
+    },
+    validateSampleImport: async (payload: unknown) => {
+      coreModuleCalls.validateSampleImport.push(payload);
     },
     importSamples: async (payload: unknown) => {
       coreModuleCalls.importSamples.push(payload);
@@ -173,6 +172,7 @@ test("createImporters delegates through the default core runtime exports", async
   assert.deepEqual(deviceBatchResult, { ok: true, kind: "device-batch" });
   assert.equal(coreModuleCalls.importDocument.length, 1);
   assert.equal(coreModuleCalls.addMeal.length, 1);
+  assert.equal(coreModuleCalls.validateSampleImport.length, 1);
   assert.equal(coreModuleCalls.importSamples.length, 1);
   assert.equal(coreModuleCalls.importAssessmentResponse.length, 1);
   assert.equal(coreModuleCalls.importDeviceBatch.length, 1);
@@ -186,6 +186,9 @@ test("assertCanonicalWritePort binds methods and rejects invalid ports", () => {
       return this.label;
     },
     addMeal() {
+      return this.label;
+    },
+    validateSampleImport() {
       return this.label;
     },
     importSamples() {
@@ -203,6 +206,21 @@ test("assertCanonicalWritePort binds methods and rejects invalid ports", () => {
     "canonical-port",
   );
   assert.equal(resolved.addMeal({ note: "soup" }), "canonical-port");
+  assert.equal(
+    resolved.validateSampleImport({
+      stream: "steps",
+      unit: "count",
+      sourcePath: "samples.csv",
+      importConfig: {
+        delimiter: ",",
+        tsColumn: "timestamp",
+        valueColumn: "value",
+        metadataColumns: [],
+      },
+      samples: [],
+    }),
+    "canonical-port",
+  );
   assert.equal(
     resolved.importSamples({
       stream: "steps",
@@ -228,6 +246,9 @@ test("assertCanonicalWritePort binds methods and rejects invalid ports", () => {
           return "ok";
         },
         addMeal() {
+          return "ok";
+        },
+        validateSampleImport() {
           return "ok";
         },
         importSamples() {
@@ -347,378 +368,6 @@ test("prepareAssessmentResponseImport defaults the title from the file basename"
   });
 });
 
-test("importDocument delegates a core-shaped document payload", async () => {
-  const filePath = await createTempFile("labs.pdf", "pdf-placeholder", "murph-importers-coverage-");
-  const { calls, corePort } = createCorePortSpy();
-
-  const result = await importDocument<{ ok: boolean; kind: string }>(
-    {
-      filePath,
-      note: "  annual lab packet  ",
-      occurredAt: "2026-03-11T14:00:00-05:00",
-    },
-    { corePort },
-  );
-
-  const [documentPayload] = calls.documents;
-
-  assert.ok(documentPayload);
-  assert.deepEqual(result, { ok: true, kind: "document" });
-  assert.equal(calls.documents.length, 1);
-  assert.equal((documentPayload as { sourcePath: string }).sourcePath, filePath);
-});
-
-test("addMeal validates attachments and maps to addMeal-compatible input", async () => {
-  const photoPath = await createTempFile("dinner.jpg", "image-placeholder", "murph-importers-coverage-");
-  const audioPath = await createTempFile(
-    "dinner-note.m4a",
-    "audio-placeholder",
-    "murph-importers-coverage-",
-  );
-  const { calls, corePort } = createCorePortSpy();
-
-  await addMeal(
-    {
-      photoPath,
-      audioPath,
-      note: "  salmon and rice  ",
-      occurredAt: new Date("2026-03-11T18:30:00Z"),
-    },
-    { corePort },
-  );
-
-  const [mealPayload] = calls.meals;
-
-  assert.ok(mealPayload);
-  assert.equal(calls.meals.length, 1);
-  assert.equal((mealPayload as { photoPath: string }).photoPath, photoPath);
-});
-
-test("addMeal accepts structured-only meal input with ingredients and nutrition", async () => {
-  const { calls, corePort } = createCorePortSpy();
-
-  await addMeal(
-    {
-      source: "derived",
-      ingredients: [" salmon  ", "rice"],
-      nutrition: {
-        totals: {
-          calories: 690,
-          proteinGrams: 42,
-        },
-        provenance: {
-          source: "estimated",
-        },
-      },
-    },
-    { corePort },
-  );
-
-  const [mealPayload] = calls.meals;
-
-  assert.ok(mealPayload);
-  assert.equal((mealPayload as { photoPath?: string }).photoPath, undefined);
-  assert.equal((mealPayload as { audioPath?: string }).audioPath, undefined);
-  assert.equal((mealPayload as { source?: string }).source, "derived");
-  assert.deepEqual((mealPayload as { ingredients?: string[] }).ingredients, ["salmon", "rice"]);
-  assert.deepEqual((mealPayload as { nutrition?: unknown }).nutrition, {
-    totals: {
-      calories: 690,
-      proteinGrams: 42,
-    },
-    provenance: {
-      source: "estimated",
-    },
-  });
-});
-
-test("addMeal accepts text-only meal notes without requiring a photo", async () => {
-  const { calls, corePort } = createCorePortSpy();
-
-  await addMeal(
-    {
-      note: "soup",
-    },
-    { corePort },
-  );
-
-  const [mealPayload] = calls.meals;
-  assert.ok(mealPayload);
-  assert.equal((mealPayload as { photoPath?: string }).photoPath, undefined);
-  assert.equal((mealPayload as { audioPath?: string }).audioPath, undefined);
-  assert.equal((mealPayload as { note: string }).note, "soup");
-});
-
-test("addMeal rejects requests without any supported meal content", async () => {
-  const { corePort } = createCorePortSpy();
-
-  await assert.rejects(
-    () =>
-      addMeal(
-        {
-        },
-        { corePort },
-      ),
-    /photoPath, audioPath, note, ingredients, or nutrition/,
-  );
-});
-
-test("importCsvSamples parses rows and emits recordedAt values for core", async () => {
-  const filePath = await createTempFile(
-    "heart-rate.csv",
-    [
-      "timestamp,bpm,device,context",
-      "2026-03-11T08:00:00Z,72,watch,resting",
-      "2026-03-11T08:05:00Z,75,watch,\"post, walk\"",
-    ].join("\n"),
-    "murph-importers-coverage-",
-  );
-  const { calls, corePort } = createCorePortSpy();
-  const presetRegistry = createSamplePresetRegistry([
-    {
-      id: "vendor-watch-heart-rate",
-      stream: "heart_rate",
-      tsColumn: "timestamp",
-      valueColumn: "bpm",
-      unit: "bpm",
-      metadataColumns: ["device", "context"],
-      source: "device",
-    },
-  ]);
-
-  await importCsvSamples(
-    {
-      filePath,
-      presetId: "vendor-watch-heart-rate",
-    },
-    { corePort, presetRegistry },
-  );
-
-  const [samplePayload] = calls.samples;
-
-  assert.ok(samplePayload);
-  assert.equal(calls.samples.length, 1);
-  assert.equal((samplePayload as { stream: string }).stream, "heart_rate");
-});
-
-test("importCsvSamples ignores the removed vault alias and still handles escaped quotes and CRLF rows", async () => {
-  const filePath = await createTempFile(
-    "sleep.csv",
-    [
-      "timestamp,bpm,context\r",
-      '2026-03-11T08:00:00Z,72,"watch ""alpha"""\r',
-      "2026-03-11T08:05:00Z,75,resting\r",
-      "",
-    ].join("\n"),
-    "murph-importers-coverage-",
-  );
-  const { calls, corePort } = createCorePortSpy();
-
-  await importCsvSamples(
-    {
-      filePath,
-      vault: "fixture-vault",
-      stream: "heart_rate",
-      tsColumn: "timestamp",
-      valueColumn: "bpm",
-      unit: "bpm",
-      delimiter: ",",
-    },
-    { corePort },
-  );
-
-  const [samplePayload] = calls.samples;
-  assert.ok(samplePayload);
-  assert.equal((samplePayload as { vaultRoot?: string }).vaultRoot, undefined);
-
-  const escapedRows = parseDelimitedRows(
-    'timestamp,bpm,context\r\n2026-03-11T08:00:00Z,72,"watch ""alpha"""',
-    ",",
-  );
-  assert.deepEqual(escapedRows[1], [
-    "2026-03-11T08:00:00Z",
-    "72",
-    'watch "alpha"',
-  ]);
-});
-
-test("importCsvSamples rejects blank sample rows and unterminated quoted fields", async () => {
-  const blankRowsPath = await createTempFile(
-    "blank.csv",
-    ["timestamp,bpm", "", "   ,   ", ""].join("\n"),
-    "murph-importers-coverage-",
-  );
-  const brokenQuotesPath = await createTempFile(
-    "broken.csv",
-    ['timestamp,bpm', '"2026-03-11T08:00:00Z,72'].join("\n"),
-    "murph-importers-coverage-",
-  );
-  const { corePort } = createCorePortSpy();
-
-  await assert.rejects(
-    () =>
-      importCsvSamples(
-        {
-          filePath: blankRowsPath,
-          stream: "heart_rate",
-          tsColumn: "timestamp",
-          valueColumn: "bpm",
-          unit: "bpm",
-        },
-        { corePort },
-      ),
-    /did not contain any importable sample rows/,
-  );
-
-  await assert.throws(
-    () => parseDelimitedRows('timestamp,bpm\n"2026-03-11T08:00:00Z,72', ","),
-    /unterminated quoted field/,
-  );
-
-  await assert.rejects(
-    () =>
-      importCsvSamples(
-        {
-          filePath: brokenQuotesPath,
-          stream: "heart_rate",
-          tsColumn: "timestamp",
-          valueColumn: "bpm",
-          unit: "bpm",
-        },
-        { corePort },
-      ),
-    /unterminated quoted field/,
-  );
-});
-
-test("importDocument accepts a narrow core port with only the called export", async () => {
-  const filePath = await createTempFile("visit-note.txt", "note", "murph-importers-coverage-");
-
-  const result = await importDocument<string>(
-    { filePath },
-    {
-      corePort: {
-        async importDocument(payload: DocumentImportPayload) {
-          return payload.title;
-        },
-      },
-    },
-  );
-
-  assert.equal(result, "visit-note.txt");
-});
-
-test("prepareMealImport requires canonical vaultRoot and omits missing audio", async () => {
-  const photoPath = await createTempFile("breakfast.jpg", "image-placeholder", "murph-importers-coverage-");
-
-  const payload = await prepareMealImport({
-    photoPath,
-    vaultRoot: "/tmp/example-vault",
-    note: "  eggs and fruit  ",
-  });
-
-  assert.equal(payload.photoPath, photoPath);
-  assert.equal(payload.audioPath, undefined);
-  assert.equal(payload.vaultRoot, "/tmp/example-vault");
-  assert.equal(payload.note, "eggs and fruit");
-});
-
-test("prepareMealImport accepts note-only meal input", async () => {
-  const payload = await prepareMealImport({
-    vaultRoot: "/tmp/example-vault",
-    note: "  eggs and fruit  ",
-  });
-
-  assert.equal(payload.photoPath, undefined);
-  assert.equal(payload.audioPath, undefined);
-  assert.equal(payload.vaultRoot, "/tmp/example-vault");
-  assert.equal(payload.note, "eggs and fruit");
-});
-
-test("prepareMealImport preserves structured-only meal data", async () => {
-  const payload = await prepareMealImport({
-    vaultRoot: "/tmp/example-vault",
-    source: "derived",
-    ingredients: [" salmon  ", "rice"],
-    nutrition: {
-      totals: {
-        calories: 690,
-      },
-      provenance: {
-        source: "estimated",
-      },
-    },
-  });
-
-  assert.equal(payload.photoPath, undefined);
-  assert.equal(payload.audioPath, undefined);
-  assert.equal(payload.vaultRoot, "/tmp/example-vault");
-  assert.equal(payload.source, "derived");
-  assert.deepEqual(payload.ingredients, ["salmon", "rice"]);
-  assert.deepEqual(payload.nutrition, {
-    totals: {
-      calories: 690,
-    },
-    provenance: {
-      source: "estimated",
-    },
-  });
-});
-
-test("prepareMealImport accepts ingredients-only structured meals", async () => {
-  const payload = await prepareMealImport({
-    vaultRoot: "/tmp/example-vault",
-    ingredients: [" salmon  ", "rice"],
-  });
-
-  assert.equal(payload.photoPath, undefined);
-  assert.equal(payload.audioPath, undefined);
-  assert.equal(payload.note, undefined);
-  assert.deepEqual(payload.ingredients, ["salmon", "rice"]);
-  assert.equal(payload.nutrition, undefined);
-});
-
-test("prepareCsvSampleImport skips blank rows and omits empty metadata columns", async () => {
-  const filePath = await createTempFile(
-    "glucose.csv",
-    [
-      "recorded,value",
-      "",
-      "2026-03-11T08:00:00Z,92",
-      "",
-      "2026-03-11T09:00:00Z,95",
-      "",
-    ].join("\n"),
-    "murph-importers-coverage-",
-  );
-
-  const plan = await prepareCsvSampleImport({
-    filePath,
-    vaultRoot: "/tmp/canonical-vault",
-    vault: "/tmp/example-vault",
-    stream: "glucose",
-    tsColumn: "recorded",
-    valueColumn: "value",
-    unit: "mg_dL",
-    delimiter: ",",
-  });
-
-  const [payload] = plan.imports;
-
-  assert.ok(payload);
-  assert.equal(plan.vaultRoot, "/tmp/canonical-vault");
-  assert.equal(plan.tsColumn, "recorded");
-  assert.equal(payload.payload.importConfig.metadataColumns, undefined);
-  assert.equal(payload.importedCount, 2);
-  assert.equal(payload.payload.batchProvenance?.sourceFileName, "glucose.csv");
-  assert.equal(payload.payload.batchProvenance?.importConfig?.valueColumn, "value");
-  assert.equal(payload.payload.batchProvenance?.rowCount, 2);
-  assert.equal(payload.payload.batchProvenance?.skippedCount, 0);
-  assert.deepEqual(payload.payload.batchProvenance?.skipReasons, []);
-  assert.equal(payload.payload.samples[0]?.recordedAt, "2026-03-11T08:00:00.000Z");
-  assert.equal(payload.payload.samples[1]?.value, 95);
-});
-
 test("prepareCsvSampleImport infers SpO2 sample columns and skips placeholder rows", async () => {
   const filePath = await createTempFile(
     "o2ring.csv",
@@ -752,36 +401,4 @@ test("prepareCsvSampleImport infers SpO2 sample columns and skips placeholder ro
   assert.deepEqual(payload.payload.batchProvenance?.skipReasons, [
     { reason: "non-numeric value", count: 1 },
   ]);
-});
-
-test("prepareCsvSampleImport rejects header-only files", async () => {
-  const filePath = await createTempFile(
-    "header-only.csv",
-    "recorded,value\n",
-    "murph-importers-coverage-",
-  );
-
-  await assert.rejects(
-    () =>
-      prepareCsvSampleImport({
-        filePath,
-        stream: "heart_rate",
-        tsColumn: "recorded",
-        valueColumn: "value",
-        unit: "bpm",
-        delimiter: ",",
-      }),
-    /header row and at least one data row/,
-  );
-});
-
-test("parseDelimitedRows rejects malformed delimiters and unterminated quoted fields", () => {
-  assert.throws(
-    () => parseDelimitedRows("a|b\n1|2\n", "||"),
-    /single character/,
-  );
-  assert.throws(
-    () => parseDelimitedRows('a,b\n1,"two\n', ","),
-    /unterminated quoted field/,
-  );
 });

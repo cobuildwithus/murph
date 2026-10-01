@@ -166,6 +166,51 @@ describe("scheduled-log contracts", () => {
     });
   });
 
+  it("preserves the canonical record slug boundary without widening action slugs", () => {
+    const base = {
+      schemaVersion: SCHEDULED_LOG_SCHEMA_VERSION,
+      docType: SCHEDULED_LOG_DOC_TYPE,
+      scheduledLogId: "slog_01JX8SC2Y2M5ZBV64ZP4N1DRB2",
+      title: "Boundary schedule",
+      status: "active",
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "18:00",
+      },
+      action: {
+        kind: "activity_session.add",
+        title: "Boundary activity",
+        activityType: "a".repeat(120),
+        durationMinutes: 15,
+      },
+      tags: ["t".repeat(120)],
+      createdAt: "2026-04-22T10:00:00.000Z",
+      updatedAt: "2026-04-22T10:00:00.000Z",
+    } as const;
+
+    expect(scheduledLogFrontmatterSchema.safeParse({
+      ...base,
+      slug: "s".repeat(160),
+    }).success).toBe(true);
+    expect(scheduledLogFrontmatterSchema.safeParse({
+      ...base,
+      slug: "s".repeat(161),
+    }).success).toBe(false);
+    expect(scheduledLogFrontmatterSchema.safeParse({
+      ...base,
+      slug: "boundary-schedule",
+      action: {
+        ...base.action,
+        activityType: "a".repeat(121),
+      },
+    }).success).toBe(false);
+    expect(scheduledLogFrontmatterSchema.safeParse({
+      ...base,
+      slug: "boundary-schedule",
+      tags: ["t".repeat(121)],
+    }).success).toBe(false);
+  });
+
   it("formats schedule intent validation issues for CLI and runtime callers", () => {
     const invalidSchedules = [
       {

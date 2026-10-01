@@ -52,3 +52,35 @@ test('public measurement writes preserve unknown custom metric slug behavior', (
     'custommetric',
   )
 })
+
+test('public measurement writes omit empty optional qualifiers', () => {
+  assert.deepEqual(
+    normalizeMeasurementEntry({
+      metric: 'heart_rate',
+      unit: 'bpm',
+      value: 60,
+      qualifiers: {
+        position: ' seated ',
+        empty: ' ',
+        unspecified: null,
+        sequence: 2,
+        verified: true,
+      },
+    }).qualifiers,
+    {
+      position: 'seated',
+      sequence: 2,
+      verified: true,
+    },
+  )
+
+  assert.equal(
+    normalizeMeasurementEntry({
+      metric: 'heart_rate',
+      unit: 'bpm',
+      value: 60,
+      qualifiers: null,
+    }).qualifiers,
+    undefined,
+  )
+})

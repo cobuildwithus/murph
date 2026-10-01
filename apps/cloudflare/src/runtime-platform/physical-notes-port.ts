@@ -2,13 +2,14 @@ import type {
   HostedRuntimePlatform,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  HOSTED_PHYSICAL_NOTES_PATH,
   HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS,
+  hostedPhysicalNoteRecoveryResponseSchema,
   hostedPhysicalNoteSendResponseSchema,
 } from "@murphai/hosted-execution/physical-notes";
 
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   HostedWebControlPlaneResponseError,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
@@ -20,6 +21,38 @@ export function createHostedWebPhysicalNotePort(input: {
   transport: HostedWebControlTransport;
 }): NonNullable<HostedRuntimePlatform["physicalNotes"]> {
   return {
+    async resolve(request, options) {
+      try {
+        const response = await fetchHostedWebControlPlaneJson({
+          body: request,
+          boundUserId: input.boundUserId,
+          description: "Hosted physical-note recovery",
+          fetchImpl: input.fetchImpl,
+          route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.physicalNoteRecovery,
+          signal: options?.signal ?? null,
+          timeoutMs: input.timeoutMs,
+          transport: input.transport,
+        });
+        return hostedPhysicalNoteRecoveryResponseSchema.parse(response);
+      } catch (error) {
+        if (
+          error instanceof HostedWebControlPlaneResponseError
+          && error.status >= 400
+          && error.status < 500
+          && error.status !== 408
+        ) {
+          return {
+            remainingUnresolved: null,
+            retryAfter: null,
+            settledUsageCostUsdMicros: null,
+            status: error.status === 403
+              ? "permission_denied" as const
+              : "unavailable" as const,
+          };
+        }
+        throw error;
+      }
+    },
     async send(request, options) {
       try {
         const response = await fetchHostedWebControlPlaneJson({
@@ -27,8 +60,7 @@ export function createHostedWebPhysicalNotePort(input: {
           boundUserId: input.boundUserId,
           description: "Hosted physical note",
           fetchImpl: input.fetchImpl,
-          method: "POST",
-          path: HOSTED_PHYSICAL_NOTES_PATH,
+          route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.physicalNoteSend,
           preserveInitialFailureOnReplayFailure: true,
           replayOnceOnRetryableFailure: true,
           signal: options?.signal ?? null,

@@ -73,6 +73,7 @@ import {
   persistAssistantNoReplyTranscriptMarkers,
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
   resolveAssistantProviderResumeStateAction,
+  resolveAssistantResumeStateFromProviderTurn,
 } from './turn-finalizer.js'
 import {
   bindAssistantResumeStateToThreadCompatibility,
@@ -140,17 +141,20 @@ import {
   resolveAssistantUserActionAcceptedInputIds,
 } from '../assistant-codex/dynamic-tools/phone-calls.js'
 import {
-  snapshotAnalyzeVideoAttachmentAuthorities,
-  type AnalyzeVideoAttachmentAuthority,
+  createAnalyzeVideoTurnState,
+  readAnalyzeVideoConversationEvents,
+  snapshotConversationAttachmentAuthorities,
+  type ConversationAttachmentAuthority,
 } from '../assistant-codex/analyze-video-tool.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   requestAssistantVaultFileSend,
+  supportsAssistantVaultFileDelivery,
   resolveAssistantVaultFileSendTargetFingerprint,
 } from './vault-file-send.js'
 import {
-  assertAssistantAcceptedTurnInputAssistantInputEventsExist,
-  assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist,
+  readAssistantAcceptedTurnInputEvents,
+  resolveAssistantAcceptedTurnInputReferenceWindow,
   type AssistantAcceptedTurnInputJournal,
   type AssistantAcceptedTurnInputItemInput,
   type AssistantAcceptedTurnInputTranscriptRef,
@@ -163,7 +167,7 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
-import { readAssistantInputEvent } from './input-store.js'
+import type { AssistantInputEventRecord } from './input-store.js'
 import {
   resolveAssistantAcceptedMessageParticipant,
   resolveAssistantAcceptedMessageTarget,
@@ -183,11 +187,127 @@ import type {
   PersistedUserTurn,
 } from './service-contracts.js'
 import { withAssistantTurnLock } from './turn-lock.js'
+import { ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION } from './group-reply-reconsideration.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
 const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
 const PHONE_CALL_MANUAL_ACCEPTED_TURN_INPUT_ID_PREFIX = 'manual-phone-call:'
+
+function shouldHoldAssistantGroupReplyDraft(input: {
+  message: AssistantMessageInput
+  plan: AssistantTurnSharedPlan
+}): boolean {
+  const channel = normalizeNullableString(
+    input.plan.conversationPolicy.audience.channel,
+  )?.toLowerCase() ?? normalizeNullableString(input.message.channel)?.toLowerCase()
+  return (
+    input.message.deliverResponse === true &&
+    input.message.turnTrigger === 'automation-auto-reply' &&
+    input.message.scheduledOccurrenceAt == null &&
+    input.message.scheduledInvocationAuthority == null &&
+    resolveAssistantConversationScope(
+      input.plan.conversationPolicy.audience,
+    ) === 'group' &&
+    (channel === 'linq' || channel === 'telegram')
+  )
+}
+
+function appendAssistantTurnContext(
+  current: string | null | undefined,
+  addition: string,
+): string {
+  return [normalizeNullableString(current), addition]
+    .filter((part): part is string => part !== null)
+    .join('\n\n')
+}
+
+function applyAssistantProviderTurnResumeInMemory(input: {
+  providerResult: ExecutedAssistantProviderTurnResult
+  session: AssistantSession
+}): AssistantSession {
+  const resumeState = resolveAssistantResumeStateFromProviderTurn({
+    assistantContractFingerprint:
+      input.providerResult.assistantContractFingerprint,
+    codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
+    codexThreadId: input.providerResult.codexThreadId,
+    routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
+    threadCompatibilityFingerprint:
+      readCodexThreadCompatibilityFingerprint(input.providerResult.route),
+  })
+  if (!resumeState) {
+    throw new VaultCliError(
+      'ASSISTANT_GROUP_DRAFT_CONTINUATION_UNAVAILABLE',
+      'The unsent group reply could not be reconsidered in the same provider thread.',
+    )
+  }
+  return {
+    ...input.session,
+    codexResume: resumeState,
+    resumeState,
+  }
+}
+
+function rebaseAssistantProviderResultDeliveryContexts(input: {
+  baseOrdinal: number
+  providerResult: ExecutedAssistantProviderTurnResult
+}): ExecutedAssistantProviderTurnResult {
+  if (input.baseOrdinal === 0) {
+    return input.providerResult
+  }
+  // A negative request-relative ordinal must not become valid after rebasing.
+  const rebaseReplyOrdinal = (ordinal: number): number =>
+    Number.isInteger(ordinal) && ordinal >= 0
+      ? ordinal + input.baseOrdinal
+      : -1
+  return {
+    ...input.providerResult,
+    acceptedNoReplyDeliveryContextOrdinals:
+      input.providerResult.acceptedNoReplyDeliveryContextOrdinals?.map(
+        (ordinal) => ordinal + input.baseOrdinal,
+      ),
+    precedingResponseSegments:
+      input.providerResult.precedingResponseSegments?.map((segment) => ({
+        ...segment,
+        deliveryContextOrdinal:
+          rebaseReplyOrdinal(segment.deliveryContextOrdinal),
+      })),
+    reactions: input.providerResult.reactions?.map((reaction) => ({
+      ...reaction,
+      deliveryContextOrdinal:
+        reaction.deliveryContextOrdinal + input.baseOrdinal,
+    })),
+    responseDeliveryContextOrdinal:
+      rebaseReplyOrdinal(input.providerResult.responseDeliveryContextOrdinal),
+  }
+}
+
+function selectAssistantGroupProviderResult(
+  providerResult: ExecutedAssistantProviderTurnResult,
+): ExecutedAssistantProviderTurnResult {
+  const noReplySelected = providerResult.finalAction?.kind === 'none'
+  return {
+    ...providerResult,
+    acceptedNoReplyDeliveryContextOrdinals: noReplySelected
+      ? [
+          providerResult.acceptedNoReplyDeliveryContextOrdinals?.at(-1)
+          ?? providerResult.responseDeliveryContextOrdinal,
+        ]
+      : [],
+    precedingResponseSegments: [],
+    reactions: noReplySelected
+      ? providerResult.reactions?.slice(-1)
+      : [],
+    ...(noReplySelected
+      ? {
+          response: '',
+          responseCard: null,
+          responseMedia: [],
+          transcriptResponse: null,
+        }
+      : {}),
+  }
+}
 
 function resolveAssistantProgressDeliveryChannel(input: {
   session: AssistantSession
@@ -338,10 +458,9 @@ async function persistUserTurn(
   let userPersisted = false
   let userTranscriptRef: AssistantAcceptedTurnInputTranscriptRef | null = null
   const userContentReceivedAt =
-    await resolveAcceptedInputContentReceivedAt({
-      inputs: input.acceptedTurnInput?.initialInputs ?? [],
-      vault: input.vault,
-    })
+    resolveAcceptedInputContentReceivedAt(
+      input.acceptedTurnInput?.initialInputs ?? [],
+    )
   if (plan.persistUserPromptOnFailure) {
     const persisted = await appendUserTranscriptEntryForTurn({
       contentReceivedAt: userContentReceivedAt,
@@ -380,6 +499,33 @@ function resolveUnverifiedExternalAudienceResponse(prompt: string): string {
   return asksForSupportContact
     ? UNVERIFIED_EXTERNAL_SUPPORT_CONTACT_RESPONSE
     : UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE
+}
+
+function buildCompletedAssistantAskResult(input: {
+  outcome: AssistantDeliveryOutcome
+  prompt: string
+  response: string
+  responseDisposition?: 'none'
+  vault: string
+}): AssistantAskResult {
+  const { outcome } = input
+  return normalizeAssistantAskResultForReturn({
+    vault: redactAssistantDisplayPath(input.vault),
+    status: 'completed',
+    prompt: input.prompt,
+    response: input.response,
+    ...(input.responseDisposition === 'none'
+      ? { responseDisposition: 'none' as const }
+      : {}),
+    media: outcome.media,
+    session: outcome.session,
+    delivery: outcome.kind === 'sent' ? outcome.delivery : null,
+    deliveryDeferred: outcome.kind === 'queued',
+    deliveryIntentId: outcome.kind === 'not-requested' ? null : outcome.intentId,
+    deliveryError: outcome.kind === 'queued' || outcome.kind === 'failed'
+      ? outcome.error
+      : null,
+  })
 }
 
 async function completeUnverifiedExternalAudienceTurn(input: {
@@ -439,23 +585,11 @@ async function completeUnverifiedExternalAudienceTurn(input: {
 
   return {
     outcome,
-    result: normalizeAssistantAskResultForReturn({
-      delivery: outcome.kind === 'sent' ? outcome.delivery : null,
-      deliveryDeferred: outcome.kind === 'queued',
-      deliveryError:
-        outcome.kind === 'queued' || outcome.kind === 'failed'
-          ? outcome.error
-          : null,
-      deliveryIntentId:
-        outcome.kind === 'sent' || outcome.kind === 'queued' || outcome.kind === 'failed'
-          ? outcome.intentId
-          : null,
-      media: outcome.media,
+    result: buildCompletedAssistantAskResult({
+      outcome,
       prompt: input.message.prompt,
       response: input.response,
-      session: outcome.session,
-      status: 'completed',
-      vault: redactAssistantDisplayPath(input.message.vault),
+      vault: input.message.vault,
     }),
   }
 }
@@ -481,7 +615,7 @@ export async function sendAssistantMessageLocal(
       input.providerStartCriticalPath,
       'assistantServiceStartedAtMonotonicMs',
     )
-  await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
+  await readAssistantAcceptedTurnInputEvents({
     inputs: input.acceptedTurnInput?.initialInputs ?? [],
     vault: input.vault,
   })
@@ -550,6 +684,10 @@ export async function sendAssistantMessageLocal(
       })
       const promptBuildStartedAt = Date.now()
       const sharedPlan = await buildAssistantTurnSharedPlan(input, resolved)
+      const holdGroupReplyDraft = shouldHoldAssistantGroupReplyDraft({
+        message: input,
+        plan: sharedPlan,
+      })
       const promptBuildMs = elapsedSince(promptBuildStartedAt)
       const route = resolveAssistantTurnRoute(input, defaults, resolved)
       const receipt = await createAssistantTurnReceipt({
@@ -572,9 +710,10 @@ export async function sendAssistantMessageLocal(
               sharedPlan,
             })
           : null
+      const hostedExecutionContext = executionContext?.hosted ?? null
       const typingIndicator = startAssistantChannelTypingIndicator({
         channelDependencies:
-          executionContext?.hosted?.channelTypingDependencies ?? null,
+          hostedExecutionContext?.channelTypingDependencies ?? null,
         input,
         session: resolved.session,
         sharedPlan,
@@ -587,6 +726,7 @@ export async function sendAssistantMessageLocal(
       }
       let currentSession = resolved.session
       let deliverySupersededTypingIndicator = false
+      let providerRequestOrdinal = 0
 
       try {
         if (
@@ -619,24 +759,21 @@ export async function sendAssistantMessageLocal(
         const runtimeState = createAssistantRuntimeStateService(input.vault)
         const analyzeVideoAttachmentAuthorities = new Map<
           string,
-          AnalyzeVideoAttachmentAuthority
+          ConversationAttachmentAuthority
         >()
+        const analyzeVideoTurnState = createAnalyzeVideoTurnState()
         const snapshottedAnalyzeVideoInputIds = new Set<string>()
-        const snapshotAnalyzeVideoAuthorities = async (
-          acceptedInputIds: readonly string[],
-        ): Promise<void> => {
-          const newInputIds = acceptedInputIds.filter((acceptedInputId) => {
-            if (snapshottedAnalyzeVideoInputIds.has(acceptedInputId)) {
+        const snapshotAnalyzeVideoAuthorities = (
+          events: readonly AssistantInputEventRecord[],
+        ): void => {
+          const newEvents = events.filter((event) => {
+            if (snapshottedAnalyzeVideoInputIds.has(event.inputId)) {
               return false
             }
-            snapshottedAnalyzeVideoInputIds.add(acceptedInputId)
+            snapshottedAnalyzeVideoInputIds.add(event.inputId)
             return true
           })
-          if (newInputIds.length === 0) return
-          const authorities = await snapshotAnalyzeVideoAttachmentAuthorities({
-            acceptedInputIds: newInputIds,
-            vaultRoot: input.vault,
-          })
+          const authorities = snapshotConversationAttachmentAuthorities(newEvents)
           for (const authority of authorities) {
             const key = JSON.stringify([
               authority.messageRef,
@@ -653,13 +790,11 @@ export async function sendAssistantMessageLocal(
         >()
         const turnInputController = createAssistantActiveTurnInputController({
           acceptedInputValidator: async ({ acceptedInputs }) => {
-            await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
+            const events = await readAssistantAcceptedTurnInputEvents({
               inputs: acceptedInputs,
               vault: input.vault,
             })
-            await snapshotAnalyzeVideoAuthorities(
-              acceptedInputs.map((acceptedInput) => acceptedInput.id),
-            )
+            snapshotAnalyzeVideoAuthorities(events)
           },
           admissionHook: input.activeTurnInput,
           beforeProviderSteer: input.beforeProviderAcceptedInputs
@@ -670,18 +805,17 @@ export async function sendAssistantMessageLocal(
                     sessionId: resolved.session.sessionId,
                     turnId: receipt.turnId,
                   })
-                await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-                  journal: acceptedInputJournal,
+                const events = await readAssistantAcceptedTurnInputEvents({
+                  inputs: acceptedInputJournal.inputs,
                   vault: input.vault,
                 })
-                await snapshotAnalyzeVideoAuthorities(
-                  acceptedInputJournal.inputIds,
-                )
+                snapshotAnalyzeVideoAuthorities(events)
                 const releaseProviderAcceptedInputs =
                   await input.beforeProviderAcceptedInputs?.({
                     ...event,
                     turnId: receipt.turnId,
                   })
+                typingIndicator?.recordAcceptedInputs(event.acceptedInputs.map((item) => item.id))
                 preProviderSteerAcceptedInputJournals.set(
                   JSON.stringify(event.acceptedInputs.map((item) => item.id)),
                   acceptedInputJournal,
@@ -694,6 +828,7 @@ export async function sendAssistantMessageLocal(
             resolveAssistantConversationLookupKey(input),
           ].filter((key): key is string => key !== null),
           sessionId: resolved.session.sessionId,
+          signal: input.abortSignal,
           turnId: receipt.turnId,
           vault: input.vault,
         })
@@ -716,12 +851,16 @@ export async function sendAssistantMessageLocal(
             sessionId: resolved.session.sessionId,
             turnId: receipt.turnId,
           })
-        await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-          journal: initialAcceptedInputJournal,
+        const initialAcceptedEvents = await readAssistantAcceptedTurnInputEvents({
+          inputs: initialAcceptedInputJournal.inputs,
           vault: input.vault,
         })
-        await snapshotAnalyzeVideoAuthorities(
-          initialAcceptedInputJournal.inputIds,
+        snapshotAnalyzeVideoAuthorities(await readAnalyzeVideoConversationEvents({
+          acceptedEvents: initialAcceptedEvents,
+          vaultRoot: input.vault,
+        }))
+        const initialVideoAuthorityInputIds = new Set(
+          [...analyzeVideoAttachmentAuthorities.values()].map((authority) => authority.messageRef),
         )
         const threadScope = resolveAssistantCodexThreadScope({})
         const turnTimingStartedAt = lockAcquiredAt
@@ -743,7 +882,7 @@ export async function sendAssistantMessageLocal(
           isHostedComputerToolTransportAvailable({
             executionContext,
           }) && currentAudienceReplyDeliveryAvailable
-        const hostedExecutionContext = executionContext?.hosted ?? null
+        typingIndicator?.recordAcceptedInputs(initialAcceptedInputJournal.inputIds)
         let acceptedInputIdsForProviderRequest: readonly string[] =
           initialAcceptedInputJournal.inputIds
         let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
@@ -775,8 +914,9 @@ export async function sendAssistantMessageLocal(
                       input:
                         await applyAssistantAcceptedMessageTargetToDeliveryInput({
                           acceptedInputIds:
-                            resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+                            resolveNativeReplyAcceptedInputIds(
                               deliveryContextOrdinal,
+                              providerRequestDeliveryContextBaseOrdinal,
                             ),
                           action: 'native-reply',
                           input: progressInput.input,
@@ -872,12 +1012,12 @@ export async function sendAssistantMessageLocal(
           input.deliverResponse === true
           && currentAudienceReplyDeliveryAvailable
           && actionApprovalPort != null
-          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
+          && supportsAssistantVaultFileDelivery(currentDeliveryFields)
           && vaultFileSendTargetFingerprint !== null
         const pendingVaultFilesAvailable =
           input.deliverResponse === true
           && currentAudienceReplyDeliveryAvailable
-          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
+          && supportsAssistantVaultFileDelivery(currentDeliveryFields)
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               computerToolsAvailable: hostedComputerToolsAvailable,
@@ -888,9 +1028,18 @@ export async function sendAssistantMessageLocal(
                 messageInput: currentInput,
                 session: currentSession,
               }),
-              getAnalyzeVideoAttachmentAuthorities: () => [
-                ...analyzeVideoAttachmentAuthorities.values(),
-              ],
+              getConversationAttachmentAuthorities: () => {
+                const acceptedInputIds = new Set(resolveAssistantUserActionAcceptedInputIds({
+                  acceptedInputItems: acceptedInputItemsForProviderRequest,
+                  turnTrigger: currentInput.turnTrigger ?? null,
+                }))
+                // Retained history is frozen at turn start. Newly steered clips
+                // still require the current provider request's accepted boundary.
+                return [...analyzeVideoAttachmentAuthorities.values()].filter((authority) =>
+                  initialVideoAuthorityInputIds.has(authority.messageRef)
+                  || acceptedInputIds.has(authority.messageRef)
+                )
+              },
               getConversationScope: () =>
                 resolveAssistantConversationScope(
                   sharedPlan.conversationPolicy.audience,
@@ -959,10 +1108,10 @@ export async function sendAssistantMessageLocal(
                         session: currentSession,
                         sharedPlan,
                       })
-                      if (deliveryFields.channel?.trim().toLowerCase() !== 'linq') {
+                      if (!supportsAssistantVaultFileDelivery(deliveryFields)) {
                         throw new VaultCliError(
                           'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
-                          'Vault files can only be sent to the current iMessage conversation.',
+                          'Vault files cannot be sent to this conversation.',
                         )
                       }
                       if (!resolveAssistantVaultFileSendTargetFingerprint(deliveryFields)) {
@@ -1030,7 +1179,15 @@ export async function sendAssistantMessageLocal(
           : null
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
         let userPromptPersistedToTranscript = currentUserTurn.userPersisted
-        const providerRequestOrdinal = 0
+        let providerRequestDeliveryContextBaseOrdinal = 0
+        let nextUsageRecordOrdinal = 0
+        const heldGroupAcceptedTranscriptInputs: Array<{
+          acceptedInput: Extract<
+            AssistantActiveTurnInputAdmissionResult,
+            { kind: 'accepted' }
+          >
+          acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
+        }> = []
         const persistInitialUserPromptToTranscriptIfNeeded = async (persistInput: {
           detail: string
           prompt: string
@@ -1068,6 +1225,32 @@ export async function sendAssistantMessageLocal(
             })
           }
         }
+        const persistAcceptedActiveTurnInputTranscripts = async (persistInput: {
+          acceptedInput: Extract<
+            AssistantActiveTurnInputAdmissionResult,
+            { kind: 'accepted' }
+          >
+          acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
+        }) => {
+          const transcriptRefsByInputId =
+            await appendAcceptedActiveTurnInputTranscriptEntries({
+              acceptedInput: persistInput.acceptedInput,
+              acceptedInputItems: persistInput.acceptedInputItems,
+              sessionId: resolved.session.sessionId,
+              turnId: currentUserTurn.turnId,
+              vault: currentInput.vault,
+            })
+          const transcriptRefUpdates = resolveAcceptedTurnInputTranscriptRefUpdates({
+            inputs: persistInput.acceptedInputItems,
+            transcriptRefsByInputId,
+          })
+          if (transcriptRefUpdates.length > 0) {
+            await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
+              refs: transcriptRefUpdates,
+              turnId: currentUserTurn.turnId,
+            })
+          }
+        }
         const acceptActiveTurnInput = async (acceptanceInput: {
           activeTurnInput: Extract<
             AssistantActiveTurnInputAdmissionResult,
@@ -1078,11 +1261,13 @@ export async function sendAssistantMessageLocal(
           sessionId: string
         }) => {
           const previousInput = currentInput
-          await persistInitialUserPromptToTranscriptIfNeeded({
-            detail: 'user prompt persisted before active-turn input',
-            prompt: previousInput.prompt,
-            vault: previousInput.vault,
-          })
+          if (!holdGroupReplyDraft) {
+            await persistInitialUserPromptToTranscriptIfNeeded({
+              detail: 'user prompt persisted before active-turn input',
+              prompt: previousInput.prompt,
+              vault: previousInput.vault,
+            })
+          }
           const acceptedInputItems = resolveAcceptedActiveTurnInputItems({
             acceptedInput: acceptanceInput.activeTurnInput,
             input: currentInput,
@@ -1094,44 +1279,36 @@ export async function sendAssistantMessageLocal(
             preProviderSteerAcceptedInputJournals.get(
               preProviderSteerJournalKey,
             )
-          if (!preProviderSteerJournal) {
+          let acceptedInputJournal = preProviderSteerJournal
+          if (!acceptedInputJournal) {
             assertAcceptedActiveTurnInputItemsAreNew({
               acceptedInputIds: acceptanceInput.providerRequestAcceptedInputIds,
               inputs: acceptedInputItems,
             })
-          }
-          let acceptedInputJournal =
-            preProviderSteerJournal ??
-            await runtimeState.turns.acceptedInputs.append({
+            acceptedInputJournal = await runtimeState.turns.acceptedInputs.append({
               inputs: acceptedInputItems,
               sessionId: resolved.session.sessionId,
               turnId: currentUserTurn.turnId,
             })
+            typingIndicator?.recordAcceptedInputs(acceptedInputItems.map((item) => item.id))
+          }
           preProviderSteerAcceptedInputJournals.delete(
             preProviderSteerJournalKey,
           )
-          await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-            journal: acceptedInputJournal,
+          await readAssistantAcceptedTurnInputEvents({
+            inputs: acceptedInputJournal.inputs,
             vault: currentInput.vault,
           })
-          const transcriptRefsByInputId =
-            await appendAcceptedActiveTurnInputTranscriptEntries({
+          if (holdGroupReplyDraft) {
+            heldGroupAcceptedTranscriptInputs.push({
               acceptedInput: acceptanceInput.activeTurnInput,
               acceptedInputItems,
-              sessionId: resolved.session.sessionId,
-              turnId: currentUserTurn.turnId,
-              vault: currentInput.vault,
             })
-          const transcriptRefUpdates = resolveAcceptedTurnInputTranscriptRefUpdates({
-            inputs: acceptedInputItems,
-            transcriptRefsByInputId,
-          })
-          if (transcriptRefUpdates.length > 0) {
-            acceptedInputJournal =
-              await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
-                refs: transcriptRefUpdates,
-                turnId: currentUserTurn.turnId,
-              }) ?? acceptedInputJournal
+          } else {
+            await persistAcceptedActiveTurnInputTranscripts({
+              acceptedInput: acceptanceInput.activeTurnInput,
+              acceptedInputItems,
+            })
           }
           await appendAssistantTurnReceiptEvent({
             vault: currentInput.vault,
@@ -1154,7 +1331,17 @@ export async function sendAssistantMessageLocal(
             acceptedInput: acceptanceInput.activeTurnInput,
             input: previousInput,
           })
-          currentInput = nextInput
+          currentInput =
+            holdGroupReplyDraft
+              ? {
+                  ...nextInput,
+                  prompt: `${previousInput.prompt}\n\n${nextInput.prompt}`,
+                  userMessageContent: [
+                    ...(previousInput.userMessageContent ?? []),
+                    ...(acceptanceInput.activeTurnInput.userMessageContent ?? []),
+                  ],
+                }
+              : nextInput
           acceptedInputIdsForProviderRequest = acceptedInputJournal.inputIds
           acceptedInputItemsForProviderRequest = acceptedInputJournal.inputs
           return {
@@ -1201,18 +1388,75 @@ export async function sendAssistantMessageLocal(
             ),
           ]
         }
+        // Native authority must not use the shared helper's out-of-range
+        // accounting fallback, or rebase an invalid request-relative ordinal.
+        function resolveNativeReplyAcceptedInputIds(
+          deliveryContextOrdinal: number,
+          baseOrdinal = 0,
+        ): readonly string[] {
+          const absoluteOrdinal = baseOrdinal + deliveryContextOrdinal
+          if (
+            !Number.isInteger(deliveryContextOrdinal) ||
+            deliveryContextOrdinal < 0 ||
+            absoluteOrdinal >= acceptedInputIdsByDeliveryContextOrdinal.length
+          ) {
+            return []
+          }
+          return resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+            absoluteOrdinal,
+          )
+        }
+        function resolveNoReplyAcceptedInputIds(
+          deliveryContextOrdinal: number,
+          precedingReplyDeliveryContextOrdinal: number | null,
+        ): readonly string[] {
+          if (precedingReplyDeliveryContextOrdinal === null) {
+            return resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+              deliveryContextOrdinal,
+            )
+          }
+          if (
+            precedingReplyDeliveryContextOrdinal < 0 ||
+            precedingReplyDeliveryContextOrdinal >= deliveryContextOrdinal ||
+            deliveryContextOrdinal >=
+              acceptedInputIdsByDeliveryContextOrdinal.length
+          ) {
+            throw new VaultCliError(
+              'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+              'Assistant no-reply selection referenced an invalid delivery context ordinal.',
+            )
+          }
+          return [
+            ...new Set(
+              acceptedInputIdsByDeliveryContextOrdinal
+                .slice(
+                  precedingReplyDeliveryContextOrdinal + 1,
+                  deliveryContextOrdinal + 1,
+                )
+                .flat(),
+            ),
+          ]
+        }
         const authorizeAcceptedMessageTarget: AssistantAcceptedMessageTargetAuthorizer =
           async (authorizationInput) => {
+            const deliveryContextOrdinal =
+              providerRequestDeliveryContextBaseOrdinal +
+              authorizationInput.deliveryContextOrdinal
             const acceptedInputIds =
-              authorizationInput.action === 'participant-effect'
-                ? resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+              authorizationInput.action === 'native-reply'
+                ? resolveNativeReplyAcceptedInputIds(
                     authorizationInput.deliveryContextOrdinal,
+                    providerRequestDeliveryContextBaseOrdinal,
                   )
-                : acceptedInputIdsByDeliveryContextOrdinal[
-                    authorizationInput.deliveryContextOrdinal
-                  ]
+                : authorizationInput.action === 'participant-effect'
+                  ? resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+                      deliveryContextOrdinal,
+                    )
+                  : acceptedInputIdsByDeliveryContextOrdinal[
+                      deliveryContextOrdinal
+                    ]
             const deliveryContext =
-              replyDeliveryContexts[authorizationInput.deliveryContextOrdinal]
+              replyDeliveryContexts[deliveryContextOrdinal]
             if (!acceptedInputIds || !deliveryContext) {
               return null
             }
@@ -1257,9 +1501,9 @@ export async function sendAssistantMessageLocal(
               throw error
             }
           }
-        // Cumulative through the ordinal: the no-reply hook and participant
-        // effects may reference any input already admitted into the provider
-        // turn. Native replies and reactions remain exact to one ordinal.
+        // Cumulative through the ordinal: the no-reply hook, participant
+        // effects and native replies may reference any input already admitted
+        // through their ordinal. Reactions remain exact to one ordinal.
         const admissionMs = elapsedSince(admissionStartedAt)
         const providerStartAtPreProviderSetupDone =
           stampAssistantProviderStartCriticalPath(
@@ -1363,176 +1607,69 @@ export async function sendAssistantMessageLocal(
           await drainLiveSteeredActiveTurnInputs({
             continuation: providerRequestContinuation,
             sessionId: currentSession.sessionId,
-            throughDeliveryContextOrdinal,
+            throughDeliveryContextOrdinal:
+              providerRequestDeliveryContextBaseOrdinal +
+              throughDeliveryContextOrdinal,
           })
         }
-        const providerOutcome = await executeCodexTurnWithRecovery({
-          acceptedInputItems: providerRequestAcceptedInputItems,
-          activeTurnSteering: turnInputController,
-          authorizeAcceptedMessageTarget,
-          input: currentInput,
-          onFinishWithoutReplyAccepted: async (event) => {
-            await drainLiveSteeredActiveTurnInputs({
-              continuation: providerRequestContinuation,
-              sessionId: currentSession.sessionId,
-              throughDeliveryContextOrdinal: event.deliveryContextOrdinal,
-            })
-            await persistInitialUserPromptToTranscriptIfNeeded({
-              detail: 'user prompt persisted before no-reply completion',
-              prompt: currentInput.prompt,
-              vault: currentInput.vault,
-            })
-            const acceptedInputIds =
-              resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
-                event.deliveryContextOrdinal,
-              )
-            await currentInput.onFinishWithoutReplyAccepted?.({
-              acceptedInputIds,
-              deliveryContextOrdinal: event.deliveryContextOrdinal,
-              messageReactionPending: event.messageReactionPending,
-            })
-          },
-          onFinishWithoutReplyRecorded: async (event) => {
-            await persistAssistantNoReplyTranscriptMarkers({
-              deliveryContextOrdinals: [event.deliveryContextOrdinal],
-              sessionId: currentSession.sessionId,
-              turnCreatedAt: currentUserTurn.turnCreatedAt,
-              turnId: currentUserTurn.turnId,
-              vault: input.vault,
-            })
-          },
-          onProviderRequestPlanned: async (event) => {
-            providerRequestContinuation = event.codexContinuation
-            providerRequestJournal =
-              await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                continuation: event.codexContinuation,
-                ordinal: providerRequestOrdinal,
-                providerAttemptId: event.providerAttemptId,
-                turnId: currentUserTurn.turnId,
-              })
-            providerRequestAcceptedInputIds =
-              providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
-            providerRequestAcceptedInputItems =
-              providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
-            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-            return await input.beforeProviderAcceptedInputs?.({
-              acceptedInputs: providerRequestAcceptedInputItems,
-              turnId: currentUserTurn.turnId,
-            })
-          },
-          onProviderRequestStarted: (event) => {
-            const startedAtMs = Date.parse(event.startedAt)
-            if (Number.isFinite(startedAtMs)) {
-              providerRequestStartedAtMs = startedAtMs
-            }
-            if (!currentInput.onProviderRequestStarted) {
-              return
-            }
-            return currentInput.onProviderRequestStarted({
-              ...event,
-              acceptedInputIds: providerRequestAcceptedInputIds,
-              admissionMs,
-              preProviderSetupMs,
-              promptBuildMs,
-              providerRequestOrdinal:
-                event.providerRequestOrdinal ?? providerRequestOrdinal,
-              sessionResolveMs,
-              turnLockWaitMs,
-            })
-          },
-          route,
-          plan: sharedPlan,
-          profile: {
-            threadScope,
-          },
-          providerRequestOrdinal,
-          ...(providerStartAtPreProviderSetupDone
-            ? {
-                providerStartCriticalPath:
-                  providerStartAtPreProviderSetupDone,
-              }
-            : {}),
-          resolvedSession: currentSession,
-          turnCreatedAt: currentUserTurn.turnCreatedAt,
-          progressDelivery,
-          hostedToolContext,
-          turnId: currentUserTurn.turnId,
-        })
-        providerResultReturnedAt = Date.now()
-        emitTurnTiming({
-          elapsedMs: elapsedSince(turnTimingStartedAt),
-          providerOutcomeKind: providerOutcome.kind,
-          providerRequestElapsedMs: providerRequestStartedAtMs === null
-            ? null
-            : Math.max(0, providerResultReturnedAt - providerRequestStartedAtMs),
-          providerRequestOrdinal,
-          sinceProviderResultMs: 0,
-          stage: 'provider-result-returned',
-        })
-        if (providerOutcome.kind === 'failed_terminal') {
-          if (!providerRequestJournal) {
-            providerRequestJournal =
-              await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                continuation: providerOutcome.codexContinuation,
-                ordinal: providerRequestOrdinal,
-                providerAttemptId: null,
-                turnId: currentUserTurn.turnId,
-              })
-            providerRequestAcceptedInputIds =
-              providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
-            providerRequestAcceptedInputItems =
-              providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
-            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-          } else {
-            providerRequestJournal =
-              await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                continuation: providerOutcome.codexContinuation,
-                ordinal: providerRequestOrdinal,
-                providerAttemptId: null,
-                turnId: currentUserTurn.turnId,
-              }) ?? providerRequestJournal
-            providerRequestAcceptedInputIds =
-              providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
-            providerRequestAcceptedInputItems =
-              providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
-            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
+        const commitSelectedNoReply = async (
+          selectedProviderResult: ExecutedAssistantProviderTurnResult,
+        ) => {
+          if (selectedProviderResult.finalAction?.kind !== 'none') {
+            return
           }
-          const failedProviderResult = {
-            attemptCount: providerOutcome.attemptCount,
-            provider: providerOutcome.route.provider,
-            providerOptions: providerOutcome.route.providerOptions,
-            route: providerOutcome.route,
-            session: providerOutcome.session,
-            usage: providerOutcome.usage,
-            usageAttribution: providerOutcome.usageAttribution,
-          }
-          const acceptedNoReplyOrdinals =
-            providerOutcome.acceptedNoReplyDeliveryContextOrdinals ?? []
-          const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
-          const recoverableNoReplyDeliveryContextOrdinal =
-            latestAcceptedDeliveryContextOrdinal >= 0 &&
-            acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
-              ? latestAcceptedDeliveryContextOrdinal
-              : null
-          if (recoverableNoReplyDeliveryContextOrdinal === null) {
-            await drainLiveSteeredActiveTurnInputs({
-              continuation: providerOutcome.codexContinuation,
-              sessionId: providerOutcome.session.sessionId,
-            })
-          }
+          await persistInitialUserPromptToTranscriptIfNeeded({
+            detail: 'user prompt persisted before no-reply completion',
+            prompt: currentInput.prompt,
+            vault: currentInput.vault,
+          })
+          const deliveryContextOrdinal =
+            selectedProviderResult.acceptedNoReplyDeliveryContextOrdinals?.at(-1)
+            ?? selectedProviderResult.responseDeliveryContextOrdinal
+          const precedingReplyDeliveryContextOrdinal = Math.max(
+            -1,
+            ...(selectedProviderResult.precedingResponseSegments ?? [])
+              .map((segment) => segment.deliveryContextOrdinal)
+              .filter((ordinal) => ordinal < deliveryContextOrdinal),
+          )
+          await currentInput.onFinishWithoutReplyAccepted?.({
+            acceptedInputIds: resolveNoReplyAcceptedInputIds(
+              deliveryContextOrdinal,
+              precedingReplyDeliveryContextOrdinal < 0
+                ? null
+                : precedingReplyDeliveryContextOrdinal,
+            ),
+            deliveryContextOrdinal,
+            messageReactionPending:
+              (selectedProviderResult.reactions ?? []).some(
+                (reaction) =>
+                  reaction.deliveryContextOrdinal <= deliveryContextOrdinal,
+              ),
+            precedingReplyDeliveryContextOrdinal:
+              precedingReplyDeliveryContextOrdinal < 0
+                ? null
+                : precedingReplyDeliveryContextOrdinal,
+          })
+        }
+        const recordCurrentProviderUsage = async (usageInput: {
+          providerResult: Parameters<typeof recordAssistantUsageEvent>[0]['providerResult']
+          additionalUsages: Parameters<typeof recordAdditionalAssistantUsageEvents>[0]['additionalUsages']
+          providerRequestOutcome?: Parameters<typeof recordAssistantUsageEvent>[0]['providerRequestOutcome']
+        }): Promise<void> => {
           const usageRecordStartedAt = Date.now()
+          const primaryUsageRecordOrdinal = nextUsageRecordOrdinal
+          nextUsageRecordOrdinal += 1
           await recordAssistantUsageEvent({
             executionContext,
             ...(providerRequestStartedAtMs === null
               ? {}
               : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
             providerRequestAcceptedInputIds,
-            providerRequestOrdinal,
-            providerRequestOutcome: providerOutcome.providerRequestOutcome,
-            providerResult: failedProviderResult,
+            providerRequestOrdinal: primaryUsageRecordOrdinal,
+            ...(usageInput.providerRequestOutcome === undefined
+              ? {}
+              : { providerRequestOutcome: usageInput.providerRequestOutcome }),
+            providerResult: usageInput.providerResult,
             turnId: currentUserTurn.turnId,
           })
           emitTurnTiming({
@@ -1544,252 +1681,519 @@ export async function sendAssistantMessageLocal(
             stage: 'usage-recorded',
             stepElapsedMs: elapsedSince(usageRecordStartedAt),
           })
+          const additionalUsages = usageInput.additionalUsages?.map(
+            (usageDraft) => ({
+              ...usageDraft,
+              providerRequestOrdinal: nextUsageRecordOrdinal++,
+            }),
+          )
           await recordAdditionalAssistantUsageEvents({
-            additionalUsages: providerOutcome.additionalUsages,
+            additionalUsages,
             effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
             executionContext,
             providerRequestAcceptedInputIds,
-            providerResult: failedProviderResult,
+            providerResult: usageInput.providerResult,
             turnId: currentUserTurn.turnId,
           })
-          const failedProviderResumeStateAction =
-            resolveAssistantProviderResumeStateAction({
-              codexThreadId: providerOutcome.codexThreadId ?? null,
-              threadScope,
-            })
-          if (progressDeliveredSessionRef.value) {
-            currentSession = applyAssistantProgressDeliveredSession({
-              progressDeliveredSession: progressDeliveredSessionRef.value,
-              session: providerOutcome.session,
-            })
+        }
+
+        type CurrentProviderRequestResult =
+          | {
+              kind: 'completed'
+              result: AssistantAskResult
+            }
+          | {
+              kind: 'provider-result'
+              providerResult: ExecutedAssistantProviderTurnResult
+            }
+        const runCurrentProviderRequest = async (requestInput: {
+          allowFailedNoReplyRecovery: boolean
+        }): Promise<CurrentProviderRequestResult> => {
+          providerRequestJournal = null
+          providerRequestContinuation = null
+          providerRequestAcceptedInputIds = acceptedInputIdsForProviderRequest
+          providerRequestAcceptedInputItems = acceptedInputItemsForProviderRequest
+          providerRequestStartedAtMs = null
+          providerResultReturnedAt = null
+          let failedNoReplyRecoveryBlocked = false
+
+          const onFirstAssistantResponseCompleted = () => {
+            if (holdGroupReplyDraft && providerRequestOrdinal === 0) {
+              turnInputController.pauseProviderSteering()
+            } else {
+              turnInputController.closeTurnAdmission()
+            }
           }
-          currentSession = await applyAssistantSessionCodexResumeStateAction({
-            action: failedProviderResumeStateAction,
-            assistantContractFingerprint:
-              providerOutcome.assistantContractFingerprint,
-            codexRolloutRelativePath:
-              providerOutcome.codexRolloutRelativePath,
-            codexThreadId: providerOutcome.codexThreadId,
-            routeFingerprint:
-              readCodexThreadRouteFingerprint(providerOutcome.route),
-            threadCompatibilityFingerprint:
-              readCodexThreadCompatibilityFingerprint(providerOutcome.route),
-            session: currentSession,
-            vault: input.vault,
+          const activeTurnSteering = {
+            onFirstAssistantResponseCompleted,
+            registerLiveProviderTurn: (
+              liveTurn: Parameters<
+                typeof turnInputController.registerLiveProviderTurn
+              >[0],
+            ) => turnInputController.registerLiveProviderTurn(liveTurn),
+          }
+          const providerOutcome = await executeCodexTurnWithRecovery({
+            acceptedInputItems: providerRequestAcceptedInputItems,
+            activeTurnSteering,
+            analyzeVideoTurnState,
+            authorizeAcceptedMessageTarget,
+            input: currentInput,
+            onFinishWithoutReplyAccepted: async (event) => {
+              onFirstAssistantResponseCompleted()
+              const deliveryContextOrdinal =
+                providerRequestDeliveryContextBaseOrdinal +
+                event.deliveryContextOrdinal
+              failedNoReplyRecoveryBlocked ||=
+                event.precedingReplyDeliveryContextOrdinal !== null
+              await drainLiveSteeredActiveTurnInputs({
+                continuation: providerRequestContinuation,
+                sessionId: currentSession.sessionId,
+                throughDeliveryContextOrdinal: deliveryContextOrdinal,
+              })
+              if (!holdGroupReplyDraft) {
+                await persistInitialUserPromptToTranscriptIfNeeded({
+                  detail: 'user prompt persisted before no-reply completion',
+                  prompt: currentInput.prompt,
+                  vault: currentInput.vault,
+                })
+                const acceptedInputIds = resolveNoReplyAcceptedInputIds(
+                  deliveryContextOrdinal,
+                  event.precedingReplyDeliveryContextOrdinal,
+                )
+                await currentInput.onFinishWithoutReplyAccepted?.({
+                  acceptedInputIds,
+                  deliveryContextOrdinal,
+                  messageReactionPending: event.messageReactionPending,
+                  precedingReplyDeliveryContextOrdinal:
+                    event.precedingReplyDeliveryContextOrdinal,
+                })
+              }
+            },
+            onFinishWithoutReplyRecorded: async (event) => {
+              if (!holdGroupReplyDraft) {
+                await persistAssistantNoReplyTranscriptMarkers({
+                  deliveryContextOrdinals: [
+                    providerRequestDeliveryContextBaseOrdinal +
+                    event.deliveryContextOrdinal,
+                  ],
+                  sessionId: currentSession.sessionId,
+                  turnCreatedAt: currentUserTurn.turnCreatedAt,
+                  turnId: currentUserTurn.turnId,
+                  vault: input.vault,
+                })
+              }
+            },
+            onProviderRequestPlanned: async (event) => {
+              providerRequestContinuation = event.codexContinuation
+              providerRequestJournal =
+                await runtimeState.turns.acceptedInputs.recordProviderRequest({
+                  continuation: event.codexContinuation,
+                  ordinal: providerRequestOrdinal,
+                  providerAttemptId: event.providerAttemptId,
+                  turnId: currentUserTurn.turnId,
+                })
+              providerRequestAcceptedInputIds =
+                providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
+              providerRequestAcceptedInputItems =
+                providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
+              acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+              acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
+              return await input.beforeProviderAcceptedInputs?.({
+                acceptedInputs: providerRequestAcceptedInputItems,
+                turnId: currentUserTurn.turnId,
+              })
+            },
+            onProviderRequestStarted: (event) => {
+              const startedAtMs = Date.parse(event.startedAt)
+              if (Number.isFinite(startedAtMs)) {
+                providerRequestStartedAtMs = startedAtMs
+              }
+              if (!currentInput.onProviderRequestStarted) {
+                return
+              }
+              return currentInput.onProviderRequestStarted({
+                ...event,
+                acceptedInputIds: providerRequestAcceptedInputIds,
+                admissionMs,
+                preProviderSetupMs,
+                promptBuildMs,
+                providerRequestOrdinal:
+                  event.providerRequestOrdinal ?? providerRequestOrdinal,
+                sessionResolveMs,
+                turnLockWaitMs,
+              })
+            },
+            route,
+            plan: sharedPlan,
+            profile: {
+              threadScope,
+            },
+            providerRequestOrdinal,
+            ...(providerStartAtPreProviderSetupDone
+              ? {
+                  providerStartCriticalPath:
+                    providerStartAtPreProviderSetupDone,
+                }
+              : {}),
+            resolvedSession: currentSession,
+            turnCreatedAt: currentUserTurn.turnCreatedAt,
+            progressDelivery,
+            hostedToolContext,
+            turnId: currentUserTurn.turnId,
           })
-          if (recoverableNoReplyDeliveryContextOrdinal !== null) {
-            turnInputController.close()
-            await runtimeState.turns.acceptedInputs.updateAdmissionState({
-              admissionState: 'commit-started',
-              turnId: currentUserTurn.turnId,
+          providerResultReturnedAt = Date.now()
+          emitTurnTiming({
+            elapsedMs: elapsedSince(turnTimingStartedAt),
+            providerOutcomeKind: providerOutcome.kind,
+            providerRequestElapsedMs: providerRequestStartedAtMs === null
+              ? null
+              : Math.max(0, providerResultReturnedAt - providerRequestStartedAtMs),
+            providerRequestOrdinal,
+            sinceProviderResultMs: 0,
+            stage: 'provider-result-returned',
+          })
+          if (providerOutcome.kind !== 'failed_terminal') {
+            onFirstAssistantResponseCompleted()
+          }
+          const completedContinuation = providerOutcome.kind === 'failed_terminal'
+            ? providerOutcome.codexContinuation
+            : providerOutcome.providerTurn.codexContinuation
+          if (!providerRequestJournal) {
+            providerRequestJournal =
+              await runtimeState.turns.acceptedInputs.recordProviderRequest({
+                continuation: completedContinuation,
+                ordinal: providerRequestOrdinal,
+                providerAttemptId: null,
+                turnId: currentUserTurn.turnId,
+              })
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
+            providerRequestAcceptedInputItems =
+              providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
+          } else {
+            providerRequestJournal =
+              await runtimeState.turns.acceptedInputs.updateProviderRequest({
+                continuation: completedContinuation,
+                ordinal: providerRequestOrdinal,
+                providerAttemptId: null,
+                turnId: currentUserTurn.turnId,
+              }) ?? providerRequestJournal
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
+            providerRequestAcceptedInputItems =
+              providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
+          }
+          acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+          acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
+          if (providerOutcome.kind === 'failed_terminal') {
+            const failedProviderResult = {
+              attemptCount: providerOutcome.attemptCount,
+              provider: providerOutcome.route.provider,
+              providerOptions: providerOutcome.route.providerOptions,
+              route: providerOutcome.route,
+              session: providerOutcome.session,
+              usage: providerOutcome.usage,
+              usageAttribution: providerOutcome.usageAttribution,
+            }
+            const acceptedNoReplyOrdinals =
+              providerOutcome.acceptedNoReplyDeliveryContextOrdinals ?? []
+            const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
+            const recoverableNoReplyDeliveryContextOrdinal =
+              !failedNoReplyRecoveryBlocked &&
+              latestAcceptedDeliveryContextOrdinal >= 0 &&
+              acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
+                ? latestAcceptedDeliveryContextOrdinal
+                : null
+            if (
+              recoverableNoReplyDeliveryContextOrdinal === null ||
+              !requestInput.allowFailedNoReplyRecovery
+            ) {
+              await drainLiveSteeredActiveTurnInputs({
+                continuation: providerOutcome.codexContinuation,
+                sessionId: providerOutcome.session.sessionId,
+              })
+            }
+            await recordCurrentProviderUsage({
+              providerResult: failedProviderResult,
+              additionalUsages: providerOutcome.additionalUsages,
+              providerRequestOutcome: providerOutcome.providerRequestOutcome,
             })
-            const recoveredReactions = (providerOutcome.reactions ?? []).filter(
-              (reaction) =>
-                reaction.deliveryContextOrdinal <= recoverableNoReplyDeliveryContextOrdinal,
-            )
-            const failedNoReplySession = currentSession
-            const failedNoReplyProviderResult: ExecutedAssistantProviderTurnResult = {
-              acceptedNoReplyDeliveryContextOrdinals: acceptedNoReplyOrdinals,
+            if (
+              requestInput.allowFailedNoReplyRecovery &&
+              recoverableNoReplyDeliveryContextOrdinal !== null
+            ) {
+              await executionContext?.hosted?.assertTurnCommitAuthority?.({
+                acceptedInputs: providerRequestAcceptedInputItems,
+                turnId: currentUserTurn.turnId,
+              })
+            }
+            const failedProviderResumeStateAction =
+              providerRequestOrdinal === 1
+                ? 'preserve-existing'
+                : resolveAssistantProviderResumeStateAction({
+                    codexThreadId: providerOutcome.codexThreadId ?? null,
+                    threadScope,
+                  })
+            if (progressDeliveredSessionRef.value) {
+              currentSession = applyAssistantProgressDeliveredSession({
+                progressDeliveredSession: progressDeliveredSessionRef.value,
+                session: providerOutcome.session,
+              })
+            }
+            currentSession = await applyAssistantSessionCodexResumeStateAction({
+              action: failedProviderResumeStateAction,
               assistantContractFingerprint:
                 providerOutcome.assistantContractFingerprint,
-              attemptCount: providerOutcome.attemptCount,
-              codexContinuation: providerOutcome.codexContinuation,
               codexRolloutRelativePath:
                 providerOutcome.codexRolloutRelativePath,
               codexThreadId: providerOutcome.codexThreadId,
-              finalAction: {
-                kind: 'none',
-              },
-              provider: providerOutcome.route.provider,
-              providerOptions: providerOutcome.route.providerOptions,
-              rawEvents: providerOutcome.rawEvents,
-              reactions: recoveredReactions,
-              response: '',
-              responseDeliveryContextOrdinal:
-                recoverableNoReplyDeliveryContextOrdinal,
-              responseMedia: [],
-              responseCard: null,
-              route: providerOutcome.route,
-              session: failedNoReplySession,
-              stderr: '',
-              stdout: '',
-              transcriptResponse: null,
-              usage: providerOutcome.usage,
-              usageAttribution: providerOutcome.usageAttribution,
-              workingDirectory: sharedPlan.requestedWorkingDirectory,
-            }
-            const turnArtifactsStartedAt = Date.now()
-            const session = await finalizeAssistantTurnArtifacts({
-              assistantTranscriptText: null,
-              input: currentInput,
-              plan: sharedPlan,
-              precedingAssistantTranscriptTexts: [],
-              providerResult: failedNoReplyProviderResult,
-              providerResumeStateAction: failedProviderResumeStateAction,
-              persistUserPromptToTranscript: !userPromptPersistedToTranscript,
-              session: failedNoReplySession,
-              turnCreatedAt: currentUserTurn.turnCreatedAt,
-              turnId: currentUserTurn.turnId,
-              userContentReceivedAt: currentUserTurn.userContentReceivedAt,
-            })
-            currentSession = session
-            emitTurnTiming({
-              elapsedMs: elapsedSince(turnTimingStartedAt),
-              finalReplySelected: false,
-              providerRequestOrdinal,
-              sinceProviderResultMs: providerResultReturnedAt === null
-                ? null
-                : elapsedSince(providerResultReturnedAt),
-              stage: 'turn-artifacts-finalized',
-              stepElapsedMs: elapsedSince(turnArtifactsStartedAt),
-            })
-            const replyDispatchStartedAt = Date.now()
-            const {
-              deliverySession,
-              reactionDeliveryOutcomes,
-            } = await deliverAssistantProviderReactions({
-              acceptedInputIdsByDeliveryContextOrdinal,
-              currentInput,
-              providerResult: failedNoReplyProviderResult,
-              replyDeliveryContexts,
-              session,
-              sharedPlan,
-              turnId: currentUserTurn.turnId,
-            })
-            const deliveryOutcome = resolveAssistantNoReplyDeliveryOutcome({
-              precedingDeliveryOutcomes: [],
-              session: deliverySession,
-            })
-            const finalDeliveryOutcome =
-              deliveryOutcome.kind === 'not-requested' &&
-              reactionDeliveryOutcomes.length > 0
-                ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
-                : deliveryOutcome
-            emitTurnTiming({
-              deliveryAttempted: reactionDeliveryOutcomes.length > 0,
-              deliveryIntentPresent: 'intentId' in finalDeliveryOutcome
-                ? finalDeliveryOutcome.intentId !== null
-                : false,
-              deliveryOutcomeKind: finalDeliveryOutcome.kind,
-              elapsedMs: elapsedSince(turnTimingStartedAt),
-              finalReplySelected: false,
-              providerRequestOrdinal,
-              sinceProviderResultMs: providerResultReturnedAt === null
-                ? null
-                : elapsedSince(providerResultReturnedAt),
-              stage: 'reply-dispatched',
-              stepElapsedMs: elapsedSince(replyDispatchStartedAt),
-            })
-            await finalizeDeliveredAssistantTurn({
-              firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
-              outcome: finalDeliveryOutcome,
-              response: '',
-              turnId: currentUserTurn.turnId,
+              routeFingerprint:
+                readCodexThreadRouteFingerprint(providerOutcome.route),
+              threadCompatibilityFingerprint:
+                readCodexThreadCompatibilityFingerprint(providerOutcome.route),
+              session: currentSession,
               vault: input.vault,
             })
-            const result = normalizeAssistantAskResultForReturn({
-              vault: redactAssistantDisplayPath(input.vault),
-              status: 'completed',
-              prompt: currentInput.prompt,
-              response: '',
-              responseDisposition: 'none' as const,
-              media: finalDeliveryOutcome.media,
-              session: finalDeliveryOutcome.session,
-              delivery:
-                finalDeliveryOutcome.kind === 'sent'
-                  ? finalDeliveryOutcome.delivery
-                  : null,
-              deliveryDeferred: finalDeliveryOutcome.kind === 'queued',
-              deliveryIntentId:
-                finalDeliveryOutcome.kind === 'sent' ||
-                finalDeliveryOutcome.kind === 'queued' ||
-                finalDeliveryOutcome.kind === 'failed'
-                  ? finalDeliveryOutcome.intentId
-                  : null,
-              deliveryError:
-                finalDeliveryOutcome.kind === 'queued' ||
-                finalDeliveryOutcome.kind === 'failed'
-                  ? finalDeliveryOutcome.error
-                  : null,
-            })
-            turnInputController.complete(result)
-            return result
+            if (
+              requestInput.allowFailedNoReplyRecovery &&
+              recoverableNoReplyDeliveryContextOrdinal !== null
+            ) {
+              turnInputController.close()
+              await runtimeState.turns.acceptedInputs.updateAdmissionState({
+                admissionState: 'commit-started',
+                turnId: currentUserTurn.turnId,
+              })
+              const recoveredReactions = (providerOutcome.reactions ?? []).filter(
+                (reaction) =>
+                  reaction.deliveryContextOrdinal <= recoverableNoReplyDeliveryContextOrdinal,
+              )
+              const failedNoReplySession = currentSession
+              const failedNoReplyProviderResult: ExecutedAssistantProviderTurnResult = {
+                acceptedNoReplyDeliveryContextOrdinals: acceptedNoReplyOrdinals,
+                assistantContractFingerprint:
+                  providerOutcome.assistantContractFingerprint,
+                attemptCount: providerOutcome.attemptCount,
+                codexContinuation: providerOutcome.codexContinuation,
+                codexRolloutRelativePath:
+                  providerOutcome.codexRolloutRelativePath,
+                codexThreadId: providerOutcome.codexThreadId,
+                finalAction: {
+                  kind: 'none',
+                },
+                provider: providerOutcome.route.provider,
+                providerOptions: providerOutcome.route.providerOptions,
+                rawEvents: providerOutcome.rawEvents,
+                reactions: recoveredReactions,
+                response: '',
+                responseDeliveryContextOrdinal:
+                  recoverableNoReplyDeliveryContextOrdinal,
+                responseMedia: [],
+                responseCard: null,
+                route: providerOutcome.route,
+                session: failedNoReplySession,
+                stderr: '',
+                stdout: '',
+                transcriptResponse: null,
+                usage: providerOutcome.usage,
+                usageAttribution: providerOutcome.usageAttribution,
+                workingDirectory: sharedPlan.requestedWorkingDirectory,
+              }
+              const turnArtifactsStartedAt = Date.now()
+              const session = await finalizeAssistantTurnArtifacts({
+                assistantTranscriptText: null,
+                input: currentInput,
+                plan: sharedPlan,
+                precedingAssistantTranscriptTexts: [],
+                providerResult: failedNoReplyProviderResult,
+                providerResumeStateAction: failedProviderResumeStateAction,
+                persistUserPromptToTranscript: !userPromptPersistedToTranscript,
+                session: failedNoReplySession,
+                turnCreatedAt: currentUserTurn.turnCreatedAt,
+                turnId: currentUserTurn.turnId,
+                userContentReceivedAt: currentUserTurn.userContentReceivedAt,
+              })
+              currentSession = session
+              emitTurnTiming({
+                elapsedMs: elapsedSince(turnTimingStartedAt),
+                finalReplySelected: false,
+                providerRequestOrdinal,
+                sinceProviderResultMs: providerResultReturnedAt === null
+                  ? null
+                  : elapsedSince(providerResultReturnedAt),
+                stage: 'turn-artifacts-finalized',
+                stepElapsedMs: elapsedSince(turnArtifactsStartedAt),
+              })
+              const replyDispatchStartedAt = Date.now()
+              const {
+                deliverySession,
+                reactionDeliveryOutcomes,
+              } = await deliverAssistantProviderReactions({
+                acceptedInputIdsByDeliveryContextOrdinal,
+                currentInput,
+                providerResult: failedNoReplyProviderResult,
+                replyDeliveryContexts,
+                session,
+                sharedPlan,
+                turnId: currentUserTurn.turnId,
+              })
+              const deliveryOutcome = resolveAssistantNoReplyDeliveryOutcome({
+                precedingDeliveryOutcomes: [],
+                session: deliverySession,
+              })
+              const finalDeliveryOutcome =
+                deliveryOutcome.kind === 'not-requested' &&
+                reactionDeliveryOutcomes.length > 0
+                  ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
+                  : deliveryOutcome
+              emitTurnTiming({
+                deliveryAttempted: reactionDeliveryOutcomes.length > 0,
+                deliveryIntentPresent: 'intentId' in finalDeliveryOutcome
+                  ? finalDeliveryOutcome.intentId !== null
+                  : false,
+                deliveryOutcomeKind: finalDeliveryOutcome.kind,
+                elapsedMs: elapsedSince(turnTimingStartedAt),
+                finalReplySelected: false,
+                providerRequestOrdinal,
+                sinceProviderResultMs: providerResultReturnedAt === null
+                  ? null
+                  : elapsedSince(providerResultReturnedAt),
+                stage: 'reply-dispatched',
+                stepElapsedMs: elapsedSince(replyDispatchStartedAt),
+              })
+              await finalizeDeliveredAssistantTurn({
+                firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
+                outcome: finalDeliveryOutcome,
+                response: '',
+                turnId: currentUserTurn.turnId,
+                vault: input.vault,
+              })
+              const result = buildCompletedAssistantAskResult({
+                outcome: finalDeliveryOutcome,
+                prompt: currentInput.prompt,
+                response: '',
+                responseDisposition: 'none',
+                vault: input.vault,
+              })
+              turnInputController.complete(result)
+              return {
+                kind: 'completed',
+                result,
+              }
+            }
+            throw providerOutcome.error
           }
-          throw providerOutcome.error
+
+          const currentProviderResult = providerOutcome.providerTurn
+          await drainLiveSteeredActiveTurnInputs({
+            continuation: currentProviderResult.codexContinuation,
+            sessionId: currentProviderResult.session.sessionId,
+            throughDeliveryContextOrdinal:
+              providerRequestDeliveryContextBaseOrdinal +
+              currentProviderResult.responseDeliveryContextOrdinal,
+          })
+          currentSession = applyAssistantProgressDeliveredSession({
+            progressDeliveredSession: progressDeliveredSessionRef.value,
+            session: currentProviderResult.session,
+          })
+          if (!holdGroupReplyDraft) {
+            responseText = resolveAssistantPersistedReplyText({
+              messageInput: currentInput,
+              rawResponse: currentProviderResult.response,
+              session: currentSession,
+              sharedPlan,
+            })
+          }
+          await recordCurrentProviderUsage({
+            providerResult: currentProviderResult,
+            additionalUsages: currentProviderResult.additionalUsages,
+          })
+
+          return {
+            kind: 'provider-result',
+            providerResult: rebaseAssistantProviderResultDeliveryContexts({
+              baseOrdinal: providerRequestDeliveryContextBaseOrdinal,
+              providerResult: currentProviderResult,
+            }),
+          }
         }
 
-        providerResult = providerOutcome.providerTurn
-        if (!providerRequestJournal) {
-          providerRequestJournal =
-            await runtimeState.turns.acceptedInputs.recordProviderRequest({
-              continuation: providerResult.codexContinuation,
-              ordinal: providerRequestOrdinal,
-              providerAttemptId: null,
-              turnId: currentUserTurn.turnId,
-            })
-          providerRequestAcceptedInputIds =
-            providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
-          providerRequestAcceptedInputItems =
-            providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
-          acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-          acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-        } else {
-          providerRequestJournal =
-            await runtimeState.turns.acceptedInputs.updateProviderRequest({
-              continuation: providerResult.codexContinuation,
-              ordinal: providerRequestOrdinal,
-              providerAttemptId: null,
-              turnId: currentUserTurn.turnId,
-            }) ?? providerRequestJournal
-          providerRequestAcceptedInputIds =
-            providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
-          providerRequestAcceptedInputItems =
-            providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
-          acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-          acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
+        const firstRequest = await runCurrentProviderRequest({
+          allowFailedNoReplyRecovery: !holdGroupReplyDraft,
+        })
+        if (firstRequest.kind === 'completed') {
+          return firstRequest.result
         }
-        await drainLiveSteeredActiveTurnInputs({
-          continuation: providerResult.codexContinuation,
-          sessionId: providerResult.session.sessionId,
-          throughDeliveryContextOrdinal:
-            providerResult.responseDeliveryContextOrdinal,
-        })
-        currentSession = applyAssistantProgressDeliveredSession({
-          progressDeliveredSession: progressDeliveredSessionRef.value,
-          session: providerResult.session,
-        })
+        providerResult = firstRequest.providerResult
+
+        if (holdGroupReplyDraft) {
+          const draftWindowOutcome = await turnInputController.finishDraftWindow({
+            signal: currentInput.abortSignal,
+          })
+          if (draftWindowOutcome.kind === 'review') {
+            providerRequestOrdinal = 1
+            try {
+              if (draftWindowOutcome.acceptedInput) {
+                const accepted = await acceptActiveTurnInput({
+                  activeTurnInput: draftWindowOutcome.acceptedInput,
+                  providerRequestAcceptedInputIds,
+                  providerRequestOrdinal,
+                  sessionId: currentSession.sessionId,
+                })
+                replyDeliveryContexts.push(
+                  pickAssistantReplyDeliveryContext(currentInput),
+                )
+                acceptedInputIdsByDeliveryContextOrdinal[
+                  replyDeliveryContexts.length - 1
+                ] = accepted.acceptedInputItems.map((item) => item.id)
+              }
+              providerRequestDeliveryContextBaseOrdinal =
+                replyDeliveryContexts.length - 1
+              currentSession = applyAssistantProviderTurnResumeInMemory({
+                providerResult,
+                session: currentSession,
+              })
+              currentInput = {
+                ...currentInput,
+                turnContext: appendAssistantTurnContext(
+                  currentInput.turnContext,
+                  ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION,
+                ),
+              }
+              const reconsiderationRequest = await runCurrentProviderRequest({
+                allowFailedNoReplyRecovery: false,
+              })
+              if (reconsiderationRequest.kind === 'completed') {
+                throw new VaultCliError(
+                  'ASSISTANT_GROUP_DRAFT_RECONSIDERATION_INVALID_RECOVERY',
+                  'The group reply reconsideration unexpectedly completed through provider failure recovery.',
+                )
+              }
+              providerResult = reconsiderationRequest.providerResult
+            } finally {
+              currentSession = {
+                ...currentSession,
+                codexResume: null,
+                resumeState: null,
+              }
+              await runAssistantTurnBestEffort(async () => {
+                currentSession = await clearAssistantSessionCodexResumeState({
+                  session: currentSession,
+                  vault: input.vault,
+                })
+              })
+            }
+          }
+          providerResult = selectAssistantGroupProviderResult(providerResult)
+        }
+
         responseText = resolveAssistantPersistedReplyText({
           messageInput: currentInput,
           rawResponse: providerResult.response,
           session: currentSession,
           sharedPlan,
         })
-        const usageRecordStartedAt = Date.now()
-        await recordAssistantUsageEvent({
-          executionContext,
-          ...(providerRequestStartedAtMs === null
-            ? {}
-            : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
-          providerRequestAcceptedInputIds,
-          providerRequestOrdinal,
-          providerResult,
-          turnId: currentUserTurn.turnId,
-        })
-        emitTurnTiming({
-          elapsedMs: elapsedSince(turnTimingStartedAt),
-          providerRequestOrdinal,
-          sinceProviderResultMs: providerResultReturnedAt === null
-            ? null
-            : elapsedSince(providerResultReturnedAt),
-          stage: 'usage-recorded',
-          stepElapsedMs: elapsedSince(usageRecordStartedAt),
-        })
-        await recordAdditionalAssistantUsageEvents({
-          additionalUsages: providerResult.additionalUsages,
-          effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
-          executionContext,
-          providerRequestAcceptedInputIds,
-          providerResult,
+        await executionContext?.hosted?.assertTurnCommitAuthority?.({
+          acceptedInputs: providerRequestAcceptedInputItems,
           turnId: currentUserTurn.turnId,
         })
 
@@ -1820,9 +2224,17 @@ export async function sendAssistantMessageLocal(
           admissionState: 'commit-started',
           turnId: currentUserTurn.turnId,
         })
-        // Every completed provider response is part of the ordinary turn,
-        // regardless of audience. A later steer may add another response, but
-        // it never erases text or media the provider already completed.
+        if (holdGroupReplyDraft) {
+          await persistInitialUserPromptToTranscriptIfNeeded({
+            detail: 'user prompt persisted after held group reply selection',
+            prompt: input.prompt,
+            vault: input.vault,
+          })
+          for (const heldInput of heldGroupAcceptedTranscriptInputs) {
+            await persistAcceptedActiveTurnInputTranscripts(heldInput)
+          }
+          await commitSelectedNoReply(providerResult)
+        }
         const precedingResponseSegments: AssistantPrecedingReplySegment[] = []
         for (const [segmentOrdinal, segment] of
           (providerResult.precedingResponseSegments ?? []).entries()) {
@@ -1853,20 +2265,10 @@ export async function sendAssistantMessageLocal(
               )
               continue
             }
-            precedingResponseSegments.push({
+            precedingResponseSegments.push(buildAssistantPrecedingReplySegment({
+              segment,
               deliveryContext: resolvedDeliveryContext.context,
-              response: segment.response,
-              ...(segment.transcriptResponse === undefined
-                ? {}
-                : { transcriptResponse: segment.transcriptResponse }),
-              media: segment.media ?? [],
-              ...(segment.targetInputId
-                ? {
-                    deliveryContextOrdinal: segment.deliveryContextOrdinal,
-                    targetInputId: segment.targetInputId,
-                  }
-                : {}),
-            })
+            }))
         }
         const precedingResponses = precedingResponseSegments.map((segment) => {
           const response = resolveAssistantPersistedReplyText({
@@ -1884,48 +2286,28 @@ export async function sendAssistantMessageLocal(
           }) ?? response
         })
         const providerResumeStateAction =
-          resolveAssistantProviderResumeStateAction({
-            codexThreadId: providerResult.codexThreadId ?? null,
-            threadScope,
-          })
-        if (providerResumeStateAction === 'clear') {
+          providerRequestOrdinal === 1
+            ? 'clear'
+            : resolveAssistantProviderResumeStateAction({
+                codexThreadId: providerResult.codexThreadId ?? null,
+                threadScope,
+              })
+        if (
+          providerRequestOrdinal === 0 &&
+          providerResumeStateAction === 'clear'
+        ) {
           currentSession = await clearAssistantSessionCodexResumeState({
             session: currentSession,
             vault: input.vault,
           })
         }
-        const noReplySelected = providerResult.finalAction?.kind === 'none'
-        const rawFinalResponseText = noReplySelected
-          ? null
-          : resolveAssistantProviderFinalResponseText(providerResult)
-        const finalResponseText =
-          rawFinalResponseText === null
-            ? null
-            : resolveAssistantPersistedReplyText({
-                messageInput: finalReplyInput,
-                rawResponse: rawFinalResponseText,
-                session: currentSession,
-                sharedPlan,
-              })
-        const rawTranscriptResponseText = noReplySelected
-          ? null
-          : providerResult.transcriptResponse ??
-            (providerResult.responseCard
-              ? renderAssistantResponseCardTranscriptText(providerResult.responseCard)
-              : null)
-        const transcriptResponseText =
-          rawTranscriptResponseText === null
-            ? null
-            : resolveAssistantPersistedReplyText({
-                messageInput: finalReplyInput,
-                rawResponse: rawTranscriptResponseText,
-                session: currentSession,
-                sharedPlan,
-              })
-        const assistantTranscriptText = resolveAssistantProviderTranscriptText({
-          media: providerResult.responseMedia,
-          response: transcriptResponseText,
-        })
+        const { rawFinalResponseText, finalResponseText, assistantTranscriptText } =
+          resolveAssistantFinalReplyContent({
+            providerResult,
+            finalReplyInput,
+            currentSession,
+            sharedPlan,
+          })
         const turnArtifactsStartedAt = Date.now()
         const session = await finalizeAssistantTurnArtifacts({
           assistantTranscriptText,
@@ -1969,9 +2351,7 @@ export async function sendAssistantMessageLocal(
               }
               return await applyAssistantAcceptedMessageTargetToDeliveryInput({
                 acceptedInputIds:
-                  acceptedInputIdsByDeliveryContextOrdinal[
-                    deliveryContextOrdinal
-                  ] ?? [],
+                  resolveNativeReplyAcceptedInputIds(deliveryContextOrdinal),
                 action: 'native-reply',
                 input: segmentInput.input,
                 session: segmentInput.session,
@@ -2061,9 +2441,9 @@ export async function sendAssistantMessageLocal(
             finalDeliveryInput =
               await applyAssistantAcceptedMessageTargetToDeliveryInput({
                 acceptedInputIds:
-                  acceptedInputIdsByDeliveryContextOrdinal[
-                    providerResult.responseDeliveryContextOrdinal
-                  ] ?? [],
+                  resolveNativeReplyAcceptedInputIds(
+                    providerResult.responseDeliveryContextOrdinal,
+                  ),
                 action: 'native-reply',
                 input: finalReplyInput,
                 session: deliverySession,
@@ -2072,6 +2452,15 @@ export async function sendAssistantMessageLocal(
               })
           } catch (error) {
             finalTargetResolutionError = normalizeAssistantDeliveryError(error)
+          }
+        }
+        if (providerResult.responseContextReferences !== undefined) {
+          finalDeliveryInput = {
+            ...finalDeliveryInput,
+            outboxAutomationContextReferences:
+              providerResult.responseContextReferences?.map(
+                (reference) => ({ ...reference }),
+              ) ?? null,
           }
         }
         const deliveryOutcome =
@@ -2086,6 +2475,7 @@ export async function sendAssistantMessageLocal(
                 }
               : await dispatchAssistantReply({
                   input: finalDeliveryInput,
+                  followUpRequest: providerResult.followUpRequest,
                   card: providerResult.responseCard ?? null,
                   media: providerResult.responseMedia ?? [],
                   response: rawFinalResponseText ?? '',
@@ -2188,28 +2578,14 @@ export async function sendAssistantMessageLocal(
           vault: input.vault,
         })
 
-        const result = normalizeAssistantAskResultForReturn({
-          vault: redactAssistantDisplayPath(input.vault),
-          status: 'completed',
+        const result = buildCompletedAssistantAskResult({
+          outcome: finalDeliveryOutcome,
           prompt: currentInput.prompt,
           response: finalResponse,
           ...(finalResponseDisposition === 'none'
             ? { responseDisposition: 'none' as const }
             : {}),
-          media: finalDeliveryOutcome.media,
-          session: finalDeliveryOutcome.session,
-          delivery: finalDeliveryOutcome.kind === 'sent' ? finalDeliveryOutcome.delivery : null,
-          deliveryDeferred: finalDeliveryOutcome.kind === 'queued',
-          deliveryIntentId:
-            finalDeliveryOutcome.kind === 'sent' ||
-            finalDeliveryOutcome.kind === 'queued' ||
-            finalDeliveryOutcome.kind === 'failed'
-              ? finalDeliveryOutcome.intentId
-              : null,
-          deliveryError:
-            finalDeliveryOutcome.kind === 'queued' || finalDeliveryOutcome.kind === 'failed'
-              ? finalDeliveryOutcome.error
-              : null,
+          vault: input.vault,
         })
         turnInputController.complete(result)
         const productFeedbackCandidate =
@@ -2238,7 +2614,10 @@ export async function sendAssistantMessageLocal(
           session: currentSession,
         })
 
-        if (failedSession !== currentSession) {
+        if (
+          providerRequestOrdinal === 1 ||
+          failedSession !== currentSession
+        ) {
           await runAssistantTurnBestEffort(() =>
             saveAssistantSession(input.vault, failedSession),
           )
@@ -2312,7 +2691,7 @@ export async function sendAssistantMessageLocal(
   } finally {
     // The automation pass owns maintenance for auto-reply turns; every
     // independently-started turn keeps a post-turn owner so direct ask/chat/
-    // assistantd use cannot grow runtime state (transcripts, event logs)
+    // direct local use cannot grow runtime state (transcripts, event logs)
     // without bound. Post-turn keeps it off the foreground reply path.
     if (input.turnTrigger !== 'automation-auto-reply') {
       await runAssistantTurnBestEffort(() =>
@@ -2520,12 +2899,11 @@ async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
   })
   const refsByInputId = new Map<string, AssistantAcceptedTurnInputTranscriptRef>()
   for (const plan of transcriptPlans) {
-    const contentReceivedAt = await resolveAcceptedInputContentReceivedAt({
-      inputs: input.acceptedInputItems.filter((item) =>
+    const contentReceivedAt = resolveAcceptedInputContentReceivedAt(
+      input.acceptedInputItems.filter((item) =>
         plan.inputIds.includes(item.id)
       ),
-      vault: input.vault,
-    })
+    )
     const persisted = await appendUserTranscriptEntryForTurn({
       contentReceivedAt,
       detail:
@@ -2542,34 +2920,13 @@ async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
   return refsByInputId
 }
 
-async function resolveAcceptedInputContentReceivedAt(input: {
-  inputs: readonly AssistantAcceptedTurnInputItemInput[]
-  vault: string
-}): Promise<string | null> {
-  const events = await Promise.all(
-    input.inputs
-      .filter((item) => item.source === 'assistant-input')
-      .map((item) =>
-        readAssistantInputEvent({
-          inputId: item.id,
-          vault: input.vault,
-        })
-      ),
-  )
-  let earliestMs: number | null = null
-  for (const event of events) {
-    if (!event) {
-      continue
-    }
-    const receivedAtMs = Date.parse(event.receivedAt ?? event.occurredAt)
-    if (
-      Number.isFinite(receivedAtMs)
-      && (earliestMs === null || receivedAtMs < earliestMs)
-    ) {
-      earliestMs = receivedAtMs
-    }
-  }
-  return earliestMs === null ? null : new Date(earliestMs).toISOString()
+function resolveAcceptedInputContentReceivedAt(
+  inputs: readonly AssistantAcceptedTurnInputItemInput[],
+): string | null {
+  // Accepted assistant-input timestamps have already been checked against their events.
+  return resolveAssistantAcceptedTurnInputReferenceWindow(
+    inputs.filter((item) => item.source === 'assistant-input'),
+  )?.earliestAt ?? null
 }
 
 function resolveAcceptedActiveTurnTranscriptAppendPlans(input: {
@@ -2711,12 +3068,87 @@ function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt)
 }
 
+function buildAssistantPrecedingReplySegment({
+  segment,
+  deliveryContext,
+}: {
+  segment: NonNullable<ExecutedAssistantProviderTurnResult['precedingResponseSegments']>[number]
+  deliveryContext: AssistantReplyDeliveryContext | null
+}): AssistantPrecedingReplySegment {
+  return {
+    followUpRequest: segment.followUpRequest,
+    ...(segment.contextReferences === undefined
+      ? {}
+      : {
+          contextReferences: segment.contextReferences?.map(
+            (reference) => ({ ...reference }),
+          ) ?? null,
+        }),
+    deliveryContext,
+    response: segment.response,
+    ...(segment.transcriptResponse === undefined
+      ? {}
+      : { transcriptResponse: segment.transcriptResponse }),
+    media: segment.media ?? [],
+    ...(segment.targetInputId
+      ? {
+          deliveryContextOrdinal: segment.deliveryContextOrdinal,
+          targetInputId: segment.targetInputId,
+        }
+      : {}),
+  }
+}
+
+function resolveAssistantFinalReplyContent({
+  providerResult,
+  finalReplyInput,
+  currentSession,
+  sharedPlan,
+}: {
+  providerResult: ExecutedAssistantProviderTurnResult
+  finalReplyInput: AssistantMessageInput
+  currentSession: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+}) {
+  if (providerResult.finalAction?.kind === 'none') {
+    return {
+      rawFinalResponseText: null,
+      finalResponseText: null,
+      assistantTranscriptText: null,
+    }
+  }
+  const rawFinalResponseText = resolveAssistantProviderFinalResponseText(providerResult)
+  const finalResponseText = resolveAssistantPersistedReplyText({
+    messageInput: finalReplyInput,
+    rawResponse: rawFinalResponseText,
+    session: currentSession,
+    sharedPlan,
+  })
+  const rawTranscriptResponseText = providerResult.transcriptResponse ??
+    (providerResult.responseCard
+      ? renderAssistantResponseCardTranscriptText(providerResult.responseCard, providerResult.response)
+      : null)
+  const transcriptResponseText = rawTranscriptResponseText === null
+    ? null
+    : resolveAssistantPersistedReplyText({
+        messageInput: finalReplyInput,
+        rawResponse: rawTranscriptResponseText,
+        session: currentSession,
+        sharedPlan,
+      })
+  const assistantTranscriptText = resolveAssistantProviderTranscriptText({
+    media: providerResult.responseMedia,
+    response: transcriptResponseText,
+  })
+  return { rawFinalResponseText, finalResponseText, assistantTranscriptText }
+}
+
 function resolveAssistantProviderFinalResponseText(
   providerResult: ExecutedAssistantProviderTurnResult,
 ): string {
   const card = normalizeAssistantProviderResponseCard(providerResult)
   if (card) {
-    return renderAssistantResponseCardText(card)
+    return renderAssistantResponseCardText(card, providerResult.response)
   }
 
   const response = normalizeNullableString(providerResult.response)
@@ -2935,6 +3367,7 @@ function buildActiveTurnInput(input: {
       input: input.input,
       overrides: input.acceptedInput,
     }),
+    outboxAutomationContextReferences: null,
     prompt: input.acceptedInput.prompt,
     receiptMetadata:
       input.acceptedInput.receiptMetadata === undefined

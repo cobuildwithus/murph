@@ -31,23 +31,33 @@ import {
   updateHostedFamilyPlanCapacities,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
+  acceptHostedMemberStripeCheckoutCompletionTx,
   assertNoHostedDirectSubscriptionStripeEffectTx,
   HostedMemberStripeMutationLockBusyError,
+  prepareHostedMemberStripeCheckoutSession,
+  prepareHostedMemberStripeCheckoutCompletion,
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { ensureHostedMemberStripeCustomer } from "@/src/lib/hosted-onboarding/hosted-member-stripe-customer";
+import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import {
   lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberBillingSnapshot,
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
+  ensureHostedMemberForPendingLinqParticipantContactTx,
   ensureHostedMemberForPrivyIdentityResolutionTx,
   reconcileHostedPrivyIdentityOnMemberTx,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
   readHostedMemberIdByReplyAliasLookupKey,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import {
+  acquireHostedLinqParticipantEmailLockTx,
+  createHostedLinqParticipantContact,
+} from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import { removeHostedMemberLinkedAccountProjectionTx } from "@/src/lib/hosted-onboarding/linked-account-removal";
 import {
   suspendHostedMemberForBillingReversalTx,
   writeHostedMemberStripeBillingTx,
@@ -129,6 +139,8 @@ const accountDeletionBoundaries = vi.hoisted(() => ({
 const stripeProvider = vi.hoisted(() => ({
   chargesRetrieve: vi.fn(),
   checkoutSessionsCreate: vi.fn(),
+  customersCreate: vi.fn(),
+  customersDelete: vi.fn(),
   eventsRetrieve: vi.fn(),
   subscriptionsRetrieve: vi.fn(),
 }));
@@ -220,10 +232,10 @@ vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/workflow-termination", () => ({
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(async () => ({
-    configured: false,
+    configured: true,
     errorCode: null,
-    notFound: false,
-    terminated: false,
+    notFound: true,
+    terminated: true,
   })),
 }));
 
@@ -265,6 +277,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
         create: stripeProvider.checkoutSessionsCreate,
       },
     },
+    customers: {
+      create: stripeProvider.customersCreate,
+      del: stripeProvider.customersDelete,
+    },
     events: {
       retrieve: stripeProvider.eventsRetrieve,
     },
@@ -275,6 +291,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
 
   return {
     ...actual,
+    getHostedOnboardingStripe: () => stripe,
     requireHostedStripeApi: () => stripe,
     requireHostedStripeApiMode: () => ({
       stripe,
@@ -480,6 +497,257 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await disconnectClients([owner, contender]);
       }
     });
+
+    it("lets account deletion reconcile an abandoned Customer claim before cleanup", async () => {
+      const deletion = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_customer_deletion_${fixtureId}`;
+      const customerId = `cus_customer_deletion_${fixtureId}`;
+      installPassthroughHostedSecureBoxTestCodec();
+      stripeProvider.customersCreate.mockClear();
+      stripeProvider.customersDelete.mockClear();
+      stripeProvider.customersDelete.mockResolvedValue({ deleted: true, id: customerId });
+
+      try {
+        await observer.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: memberId,
+          },
+        });
+
+        stripeProvider.customersCreate.mockRejectedValueOnce(
+          Object.assign(new Error("connection closed after provider commit"), {
+            code: "ECONNRESET",
+          }),
+        );
+        await expect(ensureHostedMemberStripeCustomer({
+          memberId,
+          prisma: writer,
+        })).rejects.toMatchObject({ code: "ECONNRESET" });
+        await expect(observer.hostedMemberBillingRef.findUnique({
+          select: {
+            stripeCustomerLookupKey: true,
+            stripeEffectClaimId: true,
+            stripeEffectKind: true,
+          },
+          where: { memberId },
+        })).resolves.toMatchObject({
+          stripeCustomerLookupKey: null,
+          stripeEffectClaimId: expect.any(String),
+          stripeEffectKind: "member.customer-create",
+        });
+
+        stripeProvider.customersCreate.mockRejectedValueOnce(
+          Object.assign(new Error("stripe unavailable"), { code: "ETIMEDOUT" }),
+        );
+        await expect(deleteHostedAccountData({
+          memberId,
+          prisma: deletion,
+          request: new Request("https://app.example.test/settings"),
+        })).rejects.toMatchObject({
+          code: "HOSTED_STRIPE_EFFECT_PENDING",
+          retryable: true,
+        });
+        await expect(observer.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: memberId },
+        })).resolves.toEqual({ suspendedAt: null });
+        await expect(observer.hostedMemberBillingRef.findUnique({
+          select: {
+            stripeCustomerLookupKey: true,
+            stripeEffectClaimId: true,
+            stripeEffectKind: true,
+          },
+          where: { memberId },
+        })).resolves.toMatchObject({
+          stripeCustomerLookupKey: null,
+          stripeEffectClaimId: expect.any(String),
+          stripeEffectKind: "member.customer-create",
+        });
+
+        stripeProvider.customersCreate.mockResolvedValueOnce({ id: customerId });
+        await expect(deleteHostedAccountData({
+          memberId,
+          prisma: deletion,
+          request: new Request("https://app.example.test/settings"),
+        })).resolves.toMatchObject({
+          cleanupPending: false,
+          memberId,
+        });
+        await expect(observer.hostedMember.findUnique({
+          where: { id: memberId },
+        })).resolves.toBeNull();
+        expect(stripeProvider.customersDelete).toHaveBeenCalledWith(
+          customerId,
+          {},
+          expect.objectContaining({
+            maxNetworkRetries: 0,
+          }),
+        );
+
+        expect(stripeProvider.customersCreate).toHaveBeenCalledTimes(3);
+        expect(stripeProvider.customersCreate.mock.calls.map(
+          (call: readonly unknown[]) => call[1],
+        )).toEqual(Array.from({ length: 3 }, () => ({
+          idempotencyKey: `hosted-auto-pulse-trial-customer:${memberId}`,
+          maxNetworkRetries: 0,
+          timeout: 5_000,
+        })));
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+        stripeProvider.customersCreate.mockReset();
+        stripeProvider.customersDelete.mockReset();
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        await disconnectClients([deletion, observer, writer]);
+      }
+    });
+
+    it.each(["completion-first", "customer-first"] as const)(
+      "serializes a bound Checkout Session with Customer creation ($order)",
+      async (order) => {
+        const checkout = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const customer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const fixtureId = randomUUID();
+        const memberId = `hbm_customer_checkout_${order}_${fixtureId}`;
+        const checkoutCustomerId = `cus_checkout_${fixtureId}`;
+        const checkoutSubscriptionId = `sub_checkout_${fixtureId}`;
+        const checkoutAttemptId = `attempt_checkout_${fixtureId}`;
+        const checkoutIntentHash = `intent_checkout_${fixtureId}`;
+        const checkoutSessionId = `cs_checkout_${fixtureId}`;
+        const checkoutLocked = createDeferred();
+        const releaseCheckout = createDeferred();
+        let checkoutPromise: Promise<unknown> | null = null;
+        let customerPromise: Promise<string> | null = null;
+        installPassthroughHostedSecureBoxTestCodec();
+        stripeProvider.customersCreate.mockClear();
+
+        try {
+          await observer.hostedMember.create({
+            data: {
+              billingStatus: HostedBillingStatus.active,
+              id: memberId,
+            },
+          });
+          const preparedSession =
+            await prepareHostedMemberStripeCheckoutSession({
+              memberId,
+              prisma: observer,
+              sessionId: checkoutSessionId,
+            });
+          await observer.hostedMemberBillingRef.create({
+            data: {
+              checkoutAttemptId,
+              checkoutCreatedAt: new Date("2026-08-27T12:00:00.000Z"),
+              checkoutIntentHash,
+              memberId,
+              ...preparedSession,
+            },
+          });
+          const preparedCompletion =
+            await prepareHostedMemberStripeCheckoutCompletion({
+              memberId,
+              prisma: observer,
+              stripeCustomerId: checkoutCustomerId,
+              stripeSubscriptionId: checkoutSubscriptionId,
+            });
+          const acceptCheckout = (prisma: PrismaClient) =>
+            prisma.$transaction(
+              (tx) => acceptHostedMemberStripeCheckoutCompletionTx({
+                billingIdentityDisposition: "bind",
+                checkoutAttemptId,
+                checkoutIntentHash,
+                checkoutSessionId,
+                currentCheckoutOffer: "standard",
+                eventCreatedAt: new Date("2026-08-27T12:01:00.000Z"),
+                memberId,
+                preparedCompletion,
+                tx,
+              }),
+              { timeout: transactionTimeoutMs },
+            );
+
+          if (order === "completion-first") {
+            const [customerBackend] = await customer.$queryRaw<
+              Array<{ pid: number }>
+            >(Prisma.sql`SELECT pg_backend_pid()::int AS pid`);
+            if (!customerBackend) {
+              throw new Error("Expected the Customer writer PostgreSQL backend id.");
+            }
+            checkoutPromise = checkout.$transaction(async (tx) => {
+              await lockHostedMemberRow(tx, memberId);
+              checkoutLocked.resolve();
+              await releaseCheckout.promise;
+              return acceptHostedMemberStripeCheckoutCompletionTx({
+                billingIdentityDisposition: "bind",
+                checkoutAttemptId,
+                checkoutIntentHash,
+                checkoutSessionId,
+                currentCheckoutOffer: "standard",
+                eventCreatedAt: new Date("2026-08-27T12:01:00.000Z"),
+                memberId,
+                preparedCompletion,
+                tx,
+              });
+            }, { timeout: transactionTimeoutMs });
+            await checkoutLocked.promise;
+            customerPromise = ensureHostedMemberStripeCustomer({
+              memberId,
+              prisma: customer,
+            });
+            await waitForPostgresLock({
+              observer,
+              pid: customerBackend.pid,
+            });
+            releaseCheckout.resolve();
+
+            await expect(checkoutPromise).resolves.toEqual({ kind: "accepted" });
+            await expect(customerPromise).resolves.toBe(checkoutCustomerId);
+            expect(stripeProvider.customersCreate).not.toHaveBeenCalled();
+          } else {
+            await expect(ensureHostedMemberStripeCustomer({
+              memberId,
+              prisma: customer,
+            })).rejects.toMatchObject({
+              code: "HOSTED_STRIPE_EFFECT_PENDING",
+              retryable: true,
+            });
+            await expect(acceptCheckout(checkout)).resolves.toEqual({
+              kind: "accepted",
+            });
+            expect(stripeProvider.customersCreate).not.toHaveBeenCalled();
+          }
+
+          await expect(observer.hostedMemberBillingRef.findUnique({
+            select: {
+              stripeCustomerLookupKey: true,
+              stripeEffectClaimId: true,
+              stripeEffectKind: true,
+            },
+            where: { memberId },
+          })).resolves.toEqual({
+            stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(
+              checkoutCustomerId,
+            ),
+            stripeEffectClaimId: null,
+            stripeEffectKind: null,
+          });
+        } finally {
+          releaseCheckout.resolve();
+          await Promise.allSettled([
+            ...(checkoutPromise ? [checkoutPromise] : []),
+            ...(customerPromise ? [customerPromise] : []),
+          ]);
+          setHostedSecureBoxStringTestCodecForTests(null);
+          stripeProvider.customersCreate.mockReset();
+          await observer.hostedMember.deleteMany({ where: { id: memberId } });
+          await disconnectClients([checkout, customer, observer]);
+        }
+      },
+    );
 
     it("blocks direct Checkout when a compatibility claim commits after reservation", async () => {
       const claimant = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -1873,6 +2141,119 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: memberId },
         });
         await disconnectClients([observer, reversalClient, restoreClient]);
+      }
+    });
+  },
+);
+
+describe.skipIf(!runPostgresConcurrencyProof)(
+  "hosted Linq email-handle identity PostgreSQL concurrency",
+  () => {
+    it("serializes a new inbound behind unlink without restoring the revoked member", async () => {
+      const first = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const second = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const contact = createHostedLinqParticipantContact({
+        kind: "email", value: `unlink-${randomUUID()}@example.test`,
+      });
+      if (!contact) throw new Error("Expected synthetic email contact.");
+      const memberIds: string[] = [];
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value, encrypt: ({ value }) => value,
+      });
+      try {
+        const original = await first.$transaction((tx) => ensureHostedMemberForPendingLinqParticipantContactTx({
+          contact, observedAt: new Date(), prisma: tx,
+        }), { timeout: transactionTimeoutMs });
+        memberIds.push(original.member.id);
+        const locked = createDeferred<void>();
+        const inboundStarted = createDeferred<void>();
+        const [removed, incoming] = await Promise.all([
+          first.$transaction(async (tx) => {
+            await acquireHostedLinqParticipantEmailLockTx({ emailAddress: contact.value, tx });
+            locked.resolve();
+            await inboundStarted.promise;
+            return removeHostedMemberLinkedAccountProjectionTx({
+              expectedIdentity: contact.value, memberId: original.member.id, method: "email", prisma: tx,
+            });
+          }, { timeout: transactionTimeoutMs }),
+          (async () => {
+            await locked.promise;
+            return second.$transaction((tx) => {
+              inboundStarted.resolve();
+              return ensureHostedMemberForPendingLinqParticipantContactTx({
+                contact, observedAt: new Date(), prisma: tx,
+              });
+            }, { timeout: transactionTimeoutMs });
+          })(),
+        ]);
+        memberIds.push(incoming.member.id);
+        expect(removed).toBe(true);
+        expect(incoming.created).toBe(true);
+        expect(incoming.member.id).not.toBe(original.member.id);
+        await expect(first.hostedMemberIdentity.findUnique({ where: { memberId: original.member.id } }))
+          .resolves.toMatchObject({ linqEmailHandleLookupKey: null, linqEmailHandleEncrypted: null });
+        await expect(first.hostedMemberIdentity.count({ where: { linqEmailHandleLookupKey: contact.lookupKey } }))
+          .resolves.toBe(1);
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await first.hostedMember.deleteMany({ where: { id: { in: memberIds } } });
+        await disconnectClients([first, second]);
+      }
+    });
+
+    it("selects one member and one instant-start creation winner", async () => {
+      const first = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const second = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const contact = createHostedLinqParticipantContact({
+        kind: "email",
+        value: `instant-${randomUUID()}@example.com`,
+      });
+      if (!contact) {
+        throw new Error("Expected a valid Linq email contact.");
+      }
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value,
+        encrypt: ({ value }) => value,
+      });
+
+      try {
+        const [firstResolution, secondResolution] = await Promise.all([
+          first.$transaction((tx) =>
+            ensureHostedMemberForPendingLinqParticipantContactTx({
+              contact,
+              observedAt: new Date("2026-09-04T20:46:00.000Z"),
+              prisma: tx,
+            }), { timeout: transactionTimeoutMs }),
+          second.$transaction((tx) =>
+            ensureHostedMemberForPendingLinqParticipantContactTx({
+              contact,
+              observedAt: new Date("2026-09-04T20:46:00.000Z"),
+              prisma: tx,
+            }), { timeout: transactionTimeoutMs }),
+        ]);
+
+        expect(firstResolution.member.id).toBe(secondResolution.member.id);
+        expect([
+          firstResolution.created,
+          secondResolution.created,
+        ].sort()).toEqual([false, true]);
+        await expect(observer.hostedMemberIdentity.count({
+          where: { linqEmailHandleLookupKey: contact.lookupKey },
+        })).resolves.toBe(1);
+        await expect(observer.hostedMemberRouting.count({
+          where: { pendingLinqParticipantContactLookupKey: contact.lookupKey },
+        })).resolves.toBe(1);
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await observer.hostedMember.deleteMany({
+          where: {
+            identity: {
+              linqEmailHandleLookupKey: contact.lookupKey,
+            },
+          },
+        });
+        await disconnectClients([first, second, observer]);
       }
     });
   },

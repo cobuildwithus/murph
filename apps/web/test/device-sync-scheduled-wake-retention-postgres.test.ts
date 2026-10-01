@@ -1,0 +1,1156 @@
+import { generateKeyPairSync, randomUUID } from "node:crypto";
+
+import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
+import { preflightHostedScheduledReconcile } from "@/src/lib/device-sync/scheduled-reconcile-preflight";
+import * as deviceProviders from "@/src/lib/device-sync/providers";
+import type { PrismaClient } from "@prisma/client";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+
+import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
+import { runHostedDeviceSyncDueReconcileSweeper } from "@/src/lib/device-sync/due-reconcile-sweeper";
+import { runHostedDeviceSyncRecoverySweep } from "@/src/lib/device-sync/recovery-sweeper";
+import { appendHostedDeviceSyncScheduledReconcileWake } from "@/src/lib/device-sync/wake-service";
+import * as cryptoEnv from "@/src/lib/hosted-crypto/env";
+import * as runtimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
+import * as prismaModule from "@/src/lib/prisma";
+import {
+  appendHostedMailboxEnvelopeTx,
+  appendHostedScheduledDeviceSyncWakeEnvelopeTx,
+  fetchHostedRuntimeMailboxProjection,
+  runWithPreparedHostedMailboxItemAppendCrypto,
+  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+} from "@/src/lib/hosted-mailbox/store";
+import { createPrismaClient } from "@/src/lib/prisma";
+import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
+import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/hosted-crypto/domain-root-store";
+import { runWithHostedDomainRootProviderCallsDisabled } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
+import { checkpointHostedWorkspace } from "@/src/lib/hosted-workspace/store";
+
+const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
+const runPostgresProof =
+  process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+
+if (
+  runPostgresProof
+  && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl))
+) {
+  throw new Error(
+    "The scheduled device-sync retention proof requires a local DATABASE_URL.",
+  );
+}
+
+describe.skipIf(!runPostgresProof)(
+  "scheduled device-sync wake retention",
+  () => {
+    let prisma: PrismaClient | null = null;
+    const memberIds: string[] = [];
+    let restoreCrypto: () => void;
+
+    beforeAll(() => {
+      restoreCrypto = configureLocalCryptoForTest();
+      prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+    });
+
+    afterEach(async () => {
+      if (prisma && memberIds.length > 0) {
+        await prisma.deviceConnection.deleteMany({ where: { userId: { in: memberIds } } });
+      }
+    });
+
+    afterAll(async () => {
+      if (prisma && memberIds.length > 0) {
+        await prisma.hostedMember.deleteMany({
+          where: { id: { in: memberIds } },
+        });
+      }
+      await prisma?.$disconnect();
+      restoreCrypto();
+    });
+
+    it.each(["unchanged", "source_added", "checkpoint_changed", "mailbox_append"] as const)(
+      "preflights ordinary cadence without changing a retained retry: %s", async (scenario) => {
+        const client = requirePrisma(prisma);
+        const fixture = await seedRetiredScheduledWake({
+          client, memberIds, importedSeq: "1", consumedSeq: 1n,
+          firstPendingSeq: null, deviceSyncContinuationSeqs: ["1"], sidecar: true,
+        });
+        const now = new Date("2026-09-04T12:00:00Z");
+        const retryAt = new Date("2026-09-04T12:30:00Z");
+        const nextReconcileAt = new Date("2026-09-04T13:00:00Z");
+        const connectionId = fixture.wake.connectionId!;
+        await client.hostedWorkspace.update({ where: { userId: fixture.memberId }, data: {
+          nextWakeAt: retryAt, nextWakeReason: "device-sync.reconcile",
+        } });
+        await client.deviceConnection.create({ data: {
+          id: connectionId, userId: fixture.memberId, provider: "junction", status: "active",
+          providerAccountBlindIndex: `synthetic-${connectionId}`,
+          credentialKind: "provider_config", providerConfigKey: "junction", setupPhase: "source_confirmed",
+          connectedAt: new Date(fixture.wake.expectedConnectedAt!), nextReconcileAt: now,
+          metadataJson: { junctionReconcileProofV1: "synthetic-proof" },
+        } });
+        const store = new PrismaDeviceSyncControlPlaneStore({ prisma: client });
+        const before = await client.hostedWorkspace.findUniqueOrThrow({ where: { userId: fixture.memberId } });
+        const probe = vi.fn(async () => {
+          // These real writes use the same one-connection pool. Finishing them
+          // proves provider work runs outside the admission transaction.
+          if (scenario === "source_added") await client.deviceConnectionSource.create({ data: {
+            id: `source-${connectionId}`, connectionId, sourceInstanceKey: "synthetic-source",
+            sourceProviderSlug: "garmin", firstSeenAt: now, lastSeenAt: now,
+          } });
+          if (scenario === "checkpoint_changed") await client.hostedWorkspace.update({
+            where: { userId: fixture.memberId }, data: { version: { increment: 1 } },
+          });
+          if (scenario === "mailbox_append") await client.hostedMailboxLaneCounter.update({
+            where: { userId_lane: { userId: fixture.memberId, lane: "system" } }, data: { nextSeq: 3n },
+          });
+          return { outcome: "unchanged" as const, reason: "content_unchanged",
+            nextReconcileAt: nextReconcileAt.toISOString(), requestCount: 2, recordCount: 0, responseBytes: 2, elapsedMs: 1 };
+        });
+        const registry = vi.spyOn(deviceProviders, "createHostedDeviceSyncRegistry").mockReturnValue({
+          list: () => [], register: () => undefined,
+          get: () => ({
+            provider: "junction", descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+            jobExecutor: { probeScheduledReconcile: probe, executeJob: async () => { throw new Error("Unexpected runtime execution"); } },
+          }),
+        });
+        try {
+          const result = await preflightHostedScheduledReconcile({ store, now, connection: {
+            connectionId, userId: fixture.memberId, provider: "junction",
+            connectedAt: fixture.wake.expectedConnectedAt!, nextReconcileAt: now.toISOString(),
+          } });
+          expect(probe).toHaveBeenCalledOnce();
+          expect(result.wakeAvoided).toBe(scenario === "unchanged");
+          expect((await client.deviceConnection.findUniqueOrThrow({ where: { id: connectionId } })).nextReconcileAt)
+            .toEqual(scenario === "unchanged" ? nextReconcileAt : now);
+          const after = await client.hostedWorkspace.findUniqueOrThrow({ where: { userId: fixture.memberId } });
+          expect(after.nextWakeAt).toEqual(retryAt);
+          expect(after.nextWakeReason).toBe(before.nextWakeReason);
+          expect(after.redactedStatusJson).toEqual(before.redactedStatusJson);
+          expect(await client.hostedMailboxPayload.count({ where: { userId: fixture.memberId } })).toBe(1);
+          expect(await client.hostedMailboxItem.count({ where: { userId: fixture.memberId } })).toBe(1);
+        } finally { registry.mockRestore(); }
+      },
+    );
+
+    it("recovers a consumed scheduled wake whose canonical cadence never advanced", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedConsumedScheduledWake({ client, memberIds });
+      const recoveryClient = createPrismaClient({ databaseUrl, poolMax: 3 });
+      const getPrisma = vi.spyOn(prismaModule, "getPrisma").mockReturnValue(recoveryClient);
+      const signal = vi.spyOn(runtimeSignal, "signalHostedDeviceSyncMailboxRuntime")
+        .mockImplementation(async ({ mailboxItemId }) => {
+          expect(await client.hostedMailboxItem.count({ where: { id: mailboxItemId } })).toBe(1);
+          return { signalAccepted: true, workflowId: "synthetic-workflow" };
+        });
+      try {
+        const request = {
+          connectionId: fixture.wake.connectionId!,
+          createdAt: new Date().toISOString(),
+          eventId: fixture.wake.eventId,
+          expectedConnectedAt: fixture.wake.expectedConnectedAt!,
+          nextReconcileAt: fixture.wake.hint!.nextReconcileAt!,
+          provider: "oura",
+          userId: fixture.memberId,
+        };
+        const results = await Promise.all([
+          appendHostedDeviceSyncScheduledReconcileWake(request),
+          appendHostedDeviceSyncScheduledReconcileWake(request),
+        ]);
+        expect(results.filter((result) => result.wakeInserted)).toHaveLength(1);
+        expect(results.every((result) => result.wakeAccepted)).toBe(true);
+        expect(signal).toHaveBeenCalledTimes(1);
+        const items = await client.hostedMailboxItem.findMany({
+          where: { userId: fixture.memberId, lane: "system" },
+          orderBy: { laneSeq: "asc" },
+          select: { dedupeKey: true, laneSeq: true },
+        });
+        expect(items).toEqual([
+          { dedupeKey: fixture.wake.eventId, laneSeq: 1n },
+          { dedupeKey: `${fixture.wake.eventId}:consumed-recovery:1`, laneSeq: 2n },
+        ]);
+      } finally {
+        signal.mockRestore();
+        getPrisma.mockRestore();
+        await recoveryClient.$disconnect();
+      }
+    });
+
+    it.each([
+      "pending", "continuation", "future_retry", "changed_epoch",
+      "advanced_cadence", "disconnected", "mismatched_frontier", "malformed_pending",
+    ] as const)("does not recover a consumed wake with %s", async (scenario) => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedConsumedScheduledWake({ client, memberIds });
+      const nextHour = new Date(Date.now() + 3_600_000);
+      if (scenario === "pending") {
+        await client.hostedMailboxLaneCounter.update({
+          where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+          data: { nextSeq: 3n },
+        });
+      } else if (scenario === "changed_epoch" || scenario === "advanced_cadence" || scenario === "disconnected") {
+        await client.deviceConnection.update({
+          where: { id: fixture.wake.connectionId! },
+          data: scenario === "changed_epoch" ? { connectedAt: nextHour }
+            : scenario === "advanced_cadence" ? { nextReconcileAt: nextHour }
+              : { status: "disconnected" },
+        });
+      } else {
+        await client.hostedWorkspace.update({
+          where: { userId: fixture.memberId },
+          data: {
+            ...(scenario === "future_retry" ? { nextWakeAt: nextHour } : {}),
+            redactedStatusJson: {
+              hostedMailboxSystemHandledThroughSeq: scenario === "mismatched_frontier" ? "0" : "1",
+              hostedMailboxSystemImportedSeq: "1",
+              ...(scenario === "continuation" ? { hostedMailboxSystemDeviceSyncContinuationSeqs: ["1"] } : {}),
+              ...(scenario === "malformed_pending" ? { hostedMailboxSystemFirstPendingSeq: false } : {}),
+            },
+          },
+        });
+      }
+      await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
+        duplicate: true, dedupeConflict: false, inserted: false,
+      });
+      expect(await client.hostedMailboxItem.count({ where: { userId: fixture.memberId } })).toBe(1);
+    });
+
+    it.each(["success", "kms_failure", "consent_revoked", "root_rotated", "schedule_advanced", "reconnected", "disconnected"] as const)(
+      "keeps the sole connection available during scheduled wake preparation: %s",
+      async (scenario) => {
+        const client = requirePrisma(prisma);
+        const fixture = await seedRetiredScheduledWake({ client, importedSeq: "1", memberIds });
+        const connectionId = fixture.wake.connectionId!;
+        await client.deviceConnection.create({ data: {
+          id: connectionId, userId: fixture.memberId, provider: "oura", status: "active",
+          providerAccountBlindIndex: `synthetic-${connectionId}`,
+          connectedAt: new Date(fixture.wake.expectedConnectedAt!),
+          nextReconcileAt: new Date(fixture.wake.hint!.nextReconcileAt!),
+        } });
+        const request = {
+          connectionId,
+          createdAt: "2026-09-04T12:00:00.000Z",
+          eventId: `${fixture.wake.eventId}:new-occurrence`,
+          expectedConnectedAt: fixture.wake.expectedConnectedAt!,
+          nextReconcileAt: fixture.wake.hint!.nextReconcileAt!,
+          provider: "oura",
+          userId: fixture.memberId,
+        };
+        setHostedSecureBoxStringTestCodecForTests(null);
+        vi.spyOn(prismaModule, "getPrisma").mockReturnValue(client);
+        const signal = vi.spyOn(runtimeSignal, "signalHostedDeviceSyncMailboxRuntime")
+          .mockImplementation(async ({ mailboxItemId }) => {
+            // A query on the same one-connection pool also proves signal runs
+            // after the append commits, with its durable row already visible.
+            expect(await client.hostedMailboxItem.count({ where: { id: mailboxItemId } })).toBe(1);
+            return { signalAccepted: true, workflowId: "synthetic-workflow" };
+          });
+        const config = cryptoEnv.getHostedWebCryptoConfig();
+        vi.spyOn(cryptoEnv, "getHostedWebCryptoConfig").mockReturnValue(config);
+        let release!: () => void;
+        let started!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const preparing = new Promise<void>((resolve) => { started = resolve; });
+        const decrypt = config.gcpKms.decrypt.bind(config.gcpKms);
+        const kms = vi.spyOn(config.gcpKms, "decrypt").mockImplementationOnce(async (input) => {
+          started();
+          await held;
+          if (scenario === "kms_failure") throw new Error("Synthetic KMS unavailable");
+          return decrypt(input);
+        });
+        const pending = appendHostedDeviceSyncScheduledReconcileWake(request);
+        void pending.catch(() => {});
+        try {
+          await Promise.race([preparing, pending]);
+          await expect(client.$queryRaw`SELECT 1 AS available`).resolves.toEqual([{ available: 1 }]);
+          expect(signal).not.toHaveBeenCalled();
+          expect(await client.hostedMailboxItem.count({ where: { dedupeKey: request.eventId } })).toBe(0);
+          if (scenario === "consent_revoked") {
+            await client.hostedConsentGrant.create({ data: {
+              memberId: fixture.memberId, status: "revoked",
+              scope: "launch.health-data", source: "synthetic-test",
+              documentVersionsJson: {}, grantedAt: new Date(), revokedAt: new Date(),
+            } });
+          }
+          if (scenario === "root_rotated") {
+            await client.hostedUserCryptoEnvelope.updateMany({
+              where: { userId: fixture.memberId, domain: "ingress", status: "active" },
+              data: { status: "decrypt_only", decryptOnlyAt: new Date() },
+            });
+            await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+              domain: "ingress", prisma: client, reason: "synthetic-rotation", userId: fixture.memberId,
+            });
+          }
+          if (scenario === "schedule_advanced" || scenario === "reconnected" || scenario === "disconnected") {
+            await client.deviceConnection.update({ where: { id: connectionId }, data:
+              scenario === "schedule_advanced" ? { nextReconcileAt: new Date(Date.now() + 3_600_000) }
+              : scenario === "reconnected" ? { connectedAt: new Date() }
+              : { status: "disconnected" },
+            });
+          }
+          release();
+          if (scenario === "schedule_advanced" || scenario === "reconnected" || scenario === "disconnected") {
+            await expect(pending).resolves.toMatchObject({ reason: "schedule_superseded", wakeAccepted: false, wakeInserted: false });
+            expect(signal).not.toHaveBeenCalled();
+            expect(await client.hostedMailboxItem.count({ where: { dedupeKey: request.eventId } })).toBe(0);
+            expect(await client.deviceSyncSignal.count({ where: { connectionId } })).toBe(0);
+          } else if (scenario === "kms_failure" || scenario === "consent_revoked") {
+            await expect(pending).rejects.toMatchObject(scenario === "kms_failure"
+              ? { message: "Synthetic KMS unavailable" }
+              : { code: "HEALTH_DATA_CONSENT_REQUIRED" });
+            expect(signal).not.toHaveBeenCalled();
+            expect(await client.hostedMailboxItem.count({ where: { dedupeKey: request.eventId } })).toBe(0);
+            expect(await client.deviceSyncSignal.count({ where: { connectionId } })).toBe(0);
+          } else {
+            await expect(pending).resolves.toMatchObject({ wakeAccepted: true, wakeInserted: true });
+            expect(kms).toHaveBeenCalledTimes(scenario === "root_rotated" ? 2 : 1);
+            await expect(appendHostedDeviceSyncScheduledReconcileWake(request)).resolves.toMatchObject({
+              wakeAccepted: true, wakeDuplicate: true, wakeInserted: false,
+            });
+            expect(signal).toHaveBeenCalledOnce();
+            expect(await client.hostedMailboxItem.count({ where: { dedupeKey: request.eventId } })).toBe(1);
+          }
+        } finally {
+          release();
+          await pending.catch(() => {});
+        }
+      },
+    );
+
+    it("recovers dirty work after its scheduled mailbox owner was fully consumed", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client, consumedSeq: 1n, importedSeq: "1", firstPendingSeq: null,
+        deviceSyncContinuationSeqs: [], memberIds,
+      });
+      const connectionId = fixture.wake.connectionId!;
+      await client.deviceConnection.create({ data: {
+        id: connectionId, userId: fixture.memberId, provider: "oura", status: "active",
+        providerAccountBlindIndex: `synthetic-${connectionId}`,
+        connectedAt: new Date(fixture.wake.expectedConnectedAt!),
+        nextReconcileAt: new Date(fixture.wake.hint!.nextReconcileAt!),
+        dirtyState: { create: {
+          userId: fixture.memberId, provider: "oura", dirtyRevision: 5n, processedRevision: 2n,
+          firstDirtyAt: new Date("2026-09-01T00:00:00Z"), latestDirtyAt: new Date("2026-09-01T00:00:00Z"),
+        } },
+      } });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma: client });
+      const requestWake = vi.fn(async (_input: { connectionId: string; eventId: string }) => ({ wakeAccepted: true, wakeAppended: true, wakeDuplicate: false, wakeInserted: true }));
+      const now = new Date("2026-09-04T12:00:00Z");
+      await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+      const recovered = requestWake.mock.calls[0]?.[0];
+      expect(recovered).toMatchObject({ connectionId });
+      expect(recovered?.eventId).not.toBe(fixture.wake.eventId);
+      await client.hostedWorkspace.update({
+        where: { userId: fixture.memberId }, data: { version: { increment: 1 } },
+      });
+      await client.deviceSyncDirtyConnection.update({
+        where: { connectionId }, data: { dirtyRevision: 6n },
+      });
+      await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+      expect(requestWake.mock.calls[1]?.[0]?.eventId).toBe(recovered?.eventId);
+      await client.hostedMailboxLaneCounter.update({
+        where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+        data: { nextSeq: 3n },
+      });
+      requestWake.mockClear();
+      await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+      expect(requestWake.mock.calls[0]?.[0]?.eventId).toBe(fixture.wake.eventId);
+      await client.hostedMailboxLaneCounter.update({
+        where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+        data: { nextSeq: 2n },
+      });
+      await client.deviceSyncDirtyConnection.update({ where: { connectionId }, data: { processedRevision: 6n } });
+      requestWake.mockClear();
+      await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+      expect(requestWake.mock.calls[0]?.[0]?.eventId).toBe(fixture.wake.eventId);
+      await client.deviceSyncDirtyPayload.create({ data: {
+        id: `synthetic-payload-${connectionId}`, connectionId, userId: fixture.memberId,
+        provider: "oura", dirtyRevision: 5n, resourceEncrypted: "encrypted-synthetic-fixture",
+        credentialIndependent: false,
+      } });
+      requestWake.mockClear();
+      await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+      expect(requestWake.mock.calls[0]?.[0]?.eventId).not.toBe(fixture.wake.eventId);
+      // An actual retained owner, pending mailbox work, or absent legacy proof
+      // must keep the ordinary stable schedule identity instead of reopening it.
+      for (const status of [
+        { hostedMailboxSystemHandledThroughSeq: "1", hostedMailboxSystemDeviceSyncContinuationSeqs: ["1"], hostedMailboxSystemFirstPendingSeq: null },
+        { hostedMailboxSystemHandledThroughSeq: "1", hostedMailboxSystemDeviceSyncContinuationSeqs: [], hostedMailboxSystemFirstPendingSeq: "1" },
+        {},
+      ]) {
+        await client.hostedWorkspace.update({ where: { userId: fixture.memberId }, data: { redactedStatusJson: status } });
+        requestWake.mockClear();
+        await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+        expect(requestWake.mock.calls[0]?.[0]?.eventId).toBe(fixture.wake.eventId);
+      }
+      if (!recovered) throw new Error("Expected recovered wake");
+      // Exercise the actual append boundary, including stable replay, using
+      // synthetic local crypto. A fresh identity must allocate new lane work.
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value.replace(/^enc:/u, ""),
+        encrypt: ({ value }) => `enc:${value}`,
+      });
+      try {
+        const envelope = { ...fixture.wake, eventId: recovered.eventId };
+        const appended = await appendScheduledWake(client, envelope);
+        expect(appended.inserted).toBe(true);
+        const repeated = await appendScheduledWake(client, envelope);
+        expect(repeated.inserted).toBe(false);
+        expect(repeated.dedupeConflict).toBe(false);
+        const counter = await client.hostedMailboxLaneCounter.findUniqueOrThrow({
+          where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+        });
+        expect(counter.nextSeq).toBe(3n);
+        expect(counter.consumedSeq).toBe(1n);
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+      }
+    });
+
+    it("accepts only the producer-specific duplicate after runtime import", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        importedSeq: "1",
+        memberIds,
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      try {
+        const strict = await client.$transaction((tx) =>
+          appendHostedMailboxEnvelopeTx({
+            envelope: fixture.wake,
+            tx,
+          })
+        );
+        expect(strict).toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+        });
+
+        warn.mockClear();
+        const scheduled = await appendScheduledWake(client, fixture.wake);
+        expect(scheduled).toMatchObject({
+          dedupeConflict: false,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: true,
+        });
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("accepts the first unhandled wake when later work is also imported", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        consumedSeq: 1n,
+        importedSeq: "3",
+        laneSeq: 2n,
+        memberIds,
+        nextSeq: 4n,
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      try {
+        await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
+          dedupeConflict: false,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: true,
+        });
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("accepts the exact runtime-retained wake behind the handled frontier", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        consumedSeq: 1n,
+        firstPendingSeq: null,
+        importedSeq: "1",
+        memberIds,
+        deviceSyncContinuationSeqs: ["1"],
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      try {
+        await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
+          dedupeConflict: false,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: true,
+        });
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it.each([
+      { blocker: 9n, consumed: 8n, owner: 4n },
+      { blocker: 4n, consumed: 3n, owner: 9n },
+    ])("keeps owner $owner exact through recording and completion beside blocker $blocker", async ({ blocker, consumed, owner }) => {
+      const client = requirePrisma(prisma);
+      const firstRetained = await seedRetiredScheduledWake({
+        client,
+        consumedSeq: consumed,
+        firstPendingSeq: String(blocker),
+        importedSeq: "9",
+        laneSeq: owner,
+        memberIds,
+        nextSeq: 10n,
+        deviceSyncContinuationSeqs: [String(owner), "6"],
+      });
+      const secondRetained = await insertRetiredScheduledWake({
+        client,
+        laneSeq: 6n,
+        memberId: firstRetained.memberId,
+      });
+      const completed = await insertRetiredScheduledWake({
+        client,
+        laneSeq: 7n,
+        memberId: firstRetained.memberId,
+      });
+      const blocking = await insertRetiredScheduledWake({
+        client,
+        laneSeq: blocker,
+        memberId: firstRetained.memberId,
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const getPrisma = vi.spyOn(prismaModule, "getPrisma").mockReturnValue(client);
+      const signal = vi.spyOn(runtimeSignal, "signalHostedDeviceSyncMailboxRuntime")
+        .mockImplementation(async () => { throw new Error("Unexpected runtime signal"); });
+
+      try {
+        for (const fixture of [firstRetained, secondRetained, blocking]) {
+          await client.deviceConnection.create({ data: {
+            id: fixture.wake.connectionId!, userId: firstRetained.memberId,
+            provider: "oura", status: "active",
+            providerAccountBlindIndex: `synthetic-${fixture.wake.connectionId}`,
+            connectedAt: new Date(fixture.wake.expectedConnectedAt!),
+            nextReconcileAt: new Date(fixture.wake.hint!.nextReconcileAt!),
+          } });
+          await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
+            dedupeConflict: false,
+            duplicate: true,
+            inserted: false,
+            runtimeOwnedRetiredDuplicate: true,
+          });
+        }
+
+        const recovery = await runHostedDeviceSyncRecoverySweep({
+          runDueReconcileSweeper: () => runHostedDeviceSyncDueReconcileSweeper({
+            logger: { info: () => {}, warn: console.warn },
+            now: new Date("2026-09-04T12:00:00.000Z"),
+            store: {
+              listDueReconcileConnectionsForSweep: async () =>
+                [firstRetained, secondRetained, blocking].map(({ wake }) => ({
+                  connectionId: wake.connectionId!,
+                  connectedAt: wake.expectedConnectedAt!,
+                  nextReconcileAt: wake.hint!.nextReconcileAt!,
+                  provider: wake.provider!,
+                  userId: wake.userId,
+                })),
+            },
+          }),
+          runPreferenceHandoffSweeper: async () => ({
+            candidateUsers: 0,
+            handoffAccepted: 0,
+            handoffAttempted: 0,
+            handoffFailed: 0,
+            handoffLimit: 25,
+            handoffSkippedInactive: 0,
+            skippedCandidateUsers: 0,
+          }),
+        });
+        expect(recovery.dueReconcileSweeper).toMatchObject({
+          wakeAccepted: 3,
+          wakeFailed: 0,
+          wakeNotAccepted: 0,
+        });
+        expect(signal).not.toHaveBeenCalled();
+        expect(await client.deviceSyncSignal.count({
+          where: { userId: firstRetained.memberId },
+        })).toBe(0);
+
+        const recordingCheckpoint = await checkpointHostedWorkspace({
+          checkpointedAt: "2026-09-04T12:00:00.000Z",
+          expectedVersion: "0",
+          prisma: client,
+          reason: "idle_shutdown",
+          redactedStatusJson: {
+            hostedMailboxSystemDeviceSyncContinuationSeqs: [String(owner), "6"],
+            hostedMailboxSystemFirstPendingSeq: String(blocker),
+            hostedMailboxSystemHandledThroughSeq: String(consumed),
+            hostedMailboxSystemImportedSeq: "9",
+          },
+          snapshotRef: null,
+          userId: firstRetained.memberId,
+        });
+        expect(recordingCheckpoint.status).toBe("updated");
+        await expect(appendScheduledWake(client, firstRetained.wake)).resolves.toMatchObject({
+          dedupeConflict: false,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: true,
+        });
+
+        const completedCheckpoint = await checkpointHostedWorkspace({
+          checkpointedAt: "2026-09-04T12:01:00.000Z",
+          expectedVersion: "1",
+          prisma: client,
+          reason: "idle_shutdown",
+          redactedStatusJson: {
+            hostedMailboxSystemDeviceSyncContinuationSeqs: ["6"],
+            hostedMailboxSystemFirstPendingSeq: String(blocker),
+            hostedMailboxSystemHandledThroughSeq: String(consumed),
+            hostedMailboxSystemImportedSeq: "9",
+          },
+          snapshotRef: null,
+          userId: firstRetained.memberId,
+        });
+        expect(completedCheckpoint.status).toBe("updated");
+        await expect(appendScheduledWake(client, firstRetained.wake)).resolves.toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: false,
+        });
+        for (const fixture of [secondRetained, blocking]) {
+          await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
+            dedupeConflict: false,
+            duplicate: true,
+            inserted: false,
+            runtimeOwnedRetiredDuplicate: true,
+          });
+        }
+
+        await expect(appendScheduledWake(client, completed.wake)).resolves.toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: false,
+        });
+        expect(warn.mock.calls.filter(([message]) =>
+          message === "Hosted mailbox dedupe conflict.",
+        )).toHaveLength(2);
+      } finally {
+        signal.mockRestore();
+        getPrisma.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
+    it("rejects a retired wake skipped behind an earlier pending item", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        consumedSeq: 0n,
+        firstPendingSeq: "1",
+        importedSeq: "3",
+        laneSeq: 2n,
+        memberIds,
+        nextSeq: 4n,
+      });
+      await client.hostedMailboxItem.createMany({
+        data: [
+          {
+            contentRetiredAt: new Date("2026-08-20T12:00:00.000Z"),
+            createdAt: new Date("2026-08-01T12:00:00.000Z"),
+            dedupeKey: `${fixture.mailboxItemId}:pending`,
+            id: `${fixture.mailboxItemId}_pending`,
+            kind: "runtime.maintenance-requested",
+            lane: "system",
+            laneSeq: 1n,
+            occurredAt: new Date("2026-08-01T12:00:00.000Z"),
+            payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+            userId: fixture.memberId,
+          },
+          {
+            createdAt: new Date("2026-09-02T12:00:00.000Z"),
+            dedupeKey: `${fixture.mailboxItemId}:successor`,
+            id: `${fixture.mailboxItemId}_successor`,
+            kind: "runtime.maintenance-requested",
+            lane: "system",
+            laneSeq: 3n,
+            occurredAt: new Date("2026-09-02T12:00:00.000Z"),
+            payloadBytes: 27,
+            payloadHash: "a".repeat(64),
+            payloadInlineCiphertext: "encrypted-successor-fixture",
+            payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+            userId: fixture.memberId,
+          },
+        ],
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      try {
+        await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: false,
+        });
+        expect(warn).toHaveBeenCalledWith(
+          "Hosted mailbox dedupe conflict.",
+          expect.objectContaining({
+            eventCode: "mailbox.dedupe_conflict",
+          }),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("fails closed when legacy pending state makes retention fast-forward ambiguous", async () => {
+      const client = requirePrisma(prisma);
+      const scenarioNow = "2026-09-03T12:00:00.000Z";
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        firstPendingSeq: null,
+        importedSeq: "0",
+        memberIds,
+        nextSeq: 3n,
+      });
+      const successorId = `${fixture.mailboxItemId}_successor`;
+      const successorDedupeKey = `${fixture.mailboxItemId}:successor`;
+      await client.hostedMailboxItem.create({
+        data: {
+          createdAt: new Date("2026-09-02T12:00:00.000Z"),
+          dedupeKey: successorDedupeKey,
+          id: successorId,
+          kind: "runtime.maintenance-requested",
+          lane: "system",
+          laneSeq: 2n,
+          occurredAt: new Date("2026-09-02T12:00:00.000Z"),
+          payloadBytes: 27,
+          payloadHash: "b".repeat(64),
+          payloadInlineCiphertext: "encrypted-successor-fixture",
+          payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+          userId: fixture.memberId,
+        },
+      });
+      const projection = await fetchHostedRuntimeMailboxProjection({
+        cursorMode: "imported_seq",
+        lanes: [{ importedSeq: "0", lane: "system" }],
+        limitPerLane: 10,
+        now: scenarioNow,
+        prisma: client,
+        userId: fixture.memberId,
+      });
+      expect(projection.consumedSeqByLane).toEqual([
+        { consumedSeq: "1", lane: "system" },
+      ]);
+      expect(projection.items.map((item) => item.id)).toEqual([successorId]);
+
+      const checkpoint = await checkpointHostedWorkspace({
+        checkpointedAt: scenarioNow,
+        expectedVersion: "0",
+        prisma: client,
+        reason: "import",
+        redactedStatusJson: {
+          hostedMailboxSystemFirstPendingSeq: null,
+          hostedMailboxSystemHandledThroughSeq: "0",
+          hostedMailboxSystemImportedSeq: "2",
+        },
+        snapshotRef: null,
+        userId: fixture.memberId,
+      });
+      expect(checkpoint.status).toBe("updated");
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: false,
+        });
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it.each([
+      {
+        firstPendingSeq: null,
+        importedSeq: "1",
+        label: "a checkpoint with no exact first pending sequence",
+      },
+      {
+        firstPendingSeq: "2",
+        importedSeq: "1",
+        label: "a different first pending sequence",
+      },
+      {
+        importedSeq: "0",
+        label: "a wake beyond the imported watermark",
+      },
+      {
+        importedSeq: 1,
+        label: "a non-string imported watermark",
+      },
+      {
+        importedSeq: "malformed",
+        label: "a malformed imported watermark",
+      },
+      {
+        importedSeq: "999999999999999999999999999999999999",
+        label: "an overflowing imported watermark",
+      },
+      {
+        importedSeq: "2",
+        label: "an imported watermark beyond the allocated high-water mark",
+      },
+      {
+        consumedSeq: 0n,
+        firstPendingSeq: "2",
+        importedSeq: "2",
+        label: "a first-pending wake ahead of the handled frontier",
+        laneSeq: 2n,
+        nextSeq: 3n,
+      },
+      {
+        importedSeq: "1",
+        label: "a retired row with a remaining sidecar",
+        sidecar: true,
+      },
+      {
+        consumedSeq: 1n,
+        firstPendingSeq: null,
+        importedSeq: "1",
+        label: "a missing retained-owner list for a handled wake",
+      },
+      {
+        consumedSeq: 1n,
+        firstPendingSeq: null,
+        importedSeq: "1",
+        label: "a retained-owner list that omits the handled wake",
+        deviceSyncContinuationSeqs: ["2"],
+      },
+      {
+        consumedSeq: 1n,
+        firstPendingSeq: null,
+        importedSeq: "1",
+        label: "a malformed retained-owner claim",
+        deviceSyncContinuationSeqs: "1",
+      },
+      {
+        importedSeq: "1",
+        label: "a retired row with different occurrence metadata",
+        occurredAtOffsetMs: 1,
+      },
+      {
+        eventSchema: "v2",
+        importedSeq: "1",
+        label: "a retired legacy schedule identity",
+      },
+    ])("rejects $label", async ({
+      consumedSeq,
+      eventSchema,
+      firstPendingSeq,
+      importedSeq,
+      laneSeq,
+      nextSeq,
+      occurredAtOffsetMs,
+      deviceSyncContinuationSeqs,
+      sidecar,
+    }) => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        consumedSeq,
+        eventSchema,
+        firstPendingSeq,
+        importedSeq,
+        laneSeq,
+        memberIds,
+        nextSeq,
+        occurredAtOffsetMs,
+        deviceSyncContinuationSeqs,
+        sidecar,
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      try {
+        await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: false,
+        });
+        expect(warn).toHaveBeenCalledWith(
+          "Hosted mailbox dedupe conflict.",
+          expect.objectContaining({
+            eventCode: "mailbox.dedupe_conflict",
+          }),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  },
+);
+
+async function seedRetiredScheduledWake(input: {
+  client: PrismaClient;
+  consumedSeq?: bigint;
+  eventSchema?: string;
+  firstPendingSeq?: string | null;
+  importedSeq: number | string;
+  laneSeq?: bigint;
+  memberIds: string[];
+  nextSeq?: bigint;
+  occurredAtOffsetMs?: number;
+  deviceSyncContinuationSeqs?: string[] | string | null;
+  sidecar?: boolean;
+}) {
+  const suffix = randomUUID().replaceAll("-", "");
+  const memberId = `member_scheduled_retention_${suffix}`;
+  const laneSeq = input.laneSeq ?? 1n;
+  input.memberIds.push(memberId);
+
+  await input.client.hostedMember.create({
+    data: { billingStatus: "active", id: memberId },
+  });
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "ingress",
+    prisma: input.client,
+    reason: "scheduled-wake-test",
+    userId: memberId,
+  });
+  await input.client.hostedWorkspace.create({
+    data: {
+      redactedStatusJson: {
+        hostedMailboxSystemFirstPendingSeq:
+          input.firstPendingSeq === undefined
+            ? laneSeq.toString()
+            : input.firstPendingSeq,
+        hostedMailboxSystemHandledThroughSeq:
+          (input.consumedSeq ?? 0n).toString(),
+        hostedMailboxSystemImportedSeq: input.importedSeq,
+        ...(input.deviceSyncContinuationSeqs === undefined
+          ? {}
+          : {
+              hostedMailboxSystemDeviceSyncContinuationSeqs:
+                input.deviceSyncContinuationSeqs,
+            }),
+      },
+      userId: memberId,
+    },
+  });
+  await input.client.hostedMailboxLaneCounter.create({
+    data: {
+      consumedSeq: input.consumedSeq ?? 0n,
+      lane: "system",
+      nextSeq: input.nextSeq ?? laneSeq + 1n,
+      userId: memberId,
+    },
+  });
+
+  return {
+    memberId,
+    ...await insertRetiredScheduledWake({
+      client: input.client,
+      eventSchema: input.eventSchema,
+      laneSeq,
+      memberId,
+      occurredAtOffsetMs: input.occurredAtOffsetMs,
+      sidecar: input.sidecar,
+    }),
+  };
+}
+
+async function seedConsumedScheduledWake(input: {
+  client: PrismaClient;
+  memberIds: string[];
+}) {
+  const fixture = await seedRetiredScheduledWake({ ...input, importedSeq: "0" });
+  await input.client.hostedMailboxItem.delete({ where: { id: fixture.mailboxItemId } });
+  await input.client.hostedMailboxLaneCounter.update({
+    where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+    data: { nextSeq: 1n, consumedSeq: 0n },
+  });
+  await input.client.deviceConnection.create({ data: {
+    id: fixture.wake.connectionId!, userId: fixture.memberId,
+    provider: "oura", status: "active",
+    providerAccountBlindIndex: `synthetic-${fixture.wake.connectionId}`,
+    connectedAt: new Date(fixture.wake.expectedConnectedAt!),
+    nextReconcileAt: new Date(fixture.wake.hint!.nextReconcileAt!),
+  } });
+  const initial = await appendScheduledWake(input.client, fixture.wake);
+  expect(initial.inserted).toBe(true);
+  await input.client.hostedMailboxLaneCounter.update({
+    where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+    data: { consumedSeq: 1n },
+  });
+  // Older checkpoints omit the optional pending/continuation fields and the
+  // per-item consumed marker; the lane frontier remains canonical.
+  await input.client.hostedWorkspace.update({
+    where: { userId: fixture.memberId },
+    data: { nextWakeAt: null, redactedStatusJson: {
+      hostedMailboxSystemHandledThroughSeq: "1",
+      hostedMailboxSystemImportedSeq: "1",
+    } },
+  });
+  return { ...fixture, mailboxItemId: initial.item.id };
+}
+
+async function insertRetiredScheduledWake(input: {
+  client: PrismaClient;
+  eventSchema?: string;
+  laneSeq: bigint;
+  memberId: string;
+  occurredAtOffsetMs?: number;
+  sidecar?: boolean;
+}) {
+  const suffix = randomUUID().replaceAll("-", "");
+  const connectionId = `dsc_scheduled_retention_${suffix}`;
+  const mailboxItemId = `mailbox_scheduled_retention_${suffix}`;
+  const expectedConnectedAt = "2026-08-01T12:00:00.000Z";
+  const nextReconcileAt = "2026-08-02T12:00:00.000Z";
+  const eventId = [
+    "device-sync",
+    "scheduled-reconcile",
+    input.eventSchema ?? "v3",
+    connectionId,
+    expectedConnectedAt,
+    nextReconcileAt,
+  ].join(":");
+
+  await input.client.hostedMailboxItem.create({
+    data: {
+      contentRetiredAt: new Date("2026-08-20T12:00:00.000Z"),
+      createdAt: new Date(nextReconcileAt),
+      dedupeKey: eventId,
+      id: mailboxItemId,
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: input.laneSeq,
+      occurredAt: new Date(
+        Date.parse(nextReconcileAt) + (input.occurredAtOffsetMs ?? 0),
+      ),
+      payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      userId: input.memberId,
+    },
+  });
+  if (input.sidecar) {
+    await input.client.hostedMailboxPayload.create({
+      data: {
+        mailboxItemId,
+        payloadCiphertext: "encrypted-retention-fixture",
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        userId: input.memberId,
+      },
+    });
+  }
+
+  return {
+    mailboxItemId,
+    wake: buildHostedDeviceSyncWake({
+      connectionId,
+      eventId,
+      expectedConnectedAt,
+      hint: {
+        nextReconcileAt,
+        occurredAt: nextReconcileAt,
+      },
+      occurredAt: nextReconcileAt,
+      provider: "oura",
+      source: "scheduled-reconcile",
+      userId: input.memberId,
+    }),
+  };
+}
+
+function requirePrisma(value: PrismaClient | null): PrismaClient {
+  if (!value) {
+    throw new Error("Expected a PostgreSQL test client.");
+  }
+  return value;
+}
+
+function isClearlyLocalPostgresUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol.startsWith("postgres")
+      && ["127.0.0.1", "localhost", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function appendScheduledWake(
+  client: PrismaClient,
+  envelope: Parameters<typeof appendHostedScheduledDeviceSyncWakeEnvelopeTx>[0]["envelope"],
+) {
+  return runWithPreparedHostedMailboxItemAppendCrypto({
+    prisma: client,
+    userId: envelope.userId,
+    append: (prepared) => client.$transaction((tx) =>
+      runWithHostedDomainRootProviderCallsDisabled(() =>
+        appendHostedScheduledDeviceSyncWakeEnvelopeTx({ envelope, prepared, tx })
+      )
+    ),
+  });
+}
+
+const LOCAL_CRYPTO_ENV_KEYS = [
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK",
+  "HOSTED_CRYPTO_ENV",
+  "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
+  "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
+  "HOSTED_CRYPTO_GCP_KMS_API_ROOT",
+  "HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME",
+  "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
+  "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY",
+] as const;
+
+function configureLocalCryptoForTest(): () => void {
+  const previous = new Map(
+    LOCAL_CRYPTO_ENV_KEYS.map((key) => [key, process.env[key]]),
+  );
+  const authorityKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
+  const automationKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "jwk" },
+  });
+  Object.assign(process.env, {
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "scheduled-wake-test-key",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK:
+      JSON.stringify(automationKey.publicKey),
+    HOSTED_CRYPTO_ENV: "test",
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
+      "projects/murph-test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1",
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
+    HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+      "projects/murph-test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
+      JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 23).toString("base64"),
+  });
+  return () => {
+    for (const [key, value] of previous) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
+}

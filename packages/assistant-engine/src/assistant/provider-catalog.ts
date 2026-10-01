@@ -9,7 +9,6 @@ import {
   resolveCodexAssistantCapabilities,
   resolveCodexAssistantLabel,
   resolveCodexAssistantTargetCapabilities,
-  resolveCodexStaticModels,
   type AssistantCatalogModel,
   type AssistantModelCapabilities,
   type AssistantProviderCapabilities,
@@ -110,17 +109,16 @@ export function resolveCodexModelCatalog(input: {
 }): CodexModelCatalog {
   const profile = resolveCodexAssistantProfile(input)
   const capabilities = resolveCodexTargetCapabilities(profile)
-  const staticModels = resolveCodexStaticModels(profile)
-  const models = buildCodexCatalogModels({
-    currentModel: input.currentModel,
-    profile,
-    staticModels,
-    targetCapabilities: capabilities,
-  })
   const normalizedCurrentModel = normalizeNullableString(input.currentModel)
   const selectedModel = normalizedCurrentModel
-    ? models.find((model) => model.id === normalizedCurrentModel) ?? null
+    ? createCatalogModel({
+        id: normalizedCurrentModel,
+        description: profile.target.oss ? 'Current Codex OSS model.' : 'Current Codex model.',
+        source: 'current',
+        capabilities: resolveCodexCatalogModelCapabilities(capabilities),
+      })
     : null
+  const models = selectedModel ? [selectedModel] : []
   const modelOptions = [
     ...DEFAULT_CODEX_CHAT_MODEL_OPTIONS,
     ...models.map((model) => ({
@@ -174,59 +172,6 @@ export function findCodexCatalogReasoningOptionIndex(
     (option) => option.value === normalizedReasoningEffort,
   )
   return index >= 0 ? index : Math.min(1, options.length - 1)
-}
-
-function buildCodexCatalogModels(input: {
-  currentModel?: string | null
-  profile: CodexAssistantProfile
-  staticModels: readonly CodexCatalogModel[]
-  targetCapabilities: CodexAssistantCapabilities
-}): readonly CodexCatalogModel[] {
-  const normalizedCurrentModel = normalizeNullableString(input.currentModel)
-  const models: CodexCatalogModel[] = []
-  const seen = new Set<string>()
-
-  const pushModel = (model: CodexCatalogModel | null | undefined) => {
-    if (!model) {
-      return
-    }
-
-    const normalizedId = normalizeNullableString(model.id)
-    if (!normalizedId || seen.has(normalizedId)) {
-      return
-    }
-
-    seen.add(normalizedId)
-    models.push({
-      ...model,
-      id: normalizedId,
-      label: normalizedId,
-    })
-  }
-
-  if (normalizedCurrentModel) {
-    pushModel(
-      createCatalogModel({
-        id: normalizedCurrentModel,
-        description: buildCurrentCodexModelDescription(input.profile),
-        source: 'current',
-        capabilities:
-          input.staticModels.find((model) => model.id === normalizedCurrentModel)
-            ?.capabilities ??
-          resolveCodexCatalogModelCapabilities(input.targetCapabilities),
-      }),
-    )
-  }
-
-  for (const model of input.staticModels) {
-    pushModel(model)
-  }
-
-  return models
-}
-
-function buildCurrentCodexModelDescription(profile: CodexAssistantProfile): string {
-  return profile.target.oss ? 'Current Codex OSS model.' : 'Current Codex model.'
 }
 
 function resolveCodexCatalogModelCapabilities(

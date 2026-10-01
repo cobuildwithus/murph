@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
+  KNOWLEDGE_READ_RECOVERY_ACTION,
   knowledgeGetResultSchema,
   knowledgeGraphSearchResultSchema,
   knowledgeIndexRebuildResultSchema,
@@ -48,8 +49,15 @@ describe("knowledge contracts", () => {
 
     const searchResult = knowledgeSearchResultSchema.parse({
       ...graphSearchResult,
+      degradation: {
+        issueCodes: ["parse_frontmatter"],
+        issueCount: 3,
+        recoveryAction: KNOWLEDGE_READ_RECOVERY_ACTION,
+      },
       pageType: "guide",
+      returnedCount: 1,
       status: "published",
+      truncated: false,
       vault: "/vault",
     });
 
@@ -88,10 +96,12 @@ describe("knowledge contracts", () => {
 
     expect(
       knowledgeGetResultSchema.parse({
+        degradation: null,
         page,
         vault: "/vault",
       }),
     ).toEqual({
+      degradation: null,
       page,
       vault: "/vault",
     });
@@ -108,11 +118,15 @@ describe("knowledge contracts", () => {
 
     expect(
       knowledgeListResultSchema.parse({
+        degradation: null,
         limit: 20,
         pageCount: 1,
         pages: [reference],
         pageType: "guide",
+        returnedCount: 1,
         status: "published",
+        totalCount: 1,
+        truncated: false,
         vault: "/vault",
       }).pages,
     ).toHaveLength(1);

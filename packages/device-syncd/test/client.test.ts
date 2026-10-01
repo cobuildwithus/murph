@@ -267,3 +267,53 @@ test("requestDeviceSyncJson surfaces unavailable, HTTP, and invalid-payload erro
     /invalid:not-an-object/u,
   );
 });
+
+test("requestDeviceSyncJson applies a fresh deadline and classifies response read failures", async () => {
+  await assert.rejects(
+    () => requestDeviceSyncJson({
+      baseUrl: "http://127.0.0.1:8788",
+      path: "/providers",
+      timeoutMs: 5,
+      fetchImpl: async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+      createUnavailableError(context) {
+        return new Error(
+          `unavailable:${context.failureStage}:${context.method}:${String(context.timedOut)}`,
+        );
+      },
+      createHttpError(context) {
+        return new Error(`http:${context.status}`);
+      },
+      createInvalidResponseError(context) {
+        return new Error(`invalid:${context.status}`);
+      },
+    }),
+    /unavailable:transport:GET:true/u,
+  );
+
+  await assert.rejects(
+    () => requestDeviceSyncJson({
+      baseUrl: "http://127.0.0.1:8788",
+      path: "/providers",
+      fetchImpl: async () => new Response(new ReadableStream({
+        pull() {
+          throw new Error("private body failure");
+        },
+      }), { status: 200 }),
+      createUnavailableError(context) {
+        return new Error(
+          `unavailable:${context.failureStage}:${context.method}:${String(context.timedOut)}`,
+        );
+      },
+      createHttpError(context) {
+        return new Error(`http:${context.status}`);
+      },
+      createInvalidResponseError(context) {
+        return new Error(`invalid:${context.status}`);
+      },
+    }),
+    /unavailable:response:GET:false/u,
+  );
+});

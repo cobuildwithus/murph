@@ -29,6 +29,9 @@
       "path": "./packages/assistant-engine"
     },
     {
+      "path": "./packages/assistant-runtime"
+    },
+    {
       "path": "./packages/vault-usecases"
     },
     {
@@ -57,9 +60,6 @@
     },
     {
       "path": "./packages/assistant-cli"
-    },
-    {
-      "path": "./packages/assistantd"
     },
     {
       "path": "./packages/setup-cli"

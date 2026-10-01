@@ -19,6 +19,7 @@ export function createNoopMailboxEffect(input: {
   nextWakeReason?: HostedMailboxOutcome["nextWakeReason"];
   postCheckpointRecord?: HostedMailboxOutcome["postCheckpointRecord"];
   redactedLogEntries?: HostedExecutionRedactedLogEntry[];
+  systemProgressed?: true;
 }): HostedMailboxOutcome {
   return {
     ...(input.backgroundMaintenanceYielded === true
@@ -35,5 +36,6 @@ export function createNoopMailboxEffect(input: {
     mailboxLane: input.mailboxLane,
     postCheckpointRecord: input.postCheckpointRecord ?? null,
     redactedLogEntries: input.redactedLogEntries ?? [],
+    ...(input.systemProgressed === true ? { systemProgressed: true as const } : {}),
   };
 }

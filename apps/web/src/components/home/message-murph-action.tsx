@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactAuthButton } from "@/src/components/murph/murph-contact-auth-button";
 import { AuthButton } from "@/src/components/ui/auth-button";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { cn } from "@/src/lib/utils";
 import { getOnboardingStepActionClass } from "./onboarding-steps";
 
@@ -33,12 +34,17 @@ export async function MessageMurphContactAction() {
   });
 
   if (!option) {
+    const { authenticated } = await getHostedPageAuthSnapshot();
     return (
       <AuthButton
         aria-label="Set up a way to message Murph"
         className={getOnboardingStepActionClass(true)}
         size="unstyled"
         variant="unstyled"
+        {...(authenticated ? {
+          nativeButton: false,
+          render: <a href="/settings" />,
+        } : {})}
       >
         Message
         <ArrowRight

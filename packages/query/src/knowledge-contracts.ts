@@ -12,6 +12,16 @@ const knowledgePageSlugSchema = z.string().regex(KNOWLEDGE_SLUG_PATTERN);
 const knowledgeLibrarySlugSchema = nonEmptyStringSchema;
 const knowledgeRelatedSlugSchema = nonEmptyStringSchema;
 
+export const KNOWLEDGE_READ_RECOVERY_ACTION = "knowledge lint" as const;
+
+export type KnowledgeReadIssueCode = "parse_frontmatter" | "parse_json";
+
+export interface KnowledgeReadDegradation {
+  issueCodes: KnowledgeReadIssueCode[];
+  issueCount: number;
+  recoveryAction: typeof KNOWLEDGE_READ_RECOVERY_ACTION;
+}
+
 export interface KnowledgePageReference {
   compiledAt: string | null;
   librarySlugs: string[];
@@ -55,11 +65,15 @@ export interface KnowledgeUpsertResult {
 }
 
 export interface KnowledgeListResult {
+  degradation: KnowledgeReadDegradation | null;
   limit: number;
   pageCount: number;
   pageType: string | null;
   pages: KnowledgePageMetadata[];
+  returnedCount: number;
   status: string | null;
+  totalCount: number;
+  truncated: boolean;
   vault: string;
 }
 
@@ -67,9 +81,12 @@ export interface KnowledgeSearchHit extends KnowledgeGraphSearchHit {}
 
 export interface KnowledgeSearchResult
   extends KnowledgeGraphSearchResult {
+  degradation: KnowledgeReadDegradation | null;
   hits: KnowledgeSearchHit[];
   pageType: string | null;
+  returnedCount: number;
   status: string | null;
+  truncated: boolean;
   vault: string;
 }
 
@@ -89,6 +106,7 @@ export interface KnowledgeLogTailResult {
 }
 
 export interface KnowledgeGetResult {
+  degradation: KnowledgeReadDegradation | null;
   page: KnowledgePage;
   vault: string;
 }
@@ -146,12 +164,27 @@ export const knowledgeUpsertResultSchema = z.object({
   vault: pathLikeSchema,
 }) satisfies z.ZodType<KnowledgeUpsertResult>;
 
+export const knowledgeReadIssueCodeSchema = z.enum([
+  "parse_frontmatter",
+  "parse_json",
+]);
+
+export const knowledgeReadDegradationSchema = z.object({
+  issueCodes: z.array(knowledgeReadIssueCodeSchema).min(1).max(2),
+  issueCount: z.number().int().positive(),
+  recoveryAction: z.literal(KNOWLEDGE_READ_RECOVERY_ACTION),
+}) satisfies z.ZodType<KnowledgeReadDegradation>;
+
 export const knowledgeListResultSchema = z.object({
+  degradation: knowledgeReadDegradationSchema.nullable(),
   limit: z.number().int().positive().max(200),
   pageCount: z.number().int().nonnegative(),
   pageType: nullableNonEmptyStringSchema,
   pages: z.array(knowledgePageMetadataSchema),
+  returnedCount: z.number().int().nonnegative(),
   status: nullableNonEmptyStringSchema,
+  totalCount: z.number().int().nonnegative(),
+  truncated: z.boolean(),
   vault: pathLikeSchema,
 }) satisfies z.ZodType<KnowledgeListResult>;
 
@@ -173,8 +206,11 @@ export const knowledgeSearchHitSchema =
   knowledgeGraphSearchHitSchema satisfies z.ZodType<KnowledgeSearchHit>;
 
 export const knowledgeSearchResultSchema = knowledgeGraphSearchResultSchema.extend({
+  degradation: knowledgeReadDegradationSchema.nullable(),
   pageType: nullableNonEmptyStringSchema,
+  returnedCount: z.number().int().nonnegative(),
   status: nullableNonEmptyStringSchema,
+  truncated: z.boolean(),
   vault: pathLikeSchema,
 }) satisfies z.ZodType<KnowledgeSearchResult>;
 
@@ -194,6 +230,7 @@ export const knowledgeLogTailResultSchema = z.object({
 }) satisfies z.ZodType<KnowledgeLogTailResult>;
 
 export const knowledgeGetResultSchema = z.object({
+  degradation: knowledgeReadDegradationSchema.nullable(),
   page: knowledgePageSchema,
   vault: pathLikeSchema,
 }) satisfies z.ZodType<KnowledgeGetResult>;

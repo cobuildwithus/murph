@@ -6,6 +6,7 @@ import { Cli } from 'incur'
 import { afterEach, test, vi } from 'vitest'
 
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import * as vaultRuntime from '@murphai/vault-usecases/runtime'
 import type {
   ImportersFactoryRuntimeModule,
@@ -42,7 +43,7 @@ function createCoverageCli() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
-  registerDocumentCommands(cli, services)
+  registerDocumentCommands(cli, services, createIntegratedInboxServices())
   registerMealCommands(cli, services)
   registerInterventionCommands(cli, services)
 
@@ -58,7 +59,7 @@ function createCoverageCliAndServices() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
-  registerDocumentCommands(cli, services)
+  registerDocumentCommands(cli, services, createIntegratedInboxServices())
   registerMealCommands(cli, services)
   registerInterventionCommands(cli, services)
 
@@ -662,6 +663,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
     mealId: 'meal_01JNV422Y2M5ZBV64ZP4N1DRB1',
     event: {
       id: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1',
+      dayKey: '2026-04-10',
       occurredAt: null,
       note: 'Normalized direct meal note',
       source: 'derived' as const,

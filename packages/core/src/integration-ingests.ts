@@ -1,15 +1,12 @@
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { lstat, open as openFile, readFile, stat, unlink } from "node:fs/promises";
+import { appendFile, lstat, open as openFile, readFile, stat, unlink } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
-  createGunzip,
-  createGzip,
   crc32,
   deflateRawSync,
-  gzipSync,
   inflateRawSync,
 } from "node:zlib";
 
@@ -27,6 +24,15 @@ import {
   prepareFileAtomicExclusive,
   writeFileAtomic,
 } from "./atomic-write.ts";
+import {
+  compressShard,
+  createShardCompressor,
+  createShardDecompressor,
+  isShardCompression,
+  shardCompressionFromPath,
+  type ShardCompression,
+} from "./shard-compression.ts";
+import { applyJsonlAppendTarget, INTEGRATION_INGEST_ARCHIVE_SUFFIXES } from "./write-policy.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
 import { pathExists, walkVaultFiles } from "./fs.ts";
@@ -43,7 +49,6 @@ export const MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES = 256 * 1024 * 1024;
 const INTEGRATION_INGEST_NOVELTY_MAX_SCAN_BYTES = 8 * 1024 * 1024;
 const INTEGRATION_INGEST_NOVELTY_MAX_SCAN_ROWS = 64;
 const INTEGRATION_INGEST_NOVELTY_SCAN_CHUNK_BYTES = 64 * 1024;
-const INTEGRATION_INGEST_ARCHIVE_GZIP_LEVEL = 6;
 const INTEGRATION_INGEST_APPEND_PLAN_AUTHORITY = Symbol("integration-ingest-append-plan-authority");
 const INTEGRATION_INGEST_ID_INSPECTION_AUTHORITY = Symbol("integration-ingest-id-inspection-authority");
 
@@ -69,6 +74,7 @@ export interface BuildIntegrationIngestRecordInput {
   sampleIdsComplete: boolean;
   eventCount: number;
   sampleCount: number;
+  publication?: IntegrationIngestRecord["publication"];
   provenance?: Record<string, unknown>;
 }
 
@@ -105,7 +111,11 @@ export interface ArchivedIntegrationIngestShardContentReceipt {
   sha256: string;
 }
 
+// Active months stay cheap to append until their plain evidence reaches this size.
+const ACTIVE_INTEGRATION_INGEST_ARCHIVE_MIN_BYTES = 4 * 1024 * 1024;
+
 export interface ArchiveClosedIntegrationIngestShardsInput {
+  archiveCurrentMonth?: boolean;
   now?: Date;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -189,7 +199,7 @@ interface RawIntegrationIngestJsonlRow {
   sourcePath: string;
 }
 
-type IntegrationIngestRowSourceKind = "jsonl" | "gzip" | "zip";
+type IntegrationIngestRowSourceKind = "jsonl" | ShardCompression | "zip";
 
 interface IntegrationIngestRowSource {
   kind: IntegrationIngestRowSourceKind;
@@ -230,7 +240,6 @@ interface IntegrationIngestNoveltyTailScanResult {
   unsafe: boolean;
 }
 
-const INTEGRATION_INGEST_ARCHIVE_SUFFIXES = [".gz", ".zip"] as const;
 const ZIP_EOCD_SIGNATURE = 0x06054b50;
 const ZIP_CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50;
 const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
@@ -350,6 +359,7 @@ export function buildIntegrationIngestRecord(
       eventCount: input.eventCount,
       sampleCount: input.sampleCount,
     },
+    ...(input.publication ? { publication: input.publication } : {}),
     ...(input.provenance && Object.keys(input.provenance).length > 0
       ? { provenance: input.provenance }
       : {}),
@@ -1352,22 +1362,30 @@ export async function archiveClosedIntegrationIngestShards(
       signal: input.signal ?? null,
       vaultRoot: input.vaultRoot,
     });
-    const rawPaths = await listClosedRawIntegrationIngestShardPaths(
+    const sources = (await listClosedIntegrationIngestShardSources(
       input.vaultRoot,
       currentMonth,
-    );
+      input.archiveCurrentMonth === true,
+    )).filter((source) => source.kind !== "brotli");
     let archivedByteCount = 0;
     let archivedShardCount = 0;
     let blockedShardCount = 0;
     let sourceByteCount = 0;
 
-    for (const logicalPath of rawPaths) {
+    for (const source of sources) {
+      const { logicalPath } = source;
       input.signal?.throwIfAborted();
+      if (integrationIngestMonthKeyFromLogicalPath(logicalPath) === currentMonth) {
+        const stat = await lstat(resolveVaultPath(input.vaultRoot, source.sourcePath).absolutePath);
+        if (stat.size < ACTIVE_INTEGRATION_INGEST_ARCHIVE_MIN_BYTES) continue;
+      }
       const gzipPath = `${logicalPath}.gz`;
       const zipPath = `${logicalPath}.zip`;
       if (
-        await pathExists(resolveVaultPath(input.vaultRoot, gzipPath).absolutePath)
+        (source.kind === "jsonl" && await pathExists(resolveVaultPath(input.vaultRoot, gzipPath).absolutePath))
+        || (source.kind !== "jsonl" && await pathExists(resolveVaultPath(input.vaultRoot, logicalPath).absolutePath))
         || await pathExists(resolveVaultPath(input.vaultRoot, zipPath).absolutePath)
+        || await pathExists(resolveVaultPath(input.vaultRoot, `${logicalPath}.br`).absolutePath)
       ) {
         blockedShardCount += 1;
         continue;
@@ -1375,7 +1393,7 @@ export async function archiveClosedIntegrationIngestShards(
 
       try {
         const archived = await archiveClosedIntegrationIngestShardLocked({
-          logicalPath,
+          source,
           signal: input.signal ?? null,
           vaultRoot: input.vaultRoot,
         });
@@ -1396,7 +1414,7 @@ export async function archiveClosedIntegrationIngestShards(
       archivedShardCount,
       blockedShardCount,
       repairedShardCount: recovery.repairedShardCount,
-      scannedShardCount: rawPaths.length,
+      scannedShardCount: sources.length,
       sourceByteCount,
     };
   });
@@ -1496,21 +1514,52 @@ function integrationIngestMonthKeyFromLogicalPath(logicalPath: string): string |
   return `${match[1]}-${match[2]}`;
 }
 
-async function listClosedRawIntegrationIngestShardPaths(
+async function listClosedIntegrationIngestShardSources(
   vaultRoot: string,
   currentMonth: string,
-): Promise<string[]> {
-  const rawPaths = await walkVaultFiles(
-    vaultRoot,
-    VAULT_LAYOUT.integrationIngestLedgerDirectory,
-    { extension: ".jsonl" },
-  );
-  return rawPaths
-    .filter((logicalPath) => {
-      const month = integrationIngestMonthKeyFromLogicalPath(logicalPath);
-      return month !== null && month < currentMonth;
-    })
-    .sort();
+  includeCurrentMonth = false,
+): Promise<IntegrationIngestRowSource[]> {
+  const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory);
+  return sortIntegrationIngestRowSources(paths
+    .filter((relativePath) => [".jsonl", ".jsonl.gz", ".jsonl.br"].some((suffix) => relativePath.endsWith(suffix)))
+    .map(integrationIngestRowSourceFromPath)
+    .filter((source) => {
+      const month = integrationIngestMonthKeyFromLogicalPath(source.logicalPath);
+      return month !== null && (month < currentMonth || (includeCurrentMonth && month === currentMonth));
+    }));
+}
+
+async function reconcileIntegrationIngestSources(input: {
+  signal: AbortSignal | null;
+  sources: readonly IntegrationIngestRowSource[];
+  vaultRoot: string;
+}): Promise<boolean> {
+  const keep = input.sources.find((source) => source.kind === "brotli")
+    ?? input.sources.find((source) => source.kind === "gzip");
+  if (!keep) return false;
+  const inspected = [];
+  for (const source of input.sources) {
+    input.signal?.throwIfAborted();
+    const absolutePath = resolveVaultPath(input.vaultRoot, source.sourcePath).absolutePath;
+    const before = await lstat(absolutePath);
+    assertRegularIntegrationIngestArchiveFile(before, source.sourcePath);
+    const args = { absolutePath, logicalPath: source.logicalPath, signal: input.signal, sourcePath: source.sourcePath };
+    const receipt = source.kind === "jsonl"
+      ? await validateRawIntegrationIngestSource(args)
+      : await validateCompressedIntegrationIngestSource(args);
+    inspected.push({ absolutePath, before, receipt, source });
+  }
+  const first = inspected[0]?.receipt;
+  if (!first || inspected.some(({ receipt }) => !receipt.endsWithNewline
+    || receipt.byteLength !== first.byteLength || receipt.sha256 !== first.sha256)) return false;
+  for (const entry of inspected) {
+    assertIntegrationIngestArchiveSourceUnchanged(entry.before, await lstat(entry.absolutePath), entry.source.sourcePath);
+  }
+  for (const entry of inspected) {
+    input.signal?.throwIfAborted();
+    if (entry.source !== keep) await unlink(entry.absolutePath);
+  }
+  return true;
 }
 
 async function recoverInterruptedClosedIntegrationIngestArchivesLocked(input: {
@@ -1518,67 +1567,26 @@ async function recoverInterruptedClosedIntegrationIngestArchivesLocked(input: {
   signal: AbortSignal | null;
   vaultRoot: string;
 }): Promise<RecoverInterruptedClosedIntegrationIngestArchivesResult> {
-  const rawPaths = await listClosedRawIntegrationIngestShardPaths(
-    input.vaultRoot,
-    input.currentMonth,
-  );
+  const groups = new Map<string, IntegrationIngestRowSource[]>();
+  for (const source of await listClosedIntegrationIngestShardSources(input.vaultRoot, input.currentMonth, true)) {
+    const group = groups.get(source.logicalPath) ?? [];
+    group.push(source);
+    groups.set(source.logicalPath, group);
+  }
   let repairedShardCount = 0;
   let scannedConflictCount = 0;
-
-  for (const logicalPath of rawPaths) {
+  for (const [logicalPath, sources] of groups) {
     input.signal?.throwIfAborted();
-    const gzipPath = `${logicalPath}.gz`;
-    const zipPath = `${logicalPath}.zip`;
-    const gzipAbsolutePath = resolveVaultPath(input.vaultRoot, gzipPath).absolutePath;
-    if (!(await pathExists(gzipAbsolutePath))) {
-      continue;
-    }
+    if (sources.length < 2) continue;
     scannedConflictCount += 1;
-    if (await pathExists(resolveVaultPath(input.vaultRoot, zipPath).absolutePath)) {
-      continue;
-    }
-
+    if (await pathExists(resolveVaultPath(input.vaultRoot, `${logicalPath}.zip`).absolutePath)) continue;
     try {
-      const rawAbsolutePath = resolveVaultPath(input.vaultRoot, logicalPath).absolutePath;
-      const rawStatBefore = await lstat(rawAbsolutePath);
-      assertRegularIntegrationIngestArchiveFile(rawStatBefore, logicalPath);
-      const [rawReceipt, gzipReceipt] = await Promise.all([
-        validateRawIntegrationIngestSource({
-          absolutePath: rawAbsolutePath,
-          logicalPath,
-          signal: input.signal,
-        }),
-        validateGzippedIntegrationIngestSource({
-          absolutePath: gzipAbsolutePath,
-          logicalPath,
-          signal: input.signal,
-          sourcePath: gzipPath,
-        }),
-      ]);
-      if (
-        rawReceipt.byteLength !== gzipReceipt.byteLength
-        || rawReceipt.sha256 !== gzipReceipt.sha256
-        || !rawReceipt.endsWithNewline
-        || !gzipReceipt.endsWithNewline
-      ) {
-        continue;
-      }
-      const rawStatAfter = await lstat(rawAbsolutePath);
-      assertIntegrationIngestArchiveSourceUnchanged(
-        rawStatBefore,
-        rawStatAfter,
-        logicalPath,
-      );
-      await unlink(rawAbsolutePath);
-      repairedShardCount += 1;
+      if (await reconcileIntegrationIngestSources({ ...input, sources })) repairedShardCount += 1;
     } catch (error) {
       input.signal?.throwIfAborted();
-      if (!(error instanceof VaultError)) {
-        throw error;
-      }
+      if (!(error instanceof VaultError)) throw error;
     }
   }
-
   return {
     blockedConflictCount: scannedConflictCount - repairedShardCount,
     repairedShardCount,
@@ -1587,20 +1595,23 @@ async function recoverInterruptedClosedIntegrationIngestArchivesLocked(input: {
 }
 
 async function archiveClosedIntegrationIngestShardLocked(input: {
-  logicalPath: string;
+  source: IntegrationIngestRowSource;
   signal: AbortSignal | null;
   vaultRoot: string;
 }): Promise<{ archiveByteCount: number; sourceByteCount: number }> {
-  const rawAbsolutePath = resolveVaultPath(input.vaultRoot, input.logicalPath).absolutePath;
-  const gzipPath = `${input.logicalPath}.gz`;
-  const gzipAbsolutePath = resolveVaultPath(input.vaultRoot, gzipPath).absolutePath;
-  const rawStatBefore = await lstat(rawAbsolutePath);
-  assertRegularIntegrationIngestArchiveFile(rawStatBefore, input.logicalPath);
+  const sourceAbsolutePath = resolveVaultPath(input.vaultRoot, input.source.sourcePath).absolutePath;
+  const archivePath = `${input.source.logicalPath}.br`;
+  const archiveAbsolutePath = resolveVaultPath(input.vaultRoot, archivePath).absolutePath;
+  const sourceStatBefore = await lstat(sourceAbsolutePath);
+  assertRegularIntegrationIngestArchiveFile(sourceStatBefore, input.source.logicalPath);
+  if (input.source.kind !== "jsonl") {
+    await assertIntegrationIngestArchiveCompressedSize(sourceAbsolutePath, input.source.sourcePath);
+  }
 
   const sourceReceiptHolder: {
     value?: ArchivedIntegrationIngestShardContentReceipt;
   } = {};
-  await prepareFileAtomicExclusive(gzipAbsolutePath, async (tempAbsolutePath) => {
+  await prepareFileAtomicExclusive(archiveAbsolutePath, async (tempAbsolutePath) => {
     input.signal?.throwIfAborted();
     const sourceHash = createHash("sha256");
     let sourceByteCount = 0;
@@ -1612,8 +1623,8 @@ async function archiveClosedIntegrationIngestShardLocked(input: {
           if (sourceByteCount > MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES) {
             callback(new VaultError(
               "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE",
-              `Integration ingest shard "${input.logicalPath}" exceeds the ${MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES}-byte archive limit.`,
-              { byteSize: sourceByteCount, relativePath: input.logicalPath },
+              `Integration ingest shard "${input.source.logicalPath}" exceeds the ${MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES}-byte archive limit.`,
+              { byteSize: sourceByteCount, relativePath: input.source.logicalPath },
             ));
             return;
           }
@@ -1624,41 +1635,30 @@ async function archiveClosedIntegrationIngestShardLocked(input: {
         }
       },
     });
-    const sourceStream = createReadStream(
-      rawAbsolutePath,
-      input.signal ? { signal: input.signal } : undefined,
-    );
+    const sourceStream = input.source.kind === "jsonl"
+      ? createReadStream(sourceAbsolutePath, input.signal ? { signal: input.signal } : undefined)
+      : Readable.from(readBoundedCompressedIntegrationIngestChunks(sourceAbsolutePath, input.source.sourcePath, input.signal));
     const targetStream = createWriteStream(tempAbsolutePath, {
       flags: "wx",
-      mode: rawStatBefore.mode & 0o7777,
+      mode: sourceStatBefore.mode & 0o7777,
       ...(input.signal ? { signal: input.signal } : {}),
     });
-    if (input.signal) {
-      await pipeline(
-        sourceStream,
-        meter,
-        createGzip({ level: INTEGRATION_INGEST_ARCHIVE_GZIP_LEVEL }),
-        targetStream,
-        { signal: input.signal },
-      );
-    } else {
-      await pipeline(
-        sourceStream,
-        meter,
-        createGzip({ level: INTEGRATION_INGEST_ARCHIVE_GZIP_LEVEL }),
-        targetStream,
-      );
-    }
+    await pipeline([
+      sourceStream,
+      meter,
+      createShardCompressor("brotli"),
+      targetStream,
+    ], { signal: input.signal ?? undefined });
     const sourceReceipt: ArchivedIntegrationIngestShardContentReceipt = {
       byteLength: sourceByteCount,
       sha256: sourceHash.digest("hex"),
     };
     sourceReceiptHolder.value = sourceReceipt;
-    const validated = await validateGzippedIntegrationIngestSource({
+    const validated = await validateCompressedIntegrationIngestSource({
       absolutePath: tempAbsolutePath,
-      logicalPath: input.logicalPath,
+      logicalPath: input.source.logicalPath,
       signal: input.signal,
-      sourcePath: gzipPath,
+      sourcePath: archivePath,
     });
     if (
       validated.byteLength !== sourceReceipt.byteLength
@@ -1667,15 +1667,15 @@ async function archiveClosedIntegrationIngestShardLocked(input: {
     ) {
       throw new VaultError(
         "INTEGRATION_INGEST_ARCHIVE_INVALID",
-        `Integration ingest archive "${gzipPath}" did not preserve the source shard exactly.`,
-        { relativePath: gzipPath },
+        `Integration ingest archive "${archivePath}" did not preserve the source shard exactly.`,
+        { relativePath: archivePath },
       );
     }
-    const rawStatAfter = await lstat(rawAbsolutePath);
+    const sourceStatAfter = await lstat(sourceAbsolutePath);
     assertIntegrationIngestArchiveSourceUnchanged(
-      rawStatBefore,
-      rawStatAfter,
-      input.logicalPath,
+      sourceStatBefore,
+      sourceStatAfter,
+      input.source.logicalPath,
     );
   });
 
@@ -1683,19 +1683,19 @@ async function archiveClosedIntegrationIngestShardLocked(input: {
   if (!sourceReceipt) {
     throw new VaultError(
       "INTEGRATION_INGEST_ARCHIVE_INVALID",
-      `Integration ingest archive "${gzipPath}" did not produce a source receipt.`,
-      { relativePath: gzipPath },
+      `Integration ingest archive "${archivePath}" did not produce a source receipt.`,
+      { relativePath: archivePath },
     );
   }
 
   try {
-    await unlink(rawAbsolutePath);
+    await unlink(sourceAbsolutePath);
   } catch (error) {
-    await unlink(gzipAbsolutePath).catch(() => undefined);
+    await unlink(archiveAbsolutePath).catch(() => undefined);
     throw error;
   }
-  const archiveStat = await lstat(gzipAbsolutePath);
-  assertRegularIntegrationIngestArchiveFile(archiveStat, gzipPath);
+  const archiveStat = await lstat(archiveAbsolutePath);
+  assertRegularIntegrationIngestArchiveFile(archiveStat, archivePath);
   return {
     archiveByteCount: archiveStat.size,
     sourceByteCount: sourceReceipt.byteLength,
@@ -1793,7 +1793,7 @@ async function validateRawIntegrationIngestSource(input: {
   };
 }
 
-async function validateGzippedIntegrationIngestSource(input: {
+async function validateCompressedIntegrationIngestSource(input: {
   absolutePath: string;
   logicalPath: string;
   signal: AbortSignal | null;
@@ -1802,7 +1802,7 @@ async function validateGzippedIntegrationIngestSource(input: {
   const hash = createHash("sha256");
   let byteLength = 0;
   let finalByte: number | null = null;
-  const lineStream = await openGzippedIntegrationIngestLineStream(
+  const lineStream = await openCompressedIntegrationIngestLineStream(
     input.absolutePath,
     input.sourcePath,
     input.signal,
@@ -1819,7 +1819,7 @@ async function validateGzippedIntegrationIngestSource(input: {
     crlfDelay: Infinity,
   });
   const rowCount = await validateIntegrationIngestRows(lines, {
-    kind: "gzip",
+    kind: shardCompressionFromPath(input.sourcePath),
     logicalPath: input.logicalPath,
     sourcePath: input.sourcePath,
   }, input.signal);
@@ -1922,8 +1922,8 @@ async function* openIntegrationIngestSourceByteChunks(
     }
     return;
   }
-  if (source.kind === "gzip") {
-    yield* readBoundedGzippedIntegrationIngestChunks(absolutePath, source.sourcePath);
+  if (isShardCompression(source.kind)) {
+    yield* readBoundedCompressedIntegrationIngestChunks(absolutePath, source.sourcePath);
     return;
   }
   yield Buffer.from(await readZippedIntegrationIngestJsonlText(vaultRoot, source), "utf8");
@@ -1994,12 +1994,23 @@ export async function appendArchivedIntegrationIngestShard({
     };
   }
 
-  if (source.kind === "gzip") {
-    await rewriteGzippedIntegrationIngestArchive({
-      appendPayload: Buffer.from(appendPayload, "utf8"),
-      source,
-      vaultRoot,
-    });
+  if (isShardCompression(source.kind)) {
+    try {
+      await rewriteCompressedIntegrationIngestArchive({
+        appendPayload: Buffer.from(appendPayload, "utf8"),
+        source,
+        vaultRoot,
+      });
+    } catch (error) {
+      if (!(error instanceof VaultError) || error.code !== "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE") throw error;
+      await restorePlainIntegrationIngestShard(vaultRoot, source, validatedBase);
+      const target = resolveVaultPath(vaultRoot, targetRelativePath);
+      await applyJsonlAppendTarget({
+        target,
+        readPayload: async () => appendPayload,
+        appendPayload: (chunk) => appendFile(target.absolutePath, chunk, "utf8"),
+      });
+    }
   } else {
     const baseContent = await readIntegrationIngestSourceText(vaultRoot, source);
     await writeIntegrationIngestArchiveText(vaultRoot, source, `${baseContent}${appendPayload}`);
@@ -2007,6 +2018,36 @@ export async function appendArchivedIntegrationIngestShard({
   return {
     originalSize,
   };
+}
+
+// Publish the identical base before retiring the archive. An interruption leaves
+// either exact duplicates (handled by existing recovery) or the verified plain
+// base; the existing write receipt owns append replay and rollback in both cases.
+async function restorePlainIntegrationIngestShard(
+  vaultRoot: string,
+  source: IntegrationIngestRowSource,
+  expected: ArchivedIntegrationIngestShardContentReceipt,
+): Promise<void> {
+  const target = resolveVaultPath(vaultRoot, source.logicalPath);
+  await prepareFileAtomicExclusive(target.absolutePath, async (tempAbsolutePath) => {
+    await pipeline(
+      Readable.from(openIntegrationIngestSourceByteChunks(vaultRoot, source)),
+      createWriteStream(tempAbsolutePath, { flags: "wx", mode: 0o600 }),
+    );
+    const actual = await validateRawIntegrationIngestSource({
+      absolutePath: tempAbsolutePath,
+      logicalPath: source.logicalPath,
+      signal: null,
+    });
+    if (actual.byteLength !== expected.byteLength || actual.sha256 !== expected.sha256) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
+        "Restored integration ingest base does not match its validated receipt.",
+        { relativePath: source.logicalPath },
+      );
+    }
+  });
+  await unlink(resolveVaultPath(vaultRoot, source.sourcePath).absolutePath);
 }
 
 export async function truncateArchivedIntegrationIngestShard({
@@ -2033,8 +2074,8 @@ export async function truncateArchivedIntegrationIngestShard({
   if (inspection.byteLength === expectedBaseByteLength) {
     return;
   }
-  if (source.kind === "gzip") {
-    await rewriteGzippedIntegrationIngestArchive({
+  if (isShardCompression(source.kind)) {
+    await rewriteCompressedIntegrationIngestArchive({
       source,
       truncateByteLength: expectedBaseByteLength,
       vaultRoot,
@@ -2162,7 +2203,7 @@ async function* parseIntegrationIngestJsonlLines(
   source: IntegrationIngestRowSource,
 ): AsyncGenerator<RawIntegrationIngestJsonlRow> {
   let lineNumber = 0;
-  let retainedGzipRowError: VaultError | null = null;
+  let retainedArchiveRowError: VaultError | null = null;
   const lineIterator = lines[Symbol.asyncIterator]();
   let iteratorNeedsClose = true;
 
@@ -2190,8 +2231,8 @@ async function* parseIntegrationIngestJsonlLines(
           `Integration ingest row in "${source.sourcePath}" exceeds the ${MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES}-byte journal limit.`,
           { lineNumber, relativePath: source.sourcePath, rowPayloadBytes: lineBytes },
         );
-        if (source.kind === "gzip") {
-          retainedGzipRowError ??= error;
+        if (isShardCompression(source.kind)) {
+          retainedArchiveRowError ??= error;
           continue;
         }
         throw error;
@@ -2205,8 +2246,8 @@ async function* parseIntegrationIngestJsonlLines(
           lineNumber,
           cause: error instanceof Error ? error.message : String(error),
         });
-        if (source.kind === "gzip") {
-          retainedGzipRowError ??= invalidJson;
+        if (isShardCompression(source.kind)) {
+          retainedArchiveRowError ??= invalidJson;
           continue;
         }
         throw invalidJson;
@@ -2219,10 +2260,10 @@ async function* parseIntegrationIngestJsonlLines(
       };
     }
   } finally {
-    if (iteratorNeedsClose && source.kind === "gzip") {
+    if (iteratorNeedsClose && isShardCompression(source.kind)) {
       try {
         while (!(await lineIterator.next()).done) {
-          // Keep the gzip error owner alive when a row consumer fails early.
+          // Keep the decompressor error owner alive when a row consumer fails early.
         }
       } catch {
         // Preserve the consumer's original typed row error.
@@ -2232,8 +2273,8 @@ async function* parseIntegrationIngestJsonlLines(
     }
   }
 
-  if (retainedGzipRowError) {
-    throw retainedGzipRowError;
+  if (retainedArchiveRowError) {
+    throw retainedArchiveRowError;
   }
 }
 
@@ -2249,9 +2290,9 @@ async function openIntegrationIngestLineStream(
       ...(signal ? { signal } : {}),
     });
   }
-  if (source.kind === "gzip") {
+  if (isShardCompression(source.kind)) {
     const absolutePath = resolveVaultPath(vaultRoot, source.sourcePath).absolutePath;
-    return await openGzippedIntegrationIngestLineStream(
+    return await openCompressedIntegrationIngestLineStream(
       absolutePath,
       source.sourcePath,
       signal,
@@ -2263,18 +2304,13 @@ async function openIntegrationIngestLineStream(
 async function listIntegrationIngestRowSources(
   vaultRoot: string,
 ): Promise<IntegrationIngestRowSource[]> {
-  const sources = new Map<string, IntegrationIngestRowSource>();
-  for (const extension of [".jsonl", ".jsonl.gz", ".jsonl.zip"] as const) {
-    const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory, {
-      extension,
-    });
-    for (const sourcePath of paths) {
-      const source = integrationIngestRowSourceFromPath(sourcePath);
-      sources.set(source.sourcePath, source);
-    }
-  }
-  return assertSingleIntegrationIngestShardRepresentation(
-    sortIntegrationIngestRowSources([...sources.values()]),
+  const extensions = [".jsonl", ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `.jsonl${suffix}`)];
+  const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory);
+  return resolveIntegrationIngestShardRepresentations(
+    vaultRoot,
+    sortIntegrationIngestRowSources(paths
+      .filter((sourcePath) => extensions.some((extension) => sourcePath.endsWith(extension)))
+      .map(integrationIngestRowSourceFromPath)),
   );
 }
 
@@ -2284,17 +2320,28 @@ async function listIntegrationIngestRowSourcesForLogicalPaths(
 ): Promise<IntegrationIngestRowSource[]> {
   const sources: IntegrationIngestRowSource[] = [];
   for (const logicalPath of [...new Set(logicalPaths)].sort()) {
-    for (const sourcePath of [logicalPath, ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `${logicalPath}${suffix}`)]) {
-      const resolved = resolveVaultPath(vaultRoot, sourcePath);
-      if (await pathExists(resolved.absolutePath)) {
-        sources.push(integrationIngestRowSourceFromPath(sourcePath));
-      }
+    sources.push(...await readIntegrationIngestShardSources(vaultRoot, logicalPath));
+  }
+  return resolveIntegrationIngestShardRepresentations(vaultRoot, sortIntegrationIngestRowSources(sources));
+}
+
+async function readIntegrationIngestShardSources(
+  vaultRoot: string,
+  logicalPath: string,
+): Promise<IntegrationIngestRowSource[]> {
+  const sources: IntegrationIngestRowSource[] = [];
+  for (const sourcePath of [logicalPath, ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `${logicalPath}${suffix}`)]) {
+    if (await pathExists(resolveVaultPath(vaultRoot, sourcePath).absolutePath)) {
+      sources.push(integrationIngestRowSourceFromPath(sourcePath));
     }
   }
-  return assertSingleIntegrationIngestShardRepresentation(sortIntegrationIngestRowSources(sources));
+  return sources;
 }
 
 function integrationIngestRowSourceFromPath(sourcePath: string): IntegrationIngestRowSource {
+  if (sourcePath.endsWith(".jsonl.br")) {
+    return { kind: "brotli", logicalPath: sourcePath.slice(0, -3), sourcePath };
+  }
   if (sourcePath.endsWith(".jsonl.gz")) {
     return {
       kind: "gzip",
@@ -2339,8 +2386,8 @@ async function readIntegrationIngestSourceText(
   if (source.kind === "jsonl") {
     return readFile(absolutePath, "utf8");
   }
-  if (source.kind === "gzip") {
-    return readGzippedIntegrationIngestJsonlText(absolutePath, source.sourcePath);
+  if (isShardCompression(source.kind)) {
+    return readCompressedIntegrationIngestJsonlText(absolutePath, source.sourcePath);
   }
   return readZippedIntegrationIngestJsonlText(vaultRoot, source);
 }
@@ -2359,8 +2406,8 @@ async function writeIntegrationIngestArchiveText(
   }
 
   const archivePath = resolveVaultPath(vaultRoot, source.sourcePath).absolutePath;
-  if (source.kind === "gzip") {
-    const archive = gzipSync(content);
+  if (isShardCompression(source.kind)) {
+    const archive = compressShard(content, source.kind);
     assertIntegrationIngestArchiveReplacementSize(content, archive, source.sourcePath);
     await writeFileAtomic(archivePath, archive);
     return;
@@ -2376,21 +2423,21 @@ async function writeIntegrationIngestArchiveText(
   );
 }
 
-async function rewriteGzippedIntegrationIngestArchive(input: {
+async function rewriteCompressedIntegrationIngestArchive(input: {
   appendPayload?: Buffer;
   source: IntegrationIngestRowSource;
   truncateByteLength?: number;
   vaultRoot: string;
 }): Promise<void> {
-  if (input.source.kind !== "gzip") {
+  if (!isShardCompression(input.source.kind)) {
     throw new VaultError(
       "INTEGRATION_INGEST_ARCHIVE_UNSUPPORTED",
-      `Integration ingest archive "${input.source.sourcePath}" is not gzip.`,
+      `Integration ingest archive "${input.source.sourcePath}" is not a streaming archive.`,
       { relativePath: input.source.sourcePath },
     );
   }
   if (input.appendPayload && input.truncateByteLength !== undefined) {
-    throw new TypeError("Gzip integration ingest rewrite cannot append and truncate together.");
+    throw new TypeError("Compressed integration ingest rewrite cannot append and truncate together.");
   }
 
   const archivePath = resolveVaultPath(input.vaultRoot, input.source.sourcePath).absolutePath;
@@ -2399,7 +2446,7 @@ async function rewriteGzippedIntegrationIngestArchive(input: {
     let outputByteLength = 0;
     const outputChunks = async function* (): AsyncGenerator<Buffer> {
       let remaining = input.truncateByteLength ?? Number.POSITIVE_INFINITY;
-      for await (const chunk of readBoundedGzippedIntegrationIngestChunks(
+      for await (const chunk of readBoundedCompressedIntegrationIngestChunks(
         archivePath,
         input.source.sourcePath,
       )) {
@@ -2439,14 +2486,14 @@ async function rewriteGzippedIntegrationIngestArchive(input: {
 
     await pipeline(
       Readable.from(outputChunks()),
-      createGzip({ level: INTEGRATION_INGEST_ARCHIVE_GZIP_LEVEL }),
+      createShardCompressor(shardCompressionFromPath(input.source.sourcePath)),
       createWriteStream(tempAbsolutePath, { flags: "wx", mode: 0o600 }),
     );
     const expectedReceipt = {
       byteLength: outputByteLength,
       sha256: outputHash.digest("hex"),
     };
-    const validated = await validateGzippedIntegrationIngestSource({
+    const validated = await validateCompressedIntegrationIngestSource({
       absolutePath: tempAbsolutePath,
       logicalPath: input.source.logicalPath,
       signal: null,
@@ -2480,21 +2527,22 @@ function sortIntegrationIngestRowSources(
 function integrationIngestSourceKindOrder(kind: IntegrationIngestRowSourceKind): number {
   if (kind === "jsonl") return 0;
   if (kind === "gzip") return 1;
-  return 2;
+  if (kind === "brotli") return 2;
+  return 3;
 }
 
-async function readGzippedIntegrationIngestJsonlText(
+async function readCompressedIntegrationIngestJsonlText(
   absolutePath: string,
   relativePath: string,
 ): Promise<string> {
   return readBoundedIntegrationIngestArchiveText(
-    readBoundedGzippedIntegrationIngestChunks(absolutePath, relativePath),
+    readBoundedCompressedIntegrationIngestChunks(absolutePath, relativePath),
     relativePath,
-    "gzip",
+    shardCompressionFromPath(relativePath),
   );
 }
 
-async function openGzippedIntegrationIngestLineStream(
+async function openCompressedIntegrationIngestLineStream(
   absolutePath: string,
   relativePath: string,
   signal: AbortSignal | null = null,
@@ -2503,41 +2551,42 @@ async function openGzippedIntegrationIngestLineStream(
   await assertIntegrationIngestArchiveCompressedSize(absolutePath, relativePath);
   return Readable.from(
     readBoundedIntegrationIngestArchiveChunks(
-      createGzippedIntegrationIngestReadStream(absolutePath, signal),
+      createCompressedIntegrationIngestReadStream(absolutePath, relativePath, signal),
       relativePath,
-      "gzip",
+      shardCompressionFromPath(relativePath),
       signal,
       inspectChunk,
     ),
   );
 }
 
-async function* readBoundedGzippedIntegrationIngestChunks(
+async function* readBoundedCompressedIntegrationIngestChunks(
   absolutePath: string,
   relativePath: string,
   signal: AbortSignal | null = null,
 ): AsyncGenerator<Buffer> {
   await assertIntegrationIngestArchiveCompressedSize(absolutePath, relativePath);
   yield* readBoundedIntegrationIngestArchiveChunks(
-    createGzippedIntegrationIngestReadStream(absolutePath, signal),
+    createCompressedIntegrationIngestReadStream(absolutePath, relativePath, signal),
     relativePath,
-    "gzip",
+    shardCompressionFromPath(relativePath),
     signal,
   );
 }
 
-function createGzippedIntegrationIngestReadStream(
+function createCompressedIntegrationIngestReadStream(
   absolutePath: string,
+  relativePath: string,
   signal: AbortSignal | null,
 ): NodeJS.ReadableStream {
   const compressed = createReadStream(
     absolutePath,
     signal ? { signal } : undefined,
   );
-  const gunzip = createGunzip();
-  compressed.once("error", (error) => gunzip.destroy(error));
-  gunzip.once("close", () => compressed.destroy());
-  return compressed.pipe(gunzip);
+  const decompressor = createShardDecompressor(shardCompressionFromPath(relativePath));
+  compressed.once("error", (error) => decompressor.destroy(error));
+  decompressor.once("close", () => compressed.destroy());
+  return compressed.pipe(decompressor);
 }
 
 async function assertIntegrationIngestArchiveCompressedSize(
@@ -2564,7 +2613,7 @@ async function assertIntegrationIngestArchiveCompressedSize(
 async function* readBoundedIntegrationIngestArchiveChunks(
   chunks: AsyncIterable<Buffer | string>,
   relativePath: string,
-  archiveKind: "gzip" | "zip",
+  archiveKind: ShardCompression | "zip",
   signal: AbortSignal | null = null,
   inspectChunk?: (chunk: Buffer) => void,
 ): AsyncGenerator<Buffer> {
@@ -2601,7 +2650,7 @@ async function* readBoundedIntegrationIngestArchiveChunks(
 async function readBoundedIntegrationIngestArchiveText(
   chunks: AsyncIterable<Buffer | string>,
   relativePath: string,
-  archiveKind: "gzip" | "zip",
+  archiveKind: ShardCompression | "zip",
 ): Promise<string> {
   const buffers: Buffer[] = [];
   let byteSize = 0;
@@ -2882,29 +2931,56 @@ function unzipIntegrationIngestEntry(
   );
 }
 
-function assertSingleIntegrationIngestShardRepresentation(
+async function resolveIntegrationIngestShardRepresentations(
+  vaultRoot: string,
   sources: readonly IntegrationIngestRowSource[],
-): IntegrationIngestRowSource[] {
+): Promise<IntegrationIngestRowSource[]> {
   const byLogicalPath = new Map<string, IntegrationIngestRowSource[]>();
   for (const source of sources) {
     const siblings = byLogicalPath.get(source.logicalPath) ?? [];
     siblings.push(source);
     byLogicalPath.set(source.logicalPath, siblings);
   }
+  const resolved: IntegrationIngestRowSource[] = [];
+  const currentMonth = resolveIntegrationIngestArchiveCurrentMonth(undefined);
   for (const [logicalPath, siblings] of byLogicalPath.entries()) {
-    if (siblings.length <= 1) {
-      continue;
+    let currentSources = siblings;
+    const month = integrationIngestMonthKeyFromLogicalPath(logicalPath);
+    if (
+      siblings.length > 1
+      && month !== null
+      && month <= currentMonth
+      && siblings.every((source) => source.kind !== "zip")
+    ) {
+      currentSources = await withCanonicalWriteLock(vaultRoot, async () => {
+        // Another reader or writer may have completed the archive while this
+        // reader waited. Inspect every representation under the same lock.
+        const current = await readIntegrationIngestShardSources(vaultRoot, logicalPath);
+        if (current.length > 1 && current.every((source) => source.kind !== "zip")) {
+          try {
+            if (await reconcileIntegrationIngestSources({ signal: null, sources: current, vaultRoot })) {
+              return await readIntegrationIngestShardSources(vaultRoot, logicalPath);
+            }
+          } catch (error) {
+            if (!(error instanceof VaultError)) throw error;
+          }
+        }
+        return current;
+      });
     }
-    throw new VaultError(
-      "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT",
-      `Integration ingest shard "${logicalPath}" has multiple physical representations.`,
-      {
-        relativePath: logicalPath,
-        sourcePaths: siblings.map((source) => source.sourcePath).sort(),
-      },
-    );
+    if (currentSources.length > 1) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT",
+        `Integration ingest shard "${logicalPath}" has multiple physical representations.`,
+        {
+          relativePath: logicalPath,
+          sourcePaths: currentSources.map((source) => source.sourcePath).sort(),
+        },
+      );
+    }
+    resolved.push(...currentSources);
   }
-  return [...sources];
+  return resolved;
 }
 
 function assertZippedIntegrationIngestEntrySize(

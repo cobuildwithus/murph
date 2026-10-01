@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -9,7 +10,7 @@ import type {
   HostedRuntimeWorkspaceSnapshotSessionCompleteResult,
   HostedRuntimeWorkspaceSnapshotSessionStart,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import { readHostedRuntimeSafeErrorText } from "@murphai/hosted-execution";
+import { emitHostedExecutionStructuredLog, readHostedRuntimeSafeErrorText } from "@murphai/hosted-execution";
 import { parseHostedWorkspaceCheckpointResponse, parseHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
 import type { HostedWorkspaceCheckpointResponse } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -29,7 +30,6 @@ import {
 import {
   encodeHostedWorkspaceSnapshotSha256Base64,
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
-  HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS,
 } from "../workspace-snapshot-store.ts";
 import {
   isHostedWorkspaceSnapshotAbortFailure,
@@ -60,10 +60,13 @@ import {
   readRequiredHostedRuntimePositiveInteger,
   readRequiredHostedRuntimeString,
 } from "./hosted-http.ts";
+import {
+  observeHostedWorkspaceSnapshotFetch,
+  readHostedWorkspaceSnapshotResponseIds,
+} from "./workspace-snapshot-fetch-diagnostics.ts";
 
-const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS = 2_000;
+const WORKSPACE_SNAPSHOT_READ_IDLE_TIMEOUT_MS = 15_000;
 const WORKSPACE_SNAPSHOT_PRESIGN_PUT_MAX_ATTEMPTS = 2;
-const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS = 2_000;
 const WORKSPACE_SNAPSHOT_R2_ERROR_BODY_MAX_BYTES = 16 * 1024;
 const WORKSPACE_SNAPSHOT_R2_ERROR_BODY_READ_TIMEOUT_MS = 1_000;
 const WORKSPACE_SNAPSHOT_R2_PUT_MAX_ATTEMPTS = 2;
@@ -83,16 +86,10 @@ const WORKSPACE_SNAPSHOT_R2_PUT_RETRYABLE_ERROR_CODES = new Set([
 const WORKSPACE_SNAPSHOT_R2_PUT_RETRYABLE_STATUSES = new Set([
   429,
   500,
+  502,
   503,
+  504,
 ]);
-// Session creation records the server heartbeat before its response reaches the
-// runtime. Cap that handshake so an immediate first heartbeat still has one
-// full cadence of margin before replacement may consider the session stale.
-const WORKSPACE_SNAPSHOT_HANDOFF_START_TIMEOUT_MS =
-  HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS
-  - WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS
-  - WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS;
-
 type HostedWorkspaceSnapshotFailurePhase =
   | "session_complete_payload_validation"
   | "session_complete_record_checkpoint"
@@ -113,9 +110,8 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
 }): NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> {
   const sessionRuntimeState = new Map<string, {
     headers: Headers;
-    signal: AbortSignal | null;
+    managedPart?: { uploadId: string; etag: string };
   }>();
-  const sessionHeartbeatStops = new Map<string, () => void>();
   const readSessionWriteFenceHeaders = async (
     snapshotId: string,
     description: string,
@@ -129,87 +125,15 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       description,
     );
   };
-  const stopSessionHeartbeat = (snapshotId: string): void => {
-    sessionHeartbeatStops.get(snapshotId)?.();
-    sessionHeartbeatStops.delete(snapshotId);
-  };
-  const startSessionHeartbeat = (
-    snapshotId: string,
-    headers: Headers,
-    signal?: AbortSignal | null,
-  ): void => {
-    stopSessionHeartbeat(snapshotId);
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let failureLogged = false;
-    const schedule = (delayMs: number) => {
-      if (stopped) {
-        return;
-      }
-      timer = setTimeout(() => {
-        timer = null;
-        void heartbeat();
-      }, delayMs);
-    };
-    const heartbeat = async () => {
-      const startedAtMs = Date.now();
-      try {
-        await fetchHostedJson({
-          body: { snapshotId },
-          description: "Hosted workspace snapshot handoff heartbeat",
-          exposeResponseBodyInError: false,
-          fetchImpl: input.fetchImpl,
-          headers: new Headers(headers),
-          method: "POST",
-          redactedLogPath: "/workspace-snapshots/REDACTED/heartbeat",
-          signal: signal ?? null,
-          timeoutMs: Math.min(
-            input.timeoutMs,
-            WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS,
-          ),
-          url: new URL(
-            `/workspace-snapshots/${encodeURIComponent(snapshotId)}/heartbeat`,
-            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
-          ),
-        });
-        failureLogged = false;
-      } catch (error) {
-        if (!stopped && signal?.aborted !== true && !failureLogged) {
-          failureLogged = true;
-          console.warn("Hosted workspace snapshot handoff heartbeat failed.", {
-            errorName: error instanceof Error ? error.name : typeof error,
-          });
-        }
-      } finally {
-        schedule(Math.max(
-          0,
-          WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS
-          - (Date.now() - startedAtMs),
-        ));
-      }
-    };
-    const stopForAbort = () => {
-      stopSessionHeartbeat(snapshotId);
-    };
-    const stop = () => {
-      stopped = true;
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      signal?.removeEventListener("abort", stopForAbort);
-    };
-    sessionHeartbeatStops.set(snapshotId, stop);
-    if (signal?.aborted) {
-      stopSessionHeartbeat(snapshotId);
-      return;
-    }
-    signal?.addEventListener("abort", stopForAbort, { once: true });
-    void heartbeat();
+  const rememberManagedSnapshotPart = async (snapshotId: string, uploadId: string | undefined, response: Response): Promise<void> => {
+    if (uploadId === undefined) return;
+    const etag = response.headers.get("etag");
+    if (!etag) throw new Error("Managed snapshot upload did not return a part ETag.");
+    const headers = await readSessionWriteFenceHeaders(snapshotId, "Managed snapshot completion");
+    sessionRuntimeState.set(snapshotId, { headers, managedPart: { uploadId, etag } });
   };
   const port: NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> = {
     async abortSnapshotSession(request) {
-      stopSessionHeartbeat(request.snapshotId);
       const headers = await readSessionWriteFenceHeaders(
         request.snapshotId,
         "Hosted workspace snapshot session abort",
@@ -252,15 +176,14 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         });
       }
       headers.set("content-type", "application/json; charset=utf-8");
-      // Canonical publication stays non-interruptible once `/complete` starts.
-      // The session signal only prevents replay after foreground cancellation.
-      const sessionCancellationSignal =
-        sessionRuntimeState.get(snapshotId)?.signal ?? null;
+      // Canonical publication and its one exact replay stay non-interruptible
+      // once `/complete` starts.
       const body = JSON.stringify({
         archive: request.ref.archive,
         checkpointRequest: request.checkpointRequest,
         objectKey: request.ref.objectKey,
         snapshotId,
+        managedPart: sessionRuntimeState.get(snapshotId)?.managedPart,
       });
       const url = new URL(
         `/workspace-snapshots/${encodeURIComponent(snapshotId)}/complete`,
@@ -313,13 +236,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         try {
           payload = await complete(Math.max(0, deadlineMs - Date.now()));
         } catch (error) {
-          throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
-            error,
-            sessionCancellationSignal,
-          );
-          if (sessionCancellationSignal?.aborted) {
-            throw error;
-          }
           const replayTimeoutMs = deadlineMs - Date.now();
           if (
             replayTimeoutMs <= 0
@@ -327,18 +243,9 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           ) {
             throw error;
           }
-          try {
-            payload = await complete(replayTimeoutMs);
-          } catch (replayError) {
-            throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
-              replayError,
-              sessionCancellationSignal,
-            );
-            throw replayError;
-          }
+          payload = await complete(replayTimeoutMs);
         }
       } finally {
-        stopSessionHeartbeat(snapshotId);
         sessionRuntimeState.delete(snapshotId);
       }
       let completed: HostedRuntimeWorkspaceSnapshotSessionCompleteResult;
@@ -378,10 +285,15 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         throw new Error("Hosted workspace snapshot source file size does not match encryptedByteSize.");
       }
       const presignStartedAt = Date.now();
-      let presignedPut: { expiresAt: string; putUrl: string };
+      // Declared at admission so the Worker can verify publication through R2's
+      // ETag instead of reading the stored object back.
+      const encryptedMd5 = await readFileMd5Hex(request.sourceFilePath);
+      assertHostedWorkspaceSnapshotOperationLive(request.signal);
+      let presignedPut: SnapshotPresignedPut;
       try {
         presignedPut = await presignWorkspaceSnapshotPut({
           encryptedByteSize: request.encryptedByteSize,
+          encryptedMd5,
           encryptedObjectSha256: request.encryptedObjectSha256,
           fetchImpl: input.fetchImpl,
           headers: await readSessionWriteFenceHeaders(
@@ -415,11 +327,13 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       const putHeaders = {
         "content-length": String(request.encryptedByteSize),
         "content-type": HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+        ...(presignedPut.managedUploadId ? {} : {
         "if-none-match": "*",
         "x-amz-checksum-sha256": checksumSha256Base64,
         "x-amz-meta-encryptedsha256": request.encryptedObjectSha256,
         "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
         "x-amz-meta-snapshotid": request.snapshotId,
+        }),
       };
       let precedingAttemptWasAmbiguous = false;
       for (
@@ -489,15 +403,12 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
 
         if (response.ok) {
           assertHostedWorkspaceSnapshotOperationLive(request.signal);
+          await rememberManagedSnapshotPart(request.snapshotId, presignedPut.managedUploadId, response);
           timings.snapshotDirectR2PutElapsedMs =
             readHostedRuntimeStepElapsedMs(putStartedAt);
           return timings;
         }
-        if (
-          response.status === 412
-          && attempt > 1
-          && precedingAttemptWasAmbiguous
-        ) {
+        if (isCompletedAmbiguousDirectPut(response, presignedPut, attempt, precedingAttemptWasAmbiguous)) {
           await cancelHostedWorkspaceSnapshotResponseBody(response.body);
           assertHostedWorkspaceSnapshotOperationLive(request.signal);
           timings.snapshotDirectR2PutElapsedMs =
@@ -598,7 +509,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
 
       let dataKey: string;
       let presignedGet: { expiresAtMs: number; getUrl: string };
-      if (input.preparedSnapshotRestore) {
+      if (input.preparedSnapshotRestore && request.usePreparedRestore !== false) {
         const prepared = requireHostedWorkspaceSnapshotPreparedRestoreForRef({
           prepared: input.preparedSnapshotRestore,
           ref: request.ref,
@@ -664,10 +575,13 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       }
 
       const objectFetchStartedAt = Date.now();
+      let objectFetchAttempt = 0;
       const archiveTimings = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
         details: restoreLogDetails,
+        signal: request.signal,
         onAttempt: noteReplaySafeReadAttempt,
         run: async () => {
+          objectFetchAttempt += 1;
           const objectFetchAttemptTiming = {
             objectFetchResponseHeadersMs: 0,
             objectFetchBodyReadMs: 0,
@@ -676,6 +590,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
             Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000);
           const objectFetchDeadlineMs = Date.now() + objectFetchTimeoutMs;
           const encryptedStream = readHostedWorkspaceSnapshotEncryptedObjectStream({
+            attempt: objectFetchAttempt,
             deadlineMs: objectFetchDeadlineMs,
             expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
             fetchImpl: input.fetchImpl,
@@ -727,10 +642,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       }
       headers.set("content-type", "application/json; charset=utf-8");
       assertHostedWorkspaceSnapshotOperationLive(signal);
-      const startTimeoutMs = Math.min(
-        input.timeoutMs,
-        WORKSPACE_SNAPSHOT_HANDOFF_START_TIMEOUT_MS,
-      );
+      const startTimeoutMs = input.timeoutMs;
       const startDeadlineMs = Date.now() + startTimeoutMs;
       const startTimeoutSignal = AbortSignal.timeout(startTimeoutMs);
       const startSignal = combineAbortSignalsWithCleanup(
@@ -821,9 +733,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       }
       sessionRuntimeState.set(started.snapshotId, {
         headers: new Headers(headers),
-        signal: signal ?? null,
       });
-      startSessionHeartbeat(started.snapshotId, headers, signal);
       return started;
     },
   };
@@ -1206,9 +1116,15 @@ function parseHostedWorkspaceSnapshotStartPayload(
   };
 }
 
+interface SnapshotPresignedPut { expiresAt: string; putUrl: string; managedUploadId?: string }
+
+function isCompletedAmbiguousDirectPut(response: Response, presigned: SnapshotPresignedPut, attempt: number, ambiguous: boolean): boolean {
+  return response.status === 412 && presigned.managedUploadId === undefined && attempt > 1 && ambiguous;
+}
+
 function parseHostedWorkspaceSnapshotPresignedPutPayload(
   value: unknown,
-): { expiresAt: string; putUrl: string } {
+): SnapshotPresignedPut {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Hosted workspace snapshot presign response must be an object.");
   }
@@ -1216,11 +1132,21 @@ function parseHostedWorkspaceSnapshotPresignedPutPayload(
   return {
     expiresAt: readRequiredHostedRuntimeString(record.expiresAt, "Hosted workspace snapshot presign expiresAt"),
     putUrl: readRequiredHostedRuntimeString(record.putUrl, "Hosted workspace snapshot presign putUrl"),
+    ...(record.managedUploadId === undefined ? {} : { managedUploadId: readRequiredHostedRuntimeString(record.managedUploadId, "Managed snapshot upload ID") }),
   };
+}
+
+async function readFileMd5Hex(filePath: string): Promise<string> {
+  const hash = createHash("md5");
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk as Uint8Array);
+  }
+  return hash.digest("hex");
 }
 
 async function presignWorkspaceSnapshotPut(input: {
   encryptedByteSize: number;
+  encryptedMd5: string;
   encryptedObjectSha256: string;
   fetchImpl: typeof fetch;
   headers?: Headers;
@@ -1229,14 +1155,16 @@ async function presignWorkspaceSnapshotPut(input: {
   snapshotId: string;
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
-}): Promise<{ expiresAt: string; putUrl: string }> {
+}): Promise<SnapshotPresignedPut> {
   const headers = input.headers
     ?? await requireHostedRuntimeWriteFenceHeaders(
       input.workspaceCheckpointBridge,
       "Hosted workspace snapshot presign PUT",
     );
   const body = {
+    supportsManagedUpload: true,
     encryptedByteSize: input.encryptedByteSize,
+    encryptedMd5: input.encryptedMd5,
     encryptedObjectSha256: input.encryptedObjectSha256,
     objectKey: input.objectKey,
     snapshotId: input.snapshotId,
@@ -1410,6 +1338,7 @@ async function unwrapWorkspaceSnapshotDataKey(input: {
 }
 
 async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
+  attempt: number;
   deadlineMs: number;
   expectedEncryptedByteSize: number;
   fetchImpl: typeof fetch;
@@ -1422,7 +1351,7 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
   timeoutMs: number;
 }): AsyncIterable<Uint8Array> {
   const responseHeadersStartedAt = Date.now();
-  const response = await fetchHostedResponse({
+  const response = await observeHostedWorkspaceSnapshotFetch(() => fetchHostedResponse({
     description: "Hosted workspace snapshot fetch",
     fetchImpl: input.fetchImpl,
     init: {
@@ -1433,7 +1362,7 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
     signal: input.signal ?? null,
     timeoutMs: input.timeoutMs,
     url: new URL(input.getUrl),
-  });
+  }), { attempt: input.attempt, timeoutMs: input.timeoutMs });
   input.timing.objectFetchResponseHeadersMs =
     readHostedRuntimeStepElapsedMs(responseHeadersStartedAt);
   if (response.status === 404) {
@@ -1454,22 +1383,49 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
   }
   const bodyReadStartedAt = Date.now();
   let byteCount = 0;
-  for await (const next of readHostedRuntimeResponseBodyChunks({
-    body: response.body,
-    description: "Hosted workspace snapshot fetch",
-    signal: input.signal ?? null,
-    timeoutMs: Math.max(1, input.deadlineMs - Date.now()),
-  })) {
-    byteCount += next.byteLength;
-    if (byteCount > input.expectedEncryptedByteSize) {
-      throw new Error("Hosted workspace snapshot fetch exceeded its ref byte count.");
+  const readTiming = { readWaitMs: 0, maxReadWaitMs: 0 };
+  let complete = false;
+  try {
+    for await (const next of readHostedRuntimeResponseBodyChunks({
+      body: response.body,
+      description: "Hosted workspace snapshot fetch",
+      signal: input.signal ?? null,
+      timeoutMs: Math.max(1, input.deadlineMs - Date.now()),
+      readTimeoutMs: WORKSPACE_SNAPSHOT_READ_IDLE_TIMEOUT_MS,
+      timing: readTiming,
+    })) {
+      byteCount += next.byteLength;
+      if (byteCount > input.expectedEncryptedByteSize) {
+        throw new Error("Hosted workspace snapshot fetch exceeded its ref byte count.");
+      }
+      yield next;
     }
-    yield next;
+    if (byteCount !== input.expectedEncryptedByteSize) {
+      throw new Error("Hosted workspace snapshot fetch byte count does not match its ref.");
+    }
+    complete = true;
+    input.timing.objectFetchBodyReadMs = readHostedRuntimeStepElapsedMs(bodyReadStartedAt);
+  } finally {
+    const durationMs = readHostedRuntimeStepElapsedMs(bodyReadStartedAt);
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runtime.workspace-snapshot",
+      details: {
+        workspaceSnapshotRestoreAttempt: input.attempt,
+        workspaceSnapshotRestoreStep: "object_fetch",
+        ...readHostedWorkspaceSnapshotResponseIds(response.headers),
+        bytesRead: byteCount,
+        complete,
+        durationMs,
+        readWaitMs: readTiming.readWaitMs,
+        maxReadWaitMs: readTiming.maxReadWaitMs,
+        consumerElapsedMs: Math.max(0, durationMs - readTiming.readWaitMs),
+        readIdleTimeoutMs: WORKSPACE_SNAPSHOT_READ_IDLE_TIMEOUT_MS,
+      },
+      message: "Hosted workspace snapshot body read settled.",
+      phase: "runtime.starting",
+      userId: null,
+    });
   }
-  if (byteCount !== input.expectedEncryptedByteSize) {
-    throw new Error("Hosted workspace snapshot fetch byte count does not match its ref.");
-  }
-  input.timing.objectFetchBodyReadMs = readHostedRuntimeStepElapsedMs(bodyReadStartedAt);
 }
 
 async function cancelHostedWorkspaceSnapshotResponseBody(

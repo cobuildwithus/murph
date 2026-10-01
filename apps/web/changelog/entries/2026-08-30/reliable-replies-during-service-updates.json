@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "reliable-replies-during-service-updates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable replies during service updates",
+    "summary": "Replies are more reliable during routine Murph service updates when a newly started runner briefly comes up on the previous release.",
+    "details": "Murph still verifies that the runner is on the current release before handling a turn and now makes one bounded replacement attempt when rollout versions briefly differ. If the replacement is also behind or another readiness check fails, the turn still stops safely.",
+    "relevanceTags": ["assistant", "messaging", "reliability"],
+    "sourcePullRequests": [2575]
+  }
+}

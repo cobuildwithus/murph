@@ -70,7 +70,7 @@ function resolvePreservedChildProcessEnvKey(key: string): string | null {
 export function sanitizeChildProcessEnv(
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const nextEnv: NodeJS.ProcessEnv = {};
+  const nextEnv = {} as NodeJS.ProcessEnv;
 
   for (const [key, value] of Object.entries(source)) {
     if (typeof value !== "string") {

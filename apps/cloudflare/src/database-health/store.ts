@@ -48,6 +48,7 @@ export interface DatabaseHealthAlertState {
 }
 
 export interface DatabaseHealthStoredSample {
+  checkedAtMs: number | null;
   clientWaitSeconds: number | null;
   connectionErrorDelta: number | null;
   conditions: DatabaseHealthCondition[];
@@ -85,6 +86,7 @@ interface DatabaseHealthCounterRow extends Record<string, DurableObjectSqlValue>
 }
 
 interface DatabaseHealthSampleRow extends Record<string, DurableObjectSqlValue> {
+  checked_at_ms: number | null;
   client_wait_seconds: number | null;
   conditions_json: string;
   direct_connection_error_delta: number | null;
@@ -225,6 +227,16 @@ export class DatabaseHealthStore {
     return this.readAlertState();
   }
 
+  clearUnadmittedMonitoringAlertObligation(): void {
+    // An admitted body may already have reached a recipient. Preserve it and
+    // its idempotency key; only withdraw telemetry that has not entered it.
+    this.sql.exec(
+      `UPDATE database_health_meta
+       SET monitoring_alert_owed_json = NULL
+       WHERE singleton = 1 AND pending_alert_includes_monitoring = 0`,
+    );
+  }
+
   deferConnectionErrors(input: {
     checkedAtMs: number;
     directCount: number;
@@ -293,6 +305,7 @@ export class DatabaseHealthStore {
   }
 
   recordSuccessfulSample(input: {
+    checkedAtMs: number;
     connectionErrorCounterBaseline: Readonly<Record<string, number>>;
     connectionErrorDelta: number;
     conditions: readonly DatabaseHealthCondition[];
@@ -302,6 +315,7 @@ export class DatabaseHealthStore {
     this.sql.exec(
       `INSERT INTO database_health_samples (
          observed_at_ms,
+         checked_at_ms,
          scrape_status,
          failure_code,
          client_wait_seconds,
@@ -317,8 +331,9 @@ export class DatabaseHealthStore {
          direct_connection_error_counters_json,
          monitoring_evidence_json,
          conditions_json
-       ) VALUES (?, 'ok', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+       ) VALUES (?, ?, 'ok', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
        ON CONFLICT(observed_at_ms) DO UPDATE SET
+         checked_at_ms = excluded.checked_at_ms,
          scrape_status = excluded.scrape_status,
          failure_code = excluded.failure_code,
          client_wait_seconds = excluded.client_wait_seconds,
@@ -336,6 +351,7 @@ export class DatabaseHealthStore {
          monitoring_evidence_json = excluded.monitoring_evidence_json,
          conditions_json = excluded.conditions_json`,
       input.observedAtMs,
+      input.checkedAtMs,
       input.snapshot.clientWaitSeconds,
       input.snapshot.clientWaitingConnections,
       input.snapshot.serverConnections,
@@ -352,6 +368,7 @@ export class DatabaseHealthStore {
   }
 
   recordFailedSample(input: {
+    checkedAtMs: number;
     connectionErrorCounterBaseline: Readonly<Record<string, number>>;
     connectionErrorDelta: number | null;
     conditions: readonly DatabaseHealthCondition[];
@@ -364,6 +381,7 @@ export class DatabaseHealthStore {
     this.sql.exec(
       `INSERT INTO database_health_samples (
          observed_at_ms,
+         checked_at_ms,
          scrape_status,
          failure_code,
          client_wait_seconds,
@@ -379,8 +397,9 @@ export class DatabaseHealthStore {
          direct_connection_error_counters_json,
          monitoring_evidence_json,
          conditions_json
-       ) VALUES (?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(observed_at_ms) DO UPDATE SET
+         checked_at_ms = excluded.checked_at_ms,
          scrape_status = excluded.scrape_status,
          failure_code = excluded.failure_code,
          client_wait_seconds = excluded.client_wait_seconds,
@@ -400,6 +419,7 @@ export class DatabaseHealthStore {
          monitoring_evidence_json = excluded.monitoring_evidence_json,
          conditions_json = excluded.conditions_json`,
       input.observedAtMs,
+      input.checkedAtMs,
       input.failureCode,
       snapshot?.clientWaitSeconds ?? null,
       snapshot?.clientWaitingConnections ?? null,
@@ -417,8 +437,9 @@ export class DatabaseHealthStore {
     );
   }
 
-  readLatestMonitoringEvidence(): DatabaseHealthMonitoringEvidence | null {
-    const row = this.sql.exec<{
+  readRecentMonitoringEvidence(limit: number): DatabaseHealthMonitoringEvidence[] {
+    const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+    return this.sql.exec<{
       failure_code: string;
       monitoring_evidence_json: string | null;
     }>(
@@ -426,21 +447,20 @@ export class DatabaseHealthStore {
        FROM database_health_samples
        WHERE scrape_status = 'failed'
        ORDER BY observed_at_ms DESC
-       LIMIT 1`,
-    ).toArray()[0];
-    if (!row) {
-      return null;
-    }
-    if (row.monitoring_evidence_json !== null) {
-      return parseMonitoringEvidence(row.monitoring_evidence_json);
-    }
-    return {
-      availability: row.failure_code === "required_metrics_missing"
-        ? "incomplete"
-        : "unavailable",
-      connectionErrorEvidence: null,
-      missingMetrics: [],
-    };
+       LIMIT ?`,
+      safeLimit,
+    ).toArray().map((row) => {
+      if (row.monitoring_evidence_json !== null) {
+        return parseMonitoringEvidence(row.monitoring_evidence_json);
+      }
+      return {
+        availability: row.failure_code === "required_metrics_missing"
+          ? "incomplete"
+          : "unavailable",
+        connectionErrorEvidence: null,
+        missingMetrics: [],
+      };
+    });
   }
 
   pruneSamples(beforeMs: number): void {
@@ -455,6 +475,7 @@ export class DatabaseHealthStore {
     return this.sql.exec<DatabaseHealthSampleRow>(
       `SELECT
          observed_at_ms,
+         checked_at_ms,
          scrape_status,
          failure_code,
          client_wait_seconds,
@@ -470,6 +491,7 @@ export class DatabaseHealthStore {
        LIMIT ?`,
       safeLimit,
     ).toArray().map((row) => ({
+      checkedAtMs: row.checked_at_ms,
       clientWaitSeconds: row.client_wait_seconds,
       connectionErrorDelta: row.direct_connection_error_delta,
       conditions: parseConditions(row.conditions_json),
@@ -560,6 +582,7 @@ function ensureDatabaseHealthSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
     CREATE TABLE IF NOT EXISTS database_health_samples (
       observed_at_ms INTEGER PRIMARY KEY,
+      checked_at_ms INTEGER,
       scrape_status TEXT NOT NULL CHECK (scrape_status IN ('ok', 'failed')),
       failure_code TEXT,
       client_wait_seconds REAL,
@@ -622,6 +645,12 @@ function ensureDatabaseHealthSchema(sql: DurableObjectSqlStorageLike): void {
     "database_health_meta",
     "monitoring_alert_owed_json",
     "TEXT",
+  );
+  ensureDatabaseHealthTableColumn(
+    sql,
+    "database_health_samples",
+    "checked_at_ms",
+    "INTEGER",
   );
   ensureDatabaseHealthTableColumn(
     sql,

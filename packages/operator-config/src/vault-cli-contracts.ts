@@ -24,6 +24,14 @@ export const isoTimestampSchema = z
 export const localDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a calendar date in YYYY-MM-DD form.')
+  .refine(
+    (value) => {
+      const parsed = new Date(`${value}T00:00:00.000Z`)
+      return Number.isFinite(parsed.getTime())
+        && parsed.toISOString().slice(0, 10) === value
+    },
+    'Expected a real calendar date in YYYY-MM-DD form.',
+  )
   .describe('Calendar date in YYYY-MM-DD form.')
 
 export const occurredAtOptionSchema = z
@@ -50,6 +58,169 @@ export const pathSchema = z
   .string()
   .min(1)
   .describe('Filesystem path supplied by the operator.')
+
+const vaultCliBatchCommandErrorStageSchema = z.enum([
+  'authorization',
+  'command',
+  'configuration',
+  'conflict',
+  'filesystem',
+  'integrity',
+  'persistence',
+  'protocol_family_graph',
+  'protocol_index',
+  'protocol_run_specs',
+  'query_source',
+  'read',
+  'render',
+  'response',
+  'transport',
+  'validation',
+  'write',
+])
+
+const vaultCliBatchPublicFieldPathSchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .regex(/^(?:\$|(?:[A-Za-z_][A-Za-z0-9_-]*|\d+)(?:\.(?:[A-Za-z_][A-Za-z0-9_-]*|\d+))*)$/u)
+
+export const vaultCliBatchCommandErrorSchema = z.object({
+  code: z.string().min(1).max(96).regex(/^[A-Za-z0-9_.:-]+$/u).optional(),
+  message: z.string().min(1).max(640),
+  retryable: z.boolean().optional(),
+  exitCode: z.number().int().positive().optional(),
+  hint: z.string().min(1).max(320).optional(),
+  stage: vaultCliBatchCommandErrorStageSchema.optional(),
+  fieldErrors: z.array(z.object({
+    code: z.string().min(1).max(96).regex(/^[A-Za-z0-9_.:-]+$/u).optional(),
+    expected: z.string().max(32).optional(),
+    message: z.string().min(1).max(240),
+    missing: z.boolean().optional(),
+    path: vaultCliBatchPublicFieldPathSchema,
+    received: z.enum(['missing', 'invalid']).optional(),
+  }).strict()).max(13).optional(),
+}).strict()
+
+export const vaultCliBatchCommandResultEnvelopeSchema = z.object({
+  index: z.number().int().nonnegative(),
+  argv: z.array(z.string().min(1)),
+  durationMs: z.number().int().nonnegative(),
+  ok: z.boolean(),
+  outputBytes: z.number().int().nonnegative().describe(
+    'UTF-8 byte length of captured child stdout before compact mode may clear stdout.',
+  ),
+  outputChars: z.number().int().nonnegative().describe(
+    'Legacy UTF-16 code-unit length of captured child stdout before compact mode may clear stdout.',
+  ),
+  stdout: z.string(),
+  data: z.unknown().optional(),
+  error: vaultCliBatchCommandErrorSchema.optional(),
+})
+
+export const vaultCliBatchCommandResultSchema =
+  vaultCliBatchCommandResultEnvelopeSchema.strict()
+
+export const vaultCliBatchResultEnvelopeSchema = z.object({
+  schema: z.literal(VAULT_CLI_BATCH_RESULT_SCHEMA),
+  vault: pathSchema,
+  count: z.number().int().nonnegative(),
+  requested: z.number().int().nonnegative().optional().describe(
+    'Number of child commands requested by the caller.',
+  ),
+  executed: z.number().int().nonnegative().optional().describe(
+    'Number of child commands executed before the batch finished or stopped early.',
+  ),
+  succeeded: z.number().int().nonnegative().optional().describe(
+    'Number of executed child commands that succeeded.',
+  ),
+  stoppedEarly: z.boolean().optional().describe(
+    'Whether stopOnError prevented at least one requested child command from executing.',
+  ),
+  failed: z.number().int().nonnegative(),
+  commands: z
+    .array(vaultCliBatchCommandResultEnvelopeSchema)
+    .min(1)
+    .max(VAULT_CLI_BATCH_MAX_COMMANDS),
+})
+
+export const vaultCliBatchResultSchema = vaultCliBatchResultEnvelopeSchema
+  .extend({
+    commands: z
+      .array(vaultCliBatchCommandResultSchema)
+      .min(1)
+      .max(VAULT_CLI_BATCH_MAX_COMMANDS),
+  })
+  .strict()
+  .superRefine((result, context) => {
+    if (result.count !== result.commands.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch count must equal the number of command results.',
+        path: ['count'],
+      })
+    }
+    if (
+      result.executed !== undefined &&
+      result.executed !== result.commands.length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch executed must equal the number of command results.',
+        path: ['executed'],
+      })
+    }
+    if (
+      result.requested !== undefined &&
+      result.requested < result.commands.length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch requested must not be less than executed commands.',
+        path: ['requested'],
+      })
+    }
+    if (
+      result.succeeded !== undefined &&
+      result.succeeded !== result.commands.filter((command) => command.ok).length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch succeeded must equal the successful command results.',
+        path: ['succeeded'],
+      })
+    }
+    if (
+      result.stoppedEarly !== undefined &&
+      result.requested !== undefined &&
+      result.stoppedEarly !== (result.requested > result.commands.length)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch stoppedEarly must reflect unexecuted requested commands.',
+        path: ['stoppedEarly'],
+      })
+    }
+    if (
+      result.failed !==
+      result.commands.filter((command) => !command.ok).length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch failed count must equal the failed command results.',
+        path: ['failed'],
+      })
+    }
+    for (const [index, command] of result.commands.entries()) {
+      if (command.index !== index) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Batch command indexes must be contiguous and ordered.',
+          path: ['commands', index, 'index'],
+        })
+      }
+    }
+  })
 
 export const requestIdSchema = z
   .string()
@@ -186,7 +357,7 @@ const workoutExerciseResultSchema = z.object({
     .optional(),
   unitOverride: z.enum(['lb', 'kg']).optional(),
   note: z.string().min(1).optional(),
-  memberRepsPerSet: z.number().int().min(1).max(999).optional(),
+  memberRepsPerSet: z.number().int().min(1).max(999).nullable().optional(),
   setPlanIsFinite: z.boolean().optional(),
   sets: z.array(workoutSetResultSchema).min(1).max(150),
 })
@@ -365,7 +536,7 @@ export const workoutAddResultSchema = z.object({
   durationMinutes: z.number().int().positive(),
   distanceKm: z.number().nonnegative().nullable(),
   workout: workoutSessionResultSchema.nullable(),
-  note: z.string().min(1),
+  note: z.string().min(1).nullable(),
 })
 
 export const captureResultItemSchema = z.object({
@@ -416,6 +587,16 @@ export const workoutUnitPreferencesResultSchema = z.object({
   updated: z.boolean(),
   recordedAt: isoTimestampSchema.nullable(),
   unitPreferences: workoutUnitPreferenceValuesResultSchema,
+})
+
+export const workoutCapturePreferencesResultSchema = z.object({
+  vault: pathSchema,
+  preferencesPath: pathSchema,
+  updated: z.boolean(),
+  recordedAt: isoTimestampSchema.nullable(),
+  captureDefaults: z.object({
+    durationMinutes: z.number().int().positive().max(24 * 60).nullable(),
+  }),
 })
 
 export const workoutImportInspectResultSchema = z.object({

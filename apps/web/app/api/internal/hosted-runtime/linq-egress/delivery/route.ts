@@ -1,4 +1,6 @@
+import { queueHostedLinqHomeContactCardAfterDelivery } from "@/src/lib/hosted-onboarding/linq-contact-card-delivery";
 import { after } from "next/server";
+import { lockHostedLinqMessageReceiptsTx } from "@/src/lib/hosted-onboarding/linq-message-receipt-lock";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -12,6 +14,9 @@ import {
 import {
   recordHostedLinqRuntimeDeliveryOutcomeTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import {
+  retryHostedLinqTerminalSend,
+} from "@/src/lib/hosted-onboarding/linq-terminal-retry";
 import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
@@ -159,6 +164,7 @@ export const POST = withJsonError(async (request: Request) => {
           throwHostedSignupWelcomeDeliveryAuthorityInvalid();
         }
 
+        await lockHostedLinqMessageReceiptsTx({ messageIds: providerMessageIds, prisma: tx });
         await materializeHostedSignupWelcomeHomeRouteTx({
           directRecipientPhoneNumber,
           fromPhoneNumber,
@@ -188,6 +194,15 @@ export const POST = withJsonError(async (request: Request) => {
         prisma,
       });
 
+  scheduleHostedLinqDeliveryFollowupsAfterResponse({
+    acceptedAt,
+    memberId: userId,
+    recorded: result.recorded,
+    chatId: linqChatId,
+    messageIds: providerMessageIds,
+    prisma,
+  });
+
   if (
     acceptedAt
     && result.recorded
@@ -209,6 +224,44 @@ export const POST = withJsonError(async (request: Request) => {
     recorded: result.recorded,
   });
 });
+
+function scheduleHostedLinqDeliveryFollowupsAfterResponse(input: {
+  acceptedAt: Date | null;
+  memberId: string;
+  recorded: boolean;
+  chatId: string | null;
+  messageIds: readonly string[];
+  prisma: ReturnType<typeof getPrisma>;
+}): void {
+  const { chatId, messageIds, prisma } = input;
+  if (!input.acceptedAt || !input.recorded || !chatId || messageIds.length === 0) return;
+  // Delivery or failure receipts can beat acceptance. Reconcile retries and
+  // contact sharing after the normal handoff and home-route commit.
+  try {
+    after(async () => {
+      for (const messageId of messageIds) {
+        try {
+          await retryHostedLinqTerminalSend({ chatId, messageId, prisma });
+        } catch {
+          console.warn("Hosted Linq terminal retry did not complete.", {
+            code: "HOSTED_LINQ_TERMINAL_RETRY_INCOMPLETE",
+          });
+        }
+      }
+      await queueHostedLinqHomeContactCardAfterDelivery({
+        chatId,
+        expectedMemberId: input.memberId,
+        messageIds,
+        prisma,
+      });
+    });
+  } catch {
+    // Scheduling failure must not invalidate an accepted runtime handoff.
+    console.warn("Hosted Linq terminal retry could not be scheduled.", {
+      code: "HOSTED_LINQ_TERMINAL_RETRY_NOT_SCHEDULED",
+    });
+  }
+}
 
 function parseHostedSignupWelcomeIdempotencyKey(
   value: string | null,

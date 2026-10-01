@@ -15,3 +15,13 @@ export class VaultError extends Error {
 export function isVaultError(error: unknown): error is VaultError {
   return error instanceof VaultError;
 }
+
+export interface CanonicalWriteLockErrorDetails extends UnknownRecord {
+  lockState: "active" | "stale";
+}
+
+export function isActiveCanonicalWriteLockError(error: unknown): error is VaultError {
+  return isVaultError(error)
+    && error.code === "CANONICAL_WRITE_LOCKED"
+    && error.details?.lockState === "active";
+}

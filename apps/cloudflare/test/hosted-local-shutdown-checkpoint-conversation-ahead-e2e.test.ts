@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -10,9 +10,12 @@ import {
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
 import {
+  createAssistantOutboxIntent,
+  resolveAssistantVaultFileResponseMedia,
+} from "@murphai/assistant-engine/assistant-outbox";
+import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   isHostedWorkspaceSnapshotV2Ref,
@@ -22,9 +25,8 @@ import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from "@murphai/runtime-state/assistant-generated-deliveries";
 import {
   createIntegratedVaultServices,
 } from "@murphai/vault-usecases/vault-services";
@@ -41,6 +43,7 @@ import {
   type HostedLocalLinqStub,
   type ObservedLinqRequestMatcher,
 } from "./helpers/hosted-local-linq-support.js";
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.js";
 
 const runId = Date.now();
 const userId = `member_local_shutdown_conversation_ahead_${runId}`;
@@ -51,12 +54,23 @@ const firstReplyText = "First reply captured before shutdown.";
 const conversationAheadReplyText = "Conversation-ahead input restored exactly once.";
 const linqWebhookSecret = "linq-local-shutdown-conversation-ahead-secret";
 const assistantModel = "gpt-5.6-terra";
-const idleCheckpointDelayMs = 180_000;
-const idleCheckpointWaitTimeoutMs = idleCheckpointDelayMs + 60_000;
+const runnerIdleTtlMs = 180_000;
+const idleCheckpointWaitTimeoutMs = runnerIdleTtlMs + 60_000;
+const shutdownHandoffStartDeadlineMs = 10_000;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
+const generatedDeliveryResidueContents = [
+  "synthetic completed delivery one\n",
+  "synthetic completed delivery two\n",
+  "synthetic completed delivery three\n",
+  "synthetic completed delivery four\n",
+] as const;
+const generatedDeliveryResidueBytes = generatedDeliveryResidueContents.reduce(
+  (total, contents) => total + Buffer.byteLength(contents),
+  0,
+);
 
 const cleanupPaths: string[] = [];
 let linqStub: HostedLocalLinqStub | null = null;
@@ -86,8 +100,7 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(idleCheckpointDelayMs),
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(runnerIdleTtlMs),
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -108,7 +121,7 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     });
   }, 300_000);
 
-  it("commits one shutdown snapshot and cold-restores the appended conversation once", async () => {
+  it("reclaims unrelated delivery residue, commits once, and cold-restores appended conversation", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const firstReplyMatcher = matchLinqMessageText(firstReplyText);
@@ -223,6 +236,15 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     expect(countIdleShutdownSnapshotLogs(committedShutdownStatus)).toBe(
       shutdownBaselineIdleSnapshotCount + 1,
     );
+    expect(committedShutdownStatus.recentLogs?.some((entry) =>
+      entry.eventCode === "checkpoint.snapshot_finished"
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryActiveFilesMissing === 1
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryFilesScanned === 4
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 4
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
+        === generatedDeliveryResidueBytes
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryPruneFailed !== true
+    )).toBe(true);
     const committedShutdownSnapshotAtMs = requireLatestIdleShutdownSnapshotAtMs(
       committedShutdownStatus,
     );
@@ -240,6 +262,14 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     expect(requireLinqStub().readObservedMessageText(restoredReply))
       .toBe(conversationAheadReplyText);
     expect(countContainerStartLogs()).toBeGreaterThanOrEqual(baselineContainerStartCount + 2);
+    const replacementStartLatencyMs = requireFirstContainerStartAtOrAfter(
+      committedShutdownSnapshotAtMs,
+    ) - committedShutdownSnapshotAtMs;
+    expect(replacementStartLatencyMs).toBeGreaterThanOrEqual(0);
+    expect(replacementStartLatencyMs).toBeLessThan(shutdownHandoffStartDeadlineMs);
+    console.info(
+      `Hosted shutdown checkpoint replacement-start latency: ${replacementStartLatencyMs}ms`,
+    );
 
     const acceptedReplies = requireLinqStub().acceptedSendRequests
       .slice(baselineAcceptedRequestCount)
@@ -293,16 +323,16 @@ async function seedActivatedWorkspaceCheckpoint(): Promise<void> {
     timezone: "America/New_York",
     vault: vaultRoot,
   });
+  await seedGeneratedDeliveryCleanupBlocker(vaultRoot);
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
+    harness: requireScenario().harness,
     operatorHomeRoot,
+    userId,
     vaultRoot,
   });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
-  const snapshotRef = createSnapshotBundleRef({
-    hash,
-    size: snapshot.bundle.byteLength,
-  });
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createBrowserVaultReplicaRef(hash),
     environment: requireScenario().runtimeEnv,
@@ -315,18 +345,35 @@ async function seedActivatedWorkspaceCheckpoint(): Promise<void> {
     userId,
   });
   expect(checkpoint.status).toBe("updated");
+}
 
-  const uploadResponse = await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(userId)}&sha256=${hash}`,
-    {
-      body: new Blob([new Uint8Array(snapshot.bundle)]),
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-      method: "PUT",
-    },
+async function seedGeneratedDeliveryCleanupBlocker(vaultRoot: string): Promise<void> {
+  const stagingRoot = path.join(
+    vaultRoot,
+    ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
   );
-  expect(uploadResponse.status).toBe(200);
+  await mkdir(stagingRoot, { recursive: true });
+  const missingActivePath = path.join(stagingRoot, "missing-active.pdf");
+  await writeFile(missingActivePath, "synthetic active delivery\n");
+  const missingActiveMedia = await resolveAssistantVaultFileResponseMedia({
+    ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/missing-active.pdf`,
+    vaultRoot,
+  });
+  await createAssistantOutboxIntent({
+    channel: "linq",
+    identityId: "identity-local-shutdown-cleanup",
+    media: [missingActiveMedia],
+    message: "Synthetic generated delivery",
+    sessionId: "session-local-shutdown-cleanup",
+    threadId: "thread-local-shutdown-cleanup",
+    threadIsDirect: true,
+    turnId: "turn-local-shutdown-cleanup",
+    vault: vaultRoot,
+  });
+  await rm(missingActivePath);
+  await Promise.all(generatedDeliveryResidueContents.map(async (contents, index) => {
+    await writeFile(path.join(stagingRoot, `completed-${index + 1}.zip`), contents);
+  }));
 }
 
 async function waitForShutdownCheckpointPublicationBarrier(): Promise<void> {
@@ -570,7 +617,29 @@ function countContainerStartLogs(): number {
   ).length;
 }
 
-function readStructuredLogRecords(): Array<{ message?: unknown }> {
+function requireFirstContainerStartAtOrAfter(afterAtMs: number): number {
+  const startedAtMs = readStructuredLogRecords().flatMap((record) => {
+    if (
+      record.message !== "Hosted execution container starting."
+      || typeof record.time !== "string"
+    ) {
+      return [];
+    }
+    const atMs = Date.parse(record.time);
+    return Number.isFinite(atMs) && atMs >= afterAtMs ? [atMs] : [];
+  }).sort((left, right) => left - right)[0];
+  if (startedAtMs === undefined) {
+    throw new Error(
+      "Hosted shutdown checkpoint did not issue a replacement start after publication.",
+    );
+  }
+  return startedAtMs;
+}
+
+function readStructuredLogRecords(): Array<{
+  message?: unknown;
+  time?: unknown;
+}> {
   const output = [
     requireScenario().harness.stdoutTail(2_000_000),
     requireScenario().harness.stderrTail(2_000_000),
@@ -583,7 +652,10 @@ function readStructuredLogRecords(): Array<{ message?: unknown }> {
     try {
       const value: unknown = JSON.parse(trimmed);
       return value && typeof value === "object" && !Array.isArray(value)
-        ? [value as { message?: unknown }]
+        ? [value as {
+            message?: unknown;
+            time?: unknown;
+          }]
         : [];
     } catch {
       return [];
@@ -616,18 +688,6 @@ function collectJsonStrings(value: unknown): string[] {
     return Object.values(value).flatMap((entry) => collectJsonStrings(entry));
   }
   return [];
-}
-
-function createSnapshotBundleRef(input: {
-  hash: string;
-  size: number;
-}): HostedExecutionSnapshotRef {
-  return {
-    hash: input.hash,
-    key: `cloudflare-workspace-snapshots/${input.hash}.bundle`,
-    size: input.size,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 function createBrowserVaultReplicaRef(sourceBundleHash: string): HostedBrowserVaultReplicaRef {

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 110,
+  "item": {
+    "id": "deeper-conversation-continuity",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph keeps more recent conversation context",
+    "summary": "When a conversation has to restart behind the scenes, Murph now carries forward more of the recent exchange so ordinary follow-up requests stay connected.",
+    "details": "The improvement uses only already-retained conversation history. Existing message-retention limits and member controls are unchanged.",
+    "relevanceTags": ["assistant", "conversation", "reliability"],
+    "sourcePullRequests": [2342]
+  }
+}

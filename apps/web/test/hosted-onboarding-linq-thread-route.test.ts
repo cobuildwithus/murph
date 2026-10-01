@@ -19,6 +19,7 @@ import {
 } from "../src/lib/hosted-routing/thread-container-service";
 import {
   buildHostedThreadDeliveryRoute,
+  HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
   openHostedThreadDeliveryRoute,
   sealHostedThreadDeliveryRoute,
 } from "../src/lib/hosted-routing/thread-delivery-route";
@@ -90,11 +91,29 @@ const usageReferralMocks = vi.hoisted(() => ({
 const preparedThreadMocks = vi.hoisted(() => ({
   ensureHostedPreparedLinqThreadContainerRouteTx: vi.fn(),
 }));
+const groupStoreMocks = vi.hoisted(() => ({
+  ensureHostedGroupStructureForThreadContainerTx: vi.fn(async () => ({
+    created: true,
+    groupId: "group_materialized_123",
+  })),
+}));
 const pendingGroupSetupMocks = vi.hoisted(() => ({
   prepareHostedPendingGroupSetupForParticipants: vi.fn(),
   readHostedPendingGroupSetup: vi.fn(),
   readHostedPendingGroupSetupCandidatesForParticipantsTx: vi.fn(),
 }));
+
+// The row fixtures do not execute Prisma relation filters. Preserve their
+// state-based access decisions; the PostgreSQL proof covers the boolean query.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
 
 vi.mock("../src/lib/hosted-routing/thread-route-store", async (importOriginal) => {
   const actual = await importOriginal<
@@ -115,6 +134,17 @@ vi.mock("../src/lib/hosted-growth/usage-referral", () => ({
   reconcileHostedUsageReferralRewardAfterCommit:
     usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit,
 }));
+
+vi.mock("../src/lib/hosted-groups/group-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/lib/hosted-groups/group-store")
+  >();
+  return {
+    ...actual,
+    ensureHostedGroupStructureForThreadContainerTx:
+      groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx,
+  };
+});
 
 vi.mock("../src/lib/hosted-groups/prepared-thread-container", async (importOriginal) => {
   const actual = await importOriginal<
@@ -344,6 +374,10 @@ const TEST_KEYRING_ENTRIES = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx.mockResolvedValue({
+    created: true,
+    groupId: "group_materialized_123",
+  });
   pendingGroupSetupMocks.readHostedPendingGroupSetup.mockReset();
   pendingGroupSetupMocks.readHostedPendingGroupSetup.mockResolvedValue(null);
   pendingGroupSetupMocks.prepareHostedPendingGroupSetupForParticipants
@@ -1130,7 +1164,6 @@ function createPrisma(input: {
 
 function createStatefulThreadRoutePrisma() {
   type LinqLineFixture = {
-    activeMemberLimit: number | null;
     assignmentWeight: number;
     configuredAt: Date | null;
     egressPolicy: string;
@@ -1606,7 +1639,6 @@ function createStatefulThreadRoutePrisma() {
         throw new Error("Expected a managed Linq line lookup key.");
       }
       linqLines.set(lookupKey, {
-        activeMemberLimit: null,
         assignmentWeight: 100,
         configuredAt: new Date("2026-06-24T00:00:00.000Z"),
         egressPolicy: overrides.egressPolicy ?? "enabled",
@@ -3413,6 +3445,14 @@ describe("Linq explicit external-thread routing", () => {
         deliveryRouteEncrypted: expect.stringMatching(/^hsb-test:/u),
       }),
     });
+    expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+      .toHaveBeenCalledTimes(1);
+    expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+      .toHaveBeenCalledWith({
+        containerMemberId: "member_thread_container_123",
+        now: new Date("2026-06-24T00:00:00.000Z"),
+        tx: prisma,
+      });
     expect(prisma.hostedThreadRoute.update).not.toHaveBeenCalled();
     expect(prisma.readDeliveryRouteEncrypted("member_thread_container_123"))
       .toMatch(/^hsb-test:/u);
@@ -3469,7 +3509,72 @@ describe("Linq explicit external-thread routing", () => {
     expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
   });
 
-  it("routes a bound Linq group thread into the container runtime", async () => {
+  it("materializes the same hosted-group structure for a new Telegram group route", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    const owner = {
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_telegram",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
+    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue(owner);
+    vi.mocked(hostedMemberStore.createHostedMember).mockResolvedValue({
+      ...owner,
+      id: "member_thread_container_telegram",
+    });
+    vi.mocked(domainRootStore.provisionPreparedHostedCryptoDomainRootsTx)
+      .mockResolvedValue(undefined);
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_activation_telegram",
+        userId: "member_thread_container_telegram",
+      }),
+    });
+    const preparedCreation = await prepareThreadContainerCreationForTest({
+      accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+      channel: "telegram",
+      containerMemberId: "member_thread_container_telegram",
+      prisma: prisma as unknown as Prisma.TransactionClient,
+      threadId: "telegram_group_123",
+    });
+
+    await expect(ensureHostedThreadContainerRouteTx({
+      accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+      channel: "telegram",
+      occurredAt: new Date("2026-06-24T00:00:00.000Z"),
+      ownerMemberId: "member_owner_telegram",
+      preparedCreation,
+      prisma: prisma as unknown as Prisma.TransactionClient,
+      threadId: "telegram_group_123",
+    })).resolves.toMatchObject({
+      containerMemberId: "member_thread_container_telegram",
+      created: true,
+    });
+
+    expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+      .toHaveBeenCalledOnce();
+    expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+      .toHaveBeenCalledWith({
+        containerMemberId: "member_thread_container_telegram",
+        now: new Date("2026-06-24T00:00:00.000Z"),
+        tx: prisma,
+      });
+  });
+
+  it.each([
+    { mode: "normal", text: "How did we sleep?", attachmentId: "a".repeat(256), attachmentCount: 32 },
+    { mode: "compact", text: "\u0000".repeat(20_000), attachmentId: "a".repeat(256), attachmentCount: 16 },
+    { mode: "minimal", text: "\u0000".repeat(20_000), attachmentId: "\u0000".repeat(256), attachmentCount: 0 },
+  ])("preserves bound group routing through $mode mailbox staging", async ({
+    mode,
+    text,
+    attachmentId,
+    attachmentCount,
+  }) => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
     });
@@ -3518,10 +3623,44 @@ describe("Linq explicit external-thread routing", () => {
       }),
     });
 
+    const event = buildLinqMessageReceivedEvent({
+      parts: [
+        { type: "text", value: text },
+        ...Array.from({ length: 32 }, (_, index) => ({
+          attachment_id: attachmentId,
+          filename: "f".repeat(160),
+          mime_type: "m".repeat(120),
+          size: index,
+          type: "media" as const,
+          url: `https://example.test/signed-attachment/${index}?signature=synthetic`,
+        })),
+      ],
+    });
+    const originalEvent = structuredClone(event);
     const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
+      event,
       prisma: prisma as never,
     });
+
+    expect(event).toEqual(originalEvent);
+    const stagedMessage = readAppendedConversationMessage(0);
+    if (stagedMessage.channel !== "linq") {
+      throw new Error("Expected a staged Linq conversation message.");
+    }
+    expect(stagedMessage.linqMessage.parts.filter((part) => part.type === "media"))
+      .toHaveLength(attachmentCount);
+    const serializedEnvelope = JSON.stringify(
+      vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mock.calls[0]?.[0].envelope,
+    );
+    expect(new TextEncoder().encode(serializedEnvelope).byteLength).toBeLessThan(128 * 1024);
+    expect(serializedEnvelope).not.toContain("signed-attachment");
+    if (mode === "normal") {
+      expect(serializedEnvelope).not.toContain("Internal staging note:");
+    } else {
+      expect(serializedEnvelope).toContain(mode === "compact"
+        ? "payload was compacted"
+        : "exceeded hosted mailbox staging limits");
+    }
 
     expect(plan.response).toMatchObject({
       ignored: false,
@@ -3594,6 +3733,75 @@ describe("Linq explicit external-thread routing", () => {
     );
     expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(false);
+  });
+
+  it("locks the routed group before its verified participant and reuses both locks", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: true,
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValueOnce({
+        core: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-06-24T00:00:00.000Z"),
+          id: "member_active_participant_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+        identity: {},
+        matchedBy: "phoneNumber",
+      } as Awaited<
+        ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>
+      >);
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      allowanceSource: "thread_container",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      planResetAt: null,
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
+    });
+
+    await expect(planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-thread-route",
+      },
+    });
+
+    expect(prisma.$executeRaw).toHaveBeenCalled();
+    expect(
+      memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).toHaveBeenCalledOnce();
+    const memberLockCallIndex = prisma.$queryRaw.mock.calls.findIndex(
+      ([query]) =>
+        Array.isArray(query)
+        && query.join("").includes('from "hosted_member"')
+        && query.join("").includes("for update"),
+    );
+    expect(memberLockCallIndex).toBeGreaterThanOrEqual(0);
+    const memberLockCallOrder =
+      prisma.$queryRaw.mock.invocationCallOrder[memberLockCallIndex];
+    const chatLockCallOrder = prisma.$executeRaw.mock.invocationCallOrder[0];
+    const demotionCallOrder = vi.mocked(
+      memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).mock.invocationCallOrder[0];
+    expect(chatLockCallOrder).toBeLessThan(memberLockCallOrder);
+    expect(memberLockCallOrder).toBeLessThan(demotionCallOrder!);
+    expect(
+      memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the newest ten reaction contexts in insertion order", async () => {
@@ -5888,6 +6096,40 @@ describe("Linq group chat auto-provision", () => {
     });
   });
 
+  it.each([
+    { participantMemberIds: [] },
+    { participantMemberIds: ["member_recognized_peer"] },
+  ])("keeps handle-only group admission consistent with roster $participantMemberIds", async ({ participantMemberIds }) => {
+    const prisma = {
+      ...createStatefulThreadRoutePrisma(),
+      hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([{ member: senderCore, memberId: senderCore.id }]),
+      },
+    };
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx
+      .mockImplementation(async ({ participantMemberIds }: { participantMemberIds: string[] }) =>
+        participantMemberIds.includes(senderCore.id)
+          ? [{ id: "hpgs_handle_owner", ownerMemberId: senderCore.id }]
+          : []);
+    const event = buildLinqMessageReceivedEvent({ sender: "group-handle@example.test" });
+
+    const admission = await prepareHostedLinqThreadContainerAdmission({
+      event, participantMemberIds, prisma: prisma as never,
+    });
+    expect(admission.shouldPrepareThreadContainer).toBe(false);
+    const plan = await planHostedOnboardingLinqWebhook({
+      event, prisma: prisma as never,
+      pendingGroupParticipantMemberIds: participantMemberIds,
+      ...(admission.preparedPendingGroupSetup
+        ? { preparedPendingGroupSetup: admission.preparedPendingGroupSetup }
+        : {}),
+    });
+    expect(plan.response).toMatchObject({ ok: true, reason: "sent-group-setup" });
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
+  });
+
   it("prepares new-container crypto for an active pending-contact sender", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
@@ -6362,6 +6604,10 @@ describe("Linq group chat auto-provision", () => {
 
   it.each([
     {
+      description: "reported group",
+      webhookIsGroup: true,
+    },
+    {
       description: "reported direct",
       webhookIsGroup: false,
     },
@@ -6405,6 +6651,7 @@ describe("Linq group chat auto-provision", () => {
         });
         expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
           envelope: expect.objectContaining({
+            userId: "member_thread_container_123",
             message: expect.objectContaining({
               linqMessage: expect.objectContaining({
                 chatId: "chat_group_123",
@@ -6425,7 +6672,7 @@ describe("Linq group chat auto-provision", () => {
           "Hosted onboarding diagnostic: hosted-onboarding.webhook.linq.chat-classification.",
           {
             diagnostic: "hosted-onboarding.webhook.linq.chat-classification",
-            outcome: "thread-route-group",
+            outcome: webhookIsGroup === true ? "webhook-group" : "thread-route-group",
           },
         );
       } finally {
@@ -6538,10 +6785,8 @@ describe("Linq group chat auto-provision", () => {
     vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
     vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
       .mockReturnValue(buildLinqMessageReceivedEvent({ isGroup: false }) as never);
-    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
-      handles: [],
-      isGroup: false,
-    });
+    vi.mocked(linqClient.getHostedLinqChatSummary)
+      .mockRejectedValue(new Error("Chat HTTP is not ownership authority"));
     vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -6555,12 +6800,10 @@ describe("Linq group chat auto-provision", () => {
       ok: true,
       reason: "wake-appended-thread-route",
     });
-    expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledWith({
-      chatId: "chat_group_123",
-      timeoutMs: 1_500,
-    });
+    expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
+        userId: "member_thread_container_123",
         message: expect.objectContaining({
           linqMessage: expect.objectContaining({
             chatId: "chat_group_123",
@@ -6579,26 +6822,21 @@ describe("Linq group chat auto-provision", () => {
 
   it.each([
     {
-      description: "incorrectly says direct",
+      description: "says group",
       service: "iMessage",
-      webhookIsGroup: false,
+      webhookIsGroup: true,
     },
     {
       description: "omits group directness",
       service: "iMessage",
       webhookIsGroup: null,
-    },
-    {
-      description: "incorrectly says direct",
-      service: "sms",
-      webhookIsGroup: false,
     },
     {
       description: "omits group directness",
       service: "RCS",
       webhookIsGroup: null,
     },
-  ] as const)("uses canonical chat metadata when a $service webhook $description", async ({
+  ] as const)("uses group roster metadata when a $service webhook $description", async ({
     service,
     webhookIsGroup,
   }) => {
@@ -6616,7 +6854,10 @@ describe("Linq group chat auto-provision", () => {
     ]);
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      displayName: "Weekend Warriors",
+      handleCount: 0,
       handles: [],
+      handlesComplete: true,
       isGroup: true,
     });
     vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
@@ -6637,6 +6878,7 @@ describe("Linq group chat auto-provision", () => {
         chatId: "chat_group_123",
         timeoutMs: 1_500,
       });
+      expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledTimes(1);
       expect(
         memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
       ).toHaveBeenCalledWith({
@@ -6646,6 +6888,15 @@ describe("Linq group chat auto-provision", () => {
         prisma,
       });
       expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+      const createdContainerMemberId = prisma.hostedThreadContainer.create
+        .mock.calls[0]?.[0].data.memberId;
+      expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+        .toHaveBeenCalledWith({
+          containerMemberId: createdContainerMemberId,
+          initialDisplayName: "Weekend Warriors",
+          now: new Date("2026-06-24T12:00:00.000Z"),
+          tx: prisma,
+        });
       expect(
         vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx)
           .mock.invocationCallOrder[0],
@@ -6666,7 +6917,7 @@ describe("Linq group chat auto-provision", () => {
         "Hosted onboarding diagnostic: hosted-onboarding.webhook.linq.chat-classification.",
         {
           diagnostic: "hosted-onboarding.webhook.linq.chat-classification",
-          outcome: "canonical-group",
+          outcome: webhookIsGroup === true ? "webhook-group" : "canonical-group",
         },
       );
     } finally {
@@ -6825,6 +7076,7 @@ describe("Linq group chat auto-provision", () => {
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
         kind: "member.activated",
+        onboardingFollowupEnrollment: false,
         userId: containerCreate.data.memberId,
       }),
       tx: prisma,
@@ -8328,7 +8580,7 @@ describe("Linq group chat auto-provision", () => {
         ? query.join("?")
         : (query as Prisma.Sql).sql;
       if (sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       )) {
         expect(transactionOpen).toBe(false);
       }
@@ -8465,7 +8717,7 @@ describe("Linq group chat auto-provision", () => {
     expect(prisma.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.$executeRaw.mock.calls.map(([query]) => query as Prisma.Sql)
       .filter((query) => typeof query.sql === "string" && query.sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       ))).toHaveLength(0);
 
     currentParticipantMemberId = boundaryParticipantMemberId;
@@ -8497,7 +8749,7 @@ describe("Linq group chat auto-provision", () => {
     const participantReconciles = prisma.$executeRaw.mock.calls
       .map(([query]) => query as Prisma.Sql)
       .filter((query) => typeof query.sql === "string" && query.sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       ));
     expect(participantReconciles).toHaveLength(1);
     expect(participantReconciles[0]?.sql).toContain(
@@ -8529,6 +8781,7 @@ describe("Linq group chat auto-provision", () => {
         userId: containerCreate.data.memberId,
       },
       mailboxItemId: "mailbox_group_123",
+      onSignalStarted: expect.any(Function),
     });
   });
 
@@ -8619,7 +8872,7 @@ describe("Linq group chat auto-provision", () => {
     const participantReconciles = prisma.$executeRaw.mock.calls
       .map(([query]) => query as Prisma.Sql)
       .filter((query) => typeof query.sql === "string" && query.sql.includes(
-        "WITH input_participant(participant_member_id, handle_lookup_key)",
+        "input_participant(participant_member_id, handle_lookup_key)",
       ));
     expect(participantReconciles).toHaveLength(1);
     expect(participantReconciles[0]?.values).toContain(false);
@@ -9079,16 +9332,32 @@ describe("Linq group chat auto-provision", () => {
     }
   });
 
-  it("ignores group messages received on an unknown unmanaged recipient", async () => {
+  it.each([
+    ["unmanaged", "recipient-line-unmanaged"],
+    ["conflicting", "recipient-line-conflicting"],
+    ["structurally_unavailable", "recipient-line-structurally-unavailable"],
+    ["degraded_unavailable", "recipient-line-degraded-unavailable"],
+  ] as const)("ignores group messages on a %s recipient line", async (kind, reason) => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();
-    prisma.seedActiveManagedLinqLine("+15550000000");
+    const recipient = "+15558889999";
+    if (kind === "conflicting") {
+      // The production line-state reader rejects ambiguous row cardinality
+      // before it inspects either row's fields.
+      prisma.hostedLinqLine.findMany.mockResolvedValueOnce([{}, {}]);
+    } else if (kind !== "unmanaged") {
+      prisma.seedActiveManagedLinqLine(recipient, {
+        egressPolicy: kind === "structurally_unavailable" ? "disabled" : "enabled",
+        healthStatus: "degraded",
+        providerReputationStatus: "HEALTHY",
+      });
+    }
     mockSenderLookup(senderCore);
 
     try {
       const plan = await planHostedOnboardingLinqWebhook({
         event: buildLinqMessageReceivedEvent({
-          recipient: "+15558889999",
+          recipient,
         }),
         prisma: prisma as never,
       });
@@ -9098,16 +9367,18 @@ describe("Linq group chat auto-provision", () => {
         ok: true,
         reason: "group-chat-line-unavailable",
       });
-      expectManagedLineAuthorityLookup(prisma, "+15558889999");
+      expectManagedLineAuthorityLookup(prisma, recipient);
+      expect(plan.desiredSideEffects).toEqual([]);
       expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
       expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
 
       const plannerDetails = info.mock.calls.find(
         ([message]) => message === "Hosted Linq webhook planner decision.",
       )?.[1];
       expect(plannerDetails).toMatchObject({
         existingMemberMatch: "phone-identity",
-        reason: "recipient-line-unmanaged",
+        reason,
         responseReason: "group-chat-line-unavailable",
         routeStage: "new-group-admission-ignored",
       });
@@ -9116,20 +9387,26 @@ describe("Linq group chat auto-provision", () => {
     }
   });
 
-  it("ignores echoed own messages in unbound group threads without provisioning", async () => {
+  it.each([true, false, null] as const)("ignores unbound own-message echoes without provider reads when group flag is %s", async (isGroup) => {
     const prisma = createStatefulThreadRoutePrisma();
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({ isFromMe: true, isGroup }) as never);
 
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({ isFromMe: true }),
-      prisma: prisma as never,
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
     });
 
-    expect(plan.response).toMatchObject({
+    expect(response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: isGroup === true ? "group-chat" : "own-message",
     });
-    expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .toHaveBeenCalledTimes(isGroup === true ? 0 : 1);
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });

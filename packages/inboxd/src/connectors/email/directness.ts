@@ -1,4 +1,4 @@
-import { normalizeTextValue } from "../../shared.ts";
+import { normalizeTextValue } from "../../shared-runtime.ts";
 
 export interface InferDirectEmailThreadParticipantsInput {
   accountAddress?: string | null;

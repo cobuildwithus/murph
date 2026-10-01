@@ -35,7 +35,7 @@ function createPromptInput(
 }
 
 describe('assistant appointment reminder policy', () => {
-  it('routes confirmed private appointments to the scheduling policy', async () => {
+  it('keeps one resident reminder policy without conflicting skill defaults', async () => {
     const prompt = buildAssistantSystemPromptLayers(
       createPromptInput(),
     ).stableRouteCapabilityPrompt
@@ -50,7 +50,7 @@ describe('assistant appointment reminder policy', () => {
     const normalizedSkill = skill.replace(/\s+/gu, ' ')
 
     expect(prompt).toContain(
-      'For a confirmed future care appointment in private, follow `$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md`.',
+      'a reminder alone does not require loading the appointment skill',
     )
     expect(normalizedSkill).toContain(
       'a booked or otherwise confirmed future care appointment',
@@ -61,16 +61,22 @@ describe('assistant appointment reminder policy', () => {
     expect(normalizedSkill).toContain(
       'without separate confirmation unless the user opts out',
     )
-    expect(normalizedSkill).toContain('before noon local')
     expect(normalizedSkill).toContain(
-      'the prior evening at a known pre-bed reminder time or 8:00 PM',
+      'Appointment timing defaults apply only when the member supplied neither an exact clock time nor a broad time window',
     )
     expect(normalizedSkill).toContain(
-      'For noon or later, schedule 8:00 AM local that day',
+      'never replace an exact member time with an appointment default',
     )
-    expect(normalizedSkill).toContain(
-      'Reuse one stable automation identity for repeated mentions',
-    )
+    expect(normalizedSkill).toContain("developer prompt's **Private appointment follow-through** policy")
+    expect(normalizedSkill).toContain('Never guess a missing appointment date or start time')
+    expect(normalizedSkill).toContain('Reuse the existing reminder when conversation or tool evidence identifies it')
+    expect(normalizedSkill).toContain('never invent a stable recipe key')
+    expect(prompt).toContain('For a start before 10:00 AM')
+    expect(prompt).toContain('For a start at 10:00 AM or later')
+    expect(prompt).toContain('latest still-useful future time')
+    for (const conflict of ['before noon', 'noon or later', 'earliest useful future time', 'If only the date is known']) {
+      expect(`${prompt} ${normalizedSkill}`).not.toContain(conflict)
+    }
     expect(normalizedSkill).toContain(
       'Patch it when a reschedule is confirmed and archive it when cancellation is confirmed',
     )

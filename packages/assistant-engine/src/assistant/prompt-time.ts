@@ -7,6 +7,7 @@ import { loadVault } from '@murphai/core'
 
 export interface AssistantPromptTimeContext {
   canonicalTimeZoneAvailable?: boolean
+  currentInstant?: string
   currentLocalDate: string
   currentTimeZone: string
 }
@@ -14,12 +15,14 @@ export interface AssistantPromptTimeContext {
 export interface ResolvedAssistantPromptTimeContext
   extends AssistantPromptTimeContext {
   canonicalTimeZoneAvailable: boolean
+  currentInstant: string
 }
 
 export async function resolveAssistantPromptTimeContext(
   vaultRoot: string,
 ): Promise<ResolvedAssistantPromptTimeContext> {
   const fallbackTimeZone = 'UTC'
+  const currentInstant = new Date().toISOString()
   let currentTimeZone = fallbackTimeZone
   let canonicalTimeZoneAvailable = false
 
@@ -38,7 +41,8 @@ export async function resolveAssistantPromptTimeContext(
 
   return {
     canonicalTimeZoneAvailable,
-    currentLocalDate: toLocalDayKey(new Date(), currentTimeZone),
+    currentInstant,
+    currentLocalDate: toLocalDayKey(new Date(currentInstant), currentTimeZone),
     currentTimeZone,
   }
 }

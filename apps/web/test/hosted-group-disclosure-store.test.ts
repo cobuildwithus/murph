@@ -48,6 +48,15 @@ interface DisclosureGrantState {
   revokedAt: Date | null;
 }
 
+function completeDisclosureGrantPage(grants: unknown[]) {
+  return {
+    grants,
+    kind: "ok",
+    nextCursor: null,
+    truncated: false,
+  };
+}
+
 function createPrismaStub<T extends Record<string, unknown>>(delegates: T): PrismaClient & T {
   const prisma = createPrismaClient({
     databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
@@ -62,16 +71,12 @@ function createPrismaStub<T extends Record<string, unknown>>(delegates: T): Pris
 }
 
 function buildDisclosureStoreHarness(input: {
-  groupGrantHistoryCount?: number;
   hasMembership?: boolean;
   hasThreadRoute?: boolean;
-  memberGrantHistoryCount?: number;
   permissionHistoryCount?: number;
 } = {}) {
   let permission: DisclosurePermissionState | null = null;
   let permissionHistoryCount = input.permissionHistoryCount ?? 0;
-  let groupGrantHistoryCount = input.groupGrantHistoryCount ?? 0;
-  let memberGrantHistoryCount = input.memberGrantHistoryCount ?? 0;
   const grants: DisclosureGrantState[] = [];
   const membership = {
     createdAt: NOW,
@@ -97,18 +102,11 @@ function buildDisclosureStoreHarness(input: {
       ),
     },
     hostedGroupDisclosureGrant: {
-      count: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
-        "permission" in where
-          ? Math.max(groupGrantHistoryCount, grants.length)
-          : Math.max(memberGrantHistoryCount, grants.length)
-      ),
       create: vi.fn(async ({ data }: {
         data: Omit<DisclosureGrantState, "revokedAt">;
       }) => {
         const grant = { ...data, revokedAt: null };
         grants.push(grant);
-        groupGrantHistoryCount += 1;
-        memberGrantHistoryCount += 1;
         return grant;
       }),
       findFirst: vi.fn(async ({ where }: {
@@ -127,12 +125,32 @@ function buildDisclosureStoreHarness(input: {
               && grant.revokedAt >= condition.revokedAt.gte
         )
       ) ?? null),
-      findMany: vi.fn(async () => {
+      findMany: vi.fn(async ({ take, where }: {
+        take: number;
+        where: {
+          OR?: Array<
+            | { grantedAt: { gt: Date } }
+            | { grantedAt: Date; id: { gt: string } }
+          >;
+        };
+      }) => {
         const currentPermission = permission;
         return currentPermission
           ? grants
             .filter((grant) => grant.revokedAt === null)
+            .filter((grant) => !where.OR || where.OR.some((condition) =>
+              "id" in condition
+                ? grant.grantedAt.getTime() === condition.grantedAt.getTime()
+                  && grant.id > condition.id.gt
+                : grant.grantedAt > condition.grantedAt.gt
+            ))
+            .sort((left, right) =>
+              left.grantedAt.getTime() - right.grantedAt.getTime()
+              || left.id.localeCompare(right.id)
+            )
+            .slice(0, take)
             .map((grant) => ({
+              grantedAt: grant.grantedAt,
               id: grant.id,
               membership,
               permission: {
@@ -218,15 +236,6 @@ function buildDisclosureStoreHarness(input: {
     membership,
     get permission() {
       return permission;
-    },
-    setGroupGrantHistoryCount(value: number) {
-      groupGrantHistoryCount = value;
-    },
-    setMemberGrantHistoryCount(value: number) {
-      memberGrantHistoryCount = value;
-    },
-    setPermissionHistoryCount(value: number) {
-      permissionHistoryCount = value;
     },
     tx,
   };
@@ -361,56 +370,30 @@ describe("hosted group disclosure permission text", () => {
 });
 
 describe("hosted group disclosure grant lifecycle", () => {
-  it("caps permission history while preserving exact request replay at the cap", async () => {
-    const maxMinusOne = buildDisclosureStoreHarness({
-      permissionHistoryCount: 24,
-    });
-    await expect(recordHostedGroupDisclosurePermissionTx({
-      groupId: "group_1",
-      message: { channel: "linq" as const, messageId: "provider_message_1" },
-      originAssistantInputId: "assistant_input_1",
-      permissionText: "My recent running distance",
-      postedAt: NOW,
-      tx: maxMinusOne.tx,
-    })).resolves.toEqual({ kind: "recorded" });
-    maxMinusOne.setPermissionHistoryCount(25);
-    await expect(admitHostedGroupDisclosurePermissionAppendTx({
-      groupId: "group_1",
-      originAssistantInputId: "assistant_input_1",
-      permissionText: "My recent running distance",
-      tx: maxMinusOne.tx,
-    })).resolves.toEqual({ kind: "accepted" });
-    await expect(bindPermission(maxMinusOne)).resolves.toBeTruthy();
-    expect(
-      maxMinusOne.tx.hostedGroupDisclosurePermission.create,
-    ).toHaveBeenCalledTimes(1);
-
-    const atMax = buildDisclosureStoreHarness({ permissionHistoryCount: 25 });
+  it("does not cap permission history and preserves exact request replay", async () => {
+    const atLegacyCap = buildDisclosureStoreHarness({ permissionHistoryCount: 25 });
     await expect(admitHostedGroupDisclosurePermissionAppendTx({
       groupId: "group_1",
       originAssistantInputId: "assistant_input_fresh",
       permissionText: "My recent running distance",
-      tx: atMax.tx,
-    })).resolves.toEqual({ kind: "limit_reached" });
-    const permissionLockCallOrder = atMax.tx.$queryRaw.mock.invocationCallOrder[0];
-    const permissionCountCallOrder =
-      atMax.tx.hostedGroupDisclosurePermission.count.mock.invocationCallOrder[0];
-    if (
-      permissionLockCallOrder === undefined
-      || permissionCountCallOrder === undefined
-    ) {
-      throw new Error("Expected permission admission lock and history count calls.");
-    }
-    expect(permissionLockCallOrder).toBeLessThan(permissionCountCallOrder);
+      tx: atLegacyCap.tx,
+    })).resolves.toEqual({ kind: "accepted" });
     await expect(recordHostedGroupDisclosurePermissionTx({
       groupId: "group_1",
       message: { channel: "linq" as const, messageId: "provider_message_fresh" },
       originAssistantInputId: "assistant_input_fresh",
       permissionText: "My recent running distance",
       postedAt: NOW,
-      tx: atMax.tx,
-    })).resolves.toEqual({ kind: "limit_reached" });
-    expect(atMax.tx.hostedGroupDisclosurePermission.create).not.toHaveBeenCalled();
+      tx: atLegacyCap.tx,
+    })).resolves.toEqual({ kind: "recorded" });
+    await expect(admitHostedGroupDisclosurePermissionAppendTx({
+      groupId: "group_1",
+      originAssistantInputId: "assistant_input_fresh",
+      permissionText: "My recent running distance",
+      tx: atLegacyCap.tx,
+    })).resolves.toEqual({ kind: "accepted" });
+    expect(atLegacyCap.tx.hostedGroupDisclosurePermission.count).not.toHaveBeenCalled();
+    expect(atLegacyCap.tx.hostedGroupDisclosurePermission.create).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed when a deterministic permission request replays with changed data", async () => {
@@ -467,14 +450,14 @@ describe("hosted group disclosure grant lifecycle", () => {
     await expect(readActiveHostedGroupDisclosureGrantsForGroup({
       groupId: "group_1",
       prisma: harness.tx,
-    })).resolves.toEqual([expectedSummary]);
+    })).resolves.toEqual(completeDisclosureGrantPage([expectedSummary]));
     await expect(readActiveHostedGroupDisclosureGrantsForMember({
       memberId: "member_1",
       prisma: harness.tx,
-    })).resolves.toEqual([expectedSummary]);
+    })).resolves.toEqual(completeDisclosureGrantPage([expectedSummary]));
     expect(harness.tx.hostedGroupDisclosureGrant.findMany).toHaveBeenCalledTimes(2);
     expect(harness.tx.hostedGroupDisclosureGrant.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ take: 25 }),
+      expect.objectContaining({ take: 26 }),
     );
 
     const replayed = await acceptPermission(harness);
@@ -491,7 +474,6 @@ describe("hosted group disclosure grant lifecycle", () => {
     );
     expect(redundantWhileActive).toEqual({ kind: "accepted" });
     expect(harness.grants).toHaveLength(1);
-    expect(harness.tx.hostedGroupDisclosureGrant.count).toHaveBeenCalledTimes(2);
 
     await expect(readHostedGroupDisclosureGrantAuthorityTx({
       expectedGroupRuntimeMemberId: "group_runtime_1",
@@ -539,7 +521,6 @@ describe("hosted group disclosure grant lifecycle", () => {
     );
     expect(redundantReplayAfterRevoke).toEqual({ kind: "accepted" });
     expect(harness.grants).toHaveLength(1);
-    expect(harness.tx.hostedGroupDisclosureGrant.count).toHaveBeenCalledTimes(2);
 
     const regranted = await acceptPermission(
       harness,
@@ -549,7 +530,6 @@ describe("hosted group disclosure grant lifecycle", () => {
     expect(regranted).toEqual({ kind: "accepted" });
     expect(harness.grants).toHaveLength(2);
     expect(harness.grants[1]?.id).not.toBe(acceptedGrantId);
-    expect(harness.tx.hostedGroupDisclosureGrant.count).toHaveBeenCalledTimes(4);
   });
 
   it("keeps keyed permission authority valid across contact-privacy key rotation", async () => {
@@ -672,7 +652,7 @@ describe("hosted group disclosure grant lifecycle", () => {
       await expect(readActiveHostedGroupDisclosureGrantsForMember({
         memberId: "member_1",
         prisma: harness.tx,
-      })).resolves.toEqual([]);
+      })).resolves.toEqual(completeDisclosureGrantPage([]));
       expect(calls.filter((call) => call.operation === "decrypt")).toEqual([]);
       harness.membership.groupId = "group_1";
       await expect(readHostedGroupDisclosureGrantAuthorityTx({
@@ -685,9 +665,9 @@ describe("hosted group disclosure grant lifecycle", () => {
       await expect(readActiveHostedGroupDisclosureGrantsForGroup({
         groupId: "group_1",
         prisma: harness.tx,
-      })).resolves.toEqual([
+      })).resolves.toEqual(completeDisclosureGrantPage([
         expect.objectContaining({ permissionText: privateMarker }),
-      ]);
+      ]));
       await expect(readHostedGroupDisclosureGrantAuthorityTx({
         grantId,
         tx: harness.tx,
@@ -742,50 +722,67 @@ describe("hosted group disclosure grant lifecycle", () => {
     expect(joinedAfterReaction.grants).toEqual([]);
   });
 
-  it.each([
-    ["group", { groupGrantHistoryCount: 25 }],
-    ["member", { memberGrantHistoryCount: 25 }],
-  ])("caps grant history per %s under group-then-member locks", async (_label, counts) => {
-    const harness = buildDisclosureStoreHarness(counts);
-    await bindPermission(harness);
-    harness.tx.$queryRaw.mockClear();
-
-    await expect(acceptPermission(harness)).resolves.toEqual({ kind: "limit_reached" });
-
-    const locks = harness.tx.$queryRaw.mock.calls.map(([query]) =>
-      Array.from(query).join("?")
-    );
-    expect(locks).toEqual([
-      expect.stringContaining('from "hosted_group"'),
-      expect.stringContaining('from "hosted_member"'),
-    ]);
-    const [groupLockCallOrder, memberLockCallOrder] =
-      harness.tx.$queryRaw.mock.invocationCallOrder;
-    const [groupCountCallOrder, memberCountCallOrder] =
-      harness.tx.hostedGroupDisclosureGrant.count.mock.invocationCallOrder;
-    if (
-      groupLockCallOrder === undefined
-      || memberLockCallOrder === undefined
-      || groupCountCallOrder === undefined
-      || memberCountCallOrder === undefined
-    ) {
-      throw new Error("Expected canonical grant locks and history count calls.");
+  it("pages active disclosure grants without imposing a product cardinality cap", async () => {
+    const harness = buildDisclosureStoreHarness();
+    const permission = await bindPermission(harness);
+    for (let index = 0; index < 26; index += 1) {
+      harness.grants.push({
+        grantedAt: new Date(NOW.getTime() + index),
+        id: `grant_${String(index + 1).padStart(2, "0")}`,
+        membershipId: "membership_1",
+        permissionId: permission.id,
+        revokedAt: null,
+      });
     }
-    expect(groupLockCallOrder).toBeLessThan(memberLockCallOrder);
-    expect(memberLockCallOrder).toBeLessThan(groupCountCallOrder);
-    expect(memberLockCallOrder).toBeLessThan(memberCountCallOrder);
-    expect(harness.grants).toEqual([]);
+
+    const firstPage = await readActiveHostedGroupDisclosureGrantsForGroup({
+      groupId: "group_1",
+      prisma: harness.tx,
+    });
+    expect(firstPage).toMatchObject({
+      grants: expect.arrayContaining([
+        expect.objectContaining({ grantId: "grant_01" }),
+        expect.objectContaining({ grantId: "grant_25" }),
+      ]),
+      kind: "ok",
+      truncated: true,
+    });
+    if (firstPage.kind !== "ok" || !firstPage.nextCursor) {
+      throw new Error("Expected the first disclosure grant page to continue.");
+    }
+    expect(firstPage.grants).toHaveLength(25);
+
+    await expect(readActiveHostedGroupDisclosureGrantsForMember({
+      cursor: firstPage.nextCursor,
+      memberId: "member_1",
+      prisma: harness.tx,
+    })).resolves.toEqual({
+      grants: [expect.objectContaining({ grantId: "grant_26" })],
+      kind: "ok",
+      nextCursor: null,
+      truncated: false,
+    });
   });
 
-  it("accepts exact grant replays at the history cap but rejects a fresh regrant", async () => {
-    const harness = buildDisclosureStoreHarness({
-      groupGrantHistoryCount: 24,
-      memberGrantHistoryCount: 24,
-    });
+  it("rejects malformed disclosure cursors instead of treating them as exhaustion", async () => {
+    const harness = buildDisclosureStoreHarness();
+    await expect(readActiveHostedGroupDisclosureGrantsForGroup({
+      cursor: "not-a-server-cursor",
+      groupId: "group_1",
+      prisma: harness.tx,
+    })).resolves.toEqual({ kind: "cursor_invalid" });
+    await expect(readActiveHostedGroupDisclosureGrantsForMember({
+      cursor: "not-a-server-cursor",
+      memberId: "member_1",
+      prisma: harness.tx,
+    })).resolves.toEqual({ kind: "cursor_invalid" });
+    expect(harness.tx.hostedGroupDisclosureGrant.findMany).not.toHaveBeenCalled();
+  });
+
+  it("accepts exact grant replays and rotates the generation after revocation", async () => {
+    const harness = buildDisclosureStoreHarness();
     await bindPermission(harness);
     await expect(acceptPermission(harness)).resolves.toEqual({ kind: "accepted" });
-    harness.setGroupGrantHistoryCount(25);
-    harness.setMemberGrantHistoryCount(25);
 
     await expect(acceptPermission(harness)).resolves.toEqual({ kind: "accepted" });
     const grantId = harness.grants[0]?.id;
@@ -800,8 +797,9 @@ describe("hosted group disclosure grant lifecycle", () => {
       harness,
       "reaction_event_fresh",
       new Date(NOW.getTime() + 120_000),
-    )).resolves.toEqual({ kind: "limit_reached" });
-    expect(harness.grants).toHaveLength(1);
+    )).resolves.toEqual({ kind: "accepted" });
+    expect(harness.grants).toHaveLength(2);
+    expect(harness.grants.filter((grant) => grant.revokedAt === null)).toHaveLength(1);
   });
 
   it("fails authority closed on stale pins, cross-group state, or changed text", async () => {
@@ -849,7 +847,7 @@ describe("hosted group disclosure grant lifecycle", () => {
     await expect(readActiveHostedGroupDisclosureGrantsForMember({
       memberId: "member_1",
       prisma: harness.tx,
-    })).resolves.toEqual([]);
+    })).resolves.toEqual(completeDisclosureGrantPage([]));
     harness.membership.groupId = "group_1";
 
     permission.permissionTextEncrypted = encodeDefaultHostedSecureBoxTestValue(
@@ -864,11 +862,11 @@ describe("hosted group disclosure grant lifecycle", () => {
     await expect(readActiveHostedGroupDisclosureGrantsForGroup({
       groupId: "group_1",
       prisma: harness.tx,
-    })).resolves.toEqual([]);
+    })).resolves.toEqual(completeDisclosureGrantPage([]));
     await expect(readActiveHostedGroupDisclosureGrantsForMember({
       memberId: "member_1",
       prisma: harness.tx,
-    })).resolves.toEqual([]);
+    })).resolves.toEqual(completeDisclosureGrantPage([]));
   });
 });
 

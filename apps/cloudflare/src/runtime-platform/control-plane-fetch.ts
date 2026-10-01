@@ -16,6 +16,19 @@ const HOSTED_RUNTIME_FETCH_CAUSE_NAMES = new Set([
   "TypeError",
 ]);
 
+const HOSTED_RUNTIME_FETCH_NETWORK_ERROR_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "EPIPE",
+  "ETIMEDOUT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+const HOSTED_RUNTIME_FETCH_NETWORK_ERROR_MAX_DEPTH = 4;
+
 export type HostedRuntimeControlPlaneFetchCauseKind =
   | "abort"
   | "cloudflare_rpc_destroy"
@@ -29,6 +42,7 @@ export interface HostedRuntimeControlPlaneFetchFailureDiagnostics {
   fetchCauseCode: HostedExecutionErrorCode;
   fetchCauseKind: HostedRuntimeControlPlaneFetchCauseKind;
   fetchCauseName?: string;
+  fetchNetworkErrorCode?: string;
   fetchRequestSignalAborted: boolean;
   fetchTimeoutMs: number;
   fetchTimeoutSignalAborted: boolean;
@@ -48,6 +62,7 @@ export class HostedRuntimeControlPlaneFetchError extends Error {
   readonly hostedRuntimeFetchCauseCode: HostedExecutionErrorCode;
   readonly hostedRuntimeFetchCauseKind: HostedRuntimeControlPlaneFetchCauseKind;
   readonly hostedRuntimeFetchCauseName?: string;
+  readonly hostedRuntimeFetchNetworkErrorCode?: string;
   readonly hostedRuntimeFetchRequestSignalAborted: boolean;
   readonly hostedRuntimeFetchTimeoutMs: number;
   readonly hostedRuntimeFetchTimeoutSignalAborted: boolean;
@@ -68,6 +83,10 @@ export class HostedRuntimeControlPlaneFetchError extends Error {
     const causeName = readHostedRuntimeFetchCauseName(input.cause);
     if (causeName) {
       this.hostedRuntimeFetchCauseName = causeName;
+    }
+    const networkErrorCode = readHostedRuntimeFetchNetworkErrorCode(input.cause);
+    if (networkErrorCode) {
+      this.hostedRuntimeFetchNetworkErrorCode = networkErrorCode;
     }
     this.hostedRuntimeFetchCallerSignalAborted =
       input.signalState.callerSignalAborted;
@@ -114,11 +133,13 @@ export function readHostedRuntimeControlPlaneFetchFailureDiagnostics(
         const fetchCauseName = readHostedRuntimeFetchCauseNameValue(
           record.hostedRuntimeFetchCauseName,
         );
+        const fetchNetworkErrorCode = readHostedRuntimeFetchNetworkErrorCodeMetadata(record);
         return {
           fetchCallerSignalAborted,
           fetchCauseCode,
           fetchCauseKind,
           ...(fetchCauseName ? { fetchCauseName } : {}),
+          ...(fetchNetworkErrorCode ? { fetchNetworkErrorCode } : {}),
           fetchRequestSignalAborted,
           fetchTimeoutMs,
           fetchTimeoutSignalAborted,
@@ -263,6 +284,52 @@ function readHostedRuntimeFetchCauseNameValue(value: unknown): string | null {
   }
   const normalized = value.trim();
   return HOSTED_RUNTIME_FETCH_CAUSE_NAMES.has(normalized) ? normalized : null;
+}
+
+// Only own data properties are diagnostic inputs; never evaluate error accessors.
+function readHostedRuntimeFetchNetworkErrorCode(error: unknown): string | null {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+
+  try {
+    for (let depth = 0; depth < HOSTED_RUNTIME_FETCH_NETWORK_ERROR_MAX_DEPTH; depth += 1) {
+      if (!current || typeof current !== "object" || seen.has(current)) {
+        break;
+      }
+      seen.add(current);
+      const code = Object.getOwnPropertyDescriptor(current, "code");
+      if (code && !Object.hasOwn(code, "value")) {
+        return null;
+      }
+      const networkErrorCode = readHostedRuntimeFetchNetworkErrorCodeValue(code?.value);
+      if (networkErrorCode) {
+        return networkErrorCode;
+      }
+      const cause = Object.getOwnPropertyDescriptor(current, "cause");
+      current = cause && Object.hasOwn(cause, "value") ? cause.value : null;
+    }
+  } catch {
+    // Descriptor inspection can fail (for example, on a revoked Proxy).
+    // Optional diagnostics must never replace the original fetch failure.
+  }
+  return null;
+}
+
+function readHostedRuntimeFetchNetworkErrorCodeMetadata(error: object): string | null {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, "hostedRuntimeFetchNetworkErrorCode");
+    return descriptor && Object.hasOwn(descriptor, "value")
+      ? readHostedRuntimeFetchNetworkErrorCodeValue(descriptor.value)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readHostedRuntimeFetchNetworkErrorCodeValue(value: unknown): string | null {
+  return typeof value === "string" && HOSTED_RUNTIME_FETCH_NETWORK_ERROR_CODES.has(value)
+    ? value
+    : null;
 }
 
 function readHostedRuntimeFetchCauseKind(

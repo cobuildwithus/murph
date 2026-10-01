@@ -4,12 +4,17 @@ import {
   HostedBillingStatus,
   Prisma,
 } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { HOSTED_MAILBOX_RETENTION_MS } from "@/src/lib/hosted-mailbox/store";
 import {
   readHostedRuntimeProgressHealth,
 } from "@/src/lib/hosted-runtime-progress/alert-monitor";
+import {
+  recordHostedIngressAssistantInputStaged,
+  recordHostedIngressDeliveryCommitted,
+  recordHostedIngressRuntimeMilestone,
+} from "@/src/lib/hosted-runtime-latency/store";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -28,7 +33,170 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted runtime progress alert PostgreSQL boundary",
   () => {
-    it("filters exact runtime authority and usage pauses before the eligible cap", async () => {
+    it("waits for the exact delivered email's checkpoint, then alerts at its expired deadline", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const userId = `progress-email-proof-${randomUUID()}`;
+      const acceptedAt = new Date("2026-08-10T15:00:00.000Z");
+      const now = new Date("2026-08-10T15:20:00.000Z");
+      const deadline = "2026-08-10T15:30:00.000Z";
+      const extendedDeadline = "2026-08-10T15:40:00.000Z";
+      const mailboxItemId = `${userId}-conversation-item-1`;
+      const runtimeAttemptId = "attempt_email_completion";
+      try {
+        await prisma.hostedMember.create({ data: member(userId, HostedBillingStatus.active) });
+        await seedProgressLane({ createdAt: acceptedAt, lane: "conversation", tx: prisma, userId });
+        await expect(recordHostedIngressAssistantInputStaged({
+          authenticatedUserId: userId, mailboxItemId, assistantInputId: `${userId}-input`,
+          source: "email", at: acceptedAt, runtimeAttemptId, prisma,
+        })).resolves.toMatchObject({ recorded: true });
+        const completion = {
+          authenticatedUserId: userId, mailboxItemIds: [mailboxItemId], source: "email" as const,
+          at: "2026-08-10T15:05:00.000Z", checkpointPublicationExpectedBy: deadline,
+          runtimeAttemptId, runtimeLeaseGeneration: "2", prisma,
+        };
+        // Wrong item, member, or channel must not produce completion evidence.
+        for (const override of [
+          { mailboxItemIds: ["unrelated_mailbox"] },
+          { authenticatedUserId: "unrelated_member" },
+          { source: "telegram" as const },
+        ]) {
+          await expect(recordHostedIngressDeliveryCommitted({ ...completion, ...override }))
+            .resolves.toMatchObject({ recorded: false });
+        }
+        await expect(readHostedRuntimeProgressHealth({ now, prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 1 });
+        await expect(recordHostedIngressDeliveryCommitted(completion))
+          .resolves.toMatchObject({ recorded: true });
+        await expect(readHostedRuntimeProgressHealth({ now, prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 0 });
+        expect((await prisma.hostedMailboxItem.findUniqueOrThrow({ where: { id: mailboxItemId } })).consumedAt).toBeNull();
+        await expect(readHostedRuntimeProgressHealth({ now: new Date(deadline), prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 0 });
+        await expect(readHostedRuntimeProgressHealth({ now: new Date(Date.parse(deadline) + 1), prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 1, oldestStalledAgeMs: 30 * 60_000 + 1 });
+        // The runtime's actual idle deadline can advance; stale leases cannot extend it.
+        await recordHostedIngressRuntimeMilestone({
+          authenticatedUserId: userId, source: "email", runtimeAttemptId: "attempt_resumed",
+          runtimeLeaseGeneration: "3", milestone: "checkpoint_publication_expected_by",
+          at: extendedDeadline, prisma,
+        });
+        await recordHostedIngressDeliveryCommitted({
+          ...completion, checkpointPublicationExpectedBy: "2026-08-10T18:00:00.000Z",
+        });
+        await expect(readHostedRuntimeProgressHealth({ now: new Date(extendedDeadline), prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 0 });
+        await expect(readHostedRuntimeProgressHealth({ now: new Date(Date.parse(extendedDeadline) + 1), prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 1 });
+      } finally {
+        await prisma.hostedMember.deleteMany({ where: { id: userId } });
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it.each(["member.activated", "device-sync.wake"])("bounds %s deferral to imported work and the current owner's latest completed foreground input", async (kind) => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const userId = `progress-activation-proof-${randomUUID()}`;
+      const acceptedAt = new Date("2026-08-10T15:00:00Z");
+      const foregroundAt = new Date("2026-08-10T15:12:00Z");
+      const completedAt = new Date("2026-08-10T15:14:00Z");
+      const now = new Date("2026-08-10T15:20:00Z");
+      const checkpointedAt = new Date("2026-08-10T15:10:00Z");
+      const deadline = new Date("2026-08-10T15:24:00Z");
+      const runtimeAttemptId = "activation-proof-attempt";
+      const mailboxItemId = `${userId}-conversation-item-1`;
+      const assertStalled = async (count: number, at = now) => {
+        await expect(readHostedRuntimeProgressHealth({ now: at, prisma }))
+          .resolves.toMatchObject({ stalledSystemLaneCount: count });
+      };
+      try {
+        await prisma.hostedMember.create({ data: member(userId, HostedBillingStatus.active) });
+        await seedProgressLane({ createdAt: acceptedAt, kind, lane: "system", tx: prisma, userId });
+        await seedProgressLane({ createdAt: foregroundAt, lane: "conversation", tx: prisma, userId });
+        await prisma.hostedWorkspace.create({ data: {
+          userId, checkpointedAt, systemMailboxProgressGeneration: 2n,
+          redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" },
+        } });
+        await prisma.hostedRuntimeOwner.create({ data: {
+          userId, migrationPhase: "postgres", phase: "active", processingMode: "default",
+          attemptId: runtimeAttemptId, generation: 2n, acceptedAt,
+          allocationId: `${userId}-allocation`, runnerContainerName: `${userId}-runner`,
+          workspaceVersion: 1n,
+        } });
+        await recordHostedIngressAssistantInputStaged({
+          authenticatedUserId: userId, mailboxItemId, assistantInputId: `${userId}-input`,
+          source: "email", at: foregroundAt, runtimeAttemptId, prisma,
+        });
+        await assertStalled(1);
+        await recordHostedIngressDeliveryCommitted({
+          authenticatedUserId: userId, mailboxItemIds: [mailboxItemId], source: "email",
+          at: completedAt.toISOString(), checkpointPublicationExpectedBy: deadline.toISOString(),
+          runtimeAttemptId, runtimeLeaseGeneration: "2", prisma,
+        });
+        // Exact conversation consumption must not erase its checkpoint expectation.
+        await prisma.hostedMailboxItem.update({ where: { id: mailboxItemId }, data: { consumedAt: completedAt } });
+        await assertStalled(0);
+        await assertStalled(0, deadline);
+        await assertStalled(1, new Date(+deadline + 1));
+        for (const override of [
+          { phase: "idle", attemptId: null }, { phase: "retiring" }, { processingMode: "system_mailbox" },
+          { attemptId: "another-attempt" }, { generation: 3n }, { completedAt },
+        ]) {
+          await prisma.hostedRuntimeOwner.update({ where: { userId }, data: override });
+          await assertStalled(1);
+          await prisma.hostedRuntimeOwner.update({ where: { userId }, data: {
+            phase: "active", processingMode: "default", attemptId: runtimeAttemptId,
+            generation: 2n, completedAt: null,
+          } });
+        }
+        for (const override of [
+          { systemMailboxProgressGeneration: 1n },
+          { redactedStatusJson: { hostedMailboxSystemImportedSeq: "0" } },
+          { checkpointedAt: completedAt },
+        ]) {
+          await prisma.hostedWorkspace.update({ where: { userId }, data: override });
+          await assertStalled(1);
+          await prisma.hostedWorkspace.update({ where: { userId }, data: {
+            systemMailboxProgressGeneration: 2n, checkpointedAt,
+            redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" },
+          } });
+        }
+        // A newer trace without completion must not fall back to old evidence.
+        const trace = await prisma.hostedIngressLatencyTrace.findUniqueOrThrow({ where: { mailboxItemId } });
+        const newerAt = new Date("2026-08-10T15:19:00Z");
+        await prisma.hostedMailboxItem.create({ data: {
+          id: `${userId}-newer-item`, userId, lane: "conversation", laneSeq: 2n,
+          kind: "conversation.message", dedupeKey: `${userId}-newer-item`,
+          occurredAt: newerAt, createdAt: newerAt, consumedAt: newerAt,
+          payloadSchema: "murph.runtime-progress-proof.v1",
+        } });
+        await prisma.hostedMailboxLaneCounter.update({
+          where: { userId_lane: { userId, lane: "conversation" } }, data: { nextSeq: 3n },
+        });
+        await prisma.hostedIngressLatencyTrace.create({ data: {
+          id: `${userId}-latest-trace`, userId, source: "email", mailboxLane: "conversation",
+          mailboxItemId: `${userId}-newer-item`, mailboxLaneSeq: 2n,
+          acceptedAt: newerAt, runtimeAttemptId,
+          phaseBreakdownJson: {},
+        } });
+        await assertStalled(1);
+        await prisma.hostedIngressLatencyTrace.delete({ where: { id: `${userId}-latest-trace` } });
+        await prisma.hostedIngressLatencyTrace.update({ where: { id: trace.id }, data: {
+          phaseBreakdownJson: { assistant: {
+            terminalReplyCommittedAtEpochMs: +completedAt,
+            checkpointPublicationExpectedByEpochMs: +deadline,
+            runtimeLeaseGeneration: "1",
+          } },
+        } });
+        await assertStalled(1);
+      } finally {
+        await prisma.hostedRuntimeOwner.deleteMany({ where: { userId } });
+        await prisma.hostedIngressLatencyTrace.deleteMany({ where: { userId } });
+        await prisma.hostedMember.deleteMany({ where: { id: userId } });
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("filters exact runtime authority and usage pauses", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const rollback = new Error("Rollback runtime progress PostgreSQL proof.");
       const prefix = `progress-proof-${randomUUID()}`;
@@ -299,60 +467,6 @@ describe.skipIf(!runPostgresProof)(
             invalidRowCount: 2,
           });
 
-          await seedExcludedCapRows({
-            now,
-            prefix,
-            tx,
-          });
-          const afterExcludedCap = await readHostedRuntimeProgressHealth({
-            now,
-            prisma: tx,
-          });
-          expect(afterExcludedCap).toMatchObject({
-            excludedInactiveLaneCount: 20_000,
-            scanTruncated: true,
-            stalledLaneCount: 0,
-            stalledRuntimeCount: 0,
-          });
-
-          await tx.$executeRaw(Prisma.sql`
-            UPDATE hosted_member
-            SET billing_status = 'active', updated_at = ${now}
-            WHERE id LIKE ${`${prefix}-cap-inactive-%`}
-          `);
-          const suffixLookupPlan = await tx.$queryRaw<
-            Array<{ "QUERY PLAN": string }>
-          >(Prisma.sql`
-            EXPLAIN (COSTS OFF)
-            SELECT mailbox_item.created_at
-            FROM hosted_mailbox_item AS mailbox_item
-            WHERE mailbox_item.user_id = ${`${prefix}-cap-inactive-1`}
-              AND mailbox_item.lane = 'system'
-              AND mailbox_item.lane_seq > 1
-              AND mailbox_item.created_at
-                > ${new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS)}
-              AND (
-                mailbox_item.expires_at IS NULL
-                OR mailbox_item.expires_at > ${now}
-              )
-            ORDER BY mailbox_item.lane_seq ASC
-            LIMIT 1
-          `);
-          expect(
-            suffixLookupPlan.map((row) => row["QUERY PLAN"]).join("\n"),
-          ).toMatch(
-            /hosted_mailbox_item_user_id_lane_lane_seq_(?:idx|key)/,
-          );
-          await expect(readHostedRuntimeProgressHealth({
-            now,
-            prisma: tx,
-          })).resolves.toMatchObject({
-            anomalous: true,
-            scanTruncated: true,
-            stalledLaneCount: 20_000,
-            stalledRuntimeCount: 20_000,
-          });
-
           proofCompleted = true;
           throw rollback;
         }, {
@@ -368,6 +482,88 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$disconnect();
       }
     }, 240_000);
+
+    describe.each(["inactive", "active"] as const)("candidate cap with %s members", (access) => {
+      const prefix = `progress-cap-proof-${randomUUID()}`;
+      const now = new Date("2026-08-10T16:00:00.000Z");
+      let prisma: ReturnType<typeof createPrismaClient> | null = null;
+
+      beforeAll(async () => {
+        prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+        // Commit fixture setup separately so one complete production scan owns
+        // its transaction budget, independently of bulk seeding and other cases.
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw(Prisma.sql`
+            SELECT set_config('statement_timeout', '180s', true)
+          `);
+          await seedExcludedCapRows({ now, prefix, tx });
+          if (access === "active") {
+            await tx.$executeRaw(Prisma.sql`
+              UPDATE hosted_member
+              SET billing_status = 'active', updated_at = ${now}
+              WHERE id LIKE ${`${prefix}-cap-inactive-%`}
+            `);
+          }
+          await tx.$executeRaw(Prisma.sql`
+            ANALYZE hosted_member, hosted_mailbox_lane_counter,
+              hosted_workspace, hosted_mailbox_item
+          `);
+        }, { maxWait: 10_000, timeout: 210_000 });
+      }, 240_000);
+
+      afterAll(async () => {
+        if (!prisma) return;
+        try {
+          await prisma.hostedMember.deleteMany({
+            where: { id: { startsWith: prefix } },
+          });
+        } finally {
+          await prisma.$disconnect();
+        }
+      }, 240_000);
+
+      it("keeps the full candidate cap and exact runtime authority", async () => {
+        if (!prisma) throw new Error("Expected the isolated cap fixture database.");
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw(Prisma.sql`
+            SELECT set_config('statement_timeout', '180s', true)
+          `);
+          if (access === "active") {
+            const suffixLookupPlan = await tx.$queryRaw<
+              Array<{ "QUERY PLAN": string }>
+            >(Prisma.sql`
+              EXPLAIN (COSTS OFF)
+              SELECT mailbox_item.created_at
+              FROM hosted_mailbox_item AS mailbox_item
+              WHERE mailbox_item.user_id = ${`${prefix}-cap-inactive-1`}
+                AND mailbox_item.lane = 'system'
+                AND mailbox_item.lane_seq > 1
+                AND mailbox_item.created_at
+                  > ${new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS)}
+                AND (
+                  mailbox_item.expires_at IS NULL
+                  OR mailbox_item.expires_at > ${now}
+                )
+              ORDER BY mailbox_item.lane_seq ASC
+              LIMIT 1
+            `);
+            expect(
+              suffixLookupPlan.map((row) => row["QUERY PLAN"]).join("\n"),
+            ).toMatch(
+              /hosted_mailbox_item_user_id_lane_lane_seq_(?:idx|key)/,
+            );
+          }
+          const health = await readHostedRuntimeProgressHealth({ now, prisma: tx });
+          expect(health).toMatchObject({
+            excludedInactiveLaneCount: access === "inactive" ? 20_000 : 0,
+            scanTruncated: true,
+            stalledLaneCount: access === "active" ? 20_000 : 0,
+            stalledRuntimeCount: access === "active" ? 20_000 : 0,
+          });
+          if (access === "active") expect(health.anomalous).toBe(true);
+        }, { maxWait: 10_000, timeout: 210_000 });
+      }, 240_000);
+    });
 
     it("selects the true unstamped conversation head and leaves system semantics unchanged", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -494,7 +690,7 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
-    it("ages typed device retries from their canonical scheduled wake", async () => {
+    it("does not defer unhandled device items for unrelated workspace wakes", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const rollback = new Error("Rollback scheduled device retry progress proof.");
       const prefix = `progress-device-retry-proof-${randomUUID()}`;
@@ -578,10 +774,10 @@ describe.skipIf(!runPostgresProof)(
           })).resolves.toMatchObject({
             anomalous: true,
             oldestStalledAgeMs: 60 * 60_000,
-            pendingItemCount: 2,
-            stalledLaneCount: 2,
-            stalledRuntimeCount: 2,
-            stalledSystemLaneCount: 2,
+            pendingItemCount: 4,
+            stalledLaneCount: 4,
+            stalledRuntimeCount: 4,
+            stalledSystemLaneCount: 4,
           });
 
           proofCompleted = true;
@@ -600,7 +796,7 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
-    it("starts an overdue device retry stall at its scheduled wake", async () => {
+    it("keeps accepted-work age across checkpoint and scheduling changes", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const rollback = new Error("Rollback overdue device retry progress proof.");
       const userId = `progress-overdue-device-proof-${randomUUID()}`;
@@ -635,12 +831,31 @@ describe.skipIf(!runPostgresProof)(
             prisma: tx,
           })).resolves.toMatchObject({
             anomalous: true,
-            oldestStalledAgeMs: 20 * 60_000,
+            oldestStalledAgeMs: 60 * 60_000,
             pendingItemCount: 1,
             stalledLaneCount: 1,
             stalledRuntimeCount: 1,
             stalledSystemLaneCount: 1,
           });
+
+          await tx.hostedWorkspace.update({
+            where: { userId },
+            data: {
+              checkpointedAt: now,
+              version: 9n,
+              systemMailboxProgressGeneration: 8n,
+              nextWakeAt: new Date(now.getTime() + 6 * 60 * 60_000),
+              nextWakeReason: "assistant",
+              nextDefaultProcessingWakeAt: new Date(now.getTime() + 60_000),
+              nextDefaultProcessingWakeReason: "assistant",
+            },
+          });
+          await expect(readHostedRuntimeProgressHealth({ now, prisma: tx }))
+            .resolves.toMatchObject({
+              oldestStalledAgeMs: 60 * 60_000,
+              pendingItemCount: 1,
+              stalledRuntimeCount: 1,
+            });
 
           proofCompleted = true;
           throw rollback;
@@ -765,11 +980,12 @@ describe.skipIf(!runPostgresProof)(
             now,
             prisma: tx,
           })).resolves.toMatchObject({
-            anomalous: false,
-            pendingItemCount: 0,
-            stalledLaneCount: 0,
-            stalledRuntimeCount: 0,
-            stalledSystemLaneCount: 0,
+            anomalous: true,
+            oldestStalledAgeMs: 60 * 60_000,
+            pendingItemCount: 3,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
           });
 
           await tx.hostedWorkspace.update({
@@ -787,11 +1003,32 @@ describe.skipIf(!runPostgresProof)(
           })).resolves.toMatchObject({
             anomalous: true,
             oldestStalledAgeMs: 60 * 60_000,
-            pendingItemCount: 2,
-            stalledLaneCount: 1,
-            stalledRuntimeCount: 1,
-            stalledSystemLaneCount: 1,
+            pendingItemCount: 3,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
           });
+
+          // Receipt alone did not retire either obligation. Advance the
+          // canonical handling floor and expose the successor's own clock.
+          await tx.hostedMailboxLaneCounter.updateMany({
+            where: { userId: { in: [unimportedHead, unimportedSuffix] }, lane: "system" },
+            data: { consumedSeq: 1n },
+          });
+          await expect(readHostedRuntimeProgressHealth({ now, prisma: tx }))
+            .resolves.toMatchObject({
+              oldestStalledAgeMs: 30 * 60_000,
+              pendingItemCount: 1,
+              stalledSystemLaneCount: 1,
+            });
+          await tx.hostedMailboxLaneCounter.update({
+            where: { userId_lane: { userId: unimportedSuffix, lane: "system" } },
+            data: { consumedSeq: 2n },
+          });
+          // A retained device deadline may remain after mailbox handling. This
+          // observation establishes mailbox health, not device-job completion.
+          await expect(readHostedRuntimeProgressHealth({ now, prisma: tx }))
+            .resolves.toMatchObject({ anomalous: false, pendingItemCount: 0 });
 
           proofCompleted = true;
           throw rollback;
@@ -809,7 +1046,7 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
-    it("uses exact creation clocks and fails closed impossible imported frontiers", async () => {
+    it("keeps handling age independent of imported frontiers and fresh suffixes", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const rollback = new Error("Rollback device retry clock boundary proof.");
       const prefix = `progress-device-clock-proof-${randomUUID()}`;
@@ -829,21 +1066,6 @@ describe.skipIf(!runPostgresProof)(
             data: [freshHead, freshSuffix, impossibleFrontier].map((id) =>
               member(id, HostedBillingStatus.active)
             ),
-          });
-          await seedProgressLane({
-            createdAt: now,
-            lane: "system",
-            tx,
-            userId: freshHead,
-          });
-          await seedProgressLaneItems({
-            lane: "system",
-            rows: [
-              { createdAt: staleAt, laneSeq: 1n },
-              { createdAt: freshSuffixAt, laneSeq: 2n },
-            ],
-            tx,
-            userId: freshSuffix,
           });
           await seedProgressLane({
             createdAt: staleAt,
@@ -880,16 +1102,46 @@ describe.skipIf(!runPostgresProof)(
             ],
           });
 
+          // Isolate imported=2 above the durable high water of 1 before
+          // adding the fresh-head/suffix characterization lanes.
+          await expect(readHostedRuntimeProgressHealth({ now, prisma: tx }))
+            .resolves.toMatchObject({
+              stalledSystemLaneCount: 1,
+              systemDiagnostics: {
+                fullyImportedLaneCount: 0,
+                importedUnhandledItemCount: 0,
+                partiallyImportedLaneCount: 0,
+                unimportedHeadLaneCount: 0,
+                unknownImportLaneCount: 1,
+              },
+            });
+
+          await seedProgressLane({
+            createdAt: now,
+            lane: "system",
+            tx,
+            userId: freshHead,
+          });
+          await seedProgressLaneItems({
+            lane: "system",
+            rows: [
+              { createdAt: staleAt, laneSeq: 1n },
+              { createdAt: freshSuffixAt, laneSeq: 2n },
+            ],
+            tx,
+            userId: freshSuffix,
+          });
+
           await expect(readHostedRuntimeProgressHealth({
             now,
             prisma: tx,
           })).resolves.toMatchObject({
             anomalous: true,
             oldestStalledAgeMs: 60 * 60_000,
-            pendingItemCount: 1,
-            stalledLaneCount: 1,
-            stalledRuntimeCount: 1,
-            stalledSystemLaneCount: 1,
+            pendingItemCount: 3,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
           });
 
           await tx.hostedWorkspace.update({
@@ -904,11 +1156,19 @@ describe.skipIf(!runPostgresProof)(
             now,
             prisma: tx,
           })).resolves.toMatchObject({
-            anomalous: false,
-            pendingItemCount: 0,
-            stalledLaneCount: 0,
-            stalledRuntimeCount: 0,
-            stalledSystemLaneCount: 0,
+            anomalous: true,
+            oldestStalledAgeMs: 60 * 60_000,
+            pendingItemCount: 3,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
+            systemDiagnostics: {
+              fullyImportedLaneCount: 1,
+              importedUnhandledItemCount: 2,
+              partiallyImportedLaneCount: 1,
+              unimportedHeadLaneCount: 0,
+              unknownImportLaneCount: 0,
+            },
           });
 
           await expect(readHostedRuntimeProgressHealth({
@@ -916,11 +1176,11 @@ describe.skipIf(!runPostgresProof)(
             prisma: tx,
           })).resolves.toMatchObject({
             anomalous: true,
-            oldestStalledAgeMs: 15 * 60_000,
-            pendingItemCount: 2,
-            stalledLaneCount: 1,
-            stalledRuntimeCount: 1,
-            stalledSystemLaneCount: 1,
+            oldestStalledAgeMs: 70 * 60_000,
+            pendingItemCount: 3,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
           });
 
           proofCompleted = true;
@@ -1101,6 +1361,9 @@ async function seedExcludedCapRows(input: {
       ${createdAt}
     FROM generate_series(1, 20001) AS ordinal
   `);
+  // Bulk parent rows are uncommitted, so autovacuum cannot refresh their
+  // statistics before the child inserts perform 20,001 foreign-key checks.
+  await input.tx.$executeRaw(Prisma.sql`ANALYZE hosted_member`);
   await input.tx.$executeRaw(Prisma.sql`
     INSERT INTO hosted_mailbox_lane_counter (
       user_id,

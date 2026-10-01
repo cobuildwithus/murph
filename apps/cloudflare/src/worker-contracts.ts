@@ -1,25 +1,20 @@
+import type { HostedExecutionContainerStubLike } from "./runner-container.ts";
 import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
 import type { R2BucketLike } from "./bundle-store.ts";
-import type { HostedBrowserVaultReplicaOrphanCandidate } from "./browser-vault-store.ts";
-import type {
-  HostedPrivateMediaPublishInput,
-  HostedPrivateMediaPublishResult,
-} from "./private-media.ts";
+
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
-import type {
-  HostedWorkspaceSnapshotOrphanCandidate,
-  HostedWorkspaceSnapshotUploadSession,
-} from "./workspace-snapshot-store.ts";
+
 import type { DatabaseHealthMonitorResult } from "./database-health/monitor.ts";
 import type { DatabaseHealthStoredSample } from "./database-health/store.ts";
 import type {
   DeviceWebhookQueueEnvelopeV1,
 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
+import type {
+  HostedStandbyCoordinatorNamespaceLike,
+  HostedStandbyRunnerContainerNamespaceLike,
+} from "./standby-runner-contract.js";
 import type { DeviceWebhookQueueHealthMonitorResult } from "./device-webhook-queue-health/monitor.ts";
 import type {
   DeviceWebhookQueueHealthObservation,
@@ -42,56 +37,12 @@ export interface WorkerAnalyticsEngineDatasetLike {
   }): void;
 }
 
-export type WorkerProviderEgressTokenValidationRejectReason =
-  | "missing_provider_egress_token"
-  | "missing_runner_state"
-  | "missing_write_fence"
-  | "provider_egress_token_mismatch"
-  | "write_fence_mismatch";
-
-export type WorkerProviderEgressTokenValidationResult =
-  | {
-      owns: false;
-      reason?: WorkerProviderEgressTokenValidationRejectReason;
-    }
-  | {
-      attemptId: string;
-      customInferenceEnvelope?: string;
-      leaseGeneration: string;
-      owns: true;
-      platformAiUsageAllowed?: boolean;
-      userId: string;
-      workspaceVersion: string | null;
-    };
-
-export type WorkerProviderEgressCredentialValidationRejectReason =
-  | "missing_runner_state"
-  | "missing_write_fence"
-  | "provider_egress_not_allowed"
-  | "runner_container_mismatch"
-  | "write_fence_mismatch";
-
-export type WorkerProviderEgressCredentialValidationResult =
-  | {
-      owns: false;
-      reason?: WorkerProviderEgressCredentialValidationRejectReason;
-    }
-  | {
-      attemptId: string;
-      leaseGeneration: string;
-      owns: true;
-      platformAiUsageAllowed?: boolean;
-      userId: string;
-      workspaceVersion: string | null;
-    };
-
 /**
  * Snapshot of the RunnerContainer DO's in-memory active workspace-invocation
  * operation. "Active" spans the whole DO-side invoke, including its
  * pre-dispatch readiness window — it proves the operation is in flight, not
  * that the runner child has accepted work. Consumers narrow what they need:
- * provider-egress fallback binds on `userId` only; the transport-failure
- * liveness probe matches the full attempt identity.
+ * the transport-failure liveness probe matches the full attempt identity.
  */
 export type WorkerActiveRuntimeUserFenceResult =
   | {
@@ -112,7 +63,9 @@ export interface WorkerRuntimeCompletionReceipt {
   userId: string;
 }
 
-export interface WorkerRunnerContainerStubLike {
+export interface WorkerRunnerContainerStubLike extends Pick<HostedExecutionContainerStubLike,
+  "beginRuntimeUsageSettlement" | "finishRuntimeUsageSettlement" | "readProviderAuthority" | "runtimeUsageSettlementAllowsProviders" | "readSupervisedInvocation" | "recordSupervisedRuntimeCompletion"
+> {
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
 }
 
@@ -133,95 +86,6 @@ export interface WorkerRunnerContainerNamespaceLike<
   get?(id: unknown): TStub;
   getByName?(name: string): TStub;
   idFromString?(id: string): unknown;
-}
-
-export interface WorkerUserRunnerStubLike {
-  bindUser?(userId: string): Promise<{ userId: string }>;
-  deleteHostedUserData?(userId: string): Promise<unknown>;
-  prewarmRuntimeShellForUser?(
-    userId: string,
-    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
-  ): Promise<void>;
-  reconcileRuntimeHealthDataConsentForUser?(userId: string): Promise<unknown>;
-  publishHostedPrivateMedia?(
-    input: HostedPrivateMediaPublishInput,
-  ): Promise<HostedPrivateMediaPublishResult>;
-  createHostedWorkspaceSnapshotUploadSession?(
-    input: HostedWorkspaceSnapshotUploadSession,
-  ): Promise<HostedWorkspaceSnapshotUploadSession | null>;
-  heartbeatHostedWorkspaceSnapshotUploadSession?(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    snapshotId: string;
-    userId: string;
-  }): Promise<boolean>;
-  completeHostedWorkspaceSnapshotUploadSession?(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    snapshotId: string;
-    userId: string;
-  }): Promise<boolean>;
-  rememberHostedWorkspaceSnapshotReplacedRef?(input: {
-    expectedSession: HostedWorkspaceSnapshotUploadSession;
-    replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
-  }): Promise<boolean>;
-  rememberHostedWorkspaceSnapshotPresignedPut?(input: {
-    drainUntil: string;
-    expectedSession: HostedWorkspaceSnapshotUploadSession;
-    expiresAt: string;
-  }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
-  admitHostedBrowserVaultReplicaDirectPut?(input: {
-    admittedAt: string;
-    attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-    writeId: string;
-  }): Promise<boolean>;
-  releaseHostedBrowserVaultReplicaDirectPut?(input: {
-    userId: string;
-    writeId: string;
-  }): Promise<void>;
-  deleteHostedWorkspaceSnapshotUploadSession?(input: {
-    snapshotId: string;
-    userId: string;
-  }): Promise<{ deleted: boolean }>;
-  readHostedWorkspaceSnapshotUploadSession?(input: {
-    snapshotId: string;
-    userId: string;
-  }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
-  recordHostedWorkspaceSnapshotOrphanCandidate?(
-    input: HostedWorkspaceSnapshotOrphanCandidate,
-  ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
-  recordHostedBrowserVaultReplicaOrphanCandidate?(
-    input: HostedBrowserVaultReplicaOrphanCandidate,
-  ): Promise<HostedBrowserVaultReplicaOrphanCandidate>;
-  validateRuntimeWriteFence?(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  }): Promise<boolean>;
-  recordRuntimeCompletionFromContainer?(
-    input: WorkerRuntimeCompletionReceipt,
-  ): Promise<{ completed: boolean }>;
-  validateRuntimeProviderEgressToken?(input: {
-    providerEgressToken: string;
-    userId: string;
-  }): Promise<WorkerProviderEgressTokenValidationResult>;
-  validateRuntimeProviderEgressCredential?(input: {
-    providerKind: string;
-    runnerContainerName: string;
-    userId: string;
-  }): Promise<WorkerProviderEgressCredentialValidationResult>;
-}
-
-export interface WorkerBindUserRunnerStubLike extends WorkerUserRunnerStubLike {
-  bindUser(userId: string): Promise<{ userId: string }>;
-}
-
-export interface WorkerUserRunnerNamespaceLike<
-  TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
-> {
-  getByName(name: string): TStub;
 }
 
 export interface WorkerDatabaseHealthStubLike {
@@ -259,9 +123,21 @@ export interface WorkerDeviceWebhookQueueHealthNamespaceLike<
   getByName(name: string): TStub;
 }
 
-export interface WorkerEnvironmentContract<
-  TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
-> extends Readonly<Record<string, unknown>> {
+export interface WorkerOpenAiAuthorizationAlertStubLike {
+  reportFailure(input: {
+    observedAtMs: number;
+    status: 401 | 403;
+  }): Promise<{ accepted: true }>;
+}
+
+export interface WorkerOpenAiAuthorizationAlertNamespaceLike<
+  TStub extends WorkerOpenAiAuthorizationAlertStubLike =
+    WorkerOpenAiAuthorizationAlertStubLike,
+> {
+  getByName(name: string): TStub;
+}
+
+export interface WorkerEnvironmentContract extends Readonly<Record<string, unknown>> {
   AI?: WorkerAiBindingLike;
   BUNDLES: R2BucketLike;
   CF_VERSION_METADATA?: {
@@ -296,13 +172,14 @@ export interface WorkerEnvironmentContract<
   HOSTED_ASSISTANT_SANDBOX?: string;
   ELEVENLABS_API_KEY?: string;
   OPENAI_API_KEY?: string;
+  OPENAI_AUTHORIZATION_ALERT_MONITOR?: WorkerOpenAiAuthorizationAlertNamespaceLike;
   VENICE_API_KEY?: string;
   HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET?: string;
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON?: string;
-  HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
   HOSTED_EXECUTION_RUNNER_ENV_PROFILES?: string;
+  HOSTED_EXECUTION_STANDBY_MODE?: string;
   HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS?: string;
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID?: string;
   HOSTED_R2_PRESIGN_ACCOUNT_ID?: string;
@@ -342,9 +219,13 @@ export interface WorkerEnvironmentContract<
   MURPH_ELEVENLABS_MODEL_ID?: string;
   MURPH_ELEVENLABS_VOICE_ID?: string;
   RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
+  NEXT_RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
   RUNNER_CONTAINER_SMOKE?: WorkerRunnerContainerNamespaceLike<
     WorkerDeploySmokeRunnerContainerStubLike
   >;
+  STANDBY_COORDINATOR?: HostedStandbyCoordinatorNamespaceLike;
+  STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
+  SMALL_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;
@@ -352,7 +233,6 @@ export interface WorkerEnvironmentContract<
   HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?: string;
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?: string;
   HOSTED_WEB_BASE_URL?: string;
-  USER_RUNNER: WorkerUserRunnerNamespaceLike<TStub>;
 }
 
 export function asWorkerStringEnvironment(

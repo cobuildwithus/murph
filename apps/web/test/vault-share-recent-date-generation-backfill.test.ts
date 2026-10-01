@@ -42,6 +42,7 @@ describe("hosted vault-share recent-date generation backfill", () => {
         grantedAt: Date;
         id: string;
         projectionSnapshotCiphertext: null;
+        projectionSourceWorkspaceVersion: null;
       };
       where: Record<string, unknown>;
     }) => {
@@ -71,8 +72,9 @@ describe("hosted vault-share recent-date generation backfill", () => {
     });
 
     expect(result.refreshedGrants).toBe(2);
+    expect(result.hasDeferredGrants).toBe(false);
     expect(tx.hostedVaultShare.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: 25,
+      take: 26,
     }));
     expect(tx.hostedVaultShare.updateMany).toHaveBeenCalledTimes(2);
     for (const [call] of updateMany.mock.calls) {
@@ -81,6 +83,7 @@ describe("hosted vault-share recent-date generation backfill", () => {
           grantedAt: NOW,
           id: expect.not.stringMatching(/^share_legacy_/u),
           projectionSnapshotCiphertext: null,
+          projectionSourceWorkspaceVersion: null,
         },
         where: expect.objectContaining({
           destination: {
@@ -101,9 +104,55 @@ describe("hosted vault-share recent-date generation backfill", () => {
     });
   });
 
+  it("processes at most 25 grants and reports a deferred grant", async () => {
+    const grants = Array.from({ length: 26 }, (_, index) => ({
+      id: `share_legacy_${index + 1}`,
+    }));
+    const updateMany = vi.fn(async (_input: { data: { id: string } }) => ({
+      count: 1,
+    }));
+    const tx = {
+      hostedVaultShare: {
+        findMany: vi.fn(async () => grants),
+        updateMany,
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (operation) => await operation(tx)),
+    } as unknown as PrismaClient;
+    mocks.appendMaintenance.mockResolvedValue({
+      lane: "system",
+      laneSeq: "8",
+      mailboxItemId: "mailbox_projection_1",
+      memberId: "member_1",
+    });
+
+    const result = await createHostedVaultShareRecentDateBackfillStore(prisma).refreshGrantor({
+      grantedBefore: CUTOFF,
+      grantorMemberId: "member_1",
+      now: NOW,
+    });
+
+    expect(result).toMatchObject({
+      hasDeferredGrants: true,
+      refreshedGrants: 25,
+    });
+    expect(tx.hostedVaultShare.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 26,
+    }));
+    expect(updateMany).toHaveBeenCalledTimes(25);
+    expect(mocks.appendMaintenance).toHaveBeenCalledWith({
+      grantIds: expect.arrayContaining(Array.from({ length: 25 }, (_, index) =>
+        updateMany.mock.calls[index]?.[0].data.id)),
+      memberId: "member_1",
+      tx,
+    });
+  });
+
   it("is bounded, retry-safe, and leaves durable recovery when an exact signal fails", async () => {
     const refreshGrantor = vi.fn()
       .mockResolvedValueOnce({
+        hasDeferredGrants: false,
         refreshedGrants: 2,
         signal: {
           lane: "system",
@@ -113,6 +162,7 @@ describe("hosted vault-share recent-date generation backfill", () => {
         },
       })
       .mockResolvedValueOnce({
+        hasDeferredGrants: false,
         refreshedGrants: 1,
         signal: {
           lane: "system",
@@ -164,5 +214,28 @@ describe("hosted vault-share recent-date generation backfill", () => {
       selectedGrantors: 0,
     });
     expect(refreshGrantor).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports more work when one selected grantor has deferred grants", async () => {
+    const store = {
+      listCandidateGrantors: vi.fn(async () => ["member_1"]),
+      refreshGrantor: vi.fn(async () => ({
+        hasDeferredGrants: true,
+        refreshedGrants: 25,
+        signal: null,
+      })),
+    };
+
+    await expect(backfillHostedVaultShareRecentDateGenerations({
+      batchSize: 1,
+      grantedBefore: CUTOFF,
+      mode: "apply",
+      now: () => NOW,
+      store,
+    })).resolves.toMatchObject({
+      hasMore: true,
+      refreshedGrants: 25,
+      selectedGrantors: 1,
+    });
   });
 });

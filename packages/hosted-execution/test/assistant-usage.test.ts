@@ -93,6 +93,25 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   );
 });
 
+test("measured maintenance identities isolate members, providers, and response operations", () => {
+  const input = {
+    assistantSessionId: "asst_123", codexThreadId: "thread_abc", credentialSource: "platform" as const,
+    featureKey: "assistant_idle_compact", memberId: "member_123", model: "gpt-5.6-terra",
+    occurredAt: PROVIDER_REQUEST_STARTED_AT, providerName: "hosted-openai",
+    providerRequestId: "response_compact_fixture", triggerKind: "automation_idle_compact",
+    usage: { inputTokens: 100, cachedInputTokens: 50, cacheWriteTokens: 10,
+      outputTokens: 20, reasoningTokens: 5, totalTokens: 120 },
+  };
+  const record = buildAssistantMaintenanceUsageRecord(input);
+  assert.deepEqual(buildAssistantMaintenanceUsageRecord(input), record);
+  for (const changed of [{ memberId: "member_other" }, { providerName: "venice" }, { providerRequestId: "response_retry_fixture" }]) {
+    assert.notEqual(buildAssistantMaintenanceUsageRecord({ ...input, ...changed }).usageId, record.usageId);
+  }
+  assert.equal(record.cacheWriteTokens, 10);
+  assert.equal(record.reasoningTokens, 5);
+  assert.equal(record.providerRequestId, input.providerRequestId);
+});
+
 test("native Codex memory usage is exact and replay-idempotent", () => {
   const input = {
     apiKeyEnv: "OPENAI_API_KEY",
@@ -182,6 +201,13 @@ test("usage records default and validate token pricing basis", () => {
       tokenPricingBasis: "openai-flex",
     }).tokenPricingBasis,
     "openai-flex",
+  );
+  assert.equal(
+    parseAssistantUsageRecord({
+      ...baseRecord,
+      tokenPricingBasis: "openai-priority",
+    }).tokenPricingBasis,
+    "openai-priority",
   );
   assert.throws(
     () => parseAssistantUsageRecord({
@@ -471,7 +497,7 @@ test("hosted ElevenLabs music usage retains the provider request start", () => {
 test("hosted Gemini video usage records preserve bounded token evidence", () => {
   const record = buildHostedGeminiVideoAnalysisUsageRecord({
     memberId: "member_123",
-    model: "gemini-3.7-flash",
+    model: "gemini-3.8-flash",
     occurredAt: PROVIDER_REQUEST_STARTED_AT,
     providerRequestId: "gemini_request_123",
     usage: {
@@ -758,7 +784,7 @@ test("assistant usage parsing validates the turn profile allowlist", () => {
   assert.deepEqual(
     parseAssistantUsageRecord({
       ...baseRecord,
-      turnProfileJson: profile,
+      turnProfileJson: { ...profile, reasoningEffort: "high" },
     }).turnProfileJson,
     profile,
   );
@@ -896,6 +922,44 @@ test("assistant usage parsing accepts the v2 tool profile and drops invalid v2 i
     });
     assert.equal(parsed.turnProfileJson, null);
   }
+});
+
+test("knowledge profile counts are optional, bounded and reconciled without accepting private fields", () => {
+  const tool = {
+    calls: 2, durationKnownCalls: 0, durationMs: 0, failedCalls: 1,
+    kind: "command", label: "vault-cli knowledge", outputBytesMax: 10, outputBytesTotal: 20,
+    knowledgeCounts: {
+      showCalls: 1, listCalls: 1, searchCalls: 0, writeCalls: 0, otherCalls: 0,
+      notFoundFailures: 1, invalidFailures: 0, conflictFailures: 0, otherFailures: 0,
+    },
+  };
+  const profile = {
+    modelContextWindow: null, requestCount: 0, requests: [], requestsTruncated: false,
+    schema: "murph.assistant-turn-profile.v2", tools: [tool], toolsTruncated: false,
+  };
+  const parse = (entry: unknown) => parseAssistantUsageRecord({
+    attemptCount: 1, credentialSource: "platform", inputTokens: 10, outputTokens: 5,
+    occurredAt: "2026-09-04T12:00:00.000Z", provider: "codex-cli",
+    schema: ASSISTANT_USAGE_SCHEMA, sessionId: "asst_synthetic", turnId: "turn_synthetic",
+    usageId: "turn_synthetic.attempt-1", turnProfileJson: { ...profile, tools: [entry] },
+  });
+  assert.deepEqual(parse({
+    ...tool,
+    knowledgeCounts: { ...tool.knowledgeCounts, privateSlug: "private-sentinel" },
+  }).turnProfileJson, profile);
+  const { knowledgeCounts, ...legacyTool } = tool;
+  assert.deepEqual(parse(legacyTool).turnProfileJson, { ...profile, tools: [legacyTool] });
+  for (const badCounts of [
+    { ...knowledgeCounts, showCalls: -1 },
+    { ...knowledgeCounts, showCalls: Number.MAX_SAFE_INTEGER + 1 },
+    { ...knowledgeCounts, showCalls: 2 },
+    { ...knowledgeCounts, otherFailures: 1 },
+    { ...knowledgeCounts, notFoundFailures: "private-sentinel" },
+    {},
+  ]) {
+    assert.equal(parse({ ...tool, knowledgeCounts: badCounts }).turnProfileJson, null);
+  }
+  assert.equal(parse({ ...tool, label: "curl" }).turnProfileJson, null);
 });
 
 test("assistant usage parsing drops out-of-contract turn profiles without failing the record", () => {
@@ -1370,4 +1434,35 @@ test("assistant usage credential source treats blank effective env overrides as 
     }),
     "member",
   );
+});
+
+test("optional finite CLI failures survive both profile versions and malformed details preserve timing and usage", async () => {
+  const { emptyCliTiming } = await import("@murphai/runtime-state/cli-timing");
+  const timing = { ...emptyCliTiming(), reportCount: 1, commands: [{ command: "experiment session log",
+    outcome: "error", calls: 3, phases: [], failures: [
+      { code: "invalid_payload", stage: "validation", count: 2, message: "PRIVATE_SENTINEL" },
+      { code: "PRIVATE_SENTINEL", stage: "PRIVATE_SENTINEL", count: 1 },
+    ] }] };
+  const clean = { ...timing, commands: [{ ...timing.commands[0], failures: [
+    { code: "invalid_payload", stage: "validation", count: 2 }, { code: "unknown", stage: "unknown", count: 1 },
+  ] }] };
+  for (const schema of ["murph.assistant-turn-profile.v1", "murph.assistant-turn-profile.v2"]) {
+    const profile = { schema, modelContextWindow: null, requestCount: 0, requests: [],
+      requestsTruncated: false, tools: [], toolsTruncated: false };
+    const input = { schema: ASSISTANT_USAGE_SCHEMA, provider: "codex-cli", credentialSource: "platform",
+      occurredAt: "2026-09-10T12:00:00.000Z", sessionId: "synthetic-session", turnId: "synthetic-turn",
+      usageId: "synthetic-turn.attempt-1", attemptCount: 1, inputTokens: 17, outputTokens: 11,
+      turnProfileJson: profile };
+    const baseline = parseAssistantUsageRecord(input);
+    const parsed = parseAssistantUsageRecord({ ...input, turnProfileJson: { ...profile, cliTiming: timing } });
+    assert.deepEqual(parsed, { ...baseline, turnProfileJson: { ...profile, cliTiming: clean } });
+    assert.equal(JSON.stringify(parsed).includes("PRIVATE_SENTINEL"), false);
+    const legacyTiming = { ...timing, commands: [{ command: "experiment session log", outcome: "error", calls: 3, phases: [] }] };
+    for (const failures of ["PRIVATE_SENTINEL", [{ code: "conflict", stage: "write", count: 4 }]]) {
+      const malformed = { ...legacyTiming, commands: [{ ...legacyTiming.commands[0], failures }] };
+      assert.deepEqual(parseAssistantUsageRecord({ ...input, turnProfileJson: { ...profile, cliTiming: malformed } }),
+        { ...baseline, turnProfileJson: { ...profile, cliTiming: legacyTiming } });
+    }
+    assert.deepEqual(parseAssistantUsageRecord(baseline), baseline);
+  }
 });

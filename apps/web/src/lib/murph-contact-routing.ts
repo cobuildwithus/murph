@@ -93,6 +93,16 @@ export function withMurphContactOptionBody(
   option: MurphContactOption,
   body: string,
 ): MurphContactOption {
+  if (option.kind === "text") {
+    // sms: bodies are percent-encoded, not form-encoded: Messages shows a
+    // form-style "+" as a literal plus sign instead of a space.
+    const [smsTarget] = option.href.split("?");
+    return {
+      ...option,
+      href: `${smsTarget}?body=${encodeURIComponent(body)}`,
+    };
+  }
+
   const href = new URL(option.href);
   href.searchParams.set(option.kind === "telegram" ? "text" : "body", body);
 
@@ -200,11 +210,15 @@ export function normalizeMurphTelegramUsername(value: string | null | undefined)
 export function resolveMurphTelegramBotUsername(
   source?: Readonly<Record<string, string | undefined>>,
 ): string {
-  const overrideUsername = source
-    ? normalizeMurphTelegramUsername(source.MURPH_TELEGRAM_USERNAME_OVERRIDE)
-    : normalizeMurphTelegramUsername(process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE);
+  const environment = source ?? process.env;
+  const overrideUsername = normalizeMurphTelegramUsername(
+    environment.MURPH_TELEGRAM_USERNAME_OVERRIDE,
+  );
+  const legacyUsername = normalizeMurphTelegramUsername(
+    environment.TELEGRAM_BOT_USERNAME,
+  );
 
-  return overrideUsername ?? DEFAULT_MURPH_TELEGRAM_BOT_USERNAME;
+  return overrideUsername ?? legacyUsername ?? DEFAULT_MURPH_TELEGRAM_BOT_USERNAME;
 }
 
 export function buildMurphTelegramUrl(username: string): string {

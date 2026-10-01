@@ -19,6 +19,7 @@ import {
   type HostedAssistantProfile,
 } from './assistant/hosted-config.js'
 import {
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   VENICE_CODEX_MODEL_PROVIDER_ID,
@@ -72,6 +73,7 @@ const hostedAssistantAllowedApiKeyEnvNameSet = new Set<string>(
 const HOSTED_ASSISTANT_PLATFORM_PROFILE_ID = 'platform-default'
 export const HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS = [
   OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   VENICE_CODEX_MODEL_PROVIDER_ID,
 ] as const
 const HOSTED_ASSISTANT_SUPPORTED_PROVIDER_LABEL =
@@ -108,6 +110,7 @@ export interface HostedAssistantOperatorConfigState {
 }
 
 export interface HostedAssistantBootstrapResult extends HostedAssistantOperatorConfigState {
+  config: HostedAssistantConfig | null
   seeded: boolean
   source: 'hosted-env' | 'invalid' | 'missing' | 'saved'
 }
@@ -246,6 +249,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
 
       return {
         ...savedState,
+        config: saved.hostedAssistant ?? null,
         seeded: true,
         source: 'hosted-env',
       }
@@ -254,6 +258,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
     if (input.allowMissing) {
       return {
         configured: false,
+        config: null,
         provider: null,
         seeded: false,
         source: 'invalid',
@@ -274,6 +279,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
 
       return {
         ...savedState,
+        config: saved.hostedAssistant ?? null,
         seeded: true,
         source: 'hosted-env',
       }
@@ -283,6 +289,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
   if (existingState.configured) {
     return {
       ...existingState,
+      config: existingHostedConfig,
       seeded: false,
       source: 'saved',
     }
@@ -291,6 +298,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
   if (input.allowMissing) {
     return {
       configured: false,
+      config: existingHostedConfig,
       provider: existingActiveProfile ? 'codex-cli' : null,
       seeded: false,
       source: 'missing',

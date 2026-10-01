@@ -3,6 +3,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
   automationContextReferencesSchema,
+  automationFollowUpRequestSchema,
   automationRouteSchema,
   automationScheduleAtSchema,
   automationScheduleCronSchema,
@@ -58,7 +59,7 @@ export const assistantApprovalPolicyValues = ['never'] as const
 export const assistantReasoningEffortValues = contractAssistantReasoningEffortValues
 
 export const assistantChatProviderValues = ['codex-cli'] as const
-export const assistantChannelNameValues = ['telegram', 'linq', 'email'] as const
+export const assistantChannelNameValues = ['telegram', 'linq', 'email', 'voice'] as const
 export const assistantChannelNameSchema = z.enum(assistantChannelNameValues)
 export const assistantChannelDeliveryTargetKindValues = gatewayDeliveryTargetKindValues
 export const assistantBindingDeliveryKindValues = gatewayReplyRouteKindValues
@@ -991,6 +992,16 @@ const assistantPrivateCompletionContinuitySchema = z.discriminatedUnion(
       .strict(),
   ],
 )
+export const assistantInputCursorSchema = z
+  .object({
+    createdAt: isoTimestampSchema.nullable(),
+    inputId: z.string().min(1),
+    occurredAt: isoTimestampSchema,
+    sourceKind: z.enum(['inbox-capture', 'hosted-mailbox']),
+    sourcePosition: z.string().min(1).nullable().optional(),
+  })
+  .strict()
+
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
@@ -1026,11 +1037,15 @@ export const assistantOutboxIntentSchema = z
     nativeReplyRequested: z.literal(true).optional(),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     deliverySource: assistantDeliverySourceSchema.nullable().default(null),
+    followUpRequest: automationFollowUpRequestSchema.optional(),
+    followUpEvaluatedThrough: assistantInputCursorSchema.nullable().optional(),
     automationAuthority: assistantOutboxAutomationAuthoritySchema
       .nullable()
       .optional(),
-    // Persisted delivery context only. These exact canonical references grant
-    // no mutation authority; later turns must use ordinary domain tools.
+    // Persisted delivery context only: null means no context decision, [] is
+    // an explicit clear, and omission is historical read compatibility only.
+    // Exact references grant no mutation authority; later turns must use
+    // ordinary domain tools.
     automationContextReferences: automationContextReferencesSchema
       .nullable()
       .optional(),
@@ -1401,7 +1416,20 @@ const assistantOnboardingResumeContextSurfaceOkSchema = z
 const assistantOnboardingResumeContextSurfaceErrorSchema = z
   .object({
     status: z.literal('error'),
+    code: z.string().min(1).max(80),
     message: z.string().min(1),
+    retryable: z.boolean(),
+    hint: z.string().min(1).max(320).optional(),
+  })
+  .strict()
+
+const assistantOnboardingResumeContextSurfaceUnavailableSchema = z
+  .object({
+    status: z.literal('unavailable'),
+    code: z.string().min(1).max(80),
+    message: z.string().min(1),
+    retryable: z.literal(false),
+    hint: z.string().min(1).max(320).optional(),
   })
   .strict()
 
@@ -1409,6 +1437,7 @@ export const assistantOnboardingResumeContextSurfaceSchema =
   z.discriminatedUnion('status', [
     assistantOnboardingResumeContextSurfaceOkSchema,
     assistantOnboardingResumeContextSurfaceErrorSchema,
+    assistantOnboardingResumeContextSurfaceUnavailableSchema,
   ])
 
 export const assistantOnboardingResumeContextMemorySchema =
@@ -1424,6 +1453,7 @@ export const assistantOnboardingResumeContextMemorySchema =
       })
       .strict(),
     assistantOnboardingResumeContextSurfaceErrorSchema,
+    assistantOnboardingResumeContextSurfaceUnavailableSchema,
   ])
 
 export const assistantOnboardingResumeContextResultSchema = z
@@ -1664,14 +1694,6 @@ export const assistantAskResultSchema = z.object({
   deliveryError: assistantDeliveryErrorSchema.nullable(),
 })
 
-export const assistantChatResultSchema = z.object({
-  vault: pathSchema,
-  startedAt: isoTimestampSchema,
-  stoppedAt: isoTimestampSchema,
-  turns: z.number().int().nonnegative(),
-  session: assistantSessionOutputSchema,
-})
-
 export const assistantDeliverResultSchema = z.object({
   vault: pathSchema,
   message: z.string().min(1),
@@ -1840,6 +1862,15 @@ export const assistantRunResultSchema = z.object({
   replySkipped: z.number().int().nonnegative(),
   replyFailed: z.number().int().nonnegative(),
   lastError: z.string().nullable(),
+  lastFailure: z
+    .object({
+      phase: z.enum(['capture', 'reply', 'daemon']),
+      code: z.string().min(1).max(96),
+      retryable: z.boolean(),
+      message: z.string().min(1).max(320),
+    })
+    .nullable()
+    .default(null),
 })
 
 export const assistantStopResultSchema = z.object({
@@ -1853,16 +1884,6 @@ export const assistantStopResultSchema = z.object({
   command: z.string().min(1).nullable(),
   message: z.string().min(1),
 })
-
-export const assistantInputCursorSchema = z
-  .object({
-    createdAt: isoTimestampSchema.nullable(),
-    inputId: z.string().min(1),
-    occurredAt: isoTimestampSchema,
-    sourceKind: z.enum(['inbox-capture', 'hosted-mailbox']),
-    sourcePosition: z.string().min(1).nullable().optional(),
-  })
-  .strict()
 
 export const assistantAutoReplyChannelStateSchema = z
   .object({
@@ -1996,8 +2017,6 @@ export type AssistantDiagnosticsSnapshot = z.infer<
 >
 type AssistantAskResultRecord = z.infer<typeof assistantAskResultSchema>
 export type AssistantAskResult = AssistantAskResultRecord
-type AssistantChatResultRecord = z.infer<typeof assistantChatResultSchema>
-export type AssistantChatResult = AssistantChatResultRecord
 export type AssistantDeliverResult = z.infer<
   typeof assistantDeliverResultSchema
 >

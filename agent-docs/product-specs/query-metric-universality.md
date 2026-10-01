@@ -32,8 +32,8 @@ composable architecture with minimal complexity.
 2. `measurement`/`test` events → generic (`measurementMetricPoints`; same
    open-world posture, qualifiers preserved in context).
 3. `observation` events → **no generic path**. They only become metric
-   points by surviving a triple registry: the importers wearable metric
-   catalog (`@murphai/importers/device-providers/metric-catalog`, consumed
+   points by surviving a triple registry: the health-metrics wearable metric
+   catalog (`@murphai/health-metrics`, consumed
    by `packages/query/src/wearables/candidates.ts: mapScalarMetric`), then
    one of the four summary kind sets
    (`packages/query/src/wearables/types.ts: SLEEP/RECOVERY/BODY/ACTIVITY_METRIC_KEYS`),
@@ -124,7 +124,7 @@ contract from PR #146 — this design deliberately requires neither.
 ## Workflow
 
 Standard repo workflow: worktree (`murph-*` naming), exec plan, required
-completion audits per `agent-docs/operations/completion-workflow.md`,
-`scripts/finish-task`, push, and open a PR. Apply the preliminary specialist
-ReviewGPT pass and the separate final cross-cutting gate when routed by that
+completion evidence per `agent-docs/operations/completion-workflow.md`,
+`scripts/finish-task`, push, and open a PR. The parent agent owns the required
+proof and applies the final cross-cutting ReviewGPT gate when routed by that
 workflow. Do not merge.

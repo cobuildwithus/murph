@@ -1,4 +1,7 @@
 import {
+  buildHostedMemberChannelWelcomeDeliveryIdentity,
+} from "@murphai/hosted-execution";
+import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
@@ -36,6 +39,8 @@ const mocks = vi.hoisted(() => ({
   lockHostedMemberRow: vi.fn(),
   readHostedMemberActivationCoreState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readHostedMemberSnapshot: vi.fn(),
+  readActiveHostedMemberAccess: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberIdentity: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
@@ -73,6 +78,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
     clearHostedMemberPendingActivationTimeZone: mocks.clearHostedMemberPendingActivationTimeZone,
     readHostedMemberActivationCoreState: mocks.readHostedMemberActivationCoreState,
     readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+    readHostedMemberSnapshot: mocks.readHostedMemberSnapshot,
     readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
     updateHostedMemberCoreState: mocks.updateHostedMemberCoreState,
   };
@@ -90,6 +96,11 @@ vi.mock("@/src/lib/hosted-onboarding/linq-home-routing", () => ({
   resolveHostedMemberActivationLinqRoute: mocks.resolveHostedMemberActivationLinqRoute,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>(),
+  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/lib/hosted-onboarding/shared")
@@ -104,7 +115,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 import {
   activateHostedMemberForFamilySponsorshipTx,
   activateHostedMemberForPositiveSourceTx,
-  buildHostedMemberActivationWelcomeRoute,
+  buildHostedMemberActivationOnboardingFollowupRoute,
   hasHostedMemberActivationProof,
   readHostedMemberActivationProofMemberIds,
 } from "@/src/lib/hosted-onboarding/member-activation";
@@ -155,23 +166,24 @@ function expectedSignupWelcomeText(): string {
   }).text;
 }
 
-function expectLegacySignupWelcomeCompatibilityWake(input: {
+function expectSignupWelcomeNotificationWake(input: {
   callIndex: number;
-  route: unknown;
+  route: ReturnType<typeof expectedLinqParticipantWelcomeRoute>;
   sourceEventId?: string;
 }): void {
   const expectedText = expectedSignupWelcomeText();
+  const deliveryIdentity = buildHostedMemberChannelWelcomeDeliveryIdentity({
+    memberId: "member_123", channel: "linq", destinationLookupKey: input.route.identityId,
+  });
 
   expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(input.callIndex, {
     envelope: expect.objectContaining({
-      eventId: expect.stringContaining(
-        "assistant.notification.requested:signup-welcome:member_123:member.activated:",
-      ),
+      eventId: `assistant.notification.requested:${deliveryIdentity}`,
       kind: "assistant.notification.requested",
       notification: expect.objectContaining({
-        deliveryDedupeToken: "signup-welcome:member_123",
+        deliveryDedupeToken: deliveryIdentity,
         deliveryDispatchMode: "queue-only",
-        deliveryIdempotencyKey: "signup-welcome:member_123",
+        deliveryIdempotencyKey: deliveryIdentity,
         firstContact: {
           markSeenOnDeliveryAccepted: true,
         },
@@ -201,6 +213,7 @@ describe("hosted onboarding member activation", () => {
     mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx.mockResolvedValue(new Set());
     mocks.clearHostedMemberPendingActivationTimeZone.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     setActivationMemberSnapshot(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
       welcomeRoute: expectedLinqParticipantWelcomeRoute(),
@@ -376,6 +389,8 @@ describe("hosted onboarding member activation", () => {
           linq: true,
           telegram: false,
         },
+        onboardingFollowupEnrollment: true,
+        onboardingFollowupRoute: expectedRoute,
         signupWelcome: expect.objectContaining({
           route: expectedRoute,
           text: expectedText,
@@ -388,7 +403,7 @@ describe("hosted onboarding member activation", () => {
       route: expectedRoute,
       text: expectedText,
     });
-    expectLegacySignupWelcomeCompatibilityWake({
+    expectSignupWelcomeNotificationWake({
       callIndex: 2,
       route: expectedRoute,
     });
@@ -604,6 +619,56 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it("commits an exact maintenance handoff for established Family members", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+    });
+    setActivationMemberSnapshot(member);
+    mocks.readHostedMailboxUserIdsByKind.mockResolvedValueOnce(
+      new Set([member.core.id]),
+    );
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      item: {
+        dedupeKey: "runtime-control:access-restored:family",
+        id: "mailbox_access_restored",
+        userId: member.core.id,
+      },
+    });
+    const tx = makeTransactionHarness({
+      accountGroupMemberships: [{
+        group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+        status: "active",
+      }],
+      billingStatus: HostedBillingStatus.canceled,
+      suspendedAt: null,
+      threadContainer: null,
+    }) as never;
+
+    await expect(activateHostedMemberForFamilySponsorshipTx({
+      accessRestorationSourceEventId: "family-invite:invite_123",
+      memberId: member.core.id,
+      occurredAt: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: tx,
+      sourceEventId: "family-invite:invite_123",
+    })).resolves.toEqual({
+      activated: false,
+      hostedExecutionEventId: "runtime-control:access-restored:family",
+      hostedExecutionMailboxItemId: "mailbox_access_restored",
+      memberId: member.core.id,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "runtime.maintenance-requested",
+        userId: member.core.id,
+      }),
+      tx,
+    });
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+  });
+
   it("activates verified-email-only family members without assigning a Linq home line", async () => {
     const member = makeMemberSnapshot({
       core: {
@@ -647,8 +712,8 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
         kind: "member.activated",
         memberChannels: {
@@ -656,7 +721,16 @@ describe("hosted onboarding member activation", () => {
           linq: false,
           telegram: false,
         },
-        signupWelcome: null,
+        onboardingFollowupRoute: expect.objectContaining({
+          channel: "email",
+          delivery: {
+            kind: "explicit",
+            target: "member@example.com",
+          },
+        }),
+        signupWelcome: expect.objectContaining({
+          route: expect.objectContaining({ channel: "email" }),
+        }),
       }),
       tx: expect.anything(),
     });
@@ -782,7 +856,131 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
   });
 
-  it("keeps signup welcome text stable across source events sharing the per-member delivery identity", async () => {
+  it.each([
+    { textAvailable: true, suppress: false },
+    { textAvailable: false, suppress: false },
+    { textAvailable: true, suppress: true },
+  ])("welcomes verified email and phone independently: %j", async ({ textAvailable, suppress }) => {
+    const member = makeMemberSnapshot({
+      emailAuthorization: {
+        directPublicSender: null,
+        memberId: "member_123",
+        stripeCheckoutEmail: null,
+        verifiedEmail: {
+          address: "member@example.test",
+          lookupKey: "synthetic-email-lookup",
+          verifiedAt: new Date("2026-04-12T00:00:00.000Z"),
+        },
+      },
+    });
+    setActivationMemberSnapshot(member);
+    mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
+      welcomeRoute: textAvailable ? expectedLinqParticipantWelcomeRoute() : null,
+    });
+
+    for (const sourceEventId of ["synthetic-signup", "synthetic-retry"]) {
+      await activateHostedMemberForPositiveSourceTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId,
+          sourceType: "hosted.starter-enrollment",
+        },
+        memberId: member.core.id,
+        prisma: makeTransactionHarness() as never,
+        suppressSignupWelcome: suppress,
+      });
+    }
+
+    const envelopes = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(([call]) => call.envelope);
+    const activations = envelopes.filter((wake) => wake.kind === "member.activated");
+    const notifications = envelopes.filter((wake) => wake.kind === "assistant.notification.requested");
+    expect(activations).toHaveLength(2);
+    if (suppress) {
+      expect(notifications).toHaveLength(0);
+      expect(activations.every((wake) => wake.signupWelcome === null)).toBe(true);
+      return;
+    }
+    const email = notifications.filter((wake) => wake.notification.route.channel === "email");
+    const phone = notifications.filter((wake) => wake.notification.route.channel === "linq");
+    expect(email).toHaveLength(2);
+    expect(phone).toHaveLength(textAvailable ? 2 : 0);
+    for (const wake of email) {
+      const deliveryIdentity = buildHostedMemberChannelWelcomeDeliveryIdentity({
+        memberId: member.core.id, channel: "email", destinationLookupKey: wake.notification.route.identityId,
+      });
+      expect(wake.eventId).toBe(`assistant.notification.requested:${deliveryIdentity}`);
+      expect(wake.notification).toMatchObject({
+        deliveryIdempotencyKey: deliveryIdentity,
+        route: { delivery: { target: "member@example.test" } },
+      });
+    }
+    for (const wake of phone) {
+      const deliveryIdentity = buildHostedMemberChannelWelcomeDeliveryIdentity({
+        memberId: member.core.id, channel: "linq", destinationLookupKey: expectedLinqParticipantWelcomeRoute().identityId,
+      });
+      expect(wake.eventId).toBe(`assistant.notification.requested:${deliveryIdentity}`);
+      expect(wake.notification).toMatchObject({
+        deliveryIdempotencyKey: deliveryIdentity,
+        route: expectedLinqParticipantWelcomeRoute(),
+      });
+    }
+    if (textAvailable) {
+      expect(email[0].notification.deliveryIdempotencyKey).not.toBe(phone[0].notification.deliveryIdempotencyKey);
+    }
+    for (const wake of notifications) {
+      expect(wake.notification).toMatchObject({
+        deliveryDedupeToken: wake.notification.deliveryIdempotencyKey,
+        deliveryDispatchMode: "queue-only",
+        responsePolicy: { kind: "require_send_exact_text", text: expectedSignupWelcomeText() },
+      });
+    }
+    expect(activations[0].onboardingFollowupRoute.channel).toBe(textAvailable ? "linq" : "email");
+  });
+
+  it.each(["email", "linq"] as const)("later %s connection reuses the activation notification identity", async (channel) => {
+    const member = makeMemberSnapshot({
+      emailAuthorization: {
+        directPublicSender: null, memberId: "member_123", stripeCheckoutEmail: null,
+        verifiedEmail: { address: "member@example.test", lookupKey: "synthetic-email-lookup", verifiedAt: new Date("2026-04-12T00:00:00.000Z") },
+      },
+    });
+    setActivationMemberSnapshot(member);
+    await activateHostedMemberForPositiveSourceTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"), occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "synthetic-channel-signup", sourceType: "hosted.starter-enrollment",
+      },
+      memberId: member.core.id, prisma: makeTransactionHarness() as never,
+    });
+    const notifications = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(([call]) => call.envelope)
+      .filter((wake) => wake.kind === "assistant.notification.requested");
+    const activationNotification = notifications.find((wake) => wake.notification.route.channel === channel);
+    expect(activationNotification).toBeDefined();
+    member.routing = {
+      memberId: member.core.id, linqRecipientPhone: "+15550100099", linqHomeLineAssignedAt: new Date(),
+      linqChatId: null, pendingLinqChatId: null, pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null, telegramThreadId: null, telegramUserId: null,
+      telegramUserLookupKey: null,
+    };
+    const prisma = {
+      $transaction: vi.fn(() => { throw new Error("Existing welcome should not open another transaction"); }),
+      hostedMailboxItem: { findUnique: vi.fn(async (query: { where: { userId_dedupeKey: { dedupeKey: string } } }) => (
+        query.where.userId_dedupeKey.dedupeKey === activationNotification.eventId ? { id: "existing-welcome" } : null
+      )) },
+    };
+    const { ensureHostedMemberChannelWelcome } = await import("@/src/lib/hosted-onboarding/channel-welcome");
+    const appendCount = mocks.appendHostedMailboxEnvelopeTx.mock.calls.length;
+    await ensureHostedMemberChannelWelcome({ channel, memberId: member.core.id, prisma: prisma as never });
+    expect(prisma.hostedMailboxItem.findUnique).toHaveBeenCalledExactlyOnceWith({
+      where: { userId_dedupeKey: { userId: member.core.id, dedupeKey: activationNotification.eventId } },
+      select: { id: true },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(appendCount);
+  });
+
+  it("keeps signup welcome text stable across source events sharing the destination delivery identity", async () => {
     const member = makeMemberSnapshot();
 
     await activateHostedMemberForPositiveSourceTx({
@@ -809,6 +1007,9 @@ describe("hosted onboarding member activation", () => {
     });
 
     const expectedText = expectedSignupWelcomeText();
+    const deliveryIdentity = buildHostedMemberChannelWelcomeDeliveryIdentity({
+      memberId: member.core.id, channel: "linq", destinationLookupKey: expectedLinqParticipantWelcomeRoute().identityId,
+    });
     const firstActivationEnvelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
     const firstNotificationEnvelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[1]?.[0]?.envelope;
     const secondActivationEnvelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[2]?.[0]?.envelope;
@@ -817,16 +1018,16 @@ describe("hosted onboarding member activation", () => {
     expect(firstActivationEnvelope.signupWelcome?.text).toBe(expectedText);
     expect(secondActivationEnvelope.signupWelcome?.text).toBe(expectedText);
     expect(firstNotificationEnvelope.notification).toMatchObject({
-      deliveryDedupeToken: "signup-welcome:member_123",
-      deliveryIdempotencyKey: "signup-welcome:member_123",
+      deliveryDedupeToken: deliveryIdentity,
+      deliveryIdempotencyKey: deliveryIdentity,
       responsePolicy: {
         kind: "require_send_exact_text",
         text: expectedText,
       },
     });
     expect(secondNotificationEnvelope.notification).toMatchObject({
-      deliveryDedupeToken: "signup-welcome:member_123",
-      deliveryIdempotencyKey: "signup-welcome:member_123",
+      deliveryDedupeToken: deliveryIdentity,
+      deliveryIdempotencyKey: deliveryIdentity,
       responsePolicy: {
         kind: "require_send_exact_text",
         text: expectedText,
@@ -855,11 +1056,16 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
+      member,
+      prisma: expect.anything(),
+    });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         kind: "member.activated",
+        onboardingFollowupEnrollment: true,
+        onboardingFollowupRoute: expectedLinqParticipantWelcomeRoute(),
         signupWelcome: null,
       }),
       tx: expect.anything(),
@@ -1015,7 +1221,7 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
-  it("does not enqueue a proactive Telegram welcome for email-linked phone-less members", async () => {
+  it("enqueues the welcome and follow-up on an established Telegram route", async () => {
     const member = makeMemberSnapshot({
       emailAuthorization: {
         directPublicSender: null,
@@ -1064,6 +1270,19 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    const telegramRoute = buildHostedMemberActivationOnboardingFollowupRoute({
+      emailAddress: "member@example.com",
+      emailLookupKey: "hbidx:email:v1:lookup",
+      linqChatId: null,
+      linqContactLookupKey: "hbidx:email:v1:lookup",
+      linqRecipientPhone: null,
+      memberId: "member_123",
+      memberPhoneNumber: null,
+      phoneLookupKey: null,
+      telegramThreadId:
+        "telegram_user_123:business:biz-42:dm-topic:9",
+      telegramUserId: "telegram_user_123",
+    });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
         kind: "member.activated",
@@ -1072,15 +1291,28 @@ describe("hosted onboarding member activation", () => {
           linq: false,
           telegram: true,
         },
-        signupWelcome: null,
+        onboardingFollowupEnrollment: true,
+        onboardingFollowupRoute: telegramRoute,
+        signupWelcome: expect.objectContaining({ route: telegramRoute }),
       }),
       tx: expect.anything(),
     });
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(2, {
+      envelope: expect.objectContaining({
+        eventId: expect.stringContaining("assistant.notification.requested:signup-welcome:member_123:member.activated:"),
+        notification: expect.objectContaining({
+          deliveryIdempotencyKey: "signup-welcome:member_123",
+          deliveryDedupeToken: "signup-welcome:member_123",
+          route: telegramRoute,
+        }),
+      }),
+      tx: expect.anything(),
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
-  it("does not build a proactive Telegram welcome route", () => {
-    expect(buildHostedMemberActivationWelcomeRoute({
+  it("builds a Telegram onboarding follow-up route after an inbound thread exists", () => {
+    expect(buildHostedMemberActivationOnboardingFollowupRoute({
       linqChatId: null,
       linqRecipientPhone: null,
       memberId: "member_telegram_route",
@@ -1088,11 +1320,37 @@ describe("hosted onboarding member activation", () => {
       phoneLookupKey: null,
       telegramThreadId: "telegram_user_456:business:biz-42:dm-topic:9",
       telegramUserId: "telegram_user_456",
-    })).toBeNull();
+    })).toMatchObject({
+      channel: "telegram",
+      delivery: {
+        kind: "thread",
+        target: "telegram_user_456:business:biz-42:dm-topic:9",
+      },
+    });
   });
 
-  it("builds a Linq participant welcome route when activation only knows the chosen home line", () => {
-    expect(buildHostedMemberActivationWelcomeRoute({
+  it("builds a verified-email onboarding fallback with blinded identity", () => {
+    expect(buildHostedMemberActivationOnboardingFollowupRoute({
+      emailAddress: "member@example.test",
+      emailLookupKey: "hbidx:email:v1:member",
+      linqChatId: null,
+      memberId: "member_email_route",
+      phoneLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    })).toMatchObject({
+      channel: "email",
+      delivery: {
+        kind: "explicit",
+        target: "member@example.test",
+      },
+      identityId: expect.stringMatching(/^hid_/u),
+      threadIsDirect: true,
+    });
+  });
+
+  it("builds a Linq participant onboarding route when activation only knows the chosen home line", () => {
+    expect(buildHostedMemberActivationOnboardingFollowupRoute({
       linqChatId: null,
       linqRecipientPhone: "+15550100099",
       memberId: "member_linq_participant_route",
@@ -1106,13 +1364,13 @@ describe("hosted onboarding member activation", () => {
     }));
   });
 
-  it("builds a Linq thread welcome route with blinded assistant identifiers", () => {
+  it("builds a Linq thread onboarding route with blinded assistant identifiers", () => {
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({
       secret: "hbidx:phone:v1:lookup",
       userId: "member_linq_thread_route",
     });
 
-    expect(buildHostedMemberActivationWelcomeRoute({
+    expect(buildHostedMemberActivationOnboardingFollowupRoute({
       linqChatId: "chat_home_123",
       linqContactLookupKey: "hbidx:phone:v1:lookup",
       linqRecipientPhone: null,
@@ -1457,6 +1715,7 @@ function makeMemberSnapshot(overrides?: {
 }
 
 function setActivationMemberSnapshot(member: HostedMemberSnapshot | null): void {
+  mocks.readHostedMemberSnapshot.mockResolvedValue(member);
   mocks.readHostedMemberActivationCoreState.mockResolvedValue(member?.core ?? null);
   mocks.readHostedMemberCoreState.mockResolvedValue(member?.core ?? null);
   mocks.readHostedMemberEmailAuthorization.mockResolvedValue(member?.emailAuthorization ?? null);

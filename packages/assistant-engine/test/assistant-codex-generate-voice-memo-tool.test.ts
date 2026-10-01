@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { assistantVoiceOptions, resolveAssistantVoiceOptionElevenLabsVoiceId } from '@murphai/contracts'
+import { generateElevenLabsVoiceMemoAudio } from '@murphai/operator-config/elevenlabs-runtime'
 
 import {
   createVoiceMemoToolRuntimeFromEnv,
@@ -63,6 +66,46 @@ function createLinqRuntime(
 }
 
 describe('managed voice memo runtime boundary', () => {
+  it.each(assistantVoiceOptions)('preserves saved $id voice selection through v4 generation', async (voice) => {
+    const audioBytes = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url)))
+    const fetchImplementation = vi.fn(async () => new Response(audioBytes))
+    const runtime = createVoiceMemoToolRuntimeFromEnv({
+      env: {
+        ELEVENLABS_API_KEY: 'synthetic-key',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_configured_classic',
+      },
+      fetchImpl: vi.fn<typeof fetch>(),
+      preferredVoiceId: resolveAssistantVoiceOptionElevenLabsVoiceId(voice.id),
+      voiceMemoDeliveryChannel: 'telegram',
+    })
+    const result = await executeGenerateVoiceMemoTool({
+      args: { text: 'A short synthetic reminder.' },
+      runtime,
+    })
+    const media = result.responseMedia?.[0]
+    expect(result.rpcSuccess).toBe(true)
+    if (media?.kind !== 'voice_memo' || media.transport.kind !== 'telegram_generation') {
+      throw new Error('Expected a generated voice memo descriptor')
+    }
+    expect(media.transport.generation).toMatchObject({
+      modelId: 'eleven_v4',
+      voiceId: voice.elevenLabsVoiceId ?? 'voice_configured_classic',
+    })
+    await expect(generateElevenLabsVoiceMemoAudio({
+      apiKey: 'synthetic-key',
+      fetchImplementation,
+      generation: media.transport.generation,
+    })).resolves.toMatchObject({ bytes: audioBytes })
+    expect(fetchImplementation).toHaveBeenCalledWith(
+      'https://api.elevenlabs.io/v1/text-to-dialogue?output_format=mp3_44100_128',
+      expect.objectContaining({ body: JSON.stringify({
+        inputs: [{ text: 'A short synthetic reminder.', voice_id: voice.elevenLabsVoiceId ?? 'voice_configured_classic' }],
+        model_id: 'eleven_v4',
+      }) }),
+    )
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+  })
+
   it('keeps local Telegram descriptor generation while Linq fails closed', () => {
     const fetchImpl = vi.fn<typeof fetch>()
     const env = {
@@ -110,6 +153,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: null,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText:
         'voice memo generation is only available for deliverable iMessage or Telegram replies',
@@ -125,6 +169,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: createTelegramRuntime({ apiKeyAvailable: false }),
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText: 'ELEVENLABS_API_KEY is required for voice memo generation',
     })
@@ -137,6 +182,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: createTelegramRuntime({ modelId: null }),
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText:
         'MURPH_ELEVENLABS_MODEL_ID must be a priced ElevenLabs TTS model',
@@ -150,6 +196,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: createTelegramRuntime({ voiceId: null }),
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText:
         'MURPH_ELEVENLABS_VOICE_ID is required for voice memo generation',
@@ -426,6 +473,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: missingTokenRuntime,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText:
         'LINQ_API_TOKEN is required for voice memo attachment upload',
@@ -438,6 +486,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: generationFailureRuntime,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'reported_failure' },
       rpcSuccess: false,
       rpcText:
         'voice memo generation failed: ELEVENLABS_API_REQUEST_FAILED (http 503)',
@@ -450,6 +499,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: invalidAudioRuntime,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'result', failureReason: 'invalid_result' },
       rpcSuccess: false,
       rpcText: 'voice memo generation returned invalid audio data',
     })
@@ -461,6 +511,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: uploadFailureRuntime,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'delivery', failureReason: 'reported_failure' },
       rpcSuccess: false,
       rpcText:
         'voice memo generated but Linq attachment upload failed: LINQ_API_REQUEST_FAILED (http 503)',
@@ -532,6 +583,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'conflict' },
       rpcSuccess: false,
       rpcText:
         'voice memo generation cannot be combined with other response media',

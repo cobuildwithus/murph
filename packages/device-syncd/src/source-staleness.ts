@@ -39,6 +39,13 @@ export interface PushPrimarySourcePolicy {
   neverDeliveredHours: number;
 }
 
+export interface SourceRecoveryNoticePolicy {
+  companionAppName: string;
+  deviceDisplayName: string;
+  providerDisplayName: string;
+  silentHours: number;
+}
+
 const HOUR_MS = 60 * 60_000;
 
 /**
@@ -47,7 +54,32 @@ const HOUR_MS = 60 * 60_000;
  * send it, and that service silently stops for individual users.
  */
 const PUSH_PRIMARY_SOURCE_POLICIES: ReadonlyMap<string, PushPrimarySourcePolicy> = new Map([
-  ["garmin", { silentHours: 36, neverDeliveredHours: 6 }],
+  ["garmin", {
+    silentHours: 36,
+    neverDeliveredHours: 6,
+  }],
+]);
+
+// Receipt-based recovery must not change a provider's polling strategy.
+const SOURCE_RECOVERY_NOTICE_POLICIES: ReadonlyMap<string, SourceRecoveryNoticePolicy> = new Map([
+  ["garmin", {
+    companionAppName: "Garmin Connect",
+    deviceDisplayName: "Garmin device",
+    providerDisplayName: "Garmin",
+    silentHours: 5 * 24,
+  }],
+  ["apple_health_kit", {
+    companionAppName: "Murph",
+    deviceDisplayName: "iPhone",
+    providerDisplayName: "Apple Health",
+    silentHours: 3 * 24,
+  }],
+  ["whoop_v2", {
+    companionAppName: "WHOOP",
+    deviceDisplayName: "WHOOP",
+    providerDisplayName: "WHOOP",
+    silentHours: 5 * 24,
+  }],
 ]);
 
 export type PushPrimarySourceStalenessReason = "never_delivered" | "stopped_delivering";
@@ -82,6 +114,37 @@ export function readPushPrimarySourcePolicy(
 
 export function isPushPrimarySourceProvider(sourceProviderSlug: string): boolean {
   return readPushPrimarySourcePolicy(sourceProviderSlug) !== null;
+}
+
+export function readSourceRecoveryNoticePolicy(
+  sourceProviderSlug: string,
+): SourceRecoveryNoticePolicy | null {
+  return SOURCE_RECOVERY_NOTICE_POLICIES.get(sourceProviderSlug.trim().toLowerCase()) ?? null;
+}
+
+export function isSourceRecoveryNoticeEligible(input: {
+  lastDataAt: string | null;
+  lastErrorCode?: string | null;
+  now: string;
+  silentHours?: number;
+  sourceProviderSlug: string;
+  status: string;
+}): boolean {
+  // A confirmed WHOOP refresh failure also stops delivery. Keep it in the same
+  // silence episode so status changes cannot generate a second check-in.
+  const whoopRefreshFailed = input.sourceProviderSlug.trim().toLowerCase() === "whoop_v2"
+    && input.status === "error"
+    && input.lastErrorCode?.trim().toUpperCase() === "TOKEN_REFRESH_FAILED";
+  if ((input.status !== "connected" && !whoopRefreshFailed) || input.lastDataAt === null) {
+    return false;
+  }
+  const policy = readSourceRecoveryNoticePolicy(input.sourceProviderSlug);
+  const now = parseTimestamp(input.now);
+  const lastDataAt = parseTimestamp(input.lastDataAt);
+  return policy !== null
+    && now !== null
+    && lastDataAt !== null
+    && now - lastDataAt >= (input.silentHours ?? policy.silentHours) * HOUR_MS;
 }
 
 function parseTimestamp(value: string): number | null {

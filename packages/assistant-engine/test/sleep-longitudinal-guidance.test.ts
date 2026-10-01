@@ -7,8 +7,10 @@ import {
   ASSISTANT_SKILLS,
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
+import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 
 async function readSkill(slug: string): Promise<string> {
+  if (slug === 'behavior-followthrough') return readWorkflowSkillPolicy(slug)
   return readFile(
     path.join(resolveAssistantSkillsRoot(), slug, 'SKILL.md'),
     'utf8',
@@ -36,6 +38,9 @@ describe('longitudinal sleep guidance', () => {
     expect(plan).toContain('standard/tiny/fallback versions')
     expect(plan).toContain('a dated review point')
     expect(plan).toContain('prefer a one-shot check-in')
+    expect(plan).toContain(
+      'review morning restoration after waking, not at night',
+    )
     expect(plan).toContain('Reminders and check-ins are separate user choices')
     expect(plan).toContain('load experiment-onboarding')
     expect(plan).not.toContain('recurring review')
@@ -285,7 +290,7 @@ describe('plan ownership and closeout guidance', () => {
 
   it('keeps habit-plan support reconcilable while allowing explicitly ongoing cues', async () => {
     const skill = await readSkill('behavior-followthrough')
-    const automation = readSection(skill, 'Support and automation policy')
+    const automation = skill
     const compactAutomation = automation.replace(/\s+/gu, ' ')
     const closeout = readSection(skill, 'Non-Experiment Closeout')
 
@@ -303,7 +308,10 @@ describe('plan ownership and closeout guidance', () => {
       '`murph.automation` action `reconcile`',
     )
     expect(automation).toContain(
-      'vault-cli automation list --support-series-id habit:<regimenId>',
+      'vault-cli automation list --support-series-id habit:<regimenId> --compact',
+    )
+    expect(automation).toContain(
+      'vault-cli automation show <automationId>` only when a fact needed for the reconciliation decision is absent from that compact inventory',
     )
     expect(closeout).toContain(
       'reconcile it with an empty desired-id list to archive the whole series',
@@ -423,24 +431,25 @@ describe('experiment start and support mechanics', () => {
   })
 
   it('uses typed session fields and lifecycle-owned finite support only with consent', async () => {
-    const skill = await readSkill('experiment-onboarding')
+    const skill = await readWorkflowSkillPolicy('experiment-onboarding')
     const support = readSection(skill, 'Planned-session support reminders')
     const active = readSection(skill, 'Active experiment support')
+    const mechanics = readSection(skill, 'Experiment automation mechanics')
 
     expect(active).toContain('use the stable id from `protocol.sessionFieldIds`')
     expect(active).toContain('repeat `--field <id>=<value>` for each value')
     expect(active).toContain('Never bury declared session fields in notes or confounders')
-    expect(active).toContain('supportSeriesId: "experiment:<experimentId>"')
-    expect(active).toContain(
+    expect(mechanics).toContain('supportSeriesId: "experiment:<experimentId>"')
+    expect(mechanics).toContain(
       'Never pass a raw `system:support-series:*` tag',
     )
-    expect(active).toContain(
+    expect(mechanics).toContain(
       'never assign the engine-managed `experiment-lifecycle:<experimentId>` series id',
     )
-    expect(active).toContain(
+    expect(mechanics).toContain(
       'Use `tags` only for ordinary descriptive tags.',
     )
-    expect(active).toContain(
+    expect(mechanics).toContain(
       '`murph.automation` action `reconcile`',
     )
     expect(support).toContain('Agreement to the experiment is not agreement to reminders or check-ins.')

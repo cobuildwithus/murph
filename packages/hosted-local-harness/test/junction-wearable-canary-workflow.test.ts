@@ -26,90 +26,44 @@ const browserRunner = readFileSync(
 );
 
 describe("live Junction wearable canary workflow", () => {
-  it("admits secrets only after protected main updates or manual retries", () => {
+  it("admits the private controller only for protected-main provider proof", () => {
     expect(workflow).toContain("permissions:\n  contents: read");
-    expect(workflow).toMatch(
-      /^on:\n  push:\n    branches:\n      - main\n  workflow_dispatch:/mu,
-    );
-    expect(workflow).not.toMatch(
-      /^\s*(pull_request|pull_request_target|repository_dispatch|schedule):/mu,
-    );
-    expect(workflow).toContain(
-      "if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}",
-    );
-    expect(workflow).toContain("environment: junction-wearable-canary");
+    expect(workflow).toContain('cron: "43 5 * * *"');
+    expect(workflow).toContain("  schedule:");
+    expect(workflow).toContain("  workflow_dispatch:");
+    expect(workflow).not.toMatch(/^\s*(push|pull_request|pull_request_target|repository_dispatch):/mu);
+    expect(workflow).toContain("if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}");
+    expect(workflow).toContain("environment: temporal-compatibility");
     expect(workflow).toContain("group: live-junction-wearable-canary");
     expect(workflow).toContain("cancel-in-progress: false");
   });
 
-  it("keeps the credential set step-scoped and artifact-free", () => {
-    const liveStepMarker = "      - name: Run live Junction wearable browser canary\n";
-    const liveStepOffset = workflow.indexOf(liveStepMarker);
-    expect(liveStepOffset).toBeGreaterThan(0);
-    expect(workflow.slice(0, liveStepOffset)).not.toContain("${{ secrets.");
-
+  it("keeps all provider credentials and private source out of the public controller", () => {
     const secretNames = [...workflow.matchAll(/\$\{\{ secrets\.([A-Z0-9_]+) \}\}/gu)]
-      .map((match) => match[1])
-      .sort();
-    expect(secretNames).toEqual([
-      "JUNCTION_API_KEY",
-      "JUNCTION_CLIENT_USER_ID_SECRET",
-      "WHOOP_CANARY_EMAIL",
-      "WHOOP_CANARY_PASSWORD",
-    ]);
-    expect(workflow).not.toContain("actions/upload-artifact");
-    expect(workflow).not.toContain("WHOOP_CLIENT_ID");
-    expect(workflow).not.toContain("WHOOP_CLIENT_SECRET");
-    expect(workflow).not.toContain("OURA_CLIENT_ID");
-    expect(workflow).not.toContain("OURA_CLIENT_SECRET");
+      .map((match) => match[1]);
+    expect(secretNames).toEqual(["TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY"]);
+    expect(workflow).toContain("repositories: murph-cloud");
+    expect(workflow).toContain("permission-actions: write");
+    expect(workflow).toContain("permission-contents: read");
+    expect(workflow).not.toMatch(/JUNCTION_API_KEY|GARMIN_CANARY_PASSWORD|KERNEL_API_KEY|actions\/(?:upload|download)-artifact/u);
+    expect(workflow).not.toContain("pnpm install");
+    expect(workflow).not.toContain("repository: cobuildwithus/murph-cloud");
   });
 
-  it("exposes the repository-pinned Codex CLI before hosted-local starts", () => {
-    const installStepMarker =
-      "      - name: Expose pinned workspace Codex CLI for hosted-local model catalog\n";
-    const liveStepMarker = "      - name: Run live Junction wearable browser canary\n";
-    const installStepOffset = workflow.indexOf(installStepMarker);
-    const liveStepOffset = workflow.indexOf(liveStepMarker);
-    expect(installStepOffset).toBeGreaterThan(0);
-    expect(liveStepOffset).toBeGreaterThan(installStepOffset);
-
-    const installStep = workflow.slice(installStepOffset, liveStepOffset);
-    expect(installStep).toContain(
-      'codex_bin_dir="$GITHUB_WORKSPACE/packages/assistant-engine/node_modules/.bin"',
-    );
-    expect(installStep).toContain('echo "${codex_bin_dir}" >> "$GITHUB_PATH"');
-    expect(installStep).toContain('"${codex_bin_dir}/codex" --version');
-    expect(installStep).not.toContain("npm install");
-    expect(installStep).not.toContain("${{ secrets.");
-    expect(workflow).not.toMatch(/@openai\/codex@\d/u);
-  });
-
-  it("runs only the sandbox browser proof with pinned actions", () => {
-    expect(workflow).toContain("JUNCTION_ENV: sandbox");
-    expect(workflow).toContain("MURPH_DEV_TEMPORAL: disabled");
-    expect(workflow).toContain('MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"');
-    expect(workflow).toContain("MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop");
-    expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "0"');
-    expect(workflow).toContain("      - name: Verify stable Chrome\n");
-    expect(workflow).toContain("run: google-chrome --version");
-    expect(workflow).not.toContain("playwright install");
-    expect(workflow).toContain(
-      "run: xvfb-run --auto-servernum pnpm hosted-local e2e device-connect",
-    );
-    expect(workflow).toContain("image: public.ecr.aws/docker/library/postgres:17");
-
+  it("requires the exact private canonical-data receipt with pinned controller actions", () => {
+    expect(workflow).toContain("run: node scripts/github-wearable-canary.mjs");
+    expect(workflow).toContain("ref: ${{ github.sha }}");
+    expect(workflow).toContain("persist-credentials: false");
     const actionRefs = [...workflow.matchAll(/^\s*uses:\s*[^@\s]+@([^\s#]+)/gmu)];
     expect(actionRefs.length).toBeGreaterThan(0);
-    for (const actionRef of actionRefs) {
-      expect(actionRef[1]).toMatch(/^[a-f0-9]{40}$/u);
-    }
+    for (const actionRef of actionRefs) expect(actionRef[1]).toMatch(/^[a-f0-9]{40}$/u);
   });
 
   it("confirms the required Vital disclosure before waiting for provider authorization", () => {
     const disclosureOffset = browserRunner.indexOf(
-      'stage = "murph_vital_disclosure";',
+      'setStage("murph_vital_disclosure");',
     );
-    const connectOffset = browserRunner.indexOf('stage = "murph_connect_start";');
+    const connectOffset = browserRunner.indexOf('setStage("murph_connect_start");');
 
     expect(disclosureOffset).toBeGreaterThan(0);
     expect(connectOffset).toBeGreaterThan(disclosureOffset);
@@ -120,11 +74,11 @@ describe("live Junction wearable canary workflow", () => {
     );
     expect(disclosureStep).toContain(".click({ timeout: config.timeoutMs })");
     expect(browserRunner).toContain(
-      'disclosureSourceName: source === "oura" ? "Oura" : "Whoop"',
+      'disclosureSourceName: source === "garmin"',
     );
   });
 
-  it("keeps headed CI authorization automated and fail-closed", () => {
+  it("keeps provider authorization automated and fail-closed", () => {
     expect(browserRunner).toContain(
       'const manualAuthorizationAllowed = !headless && ci !== "1" && ci !== "true";',
     );
@@ -132,9 +86,11 @@ describe("live Junction wearable canary workflow", () => {
       "if (source === \"oura\" && !manualAuthorizationAllowed && !otp)",
     );
     expect(browserRunner).toContain(
-      'browserChannel: !headless && !manualAuthorizationAllowed ? "chrome" : undefined,',
+      'browserChannel: browserTransport === "local"',
     );
-    expect(browserRunner).toContain("channel: config.browserChannel,");
+    expect(browserRunner).toContain("const session = await openBrowserSession(config);");
+    expect(browserRunner).toContain("await chromium.connectOverCDP(kernelBrowser.cdpWsUrl");
+    expect(browserRunner).toContain("buildKernelTunnelArguments(input.sessionId, input.port)");
 
     const clickedBranchOffset = browserRunner.indexOf("if (clicked) {");
     const blockedWindowResetOffset = browserRunner.indexOf(
@@ -166,7 +122,7 @@ describe("live Junction wearable canary workflow", () => {
 
   it("keeps Playwright's closing quote out of redacted navigation URLs", () => {
     expect(browserRunner).toContain(
-      'message.replace(/https?:\\/\\/[^\\s)"\']+/gu, (rawUrl) => {',
+      'message.replace(/(?:https?|wss?):\\/\\/[^\\s)"\']+/gu, (rawUrl) => {',
     );
   });
 });

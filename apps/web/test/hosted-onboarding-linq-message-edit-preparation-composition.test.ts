@@ -180,14 +180,15 @@ describe("Linq message-edit preparation composition", () => {
       "source-read",
       "root-envelope-batch",
       "active-root-read",
+      "chat-ownership-lock",
       "source-lock",
       "source-lock",
       "source-read",
     ]);
-    expect(harness.state.datastoreCalls).toHaveLength(6);
+    expect(harness.state.datastoreCalls).toHaveLength(7);
     expect(harness.state.datastoreCalls.map(
       (call) => call.inTransaction,
-    )).toEqual([false, false, false, true, true, true]);
+    )).toEqual([false, false, false, true, true, true, true]);
     expect(harness.state.kms.returnedPlaintexts).toHaveLength(7);
     expect(harness.state.kms.returnedPlaintexts.every((plaintext) =>
       plaintext.every((byte) => byte === 0)
@@ -289,6 +290,7 @@ describe("Linq message-edit preparation composition", () => {
       "source-read",
       "root-envelope-batch",
       "active-root-read",
+      "chat-ownership-lock",
       "source-lock",
       "source-lock",
       "source-read",
@@ -297,7 +299,7 @@ describe("Linq message-edit preparation composition", () => {
       "access-authority",
       "chat-ownership-lock",
       "thread-route-read",
-      "workspace-upsert",
+      "workspace-ensure",
       "mailbox-dedupe-lock",
       "mailbox-dedupe-read",
       "mailbox-causal-lock",
@@ -305,14 +307,14 @@ describe("Linq message-edit preparation composition", () => {
       "mailbox-lane-seq",
       "mailbox-insert",
     ]);
-    expect(harness.state.datastoreCalls).toHaveLength(18);
+    expect(harness.state.datastoreCalls).toHaveLength(19);
     expect(harness.state.datastoreCalls.map(
       (call) => call.inTransaction,
     )).toEqual([
       false,
       false,
       false,
-      ...Array.from({ length: 15 }, () => true),
+      ...Array.from({ length: 16 }, () => true),
     ]);
     expect(harness.state.kms.returnedPlaintexts).toHaveLength(6);
     expect(harness.state.kms.returnedPlaintexts.every((plaintext) =>
@@ -782,12 +784,14 @@ function createPrismaStub(input: {
       }),
     },
     hostedWorkspace: {
-      upsert: vi.fn(async (upsertInput: unknown) => {
-        expect(upsertInput).toMatchObject({
-          where: { userId: TEST_USER_ID },
+      findUnique: vi.fn(async () => null),
+      createMany: vi.fn(async (createInput: unknown) => {
+        expect(createInput).toMatchObject({
+          data: [{ userId: TEST_USER_ID }],
+          skipDuplicates: true,
         });
-        recordDatastoreCall("workspace-upsert");
-        return { userId: TEST_USER_ID };
+        recordDatastoreCall("workspace-ensure");
+        return { count: 0 };
       }),
     },
   };

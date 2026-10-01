@@ -9,6 +9,7 @@ import {
   HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS,
   HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
   readHostedRuntimeProgressHealth,
+  readHostedRuntimeStalledRecheckCandidates,
   runHostedRuntimeProgressAlertMonitor,
   summarizeHostedRuntimeProgressRows,
   type HostedRuntimeProgressHealthRow,
@@ -47,9 +48,15 @@ describe("hosted runtime progress health", () => {
         }),
         progressRow({
           progressOriginAt: "2026-08-10T15:45:00.000Z",
+          durableHighWaterSeq: 12n,
+          effectiveConsumedSeq: 9n,
+          headKind: "device-sync.wake",
+          headLaneSeq: 10n,
           lane: "system",
+          nextWakeReason: "assistant",
           pendingCount: 3n,
           runtimeKey: "runtime_a",
+          workspaceSystemImportedSeq: 12n,
         }),
         progressRow({
           progressOriginAt: "2026-08-10T15:30:00.000Z",
@@ -69,6 +76,205 @@ describe("hosted runtime progress health", () => {
       stalledLaneCount: 2,
       stalledRuntimeCount: 2,
       stalledSystemLaneCount: 1,
+      systemDiagnostics: {
+        assistantWakeLaneCount: 1,
+        deviceSyncHeadLaneCount: 1,
+        deviceSyncWakeLaneCount: 0,
+        fullyImportedLaneCount: 1,
+        importedUnhandledItemCount: 3,
+        otherOrMissingWakeLaneCount: 0,
+        partiallyImportedLaneCount: 0,
+        unimportedHeadLaneCount: 0,
+        unknownImportLaneCount: 0,
+      },
+    });
+  });
+
+  it.each(["delivery", "terminal_no_reply"])("defers a completed conversation head until its checkpoint deadline (%s)", (completion) => {
+    const row = progressRow({ progressOriginAt: "2026-08-10T15:30:00Z", lane: "conversation", runtimeKey: "runtime_a" });
+    Object.assign(row, {
+      deliveryAcceptedAt: completion === "delivery" ? instant("2026-08-10T15:56:00Z") : null,
+      checkpointEvidence: { assistant: {
+        checkpointPublicationExpectedByEpochMs: +now + 60_000,
+        ...(completion === "terminal_no_reply" ? { terminalNonReplyCommittedAtEpochMs: +now - 4 * 60_000 } : {}),
+      } },
+    });
+    const summarize = (at: Date) => summarizeHostedRuntimeProgressRows({
+      activeRuntimeKeys: ["runtime_a"], rows: [row], now: at,
+    });
+    expect(summarize(now).anomalous).toBe(false);
+    expect(summarize(new Date(+now + 60_000)).anomalous).toBe(false);
+    expect(summarize(new Date(+now + 60_001))).toMatchObject({
+      anomalous: true, stalledConversationLaneCount: 1, pendingItemCount: 1,
+    });
+  });
+
+  it("does not defer missing completion, invalid chronology, or system work", () => {
+    const deadline = +now + 60_000;
+    const completion = instant("2026-08-10T15:56:00Z");
+    const cases = [
+      { deliveryAcceptedAt: null, expected: deadline },
+      { deliveryAcceptedAt: completion, expected: null },
+      { deliveryAcceptedAt: completion, expected: String(deadline) },
+      { deliveryAcceptedAt: completion, expected: 1e100 },
+      { deliveryAcceptedAt: completion, expected: +completion - 1 },
+      { deliveryAcceptedAt: instant("2026-08-10T15:29:00Z"), expected: deadline },
+      { deliveryAcceptedAt: new Date(+now + 1), expected: deadline },
+      { deliveryAcceptedAt: completion, expected: deadline, lane: "system" },
+    ];
+    for (const test of cases) {
+      const row = Object.assign(progressRow({ progressOriginAt: "2026-08-10T15:30:00Z",
+        lane: test.lane ?? "conversation", runtimeKey: "runtime_a" }), {
+        deliveryAcceptedAt: test.deliveryAcceptedAt,
+        checkpointEvidence: { assistant: { checkpointPublicationExpectedByEpochMs: test.expected } },
+      });
+      expect(summarizeHostedRuntimeProgressRows({ activeRuntimeKeys: ["runtime_a"], rows: [row], now }).anomalous).toBe(true);
+    }
+  });
+
+  it.each(["member.activated", "device-sync.wake"])("defers imported %s behind a current foreground checkpoint only until its deadline", (headKind) => {
+    const row = progressRow({
+      progressOriginAt: "2026-08-10T15:30:00Z", lane: "system", runtimeKey: "runtime_a",
+      headKind, workspaceCheckpointedAt: instant("2026-08-10T15:40:00Z"),
+    });
+    row.foregroundCheckpointEvidence = { assistant: {
+      terminalReplyCommittedAtEpochMs: +now - 4 * 60_000,
+      checkpointPublicationExpectedByEpochMs: +now + 60_000,
+    } };
+    const summarize = (candidate = row, at = now) => summarizeHostedRuntimeProgressRows({
+      activeRuntimeKeys: ["runtime_a"], rows: [candidate], now: at,
+    });
+    expect(summarize().anomalous).toBe(false);
+    expect(summarize(row, new Date(+now + 60_000)).anomalous).toBe(false);
+    expect(summarize(row, new Date(+now + 60_001))).toMatchObject({
+      anomalous: true, stalledSystemLaneCount: 1, oldestStalledAgeMs: 31 * 60_000 + 1,
+    });
+    for (const override of [
+      { headKind: "member.preferences.updated" },
+      { workspaceSystemImportedSeq: null },
+      { workspaceSystemImportedSeq: 0n },
+      { workspaceSystemImportedSeq: 2n },
+      { workspaceCheckpointedAt: null },
+      { workspaceCheckpointedAt: instant("2026-08-10T15:56:00Z") },
+      { foregroundCheckpointEvidence: null },
+      { chronologyInvalid: true },
+      { foregroundCheckpointEvidence: { assistant: {
+        checkpointPublicationExpectedByEpochMs: +now + 60_000,
+      } } },
+      { foregroundCheckpointEvidence: { assistant: {
+        terminalReplyCommittedAtEpochMs: +now + 1,
+        checkpointPublicationExpectedByEpochMs: +now + 60_000,
+      } } },
+    ]) {
+      expect(summarize({ ...row, ...override }).anomalous).toBe(true);
+    }
+  });
+
+  it("classifies every system import and wake-owner diagnostic without identifiers", () => {
+    const health = summarizeHostedRuntimeProgressRows({
+      activeRuntimeKeys: [
+        "runtime_full",
+        "runtime_partial",
+        "runtime_unimported",
+        "runtime_unknown",
+      ],
+      now,
+      rows: [
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 8n,
+          headKind: "device-sync.wake",
+          headLaneSeq: 9n,
+          lane: "system",
+          nextWakeReason: "assistant",
+          pendingCount: 2n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_full",
+          workspaceSystemImportedSeq: 10n,
+        }),
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 6n,
+          headKind: "device-sync.wake",
+          headLaneSeq: 7n,
+          lane: "system",
+          nextWakeReason: "device-sync.reconcile",
+          pendingCount: 4n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_partial",
+          workspaceSystemImportedSeq: 8n,
+        }),
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 5n,
+          headKind: "device-sync.wake",
+          headLaneSeq: 7n,
+          lane: "system",
+          nextWakeReason: null,
+          pendingCount: 5n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_unimported",
+          workspaceSystemImportedSeq: 6n,
+        }),
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 5n,
+          headKind: "runtime.maintenance-requested",
+          headLaneSeq: 6n,
+          lane: "system",
+          nextWakeReason: "mailbox",
+          pendingCount: 5n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_unknown",
+          workspaceSystemImportedSeq: null,
+        }),
+      ],
+    });
+
+    expect(health.systemDiagnostics).toEqual({
+      assistantWakeLaneCount: 1,
+      deviceSyncHeadLaneCount: 3,
+      deviceSyncWakeLaneCount: 1,
+      fullyImportedLaneCount: 1,
+      importedUnhandledItemCount: 4,
+      otherOrMissingWakeLaneCount: 2,
+      partiallyImportedLaneCount: 1,
+      unimportedHeadLaneCount: 1,
+      unknownImportLaneCount: 1,
+    });
+  });
+
+  it.each([
+    { importedSeq: 2n, full: 0, unknown: 1, unhandled: 0 },
+    { importedSeq: 1n, full: 1, unknown: 0, unhandled: 1 },
+  ])("bounds system import coverage at durable high water ($importedSeq)", ({
+    importedSeq,
+    full,
+    unknown,
+    unhandled,
+  }) => {
+    const health = summarizeHostedRuntimeProgressRows({
+      activeRuntimeKeys: ["runtime_a"],
+      now,
+      rows: [progressRow({
+        durableHighWaterSeq: 1n,
+        effectiveConsumedSeq: 0n,
+        headKind: "device-sync.wake",
+        headLaneSeq: 1n,
+        lane: "system",
+        pendingCount: 1n,
+        progressOriginAt: "2026-08-10T15:30:00.000Z",
+        runtimeKey: "runtime_a",
+        workspaceSystemImportedSeq: importedSeq,
+      })],
+    });
+
+    expect(health.systemDiagnostics).toMatchObject({
+      fullyImportedLaneCount: full,
+      importedUnhandledItemCount: unhandled,
+      partiallyImportedLaneCount: 0,
+      unimportedHeadLaneCount: 0,
+      unknownImportLaneCount: unknown,
     });
   });
 
@@ -119,6 +325,87 @@ describe("hosted runtime progress health", () => {
       scanTruncated: true,
     });
   });
+
+  it("selects only the durable legacy device-sync stall signature", async () => {
+    const fixture = createProgressMonitorFixture([
+      stalledDeviceSyncRow("runtime_z", { pendingCount: 7n }),
+      stalledDeviceSyncRow("runtime_fresh", {
+        progressOriginAt: "2026-08-10T15:45:00.001Z",
+      }),
+      stalledDeviceSyncRow("runtime_wrong_head", {
+        headKind: "runtime.maintenance-requested",
+      }),
+      stalledDeviceSyncRow("runtime_conversation", {
+        lane: "conversation",
+      }),
+      stalledDeviceSyncRow("runtime_missing_wake", {
+        nextWakeAt: null,
+      }),
+      stalledDeviceSyncRow("runtime_fresh_wake", {
+        nextWakeAt: instant("2026-08-10T15:45:00.001Z"),
+      }),
+      stalledDeviceSyncRow("runtime_wrong_wake_reason", {
+        nextWakeReason: "assistant.default-processing",
+      }),
+      stalledDeviceSyncRow("runtime_default_wake", {
+        nextDefaultProcessingWakeAt: instant("2026-08-10T15:10:00.000Z"),
+      }),
+      stalledDeviceSyncRow("runtime_default_wake_reason", {
+        nextDefaultProcessingWakeReason: "assistant.default-processing",
+      }),
+      stalledDeviceSyncRow("runtime_current_generation", {
+        systemMailboxProgressGeneration: 0n,
+      }),
+      stalledDeviceSyncRow("runtime_without_checkpoint", {
+        workspaceCheckpointedAt: null,
+      }),
+      stalledDeviceSyncRow("runtime_a", { pendingCount: 3n }),
+    ]);
+
+    await expect(readHostedRuntimeStalledRecheckCandidates({
+      now,
+      prisma: fixture.prisma,
+    })).resolves.toEqual({
+      candidates: [
+        {
+          pendingItemCount: "3",
+          stalledSince: "2026-08-10T15:00:00.000Z",
+          userId: "runtime_a",
+        },
+        {
+          pendingItemCount: "7",
+          stalledSince: "2026-08-10T15:00:00.000Z",
+          userId: "runtime_z",
+        },
+      ],
+      scanTruncated: false,
+    });
+  });
+
+  it("reports when the bounded stalled-recheck scan truncates", async () => {
+    const repeatedRow = stalledDeviceSyncRow("runtime_inactive");
+    const queryRaw = vi.fn(async () => Array.from(
+      { length: 20_001 },
+      () => repeatedRow,
+    ));
+
+    await expect(readHostedRuntimeStalledRecheckCandidates({
+      now,
+      prisma: {
+        $queryRaw: queryRaw,
+        hostedMember: {
+          findMany: vi.fn(async () => []),
+        },
+        hostedThreadContainerParticipant: {
+          findMany: vi.fn(async () => []),
+        },
+      } as never,
+    })).resolves.toEqual({
+      candidates: [],
+      scanTruncated: true,
+    });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("hosted runtime progress alert monitor", () => {
@@ -157,16 +444,30 @@ describe("hosted runtime progress alert monitor", () => {
     expect(sql).toContain(
       "workspace.next_wake_at AS workspace_next_wake_at",
     );
+    expect(sql).toContain("pending_head.kind AS head_kind");
     expect(sql).toContain(
-      "progress_evidence.head_kind = 'device-sync.wake'",
-    );
-    expect(sql).toContain("hostedMailboxSystemImportedSeq");
-    expect(sql).toContain(
-      "progress_evidence.workspace_system_imported_seq",
+      "workspace.checkpointed_at AS workspace_checkpointed_at",
     );
     expect(sql).toContain(
-      "progress_evidence.first_unimported_system_created_at",
+      "workspace.next_default_processing_wake_at AS workspace_next_default_processing_wake_at",
     );
+    expect(sql).toContain(
+      "workspace.next_default_processing_wake_reason AS workspace_next_default_processing_wake_reason",
+    );
+    expect(sql).toContain(
+      "workspace.system_mailbox_progress_generation AS workspace_system_mailbox_progress_generation",
+    );
+    expect(sql).toContain('progress_lane.head_kind AS "headKind"');
+    expect(sql).toContain(
+      'AS "nextDefaultProcessingWakeAt"',
+    );
+    expect(sql).toContain(
+      'AS "nextDefaultProcessingWakeReason"',
+    );
+    expect(sql).toContain('AS "nextWakeAt"');
+    expect(sql).toContain('AS "nextWakeReason"');
+    expect(sql).toContain('AS "systemMailboxProgressGeneration"');
+    expect(sql).toContain('AS "workspaceCheckpointedAt"');
     expect(sql).not.toContain("head_consumed_at");
   });
 
@@ -220,9 +521,15 @@ describe("hosted runtime progress alert monitor", () => {
     const fixture = createProgressMonitorFixture([
       progressRow({
         progressOriginAt: "2026-08-10T15:30:00.000Z",
+        durableHighWaterSeq: 7n,
+        effectiveConsumedSeq: 0n,
+        headKind: "device-sync.wake",
+        headLaneSeq: 1n,
         lane: "system",
+        nextWakeReason: "assistant",
         pendingCount: 7n,
         runtimeKey: "runtime_private_a",
+        workspaceSystemImportedSeq: 7n,
       }),
       progressRow({
         progressOriginAt: "2026-08-10T15:20:00.000Z",
@@ -266,11 +573,24 @@ describe("hosted runtime progress alert monitor", () => {
     const message = sendAlert.mock.calls[0]?.[0].text ?? "";
     expect(message).toContain("Affected lanes: 1 system, 1 conversation");
     expect(message).toContain("Pending live items: 9");
+    expect(message).toContain(
+      "System diagnostics: 1/1 device-sync heads; import coverage 1 full, 0 partial, 0 head-unimported, 0 unknown; 7 imported-but-unhandled items; wake owners 1 assistant, 0 device-sync, 0 other/missing.",
+    );
     expect(message).not.toContain("runtime_private_a");
     expect(message).not.toContain("runtime_private_b");
     expect(persisted).not.toContain("runtime_private_a");
     expect(persisted).not.toContain("runtime_private_b");
     expect(fixture.readState()).toMatchObject({
+      detailsJson: {
+        health: {
+          systemDiagnostics: {
+            assistantWakeLaneCount: 1,
+            deviceSyncHeadLaneCount: 1,
+            fullyImportedLaneCount: 1,
+            importedUnhandledItemCount: 7,
+          },
+        },
+      },
       kind: "hosted_runtime_progress_monitor",
       status: "progress_alerting",
     });
@@ -475,7 +795,35 @@ describe("hosted runtime progress alert monitor", () => {
     expect(sendAlert).toHaveBeenCalledTimes(2);
   });
 
-  it("defers an overdue reminder through quiet hours and resumes in the morning", async () => {
+  it("sends a first progress alert during quiet hours", async () => {
+    const quietNow = instant("2026-08-11T06:20:00.000Z");
+    const fixture = createProgressMonitorFixture([
+      progressRow({
+        progressOriginAt: "2026-08-11T05:00:00.000Z",
+        lane: "system",
+        runtimeKey: "runtime_private",
+      }),
+    ]);
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      return { providerMessageId: "provider-message" };
+    });
+
+    const result = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: quietNow,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+
+    expect(result.outcome).toBe("alert_sent");
+    expect(sendAlert).toHaveBeenCalledTimes(1);
+    expect(sendAlert.mock.calls[0]?.[0].text).toContain(
+      "Murph runtime progress alert.",
+    );
+  });
+
+  it("sends an overdue progress reminder during quiet hours", async () => {
     const initialNow = instant("2026-08-11T00:00:00.000Z");
     const fixture = createProgressMonitorFixture([
       progressRow({
@@ -501,15 +849,8 @@ describe("hosted runtime progress alert monitor", () => {
       prisma: fixture.prisma,
       sendAlert,
     });
-    const morning = await runHostedRuntimeProgressAlertMonitor({
-      env: alertEnv,
-      now: instant("2026-08-11T14:20:00.000Z"),
-      prisma: fixture.prisma,
-      sendAlert,
-    });
 
-    expect(overnight.outcome).toBe("deferred_quiet_hours");
-    expect(morning.outcome).toBe("alert_sent");
+    expect(overnight.outcome).toBe("alert_sent");
     expect(sendAlert).toHaveBeenCalledTimes(2);
     expect(sendAlert.mock.calls[1]?.[0].text).toContain(
       "Murph runtime progress reminder.",
@@ -644,20 +985,80 @@ describe("hosted runtime progress alert monitor", () => {
 
 function progressRow(input: {
   chronologyInvalid?: boolean;
+  durableHighWaterSeq?: bigint;
+  effectiveConsumedSeq?: bigint;
+  headKind?: string;
+  headLaneSeq?: bigint;
   progressOriginAt: string;
   lane: string;
+  nextDefaultProcessingWakeAt?: Date | null;
+  nextDefaultProcessingWakeReason?: string | null;
+  nextWakeAt?: Date | null;
+  nextWakeReason?: string | null;
   pendingCount?: bigint;
   runtimeKey: string;
+  systemMailboxProgressGeneration?: bigint | null;
   usageBlocked?: boolean;
+  workspaceCheckpointedAt?: Date | null;
+  workspaceSystemImportedSeq?: bigint | null;
 }): HostedRuntimeProgressHealthRow {
   return {
+    foregroundCheckpointEvidence: null,
+    checkpointEvidence: null,
+    deliveryAcceptedAt: null,
     chronologyInvalid: input.chronologyInvalid ?? false,
+    durableHighWaterSeq: input.durableHighWaterSeq ?? 1n,
+    effectiveConsumedSeq: input.effectiveConsumedSeq ?? 0n,
+    headKind: input.headKind ?? "test.pending-work",
+    headLaneSeq: input.headLaneSeq ?? 1n,
     progressOriginAt: instant(input.progressOriginAt),
     lane: input.lane,
+    nextDefaultProcessingWakeAt:
+      input.nextDefaultProcessingWakeAt ?? null,
+    nextDefaultProcessingWakeReason:
+      input.nextDefaultProcessingWakeReason ?? null,
+    nextWakeAt: input.nextWakeAt ?? null,
+    nextWakeReason: input.nextWakeReason ?? null,
     pendingCount: input.pendingCount ?? 1n,
     runtimeKey: input.runtimeKey,
+    systemMailboxProgressGeneration:
+      input.systemMailboxProgressGeneration ?? null,
     usageBlocked: input.usageBlocked ?? false,
+    workspaceCheckpointedAt: input.workspaceCheckpointedAt ?? null,
+    workspaceSystemImportedSeq:
+      input.workspaceSystemImportedSeq === undefined
+        ? 1n
+        : input.workspaceSystemImportedSeq,
   };
+}
+
+function stalledDeviceSyncRow(
+  runtimeKey: string,
+  overrides: Omit<Partial<HostedRuntimeProgressHealthRow>, "progressOriginAt"> & {
+    progressOriginAt?: string;
+  } = {},
+): HostedRuntimeProgressHealthRow {
+  return progressRow({
+    headKind: overrides.headKind ?? "device-sync.wake",
+    lane: overrides.lane ?? "system",
+    nextDefaultProcessingWakeAt:
+      overrides.nextDefaultProcessingWakeAt ?? null,
+    nextDefaultProcessingWakeReason:
+      overrides.nextDefaultProcessingWakeReason ?? null,
+    nextWakeAt: overrides.nextWakeAt === undefined
+      ? instant("2026-08-10T15:00:00.000Z")
+      : overrides.nextWakeAt,
+    nextWakeReason: overrides.nextWakeReason ?? "device-sync.reconcile",
+    pendingCount: overrides.pendingCount,
+    progressOriginAt:
+      overrides.progressOriginAt ?? "2026-08-10T15:00:00.000Z",
+    runtimeKey,
+    systemMailboxProgressGeneration:
+      overrides.systemMailboxProgressGeneration ?? null,
+    workspaceCheckpointedAt: overrides.workspaceCheckpointedAt === undefined
+      ? instant("2026-08-10T15:05:00.000Z")
+      : overrides.workspaceCheckpointedAt,
+  });
 }
 
 function createProgressMonitorFixture(

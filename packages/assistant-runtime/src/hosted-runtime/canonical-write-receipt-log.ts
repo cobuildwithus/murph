@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 
-import type {
-  HostedCanonicalWriteReceipt,
-  HostedCanonicalWriteReceiptContentRef,
-  HostedCanonicalWritePayload,
+import {
+  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+  type HostedCanonicalWriteReceipt,
+  type HostedCanonicalWriteReceiptContentRef,
+  type HostedCanonicalWritePayload,
 } from "@murphai/core";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
@@ -14,22 +15,42 @@ import {
   type HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
 
+import {
+  parseHostedCanonicalWriteReceiptArtifact,
+} from "./canonical-write-receipt.ts";
 import type {
   HostedRuntimeArtifactStore,
 } from "./platform.ts";
 
-const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SCHEMA = "murph.hosted-canonical-write-receipt-log.v1";
-const HOSTED_CANONICAL_WRITE_ARTIFACT_UPLOAD_CONCURRENCY = 8;
+const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_V1_SCHEMA =
+  "murph.hosted-canonical-write-receipt-log.v1";
+const HOSTED_CANONICAL_WRITE_ARTIFACT_IO_CONCURRENCY = 8;
 export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES = 64;
+export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_TOTAL_ENTRIES = 512;
+// Background owners stop here so one already-admitted canonical append can
+// finish before cooperative yield observation without crossing the compacting
+// boundary.
+export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD =
+  HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES - 1;
 export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_BYTES = 64 * 1024;
+export const HOSTED_CANONICAL_WRITE_RECEIPT_COMPACTION_MAX_BYTES = 4 * 1024 * 1024;
 const LEGACY_LOG_COUNT_STATUS_KEY = "hostedCanonicalWriteReceiptLogEntryCount";
 
-interface HostedCanonicalWriteReceiptLog {
+interface HostedCanonicalWriteReceiptLogV1 {
   entries: HostedCanonicalWriteReceiptContentRef[];
-  schema: typeof HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SCHEMA;
+  entryCount: number;
+  oldWriterBarrier: boolean;
+  receiptSha256s: string[];
+  schema: typeof HOSTED_CANONICAL_WRITE_RECEIPT_LOG_V1_SCHEMA;
+}
+
+export interface HostedCanonicalWriteReceiptLogReadResult {
+  entries: HostedCanonicalWriteReceiptContentRef[];
+  entryCount: number;
 }
 
 export interface HostedCanonicalWriteReceiptLogUpdate {
+  entryCount: number;
   logRef: HostedCanonicalWriteReceiptContentRef;
 }
 
@@ -49,38 +70,76 @@ export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
   previousStatus: HostedRuntimeRedactedJson | null | undefined;
   receipt: HostedCanonicalWriteReceipt;
 }): Promise<HostedCanonicalWriteReceiptLogUpdate> {
-  const previousEntries = await readHostedCanonicalWriteReceiptLogEntries({
-    artifactStore: input.artifactStore,
-    status: input.previousStatus,
-  });
-  if (previousEntries.length >= HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES) {
+  validateHostedCanonicalWritePayloadLengths(input.payloads);
+  const previousRef = readHostedCanonicalWriteReceiptLogStatusFingerprint(
+    input.previousStatus,
+  );
+  const previousLog = previousRef
+    ? await readHostedCanonicalWriteReceiptLogArtifact({
+        artifactStore: input.artifactStore,
+        ref: previousRef,
+      })
+    : null;
+  const previousEntryCount = previousLog?.entryCount ?? 0;
+  const receiptArtifact = createHostedCanonicalWriteJsonArtifact(input.receipt);
+  if (
+    previousRef
+    && previousLog?.receiptSha256s.includes(receiptArtifact.ref.sha256)
+  ) {
+    return {
+      entryCount: previousEntryCount,
+      logRef: previousRef,
+    };
+  }
+  if (previousEntryCount >= HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_TOTAL_ENTRIES) {
     throw new RangeError("Hosted canonical write receipt log reached its pending entry limit.");
   }
-  const receiptArtifact = createHostedCanonicalWriteJsonArtifact(input.receipt);
-  const receiptRef = receiptArtifact.ref;
-  const entries = [...previousEntries, receiptRef];
+
+  const compactedReceiptArtifact =
+    previousLog?.entries.length === HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES
+      ? await compactHostedCanonicalWriteReceiptLogEntries({
+          artifactStore: input.artifactStore,
+          entries: previousLog.entries,
+        })
+      : null;
+  const entries = compactedReceiptArtifact
+    ? [compactedReceiptArtifact.ref, receiptArtifact.ref]
+    : [...(previousLog?.entries ?? []), receiptArtifact.ref];
+  const entryCount = previousEntryCount + 1;
+  const oldWriterBarrier =
+    previousLog?.oldWriterBarrier === true || compactedReceiptArtifact !== null;
+  const storedEntries = oldWriterBarrier
+    ? padHostedCanonicalWriteReceiptLogEntries(entries)
+    : entries;
+  const receiptSha256s = [
+    ...(previousLog?.receiptSha256s ?? []),
+    receiptArtifact.ref.sha256,
+  ];
   const logArtifact = createHostedCanonicalWriteJsonArtifact(
     {
-      entries,
-      schema: HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SCHEMA,
-    } satisfies HostedCanonicalWriteReceiptLog,
+      entries: storedEntries,
+      entryCount,
+      ...(oldWriterBarrier ? { activeEntryCount: entries.length } : {}),
+      receiptSha256s,
+      schema: HOSTED_CANONICAL_WRITE_RECEIPT_LOG_V1_SCHEMA,
+    },
   );
   if (logArtifact.bytes.byteLength > HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_BYTES) {
     throw new Error("Hosted canonical write receipt log exceeds its size limit.");
   }
-  for (const payload of input.payloads) {
-    if (payload.bytes.byteLength !== payload.byteLength) {
-      throw new TypeError(
-        "Hosted canonical write payload length does not match its receipt.",
-      );
-    }
-  }
+
   await uploadHostedCanonicalWriteArtifacts({
     artifacts: [
       ...input.payloads.map((payload) => ({
         bytes: payload.bytes,
         sha256: payload.sha256,
       })),
+      ...(compactedReceiptArtifact
+        ? [{
+            bytes: compactedReceiptArtifact.bytes,
+            sha256: compactedReceiptArtifact.ref.sha256,
+          }]
+        : []),
       {
         bytes: receiptArtifact.bytes,
         sha256: receiptArtifact.ref.sha256,
@@ -93,8 +152,124 @@ export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
     artifactStore: input.artifactStore,
   });
   return {
+    entryCount,
     logRef: logArtifact.ref,
   };
+}
+
+async function compactHostedCanonicalWriteReceiptLogEntries(input: {
+  artifactStore: HostedRuntimeArtifactStore;
+  entries: readonly HostedCanonicalWriteReceiptContentRef[];
+}): Promise<{
+  bytes: Uint8Array;
+  ref: HostedCanonicalWriteReceiptContentRef;
+}> {
+  const uniqueEntries = dedupeHostedCanonicalWriteReceiptRefs(input.entries);
+  const inputByteSize = uniqueEntries.reduce(
+    (total, entry) => total + entry.byteSize,
+    0,
+  );
+  if (inputByteSize > HOSTED_CANONICAL_WRITE_RECEIPT_COMPACTION_MAX_BYTES) {
+    throw new Error("Hosted canonical write receipt compaction input exceeds its size limit.");
+  }
+
+  const receipts: HostedCanonicalWriteReceipt[] = [];
+  for (
+    let offset = 0;
+    offset < uniqueEntries.length;
+    offset += HOSTED_CANONICAL_WRITE_ARTIFACT_IO_CONCURRENCY
+  ) {
+    const receiptWave = await Promise.all(
+      uniqueEntries
+        .slice(offset, offset + HOSTED_CANONICAL_WRITE_ARTIFACT_IO_CONCURRENCY)
+        .map(async (entry) => {
+          const bytes = await input.artifactStore.get(entry.sha256, {
+            purpose: "canonical_write_receipt",
+          });
+          if (!bytes) {
+            throw new Error("Hosted canonical write receipt artifact is unavailable.");
+          }
+          if (bytes.byteLength !== entry.byteSize) {
+            throw new Error(
+              "Hosted canonical write receipt artifact size does not match its log ref.",
+            );
+          }
+          return parseHostedCanonicalWriteReceiptArtifact(
+            Buffer.from(bytes).toString("utf8"),
+          );
+        }),
+    );
+    for (const receipt of receiptWave) {
+      if (receipt) {
+        receipts.push(receipt);
+      }
+    }
+  }
+
+  const firstReceipt = receipts[0] ?? null;
+  const lastReceipt = receipts.at(-1) ?? null;
+  const epoch = new Date(0).toISOString();
+  const identity = uniqueEntries
+    .map((entry) => `${entry.sha256}:${entry.byteSize}`)
+    .join("\n");
+  const compactedReceipt: HostedCanonicalWriteReceipt = {
+    schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+    operationId: `hosted_receipt_compaction_${createHash("sha256").update(identity).digest("hex")}`,
+    operationType: "hosted_canonical_write_receipt_compaction",
+    summary: "Compact pending hosted canonical write receipts.",
+    createdAt: firstReceipt?.createdAt ?? epoch,
+    updatedAt: lastReceipt?.updatedAt ?? epoch,
+    occurredAt: firstReceipt?.occurredAt ?? epoch,
+    committedAt: lastReceipt?.committedAt ?? epoch,
+    actions: receipts.flatMap((receipt) => receipt.actions),
+  };
+  const artifact = createHostedCanonicalWriteJsonArtifact(compactedReceipt);
+  if (artifact.bytes.byteLength > HOSTED_CANONICAL_WRITE_RECEIPT_COMPACTION_MAX_BYTES) {
+    throw new Error("Hosted canonical write receipt compaction output exceeds its size limit.");
+  }
+  return artifact;
+}
+
+function padHostedCanonicalWriteReceiptLogEntries(
+  entries: readonly HostedCanonicalWriteReceiptContentRef[],
+): HostedCanonicalWriteReceiptContentRef[] {
+  const paddingEntry = entries[0];
+  if (!paddingEntry) {
+    throw new Error("Hosted canonical write receipt log barrier requires an entry.");
+  }
+  return [
+    ...entries,
+    ...Array.from(
+      { length: HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES - entries.length },
+      () => paddingEntry,
+    ),
+  ];
+}
+
+function dedupeHostedCanonicalWriteReceiptRefs(
+  entries: readonly HostedCanonicalWriteReceiptContentRef[],
+): HostedCanonicalWriteReceiptContentRef[] {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    const key = `${entry.sha256}:${entry.byteSize}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function validateHostedCanonicalWritePayloadLengths(
+  payloads: readonly HostedCanonicalWritePayload[],
+): void {
+  for (const payload of payloads) {
+    if (payload.bytes.byteLength !== payload.byteLength) {
+      throw new TypeError(
+        "Hosted canonical write payload length does not match its receipt.",
+      );
+    }
+  }
 }
 
 async function uploadHostedCanonicalWriteArtifacts(input: {
@@ -107,11 +282,11 @@ async function uploadHostedCanonicalWriteArtifacts(input: {
   for (
     let offset = 0;
     offset < input.artifacts.length;
-    offset += HOSTED_CANONICAL_WRITE_ARTIFACT_UPLOAD_CONCURRENCY
+    offset += HOSTED_CANONICAL_WRITE_ARTIFACT_IO_CONCURRENCY
   ) {
     const results = await Promise.allSettled(
       input.artifacts
-        .slice(offset, offset + HOSTED_CANONICAL_WRITE_ARTIFACT_UPLOAD_CONCURRENCY)
+        .slice(offset, offset + HOSTED_CANONICAL_WRITE_ARTIFACT_IO_CONCURRENCY)
         .map((artifact) => input.artifactStore.put(artifact)),
     );
     for (const result of results) {
@@ -184,25 +359,32 @@ export function readHostedCanonicalWriteReceiptRecoveryWake(
   };
 }
 
+export async function readHostedCanonicalWriteReceiptLog(input: {
+  artifactStore: HostedRuntimeArtifactStore;
+  status: HostedRuntimeRedactedJson | null | undefined;
+}): Promise<HostedCanonicalWriteReceiptLogReadResult> {
+  const ref = readHostedCanonicalWriteReceiptLogStatusFingerprint(input.status);
+  if (!ref) {
+    return {
+      entries: [],
+      entryCount: 0,
+    };
+  }
+  const log = await readHostedCanonicalWriteReceiptLogArtifact({
+    artifactStore: input.artifactStore,
+    ref,
+  });
+  return {
+    entries: log.entries,
+    entryCount: log.entryCount,
+  };
+}
+
 export async function readHostedCanonicalWriteReceiptLogEntries(input: {
   artifactStore: HostedRuntimeArtifactStore;
   status: HostedRuntimeRedactedJson | null | undefined;
 }): Promise<HostedCanonicalWriteReceiptContentRef[]> {
-  const ref = readHostedCanonicalWriteReceiptLogStatusFingerprint(input.status);
-  if (!ref) {
-    return [];
-  }
-  const bytes = await input.artifactStore.get(ref.sha256, {
-    purpose: "canonical_write_receipt",
-  });
-  if (!bytes) {
-    throw new Error("Hosted canonical write receipt log artifact is unavailable.");
-  }
-  if (bytes.byteLength !== ref.byteSize) {
-    throw new Error("Hosted canonical write receipt log artifact size does not match its checkpoint ref.");
-  }
-
-  return parseHostedCanonicalWriteReceiptLog(bytes).entries;
+  return (await readHostedCanonicalWriteReceiptLog(input)).entries;
 }
 
 export function readHostedCanonicalWriteReceiptLogStatusFingerprint(
@@ -240,12 +422,35 @@ function createHostedCanonicalWriteJsonArtifact(value: unknown): {
   return { bytes, ref };
 }
 
-function parseHostedCanonicalWriteReceiptLog(bytes: Uint8Array): HostedCanonicalWriteReceiptLog {
+async function readHostedCanonicalWriteReceiptLogArtifact(input: {
+  artifactStore: HostedRuntimeArtifactStore;
+  ref: HostedCanonicalWriteReceiptContentRef;
+}): Promise<HostedCanonicalWriteReceiptLogV1> {
+  if (input.ref.byteSize > HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_BYTES) {
+    throw new Error("Hosted canonical write receipt log ref exceeds its size limit.");
+  }
+  const bytes = await input.artifactStore.get(input.ref.sha256, {
+    purpose: "canonical_write_receipt",
+  });
+  if (!bytes) {
+    throw new Error("Hosted canonical write receipt log artifact is unavailable.");
+  }
+  if (bytes.byteLength !== input.ref.byteSize) {
+    throw new Error(
+      "Hosted canonical write receipt log artifact size does not match its checkpoint ref.",
+    );
+  }
+  return parseHostedCanonicalWriteReceiptLog(bytes);
+}
+
+function parseHostedCanonicalWriteReceiptLog(
+  bytes: Uint8Array,
+): HostedCanonicalWriteReceiptLogV1 {
   if (bytes.byteLength > HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_BYTES) {
     throw new Error("Hosted canonical write receipt log exceeds its size limit.");
   }
   const parsed: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
-  if (!isPlainObject(parsed) || parsed.schema !== HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SCHEMA) {
+  if (!isPlainObject(parsed) || parsed.schema !== HOSTED_CANONICAL_WRITE_RECEIPT_LOG_V1_SCHEMA) {
     throw new Error("Hosted canonical write receipt log schema is invalid.");
   }
   if (!Array.isArray(parsed.entries)) {
@@ -254,10 +459,76 @@ function parseHostedCanonicalWriteReceiptLog(bytes: Uint8Array): HostedCanonical
   if (parsed.entries.length > HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES) {
     throw new Error("Hosted canonical write receipt log exceeds its pending entry limit.");
   }
+  const storedEntries = parsed.entries.map(parseHostedCanonicalWriteReceiptContentRef);
+  const activeEntryCount = parsed.activeEntryCount === undefined
+    ? storedEntries.length
+    : parsed.activeEntryCount;
+  const oldWriterBarrier = parsed.activeEntryCount !== undefined;
+  if (
+    !Number.isSafeInteger(activeEntryCount)
+    || typeof activeEntryCount !== "number"
+    || activeEntryCount < 0
+    || activeEntryCount > storedEntries.length
+    || (
+      oldWriterBarrier
+      && (
+        activeEntryCount < 1
+        || storedEntries.length !== HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES
+      )
+    )
+  ) {
+    throw new Error("Hosted canonical write receipt log active entry count is invalid.");
+  }
+  const entries = storedEntries.slice(0, activeEntryCount);
+  if (oldWriterBarrier) {
+    const paddingEntry = entries[0]!;
+    for (const entry of storedEntries.slice(activeEntryCount)) {
+      if (entry.sha256 !== paddingEntry.sha256 || entry.byteSize !== paddingEntry.byteSize) {
+        throw new Error("Hosted canonical write receipt log barrier padding is invalid.");
+      }
+    }
+  }
+  const entryCount = parsed.entryCount === undefined
+    ? entries.length
+    : parsed.entryCount;
+  if (
+    !Number.isSafeInteger(entryCount)
+    || typeof entryCount !== "number"
+    || entryCount < entries.length
+    || entryCount > HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_TOTAL_ENTRIES
+    || ((entryCount === 0) !== (entries.length === 0))
+  ) {
+    throw new Error("Hosted canonical write receipt log entry count is invalid.");
+  }
+  const receiptSha256s = parsed.receiptSha256s === undefined
+    ? [...new Set(entries.map((entry) => entry.sha256))]
+    : parseHostedCanonicalWriteReceiptSha256s(parsed.receiptSha256s);
+  if (receiptSha256s.length > entryCount) {
+    throw new Error("Hosted canonical write receipt log provenance is invalid.");
+  }
   return {
-    entries: parsed.entries.map(parseHostedCanonicalWriteReceiptContentRef),
-    schema: HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SCHEMA,
+    entries,
+    entryCount,
+    oldWriterBarrier,
+    receiptSha256s,
+    schema: HOSTED_CANONICAL_WRITE_RECEIPT_LOG_V1_SCHEMA,
   };
+}
+
+function parseHostedCanonicalWriteReceiptSha256s(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    throw new Error("Hosted canonical write receipt log provenance is invalid.");
+  }
+  const sha256s: string[] = [];
+  const seen = new Set<string>();
+  for (const value of raw) {
+    if (!isSha256(value) || seen.has(value)) {
+      throw new Error("Hosted canonical write receipt log provenance is invalid.");
+    }
+    seen.add(value);
+    sha256s.push(value);
+  }
+  return sha256s;
 }
 
 function parseHostedCanonicalWriteReceiptContentRef(

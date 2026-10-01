@@ -1,8 +1,11 @@
+import { performance } from "node:perf_hooks";
+
 import { isStrictIsoDate, isWritableIsoDateTime } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
 
 import { assertCanonicalWritePort } from "../core-port.ts";
 import type {
+  DeviceBatchImportExecutionOptions,
   DeviceBatchImportPayload,
   DeviceEvidencePartPayload,
 } from "../core-port.ts";
@@ -14,7 +17,7 @@ import {
 } from "../shared.ts";
 
 import { defaultDeviceProviderAdapters } from "./defaults.ts";
-import { deriveJunctionCanonicalCoverageEvidence } from "./junction.ts";
+import { deriveJunctionCanonicalCoverageEvidence } from "./junction-canonical-coverage.ts";
 import { buildWearableRawIngestReceipt } from "./raw-ingest-receipt.ts";
 import { createDeviceProviderRegistry } from "./registry.ts";
 
@@ -24,7 +27,17 @@ import type { CompleteDeviceProviderSourceDay } from "./types.ts";
 export interface DeviceProviderImporterExecutionOptions {
   corePort?: unknown;
   defaultTimeZone?: string;
+  importSession?: DeviceBatchImportExecutionOptions["session"];
+  signal?: AbortSignal | null;
   providerRegistry?: DeviceProviderRegistry;
+}
+
+export interface DeviceProviderSnapshotImportTiming {
+  canonicalCoreElapsedMs: number;
+  canonicalWriteElapsedMs: number;
+  eventIdentityIndexCacheHit: boolean;
+  eventIdentityIndexElapsedMs: number;
+  normalizationElapsedMs: number;
 }
 
 export interface DeviceProviderSnapshotImportInput {
@@ -304,8 +317,8 @@ function resolveStableRawReceiptObservedAt(
   request: DeviceProviderSnapshotImportInput,
   payload: DeviceBatchImportPayload,
 ): string {
-  return firstValidTimestamp(
-    request.observedAt,
+  // An explicit receipt time is authoritative; missing times use a stable replay anchor.
+  return earliestValidTimestamp(request.observedAt) ?? earliestValidTimestamp(
     request.occurredAt,
     request.windowEnd,
     request.windowStart,
@@ -315,7 +328,7 @@ function resolveStableRawReceiptObservedAt(
 }
 
 function earliestPayloadTimestamp(payload: DeviceBatchImportPayload): string | undefined {
-  return firstValidTimestamp(
+  return earliestValidTimestamp(
     ...(payload.events ?? []).flatMap((event) => [
       event.recordedAt,
       event.occurredAt,
@@ -330,7 +343,7 @@ function earliestPayloadTimestamp(payload: DeviceBatchImportPayload): string | u
   );
 }
 
-function firstValidTimestamp(...candidates: Array<string | undefined>): string | undefined {
+function earliestValidTimestamp(...candidates: Array<string | undefined>): string | undefined {
   const validCandidates = candidates
     .filter((candidate): candidate is string =>
       typeof candidate === "string" && Number.isFinite(Date.parse(candidate))
@@ -342,29 +355,65 @@ function firstValidTimestamp(...candidates: Array<string | undefined>): string |
 
 export async function importDeviceProviderSnapshot<TResult = unknown>(
   input: unknown,
-  { corePort, defaultTimeZone, providerRegistry }: DeviceProviderImporterExecutionOptions = {},
+  {
+    corePort,
+    defaultTimeZone,
+    importSession,
+    signal,
+    providerRegistry,
+  }: DeviceProviderImporterExecutionOptions = {},
 ): Promise<TResult> {
+  signal?.throwIfAborted();
   const writer = assertCanonicalWritePort(corePort, ["importDeviceBatch"]);
   const resolvedDefaultTimeZone =
     defaultTimeZone ?? await resolveSnapshotImportDefaultTimeZone(input, corePort);
+  signal?.throwIfAborted();
+  const normalizationStartedAt = performance.now();
   const payload = await prepareDeviceProviderSnapshotImport(input, {
     defaultTimeZone: resolvedDefaultTimeZone,
     providerRegistry,
   });
-  const result = await writer.importDeviceBatch(payload);
+  signal?.throwIfAborted();
+  const normalizationElapsedMs = Math.max(0, performance.now() - normalizationStartedAt);
+  const coreTimingRef: {
+    value?: Parameters<NonNullable<DeviceBatchImportExecutionOptions["onTiming"]>>[0];
+  } = {};
+  const result = await writer.importDeviceBatch(payload, {
+    signal,
+    ...(importSession ? { session: importSession } : {}),
+    onTiming: (timing) => {
+      coreTimingRef.value = timing;
+    },
+  });
   const resultRecord = readPlainObject(result);
-  if (payload.provider !== "junction" || !resultRecord || !Array.isArray(resultRecord.events)) {
+  if (!resultRecord) {
     return result as TResult;
   }
-
+  const resultWithCoverage = payload.provider === "junction" && Array.isArray(resultRecord.events)
+    ? {
+        ...resultRecord,
+        junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(
+          resultRecord.events.filter(isEventRecord),
+          {
+            providerPulledAt: resolveJunctionCoverageProviderPulledAt(input),
+          },
+        ),
+      }
+    : resultRecord;
+  const coreTiming = coreTimingRef.value;
+  if (!coreTiming) {
+    return resultWithCoverage as TResult;
+  }
+  const timing: DeviceProviderSnapshotImportTiming = {
+    canonicalCoreElapsedMs: coreTiming.totalElapsedMs,
+    canonicalWriteElapsedMs: coreTiming.canonicalWriteElapsedMs,
+    eventIdentityIndexCacheHit: coreTiming.eventIdentityIndexCacheHit,
+    eventIdentityIndexElapsedMs: coreTiming.eventIdentityIndexElapsedMs,
+    normalizationElapsedMs,
+  };
   return {
-    ...resultRecord,
-    junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(
-      resultRecord.events.filter(isEventRecord),
-      {
-        providerPulledAt: resolveJunctionCoverageProviderPulledAt(input),
-      },
-    ),
+    ...resultWithCoverage,
+    deviceProviderSnapshotImportTiming: timing,
   } as TResult;
 }
 

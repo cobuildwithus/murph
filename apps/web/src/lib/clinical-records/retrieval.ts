@@ -1,9 +1,15 @@
 import "server-only";
 
+import { renewClinicalAccess, CLEAR_CLINICAL_PERSISTENT_ACCESS, clinicalCredentialsAfterCheck } from "./persistent-access";
+
+import { epicImportQueryEnabled } from "./epic-import-config";
+
+import { lockHostedMemberRow } from "../hosted-onboarding/shared";
+import { readHostedRuntimeAiAccessDecision } from "../hosted-onboarding/member-access";
+
 import { createHash, randomBytes } from "node:crypto";
 
 import {
-  CLINICAL_FHIR_RESOURCE_TYPES,
   clinicalFhirRetrievalPlanSchema,
   clinicalSourceSystemSchema,
   hashClinicalFhirPageUrl,
@@ -15,16 +21,16 @@ import {
 import {
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
   HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
-  HOSTED_CLINICAL_RECORDS_MAX_PAGES,
-  HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES,
+  HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES,
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+  type HostedClinicalRecordsFetchDocumentRequest,
+  type HostedClinicalRecordsFetchDocumentResponse,
   type HostedClinicalRecordsFetchPageRequest,
   type HostedClinicalRecordsFetchPageResponse,
   type HostedClinicalRecordsOutcomeCounts,
   type HostedClinicalRecordsReadRunResponse,
   type HostedClinicalRecordsRecordOutcomeRequest,
-  type HostedClinicalRecordsRetrievalScope,
-  type HostedClinicalRecordsAnyRunDescriptor,
+  type HostedClinicalRecordsRunDescriptor,
 } from "@murphai/hosted-execution/clinical-records";
 import type { Prisma } from "@prisma/client";
 
@@ -39,6 +45,7 @@ import {
   openClinicalConnectionFhirBaseUrl,
   openClinicalConnectionSecret,
   openClinicalPageCursor,
+  openClinicalDocumentTicket,
   sealClinicalPageCursor,
 } from "./secrets";
 import {
@@ -47,9 +54,9 @@ import {
 } from "./errors";
 import {
   buildEpicBetaInitialFhirPageUrl,
-  buildEpicBetaRetrievalPlan,
-  buildEpicLegacyBetaRetrievalPlan,
   EPIC_BETA_FHIR_PAGE_COUNT,
+  epicBinaryReadIsGranted,
+  epicMediaReadIsGranted,
 } from "./epic-policy";
 import {
   ClinicalResponseBodyLimitError,
@@ -57,10 +64,25 @@ import {
   readClinicalResponseBytes,
 } from "./response-bytes";
 
+import {
+  clinicalDocumentTicketSchema,
+  issueClinicalDocumentTickets,
+  readClinicalMediaResponse,
+  readClinicalDocumentResponse,
+  resolveClinicalDocumentUrl,
+} from "./documents";
+
 const FHIR_REQUEST_TIMEOUT_MS = 20_000;
 const FHIR_NEXT_URL_MAX_CHARS = 1_024;
 const PAGE_REQUEST_CLAIM_STALE_MS = 30_000;
 const PAGE_EGRESS_RESERVATION_BYTES = HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS;
+const DOCUMENT_MEDIA_RESPONSE_MAX_BYTES = 64 * 1024;
+const DOCUMENT_EGRESS_RESERVATION_BYTES = HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES
+  + DOCUMENT_MEDIA_RESPONSE_MAX_BYTES;
+// PostgreSQL Int columns retain cumulative accounting; this is a storage safety
+// ceiling, not the former small-chart retrieval budget. Execution yields locally.
+const RETRIEVAL_COUNTER_MAX = 2_147_483_647;
+const MAX_LOGICAL_REQUEST_CLAIM_VERSION = 20;
 const TOKEN_EXPIRY_LEEWAY_MS = 60_000;
 const RETRIEVAL_REQUEST_ID_PREFIX = "crq_";
 const FHIR_PATIENT_ID_PATTERN = /^[A-Za-z0-9.-]{1,64}$/u;
@@ -72,7 +94,6 @@ const TERMINAL_RUN_STATUSES = new Set([
   "canceled",
 ]);
 const ACTIVE_RUN_STATUSES = new Set(["queued", "retrieving", "importing"]);
-const ALLOWED_RESOURCE_TYPES = new Set<string>(CLINICAL_FHIR_RESOURCE_TYPES);
 
 type ClinicalRetrievalTx = Prisma.TransactionClient;
 
@@ -87,6 +108,7 @@ interface RunnableClinicalRun {
   connection: {
     accessTokenEncrypted: string | null;
     accessTokenExpiresAt: Date | null;
+    refreshTokenEncrypted: string | null;
     fhirBaseHash: string;
     fhirBaseUrlEncrypted: string;
     id: string;
@@ -108,7 +130,7 @@ interface RunnableClinicalRun {
   pageCount: number;
   providerRequestCount: number;
   retrievalPlan: ClinicalFhirRetrievalPlan;
-  retrievalProtocol: "query-slices-v2" | null;
+  retrievalProtocol: "query-slices-v2";
   resourceTypes: HostedClinicalRecordsFetchPageRequest["resourceType"][];
   status: string;
 }
@@ -123,7 +145,7 @@ export async function readClinicalRetrievalRun(input: {
   memberId: string;
   runId: string;
 }): Promise<
-  | { run: HostedClinicalRecordsAnyRunDescriptor; status: "ready" }
+  | { run: HostedClinicalRecordsRunDescriptor; status: "ready" }
   | Extract<HostedClinicalRecordsReadRunResponse, { status: "unavailable" }>
 > {
   const loaded = await loadRunnableClinicalRun(input);
@@ -159,16 +181,7 @@ export async function readClinicalRetrievalRun(input: {
     sourceSystem: run.connection.sourceSystem,
   } as const;
   return {
-    run: run.retrievalProtocol === "query-slices-v2"
-      ? {
-          ...runDescriptorBase,
-          retrievalProtocol: run.retrievalProtocol,
-          retrievalSlices: run.retrievalPlan.slices,
-        }
-      : {
-          ...runDescriptorBase,
-          retrievalScopes: buildRetrievalScopes(run.retrievalPlan),
-        },
+    run: { ...runDescriptorBase, retrievalProtocol: run.retrievalProtocol, retrievalSlices: run.retrievalPlan.slices },
     status: "ready",
   };
 }
@@ -185,22 +198,19 @@ export async function fetchClinicalRetrievalPage(input: {
   });
   if ("unavailable" in loaded) return unavailable(loaded.unavailable, loaded.retryable);
   const run = loaded.run;
-  if (
-    !("retrievalProtocol" in input.request)
-    && !run.resourceTypes.includes(input.request.resourceType)
-  ) {
-    return unavailable("resource-family-not-requested", false);
-  }
   const retrievalSlice = resolveRequestedRetrievalSlice(run, input.request);
   if (!retrievalSlice) {
     return unavailable("retrieval-identity-mismatch", false);
+  }
+  if (!epicImportQueryEnabled(run.connection.providerDirectoryEntryId, retrievalSlice.queryScopeId)) {
+    return unavailable("hospital-approval-required", false);
   }
   if (!run.resourceTypes.includes(input.request.resourceType)) {
     return unavailable("resource-family-not-requested", false);
   }
   if (
-    run.providerRequestCount >= HOSTED_CLINICAL_RECORDS_MAX_PAGES
-    || run.egressBytes > HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES - PAGE_EGRESS_RESERVATION_BYTES
+    run.providerRequestCount >= RETRIEVAL_COUNTER_MAX
+    || run.egressBytes > RETRIEVAL_COUNTER_MAX - PAGE_EGRESS_RESERVATION_BYTES
   ) {
     return unavailable("retrieval-bound-reached", false);
   }
@@ -221,9 +231,7 @@ export async function fetchClinicalRetrievalPage(input: {
     ? await openClinicalPageCursor({
         generation: run.generation,
         memberId: input.memberId,
-        ...(run.retrievalProtocol === "query-slices-v2"
-          ? queryCursorIdentity(retrievalSlice)
-          : {}),
+        ...queryCursorIdentity(retrievalSlice),
         resourceType: input.request.resourceType,
         runId: run.id,
         value: input.request.cursor,
@@ -235,7 +243,7 @@ export async function fetchClinicalRetrievalPage(input: {
     pageUrl = openedCursor
       ? parsePageCursor(
           openedCursor,
-          run.retrievalProtocol === "query-slices-v2" ? retrievalSlice : null,
+          retrievalSlice,
         )
       : (() => {
           const url = buildInitialFhirPageUrl({
@@ -256,8 +264,7 @@ export async function fetchClinicalRetrievalPage(input: {
   }
 
   const pageUrlHash = hashClinicalFhirPageUrl(pageUrl.raw);
-  const requestFingerprint = run.retrievalProtocol === "query-slices-v2"
-    ? sha256Hex([
+  const requestFingerprint = sha256Hex([
         run.connection.id,
         String(run.generation),
         run.id,
@@ -266,22 +273,13 @@ export async function fetchClinicalRetrievalPage(input: {
         retrievalSlice.queryFingerprint,
         retrievalSlice.sliceId,
         pageUrlHash,
-      ].join("\n"))
-    : sha256Hex([
-        String(run.generation),
-        input.request.resourceType,
-        pageUrlHash,
       ].join("\n"));
   const claimed = await claimRetrievalPageRequest({
     connectionId: run.connection.id,
     generation: run.generation,
     memberId: input.memberId,
-    ...(run.retrievalProtocol === "query-slices-v2"
-      ? {
-          queryScopeId: retrievalSlice.queryScopeId,
-          sliceId: retrievalSlice.sliceId,
-        }
-      : {}),
+    queryScopeId: retrievalSlice.queryScopeId,
+    sliceId: retrievalSlice.sliceId,
     requestFingerprint,
     runId: run.id,
   });
@@ -291,6 +289,7 @@ export async function fetchClinicalRetrievalPage(input: {
   try {
     const accessToken = await requireCurrentAccessToken({
       memberId: input.memberId,
+      fetchImpl: input.fetchImpl,
       run,
     });
     providerRequestStarted = true;
@@ -299,69 +298,8 @@ export async function fetchClinicalRetrievalPage(input: {
       fetchImpl: input.fetchImpl,
       pageUrl: pageUrl.url,
     });
-    let sanitized: Awaited<ReturnType<typeof readSanitizedFhirPage>>;
-    try {
-      sanitized = await readSanitizedFhirPage({
-        fhirBaseUrl,
-        resourceType: input.request.resourceType,
-        response,
-      });
-    } catch (error) {
-      if (!(error instanceof TypeError)) throw error;
-      throw clinicalRecordsError({
-        cause: error,
-        code: "CLINICAL_RECORD_FHIR_RESPONSE_INVALID",
-        httpStatus: 502,
-        message: "The provider returned an invalid FHIR response.",
-      });
-    }
-    const nextCursor = sanitized.nextUrl
-      ? await sealClinicalPageCursor({
-          generation: run.generation,
-          memberId: input.memberId,
-          ...(run.retrievalProtocol === "query-slices-v2"
-            ? queryCursorIdentity(retrievalSlice)
-            : {}),
-          resourceType: input.request.resourceType,
-          runId: run.id,
-          value: JSON.stringify(run.retrievalProtocol === "query-slices-v2"
-            ? {
-                queryFingerprint: retrievalSlice.queryFingerprint,
-                queryScopeId: retrievalSlice.queryScopeId,
-                resourceType: retrievalSlice.resourceType,
-                schema: "murph.clinical-page-cursor.v3",
-                sliceId: retrievalSlice.sliceId,
-                url: sanitized.nextUrl.raw,
-              }
-            : {
-                schema: "murph.clinical-page-cursor.v2",
-                url: sanitized.nextUrl.raw,
-              }),
-        })
-      : null;
-    if (nextCursor && nextCursor.length > 2_048) {
-      throw clinicalRecordsError({
-        code: "CLINICAL_RECORD_PAGE_CURSOR_TOO_LARGE",
-        httpStatus: 502,
-        message: "The provider pagination cursor was too large.",
-      });
-    }
-    const accounted = await completeRetrievalPageRequest({
-      bodyBytes: sanitized.bodyBytes,
-      claimVersion: claimed.claimVersion,
-      isFirstCompletion: claimed.isFirstCompletion,
-      requestRowId: claimed.requestRowId,
-      run,
-    });
-    if (!accounted) return unavailable("request-superseded", true);
-    return {
-      body: sanitized.body,
-      nextCursor,
-      ...(input.request.cursor
-        ? { pageUrlHash: hashClinicalFhirPageUrl(pageUrl.raw) }
-        : {}),
-      status: "page",
-    };
+    return await finishClinicalRetrievalPage({ response, input, run, retrievalSlice, pageUrl,
+      fhirBaseUrl, openedPatientId: requireFhirPatientId(openedPatientId), claimed });
   } catch (error) {
     await releaseRetrievalPageRequest({
       chargeReservation: providerRequestStarted,
@@ -370,22 +308,20 @@ export async function fetchClinicalRetrievalPage(input: {
       requestRowId: claimed.requestRowId,
       run,
     });
-    if (
-      isClinicalRecordsControlPlaneError(error)
-      && error.code === "CLINICAL_RECORD_SMART_REAUTH_REQUIRED"
-    ) {
-      const marked = await markClinicalConnectionNeedsReauth({
-        connectionId: run.connection.id,
-        generation: run.generation,
-        memberId: input.memberId,
-        observedTokenVersion: run.connection.tokenVersion,
-        runId: run.id,
-      });
-      return marked
-        ? unavailable(HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE, false)
-        : unavailable("credentials-updated-retry", true);
-    }
+    if (error instanceof TypeError) return unavailable("provider-response-invalid", false);
     if (isClinicalRecordsControlPlaneError(error)) {
+      if (error.code === "CLINICAL_RECORD_SMART_REAUTH_REQUIRED") {
+        const marked = await markClinicalConnectionNeedsReauth({
+          connectionId: run.connection.id,
+          generation: run.generation,
+          memberId: input.memberId,
+          observedTokenVersion: run.connection.tokenVersion,
+          runId: run.id,
+        });
+        return marked
+          ? unavailable(HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE, false)
+          : unavailable("credentials-updated-retry", true);
+      }
       return unavailable(
         error.code === "CLINICAL_RECORD_FHIR_FAMILY_UNAVAILABLE"
           ? "family-unavailable"
@@ -403,12 +339,197 @@ export async function fetchClinicalRetrievalPage(input: {
   }
 }
 
+/** Reads only a server-attested attachment from a currently authorized run. */
+export async function fetchClinicalRetrievalDocument(input: {
+  fetchImpl?: typeof fetch;
+  memberId: string;
+  request: HostedClinicalRecordsFetchDocumentRequest;
+}): Promise<HostedClinicalRecordsFetchDocumentResponse> {
+  const loaded = await loadRunnableClinicalRun({ generation: input.request.generation,
+    memberId: input.memberId, runId: input.request.runId });
+  if ("unavailable" in loaded) return unavailable(loaded.unavailable, loaded.retryable);
+  const run = loaded.run;
+  const grantedScopes = parseStoredStringArray(run.grantedScopesJson, "granted scopes");
+  if (!epicBinaryReadIsGranted(grantedScopes)) return unavailable("document-scope-unavailable", false);
+  const prepared = await loadClinicalDocumentRequest({ input, run, grantedScopes });
+  if ("unavailable" in prepared) return unavailable(prepared.unavailable, prepared.retryable);
+  const { ticket, url, fhirBaseUrl, patientIdHash } = prepared;
+  // Ciphertext is randomized; the attested parent and URL own logical identity.
+  const requestFingerprint = sha256Hex(["document", run.connection.id, String(run.generation), run.id,
+    ticket.queryScopeId, ticket.sliceId, ticket.parentPageSha256, ticket.resourceType,
+    ticket.resourceId, ticket.resourceVersion ?? "", String(ticket.attachmentIndex), url.href].join("\n"));
+  const claimed = await claimRetrievalPageRequest({ connectionId: run.connection.id,
+    generation: run.generation, memberId: input.memberId, queryScopeId: ticket.queryScopeId,
+    sliceId: ticket.sliceId, requestFingerprint, runId: run.id,
+    reservationBytes: DOCUMENT_EGRESS_RESERVATION_BYTES });
+  if (!claimed.claimed) return unavailable(claimed.errorCode, claimed.retryable);
+  let providerRequestStarted = false;
+  try {
+    const accessToken = await requireCurrentAccessToken({ memberId: input.memberId, fetchImpl: input.fetchImpl, run });
+    providerRequestStarted = true;
+    const response = await fetchFhirPage({ accessToken, fetchImpl: input.fetchImpl, pageUrl: url,
+      accept: "application/fhir+json, application/json, */*;q=0.5" });
+    const document = (ticket.sourceKind ?? "binary") === "media"
+      ? await fetchMediaDocument({ response, mediaUrl: url, fhirBaseUrl, patientIdHash, accessToken, fetchImpl: input.fetchImpl, ticket })
+      : await readClinicalDocumentResponse({ response, ticket, url,
+      maxResponseBytes: DOCUMENT_EGRESS_RESERVATION_BYTES });
+    const accounted = await completeRetrievalPageRequest({ bodyBytes: document.bytes.length,
+      receivedBytes: document.receivedBytes, claimVersion: claimed.claimVersion,
+      isFirstCompletion: claimed.isFirstCompletion, requestRowId: claimed.requestRowId, run,
+      countAsPage: false, reservationBytes: DOCUMENT_EGRESS_RESERVATION_BYTES });
+    if (!accounted) return unavailable("request-superseded", true);
+    return { status: "document", contentBase64: document.bytes.toString("base64"),
+      mediaType: document.mediaType, byteLength: document.bytes.length,
+      sha256: createHash("sha256").update(document.bytes).digest("hex") };
+  } catch (error) {
+    await releaseRetrievalPageRequest({ chargeReservation: providerRequestStarted,
+      claimVersion: claimed.claimVersion, previousCompletedAt: claimed.previousCompletedAt,
+      requestRowId: claimed.requestRowId, run, reservationBytes: DOCUMENT_EGRESS_RESERVATION_BYTES });
+    if (isClinicalRecordsControlPlaneError(error) && error.code === "CLINICAL_RECORD_SMART_REAUTH_REQUIRED") {
+      const marked = await markClinicalConnectionNeedsReauth({ connectionId: run.connection.id,
+        generation: run.generation, memberId: input.memberId,
+        observedTokenVersion: run.connection.tokenVersion, runId: run.id });
+      return marked ? unavailable(HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE, false)
+        : unavailable("credentials-updated-retry", true);
+    }
+    if (error instanceof ClinicalResponseBodyLimitError) return unavailable("document-size-exceeded", false);
+    if (error instanceof TypeError || error instanceof SyntaxError) return unavailable("document-response-invalid", false);
+    if (isClinicalRecordsControlPlaneError(error)) {
+      return unavailable(error.code === "CLINICAL_RECORD_FHIR_FAMILY_UNAVAILABLE"
+        ? "document-unavailable" : error.retryable ? "provider-temporarily-unavailable" : "document-response-invalid", error.retryable);
+    }
+    throw error;
+  }
+}
+
+async function loadClinicalDocumentRequest(input: {
+  input: Parameters<typeof fetchClinicalRetrievalDocument>[0];
+  run: RunnableClinicalRun;
+  grantedScopes: readonly string[];
+}): Promise<{ ticket: ReturnType<typeof clinicalDocumentTicketSchema.parse>; url: URL; fhirBaseUrl: string; patientIdHash: string } | { unavailable: string; retryable: boolean }> {
+  let openedTicket: string;
+  let fhirBaseUrl: string;
+  let patientIdHash: string;
+  try {
+    openedTicket = await openClinicalDocumentTicket({ generation: input.run.generation, memberId: input.input.memberId,
+      runId: input.run.id, value: input.input.request.ticket });
+    fhirBaseUrl = await openClinicalConnectionFhirBaseUrl({ connectionId: input.run.connection.id,
+      encrypted: input.run.connection.fhirBaseUrlEncrypted, memberId: input.input.memberId });
+    const patientId = await openClinicalConnectionSecret({ connectionId: input.run.connection.id,
+      encrypted: input.run.connection.patientIdEncrypted, field: "patientId", memberId: input.input.memberId,
+      tokenVersion: input.run.connection.tokenVersion });
+    patientIdHash = hashClinicalFhirPatientId(requireFhirPatientId(patientId));
+  } catch (error) {
+    const invalid = error instanceof TypeError || error instanceof SyntaxError
+      || (error instanceof DOMException && error.name === "OperationError");
+    return invalid ? { unavailable: "document-ticket-invalid", retryable: false }
+      : { unavailable: "document-ticket-temporarily-unavailable", retryable: true };
+  }
+  try {
+    const ticket = clinicalDocumentTicketSchema.parse(JSON.parse(openedTicket));
+    const slice = input.run.retrievalPlan.slices.find((entry) => entry.queryScopeId === ticket.queryScopeId
+      && entry.sliceId === ticket.sliceId && entry.queryFingerprint === ticket.queryFingerprint
+      && entry.resourceType === ticket.resourceType);
+    if (!slice) return { unavailable: "document-ticket-invalid", retryable: false };
+    if (!epicImportQueryEnabled(input.run.connection.providerDirectoryEntryId, slice.queryScopeId)) {
+      return { unavailable: "hospital-approval-required", retryable: false };
+    }
+    const sourceKind = ticket.sourceKind ?? "binary";
+    if (sourceKind === "media" && !epicMediaReadIsGranted(input.grantedScopes)) return { unavailable: "media-scope-unavailable", retryable: false };
+    return { ticket, url: resolveClinicalDocumentUrl(ticket.url, fhirBaseUrl, sourceKind), fhirBaseUrl, patientIdHash };
+  } catch {
+    return { unavailable: "document-ticket-invalid", retryable: false };
+  }
+}
+
+async function finishClinicalRetrievalPage(input: {
+  response: Response;
+  input: Parameters<typeof fetchClinicalRetrievalPage>[0];
+  run: RunnableClinicalRun;
+  retrievalSlice: ClinicalFhirRetrievalSlice;
+  pageUrl: ValidatedFhirPageUrl;
+  fhirBaseUrl: string;
+  openedPatientId: string;
+  claimed: Extract<Awaited<ReturnType<typeof claimRetrievalPageRequest>>, { claimed: true }>;
+}): Promise<HostedClinicalRecordsFetchPageResponse> {
+  const sanitized = await sanitizeClinicalPageResponse(input);
+  const nextCursor = await sealClinicalContinuationCursor({ ...input, nextUrl: sanitized.nextUrl });
+  const documents = await issueClinicalDocumentTickets({
+    body: sanitized.body, fhirBaseUrl: input.fhirBaseUrl, patientId: requireFhirPatientId(input.openedPatientId),
+    memberId: input.input.memberId, runId: input.run.id, generation: input.run.generation,
+    queryScopeId: input.retrievalSlice.queryScopeId, sliceId: input.retrievalSlice.sliceId,
+    queryFingerprint: input.retrievalSlice.queryFingerprint,
+  });
+  const accounted = await completeRetrievalPageRequest({ bodyBytes: sanitized.bodyBytes, receivedBytes: sanitized.receivedBytes,
+    claimVersion: input.claimed.claimVersion, isFirstCompletion: input.claimed.isFirstCompletion,
+    requestRowId: input.claimed.requestRowId, run: input.run });
+  if (!accounted) return unavailable("request-superseded", true);
+  return { body: sanitized.body, ...(documents.length > 0 ? { documents } : {}), nextCursor,
+    ...(input.input.request.cursor ? { pageUrlHash: hashClinicalFhirPageUrl(input.pageUrl.raw) } : {}), status: "page" };
+}
+
+async function sanitizeClinicalPageResponse(input: {
+  response: Response;
+  input: Parameters<typeof fetchClinicalRetrievalPage>[0];
+  run: RunnableClinicalRun;
+  retrievalSlice: ClinicalFhirRetrievalSlice;
+  pageUrl: ValidatedFhirPageUrl;
+  fhirBaseUrl: string;
+  openedPatientId: string;
+  claimed: Extract<Awaited<ReturnType<typeof claimRetrievalPageRequest>>, { claimed: true }>;
+}): Promise<Awaited<ReturnType<typeof readSanitizedFhirPage>>> {
+  try {
+    return await readSanitizedFhirPage({ fhirBaseUrl: input.fhirBaseUrl,
+      resourceType: input.input.request.resourceType, response: input.response });
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    throw clinicalRecordsError({ cause: error, code: "CLINICAL_RECORD_FHIR_RESPONSE_INVALID", httpStatus: 502,
+      message: "The provider returned an invalid FHIR response." });
+  }
+}
+
+async function sealClinicalContinuationCursor(input: {
+  nextUrl: ValidatedFhirPageUrl | null;
+  input: Parameters<typeof fetchClinicalRetrievalPage>[0];
+  run: RunnableClinicalRun;
+  retrievalSlice: ClinicalFhirRetrievalSlice;
+}): Promise<string | null> {
+  if (!input.nextUrl) return null;
+  const cursor = await sealClinicalPageCursor({ generation: input.run.generation, memberId: input.input.memberId,
+    ...queryCursorIdentity(input.retrievalSlice), resourceType: input.input.request.resourceType, runId: input.run.id,
+    value: JSON.stringify({ queryFingerprint: input.retrievalSlice.queryFingerprint,
+      queryScopeId: input.retrievalSlice.queryScopeId, resourceType: input.retrievalSlice.resourceType,
+      schema: "murph.clinical-page-cursor.v3", sliceId: input.retrievalSlice.sliceId, url: input.nextUrl.raw }) });
+  if (cursor.length > 2_048) throw clinicalRecordsError({ code: "CLINICAL_RECORD_PAGE_CURSOR_TOO_LARGE", httpStatus: 502,
+    message: "The provider pagination cursor was too large." });
+  return cursor;
+}
+
+async function fetchMediaDocument(input: {
+  response: Response;
+  mediaUrl: URL;
+  fhirBaseUrl: string;
+  patientIdHash: string;
+  accessToken: string;
+  fetchImpl?: typeof fetch;
+  ticket: ReturnType<typeof clinicalDocumentTicketSchema.parse>;
+}): Promise<{ bytes: Buffer; mediaType: string; receivedBytes: number }> {
+  const media = await readClinicalMediaResponse({ response: input.response, mediaUrl: input.mediaUrl,
+    fhirBaseUrl: input.fhirBaseUrl, patientIdHash: input.patientIdHash, maxResponseBytes: DOCUMENT_MEDIA_RESPONSE_MAX_BYTES });
+  const binaryResponse = await fetchFhirPage({ accessToken: input.accessToken, fetchImpl: input.fetchImpl,
+    pageUrl: media.binaryUrl, accept: "application/fhir+json, application/json, */*;q=0.5" });
+  const document = await readClinicalDocumentResponse({ response: binaryResponse, ticket: input.ticket, attachmentIntegrity: media.attachmentIntegrity,
+    url: media.binaryUrl, maxResponseBytes: DOCUMENT_EGRESS_RESERVATION_BYTES });
+  return { ...document, receivedBytes: media.receivedBytes + document.receivedBytes };
+}
+
 export async function recordClinicalRetrievalOutcome(input: {
   memberId: string;
   request: HostedClinicalRecordsRecordOutcomeRequest;
 }): Promise<void> {
   const now = new Date();
   await getPrisma().$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
     const run = await tx.clinicalRecordRetrievalRun.findFirst({
       include: { connection: true },
       where: {
@@ -418,12 +539,11 @@ export async function recordClinicalRetrievalOutcome(input: {
       },
     });
     if (!run) throw staleRunError();
-    assertOutcomeRetrievalIdentity({
-      createdAt: run.createdAt,
+    assertOutcomeMatchesRun({
       request: input.request,
+      pageCount: run.pageCount,
       retrievalPlanJson: run.retrievalPlanJson,
       retrievalProtocol: run.retrievalProtocol,
-      resourceTypesJson: run.resourceTypesJson,
     });
     if (input.request.status === "preempted") {
       if (run.completedAt) throw staleRunError();
@@ -448,6 +568,27 @@ export async function recordClinicalRetrievalOutcome(input: {
       if (preempted.count !== 1) throw staleRunError();
       return;
     }
+    if (
+      run.status === "needs_reauth"
+      && run.connection.status === "needs_reauth"
+      && run.connection.retrievalGeneration === run.generation
+      && ((input.request.status === "partial" && input.request.errorCode === HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE)
+        || (input.request.status === "failed" && input.request.errorCode === "snapshot_rejected"))
+    ) {
+      if (run.outcomeCountsJson !== null) {
+        if (stableJson(run.outcomeCountsJson) === stableJson(input.request.counts)) return;
+        throw outcomeConflictError();
+      }
+      await tx.clinicalRecordRetrievalRun.update({
+        where: { id: run.id },
+        data: {
+          importedCount: input.request.counts.createdCount,
+          reviewCount: input.request.counts.reviewDecisionCount,
+          outcomeCountsJson: { ...input.request.counts },
+        },
+      });
+      return;
+    }
     const storedStatus = mapOutcomeStatus(input.request.status);
     if (run.completedAt) {
       if (
@@ -466,16 +607,6 @@ export async function recordClinicalRetrievalOutcome(input: {
     if (!generationIsCurrent || !connectionIsActive) {
       throw staleRunError();
     }
-    if (
-      (input.request.status === "completed" || input.request.status === "partial")
-      && input.request.counts.fetchedPageCount !== run.pageCount
-    ) {
-      throw clinicalRecordsError({
-        code: "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH",
-        httpStatus: 409,
-        message: "The Clinical Records retrieval page count does not match the control plane.",
-      });
-    }
     const connectionData = input.request.status === "failed"
       ? {
           lastErrorCode: input.request.errorCode ?? "retrieval-failed",
@@ -487,7 +618,11 @@ export async function recordClinicalRetrievalOutcome(input: {
           status: "active",
         };
     const updatedConnection = await tx.clinicalRecordConnection.updateMany({
-      data: connectionData,
+      data: {
+        ...connectionData,
+        lastCheckedAt: now,
+        ...clinicalCredentialsAfterCheck(Boolean(run.connection.refreshTokenEncrypted), now),
+      },
       where: {
         id: run.connectionId,
         memberId: input.memberId,
@@ -582,24 +717,6 @@ export async function signalClinicalRetrievalWake(
   }
 }
 
-function buildRetrievalScopes(
-  retrievalPlan: ClinicalFhirRetrievalPlan,
-): HostedClinicalRecordsRetrievalScope[] {
-  return retrievalPlan.slices.map((slice) => slice.coverage === "whole-family"
-    ? {
-        coverage: slice.coverage,
-        queryFingerprint: slice.queryFingerprint,
-        resourceType: slice.resourceType,
-      }
-    : {
-        coverage: slice.coverage,
-        from: slice.from,
-        queryFingerprint: slice.queryFingerprint,
-        resourceType: slice.resourceType,
-        to: slice.to,
-      });
-}
-
 async function loadRunnableClinicalRun(input: {
   generation: number;
   memberId: string;
@@ -608,12 +725,16 @@ async function loadRunnableClinicalRun(input: {
   | { run: RunnableClinicalRun }
   | { retryable: boolean; unavailable: string }
 > {
+  if (!(await readHostedRuntimeAiAccessDecision({ memberId: input.memberId })).allowed) {
+    return { unavailable: "member-processing-inactive", retryable: false };
+  }
   const record = await getPrisma().clinicalRecordRetrievalRun.findFirst({
     select: {
       connection: {
         select: {
           accessTokenEncrypted: true,
           accessTokenExpiresAt: true,
+          refreshTokenEncrypted: true,
           fhirBaseHash: true,
           fhirBaseUrlEncrypted: true,
           id: true,
@@ -637,7 +758,6 @@ async function loadRunnableClinicalRun(input: {
       providerRequestCount: true,
       retrievalPlanJson: true,
       retrievalProtocol: true,
-      resourceTypesJson: true,
       status: true,
     },
     where: {
@@ -671,23 +791,15 @@ async function loadRunnableClinicalRun(input: {
   ) {
     return { retryable: false, unavailable: "credentials-unavailable" };
   }
-  let resourceTypes: HostedClinicalRecordsFetchPageRequest["resourceType"][];
   let retrievalPlan: ClinicalFhirRetrievalPlan;
   let sourceSystem: ClinicalSourceSystem;
   try {
-    resourceTypes = parseStoredResourceTypes(record.resourceTypesJson);
     if (
-      record.retrievalProtocol !== null
-      && record.retrievalProtocol !== "query-slices-v2"
+      record.retrievalProtocol !== "query-slices-v2"
     ) {
       throw new TypeError("Stored Clinical Records retrieval protocol is unsupported.");
     }
-    retrievalPlan = parseStoredRetrievalPlan({
-      createdAt: record.createdAt,
-      protocol: record.retrievalProtocol,
-      resourceTypes,
-      value: record.retrievalPlanJson,
-    });
+    retrievalPlan = clinicalFhirRetrievalPlanSchema.parse(record.retrievalPlanJson);
     sourceSystem = clinicalSourceSystemSchema.parse(record.connection.sourceSystem);
   } catch {
     return { retryable: false, unavailable: "run-configuration-invalid" };
@@ -705,8 +817,8 @@ async function loadRunnableClinicalRun(input: {
       pageCount: record.pageCount,
       providerRequestCount: record.providerRequestCount,
       retrievalPlan,
-      retrievalProtocol: record.retrievalProtocol,
-      resourceTypes,
+      retrievalProtocol: "query-slices-v2",
+      resourceTypes: [...new Set(retrievalPlan.slices.map((slice) => slice.resourceType))],
       status: record.status,
     },
   };
@@ -727,13 +839,12 @@ function buildInitialFhirPageUrl(input: {
 
 function parsePageCursor(
   plaintext: string,
-  expectedSlice: ClinicalFhirRetrievalSlice | null,
+  expectedSlice: ClinicalFhirRetrievalSlice,
 ): ValidatedFhirPageUrl {
   const parsed: unknown = JSON.parse(plaintext);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new TypeError("Invalid cursor.");
   const record = parsed as Record<string, unknown>;
-  if (expectedSlice) {
-    if (
+  if (
       Object.keys(record).sort().join(",")
         !== "queryFingerprint,queryScopeId,resourceType,schema,sliceId,url"
       || record.schema !== "murph.clinical-page-cursor.v3"
@@ -742,12 +853,6 @@ function parsePageCursor(
       || record.resourceType !== expectedSlice.resourceType
       || record.sliceId !== expectedSlice.sliceId
     ) throw new TypeError("Invalid cursor.");
-  } else if (
-    Object.keys(record).sort().join(",") !== "schema,url"
-    || record.schema !== "murph.clinical-page-cursor.v2"
-  ) {
-    throw new TypeError("Invalid cursor.");
-  }
   if (
     typeof record.url !== "string"
     || hasSurroundingAsciiWhitespace(record.url)
@@ -760,31 +865,9 @@ function resolveRequestedRetrievalSlice(
   run: RunnableClinicalRun,
   request: HostedClinicalRecordsFetchPageRequest,
 ): ClinicalFhirRetrievalSlice | null {
-  const queryAwareRequest = "retrievalProtocol" in request;
-  if ((run.retrievalProtocol === "query-slices-v2") !== queryAwareRequest) {
-    return null;
-  }
-  if (queryAwareRequest) {
-    const slice = run.retrievalPlan.slices.find((candidate) =>
-      candidate.queryScopeId === request.queryScopeId
-      && candidate.sliceId === request.sliceId
-    );
-    if (
-      !slice
-      || slice.resourceType !== request.resourceType
-      || (
-        request.queryFingerprint !== undefined
-        && request.queryFingerprint !== slice.queryFingerprint
-      )
-    ) {
-      return null;
-    }
-    return slice;
-  }
-  const matches = run.retrievalPlan.slices.filter(
-    (candidate) => candidate.resourceType === request.resourceType,
-  );
-  return matches.length === 1 ? matches[0] ?? null : null;
+  return run.retrievalPlan.slices.find((slice) => slice.queryScopeId === request.queryScopeId
+    && slice.sliceId === request.sliceId && slice.resourceType === request.resourceType
+    && slice.queryFingerprint === request.queryFingerprint) ?? null;
 }
 
 function queryCursorIdentity(
@@ -828,14 +911,17 @@ function assertFhirPageUrlAllowed(input: {
 }
 
 async function requireCurrentAccessToken(input: {
+  fetchImpl?: typeof fetch;
   memberId: string;
   run: RunnableClinicalRun;
 }): Promise<string> {
   const connection = input.run.connection;
   if (
-    connection.accessTokenExpiresAt !== null
-    && connection.accessTokenExpiresAt.getTime() <= Date.now() + TOKEN_EXPIRY_LEEWAY_MS
+    (connection.accessTokenExpiresAt === null && connection.refreshTokenEncrypted)
+    || (connection.accessTokenExpiresAt !== null
+      && connection.accessTokenExpiresAt.getTime() <= Date.now() + TOKEN_EXPIRY_LEEWAY_MS)
   ) {
+    if (connection.refreshTokenEncrypted) return renewClinicalAccess({ connectionId: connection.id, memberId: input.memberId, generation: input.run.generation, fetchImpl: input.fetchImpl });
     throw reauthRequiredError();
   }
   const accessToken = await openClinicalConnectionSecret({
@@ -851,6 +937,7 @@ async function requireCurrentAccessToken(input: {
 
 async function fetchFhirPage(input: {
   accessToken: string;
+  accept?: string;
   fetchImpl?: typeof fetch;
   pageUrl: URL;
 }): Promise<Response> {
@@ -859,7 +946,7 @@ async function fetchFhirPage(input: {
     response = await (input.fetchImpl ?? fetch)(input.pageUrl, {
       cache: "no-store",
       headers: {
-        Accept: "application/fhir+json, application/json",
+        Accept: input.accept ?? "application/fhir+json, application/json",
         Authorization: `Bearer ${input.accessToken}`,
       },
       method: "GET",
@@ -898,7 +985,7 @@ async function readSanitizedFhirPage(input: {
   fhirBaseUrl: string;
   resourceType: string;
   response: Response;
-}): Promise<{ body: string; bodyBytes: number; nextUrl: ValidatedFhirPageUrl | null }> {
+}): Promise<{ body: string; bodyBytes: number; receivedBytes: number; nextUrl: ValidatedFhirPageUrl | null }> {
   const contentType = input.response.headers.get("content-type")?.toLowerCase() ?? "";
   if (contentType && !contentType.includes("json")) throw invalidFhirResponseError();
   let bytes: Uint8Array;
@@ -953,7 +1040,7 @@ async function readSanitizedFhirPage(input: {
   if (body.length > HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS || bodyBytes > HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS) {
     throw invalidFhirResponseError();
   }
-  return { body, bodyBytes, nextUrl };
+  return { body, bodyBytes, receivedBytes: bytes.byteLength, nextUrl };
 }
 
 function isMarkedFhirSearchOutcomeEntry(
@@ -1000,6 +1087,7 @@ function hasSurroundingAsciiWhitespace(value: string): boolean {
 }
 
 async function claimRetrievalPageRequest(input: {
+  reservationBytes?: number;
   connectionId: string;
   generation: number;
   memberId: string;
@@ -1047,17 +1135,24 @@ async function claimRetrievalPageRequest(input: {
     || record.queryScopeId !== (input.queryScopeId ?? null)
     || record.sliceId !== (input.sliceId ?? null)
   ) return { claimed: false, errorCode: "request-page-conflict", retryable: false };
+  if (record.claimVersion >= MAX_LOGICAL_REQUEST_CLAIM_VERSION) {
+    return { claimed: false, errorCode: "request-retry-limit-reached", retryable: false };
+  }
   const isFirstCompletion = record.responseBytes === null;
   const previousCompletedAt = record.completedAt;
   const staleBefore = new Date(now.getTime() - PAGE_REQUEST_CLAIM_STALE_MS);
   try {
     return await prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, input.memberId);
+      if (!(await readHostedRuntimeAiAccessDecision({ memberId: input.memberId, prisma: tx })).allowed) {
+        return { claimed: false, errorCode: "member-processing-inactive", retryable: false } as const;
+      }
       const reclaimed = await tx.clinicalRecordRetrievalRequest.updateMany({
         data: {
           claimVersion: { increment: 1 },
           claimedAt: now,
           completedAt: null,
-          reservedBytes: PAGE_EGRESS_RESERVATION_BYTES,
+          reservedBytes: (input.reservationBytes ?? PAGE_EGRESS_RESERVATION_BYTES),
         },
         where: {
           claimVersion: record.claimVersion,
@@ -1073,7 +1168,7 @@ async function claimRetrievalPageRequest(input: {
       }
       const reserved = await tx.clinicalRecordRetrievalRun.updateMany({
         data: {
-          egressBytes: { increment: PAGE_EGRESS_RESERVATION_BYTES },
+          egressBytes: { increment: (input.reservationBytes ?? PAGE_EGRESS_RESERVATION_BYTES) },
           providerRequestCount: { increment: 1 },
           startedAt: now,
           status: "retrieving",
@@ -1081,12 +1176,13 @@ async function claimRetrievalPageRequest(input: {
         where: {
           completedAt: null,
           egressBytes: {
-            lte: HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES - PAGE_EGRESS_RESERVATION_BYTES,
+            lte: RETRIEVAL_COUNTER_MAX - (input.reservationBytes ?? PAGE_EGRESS_RESERVATION_BYTES),
           },
           generation: input.generation,
           id: input.runId,
           memberId: input.memberId,
-          providerRequestCount: { lt: HOSTED_CLINICAL_RECORDS_MAX_PAGES },
+          connection: { retrievalGeneration: input.generation, status: { in: ["active", "error"] } },
+          providerRequestCount: { lt: RETRIEVAL_COUNTER_MAX },
           status: { in: [...ACTIVE_RUN_STATUSES] },
         },
       });
@@ -1108,7 +1204,10 @@ async function claimRetrievalPageRequest(input: {
 }
 
 async function completeRetrievalPageRequest(input: {
+  reservationBytes?: number;
+  countAsPage?: boolean;
   bodyBytes: number;
+  receivedBytes: number;
   claimVersion: number;
   isFirstCompletion: boolean;
   requestRowId: string;
@@ -1127,16 +1226,16 @@ async function completeRetrievalPageRequest(input: {
         claimVersion: input.claimVersion,
         completedAt: null,
         id: input.requestRowId,
-        reservedBytes: PAGE_EGRESS_RESERVATION_BYTES,
+        reservedBytes: (input.reservationBytes ?? PAGE_EGRESS_RESERVATION_BYTES),
         responseBytes: input.isFirstCompletion ? null : { not: null },
       },
     });
     if (completed.count !== 1) return false;
     const updated = await tx.clinicalRecordRetrievalRun.updateMany({
       data: {
-        egressBytes: { decrement: PAGE_EGRESS_RESERVATION_BYTES - input.bodyBytes },
+        egressBytes: { decrement: (input.reservationBytes ?? PAGE_EGRESS_RESERVATION_BYTES) - input.receivedBytes },
         fetchedBytes: { increment: input.bodyBytes },
-        pageCount: input.isFirstCompletion ? { increment: 1 } : undefined,
+        pageCount: input.isFirstCompletion && input.countAsPage !== false ? { increment: 1 } : undefined,
       },
       where: {
         completedAt: null,
@@ -1158,6 +1257,7 @@ async function completeRetrievalPageRequest(input: {
 }
 
 async function releaseRetrievalPageRequest(input: {
+  reservationBytes?: number;
   chargeReservation: boolean;
   claimVersion: number;
   previousCompletedAt: Date | null;
@@ -1175,12 +1275,12 @@ async function releaseRetrievalPageRequest(input: {
         claimVersion: input.claimVersion,
         completedAt: null,
         id: input.requestRowId,
-        reservedBytes: PAGE_EGRESS_RESERVATION_BYTES,
+        reservedBytes: (input.reservationBytes ?? PAGE_EGRESS_RESERVATION_BYTES),
       },
     });
     if (released.count !== 1 || input.chargeReservation) return;
     await tx.clinicalRecordRetrievalRun.updateMany({
-      data: { egressBytes: { decrement: PAGE_EGRESS_RESERVATION_BYTES } },
+      data: { egressBytes: { decrement: (input.reservationBytes ?? PAGE_EGRESS_RESERVATION_BYTES) } },
       where: {
         completedAt: null,
         generation: input.run.generation,
@@ -1208,8 +1308,8 @@ async function markClinicalConnectionNeedsReauth(input: {
         accessTokenEncrypted: null,
         accessTokenExpiresAt: null,
         lastErrorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+        ...CLEAR_CLINICAL_PERSISTENT_ACCESS,
         patientIdEncrypted: null,
-        refreshTokenEncrypted: null,
         status: "needs_reauth",
       },
       where: {
@@ -1250,31 +1350,27 @@ function mapOutcomeStatus(status: HostedClinicalRecordsRecordOutcomeRequest["sta
   return status;
 }
 
-function assertOutcomeRetrievalIdentity(input: {
-  createdAt: Date;
+function assertOutcomeMatchesRun(input: {
+  pageCount: number;
   request: HostedClinicalRecordsRecordOutcomeRequest;
   retrievalPlanJson: Prisma.JsonValue | null;
   retrievalProtocol: string | null;
-  resourceTypesJson: Prisma.JsonValue;
 }): void {
-  const queryAwareOutcome = input.request.retrievalProtocol === "query-slices-v2";
-  if (queryAwareOutcome && input.retrievalProtocol !== "query-slices-v2") {
-    throw outcomeConflictError();
+  if (
+    input.request.status !== "preempted" &&
+    (input.request.counts.fetchedPageCount > input.pageCount ||
+      (input.request.status === "completed" &&
+        input.request.counts.fetchedPageCount !== input.pageCount))
+  ) {
+    throw clinicalRecordsError({
+      code: "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH",
+      httpStatus: 409,
+      message: "The Clinical Records retrieval page count does not match the control plane.",
+    });
   }
-  if (!queryAwareOutcome) {
-    // The PR 1 runner reports the legacy aggregate outcome even when it has
-    // consumed a query-aware descriptor. Keep that one deploy-skew reader until
-    // old runner bundles and their serviceable in-flight runs have drained and
-    // the runtime rollback floor has advanced.
-    return;
-  }
-  const resourceTypes = parseStoredResourceTypes(input.resourceTypesJson);
-  const plan = parseStoredRetrievalPlan({
-    createdAt: input.createdAt,
-    protocol: "query-slices-v2",
-    resourceTypes,
-    value: input.retrievalPlanJson,
-  });
+
+  if (input.retrievalProtocol !== "query-slices-v2") throw outcomeConflictError();
+  const plan = clinicalFhirRetrievalPlanSchema.parse(input.retrievalPlanJson);
   const expected = plan.slices.map((slice) => ({
     queryScopeId: slice.queryScopeId,
     sliceId: slice.sliceId,
@@ -1290,53 +1386,6 @@ function outcomeConflictError() {
     httpStatus: 409,
     message: "The Clinical Records retrieval outcome does not match its frozen query plan.",
   });
-}
-
-function parseStoredResourceTypes(
-  value: Prisma.JsonValue,
-): HostedClinicalRecordsFetchPageRequest["resourceType"][] {
-  const types = parseStoredStringArray(value, "resource types");
-  const resourceTypes = types.filter(isClinicalFhirResourceType);
-  if (resourceTypes.length !== types.length) {
-    throw new TypeError("Stored Clinical Records resource types are invalid.");
-  }
-  return resourceTypes;
-}
-
-function parseStoredRetrievalPlan(input: {
-  createdAt: Date;
-  protocol: "query-slices-v2" | null;
-  resourceTypes: readonly HostedClinicalRecordsFetchPageRequest["resourceType"][];
-  value: Prisma.JsonValue | null;
-}): ClinicalFhirRetrievalPlan {
-  if (input.protocol === "query-slices-v2" && input.value === null) {
-    throw new TypeError("Stored query-aware Clinical Records run is missing its frozen retrieval plan.");
-  }
-  const expectedPlan = input.protocol === "query-slices-v2"
-    ? buildEpicBetaRetrievalPlan({
-        frozenAt: input.createdAt,
-        pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
-        resourceTypes: input.resourceTypes,
-      })
-    : buildEpicLegacyBetaRetrievalPlan({
-        pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
-        resourceTypes: input.resourceTypes,
-      });
-  const plan = input.value === null
-    ? expectedPlan
-    : clinicalFhirRetrievalPlanSchema.parse(input.value);
-  if (
-    JSON.stringify(plan.slices) !== JSON.stringify(expectedPlan.slices)
-  ) {
-    throw new TypeError("Stored Clinical Records retrieval plan does not match its owned acquisition policy.");
-  }
-  return plan;
-}
-
-function isClinicalFhirResourceType(
-  value: string,
-): value is HostedClinicalRecordsFetchPageRequest["resourceType"] {
-  return ALLOWED_RESOURCE_TYPES.has(value);
 }
 
 function parseStoredStringArray(value: Prisma.JsonValue, label: string): string[] {

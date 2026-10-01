@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_ASSISTANT_DELIVERY_KIND,
+  HOSTED_ASSISTANT_NOTIFICATION_VALIDATION_FAILURE_REASONS,
   buildHostedAssistantDeliverySendingRecord,
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
@@ -533,13 +534,20 @@ describe("hosted execution observability", () => {
   });
 
   it("extracts a privacy-bounded assistant-notification detail subset from annotated errors", () => {
+    const privateResponseMarker = "PRIVATE_PROVIDER_RESPONSE_5a2d9c_DO_NOT_EMIT";
     const error = Object.assign(new Error("provider failed"), {
       cause: Object.assign(new Error("Gateway rejected provider credentials."), {
         code: "invalid_api_key",
         statusCode: 401,
       }),
+      context: {
+        assistantNotificationValidationFailureReason: "decision_schema_invalid",
+        providerResponse: privateResponseMarker,
+      },
       details: {
         assistantNotificationChannel: "linq",
+        assistantNotificationValidationFailureReason:
+          "creative_response_media_invalid",
         assistantNotificationDeliveryKind: "thread",
         assistantNotificationExplicitTargetPresent: false,
         assistantNotificationGatewayOnlyProviders: "openai",
@@ -580,7 +588,8 @@ describe("hosted execution observability", () => {
       notificationErrorStatus: 401,
     });
 
-    expect(extractHostedAssistantNotificationRedactedDetails(error)).toEqual({
+    const redacted = extractHostedAssistantNotificationRedactedDetails(error);
+    expect(redacted).toEqual({
       assistantNotificationChannel: "linq",
       assistantNotificationDeliveryKind: "thread",
       assistantNotificationErrorCause: "Gateway rejected provider credentials.",
@@ -604,6 +613,7 @@ describe("hosted execution observability", () => {
       assistantNotificationThreadIdPresent: true,
       assistantNotificationThreadIsDirect: true,
       assistantNotificationTurnTrigger: "automation-cron",
+      assistantNotificationValidationFailureReason: "decision_schema_invalid",
       assistantNotificationWorkingDirectoryPresent: false,
       assistantProviderAdapter: "openai-compatible",
       assistantProviderErrorBodyCode: "invalid_request",
@@ -616,6 +626,34 @@ describe("hosted execution observability", () => {
       assistantProviderGatewayTarget: true,
       assistantProviderModel: "openai/gpt-5.4",
     });
+    expect(JSON.stringify(redacted)).not.toContain(privateResponseMarker);
+    expect(JSON.stringify(redacted)).not.toContain("do not keep me");
+  });
+
+  it("keeps assistant-notification validation attribution on its four-value contract", () => {
+    expect(HOSTED_ASSISTANT_NOTIFICATION_VALIDATION_FAILURE_REASONS).toEqual([
+      "decision_json_unparseable",
+      "decision_schema_invalid",
+      "runtime_presentation_non_send_decision",
+      "creative_response_media_invalid",
+    ]);
+  });
+
+  it("drops assistant-notification validation reasons outside the closed vocabulary", () => {
+    const privateResponseMarker = "PRIVATE_REASON_VALUE_790bfd_DO_NOT_EMIT";
+    const redacted = extractHostedAssistantNotificationRedactedDetails(
+      Object.assign(new Error("fixed validation failure"), {
+        context: {
+          assistantNotificationValidationFailureReason: privateResponseMarker,
+          providerResponse: privateResponseMarker,
+        },
+      }),
+    );
+
+    expect(redacted).not.toHaveProperty(
+      "assistantNotificationValidationFailureReason",
+    );
+    expect(JSON.stringify(redacted)).not.toContain(privateResponseMarker);
   });
 
   it("keeps notification error diagnostics even when no annotation details exist", () => {
@@ -789,6 +827,21 @@ describe("hosted execution observability", () => {
       phase: "outbox",
     });
     expect(infoSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves larger diagnostic records while bounding and redacting their tail", () => {
+    const fields = Object.fromEntries(Array.from({ length: 60 }, (_, index) => [`field${index}`, index]));
+    const sanitized = sanitizeHostedExecutionStructuredLogDetails({
+      ...fields, closeCode: 1000, authorization: "Bearer synthetic-secret", userId: "member_123",
+      responseTerminalKind: "response.completed", overflow: "excluded",
+    });
+    expect(sanitized).toMatchObject({
+      field59: 59, closeCode: 1000, authorization: "[redacted]", userIdPresent: true,
+      responseTerminalKind: "response.completed",
+    });
+    expect(sanitized).not.toHaveProperty("overflow");
+    expect(Object.keys(sanitized ?? {})).toHaveLength(64);
+    expect(JSON.stringify(sanitized)).not.toMatch(/synthetic-secret|member_123/);
   });
 
   it("sanitizes nested structured log details and safe error metadata", () => {

@@ -76,23 +76,6 @@ async function resolveManifestFile(
   return resolveRawImportManifestFile(vault, directories[0]!)
 }
 
-async function loadTrackedWorkoutRecord(
-  vault: string,
-  lookup: string,
-  allowedKinds: readonly TrackedWorkoutEventKind[],
-  label: string,
-): Promise<QueryRecord> {
-  const query = await loadQueryRuntime(`${label} query reads`)
-  const readModel = await query.readVault(vault)
-  const record = query.lookupEntityById(readModel, lookup)
-
-  if (!record || record.family !== 'event' || !allowedKinds.includes(record.kind as TrackedWorkoutEventKind)) {
-    throw new VaultCliError('not_found', `No ${label} found for "${lookup}".`)
-  }
-
-  return record
-}
-
 async function listTrackedWorkoutRecords(input: {
   vault: string
   from?: string
@@ -101,18 +84,18 @@ async function listTrackedWorkoutRecords(input: {
   kinds: readonly TrackedWorkoutEventKind[]
 }) {
   const query = await loadQueryRuntime('workout query reads')
-  const readModel = await query.readVault(input.vault)
   const limit =
     typeof input.limit === 'number' && Number.isFinite(input.limit)
       ? Math.max(1, Math.min(MAX_LIST_LIMIT, Math.round(input.limit)))
       : DEFAULT_LIST_LIMIT
-  const items = query
-    .listEntities(readModel, {
-      families: ['event'],
-      kinds: [...input.kinds],
-      from: input.from,
-      to: input.to,
-    })
+  const records = await query.listCanonicalEntities(input.vault, {
+    family: 'event',
+    kinds: [...input.kinds],
+    from: input.from,
+    to: input.to,
+    limit: null,
+  })
+  const items = records
     .slice(0, limit)
     .map((record: QueryRecord) => {
       const entity = toCommandShowEntity(record)
@@ -133,7 +116,12 @@ async function showTrackedWorkoutManifest(
   allowedKinds: readonly TrackedWorkoutEventKind[],
   label: string,
 ) {
-  const record = await loadTrackedWorkoutRecord(vault, lookup, allowedKinds, label)
+  const { record } = await readExactEventRecord({
+    vault,
+    lookup,
+    entityLabel: label,
+    expectedKinds: allowedKinds,
+  })
   const manifestFile = await resolveManifestFile(vault, record)
   const manifest = await readRawImportManifest(vault, manifestFile)
 

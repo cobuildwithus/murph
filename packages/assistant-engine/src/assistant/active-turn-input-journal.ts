@@ -14,7 +14,6 @@ import {
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
-import { ensureAssistantState } from './store/persistence.js'
 import {
   ASSISTANT_INPUT_EVENT_SCHEMA,
   readAssistantInputEvent,
@@ -329,7 +328,6 @@ export async function readAssistantAcceptedTurnInputJournal(
   turnId: string,
 ): Promise<AssistantAcceptedTurnInputJournal | null> {
   const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
   return readAssistantAcceptedTurnInputJournalAtPaths(paths, turnId)
 }
 
@@ -342,7 +340,6 @@ export async function appendAssistantAcceptedTurnInputItems(input: {
   vault: string
 }): Promise<AssistantAcceptedTurnInputJournal> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
     const now = (input.now ?? new Date()).toISOString()
     const existing = await readAssistantAcceptedTurnInputJournalAtPaths(
       paths,
@@ -401,24 +398,13 @@ export async function appendAssistantAcceptedTurnInputItems(input: {
   })
 }
 
-export async function assertAssistantAcceptedTurnInputAssistantInputEventsExist(
-  input: {
-    journal: AssistantAcceptedTurnInputJournal
-    vault: string
-  },
-): Promise<void> {
-  await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
-    inputs: input.journal.inputs,
-    vault: input.vault,
-  })
-}
-
-export async function assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist(
+export async function readAssistantAcceptedTurnInputEvents(
   input: {
     inputs: readonly AssistantAcceptedTurnInputItemInput[]
     vault: string
   },
-): Promise<void> {
+): Promise<AssistantInputEventRecord[]> {
+  const events: AssistantInputEventRecord[] = []
   for (const item of input.inputs) {
     if (item.source !== 'assistant-input') {
       continue
@@ -452,7 +438,9 @@ export async function assertAssistantAcceptedTurnInputItemInputsAssistantInputEv
       event,
       inputId: item.id,
     })
+    events.push(event)
   }
+  return events
 }
 
 export async function updateAssistantAcceptedTurnInputTranscriptRefs(input: {
@@ -462,7 +450,6 @@ export async function updateAssistantAcceptedTurnInputTranscriptRefs(input: {
   vault: string
 }): Promise<AssistantAcceptedTurnInputJournal | null> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
     const existing = await readAssistantAcceptedTurnInputJournalAtPaths(
       paths,
       input.turnId,
@@ -473,10 +460,10 @@ export async function updateAssistantAcceptedTurnInputTranscriptRefs(input: {
     if (input.refs.length === 0) {
       return existing
     }
-    if (existing.admissionState !== 'current-turn-open') {
+    if (existing.admissionState === 'passive-input-next-turn') {
       throw new VaultCliError(
         'ASSISTANT_TURN_INPUT_JOURNAL_ADMISSION_CLOSED',
-        'Accepted turn input transcript refs cannot be updated after current-turn admission closes.',
+        'Accepted turn input transcript refs cannot be updated after input ownership moves to a later turn.',
       )
     }
 
@@ -595,7 +582,6 @@ export async function updateAssistantAcceptedTurnInputAdmissionState(input: {
   vault: string
 }): Promise<AssistantAcceptedTurnInputJournal | null> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
     const existing = await readAssistantAcceptedTurnInputJournalAtPaths(
       paths,
       input.turnId,
@@ -628,7 +614,6 @@ export async function recordAssistantAcceptedTurnInputProviderRequest(input: {
   vault: string
 }): Promise<AssistantAcceptedTurnInputJournal | null> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
     const existing = await readAssistantAcceptedTurnInputJournalAtPaths(
       paths,
       input.turnId,
@@ -675,7 +660,6 @@ export async function updateAssistantAcceptedTurnInputProviderRequest(input: {
   vault: string
 }): Promise<AssistantAcceptedTurnInputJournal | null> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
     const existing = await readAssistantAcceptedTurnInputJournalAtPaths(
       paths,
       input.turnId,
@@ -757,6 +741,7 @@ async function readAssistantAcceptedTurnInputJournalAtPaths(
   turnId: string,
 ): Promise<AssistantAcceptedTurnInputJournal | null> {
   const journalPath = resolveAssistantAcceptedTurnInputJournalPath(paths, turnId)
+  await ensureAssistantStateDirectory(path.dirname(journalPath))
   let raw: string
   try {
     raw = await readFile(journalPath, 'utf8')
@@ -778,7 +763,6 @@ async function writeAssistantAcceptedTurnInputJournalAtPaths(
     paths,
     journal.turnId,
   )
-  await ensureAssistantStateDirectory(path.dirname(journalPath))
   await writeJsonFileAtomic(
     journalPath,
     assistantAcceptedTurnInputJournalSchema.parse(journal),

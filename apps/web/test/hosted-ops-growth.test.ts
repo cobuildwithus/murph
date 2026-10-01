@@ -43,7 +43,8 @@ import { GrowthScorecard } from "../app/(dashboard)/ops/growth/growth-scorecard"
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
-  decodeHostedMailboxStoredPayload: vi.fn(),
+  decodeHostedMailboxStoredPayloads: vi.fn(),
+  executeRaw: vi.fn(),
   getHostedDashboardPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(),
   hostedAccountGroup: {
@@ -83,6 +84,8 @@ const mocks = vi.hoisted(() => ({
   hostedMember: {
     count: vi.fn(),
     findMany: vi.fn(),
+    groupBy: vi.fn(),
+    updateMany: vi.fn(),
   },
   hostedMemberBillingRef: {
     count: vi.fn(),
@@ -95,6 +98,9 @@ const mocks = vi.hoisted(() => ({
   hostedUsageCreditPurchase: {
     findMany: vi.fn(),
   },
+  queryRaw: vi.fn(),
+  readHostedLinqProductionCanaryMemberId: vi.fn(),
+  readHostedMemberRoutingRecord: vi.fn(),
   requireActiveHostedAppSession: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   requireVercelCronRequest: vi.fn(),
@@ -110,8 +116,17 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedDashboardPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-production-canary", () => ({
+  readHostedLinqProductionCanaryMemberId:
+    mocks.readHostedLinqProductionCanaryMemberId,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  readHostedMemberRoutingRecord: mocks.readHostedMemberRoutingRecord,
+}));
+
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
-  decodeHostedMailboxStoredPayload: mocks.decodeHostedMailboxStoredPayload,
+  decodeHostedMailboxStoredPayloads: mocks.decodeHostedMailboxStoredPayloads,
 }));
 
 vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
@@ -140,6 +155,8 @@ let growthCronRoute: GrowthCronRouteModule;
 
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const prisma = {
+  $executeRaw: mocks.executeRaw,
+  $queryRaw: mocks.queryRaw,
   hostedAccountGroup: mocks.hostedAccountGroup,
   hostedGrowthAggregate: mocks.hostedGrowthAggregate,
   hostedGrowthDailySnapshot: mocks.hostedGrowthDailySnapshot,
@@ -179,6 +196,8 @@ describe("hosted ops growth metrics", () => {
       member: { id: "member_ops" },
     });
     mocks.getPrisma.mockReturnValue(prisma);
+    mocks.executeRaw.mockResolvedValue(0);
+    mocks.queryRaw.mockResolvedValue([]);
     mocks.hostedLinqDelivery.count.mockResolvedValue(0);
     mocks.hostedMailboxItem.count.mockResolvedValue(0);
     mocks.hostedOutboundMessageVolumeReceipt.count.mockResolvedValue(0);
@@ -187,11 +206,17 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedMemberEmailAuthorization.findMany.mockResolvedValue([]);
     mocks.hostedMemberIdentity.findMany.mockResolvedValue([]);
     mocks.hostedMemberRouting.findMany.mockResolvedValue([]);
-    mocks.decodeHostedMailboxStoredPayload.mockImplementation(async (input: {
-      payloadInlineCiphertext: unknown;
+    mocks.hostedMember.findMany.mockResolvedValue([]);
+    mocks.hostedMember.groupBy.mockResolvedValue([]);
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingRecord.mockResolvedValue(null);
+    mocks.decodeHostedMailboxStoredPayloads.mockImplementation(async (input: {
+      entries: Array<{ payloadInlineCiphertext: unknown }>;
     }) => {
-      const payload = input.payloadInlineCiphertext;
-      return typeof payload === "string" ? JSON.parse(payload) : null;
+      return input.entries.map((entry) => {
+        const payload = entry.payloadInlineCiphertext;
+        return typeof payload === "string" ? JSON.parse(payload) : null;
+      });
     });
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValue({
       trackedFulfilledUsageTopUps: 0,
@@ -214,6 +239,7 @@ describe("hosted ops growth metrics", () => {
       },
     });
     mocks.hostedMember.count.mockResolvedValue(0);
+    mocks.hostedMember.updateMany.mockResolvedValue({ count: 0 });
     mocks.requireActiveHostedAppSession.mockResolvedValue({
       member: { id: "member_ops" },
     });
@@ -231,12 +257,72 @@ describe("hosted ops growth metrics", () => {
     }
   });
 
+  it("excludes the configured production canary from member-derived dashboard queries", async () => {
+    const now = new Date("2026-07-31T12:00:00.000Z");
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(
+      "member_canary",
+    );
+    queueCurrentMetricMocks();
+
+    await readHostedGrowthDashboard(now);
+
+    expect(mocks.readHostedLinqProductionCanaryMemberId).toHaveBeenCalledWith({
+      prisma,
+    });
+    for (const [input] of mocks.hostedMember.count.mock.calls) {
+      expect(input.where).toMatchObject({
+        id: {
+          not: "member_canary",
+        },
+      });
+    }
+    expect(mocks.hostedMember.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: {
+            not: "member_canary",
+          },
+        }),
+      }),
+    );
+    for (const [input] of mocks.hostedMember.findMany.mock.calls.slice(0, 4)) {
+      expect(input.where).toMatchObject({
+        id: {
+          not: "member_canary",
+        },
+      });
+    }
+    expect(mocks.hostedUsageCreditEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          beneficiary: {
+            is: expect.objectContaining({
+              id: {
+                not: "member_canary",
+              },
+            }),
+          },
+        }),
+      }),
+    );
+    expect(mocks.hostedMailboxItem.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          member: expect.objectContaining({
+            id: {
+              not: "member_canary",
+            },
+          }),
+        }),
+      }),
+    );
+  });
+
   it("counts paid individuals, family seats, covered members, and unpriced paid members", () => {
     const metrics = calculateHostedGrowthCurrentMetrics({
       payingFamilyGroups: [
         {
           billingRef: {
-            billedSeatCount: 4,
             currentBillingPhase: "paid",
           },
           id: "group_family",
@@ -299,6 +385,34 @@ describe("hosted ops growth metrics", () => {
     expect(metrics.mrrUsdCents)
       .toBe(800 + 2_000 + 5_000 + 2 * 700 + 1_900 + 4_900);
     expect(metrics.unpricedPaidMembers).toBe(1);
+  });
+
+  it("counts Family capacity without a legacy total and excludes missing tier rows", () => {
+    const group = {
+      billingRef: { currentBillingPhase: "paid" },
+      id: "group_family",
+      memberships: [{ memberId: "member_family" }],
+      planCapacities: [{ billedQuantity: 2, planCode: "pulse" }],
+    };
+    const unprojectedGroup = {
+      ...group,
+      billingRef: { ...group.billingRef, billedSeatCount: 4 },
+      id: "group_unprojected",
+      planCapacities: [],
+    };
+    const metrics = calculateHostedGrowthCurrentMetrics({
+      payingFamilyGroups: [group, unprojectedGroup],
+      payingIndividuals: [],
+      statusCounts: zeroStatusCounts,
+      totalMembers: 2,
+      trialCandidates: [],
+      windowEnd: new Date("2026-07-06T12:00:00.000Z"),
+    });
+
+    expect(metrics.payingFamilyGroups).toBe(1);
+    expect(metrics.payingFamilySeats).toBe(2);
+    expect(metrics.coveredMembers).toBe(1);
+    expect(metrics.familyMrrUsdCents).toBe(1_400);
   });
 
   it("uses shared trial state logic for active or paused unsuspended trial members", () => {
@@ -556,7 +670,9 @@ describe("hosted ops growth metrics", () => {
   it("reads referral claims by durable attribution rather than invite channel", async () => {
     const now = new Date("2026-07-31T12:00:00.000Z");
     queueCurrentMetricMocks();
-    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMember.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
     mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
     mocks.hostedMemberBillingRef.count
@@ -619,6 +735,50 @@ describe("hosted ops growth metrics", () => {
         referrerMemberId: {
           not: null,
         },
+      },
+    });
+  });
+
+  it("reads the durable group-to-private total and daily conversion series", async () => {
+    const now = new Date("2026-07-31T12:00:00.000Z");
+    queueCurrentMetricMocks();
+    mocks.hostedMember.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+    mocks.hostedMember.count.mockResolvedValueOnce(5);
+    mocks.hostedMember.findMany.mockResolvedValueOnce([
+      { groupPrivateConversionTrackedAt: new Date("2026-07-30T09:00:00.000Z") },
+      { groupPrivateConversionTrackedAt: new Date("2026-07-30T11:00:00.000Z") },
+      { groupPrivateConversionTrackedAt: new Date("2026-07-31T08:00:00.000Z") },
+    ]);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.groupPrivateConversions.total).toBe(5);
+    expect(dashboard.groupPrivateConversions.dailySeries.at(-2)).toEqual({
+      conversions: 2,
+      date: "2026-07-30",
+    });
+    expect(dashboard.groupPrivateConversions.dailySeries.at(-1)).toEqual({
+      conversions: 1,
+      date: "2026-07-31",
+    });
+    expect(mocks.hostedMember.findMany).toHaveBeenLastCalledWith({
+      select: {
+        groupPrivateConversionTrackedAt: true,
+      },
+      where: {
+        groupPrivateConversionTrackedAt: {
+          gte: new Date("2026-07-02T00:00:00.000Z"),
+          lte: now,
+        },
+        hostedGroupRuntime: null,
+        threadContainer: null,
       },
     });
   });
@@ -800,6 +960,72 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
+  it("excludes configured canary traffic from the public message-volume response", async () => {
+    const liveStart = new Date("2026-07-23T00:00:00.000Z");
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue("member_canary");
+    mocks.readHostedMemberRoutingRecord.mockResolvedValue({
+      linqChatLookupKey: "v1:canary-chat",
+      pendingLinqChatLookupKey: "v1:canary-chat-pending",
+    });
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _max: { snapshotDate: liveStart },
+      _sum: { inboundMessagesPriorDay: 400, outboundMessagesPriorDay: 300 },
+    });
+    mocks.hostedMailboxItem.count.mockResolvedValueOnce(12);
+    mocks.hostedLinqDelivery.count.mockResolvedValueOnce(8);
+    mocks.hostedOutboundMessageVolumeReceipt.count.mockResolvedValueOnce(5);
+
+    const { GET } = await import("../app/api/message-volume/route");
+    const response = await GET();
+
+    await expect(response.json()).resolves.toEqual({
+      total: HOSTED_MESSAGE_VOLUME_BASE + 725,
+    });
+    expect(mocks.hostedMailboxItem.count).toHaveBeenCalledExactlyOnceWith({
+      where: {
+        kind: "conversation.message",
+        member: { id: { not: "member_canary" } },
+        occurredAt: { gte: liveStart },
+      },
+    });
+    expect(mocks.hostedLinqDelivery.count).toHaveBeenCalledExactlyOnceWith({
+      where: {
+        OR: [
+          { linqChatLookupKey: null },
+          {
+            linqChatLookupKey: {
+              notIn: ["v1:canary-chat", "v1:canary-chat-pending"],
+            },
+          },
+        ],
+        attemptedAt: { gte: liveStart },
+        status: { in: ["accepted", "delivered", "sent_no_receipt_expected"] },
+      },
+    });
+    expect(mocks.readHostedLinqProductionCanaryMemberId)
+      .toHaveBeenCalledExactlyOnceWith({ prisma });
+    expect(mocks.readHostedMemberRoutingRecord).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_canary",
+      prisma,
+    });
+    expect(mocks.hostedOutboundMessageVolumeReceipt.count).toHaveBeenCalledExactlyOnceWith({
+      where: { recordedAt: { gte: liveStart } },
+    });
+  });
+
+  it("falls back to the base if canary attribution cannot be read", async () => {
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _max: { snapshotDate: null },
+      _sum: { inboundMessagesPriorDay: 400, outboundMessagesPriorDay: 300 },
+    });
+    mocks.readHostedLinqProductionCanaryMemberId.mockRejectedValueOnce(new Error("db down"));
+
+    await expect(readHostedMessageVolumeTotal(new Date("2026-07-23T18:00:00.000Z")))
+      .resolves.toBe(HOSTED_MESSAGE_VOLUME_BASE);
+    expect(mocks.hostedMailboxItem.count).not.toHaveBeenCalled();
+    expect(mocks.hostedLinqDelivery.count).not.toHaveBeenCalled();
+  });
+
   it("counts live messages from the start of today when no snapshot exists", async () => {
     mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
       _max: {
@@ -859,12 +1085,9 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
-  it("counts own-paid or family-paid members in the mature converted count query", async () => {
-    queueCurrentMetricMocks();
+  it("renders current metrics without capturing a snapshot", async () => {
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.groupBy
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
       .mockResolvedValueOnce(activeUserRows(6))
       .mockResolvedValueOnce(activeUserRows(3))
       .mockResolvedValueOnce(activeUserRows(9))
@@ -872,18 +1095,33 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
       trackedFulfilledUsageTopUps: 12,
     });
-    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
-      snapshotRow("2026-07-06", 2_900),
-    );
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
     mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
     mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(3)
       .mockResolvedValueOnce(1);
+    mocks.queryRaw.mockResolvedValueOnce([{
+      activeMonthlyCapUsdCents: 0n,
+      activeMonthlySponsorships: 0n,
+      monthlyPaidPurchasesThisMonth: 0n,
+      monthlyPaidThisMonthUsdCents: 0n,
+      oneTimePaidPurchasesThisMonth: 0n,
+      oneTimePaidThisMonthUsdCents: 0n,
+      paidPurchasesThisMonth: 0n,
+      paidThisMonthUsdCents: 0n,
+      remainingUsageUsdMicros: 0n,
+      usageConsumedThisMonthUsdMicros: 0n,
+    }]);
+    const guarded = createDatabaseConcurrencyGuard(
+      prisma as unknown as Record<string, unknown>,
+    );
+    mocks.getPrisma.mockReturnValue(guarded.client);
 
     const markup = renderToStaticMarkup(await growthPage.default());
 
+    expect(markup).toContain("Recent member retention");
+    expect(markup).toContain("No real member accounts yet.");
     expect(markup).toContain("Referral link usage");
     expect(markup).toContain("MRR growth per week");
     expect(markup).toContain("Total messages sent");
@@ -900,6 +1138,10 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toMatch(
       /Tracked fulfilled usage top-ups<\/td><td[^>]*>12<\/td><td[^>]*>One-time<\/td>/u,
     );
+    expect(guarded.peak()).toBe(8);
+    expect(mocks.queryRaw).toHaveBeenCalledOnce();
+    expect(mocks.hostedGrowthDailySnapshot.upsert).not.toHaveBeenCalled();
+    expect(mocks.hostedMember.updateMany).not.toHaveBeenCalled();
     expect(mocks.hostedUsageCreditEntry.findMany.mock.calls[0]?.[0]).toMatchObject({
       select: {
         beneficiary: {
@@ -913,13 +1155,11 @@ describe("hosted ops growth metrics", () => {
                 group: {
                   billingRef: {
                     is: {
-                      billedSeatCount: {
-                        gte: 1,
-                      },
                       currentBillingPhase: "paid",
                     },
                   },
                   billingStatus: HostedBillingStatus.active,
+                  planCapacities: { some: {} },
                   suspendedAt: null,
                 },
                 status: "active",
@@ -971,13 +1211,11 @@ describe("hosted ops growth metrics", () => {
                     group: {
                       billingRef: {
                         is: {
-                          billedSeatCount: {
-                            gte: 1,
-                          },
                           currentBillingPhase: "paid",
                         },
                       },
                       billingStatus: HostedBillingStatus.active,
+                      planCapacities: { some: {} },
                       suspendedAt: null,
                     },
                     status: "active",
@@ -1194,7 +1432,68 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
-  it("counts distinct senders across personal chats and group containers", async () => {
+  it("bounds dashboard database fanout while preserving the computed metrics", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    queueCurrentMetricMocks();
+    mocks.hostedMember.groupBy.mockReset().mockResolvedValue([
+      { _count: { _all: 2 }, billingStatus: HostedBillingStatus.past_due },
+      { _count: { _all: 3 }, billingStatus: HostedBillingStatus.canceled },
+      { _count: { _all: 5 }, billingStatus: HostedBillingStatus.unpaid },
+    ]);
+    mocks.hostedUsageCreditEntry.count.mockResolvedValue(0);
+    const guarded = createDatabaseConcurrencyGuard(
+      prisma as unknown as Record<string, unknown>,
+    );
+
+    const dashboard = await readHostedGrowthDashboard(
+      now,
+      guarded.client as never,
+    );
+
+    expect(guarded.peak()).toBe(8);
+    expect(dashboard.current).toMatchObject({
+      coveredMembers: 2,
+      mrrUsdCents: 2_800,
+      payingCustomers: 2,
+      statusCounts: {
+        canceled: 3,
+        past_due: 2,
+        paused: 0,
+        unpaid: 5,
+      },
+      totalMembers: 4,
+      trialingMembers: 1,
+    });
+    expect(dashboard.conversion).toEqual({
+      converted: 0,
+      matureStarted: 0,
+      percent: null,
+    });
+    expect(dashboard.activeUsers).toMatchObject({
+      today: 0,
+      trailing30Days: 0,
+      trailing7Days: 0,
+    });
+    expect(mocks.hostedMember.groupBy).toHaveBeenCalledOnce();
+    expect(mocks.hostedMember.groupBy).toHaveBeenCalledWith({
+      _count: { _all: true },
+      by: ["billingStatus"],
+      where: {
+        billingStatus: {
+          in: [
+            HostedBillingStatus.past_due,
+            HostedBillingStatus.canceled,
+            HostedBillingStatus.paused,
+            HostedBillingStatus.unpaid,
+          ],
+        },
+        hostedGroupRuntime: null,
+        threadContainer: null,
+      },
+    });
+  });
+
+  it.each([false, true])("counts distinct senders and supplements recent members from provider receipts (%s)", async (includeProviderActivity) => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const registeredPhone = requireLinqContact("phone", "+15550000001");
     const unregisteredPhone = requireLinqContact("phone", "+15550000002");
@@ -1204,8 +1503,16 @@ describe("hosted ops growth metrics", () => {
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.groupBy
       .mockResolvedValueOnce([
-        { userId: "member_direct" },
-        { userId: "member_direct_only" },
+        {
+          _count: { _all: 7 },
+          _max: { createdAt: new Date("2026-07-06T11:30:00.000Z") },
+          userId: "member_direct",
+        },
+        {
+          _count: { _all: 2 },
+          _max: { createdAt: new Date("2026-07-05T12:00:00.000Z") },
+          userId: "member_direct_only",
+        },
       ])
       .mockResolvedValueOnce([{ userId: "member_previous" }])
       .mockResolvedValueOnce([
@@ -1215,8 +1522,8 @@ describe("hosted ops growth metrics", () => {
         { userId: "member_monthly" },
       ])
       .mockResolvedValueOnce([
-        { userId: "member_direct" },
-        { userId: "member_today" },
+        { _count: { _all: 4 }, userId: "member_direct" },
+        { _count: { _all: 3 }, userId: "member_today" },
       ]);
     mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
       buildLinqGroupMailboxRow({
@@ -1280,13 +1587,41 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
       trackedFulfilledUsageTopUps: 12,
     });
-    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMember.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          createdAt: new Date("2026-07-06T11:30:00.000Z"),
+          id: "member_no_recent_activity",
+          identity: { maskedPhoneNumberHint: "*** 0630" },
+          initialOnboardingCompletedAt: null,
+          suspendedAt: null,
+        },
+        {
+          createdAt: new Date("2026-07-05T12:00:00.000Z"),
+          id: "member_direct",
+          identity: null,
+          initialOnboardingCompletedAt: new Date("2026-07-05T12:05:00.000Z"),
+          suspendedAt: null,
+        },
+        {
+          createdAt: new Date("2026-07-04T12:00:00.000Z"),
+          id: "member_direct_only",
+          identity: { maskedPhoneNumberHint: "*** 0704" },
+          initialOnboardingCompletedAt: new Date("2026-07-04T12:05:00.000Z"),
+          suspendedAt: new Date("2026-07-06T10:00:00.000Z"),
+        },
+      ]);
     mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
     mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
+    if (includeProviderActivity) mocks.queryRaw.mockResolvedValue([
+      { memberId: "member_no_recent_activity", messagesLast7Days: 2, messagesToday: 2, lastMessageAt: new Date("2026-07-06T11:45:00Z") },
+      { memberId: "member_direct", messagesLast7Days: 1, messagesToday: 0, lastMessageAt: new Date("2026-07-05T11:00:00Z") },
+    ]);
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
@@ -1298,6 +1633,41 @@ describe("hosted ops growth metrics", () => {
       trailing7DaysComplete: true,
       wowComparisonComplete: true,
       wowPercent: 300,
+    });
+    expect(dashboard.recentMemberRetention).toEqual({
+      capturedAt: "2026-07-06T12:00:00.000Z",
+      members: [
+        {
+          createdAt: "2026-07-06T11:30:00.000Z",
+          lastMessageAt: includeProviderActivity ? "2026-07-06T11:45:00.000Z" : null,
+          maskedPhoneNumberHint: "*** 0630",
+          memberId: "member_no_recent_activity",
+          messagesLast7Days: includeProviderActivity ? 2 : 0,
+          messagesToday: includeProviderActivity ? 2 : 0,
+          onboardingCompleted: false,
+          suspended: false,
+        },
+        {
+          createdAt: "2026-07-05T12:00:00.000Z",
+          lastMessageAt: "2026-07-06T11:30:00.000Z",
+          maskedPhoneNumberHint: null,
+          memberId: "member_direct",
+          messagesLast7Days: includeProviderActivity ? 8 : 7,
+          messagesToday: 4,
+          onboardingCompleted: true,
+          suspended: false,
+        },
+        {
+          createdAt: "2026-07-04T12:00:00.000Z",
+          lastMessageAt: "2026-07-05T12:00:00.000Z",
+          maskedPhoneNumberHint: "*** 0704",
+          memberId: "member_direct_only",
+          messagesLast7Days: 2,
+          messagesToday: 0,
+          onboardingCompleted: true,
+          suspended: true,
+        },
+      ],
     });
     expect(dashboard.usageTopUps).toEqual({
       trackedFulfilled: 12,
@@ -1311,6 +1681,8 @@ describe("hosted ops growth metrics", () => {
       },
     });
     expect(mocks.hostedMailboxItem.groupBy.mock.calls[0]?.[0]).toEqual({
+      _count: { _all: true },
+      _max: { createdAt: true },
       by: ["userId"],
       where: {
         kind: "conversation.message",
@@ -1367,6 +1739,7 @@ describe("hosted ops growth metrics", () => {
       },
     });
     expect(mocks.hostedMailboxItem.groupBy.mock.calls[3]?.[0]).toMatchObject({
+      _count: { _all: true },
       where: {
         createdAt: {
           gte: new Date("2026-07-06T00:00:00.000Z"),
@@ -1374,7 +1747,108 @@ describe("hosted ops growth metrics", () => {
         },
       },
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(7);
+    expect(mocks.hostedMember.findMany.mock.calls[3]?.[0]).toEqual({
+      orderBy: [
+        { createdAt: "desc" },
+        { id: "desc" },
+      ],
+      select: {
+        createdAt: true,
+        id: true,
+        identity: {
+          select: {
+            maskedPhoneNumberHint: true,
+          },
+        },
+        initialOnboardingCompletedAt: true,
+        suspendedAt: true,
+      },
+      take: 20,
+      where: {
+        createdAt: { lte: now },
+        hostedGroupRuntime: null,
+        threadContainer: null,
+      },
+    });
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.decodeHostedMailboxStoredPayloads.mock.calls[0]?.[0].entries,
+    ).toHaveLength(7);
+  });
+
+  it("pages retained group ciphertext with a stable equal-time cursor", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const contacts = Array.from({ length: 101 }, (_, index) =>
+      requireLinqContact(
+        "phone",
+        `+1555${String(index + 1).padStart(7, "0")}`,
+      )
+    );
+    const sharedCreatedAt = new Date("2026-07-05T12:00:00.000Z");
+    const groupRows = contacts.map((contact, index) => buildLinqGroupMailboxRow({
+      contact,
+      containerMemberId: `thread_container_${index + 1}`,
+      createdAt: sharedCreatedAt,
+      occurredAt: new Date(sharedCreatedAt.getTime() + index * 1_000),
+    }));
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.hostedMailboxItem.findMany
+      .mockResolvedValueOnce(groupRows.slice(0, 100))
+      .mockResolvedValueOnce(groupRows.slice(100));
+    mocks.hostedMemberIdentity.findMany.mockResolvedValueOnce(
+      contacts.map((contact, index) => ({
+        memberId: `member_group_${index + 1}`,
+        phoneLookupKey: contact.lookupKey,
+      })),
+    );
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.activeUsers).toMatchObject({
+      today: 0,
+      trailing30Days: 101,
+      trailing7Days: 101,
+      wowPercent: null,
+    });
+    expect(dashboard.current.totalMembers).toBe(4);
+    expect(mocks.hostedMailboxItem.findMany).toHaveBeenCalledTimes(2);
+    expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
+      take: 100,
+    });
+    expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).not.toHaveProperty(
+      "cursor",
+    );
+    expect(mocks.hostedMailboxItem.findMany.mock.calls[1]?.[0]).toMatchObject({
+      cursor: { id: groupRows[99]?.id },
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
+      skip: 1,
+      take: 100,
+    });
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.decodeHostedMailboxStoredPayloads.mock.calls[0]?.[0].entries,
+    ).toHaveLength(100);
+    expect(
+      mocks.decodeHostedMailboxStoredPayloads.mock.calls[1]?.[0].entries,
+    ).toHaveLength(1);
   });
 
   it("assigns late provider events to the durable receipt window", async () => {
@@ -1387,7 +1861,9 @@ describe("hosted ops growth metrics", () => {
       .mockResolvedValueOnce([{ userId: "member_direct_late" }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ userId: "member_direct_late" }])
-      .mockResolvedValueOnce([{ userId: "member_direct_late" }]);
+      .mockResolvedValueOnce([
+        { _count: { _all: 1 }, userId: "member_direct_late" },
+      ]);
     mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
       buildLinqGroupMailboxRow({
         contact: groupPhone,
@@ -1431,9 +1907,10 @@ describe("hosted ops growth metrics", () => {
       },
     });
     expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
-      orderBy: {
-        createdAt: "asc",
-      },
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
       select: {
         createdAt: true,
         occurredAt: true,
@@ -1445,9 +1922,13 @@ describe("hosted ops growth metrics", () => {
         },
       },
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledWith(
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledWith(
       expect.objectContaining({
-        occurredAt: providerOccurredAt.toISOString(),
+        entries: [
+          expect.objectContaining({
+            occurredAt: providerOccurredAt.toISOString(),
+          }),
+        ],
       }),
     );
   });
@@ -1499,7 +1980,7 @@ describe("hosted ops growth metrics", () => {
       wowComparisonComplete: true,
       wowPercent: 100,
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(1);
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(1);
     expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
       select: {
         contentRetiredAt: true,
@@ -1547,7 +2028,7 @@ describe("hosted ops growth metrics", () => {
       wowComparisonComplete: false,
       wowPercent: null,
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).not.toHaveBeenCalled();
+    expect(mocks.decodeHostedMailboxStoredPayloads).not.toHaveBeenCalled();
   });
 
   it("marks current WAU incomplete when retired content affects the current week", async () => {
@@ -1590,7 +2071,7 @@ describe("hosted ops growth metrics", () => {
       wowComparisonComplete: false,
       wowPercent: null,
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).not.toHaveBeenCalled();
+    expect(mocks.decodeHostedMailboxStoredPayloads).not.toHaveBeenCalled();
   });
 
   it("still rejects missing group content without a retirement marker", async () => {
@@ -1727,7 +2208,10 @@ describe("hosted ops growth metrics", () => {
       wowPercent: null,
     });
     expect(mocks.hostedMemberRouting.findMany).toHaveBeenCalledTimes(1);
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(3);
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.decodeHostedMailboxStoredPayloads.mock.calls[0]?.[0].entries,
+    ).toHaveLength(3);
   });
 
   it("omits group reaction attestation rows from active senders", async () => {
@@ -1783,7 +2267,10 @@ describe("hosted ops growth metrics", () => {
       wowComparisonComplete: true,
       wowPercent: null,
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(3);
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.decodeHostedMailboxStoredPayloads.mock.calls[0]?.[0].entries,
+    ).toHaveLength(3);
   });
 
   it("still rejects the reaction sender attestation on a non-reaction event", async () => {
@@ -2472,7 +2959,6 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedAccountGroup.findMany.mockResolvedValueOnce([
       {
         billingRef: {
-          billedSeatCount: 2,
           currentBillingPhase: "paid",
         },
         id: "group_family",
@@ -2483,24 +2969,47 @@ describe("hosted ops growth metrics", () => {
         planCapacities: [{ billedQuantity: 2, planCode: "pulse" }],
       },
     ]);
-    queueCurrentMetricMocks();
+    queueCurrentMetricMocks({ includeMax: true });
     mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
-      snapshotRow("2026-08-07", 4_200),
+      snapshotRow("2026-08-07", 9_200),
     );
 
     await captureHostedGrowthDailySnapshot(now);
 
+    expect(mocks.executeRaw).toHaveBeenCalledWith(expect.objectContaining({
+      sql: expect.stringContaining("hosted_group_participant_observation"),
+    }));
     const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
     expect(upsertArg?.create).toMatchObject({
       familyMrrUsdCents: 1_400,
-      individualMrrUsdCents: 2_800,
-      mrrUsdCents: 4_200,
+      individualMrrUsdCents: 7_800,
+      mrrUsdCents: 9_200,
     });
     expect(upsertArg?.update).toMatchObject({
       familyMrrUsdCents: 1_400,
-      individualMrrUsdCents: 2_800,
-      mrrUsdCents: 4_200,
+      individualMrrUsdCents: 7_800,
+      mrrUsdCents: 9_200,
     });
+  });
+
+  it("keeps the daily snapshot retryable when roster attribution fails", async () => {
+    const now = new Date("2026-08-07T12:00:00.000Z");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    queueCurrentMetricMocks();
+    mocks.executeRaw.mockRejectedValueOnce(new Error("temporary attribution failure"));
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-08-07", 2_900),
+    );
+
+    try {
+      await expect(captureHostedGrowthDailySnapshot(now)).resolves.toBeDefined();
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted growth roster-to-private attribution failed; a later snapshot will retry retained evidence.",
+      );
+      expect(mocks.hostedGrowthDailySnapshot.upsert).toHaveBeenCalledTimes(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("upserts one daily snapshot per UTC date", async () => {
@@ -2523,8 +3032,15 @@ describe("hosted ops growth metrics", () => {
     ).toEqual(startOfUtcDay(now));
   });
 
-  it("records prior-day message counts in the snapshot", async () => {
+  it("records prior-day message counts without configured canary traffic", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(
+      "member_canary",
+    );
+    mocks.readHostedMemberRoutingRecord.mockResolvedValue({
+      linqChatLookupKey: "v1:canary-chat",
+      pendingLinqChatLookupKey: "v1:canary-chat-pending",
+    });
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
     mocks.hostedLinqDelivery.count.mockResolvedValueOnce(57);
@@ -2538,6 +3054,11 @@ describe("hosted ops growth metrics", () => {
     expect(mocks.hostedMailboxItem.count.mock.calls[0]?.[0]).toEqual({
       where: {
         kind: "conversation.message",
+        member: {
+          id: {
+            not: "member_canary",
+          },
+        },
         occurredAt: {
           gte: new Date("2026-07-05T00:00:00.000Z"),
           lt: new Date("2026-07-06T00:00:00.000Z"),
@@ -2546,6 +3067,14 @@ describe("hosted ops growth metrics", () => {
     });
     expect(mocks.hostedLinqDelivery.count.mock.calls[0]?.[0]).toEqual({
       where: {
+        OR: [
+          { linqChatLookupKey: null },
+          {
+            linqChatLookupKey: {
+              notIn: ["v1:canary-chat", "v1:canary-chat-pending"],
+            },
+          },
+        ],
         attemptedAt: {
           gte: new Date("2026-07-05T00:00:00.000Z"),
           lt: new Date("2026-07-06T00:00:00.000Z"),
@@ -2554,6 +3083,10 @@ describe("hosted ops growth metrics", () => {
           in: ["accepted", "delivered", "sent_no_receipt_expected"],
         },
       },
+    });
+    expect(mocks.readHostedMemberRoutingRecord).toHaveBeenCalledWith({
+      memberId: "member_canary",
+      prisma,
     });
     expect(
       mocks.hostedOutboundMessageVolumeReceipt.count.mock.calls[0]?.[0],
@@ -2636,16 +3169,184 @@ describe("hosted ops growth metrics", () => {
       },
     });
     expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
-      orderBy: {
-        createdAt: "asc",
-      },
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
       where: {
         createdAt: {
-          gte: new Date("2026-06-29T00:00:00.000Z"),
-          lt: new Date("2026-07-06T00:00:00.000Z"),
+          gte: new Date("2026-06-22T12:00:00.000Z"),
+          lt: new Date("2026-07-06T12:00:00.000Z"),
         },
       },
     });
+  });
+
+  it("records one durable conversion when group activity precedes private activation", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const registeredPhone = requireLinqContact("phone", "+15550000001");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: registeredPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+      }),
+    ]);
+    mocks.hostedMemberIdentity.findMany.mockResolvedValueOnce([{
+      memberId: "member_converted",
+      phoneLookupKey: registeredPhone.lookupKey,
+    }]);
+    mocks.hostedMember.findMany.mockResolvedValueOnce([{
+      hostedMailboxItems: [{
+        createdAt: new Date("2026-07-05T10:00:00.000Z"),
+      }],
+      id: "member_converted",
+    }]);
+    mocks.hostedMember.updateMany.mockResolvedValueOnce({ count: 1 });
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    await captureHostedGrowthDailySnapshot(now);
+
+    expect(mocks.hostedMember.findMany).toHaveBeenLastCalledWith({
+      select: {
+        hostedMailboxItems: {
+          orderBy: [
+            { createdAt: "asc" },
+            { id: "asc" },
+          ],
+          select: {
+            createdAt: true,
+          },
+          take: 1,
+          where: {
+            kind: "member.activated",
+          },
+        },
+        id: true,
+      },
+      where: {
+        groupPrivateConversionTrackedAt: null,
+        hostedGroupRuntime: null,
+        id: {
+          in: ["member_converted"],
+        },
+        threadContainer: null,
+      },
+    });
+    expect(mocks.hostedMember.updateMany).toHaveBeenCalledWith({
+      data: {
+        groupPrivateConversionTrackedAt: now,
+      },
+      where: {
+        groupPrivateConversionTrackedAt: null,
+        id: {
+          in: ["member_converted"],
+        },
+      },
+    });
+  });
+
+  it("isolates an attribution-only decode failure from existing activity aggregates", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const registeredPhone = requireLinqContact("phone", "+15550000001");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const attributionOnlyRow = buildLinqGroupMailboxRow({
+      contact: registeredPhone,
+      containerMemberId: "thread_container_old",
+      occurredAt: new Date("2026-06-25T08:00:00.000Z"),
+    });
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      {
+        ...attributionOnlyRow,
+        payloadInlineCiphertext: "invalid-json",
+      },
+      buildLinqGroupMailboxRow({
+        contact: registeredPhone,
+        containerMemberId: "thread_container_current",
+        occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+      }),
+    ]);
+    mocks.hostedMemberIdentity.findMany.mockResolvedValueOnce([{
+      memberId: "member_active",
+      phoneLookupKey: registeredPhone.lookupKey,
+    }]);
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    try {
+      const capture = await captureHostedGrowthDailySnapshot(now);
+
+      expect(capture.activityAvailable).toBe(true);
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted growth group-to-private attribution failed; a later snapshot will retry retained evidence.",
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      activeUsersPriorDay: 1,
+      activeUsersTrailing7Days: 1,
+    });
+    expect(upsertArg?.update).toMatchObject({
+      activeUsersPriorDay: 1,
+      activeUsersTrailing7Days: 1,
+    });
+  });
+
+  it("retries a retained conversion after a marker update failure", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const registeredPhone = requireLinqContact("phone", "+15550000001");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const groupRow = buildLinqGroupMailboxRow({
+      contact: registeredPhone,
+      containerMemberId: "thread_container_one",
+      occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+    });
+    const activatedMember = {
+      hostedMailboxItems: [{
+        createdAt: new Date("2026-07-05T10:00:00.000Z"),
+      }],
+      id: "member_converted",
+    };
+    mocks.hostedMailboxItem.findMany.mockResolvedValue([groupRow]);
+    mocks.hostedMemberIdentity.findMany.mockResolvedValue([{
+      memberId: "member_converted",
+      phoneLookupKey: registeredPhone.lookupKey,
+    }]);
+    mocks.hostedMember.updateMany
+      .mockRejectedValueOnce(new Error("write unavailable"))
+      .mockResolvedValueOnce({ count: 1 });
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValue(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    try {
+      queueCurrentMetricMocks();
+      mocks.hostedMember.findMany.mockResolvedValueOnce([activatedMember]);
+      const firstCapture = await captureHostedGrowthDailySnapshot(now);
+
+      queueCurrentMetricMocks();
+      mocks.hostedMember.findMany.mockResolvedValueOnce([activatedMember]);
+      const retryCapture = await captureHostedGrowthDailySnapshot(now);
+
+      expect(firstCapture.activityAvailable).toBe(true);
+      expect(retryCapture.activityAvailable).toBe(true);
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted growth group-to-private attribution failed; a later snapshot will retry retained evidence.",
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    expect(mocks.hostedGrowthDailySnapshot.upsert).toHaveBeenCalledTimes(2);
+    expect(mocks.hostedMember.updateMany).toHaveBeenCalledTimes(2);
   });
 
   it("stores unknown activity when retired group evidence affects a window", async () => {
@@ -2692,7 +3393,7 @@ describe("hosted ops growth metrics", () => {
         occurredAt: new Date("2026-07-05T08:00:00.000Z"),
       }),
     ]);
-    mocks.decodeHostedMailboxStoredPayload.mockRejectedValueOnce(
+    mocks.decodeHostedMailboxStoredPayloads.mockRejectedValueOnce(
       new Error("unavailable sidecar"),
     );
     mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
@@ -2815,13 +3516,11 @@ describe("hosted ops growth metrics", () => {
       where: {
         billingRef: {
           is: {
-            billedSeatCount: {
-              gte: 1,
-            },
             currentBillingPhase: "paid",
           },
         },
         billingStatus: HostedBillingStatus.active,
+        planCapacities: { some: {} },
         suspendedAt: null,
       },
       select: {
@@ -2851,6 +3550,8 @@ describe("hosted ops growth metrics", () => {
   it("reports activity failure after preserving the legacy cron snapshot", async () => {
     const registeredPhone = requireLinqContact("phone", "+15550000001");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T12:00:00.000Z"));
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
       buildLinqGroupMailboxRow({
@@ -2859,7 +3560,7 @@ describe("hosted ops growth metrics", () => {
         occurredAt: new Date("2026-07-05T08:00:00.000Z"),
       }),
     ]);
-    mocks.decodeHostedMailboxStoredPayload.mockRejectedValueOnce(
+    mocks.decodeHostedMailboxStoredPayloads.mockRejectedValueOnce(
       new Error("unavailable sidecar"),
     );
     mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
@@ -2881,6 +3582,7 @@ describe("hosted ops growth metrics", () => {
       });
     } finally {
       errorSpy.mockRestore();
+      vi.useRealTimers();
     }
 
     const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
@@ -2895,13 +3597,10 @@ describe("hosted ops growth metrics", () => {
   });
 });
 
-function queueCurrentMetricMocks() {
+function queueCurrentMetricMocks(input: { includeMax?: boolean } = {}) {
   mocks.hostedMember.count
-    .mockResolvedValueOnce(4)
-    .mockResolvedValueOnce(0)
-    .mockResolvedValueOnce(0)
-    .mockResolvedValueOnce(0)
-    .mockResolvedValueOnce(0);
+    .mockResolvedValueOnce(4);
+  mocks.hostedMember.groupBy.mockResolvedValueOnce([]);
   mocks.hostedMember.findMany
     .mockResolvedValueOnce([
       {
@@ -2918,6 +3617,15 @@ function queueCurrentMetricMocks() {
         },
         id: "member_edge",
       },
+      ...(input.includeMax
+        ? [{
+          billingRef: {
+            currentBillingPhase: "paid",
+            currentBillingPlanCode: "launch_max_monthly",
+          },
+          id: "member_max",
+        }]
+        : []),
     ])
     .mockResolvedValueOnce([
       {
@@ -2933,7 +3641,6 @@ function queueCurrentMetricMocks() {
   mocks.hostedAccountGroup.findMany.mockResolvedValueOnce([
     {
       billingRef: {
-        billedSeatCount: 1,
         currentBillingPhase: "paid",
       },
       id: "group_family",
@@ -2945,8 +3652,52 @@ function queueCurrentMetricMocks() {
 
 function activeUserRows(count: number) {
   return Array.from({ length: count }, (_, index) => ({
+    _count: { _all: 1 },
+    _max: { createdAt: null },
     userId: `member_${index + 1}`,
   }));
+}
+
+function createDatabaseConcurrencyGuard(
+  client: Record<string, unknown>,
+): {
+  client: Record<string, unknown>;
+  peak: () => number;
+} {
+  let active = 0;
+  let peak = 0;
+  const guardOperation = (operation: unknown, receiver: object): unknown => {
+    if (typeof operation !== "function") {
+      return operation;
+    }
+    return async (...args: unknown[]) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      try {
+        await Promise.resolve();
+        return await Reflect.apply(operation, receiver, args);
+      } finally {
+        active -= 1;
+      }
+    };
+  };
+  const guardedClient = Object.fromEntries(
+    Object.entries(client).map(([delegateName, delegate]) => [
+      delegateName,
+      delegate && typeof delegate === "object"
+        ? Object.fromEntries(
+            Object.entries(delegate).map(([methodName, method]) => [
+              methodName,
+              guardOperation(method, delegate),
+            ]),
+          )
+        : guardOperation(delegate, client),
+    ]),
+  );
+  return {
+    client: guardedClient,
+    peak: () => peak,
+  };
 }
 
 function requireLinqContact(

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-24",
+  "order": 100,
+  "item": {
+    "id": "group-private-handoff-continuation",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Group-to-private handoffs keep moving",
+    "summary": "When a group-to-private handoff needs one more detail, Murph can now ask and continue after the participant replies.",
+    "details": "Fresh private requests and follow-up answers use their existing separate paths; queued work is still not described as sent.",
+    "relevanceTags": ["assistant", "groups", "reliability"],
+    "sourcePullRequests": [2224]
+  }
+}

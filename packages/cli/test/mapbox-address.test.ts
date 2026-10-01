@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 import { resolveMapboxAddress } from '../src/mapbox-address.js'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -578,8 +579,60 @@ describe('resolveMapboxAddress', () => {
       ),
     ).rejects.toMatchObject({
       code: 'route_mapbox_response_invalid',
-      message: 'Mapbox returned an invalid address-resolution response.',
+      context: {
+        retryable: true,
+        stage: 'response',
+      },
+      message: 'Mapbox returned an invalid response.',
     })
+  })
+
+  it('preserves bounded provider classification without echoing request data', async () => {
+    const submittedValue = 'private-submitted-value'
+    const providerBody = 'private-provider-response'
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse(
+        {
+          message: `${providerBody} echoed ${submittedValue}`,
+        },
+        400,
+      ),
+    )
+
+    const failure = await resolveMapboxAddress(
+      {
+        query: submittedValue,
+      },
+      dependencies(fetchImpl),
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    )
+    expect(failure).toBeInstanceOf(Error)
+    if (!(failure instanceof Error)) {
+      throw new TypeError('Expected Mapbox address resolution to fail.')
+    }
+    expect(failure).toMatchObject({
+      code: 'route_mapbox_request_rejected',
+      context: {
+        retryable: false,
+        stage: 'response',
+        status: 400,
+      },
+      message: 'Mapbox rejected the request.',
+    })
+
+    const projection = projectVaultCliError(failure)
+    const serialized = JSON.stringify(projection)
+
+    expect(projection).toMatchObject({
+      code: 'route_mapbox_request_rejected',
+      message: 'Mapbox rejected the request.',
+      retryable: false,
+      stage: 'response',
+    })
+    expect(serialized).not.toContain(submittedValue)
+    expect(serialized).not.toContain(providerBody)
   })
 
   it('fails closed when the shared Mapbox runtime token is unavailable', async () => {

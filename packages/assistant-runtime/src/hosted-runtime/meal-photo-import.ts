@@ -26,6 +26,12 @@ import type { HostedRuntimeEffectsPort } from "./platform.ts";
 const MEAL_PHOTO_EXTERNAL_SYSTEM = "meal-photo-capture";
 const MEAL_PHOTO_EXTERNAL_RESOURCE_TYPE = "photo";
 
+export function isHostedManualMealPhotoWake(
+  wake: HostedExecutionMealPhotoCapturedWake,
+): boolean {
+  return wake.eventId === `meal-photo:manual:${wake.mealPhoto.captureId}`;
+}
+
 export async function importHostedMealPhotoCapturedMailboxItem(input: {
   effectsPort: HostedRuntimeEffectsPort;
   item: HostedMailboxResolvedImportItem;

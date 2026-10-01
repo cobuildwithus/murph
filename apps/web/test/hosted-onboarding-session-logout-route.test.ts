@@ -25,9 +25,10 @@ describe("hosted onboarding session logout route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
-    mocks.revokeHostedAppSessionFromRequest.mockResolvedValue(
+    mocks.revokeHostedAppSessionFromRequest.mockResolvedValue([
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
   });
 
   it("revokes the hosted app session and clears the cookie on logout", async () => {
@@ -41,9 +42,10 @@ describe("hosted onboarding session logout route", () => {
     const response = await logoutRoute.POST(request);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Set-Cookie")).toBe(
+    expect(response.headers.getSetCookie()).toEqual([
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
     await expect(response.json()).resolves.toEqual({
       ok: true,
     });

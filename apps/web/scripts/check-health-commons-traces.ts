@@ -41,6 +41,35 @@ const requiredMeasurementMethodTraceArtifacts = [
   "packages/health-commons/generated/web/routes/index.json",
   "packages/health-commons/generated/web/bundles/measurement_method/home-standardized-photo-roi-analysis.json",
 ] as const;
+const requiredGoalBrowseTraceArtifacts = [
+  "packages/health-commons/generated/web/browse/goals.json",
+] as const;
+const requiredGoalDetailTraceArtifacts = [
+  ...requiredGoalBrowseTraceArtifacts,
+  "packages/health-commons/generated/web/routes/index.json",
+  "packages/health-commons/generated/web/pages/goals/improve-deep-sleep.json",
+] as const;
+const requiredGoalContactTraceArtifacts = requiredGoalBrowseTraceArtifacts;
+const goalIndexWebhookGeneratedArtifactByteBudget = 640 * 1024;
+const goalIndexWebhookTracePolicies = [
+  {
+    label: "Linq webhook",
+    traceSuffix:
+      "server/app/api/hosted-onboarding/linq/webhook/route.js.nft.json",
+  },
+  {
+    label: "Telegram webhook",
+    traceSuffix:
+      "server/app/api/hosted-onboarding/telegram/webhook/route.js.nft.json",
+  },
+] as const;
+const healthCommonsGeneratedWebMarker =
+  "packages/health-commons/generated/web/";
+
+interface GoalIndexWebhookTraceState {
+  artifacts: Map<string, number>;
+  found: boolean;
+}
 
 if (!existsSync(distDir)) {
   throw new Error(
@@ -55,6 +84,15 @@ const browseTraceArtifacts = new Set<string>();
 const biomarkerOverviewTraceArtifacts = new Set<string>();
 const biomarkerResearchTraceArtifacts = new Set<string>();
 const measurementMethodTraceArtifacts = new Set<string>();
+const goalBrowseTraceArtifacts = new Set<string>();
+const goalDetailTraceArtifacts = new Set<string>();
+const goalContactTraceArtifacts = new Set<string>();
+const goalIndexWebhookTraceStates: Map<string, GoalIndexWebhookTraceState> = new Map(
+  goalIndexWebhookTracePolicies.map((policy) => [
+    policy.traceSuffix,
+    { artifacts: new Map<string, number>(), found: false },
+  ]),
+);
 
 for (const traceFile of traceFiles) {
   const trace = JSON.parse(readFileSync(traceFile, "utf8")) as unknown;
@@ -75,9 +113,28 @@ for (const traceFile of traceFiles) {
   const isMeasurementMethodTrace = relativeTraceFile.includes(
     "server/app/measurement-methods/[measurementMethodId]/",
   );
+  const isGoalBrowseTrace = relativeTraceFile.endsWith(
+    "server/app/goals/page.js.nft.json",
+  );
+  const isGoalDetailTrace = relativeTraceFile.endsWith(
+    "server/app/goals/[goalId]/page.js.nft.json",
+  );
+  const isGoalContactTrace = relativeTraceFile.endsWith(
+    "server/app/api/goals/contact/route.js.nft.json",
+  );
+  const goalIndexWebhookTracePolicy = goalIndexWebhookTracePolicies.find((policy) =>
+    relativeTraceFile.endsWith(policy.traceSuffix)
+  );
+  const goalIndexWebhookTraceState = goalIndexWebhookTracePolicy
+    ? goalIndexWebhookTraceStates.get(goalIndexWebhookTracePolicy.traceSuffix)
+    : undefined;
+  if (goalIndexWebhookTraceState) {
+    goalIndexWebhookTraceState.found = true;
+  }
 
   for (const tracedFile of files) {
     const normalizedTracedFile = tracedFile.replace(/\\/gu, "/");
+    const generatedWebArtifact = generatedWebArtifactPath(normalizedTracedFile);
     if (
       forbiddenGeneratedCatalogPattern.test(normalizedTracedFile) ||
       forbiddenGeneratedCatalogSubstring.test(normalizedTracedFile) ||
@@ -86,6 +143,18 @@ for (const traceFile of traceFiles) {
         isMeasurementMethodTrace
         && forbiddenRouteBundleSubstring.test(normalizedTracedFile)
         && !allowedMeasurementMethodRouteBundleSubstring.test(normalizedTracedFile)
+      ) ||
+      (
+        generatedWebArtifact !== null
+        && (
+          (isGoalBrowseTrace && !isAllowedGoalBrowseArtifact(generatedWebArtifact))
+          || (isGoalDetailTrace && !isAllowedGoalDetailArtifact(generatedWebArtifact))
+          || (isGoalContactTrace && !isAllowedGoalBrowseArtifact(generatedWebArtifact))
+          || (
+            goalIndexWebhookTracePolicy !== undefined
+            && !isAllowedGoalBrowseArtifact(generatedWebArtifact)
+          )
+        )
       )
     ) {
       violations.push(`${relativeTraceFile} -> ${tracedFile}`);
@@ -130,13 +199,75 @@ for (const traceFile of traceFiles) {
         }
       }
     }
+
+    if (isGoalBrowseTrace) {
+      collectRequiredArtifacts(
+        normalizedTracedFile,
+        requiredGoalBrowseTraceArtifacts,
+        goalBrowseTraceArtifacts,
+      );
+    }
+
+    if (isGoalDetailTrace) {
+      collectRequiredArtifacts(
+        normalizedTracedFile,
+        requiredGoalDetailTraceArtifacts,
+        goalDetailTraceArtifacts,
+      );
+    }
+
+    if (isGoalContactTrace) {
+      collectRequiredArtifacts(
+        normalizedTracedFile,
+        requiredGoalContactTraceArtifacts,
+        goalContactTraceArtifacts,
+      );
+    }
+
+    if (goalIndexWebhookTraceState && generatedWebArtifact !== null) {
+      const absoluteTracedFile = path.resolve(path.dirname(traceFile), tracedFile);
+      goalIndexWebhookTraceState.artifacts.set(
+        generatedWebArtifact,
+        statSync(absoluteTracedFile).size,
+      );
+    }
+  }
+}
+
+for (const policy of goalIndexWebhookTracePolicies) {
+  const state = goalIndexWebhookTraceStates.get(policy.traceSuffix);
+  if (!state?.found) {
+    violations.push(`${policy.label} trace is missing: ${policy.traceSuffix}`);
+    continue;
+  }
+
+  const missingArtifacts = requiredGoalBrowseTraceArtifacts.filter((artifact) =>
+    !state.artifacts.has(generatedWebArtifactPath(artifact) ?? "")
+  );
+  for (const artifact of missingArtifacts) {
+    violations.push(`${policy.label} is missing required Goal index artifact: ${artifact}`);
+  }
+
+  const artifactBytes = [...state.artifacts.values()].reduce(
+    (total, bytes) => total + bytes,
+    0,
+  );
+  if (state.artifacts.size > 1) {
+    violations.push(
+      `${policy.label} traces ${state.artifacts.size} generated web artifacts; budget is 1.`,
+    );
+  }
+  if (artifactBytes > goalIndexWebhookGeneratedArtifactByteBudget) {
+    violations.push(
+      `${policy.label} traces ${artifactBytes} generated web artifact bytes; budget is ${goalIndexWebhookGeneratedArtifactByteBudget}.`,
+    );
   }
 }
 
 if (violations.length > 0) {
   throw new Error([
-    "Health Commons generated catalog leaked into Next build traces.",
-    "Public experiment routes must use web projections; measurement routes may trace only measurement-method route bundles.",
+    "Health Commons Next trace boundary check failed.",
+    "Public experiment and Goal routes must use only their web projections; measurement routes may trace only measurement-method route bundles.",
     ...violations.map((violation) => `- ${violation}`),
   ].join("\n"));
 }
@@ -156,13 +287,25 @@ const missingBiomarkerResearchArtifacts = requiredBiomarkerResearchTraceArtifact
 const missingMeasurementMethodArtifacts = requiredMeasurementMethodTraceArtifacts.filter((artifact) =>
   !measurementMethodTraceArtifacts.has(artifact)
 );
+const missingGoalBrowseArtifacts = requiredGoalBrowseTraceArtifacts.filter((artifact) =>
+  !goalBrowseTraceArtifacts.has(artifact)
+);
+const missingGoalDetailArtifacts = requiredGoalDetailTraceArtifacts.filter((artifact) =>
+  !goalDetailTraceArtifacts.has(artifact)
+);
+const missingGoalContactArtifacts = requiredGoalContactTraceArtifacts.filter((artifact) =>
+  !goalContactTraceArtifacts.has(artifact)
+);
 
 if (
   missingExperimentArtifacts.length > 0 ||
   missingBrowseArtifacts.length > 0 ||
   missingBiomarkerOverviewArtifacts.length > 0 ||
   missingBiomarkerResearchArtifacts.length > 0 ||
-  missingMeasurementMethodArtifacts.length > 0
+  missingMeasurementMethodArtifacts.length > 0 ||
+  missingGoalBrowseArtifacts.length > 0 ||
+  missingGoalDetailArtifacts.length > 0 ||
+  missingGoalContactArtifacts.length > 0
 ) {
   throw new Error([
     "Health Commons generated web projections are missing from Next build traces.",
@@ -172,6 +315,9 @@ if (
     ...missingBiomarkerOverviewArtifacts.map((artifact) => `- missing biomarker overview trace artifact: ${artifact}`),
     ...missingBiomarkerResearchArtifacts.map((artifact) => `- missing biomarker research trace artifact: ${artifact}`),
     ...missingMeasurementMethodArtifacts.map((artifact) => `- missing measurement method trace artifact: ${artifact}`),
+    ...missingGoalBrowseArtifacts.map((artifact) => `- missing Goal browse trace artifact: ${artifact}`),
+    ...missingGoalDetailArtifacts.map((artifact) => `- missing Goal detail trace artifact: ${artifact}`),
+    ...missingGoalContactArtifacts.map((artifact) => `- missing Goal contact trace artifact: ${artifact}`),
   ].join("\n"));
 }
 
@@ -208,4 +354,33 @@ function readTraceFiles(trace: unknown): string[] {
   return Array.isArray(files)
     ? files.filter((file): file is string => typeof file === "string")
     : [];
+}
+
+function collectRequiredArtifacts(
+  tracedFile: string,
+  requiredArtifacts: readonly string[],
+  collectedArtifacts: Set<string>,
+): void {
+  for (const requiredArtifact of requiredArtifacts) {
+    if (tracedFile.endsWith(requiredArtifact)) {
+      collectedArtifacts.add(requiredArtifact);
+    }
+  }
+}
+
+function generatedWebArtifactPath(tracedFile: string): string | null {
+  const markerIndex = tracedFile.lastIndexOf(healthCommonsGeneratedWebMarker);
+  return markerIndex === -1
+    ? null
+    : tracedFile.slice(markerIndex + healthCommonsGeneratedWebMarker.length);
+}
+
+function isAllowedGoalBrowseArtifact(artifactPath: string): boolean {
+  return artifactPath === "browse/goals.json";
+}
+
+function isAllowedGoalDetailArtifact(artifactPath: string): boolean {
+  return isAllowedGoalBrowseArtifact(artifactPath)
+    || artifactPath === "routes/index.json"
+    || artifactPath.startsWith("pages/goals/");
 }

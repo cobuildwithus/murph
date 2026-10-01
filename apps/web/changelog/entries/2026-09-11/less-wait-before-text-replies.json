@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 100,
+  "item": {
+    "id": "less-wait-before-text-replies",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting before a reply",
+    "summary": "Murph skips repeated checks when picking up your next message in an ongoing conversation.",
+    "details": "Current access and usage checks still apply before Murph acts or sends a reply.",
+    "relevanceTags": ["messaging", "replies"],
+    "sourcePullRequests": [3316]
+  }
+}

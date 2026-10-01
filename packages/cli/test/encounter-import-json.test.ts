@@ -13,6 +13,7 @@ import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   createTempVaultContext,
   requireData,
+  runCli,
   runInProcessJsonCli,
 } from './cli-test-helpers.js'
 import { localParallelCliTest as test } from './local-parallel-test.js'
@@ -493,6 +494,7 @@ test('encounter import-json rejects child facts without stable event ids', async
   await initVault(cli, vaultRoot)
 
   const payloadPath = path.join(parentRoot, 'encounter.json')
+  const privateTitle = 'private-visit-vitals-title'
   await writeFile(
     payloadPath,
     JSON.stringify({
@@ -505,7 +507,7 @@ test('encounter import-json rejects child facts without stable event ids', async
       },
       measurements: [
         {
-          title: 'Visit vitals',
+          title: privateTitle,
           measurements: [
             {
               metric: 'systolic-blood-pressure',
@@ -533,5 +535,91 @@ test('encounter import-json rejects child facts without stable event ids', async
   if (!importResult.envelope.ok) {
     assert.equal(importResult.envelope.error.code, 'invalid_payload')
     assert.equal(importResult.envelope.error.message, 'encounter payload failed validation.')
+    assert.equal(importResult.envelope.error.stage, 'validation')
+    assert.equal(
+      importResult.envelope.error.fieldErrors?.some(
+        (field) =>
+          field.path === 'measurements.0.eventId' &&
+          field.code === 'invalid_type' &&
+          field.expected === 'string',
+      ),
+      true,
+    )
+    assert.equal(importResult.envelope.error.hint, undefined)
+    assert.equal(JSON.stringify(importResult.envelope).includes(privateTitle), false)
   }
+})
+
+test('built encounter import truncates private qualifier keys from the full error envelope without writing', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-encounter-private-qualifier-',
+  )
+  cleanupPaths.push(parentRoot)
+  const payloadPath = path.join(parentRoot, 'encounter.json')
+  const privateQualifierKey = 'private_qualifier_key_sentinel'
+  const privateQualifierValue = 'private-qualifier-value-sentinel'
+
+  await runCli([
+    'init',
+    '--vault',
+    vaultRoot,
+    '--timezone',
+    'America/New_York',
+  ])
+  await writeFile(
+    payloadPath,
+    JSON.stringify({
+      encounter: {
+        eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1J0',
+        occurredAt: '2026-03-08T16:00:00.000Z',
+        source: 'import',
+        title: 'Synthetic encounter',
+        encounterType: 'office_visit',
+      },
+      measurements: [
+        {
+          eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1J1',
+          measurements: [
+            {
+              metric: 'synthetic_metric',
+              value: 1,
+              unit: 'count',
+              qualifiers: {
+                [privateQualifierKey]: [privateQualifierValue],
+              },
+            },
+          ],
+        },
+      ],
+    }),
+    'utf8',
+  )
+
+  const importResult = await runCli([
+    'encounter',
+    'import-json',
+    '--vault',
+    vaultRoot,
+    '--input',
+    `@${payloadPath}`,
+  ])
+
+  assert.equal(importResult.ok, false)
+  assert.equal(importResult.error?.code, 'invalid_payload')
+  assert.equal(importResult.error?.stage, 'validation')
+  assert.equal(
+    importResult.error?.fieldErrors?.some(
+      (field) =>
+        field.path === 'measurements.0.measurements.0.qualifiers' &&
+        field.code === 'invalid_union',
+    ),
+    true,
+  )
+  const envelope = JSON.stringify(importResult)
+  assert.equal(envelope.includes(privateQualifierKey), false)
+  assert.equal(envelope.includes(privateQualifierValue), false)
+  await assert.rejects(
+    readFile(path.join(vaultRoot, 'ledger/events/2026/2026-03.jsonl'), 'utf8'),
+    { code: 'ENOENT' },
+  )
 })

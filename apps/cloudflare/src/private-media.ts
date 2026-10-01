@@ -308,7 +308,7 @@ export function matchHostedPrivateMediaCapabilityPath(
   pathname: string,
 ): {
   capability: string;
-  extension: HostedPrivateMediaExtension | null;
+  extension: HostedPrivateMediaExtension;
 } | null {
   if (!pathname.startsWith(HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX)) {
     return null;
@@ -316,9 +316,6 @@ export function matchHostedPrivateMediaCapabilityPath(
   const remainder = pathname.slice(
     HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX.length,
   );
-  if (HOSTED_PRIVATE_MEDIA_TOKEN_PATTERN.test(remainder)) {
-    return { capability: remainder, extension: null };
-  }
   const segments = remainder.split("/");
   if (segments.length !== 2) {
     return null;

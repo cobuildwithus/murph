@@ -58,6 +58,7 @@ async function loadExperimentJournalModule() {
   const queryRuntime = {
     readVault: vi.fn(async () => ({ entities: [entity], experiments: [entity] })),
     lookupEntityById: vi.fn(() => entity),
+    resolveCanonicalEntityInFamily: vi.fn(async () => entity),
   };
   const upsertEventRecord = vi.fn(async () => ({
     created: true,

@@ -33,6 +33,7 @@ import type {
 import { createVaultCli } from '../src/vault-cli.js'
 import {
   createTempVaultContext,
+  runCli,
   runInProcessJsonCli,
 } from './cli-test-helpers.js'
 
@@ -545,6 +546,10 @@ test('knowledge commands round-trip the registered CLI against a temp vault', as
   assert.equal(listed.envelope.ok, true)
   assert.equal(listed.envelope.data.limit, 10)
   assert.equal(listed.envelope.data.pageCount, 1)
+  assert.equal(listed.envelope.data.returnedCount, 1)
+  assert.equal(listed.envelope.data.totalCount, 1)
+  assert.equal(listed.envelope.data.truncated, false)
+  assert.equal(listed.envelope.data.degradation, null)
   assert.equal(listed.envelope.data.pages[0]?.slug, upserted.envelope.data.page.slug)
 
   const searched = await runInProcessJsonCli<KnowledgeSearchResult>(cli, [
@@ -563,6 +568,9 @@ test('knowledge commands round-trip the registered CLI against a temp vault', as
   assert.equal(searched.exitCode, null)
   assert.equal(searched.envelope.ok, true)
   assert.equal(searched.envelope.data.total, 1)
+  assert.equal(searched.envelope.data.returnedCount, 1)
+  assert.equal(searched.envelope.data.truncated, false)
+  assert.equal(searched.envelope.data.degradation, null)
   assert.equal(searched.envelope.data.hits[0]?.slug, upserted.envelope.data.page.slug)
   assert.equal(searched.envelope.data.query, 'magnesium sleep')
 
@@ -575,6 +583,7 @@ test('knowledge commands round-trip the registered CLI against a temp vault', as
   ])
   assert.equal(shown.exitCode, null)
   assert.equal(shown.envelope.ok, true)
+  assert.equal(shown.envelope.data.degradation, null)
   assert.match(shown.envelope.data.page.markdown, /# Magnesium and sleep continuity/u)
 
   const linted = await runInProcessJsonCli<KnowledgeLintResult>(cli, [
@@ -620,4 +629,176 @@ test('knowledge commands round-trip the registered CLI against a temp vault', as
     'utf8',
   )
   assert.match(indexMarkdown, /Magnesium and sleep continuity/u)
+})
+
+test('knowledge reads expose bounded degradation and a typed invalid-target recovery', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-knowledge-degraded-command-coverage-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  for (const [slug, title] of [
+    ['first-page', 'First page'],
+    ['second-page', 'Second page'],
+    ['third-page', 'Third page'],
+  ] as const) {
+    await writeVaultFile(
+      vaultRoot,
+      `derived/knowledge/pages/${slug}.md`,
+      [
+        '---',
+        `title: ${title}`,
+        `slug: ${slug}`,
+        'pageType: concept',
+        'status: active',
+        '---',
+        '',
+        `# ${title}`,
+        '',
+        'Shared recovery evidence.',
+        '',
+      ].join('\n'),
+    )
+  }
+
+  for (let index = 0; index < 12; index += 1) {
+    const slug = `broken-${String(index).padStart(2, '0')}`
+    await writeVaultFile(
+      vaultRoot,
+      `derived/knowledge/pages/${index === 0 ? `legacy/${slug}` : slug}.md`,
+      [
+        '---',
+        `title: Private malformed sentinel ${index}`,
+        `slug: Private malformed sentinel ${index}`,
+        '---',
+        '',
+        '# Unusable page',
+        '',
+      ].join('\n'),
+    )
+  }
+
+  await writeVaultFile(
+    vaultRoot,
+    'derived/knowledge/pages/group-room-model.md',
+    [
+      '---',
+      'title: Private reserved sentinel',
+      'slug: Invalid private reserved sentinel',
+      '---',
+      '',
+      '# Unusable reserved page',
+      '',
+    ].join('\n'),
+  )
+
+  const cli = createVaultCli()
+  const listed = await runInProcessJsonCli<KnowledgeListResult>(cli, [
+    'knowledge',
+    'list',
+    '--vault',
+    vaultRoot,
+    '--page-type',
+    'concept',
+    '--limit',
+    '2',
+  ])
+  assert.equal(listed.exitCode, null)
+  assert.equal(listed.envelope.ok, true)
+  assert.equal(listed.envelope.data.pageCount, 2)
+  assert.equal(listed.envelope.data.returnedCount, 2)
+  assert.equal(listed.envelope.data.totalCount, 3)
+  assert.equal(listed.envelope.data.truncated, true)
+  assert.deepEqual(listed.envelope.data.degradation, {
+    issueCodes: ['parse_frontmatter'],
+    issueCount: 12,
+    recoveryAction: 'knowledge lint',
+  })
+  assert.equal(
+    JSON.stringify(listed.envelope.data.degradation).includes('Private malformed sentinel'),
+    false,
+  )
+  assert.equal(
+    JSON.stringify(listed.envelope.data.degradation).includes(vaultRoot),
+    false,
+  )
+
+  const searched = await runInProcessJsonCli<KnowledgeSearchResult>(cli, [
+    'knowledge',
+    'search',
+    'recovery evidence',
+    '--vault',
+    vaultRoot,
+    '--limit',
+    '1',
+  ])
+  assert.equal(searched.exitCode, null)
+  assert.equal(searched.envelope.ok, true)
+  assert.equal(searched.envelope.data.total, 3)
+  assert.equal(searched.envelope.data.returnedCount, 1)
+  assert.equal(searched.envelope.data.truncated, true)
+  assert.deepEqual(
+    searched.envelope.data.degradation,
+    listed.envelope.data.degradation,
+  )
+
+  const shown = await runInProcessJsonCli<KnowledgeShowResult>(cli, [
+    'knowledge',
+    'show',
+    'first-page',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(shown.exitCode, null)
+  assert.equal(shown.envelope.ok, true)
+  assert.deepEqual(
+    shown.envelope.data.degradation,
+    listed.envelope.data.degradation,
+  )
+
+  const invalid = await runCli([
+    'knowledge',
+    'show',
+    'broken-00',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(invalid.ok, false)
+  assert.equal(invalid.error.code, 'knowledge_page_invalid')
+  assert.equal(invalid.error.retryable, false)
+  assert.equal(invalid.error.stage, 'integrity')
+  assert.equal(
+    invalid.error.hint,
+    'Run `knowledge lint` for bounded repair details, then retry `knowledge show`.',
+  )
+  const serializedError = JSON.stringify(invalid.error)
+  assert.equal(serializedError.includes('Private malformed sentinel'), false)
+  assert.equal(serializedError.includes(vaultRoot), false)
+
+  const missing = await runInProcessJsonCli(cli, [
+    'knowledge',
+    'show',
+    'missing-page',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(missing.exitCode, 1)
+  assert.equal(missing.envelope.ok, false)
+  assert.equal(missing.envelope.error.code, 'knowledge_page_not_found')
+})
+
+test('missing wiki page recovery survives the production CLI error bridge', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-knowledge-missing-recovery-')
+  cleanupPaths.push(parentRoot)
+  const missing = await runInProcessJsonCli(createVaultCli(), [
+    'knowledge', 'show', 'missing-page', '--vault', vaultRoot,
+  ])
+  assert.equal(missing.exitCode, 1)
+  assert.equal(missing.envelope.ok, false)
+  assert.equal(missing.envelope.error.code, 'knowledge_page_not_found')
+  assert.equal(missing.envelope.error.retryable, false)
+  assert.equal(missing.envelope.error.stage, 'read')
+  assert.match(missing.envelope.error.hint ?? '', /Do not retry the same missing slug/u)
+  assert.match(missing.envelope.error.hint ?? '', /authorized write/u)
+  assert.match(missing.envelope.error.hint ?? '', /continue without the page/u)
 })

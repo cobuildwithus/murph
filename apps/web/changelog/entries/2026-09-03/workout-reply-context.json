@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-03",
+  "order": 100,
+  "item": {
+    "id": "workout-reply-context",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Workout replies keep their context",
+    "summary": "Murph now keeps the relevant workout context when another topic appears before you report a completed set.",
+    "details": "A short completion reply can resolve and log the intended set without making you repeat which routine you are doing.",
+    "relevanceTags": ["workouts", "conversation", "reminders"],
+    "sourcePullRequests": [2781]
+  }
+}

@@ -17,9 +17,7 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
   dev: {
     description:
       "Interactive hosted local stack using the production-shaped runner-container Codex app-server path.",
-    envDefaults: {
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "250",
-    },
+    envDefaults: {},
     mode: "dev",
     name: "dev",
   },
@@ -36,7 +34,7 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
     description:
       "Hosted-local E2E with deterministic local stubs and no live assistant provider, Stripe listener, or Vercel pull.",
     envDefaults: {
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "250",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
       MURPH_DEV_TEMPORAL: "managed",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
@@ -55,7 +53,7 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
     description:
       "Hosted-local E2E using explicit live/test provider credentials supplied by the caller.",
     envDefaults: {
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "250",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
       MURPH_DEV_TEMPORAL: "managed",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",

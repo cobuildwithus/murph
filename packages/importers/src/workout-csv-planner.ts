@@ -10,7 +10,7 @@ import {
 import {
   normalizeFlexibleTimestamp,
   parseDelimitedRows,
-} from "./csv-sample-import-planner.ts";
+} from "./csv-parsing.ts";
 
 const DEFAULT_DELIMITER = ",";
 const DEFAULT_SOURCE = "strong";
@@ -462,6 +462,26 @@ function toKilograms(value: number, unit: WorkoutCsvWeightUnit): number {
   return unit === "lb" ? value * 0.45359237 : value;
 }
 
+function resolveWeightMetadata(
+  parsed: ReturnType<typeof parseWeightValue>,
+  metadataUnits: (WorkoutCsvWeightUnit | undefined)[],
+  explicitUnit: WorkoutCsvWeightUnit | undefined,
+) {
+  const declaredUnits = [parsed.unit, ...metadataUnits]
+    .filter((unit): unit is WorkoutCsvWeightUnit => unit !== undefined);
+  const declaredUnit = declaredUnits[0];
+  const unit = declaredUnit ?? explicitUnit;
+  return {
+    unit,
+    metadataConflict: new Set(declaredUnits).size > 1,
+    explicitConflict: explicitUnit && declaredUnit && explicitUnit !== declaredUnit,
+    requiresUnit: (parsed.weight ?? 0) > 0 && !unit,
+    kilograms: parsed.weight === 0
+      ? 0
+      : parsed.weight !== undefined && unit ? toKilograms(parsed.weight, unit) : undefined,
+  };
+}
+
 function normalizeSetType(value: string | undefined, detectedSource: WorkoutCsvSource | null): WorkoutSetType {
   const normalized = normalizeOptionalText(value)?.toLowerCase();
   if (detectedSource === "strong") {
@@ -474,6 +494,49 @@ function normalizeSetType(value: string | undefined, detectedSource: WorkoutCsvS
   if (normalized?.includes("drop")) return "dropset";
   if (normalized?.includes("fail")) return "failure";
   return "normal";
+}
+
+function buildWorkoutSet(input: {
+  detectedSource: WorkoutCsvSource | null;
+  rawSetOrder?: string;
+  rawSetType?: string;
+  warmup?: string;
+  dropset?: string;
+  failure?: string;
+  appendOrder: number;
+  values: Readonly<Omit<WorkoutSet, "order" | "type">>;
+}): WorkoutSet | undefined {
+  let type = normalizeSetType(input.rawSetType, input.detectedSource);
+  if (input.detectedSource === "strong") {
+    type = normalizeSetType(input.rawSetOrder, input.detectedSource);
+  } else if (type === "normal") {
+    if (parseBooleanLike(input.warmup)) {
+      type = "warmup";
+    } else if (parseBooleanLike(input.dropset)) {
+      type = "dropset";
+    } else if (parseBooleanLike(input.failure)) {
+      type = "failure";
+    }
+  }
+  const requestedOrder = input.detectedSource === "strong"
+    ? undefined
+    : parseNonnegativeInteger(input.rawSetOrder);
+  const setValues: Omit<WorkoutSet, "order" | "type"> = {
+    ...input.values,
+    weight: input.values.weight === 0 ? undefined : input.values.weight,
+    weightUnit: input.values.weight ? input.values.weightUnit : undefined,
+  };
+  for (const key of Object.keys(setValues) as (keyof typeof setValues)[]) {
+    if (setValues[key] === undefined) delete setValues[key];
+  }
+  if (Object.keys(setValues).length === 0) {
+    return undefined;
+  }
+  return {
+    order: requestedOrder && requestedOrder > 0 ? requestedOrder : input.appendOrder,
+    type,
+    ...setValues,
+  };
 }
 
 function sourceTimestampDomain(rawTimestamp: string): "instant" | "wall" {
@@ -545,6 +608,45 @@ function resolveExerciseMode(exercise: WorkoutCsvSessionExercise): WorkoutSessio
   if (hasDistance && hasDuration) return "cardio";
   if (hasDuration && !hasLoadOrReps) return "duration";
   return "weight_reps";
+}
+
+function projectWorkoutSession(
+  session: Readonly<MutableWorkoutCsvSession>,
+  source: WorkoutCsvSource,
+): PlannedWorkoutCsvSession {
+  const endedAt = session.endedAt
+    ?? (session.durationMinutes
+      ? new Date(new Date(session.occurredAt).getTime() + session.durationMinutes * 60_000).toISOString()
+      : undefined);
+  const exercises = session.exercises
+    .filter((exercise) => exercise.sets.length > 0)
+    .map((exercise) => {
+      const unitOverride = exercise.sets.find((set) => set.weightUnit)?.weightUnit;
+      return {
+        ...exercise,
+        mode: resolveExerciseMode(exercise),
+        ...(unitOverride ? { unitOverride } : {}),
+      };
+    });
+  return {
+    sourceSessionKey: session.sourceSessionKey,
+    ...(session.sourceEndTimeKey ? { sourceEndTimeKey: session.sourceEndTimeKey } : {}),
+    sourceWorkoutId: session.sourceWorkoutId,
+    occurredAt: session.occurredAt,
+    title: session.title,
+    ...(session.durationMinutes ? { durationMinutes: session.durationMinutes } : {}),
+    ...(session.distanceKm ? { distanceKm: session.distanceKm } : {}),
+    ...(session.note ? { note: session.note } : {}),
+    workout: {
+      sourceApp: source,
+      sourceWorkoutId: session.sourceWorkoutId,
+      startedAt: session.occurredAt,
+      ...(endedAt ? { endedAt } : {}),
+      routineName: session.title,
+      ...(session.note ? { sessionNote: session.note } : {}),
+      exercises,
+    },
+  };
 }
 
 function toWarnings(input: {
@@ -650,18 +752,9 @@ function buildSessions(input: {
   const warmupIndex = findHeaderIndex(headers, ["warmup", "warm up"]);
   const dropsetIndex = findHeaderIndex(headers, ["dropset", "drop set"]);
   const failureIndex = findHeaderIndex(headers, ["failure"]);
-  const bodyweightHeaderUnit = bodyweightIndex === undefined
-    ? undefined
-    : inferWeightUnitFromHeader(headers[bodyweightIndex]);
-  const assistanceHeaderUnit = assistanceIndex === undefined
-    ? undefined
-    : inferWeightUnitFromHeader(headers[assistanceIndex]);
-  const addedWeightHeaderUnit = addedWeightIndex === undefined
-    ? undefined
-    : inferWeightUnitFromHeader(headers[addedWeightIndex]);
-  const weightHeaderUnit = weightIndex === undefined
-    ? undefined
-    : inferWeightUnitFromHeader(headers[weightIndex]);
+  const [bodyweightHeaderUnit, assistanceHeaderUnit, addedWeightHeaderUnit, weightHeaderUnit] = [
+    bodyweightIndex, assistanceIndex, addedWeightIndex, weightIndex,
+  ].map((index) => inferWeightUnitFromHeader(index === undefined ? undefined : headers[index]));
 
   const sessions = new Map<string, MutableWorkoutCsvSession>();
   const titleByOccurredAt = new Map<string, string>();
@@ -717,66 +810,57 @@ function buildSessions(input: {
     const parsedAssistance = parseWeightValue(assistanceText);
     const parsedAddedWeight = parseWeightValue(addedWeightText);
     if (
-      (repsText !== undefined && reps === undefined)
-      || (weightText !== undefined && weight === undefined)
-      || (distanceText !== undefined && distance === undefined)
+      [
+        [repsText, reps],
+        [weightText, weight],
+        [distanceText, distance],
+        [bodyweightText, parsedBodyweight.weight],
+        [assistanceText, parsedAssistance.weight],
+        [addedWeightText, parsedAddedWeight.weight],
+      ].some(([text, value]) => text !== undefined && value === undefined)
       || (secondsText !== undefined && parseNonnegativeNumber(secondsText) !== 0 && durationSeconds === undefined)
       || (rpeText !== undefined && (rpe === undefined || rpe > 10))
-      || (bodyweightText !== undefined && parsedBodyweight.weight === undefined)
-      || (assistanceText !== undefined && parsedAssistance.weight === undefined)
-      || (addedWeightText !== undefined && parsedAddedWeight.weight === undefined)
     ) {
       skippedRowCount += 1;
       incrementReason(input.skipReasons, "invalid numeric set value");
       continue;
     }
 
-    const weightUnitCell = normalizeWeightUnit(valueAt(row, weightUnitIndex));
-    const declaredWeightUnits = [parsedWeight.unit, weightUnitCell, weightHeaderUnit]
-      .filter((unit): unit is WorkoutCsvWeightUnit => unit !== undefined);
-    if (new Set(declaredWeightUnits).size > 1) {
+    const weightMetadata = resolveWeightMetadata(parsedWeight, [
+      normalizeWeightUnit(valueAt(row, weightUnitIndex)), weightHeaderUnit,
+    ], input.weightUnit);
+    if (weightMetadata.metadataConflict) {
       skippedRowCount += 1;
       incrementReason(input.skipReasons, "weight units conflict within CSV metadata");
       continue;
     }
-    const declaredWeightUnit = parsedWeight.unit ?? weightUnitCell ?? weightHeaderUnit;
-    if (input.weightUnit && declaredWeightUnit && input.weightUnit !== declaredWeightUnit) {
+    if (weightMetadata.explicitConflict) {
       skippedRowCount += 1;
       incrementReason(input.skipReasons, "explicit weight unit conflicts with CSV metadata");
       continue;
     }
-    const resolvedWeightUnit = declaredWeightUnit ?? input.weightUnit;
-    if (typeof weight === "number" && weight > 0 && !resolvedWeightUnit) {
+    if (weightMetadata.requiresUnit) {
       hasUnitlessPositiveWeight = true;
     }
     const auxiliaryLoads = [
-      { parsed: parsedBodyweight, headerUnit: bodyweightHeaderUnit },
-      { parsed: parsedAssistance, headerUnit: assistanceHeaderUnit },
-      { parsed: parsedAddedWeight, headerUnit: addedWeightHeaderUnit },
+      resolveWeightMetadata(parsedBodyweight, [bodyweightHeaderUnit], input.weightUnit),
+      resolveWeightMetadata(parsedAssistance, [assistanceHeaderUnit], input.weightUnit),
+      resolveWeightMetadata(parsedAddedWeight, [addedWeightHeaderUnit], input.weightUnit),
     ];
-    if (auxiliaryLoads.some(({ parsed, headerUnit }) =>
-      parsed.unit && headerUnit && parsed.unit !== headerUnit)) {
+    if (auxiliaryLoads.some((load) => load.metadataConflict)) {
       skippedRowCount += 1;
       incrementReason(input.skipReasons, "weight units conflict within CSV metadata");
       continue;
     }
-    if (auxiliaryLoads.some(({ parsed, headerUnit }) =>
-      input.weightUnit && (parsed.unit ?? headerUnit) && input.weightUnit !== (parsed.unit ?? headerUnit))) {
+    if (auxiliaryLoads.some((load) => load.explicitConflict)) {
       skippedRowCount += 1;
       incrementReason(input.skipReasons, "explicit weight unit conflicts with CSV metadata");
       continue;
     }
-    if (auxiliaryLoads.some(({ parsed, headerUnit }) =>
-      typeof parsed.weight === "number"
-      && parsed.weight > 0
-      && !(parsed.unit ?? headerUnit ?? input.weightUnit))) {
+    if (auxiliaryLoads.some((load) => load.requiresUnit)) {
       hasUnitlessPositiveWeight = true;
     }
-    const [bodyweightKg, assistanceKg, addedWeightKg] = auxiliaryLoads.map(({ parsed, headerUnit }) => {
-      if (parsed.weight === undefined) return undefined;
-      const unit = parsed.unit ?? headerUnit ?? input.weightUnit;
-      return parsed.weight === 0 ? 0 : unit ? toKilograms(parsed.weight, unit) : undefined;
-    });
+    const [bodyweightKg, assistanceKg, addedWeightKg] = auxiliaryLoads.map((load) => load.kilograms);
     const declaredDistanceUnit = parsedDistance.unit ?? headerDistanceUnit;
     if (input.distanceUnit && declaredDistanceUnit && input.distanceUnit !== declaredDistanceUnit) {
       skippedRowCount += 1;
@@ -858,87 +942,32 @@ function buildSessions(input: {
     exercise.groupId = exercise.groupId ?? valueAt(row, groupIndex);
     exercise.note = exercise.note ?? valueAt(row, exerciseNoteIndex);
 
-    const normalizedGenericType = normalizeSetType(valueAt(row, setTypeIndex), input.detectedSource);
-    const type = input.detectedSource === "strong"
-      ? normalizeSetType(rawSetOrder, input.detectedSource)
-      : normalizedGenericType !== "normal"
-        ? normalizedGenericType
-        : parseBooleanLike(valueAt(row, warmupIndex))
-          ? "warmup"
-          : parseBooleanLike(valueAt(row, dropsetIndex))
-            ? "dropset"
-            : parseBooleanLike(valueAt(row, failureIndex))
-              ? "failure"
-              : "normal";
-    const requestedOrder = input.detectedSource === "strong"
-      ? undefined
-      : parseNonnegativeInteger(rawSetOrder);
-    const set: WorkoutSet = {
-      order: requestedOrder && requestedOrder > 0 ? requestedOrder : exercise.sets.length + 1,
-      type,
-      ...(reps !== undefined ? { reps } : {}),
-      ...(weight !== undefined && weight > 0 ? { weight } : {}),
-      ...(resolvedWeightUnit && weight !== undefined && weight > 0
-        ? { weightUnit: resolvedWeightUnit }
-        : {}),
-      ...(durationSeconds !== undefined ? { durationSeconds: Math.round(durationSeconds) } : {}),
-      ...(distanceMeters !== undefined
-        ? { distanceMeters }
-        : {}),
-      ...(rpe !== undefined ? { rpe } : {}),
-      ...(bodyweightKg !== undefined ? { bodyweightKg } : {}),
-      ...(assistanceKg !== undefined ? { assistanceKg } : {}),
-      ...(addedWeightKg !== undefined ? { addedWeightKg } : {}),
-    };
-    if (
-      set.reps !== undefined
-      || set.weight !== undefined
-      || set.durationSeconds !== undefined
-      || set.distanceMeters !== undefined
-      || set.rpe !== undefined
-      || set.bodyweightKg !== undefined
-      || set.assistanceKg !== undefined
-      || set.addedWeightKg !== undefined
-    ) {
+    const set = buildWorkoutSet({
+      detectedSource: input.detectedSource,
+      rawSetOrder,
+      rawSetType: valueAt(row, setTypeIndex),
+      warmup: valueAt(row, warmupIndex),
+      dropset: valueAt(row, dropsetIndex),
+      failure: valueAt(row, failureIndex),
+      appendOrder: exercise.sets.length + 1,
+      values: {
+        reps,
+        weight,
+        weightUnit: weightMetadata.unit,
+        durationSeconds,
+        distanceMeters,
+        rpe,
+        bodyweightKg,
+        assistanceKg,
+        addedWeightKg,
+      },
+    });
+    if (set) {
       exercise.sets.push(set);
     }
   }
 
-  const planned = [...sessions.values()].map((session): PlannedWorkoutCsvSession => {
-    const endedAt = session.endedAt
-      ?? (session.durationMinutes
-        ? new Date(new Date(session.occurredAt).getTime() + session.durationMinutes * 60_000).toISOString()
-        : undefined);
-    const exercises = session.exercises
-      .filter((exercise) => exercise.sets.length > 0)
-      .map((exercise) => {
-        const unitOverride = exercise.sets.find((set) => set.weightUnit)?.weightUnit;
-        return {
-          ...exercise,
-          mode: resolveExerciseMode(exercise),
-          ...(unitOverride ? { unitOverride } : {}),
-        };
-      });
-    return {
-      sourceSessionKey: session.sourceSessionKey,
-      ...(session.sourceEndTimeKey ? { sourceEndTimeKey: session.sourceEndTimeKey } : {}),
-      sourceWorkoutId: session.sourceWorkoutId,
-      occurredAt: session.occurredAt,
-      title: session.title,
-      ...(session.durationMinutes ? { durationMinutes: session.durationMinutes } : {}),
-      ...(session.distanceKm ? { distanceKm: session.distanceKm } : {}),
-      ...(session.note ? { note: session.note } : {}),
-      workout: {
-        sourceApp: input.source,
-        sourceWorkoutId: session.sourceWorkoutId,
-        startedAt: session.occurredAt,
-        ...(endedAt ? { endedAt } : {}),
-        routineName: session.title,
-        ...(session.note ? { sessionNote: session.note } : {}),
-        exercises,
-      },
-    };
-  });
+  const planned = [...sessions.values()].map((session) => projectWorkoutSession(session, input.source));
 
   return {
     sessions: planned,

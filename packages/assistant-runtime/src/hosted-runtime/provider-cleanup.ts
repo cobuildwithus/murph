@@ -19,6 +19,7 @@ import {
 import type {
   HostedAssistantDeliveryOutcome,
 } from "./models.ts";
+import { resolveHostedRuntimeIdleCheckpointDelayMs } from "./checkpoint-publication.ts";
 import { deleteHostedLinqMessages } from "./message-cleanup.ts";
 import {
   requireHostedProviderFetchDependencies,
@@ -30,9 +31,10 @@ const HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA =
   "murph.hosted-provider-cleanup-recovery.v1";
 const HOSTED_PROVIDER_CLEANUP_RECOVERY_FILE_NAME =
   "hosted-provider-cleanup-recovery.json";
-const HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS = 1_000;
 const HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS = 5 * 60_000;
+const HOSTED_PROVIDER_CLEANUP_REQUEST_BUDGET_MS = 1_000;
+const HOSTED_PROVIDER_CLEANUP_YIELD_POLL_MS = 25;
 
 interface HostedProviderCleanupState {
   linqMessageIds: string[];
@@ -113,7 +115,7 @@ export async function resolveHostedProviderCleanupScheduledWakeAt(input: {
 
 export async function prepareHostedProviderCleanupPlan(input: {
   deferred: boolean;
-  idleCheckpointDelayMs?: number | null;
+  runnerIdleTtlMs?: number | null;
   initialCheckpoint?: HostedProviderCleanupCheckpoint | null;
   nowMs: number;
   shouldYield?: (() => boolean) | null;
@@ -128,7 +130,7 @@ export async function prepareHostedProviderCleanupPlan(input: {
       const checkpoint = await recordHostedProviderCleanupBeforeCommit({
         checkpoint: {
           nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
-            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            runnerIdleTtlMs: input.runnerIdleTtlMs,
             nowMs: input.nowMs,
           }),
         },
@@ -148,7 +150,7 @@ export async function prepareHostedProviderCleanupPlan(input: {
     const scheduledWakeAt = resolveHostedProviderCleanupCheckpointWakeAt({
       checkpoint: storedCheckpoint,
       deferDueOrInvalid: true,
-      idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+      runnerIdleTtlMs: input.runnerIdleTtlMs,
       nowMs: input.nowMs,
     });
     // A due or invalid stored checkpoint re-arms to a future wake. Persist
@@ -189,7 +191,7 @@ export async function prepareHostedProviderCleanupPlan(input: {
       const checkpoint = await recordHostedProviderCleanupBeforeCommit({
         checkpoint: {
           nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
-            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            runnerIdleTtlMs: input.runnerIdleTtlMs,
             nowMs: input.nowMs,
           }),
         },
@@ -232,7 +234,7 @@ export async function prepareHostedProviderCleanupPlan(input: {
     await recordHostedProviderCleanupBeforeCommit({
       checkpoint: {
         nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
-          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+          runnerIdleTtlMs: input.runnerIdleTtlMs,
           nowMs: input.nowMs,
         }),
       },
@@ -254,7 +256,7 @@ export async function prepareHostedProviderCleanupPlan(input: {
 }
 
 export async function recordHostedProviderCleanupAfterDelivery(input: {
-  idleCheckpointDelayMs?: number | null;
+  runnerIdleTtlMs?: number | null;
   nowMs: number;
   outcomes: readonly HostedAssistantDeliveryOutcome[];
   vaultRoot: string;
@@ -270,7 +272,7 @@ export async function recordHostedProviderCleanupAfterDelivery(input: {
   const checkpoint = await recordHostedProviderCleanupBeforeCommit({
     checkpoint: {
       nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
-        idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+        runnerIdleTtlMs: input.runnerIdleTtlMs,
         nowMs: input.nowMs,
       }),
     },
@@ -325,36 +327,17 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   }
 
   let deletedCount = 0;
+  let attemptedCount = 0;
   for (let index = 0; index < messageIds.length; index += 1) {
-    if (input.shouldYield?.() === true) {
-      const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
-      await writeHostedProviderCleanupState(input.vaultRoot, {
-        schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
-        checkpoint: {
-          nextWakeAt,
-        },
-        linqMessageIds: messageIds.slice(index),
-      });
-      return {
-        attemptedLinqMessageCount: deletedCount,
-        deletedLinqMessageCount: deletedCount,
-        failedLinqMessageCount: 0,
-        nextWakeAt,
-      };
-    }
-
     try {
-      await assertHostedProviderCleanupLiveNow(input);
-      const dependencies = requireHostedProviderFetchDependencies({
-        env: input.env,
-        fetchImplementation: input.fetchImplementation,
-        ...(input.signal ? { signal: input.signal } : {}),
-      }, "Hosted Linq provider cleanup");
-      await deleteHostedLinqMessages({
-        ...dependencies,
-        messageIds: [messageIds[index]!],
-      });
-      deletedCount += 1;
+      if (input.shouldYield?.() !== true) {
+        await assertHostedProviderCleanupLiveNow(input);
+        attemptedCount += 1;
+        if (await deleteHostedProviderCleanupMessage(input, messageIds[index]!)) {
+          deletedCount += 1;
+          continue;
+        }
+      }
     } catch (error) {
       const remainingMessageIds = messageIds.slice(index);
       const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
@@ -385,6 +368,19 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
         nextWakeAt,
       };
     }
+
+    const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
+    await writeHostedProviderCleanupState(input.vaultRoot, {
+      schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
+      checkpoint: { nextWakeAt },
+      linqMessageIds: messageIds.slice(index),
+    });
+    return {
+      attemptedLinqMessageCount: attemptedCount,
+      deletedLinqMessageCount: deletedCount,
+      failedLinqMessageCount: 0,
+      nextWakeAt,
+    };
   }
 
   await clearHostedProviderCleanupState(input.vaultRoot);
@@ -396,6 +392,44 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   };
 }
 
+async function deleteHostedProviderCleanupMessage(
+  input: Pick<Parameters<typeof drainHostedProviderCleanupAfterCommit>[0],
+    "env" | "fetchImplementation" | "shouldYield" | "signal">,
+  messageId: string,
+): Promise<boolean> {
+  // Only the idempotent provider request is interruptible. The caller awaits its
+  // settlement before retaining the unconfirmed id in the existing cleanup queue.
+  const controller = new AbortController();
+  const yieldRequest = () => controller.abort(
+    new DOMException("Provider cleanup yielded.", "AbortError"),
+  );
+  const budgetTimer = setTimeout(yieldRequest, HOSTED_PROVIDER_CLEANUP_REQUEST_BUDGET_MS);
+  budgetTimer.unref?.();
+  const yieldTimer = input.shouldYield
+    ? setInterval(() => {
+        if (input.shouldYield?.() === true) yieldRequest();
+      }, HOSTED_PROVIDER_CLEANUP_YIELD_POLL_MS)
+    : null;
+  yieldTimer?.unref?.();
+  try {
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: input.env,
+      fetchImplementation: input.fetchImplementation,
+      signal: input.signal
+        ? AbortSignal.any([input.signal, controller.signal])
+        : controller.signal,
+    }, "Hosted Linq provider cleanup");
+    await deleteHostedLinqMessages({ ...dependencies, messageIds: [messageId] });
+    return true;
+  } catch (error) {
+    if (controller.signal.aborted && !input.signal?.aborted) return false;
+    throw error;
+  } finally {
+    clearTimeout(budgetTimer);
+    if (yieldTimer) clearInterval(yieldTimer);
+  }
+}
+
 function collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(
   outcomes: readonly HostedAssistantDeliveryOutcome[],
 ): string[] {
@@ -403,7 +437,7 @@ function collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(
 }
 
 export function resolveHostedProviderCleanupFirstDeferredWakeAt(input: {
-  idleCheckpointDelayMs?: number | null;
+  runnerIdleTtlMs?: number | null;
   nowMs?: number | null;
 } = {}): string {
   const nowMs = Number.isFinite(input.nowMs)
@@ -411,7 +445,7 @@ export function resolveHostedProviderCleanupFirstDeferredWakeAt(input: {
     : Date.now();
   return new Date(
     nowMs
-      + resolveHostedProviderCleanupIdleCheckpointDelayMs(input.idleCheckpointDelayMs)
+      + resolveHostedRuntimeIdleCheckpointDelayMs(input.runnerIdleTtlMs)
       + HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS,
   ).toISOString();
 }
@@ -428,7 +462,7 @@ function resolveHostedProviderCleanupRetryWakeAt(input: {
 function resolveHostedProviderCleanupCheckpointWakeAt(input: {
   checkpoint: HostedProviderCleanupCheckpoint | null;
   deferDueOrInvalid: boolean;
-  idleCheckpointDelayMs?: number | null;
+  runnerIdleTtlMs?: number | null;
   nowMs: number;
 }): string | null {
   if (!input.checkpoint) {
@@ -440,7 +474,7 @@ function resolveHostedProviderCleanupCheckpointWakeAt(input: {
   if (!Number.isFinite(checkpointWakeMs) || checkpointWakeMs <= input.nowMs) {
     return input.deferDueOrInvalid
       ? resolveHostedProviderCleanupFirstDeferredWakeAt({
-          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+          runnerIdleTtlMs: input.runnerIdleTtlMs,
           nowMs: input.nowMs,
         })
       : null;
@@ -585,16 +619,6 @@ function isHostedProviderCleanupCheckpointDue(
   const wakeAt = checkpoint.nextWakeAt ?? null;
   const wakeMs = Date.parse(wakeAt ?? "");
   return !Number.isFinite(wakeMs) || wakeMs <= nowMs;
-}
-
-function resolveHostedProviderCleanupIdleCheckpointDelayMs(
-  value: number | null | undefined,
-): number {
-  if (value !== null && value !== undefined && Number.isFinite(value) && value > 0) {
-    return Math.trunc(value);
-  }
-
-  return HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS;
 }
 
 async function assertHostedProviderCleanupLiveNow(input: {

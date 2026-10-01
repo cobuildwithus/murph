@@ -42,6 +42,9 @@
       "@murphai/contracts/browser-vault": [
         "../../packages/contracts/src/browser-vault.ts"
       ],
+      "@murphai/contracts/journal-presentation": [
+        "../../packages/contracts/src/journal-presentation.ts"
+      ],
       "@murphai/contracts/zod-runtime": [
         "../../packages/contracts/src/zod-runtime.ts"
       ],
@@ -54,11 +57,14 @@
       "@murphai/health-commons/biomarker-entity-mappings": [
         "../../packages/health-commons/src/biomarker-entity-mappings.ts"
       ],
-      "@murphai/health-commons/biomarker-fallback-ranges": [
-        "../../packages/health-commons/src/biomarker-fallback-ranges.ts"
-      ],
       "@murphai/health-commons/runtime": [
         "../../packages/health-commons/src/runtime.ts"
+      ],
+      "@murphai/health-commons/goal-runtime": [
+        "../../packages/health-commons/src/goal-runtime.ts"
+      ],
+      "@murphai/health-commons/goal-index-runtime": [
+        "../../packages/health-commons/src/goal-index-runtime.ts"
       ],
       "@murphai/health-commons/generated/*": [
         "../../packages/health-commons/generated/*"
@@ -83,6 +89,9 @@
       ],
       "@murphai/hosted-execution/auth": [
         "../../packages/hosted-execution/src/auth.ts"
+      ],
+      "@murphai/hosted-execution/voice-control": [
+        "../../packages/hosted-execution/src/voice-control.ts"
       ],
       "@murphai/hosted-execution/assistant-identifiers": [
         "../../packages/hosted-execution/src/assistant-identifiers.ts"
@@ -114,6 +123,9 @@
       "@murphai/hosted-execution/computer-use": [
         "../../packages/hosted-execution/src/computer-use.ts"
       ],
+      "@murphai/hosted-execution/conversation-polls": [
+        "../../packages/hosted-execution/src/conversation-polls.ts"
+      ],
       "@murphai/hosted-execution/connected-apps": [
         "../../packages/hosted-execution/src/connected-apps.ts"
       ],
@@ -134,6 +146,12 @@
       ],
       "@murphai/hosted-execution/parsers": [
         "../../packages/hosted-execution/src/parsers.ts"
+      ],
+      "@murphai/hosted-execution/parsers/mailbox": [
+        "../../packages/hosted-execution/src/parsers/mailbox.ts"
+      ],
+      "@murphai/hosted-execution/observability": [
+        "../../packages/hosted-execution/src/observability.ts"
       ],
       "@murphai/hosted-execution/phone-calls": [
         "../../packages/hosted-execution/src/phone-calls.ts"
@@ -159,11 +177,35 @@
       "@murphai/hosted-execution/runtime-control": [
         "../../packages/hosted-execution/src/runtime-control.ts"
       ],
+      "@murphai/hosted-execution/runtime-media": [
+        "../../packages/hosted-execution/src/runtime-media.ts"
+      ],
+      "@murphai/hosted-execution/runtime-migration": [
+        "../../packages/hosted-execution/src/runtime-migration.ts"
+      ],
+      "@murphai/hosted-execution/runtime-owner": [
+        "../../packages/hosted-execution/src/runtime-owner.ts"
+      ],
+      "@murphai/hosted-execution/runtime-resource-purge": [
+        "../../packages/hosted-execution/src/runtime-resource-purge.ts"
+      ],
+      "@murphai/hosted-execution/runtime-resources": [
+        "../../packages/hosted-execution/src/runtime-resources.ts"
+      ],
+      "@murphai/hosted-execution/storage-paths": [
+        "../../packages/hosted-execution/src/storage-paths.ts"
+      ],
       "@murphai/hosted-execution/temporal-env": [
         "../../packages/hosted-execution/src/temporal-env.ts"
       ],
       "@murphai/hosted-execution/vault-share": [
         "../../packages/hosted-execution/src/vault-share.ts"
+      ],
+      "@murphai/hosted-execution/workspace-snapshot-v2": [
+        "../../packages/hosted-execution/src/workspace-snapshot-v2.ts"
+      ],
+      "@murphai/hosted-execution/workspace-snapshot-store": [
+        "../../packages/hosted-execution/src/workspace-snapshot-store.ts"
       ],
       "@murphai/messaging-ingress/linq-webhook": [
         "../../packages/messaging-ingress/src/linq-webhook.ts"
@@ -180,6 +222,9 @@
       "@murphai/runtime-state/assistant-generated-deliveries": [
         "../../packages/runtime-state/src/assistant-generated-deliveries.ts"
       ],
+      "@murphai/runtime-state/cli-timing": [
+        "../../packages/runtime-state/src/cli-timing.ts"
+      ],
       "@murphai/runtime-state/hosted-codex-subscription-auth": [
         "../../packages/runtime-state/src/hosted-codex-subscription-auth.ts"
       ],
@@ -191,6 +236,12 @@
       ],
       "@murphai/runtime-state/node/assistant-runtime-issues": [
         "../../packages/runtime-state/src/node/assistant-runtime-issues.ts"
+      ],
+      "@murphai/runtime-state/node/cli-timing": [
+        "../../packages/runtime-state/src/node/cli-timing.ts"
+      ],
+      "@murphai/runtime-state/node/hosted-bundle-codec": [
+        "../../packages/runtime-state/src/node/hosted-bundle-codec.ts"
       ],
       "@murphai/runtime-state/node/loopback-control-plane-auth": [
         "../../packages/runtime-state/src/node/loopback-control-plane-auth.ts"
@@ -206,6 +257,9 @@
       ],
       "@murphai/health-metrics": [
         "../../packages/health-metrics/src/index.ts"
+      ],
+      "@murphai/health-metrics/wearable-provider-catalog": [
+        "../../packages/health-metrics/src/wearable-provider-catalog.ts"
       ],
       "@murphai/query": [
         "../../packages/query/src/index.ts"
@@ -225,11 +279,20 @@
       "@murphai/query/browser-replica-client": [
         "../../packages/query/src/browser-replica-client.ts"
       ],
+      "@murphai/query/browser-replica-server": [
+        "../../packages/query/src/browser-replica-server.ts"
+      ],
+      "@murphai/vault-usecases/clinical-records": [
+        "../../packages/vault-usecases/src/clinical-records.ts"
+      ],
       "@murphai/core": [
         "../../packages/core/src/index.ts"
       ],
       "@murphai/importers": [
         "../../packages/importers/src/index.ts"
+      ],
+      "@murphai/importers/clinical-records": [
+        "../../packages/importers/src/clinical-records/index.ts"
       ],
       "@murphai/importers/device-providers/provider-descriptors": [
         "../../packages/importers/src/device-providers/provider-descriptors.ts"
@@ -243,14 +306,8 @@
       "@murphai/importers/device-providers/junction-resources": [
         "../../packages/importers/src/device-providers/junction-resources.ts"
       ],
-      "@murphai/importers/device-providers/metric-catalog": [
-        "../../packages/importers/src/device-providers/metric-catalog.ts"
-      ],
       "@murphai/importers/device-providers/raw-ingest-receipt": [
         "../../packages/importers/src/device-providers/raw-ingest-receipt.ts"
-      ],
-      "@murphai/importers/sample-series-summary": [
-        "../../packages/importers/src/sample-series-summary.ts"
       ],
       "@murphai/inboxd": [
         "../../packages/inboxd/src/index.ts"
@@ -335,6 +392,12 @@
       ],
       "@murphai/device-syncd/public-provider-descriptors": [
         "../../packages/device-syncd/src/public-provider-descriptors.ts"
+      ],
+      "@murphai/device-syncd/service": [
+        "../../packages/device-syncd/src/service.ts"
+      ],
+      "@murphai/device-syncd/source-staleness": [
+        "../../packages/device-syncd/src/source-staleness.ts"
       ],
       "@murphai/device-syncd/types": [
         "../../packages/device-syncd/src/types.ts"

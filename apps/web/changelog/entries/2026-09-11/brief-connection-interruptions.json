@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 100,
+  "item": {
+    "id": "brief-connection-interruptions",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer errors from brief connection interruptions",
+    "summary": "Murph can recover from more brief connection interruptions while loading information or preparing to save background progress.",
+    "details": "Recovery is limited to work that is safe to repeat. An uncertain save is not automatically repeated.",
+    "relevanceTags": [
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3295
+    ]
+  }
+}

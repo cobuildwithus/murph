@@ -1,11 +1,15 @@
 "use client";
 
 import {
+  HOSTED_ASSISTANT_ASTRA_MODEL,
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
+  HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_VENICE_PROVIDER,
   isHostedAssistantProductModel,
   isHostedAssistantProvider,
@@ -81,23 +85,23 @@ const MODEL_OPTIONS = [
   {
     artwork: "luna",
     description: "Fast health intelligence",
-    model: HOSTED_ASSISTANT_LUNA_MODEL,
+    model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
     name: "Luna",
     usage: "Low usage",
   },
   {
-    artwork: "terra",
-    description: "Advanced health intelligence",
-    model: HOSTED_ASSISTANT_TERRA_MODEL,
-    name: "Terra",
+    artwork: "sol",
+    description: "Deep health intelligence",
+    model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+    name: "Sol",
     usage: "Balanced usage",
   },
   {
-    artwork: "sol",
-    description: "Highest health intelligence",
-    model: HOSTED_ASSISTANT_SOL_MODEL,
-    name: "Sol",
-    usage: "High usage",
+    artwork: "astra",
+    description: "Frontier health intelligence",
+    model: HOSTED_ASSISTANT_ASTRA_MODEL,
+    name: "Astra",
+    usage: "Highest usage",
   },
 ] as const satisfies ReadonlyArray<{
   artwork: AssistantModelArtworkVariant;
@@ -140,6 +144,7 @@ const PROVIDER_OPTIONS = [
 }>;
 
 interface AssistantModelSettingsResponse {
+  availableModels?: readonly HostedAssistantProductModel[];
   dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
   ok: true;
@@ -154,6 +159,7 @@ interface AssistantModeResponse {
 }
 
 interface HostedAssistantModelSettingsProps {
+  availableModels?: readonly HostedAssistantProductModel[];
   canUpgradeToEdge: boolean;
   chatCompletionsAvailable?: boolean;
   configurationAvailable: boolean;
@@ -305,10 +311,10 @@ export function AssistantProviderDialog({
               onConnectionChange={(next) => onConnectionChange?.(next)}
               selected={connection?.selected === true}
             />
-            <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
+            <div className="flex flex-col items-stretch justify-between sm:flex-row sm:items-center gap-2 border-t border-border pt-4">
               <Button
                 onClick={() => setPane("list")}
-                size="sm"
+                size="lg"
                 type="button"
                 variant="ghost"
               >
@@ -321,7 +327,7 @@ export function AssistantProviderDialog({
                     onRoutingChange(CUSTOM_INFERENCE_ROUTING);
                     changeOpen(false);
                   }}
-                  size="sm"
+                  size="lg"
                   type="button"
                   variant={
                     routing === CUSTOM_INFERENCE_ROUTING ? "outline" : "default"
@@ -496,7 +502,7 @@ export function HostedAssistantModelSettings(
   const initialConnection = props.initialConnection ?? null;
   return (
     <HostedAssistantModelSettingsForm
-      key={`${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}:${String(props.customInferenceAvailable === true)}:${String(initialConnection?.revision ?? "none")}:${String(initialConnection?.selected === true)}`}
+      key={`${props.availableModels?.join(",")}:${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}:${String(props.customInferenceAvailable === true)}:${String(initialConnection?.revision ?? "none")}:${String(initialConnection?.selected === true)}`}
       {...props}
       initialConnection={initialConnection}
       initialProvider={initialProvider}
@@ -523,6 +529,7 @@ function HostedAssistantModelSettingsForm(
     props.initialDormantSolPreference,
   );
   const [solAvailable, setSolAvailable] = useState(props.solAvailable);
+  const [availableModels, setAvailableModels] = useState(props.availableModels);
   const [veniceAvailable, setVeniceAvailable] = useState(
     props.veniceAvailable === true,
   );
@@ -609,6 +616,7 @@ function HostedAssistantModelSettingsForm(
         setCurrentProvider(provider);
         setDormantSolPreference(response.dormantSolPreference);
         setSolAvailable(response.solAvailable);
+        setAvailableModels(response.availableModels);
         return {
           dormantSolPreference: response.dormantSolPreference,
           model: response.model,
@@ -648,7 +656,7 @@ function HostedAssistantModelSettingsForm(
         enteringCustom
           ? `Saved. Inference on your endpoint. ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} stays your managed default.`
           : (managed?.dormantSolPreference ?? dormantSolPreference)
-          ? `Saved. Inference on ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} while Edge is paused; Sol remains saved.`
+          ? `Saved. Inference on ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} while Edge is paused; your previous model remains saved.`
           : `Saved. ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} is your default.`,
       );
     } catch (error) {
@@ -673,8 +681,8 @@ function HostedAssistantModelSettingsForm(
       setStatus({
         message: solNoLongerAvailable
           ? props.customInferenceAvailable
-            ? `Your Edge access changed. Your managed default stays ${readModelName(currentModel)}.`
-            : `Your Edge access changed. Murph will keep using ${readModelName(currentModel)}.`
+            ? `Your Edge access changed. Your managed default stays ${readProductModelName(currentModel)}.`
+            : `Your Edge access changed. Murph will keep using ${readProductModelName(currentModel)}.`
           : veniceNoLongerAvailable
             ? props.customInferenceAvailable
               ? "Venice is no longer available. OpenAI remains your saved managed provider."
@@ -716,8 +724,8 @@ function HostedAssistantModelSettingsForm(
         {dormantSolPreference ? (
           <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
             {props.customInferenceAvailable
-              ? "Terra is your managed default while Edge is paused. Sol is still saved and will return with Edge. Choose Luna or save Terra to replace it."
-              : "Terra is active while Edge is paused. Sol is still saved and will return with Edge. Choose Luna or save Terra to replace it."}
+              ? `${readProductModelName(currentModel)} is your managed default while Edge is paused. Your previous model is still saved and will return with Edge. Choose another model or save this default to replace it.`
+              : `${readProductModelName(currentModel)} is active while Edge is paused. Your previous model is still saved and will return with Edge. Choose another model or save this default to replace it.`}
           </p>
         ) : null}
 
@@ -736,7 +744,7 @@ function HostedAssistantModelSettingsForm(
               : "Choose one model for new Murph replies."}
           </FieldDescription>
           <RadioGroup
-            className="grid gap-3 lg:grid-cols-3"
+            className="grid gap-3 sm:grid-cols-2"
             disabled={controlsDisabled}
             value={draftModel}
             onValueChange={(value) => {
@@ -750,10 +758,15 @@ function HostedAssistantModelSettingsForm(
           >
             {MODEL_OPTIONS.map((option) => {
               const selected = draftModel === option.model;
-              const unavailable =
-                option.model === HOSTED_ASSISTANT_SOL_MODEL && !solAvailable;
+              const requiresOpenAi = (option.model === HOSTED_ASSISTANT_GPT_61_SOL_MODEL
+                || option.model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL)
+                && draftRouting !== HOSTED_ASSISTANT_OPENAI_PROVIDER;
+              const unavailable = requiresOpenAi ||
+                (option.model === HOSTED_ASSISTANT_ASTRA_MODEL
+                  && (!availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL)
+                    || draftRouting !== HOSTED_ASSISTANT_OPENAI_PROVIDER));
               const current = option.model === currentModel;
-              const badge = readModelOptionBadge({
+              const badge = requiresOpenAi ? <ModelOptionBadge>OpenAI</ModelOptionBadge> : readModelOptionBadge({
                 current,
                 dormantSolPreference,
                 managedDefaultOnly: props.customInferenceAvailable === true,
@@ -777,7 +790,9 @@ function HostedAssistantModelSettingsForm(
                   key={option.model}
                   meta={
                     unavailable
-                      ? `${option.usage} · Edge required`
+                      ? requiresOpenAi ? `${option.usage} · OpenAI required` : `${option.usage} · ${option.model === HOSTED_ASSISTANT_ASTRA_MODEL
+                        ? availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL) ? "OpenAI required" : "Edge required"
+                        : "Edge required"}`
                       : option.usage
                   }
                   title={option.name}
@@ -900,7 +915,7 @@ function readModelOptionBadge(input: {
     return <ModelOptionBadge>Edge</ModelOptionBadge>;
   }
 
-  if (input.model === HOSTED_ASSISTANT_TERRA_MODEL) {
+  if (input.model === HOSTED_ASSISTANT_DEFAULT_MODEL) {
     return <ModelOptionBadge>Recommended</ModelOptionBadge>;
   }
 
@@ -918,15 +933,12 @@ function ModelOptionBadge({ children }: { children: React.ReactNode }) {
   );
 }
 
-function readModelName(model: HostedAssistantProductModel): string {
-  return `GPT-5.6 ${readProductModelName(model)}`;
-}
-
 function readProductModelName(model: HostedAssistantProductModel): string {
-  if (model === HOSTED_ASSISTANT_LUNA_MODEL) {
+  if (model === HOSTED_ASSISTANT_ASTRA_MODEL) return "Astra";
+  if (model === HOSTED_ASSISTANT_LUNA_MODEL || model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL) {
     return "Luna";
   }
-  return model === HOSTED_ASSISTANT_SOL_MODEL ? "Sol" : "Terra";
+  return model === HOSTED_ASSISTANT_SOL_MODEL || model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL || model === HOSTED_ASSISTANT_GPT_61_SOL_MODEL ? "Sol" : "Murph";
 }
 
 function readProviderName(provider: HostedAssistantProvider): string {

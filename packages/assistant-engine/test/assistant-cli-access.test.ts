@@ -199,5 +199,21 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(guidance).toContain("prefer `--format json`");
     expect(guidance).toContain("do not run recursive assistant or delivery commands");
     expect(guidance).toContain("`assistant deliver`");
+    expect(guidance).toContain(
+      "`stage` names the failure",
+    );
+    expect(guidance).toContain(
+      "For a read-only command, `retryable: true` permits at most one unchanged retry in the turn",
+    );
+    expect(guidance).toContain("never retry an unchanged write");
+    expect(guidance).toContain(
+      "Fixing a `fieldErrors` field, a `hint` prerequisite, or a precise bounded `message` is a new attempt",
+    );
+    expect(guidance).toContain(
+      "Otherwise stop",
+    );
+    expect(guidance).toContain(
+      "never guess or echo omitted details",
+    );
   });
 });

@@ -1,3 +1,4 @@
+import { normalizeCliTiming } from "@murphai/runtime-state/cli-timing";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 
 export const ASSISTANT_USAGE_SCHEMA = "murph.assistant-usage.v1";
@@ -49,6 +50,8 @@ const ASSISTANT_USAGE_RAW_DETAIL_TOKEN_KEYS = new Map<string, ReadonlySet<string
 const ASSISTANT_USAGE_RAW_AUDIO_KEYS = new Set<string>([
   "audioBytes",
   "durationMs",
+  "startDurationMs",
+  "endDurationMs",
 ]);
 const ASSISTANT_USAGE_RAW_TTS_KEYS = new Set<string>([
   "characterCount",
@@ -111,6 +114,14 @@ export const ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES = [
 ] as const;
 export type AssistantTurnProfileCommandFamily =
   (typeof ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES)[number];
+
+export const ASSISTANT_TURN_PROFILE_KNOWLEDGE_COUNT_KEYS = [
+  "showCalls", "listCalls", "searchCalls", "writeCalls", "otherCalls",
+  "notFoundFailures", "invalidFailures", "conflictFailures", "otherFailures",
+] as const;
+export type AssistantTurnProfileKnowledgeCounts = Record<
+  (typeof ASSISTANT_TURN_PROFILE_KNOWLEDGE_COUNT_KEYS)[number], number
+>;
 const ASSISTANT_TURN_PROFILE_COMMAND_FAMILY_SET = new Set<string>(
   ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES,
 );
@@ -165,10 +176,12 @@ export type AssistantProviderRequestOutcome =
   | "succeeded";
 export type AssistantUsageTokenPricingBasis =
   | "openai-flex"
+  | "openai-priority"
   | "standard";
 export type AssistantUsageStripeMeterSource = "murph";
 
 export interface AssistantUsageRecord {
+  operatorTaskId?: string | null;
   apiKeyEnv: string | null;
   attemptCount: number;
   baseUrl: string | null;
@@ -513,6 +526,8 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   assistantSessionId: string;
   // Provider-side correlation handle, stored as providerRequestId.
   codexThreadId: string | null;
+  providerRequestId?: string;
+  providerRequestOutcome?: AssistantProviderRequestOutcome;
   credentialSource: AssistantUsageCredentialSource;
   featureKey: string;
   memberId: string;
@@ -522,6 +537,9 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   tokenPricingBasis?: AssistantUsageTokenPricingBasis;
   triggerKind: string;
   usage: {
+    cacheWriteTokens?: number | null;
+    reasoningTokens?: number | null;
+    rawUsageJson?: Record<string, unknown> | null;
     cachedInputTokens: number | null;
     inputTokens: number | null;
     outputTokens: number | null;
@@ -530,10 +548,19 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   usageExtractionSourcePath?: string | null;
   usageExtractionVersion?: string | null;
 }): AssistantUsageRecord {
-  const turnId = `turn_maintenance_${randomUUID().replaceAll("-", "")}`;
+  const identity = input.providerRequestId
+    ? createHash("sha256").update(JSON.stringify([
+        "murph.idle-compaction-usage.v1", input.memberId, input.providerName,
+        input.providerRequestId,
+      ])).digest("hex").slice(0, 32)
+    : randomUUID().replaceAll("-", "");
+  const turnId = `turn_maintenance_${identity}`;
 
   return parseAssistantUsageRecord({
     attemptCount: 1,
+    cacheWriteTokens: input.usage.cacheWriteTokens ?? null,
+    reasoningTokens: input.usage.reasoningTokens ?? null,
+    rawUsageJson: input.usage.rawUsageJson ?? null,
     cachedInputTokens: input.usage.cachedInputTokens,
     credentialSource: input.credentialSource,
     featureKey: input.featureKey,
@@ -543,7 +570,8 @@ export function buildAssistantMaintenanceUsageRecord(input: {
     outputTokens: input.usage.outputTokens,
     provider: "codex-cli",
     ...(input.providerName === undefined ? {} : { providerName: input.providerName }),
-    providerRequestId: input.codexThreadId,
+    providerRequestId: input.providerRequestId ?? input.codexThreadId,
+    ...(input.providerRequestOutcome ? { providerRequestOutcome: input.providerRequestOutcome } : {}),
     requestedModel: input.model,
     schema: ASSISTANT_USAGE_SCHEMA,
     sessionId: input.assistantSessionId,
@@ -564,6 +592,55 @@ export function buildAssistantMaintenanceUsageRecord(input: {
       attemptCount: 1,
       turnId,
     }),
+  });
+}
+
+export const HOSTED_LIVE_USAGE_SOURCE = "codex.live.session.usage";
+export const HOSTED_LIVE_USAGE_VERSION = "codex-live-duration-v1";
+
+/** One non-overlapping interval from trusted native cumulative usage. */
+export function buildHostedLiveUsageRecord(input: {
+  sessionId: string;
+  memberId: string;
+  occurredAt: string;
+  startDurationMs: number;
+  endDurationMs: number;
+}): AssistantUsageRecord {
+  if (!input.sessionId.trim() || !input.memberId.trim()) {
+    throw new TypeError("Live usage requires a session and member.");
+  }
+  if (!Number.isSafeInteger(input.startDurationMs) || input.startDurationMs < 0
+    || !Number.isSafeInteger(input.endDurationMs)
+    || input.endDurationMs <= input.startDurationMs) {
+    throw new TypeError("Live usage requires an increasing duration interval.");
+  }
+  const digest = createHash("sha256")
+    .update(JSON.stringify([input.memberId, input.sessionId, input.startDurationMs, input.endDurationMs]))
+    .digest("hex");
+  const turnId = `turn_live_${digest}`;
+  return parseAssistantUsageRecord({
+    apiKeyEnv: "OPENAI_API_KEY",
+    attemptCount: 1,
+    baseUrl: "https://api.openai.com/v1",
+    credentialSource: "platform",
+    featureKey: "live-voice",
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    provider: "codex-cli",
+    providerName: "openai",
+    rawUsageJson: {
+      startDurationMs: input.startDurationMs,
+      endDurationMs: input.endDurationMs,
+    },
+    requestedModel: "gpt-live-1",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: input.sessionId,
+    surface: "hosted-runtime",
+    triggerKind: "live-voice",
+    turnId,
+    usageId: createAssistantUsageId({ attemptCount: 1, turnId }),
+    usageExtractionSourcePath: HOSTED_LIVE_USAGE_SOURCE,
+    usageExtractionVersion: HOSTED_LIVE_USAGE_VERSION,
   });
 }
 
@@ -962,6 +1039,9 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
   });
 
   return {
+    ...(record.operatorTaskId === undefined ? {} : {
+      operatorTaskId: normalizeOptionalOperatorTaskId(record.operatorTaskId),
+    }),
     apiKeyEnv: normalizeOptionalString(record.apiKeyEnv, "apiKeyEnv"),
     attemptCount,
     baseUrl: normalizeOptionalString(record.baseUrl, "baseUrl"),
@@ -1132,12 +1212,16 @@ export function normalizeAssistantUsageTokenPricingBasis(
     return "standard";
   }
 
-  if (normalized === "openai-flex" || normalized === "standard") {
+  if (
+    normalized === "openai-flex"
+    || normalized === "openai-priority"
+    || normalized === "standard"
+  ) {
     return normalized;
   }
 
   throw new TypeError(
-    "tokenPricingBasis must be 'standard' or 'openai-flex' when provided.",
+    "tokenPricingBasis must be 'standard', 'openai-flex', or 'openai-priority' when provided.",
   );
 }
 
@@ -1322,7 +1406,6 @@ function requireValidTurnProfileJson(
       `${label}.tools must be an array of at most ${ASSISTANT_TURN_PROFILE_MAX_TOOLS} entries.`,
     );
   }
-
   const isV2 = record.schema === ASSISTANT_TURN_PROFILE_SCHEMA;
   if (
     isV2
@@ -1366,7 +1449,11 @@ function requireValidTurnProfileJson(
     return normalized;
   });
 
+  // Optional diagnostics are independently best-effort; never reject valid
+  // legacy token/tool accounting because a producer sent malformed new fields.
+  const cliTiming = normalizeCliTiming(record.cliTiming);
   return {
+    ...(cliTiming ? { cliTiming } : {}),
     modelContextWindow: record.modelContextWindow,
     requestCount: record.requestCount,
     requests: record.requests.map((entry, index) =>
@@ -1466,7 +1553,32 @@ function normalizeTurnProfileV2Tool(
     ...normalized,
     kind: tool.kind,
     label: tool.label,
+    ...(tool.knowledgeCounts === undefined ? {} : {
+      knowledgeCounts: normalizeTurnProfileKnowledgeCounts(tool, label),
+    }),
   };
+}
+
+function normalizeTurnProfileKnowledgeCounts(
+  tool: Record<string, unknown>,
+  label: string,
+): AssistantTurnProfileKnowledgeCounts {
+  if (tool.kind !== "command" || tool.label !== "vault-cli knowledge") {
+    throw new TypeError(`${label}.knowledgeCounts requires the knowledge command family.`);
+  }
+  const counts = normalizeTurnProfileIntegerRecord(
+    tool.knowledgeCounts,
+    `${label}.knowledgeCounts`,
+    ASSISTANT_TURN_PROFILE_KNOWLEDGE_COUNT_KEYS,
+  ) as AssistantTurnProfileKnowledgeCounts;
+  const calls = counts.showCalls + counts.listCalls + counts.searchCalls
+    + counts.writeCalls + counts.otherCalls;
+  const failures = counts.notFoundFailures + counts.invalidFailures
+    + counts.conflictFailures + counts.otherFailures;
+  if (calls !== tool.calls || failures !== tool.failedCalls) {
+    throw new TypeError(`${label}.knowledgeCounts must reconcile with calls and failedCalls.`);
+  }
+  return counts;
 }
 
 function validateTurnProfileFailedCalls(
@@ -1595,4 +1707,12 @@ function hasNonEmptyAssistantEnvValue(
 ): boolean {
   const value = env[key];
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function normalizeOptionalOperatorTaskId(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value !== "string" || !/^opt_[a-f0-9]{64}$/u.test(value)) {
+    throw new TypeError("Assistant usage operator task identity is invalid.");
+  }
+  return value;
 }

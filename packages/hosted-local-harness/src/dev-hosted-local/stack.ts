@@ -1,10 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { constants, existsSync } from "node:fs";
+import { access, chmod, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { stripVTControlCharacters } from "node:util";
 
 import {
   removeHostedLocalWebAuthorityFromProcessEnvironment,
@@ -16,6 +17,7 @@ import {
   resolveHostedLocalCodexSubscriptionAuthEnvValue,
   shouldSeedHostedLocalCodexSubscriptionAuth,
 } from "./codex-subscription-auth.ts";
+import { prepareHostedLocalCloudflareSourceSnapshot } from "./cloudflare-source-snapshot.ts";
 import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
   cloudflareDir,
@@ -24,7 +26,9 @@ import {
   DEFAULT_WEB_PORT,
   DEFAULT_WORKER_PERSIST_DIR,
   DEFAULT_WORKER_PORT,
+  HOSTED_LOCAL_HTTPS_ORIGIN,
   HOSTED_LOCAL_WORKTREE_ROOT,
+  HOSTED_LOCAL_RUNNER_BUNDLE_ROOT,
   HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
   HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
@@ -187,35 +191,41 @@ const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
   "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
 const HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE =
   "codex-model-catalog.openai-flex.json";
-const HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG = "gpt-5.6-terra";
+const HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS = [
+  "gpt-6.1-sol",
+  "gpt-6-sol",
+  "gpt-6-luna",
+  "gpt-5.6-sol",
+  "gpt-5.6-luna",
+] as const;
 const HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER = {
   id: "flex",
   name: "Flex",
   description: "Lower-cost flexible processing",
 } as const;
-const HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG = "gpt-5.4-nano";
-const HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG = "gpt-5.4-mini";
-const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
-  repoRoot,
-  "apps",
-  "cloudflare",
-  ".deploy",
-  "runner-bundle",
-);
-const HOSTED_LOCAL_CLOUDFLARE_SOURCE_SNAPSHOT_DIR = "cloudflare-source";
-const HOSTED_LOCAL_WORKSPACE_PACKAGE_SCOPE = "@murphai/";
+const HOSTED_LOCAL_RUNNER_BUNDLE_MANIFEST_FILE =
+  ".murph-runner-bundle-manifest.json";
+function registerHostedLocalStackLifecycle(input: {
+  abortSignal?: AbortSignal;
+  kill: (signal?: NodeJS.Signals) => void;
+}): () => void {
+  const onParentExit = (): void => {
+    input.kill("SIGKILL");
+  };
+  const onStartupAbort = (): void => {
+    input.kill("SIGTERM");
+  };
+  process.once("exit", onParentExit);
+  input.abortSignal?.addEventListener("abort", onStartupAbort, { once: true });
+  if (input.abortSignal?.aborted) {
+    onStartupAbort();
+  }
 
-type HostedLocalCloudflareSourceSnapshot = {
-  cloudflareAppDir: string;
-  workspaceRoot: string;
-};
-
-type HostedLocalWorkspacePackage = {
-  dependencies: readonly string[];
-  dir: string;
-  externalDependencies: readonly string[];
-  packageJsonPath: string;
-};
+  return () => {
+    process.off("exit", onParentExit);
+    input.abortSignal?.removeEventListener("abort", onStartupAbort);
+  };
+}
 
 export async function startHostedLocalDevStack(input: {
   abortSignal?: AbortSignal;
@@ -319,6 +329,34 @@ export async function startHostedLocalDevStack(input: {
   let hostedWebTestPreloadOutputDir: string | null = null;
   let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   let minioMonitor: HostedLocalMinioMonitor | null = null;
+  const abortController = new AbortController();
+  const readinessChecks: Promise<void>[] = [];
+  const kill = (signal: NodeJS.Signals = "SIGTERM"): void => {
+    const childSignal = resolveHostedLocalChildShutdownSignal(signal);
+    abortController.abort(childSignal);
+    killHostedLocalMinioMonitor();
+    for (const { child } of children) {
+      terminateChildProcess(child, childSignal);
+    }
+    if (minioServer !== null) {
+      for (const { child } of minioServer.processes()) {
+        terminateChildProcess(child, childSignal);
+      }
+    }
+    if (minioServer === null && minioProcess !== null) {
+      terminateChildProcess(minioProcess.child, childSignal);
+    }
+    if (stripeListener !== null) {
+      terminateChildProcess(stripeListener.child, childSignal);
+    }
+    if (dockerEventsProcess !== null) {
+      terminateChildProcess(dockerEventsProcess.child, childSignal);
+    }
+  };
+  const releaseLifecycleListeners = registerHostedLocalStackLifecycle({
+    abortSignal: input.abortSignal,
+    kill,
+  });
 
   try {
     if (!config.skipVercelPull && !providedVercelOidcToken) {
@@ -326,7 +364,7 @@ export async function startHostedLocalDevStack(input: {
         cwd: webDir,
         env: initialProcessEnv,
         name: "setup",
-        signal: input.abortSignal,
+        signal: abortController.signal,
       });
     }
 
@@ -339,7 +377,7 @@ export async function startHostedLocalDevStack(input: {
     const pulledEnv = (config.skipVercelPull || providedVercelOidcToken)
       ? {}
       : await readSimpleEnvFile(pulledEnvPath);
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
     const localStripeAuthorityEnv = pickHostedLocalStripeAuthorityEnv({
       inheritedEnv: initialEnv,
       localEnvFiles: [
@@ -440,7 +478,7 @@ export async function startHostedLocalDevStack(input: {
       }
     }
     const oidcToken = await resolveVercelOidcToken(vercelEnv);
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
     const oidcIdentity = parseHostedExecutionOidcIdentity(oidcToken);
     if (isolatedDockerConfigDir !== null) {
       await prepareIsolatedDockerConfig({
@@ -448,13 +486,15 @@ export async function startHostedLocalDevStack(input: {
         sourceEnv: initialEnv,
       });
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
     const containerReachableHost = new URL(resolveContainerReachableWorkerOrigin(
       config,
       initialEnv,
     )).hostname;
     minioServer = workerPortMode === "start"
       ? await maybeStartHostedLocalMinio({
+        abortSignal: abortController.signal,
+        onProcessStarted: (process) => { minioProcess = process; },
         buildId: hostedRunnerLocalBuildId,
         containerHost: containerReachableHost,
         env: {
@@ -481,7 +521,7 @@ export async function startHostedLocalDevStack(input: {
         stderrTarget: input.stderrTarget,
       });
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
     const cloudflareDevVars = await resolveCloudflareLocalEnv({
       config,
       oidcIdentity,
@@ -493,9 +533,10 @@ export async function startHostedLocalDevStack(input: {
         ...temporalEnvironmentOverlay,
       },
     });
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
     const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars, {
       retellWebhookPublicBaseUrl: linqWebhookSetup?.publicBaseUrl ?? null,
+      webPublicBaseUrl: initialEnv.MURPH_DEV_WEB_PUBLIC_BASE_URL,
     });
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...vercelEnv,
@@ -522,6 +563,10 @@ export async function startHostedLocalDevStack(input: {
         ...localOverrides,
         ...temporalEnvironmentOverlay,
       }),
+      // The browser uses the public HTTPS origin. The local Worker must call
+      // the managed Web child directly because workerd does not trust Caddy's
+      // local development certificate.
+      ...buildHostedWorkerWebBaseUrlEnv(config),
       ...(hostedLocalCodexModelCatalogJson !== null
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedLocalCodexModelCatalogJson }
         : {}),
@@ -594,7 +639,7 @@ export async function startHostedLocalDevStack(input: {
         await symlink(workerDevVarsPath, cloudflareDevVarsPath);
       }
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     requireEnvValue(
       "DATABASE_URL",
@@ -615,73 +660,24 @@ export async function startHostedLocalDevStack(input: {
       stderrTarget: input.stderrTarget,
       stripeListenerWillCaptureSecret,
     });
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     await maybeGenerateHostedWebPrismaClient({
-      abortSignal: input.abortSignal,
+      abortSignal: abortController.signal,
       env: runtimeEnv,
       stderrTarget: input.stderrTarget,
     });
 
-    if (!config.skipPrismaMigrate) {
-      if (shouldSyncLocalDatabaseSchema(runtimeEnv.DATABASE_URL)) {
-        await runCommand("pnpm", [
-          "--dir",
-          "apps/web",
-          "exec",
-          "prisma",
-          "db",
-          "push",
-          config.forceResetLocalDatabase ? "--force-reset" : "--accept-data-loss",
-        ], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: input.abortSignal,
-        });
-      } else {
-        await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: input.abortSignal,
-        });
-      }
-
-      // The DB is now the hosted Linq home-line authority, so seed the
-      // configured lines the same way the Vercel deploy does. Without this a
-      // fresh local database has no assignable line and onboarding activation
-      // fails closed with LINQ_CONVERSATION_PHONE_REQUIRED. Provider inventory
-      // sync is skipped locally so startup needs no Linq API call. With no
-      // configured conversation phones there is nothing to seed and the
-      // script's pool-ready assertion would fail startup, so skip it: e2e
-      // scenarios seed their own line inventory, and a dev stack without Linq
-      // env keeps failing closed at activation exactly as before.
-      const configuredLinqConversationPhones =
-        runtimeEnv.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS?.trim() ?? "";
-      if (configuredLinqConversationPhones.length > 0) {
-        await runCommand("pnpm", [
-          "--dir",
-          "apps/web",
-          "linq:sync-lines",
-          "--",
-          "--skip-provider-inventory",
-        ], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: input.abortSignal,
-        });
-      } else {
-        (input.stderrTarget ?? process.stderr).write(
-          "[setup] No HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS configured; skipping hosted Linq line seeding.\n",
-        );
-      }
-    }
+    await prepareHostedLocalDatabase({
+      abortSignal: abortController.signal,
+      config,
+      runtimeEnv,
+      stderrTarget: input.stderrTarget,
+    });
 
     if (!config.skipWeb) {
       await maybeGenerateHostedWebHealthCommons({
-        abortSignal: input.abortSignal,
+        abortSignal: abortController.signal,
         env: runtimeEnv,
         stderrTarget: input.stderrTarget,
       });
@@ -689,60 +685,17 @@ export async function startHostedLocalDevStack(input: {
     }
 
     if (workerRuntimeEnv !== null) {
-      if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
-        const runnerBundleEnv: NodeJS.ProcessEnv = {
-          ...(workerProcessEnv ?? workerRuntimeEnv),
-          MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY:
-            (workerProcessEnv ?? workerRuntimeEnv).MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1",
-          MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
-        };
-        if (runnerBundleEnv[HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV] === "1") {
-          runnerBundleEnv[MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV] = "1";
-        }
-        await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"], {
-          cwd: repoRoot,
-          env: runnerBundleEnv,
-          name: "setup",
-          signal: input.abortSignal,
-        });
-        if (workerProcessEnv !== null) {
-          workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
-        }
-      }
-      const cloudflareSourceSnapshot = await prepareHostedLocalCloudflareSourceSnapshot({
-        abortSignal: input.abortSignal,
+      await prepareHostedLocalRunner({
+        abortSignal: abortController.signal,
+        initialEnv,
         tempDir,
-      });
-      await writeFile(
         workerConfigPath,
-        `${JSON.stringify(
-          buildWranglerLocalDevConfig(workerRuntimeEnv, {
-            cloudflareAppDir: cloudflareSourceSnapshot.cloudflareAppDir,
-            configDir: path.dirname(workerConfigPath),
-            workspaceRoot: cloudflareSourceSnapshot.workspaceRoot,
-          }),
-          null,
-          2,
-        )}\n`,
-        {
-          encoding: "utf8",
-          mode: 0o600,
-        },
-      );
-      await chmod(workerConfigPath, 0o600);
-
-      const runnerCleanupScope = resolvePreStartHostedRunnerContainerCleanupScope(initialEnv);
-      await cleanupHostedRunnerContainers({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        scope: runnerCleanupScope,
-      });
-      await cleanupHostedRunnerContainerLocalState({
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        persistDir: workerPersistDir,
+        workerPersistDir,
+        workerProcessEnv,
+        workerRuntimeEnv,
       });
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     // Wrangler prefers CLOUDFLARE_API_TOKEN over OAuth, and account-scoped
     // tokens cannot open the remote session backing the Workers AI binding.
@@ -812,7 +765,7 @@ export async function startHostedLocalDevStack(input: {
         keepAliveTimer = setInterval(() => {}, 2_147_483_647);
       }
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     if (linqWebhookSetup?.shouldStartTunnel) {
       linqTunnelProcess = spawnChildProcess("linq-tunnel", "cloudflared", [
@@ -829,7 +782,7 @@ export async function startHostedLocalDevStack(input: {
       });
       children.push(linqTunnelProcess);
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     stripeListener = await maybeStartStripeWebhookListener({
       config,
@@ -857,7 +810,7 @@ export async function startHostedLocalDevStack(input: {
         );
       });
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     healthCommonsWatcher = config.skipWeb || config.skipHealthCommonsWatch
       ? null
@@ -874,7 +827,7 @@ export async function startHostedLocalDevStack(input: {
     if (healthCommonsWatcher) {
       children.push(healthCommonsWatcher);
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     const shouldUseWebProductionStart = config.skipWeb
       ? false
@@ -904,7 +857,7 @@ export async function startHostedLocalDevStack(input: {
     const webProcessEnvironment = hostedWebTestPreloadOutputDir === null
       ? webProcessSourceEnv
       : await prepareHostedLocalTemporalMailboxSignalFaultPreload({
-        abortSignal: input.abortSignal,
+        abortSignal: abortController.signal,
         env: webProcessSourceEnv,
         expectedUserId: input.webTemporalMailboxSignalFaultUserId ?? "",
         outputDir: hostedWebTestPreloadOutputDir,
@@ -926,11 +879,11 @@ export async function startHostedLocalDevStack(input: {
     if (webProcess) {
       children.push(webProcess);
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     const tlsProxyProcess = config.skipWeb
       ? null
-      : maybeStartTlsProxy({
+      : await maybeStartTlsProxy({
         pipeOutput: input.pipeOutput,
         runtimeEnv,
         stderrTarget: input.stderrTarget,
@@ -939,19 +892,22 @@ export async function startHostedLocalDevStack(input: {
     if (tlsProxyProcess) {
       children.push(tlsProxyProcess);
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
-    const webBaseUrl = config.skipWeb ? null : `http://${config.webHost}:${config.webPort}`;
+    const { internalWebBaseUrl, webBaseUrl } = resolveHostedLocalWebBaseUrls(
+      config,
+      runtimeEnv,
+    );
     const temporalRuntimeEnv = buildHostedLocalTemporalProcessEnv({
       cloudflareDevVars,
       runtimeEnv,
     });
     temporalRuntime = await startHostedLocalTemporalRuntime({
-      abortSignal: input.abortSignal,
+      abortSignal: abortController.signal,
       cloudflareHostedControlBaseUrl: workerBaseUrl,
       config,
       env: temporalRuntimeEnv,
-      hostedWebBaseUrl: webBaseUrl,
+      hostedWebBaseUrl: internalWebBaseUrl,
       pipeOutput: input.pipeOutput,
       stderrTarget: input.stderrTarget,
       stdoutTarget: input.stdoutTarget,
@@ -962,26 +918,8 @@ export async function startHostedLocalDevStack(input: {
     if (temporalRuntime?.workerProcess) {
       children.push(temporalRuntime.workerProcess);
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
-    const kill = (signal: NodeJS.Signals = "SIGTERM"): void => {
-      const childSignal = resolveHostedLocalChildShutdownSignal(signal);
-      killHostedLocalMinioMonitor();
-      for (const { child } of children) {
-        terminateChildProcess(child, childSignal);
-      }
-      if (minioServer !== null) {
-        for (const { child } of minioServer.processes()) {
-          terminateChildProcess(child, childSignal);
-        }
-      }
-      if (stripeListener !== null) {
-        terminateChildProcess(stripeListener.child, childSignal);
-      }
-      if (dockerEventsProcess !== null) {
-        terminateChildProcess(dockerEventsProcess.child, childSignal);
-      }
-    };
     const cleanupTemporaryInputs = async (): Promise<void> => {
       if (restoreCloudflareDevVars) {
         await rm(cloudflareDevVarsPath, { force: true });
@@ -1009,6 +947,7 @@ export async function startHostedLocalDevStack(input: {
         }
 
         stopped = true;
+        abortController.abort(resolveHostedLocalChildShutdownSignal(signal));
         if (keepAliveTimer !== null) {
           clearInterval(keepAliveTimer);
           keepAliveTimer = null;
@@ -1035,6 +974,7 @@ export async function startHostedLocalDevStack(input: {
             ]
             : []),
         ]);
+        await Promise.allSettled(readinessChecks);
         const terminationFailure = terminationResults.find(
           (result): result is PromiseRejectedResult => result.status === "rejected",
         );
@@ -1066,7 +1006,7 @@ export async function startHostedLocalDevStack(input: {
         if (terminationFailure) {
           throw terminationFailure.reason;
         }
-      })();
+      })().finally(releaseLifecycleListeners);
 
       return await stopPromise;
     };
@@ -1080,20 +1020,22 @@ export async function startHostedLocalDevStack(input: {
 
     const ready = (async (): Promise<void> => {
       try {
-        const healthChecks = [
+        readinessChecks.push(
           waitForHealthyHttpEndpoint({
             host: resolveHostedLocalClientWorkerHost(config.workerHost),
             label: "cloudflare",
+            signal: abortController.signal,
             path: "/health",
             port: config.workerPort,
             protocol: config.workerProtocol,
           }),
-        ];
-        if (webBaseUrl !== null) {
-          healthChecks.push(
+        );
+        if (internalWebBaseUrl !== null) {
+          readinessChecks.push(
             waitForHealthyHttpEndpoint({
               host: config.webHost,
               label: "web",
+              signal: abortController.signal,
               path: HOSTED_WEB_HEALTH_PATH,
               port: config.webPort,
               protocol: "http",
@@ -1101,21 +1043,32 @@ export async function startHostedLocalDevStack(input: {
           );
         }
         await Promise.race([
-          Promise.all(healthChecks).then(() => undefined),
+          Promise.all(readinessChecks).then(() => undefined),
           waitForFirstChildExit(children).then((child) => {
+            const exitedChild = children.find((candidate) => candidate.child === child.child);
+            const portBindCollision = exitedChild
+              ? childReportedPortBindCollision(exitedChild)
+              : false;
             throw new Error(
-              `${child.name} dev process exited before the hosted local stack became healthy.`,
+              [
+                `${child.name} dev process exited before the hosted local stack became healthy.`,
+                portBindCollision ? "Address already in use was reported by the exited process." : null,
+              ].filter((value): value is string => value !== null).join(" "),
             );
           }),
         ]);
+        throwIfAbortSignalAborted(abortController.signal);
         ensurePreparedRunnerContainerImageAlias(combineChildOutput(children));
         if (workerRuntimeEnv !== null) {
-          await maybeRunRunnerContainerSmoke({
+          const smoke = maybeRunRunnerContainerSmoke({
+            abortSignal: abortController.signal,
             config,
             env: workerProcessEnv ?? workerRuntimeEnv,
             stderrTarget: input.stderrTarget,
             workerBaseUrl,
           });
+          readinessChecks.push(smoke);
+          await smoke;
         }
       } catch (error) {
         if (!stopped) {
@@ -1173,62 +1126,67 @@ export async function startHostedLocalDevStack(input: {
       workerBaseUrl,
     };
   } catch (error) {
-    await stopHostedLocalMinioMonitor().catch(() => {});
-    for (const { child } of children) {
-      await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
-    }
-    if (minioServer !== null) {
-      for (const { child } of minioServer.processes()) {
+    abortController.abort("SIGTERM");
+    try {
+      await stopHostedLocalMinioMonitor().catch(() => {});
+      for (const { child } of children) {
         await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
       }
-    }
-    if (stripeListener !== null) {
-      await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});
-    }
-    if (dockerEventsProcess !== null) {
-      await terminateChildProcessAndWait(dockerEventsProcess.child, { signal: "SIGTERM" })
-        .catch(() => {});
-    }
-    if (workerRuntimeEnv && workerPortMode === "start") {
-      await cleanupHostedRunnerContainers({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        ignoreErrors: true,
-        scope: "current-build",
-      }).catch(() => {});
-      // Preserve suite-owned reuse even when this scenario fails to start; the
-      // outer E2E finally block still removes the current-build image.
-      if (!shouldRunHostedLocalE2eRunnerSmokeOnce(initialProcessEnv)) {
-        await cleanupHostedRunnerImages({
+      if (minioServer !== null) {
+        for (const { child } of minioServer.processes()) {
+          await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
+        }
+      }
+      if (stripeListener !== null) {
+        await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});
+      }
+      if (dockerEventsProcess !== null) {
+        await terminateChildProcessAndWait(dockerEventsProcess.child, { signal: "SIGTERM" })
+          .catch(() => {});
+      }
+      if (workerRuntimeEnv && workerPortMode === "start") {
+        await cleanupHostedRunnerContainers({
           cwd: repoRoot,
           env: workerProcessEnv ?? workerRuntimeEnv,
           ignoreErrors: true,
           scope: "current-build",
         }).catch(() => {});
-      }
-    }
-    if (minioServer !== null) {
-      await cleanupHostedLocalMinioContainerBestEffort(
-        workerProcessEnv ?? workerRuntimeEnv ?? initialProcessEnv,
-        minioServer.containerName,
-      ).catch(() => {});
-    }
-    if (!stopped) {
-      await rm(workerConfigPath, { force: true }).catch(() => {});
-      if (hostedWebTestPreloadOutputDir !== null) {
-        await rm(hostedWebTestPreloadOutputDir, { force: true, recursive: true }).catch(() => {});
-      }
-      if (restoreCloudflareDevVars) {
-        await rm(cloudflareDevVarsPath, { force: true }).catch(() => {});
-        if (hadExistingCloudflareDevVars) {
-          await rename(workerDevVarsBackupPath, cloudflareDevVarsPath).catch(() => {});
+        // Preserve suite-owned reuse even when this scenario fails to start; the
+        // outer E2E finally block still removes the current-build image.
+        if (!shouldRunHostedLocalE2eRunnerSmokeOnce(initialProcessEnv)) {
+          await cleanupHostedRunnerImages({
+            cwd: repoRoot,
+            env: workerProcessEnv ?? workerRuntimeEnv,
+            ignoreErrors: true,
+            scope: "current-build",
+          }).catch(() => {});
         }
       }
-      if (!tempDirOverride) {
-        await rm(tempDir, { force: true, recursive: true }).catch(() => {});
+      if (minioServer !== null) {
+        await cleanupHostedLocalMinioContainerBestEffort(
+          workerProcessEnv ?? workerRuntimeEnv ?? initialProcessEnv,
+          minioServer.containerName,
+        ).catch(() => {});
       }
+      if (!stopped) {
+        await rm(workerConfigPath, { force: true }).catch(() => {});
+        if (hostedWebTestPreloadOutputDir !== null) {
+          await rm(hostedWebTestPreloadOutputDir, { force: true, recursive: true }).catch(() => {});
+        }
+        if (restoreCloudflareDevVars) {
+          await rm(cloudflareDevVarsPath, { force: true }).catch(() => {});
+          if (hadExistingCloudflareDevVars) {
+            await rename(workerDevVarsBackupPath, cloudflareDevVarsPath).catch(() => {});
+          }
+        }
+        if (!tempDirOverride) {
+          await rm(tempDir, { force: true, recursive: true }).catch(() => {});
+        }
+      }
+      throw error;
+    } finally {
+      releaseLifecycleListeners();
     }
-    throw error;
   }
 
   async function stopHostedLocalMinioMonitor(): Promise<void> {
@@ -1242,8 +1200,223 @@ export async function startHostedLocalDevStack(input: {
   function killHostedLocalMinioMonitor(): void {
     if (minioMonitor !== null) {
       minioMonitor.kill();
-      minioMonitor = null;
     }
+  }
+}
+
+async function prepareHostedLocalRunner({
+  abortSignal,
+  initialEnv,
+  tempDir,
+  workerConfigPath,
+  workerPersistDir,
+  workerProcessEnv,
+  workerRuntimeEnv,
+}: {
+  abortSignal: AbortSignal;
+  initialEnv: NodeJS.ProcessEnv;
+  tempDir: string;
+  workerConfigPath: string;
+  workerPersistDir: string;
+  workerProcessEnv: NodeJS.ProcessEnv | null;
+  workerRuntimeEnv: NodeJS.ProcessEnv;
+}): Promise<void> {
+  if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
+    const runnerBundleEnv: NodeJS.ProcessEnv = {
+      ...(workerProcessEnv ?? workerRuntimeEnv),
+      MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY:
+        (workerProcessEnv ?? workerRuntimeEnv).MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1",
+      MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
+    };
+    if (runnerBundleEnv[HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV] === "1") {
+      runnerBundleEnv[MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV] = "1";
+    }
+    await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"], {
+      cwd: repoRoot,
+      env: runnerBundleEnv,
+      name: "setup",
+      signal: abortSignal,
+    });
+    if (workerProcessEnv !== null) {
+      workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
+    }
+  }
+  const runnerBundleFingerprintEnv =
+    await readHostedLocalRunnerBundleFingerprintEnv();
+  applyHostedLocalRunnerBundleFingerprintEnv({
+    fingerprintEnv: runnerBundleFingerprintEnv,
+    workerProcessEnv,
+    workerRuntimeEnv,
+  });
+  const cloudflareSourceSnapshot = await prepareHostedLocalCloudflareSourceSnapshot({
+    abortSignal: abortSignal,
+    tempDir,
+  });
+  await writeFile(
+    workerConfigPath,
+    `${JSON.stringify(
+      buildWranglerLocalDevConfig(workerRuntimeEnv, {
+        cloudflareAppDir: cloudflareSourceSnapshot.cloudflareAppDir,
+        configDir: path.dirname(workerConfigPath),
+        workspaceRoot: cloudflareSourceSnapshot.workspaceRoot,
+      }),
+      null,
+      2,
+    )}\n`,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+  await chmod(workerConfigPath, 0o600);
+
+  const runnerCleanupScope = resolvePreStartHostedRunnerContainerCleanupScope(initialEnv);
+  await cleanupHostedRunnerContainers({
+    cwd: repoRoot,
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    ignoreErrors: true,
+    scope: runnerCleanupScope,
+    stoppedOnly: true,
+  });
+  await cleanupHostedRunnerImages({
+    cwd: repoRoot,
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    force: false,
+    ignoreErrors: true,
+    preserveCurrentBuild: true,
+    scope: runnerCleanupScope,
+  });
+  await cleanupHostedRunnerContainerLocalState({
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    persistDir: workerPersistDir,
+  });
+}
+
+async function prepareHostedLocalDatabase({
+  abortSignal,
+  config,
+  runtimeEnv,
+  stderrTarget,
+}: {
+  abortSignal: AbortSignal;
+  config: HostedLocalDevConfig;
+  runtimeEnv: NodeJS.ProcessEnv;
+  stderrTarget: NodeJS.WritableStream | undefined;
+}): Promise<void> {
+  if (!config.skipPrismaMigrate) {
+    if (shouldSyncLocalDatabaseSchema(runtimeEnv.DATABASE_URL)) {
+      await runCommand("pnpm", [
+        "--dir",
+        "apps/web",
+        "exec",
+        "prisma",
+        "db",
+        "push",
+        config.forceResetLocalDatabase ? "--force-reset" : "--accept-data-loss",
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+      await runCommand("pnpm", [
+        "--dir", "apps/web", "exec", "prisma", "db", "execute",
+        "--file", "scripts/initialize-local-runtime-cutover.sql",
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+    } else {
+      await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+    }
+
+    // The DB is now the hosted Linq home-line authority, so seed the
+    // configured lines the same way the Vercel deploy does. Without this a
+    // fresh local database has no assignable line and onboarding activation
+    // fails closed with LINQ_CONVERSATION_PHONE_REQUIRED. Provider inventory
+    // sync is skipped locally so startup needs no Linq API call. With no
+    // configured conversation phones there is nothing to seed and the
+    // script's pool-ready assertion would fail startup, so skip it: e2e
+    // scenarios seed their own line inventory, and a dev stack without Linq
+    // env keeps failing closed at activation exactly as before.
+    const configuredLinqConversationPhones =
+      runtimeEnv.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS?.trim() ?? "";
+    if (configuredLinqConversationPhones.length > 0) {
+      await runCommand("pnpm", [
+        "--dir",
+        "apps/web",
+        "linq:sync-lines",
+        "--",
+        "--skip-provider-inventory",
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+    } else {
+      (stderrTarget ?? process.stderr).write(
+        "[setup] No HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS configured; skipping hosted Linq line seeding.\n",
+      );
+    }
+  }
+}
+
+async function readHostedLocalRunnerBundleFingerprintEnv(): Promise<{
+  HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: string;
+  HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: string;
+}> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(
+      path.join(
+        HOSTED_LOCAL_RUNNER_BUNDLE_ROOT,
+        HOSTED_LOCAL_RUNNER_BUNDLE_MANIFEST_FILE,
+      ),
+      "utf8",
+    ));
+  } catch (error) {
+    throw new Error("Hosted local runner bundle manifest is unreadable.", {
+      cause: error,
+    });
+  }
+
+  const bundleFingerprint = isRecord(parsed)
+    && typeof parsed.bundleFingerprint === "string"
+    ? parsed.bundleFingerprint.trim()
+    : "";
+  const sourceFingerprint = isRecord(parsed)
+    && typeof parsed.sourceFingerprint === "string"
+    ? parsed.sourceFingerprint.trim()
+    : "";
+  if (!bundleFingerprint || !sourceFingerprint) {
+    throw new Error("Hosted local runner bundle manifest is missing fingerprints.");
+  }
+
+  return {
+    HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: bundleFingerprint,
+    HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: sourceFingerprint,
+  };
+}
+
+function applyHostedLocalRunnerBundleFingerprintEnv(input: {
+  fingerprintEnv: {
+    HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: string;
+    HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: string;
+  };
+  workerProcessEnv: NodeJS.ProcessEnv | null;
+  workerRuntimeEnv: NodeJS.ProcessEnv;
+}): void {
+  Object.assign(input.workerRuntimeEnv, input.fingerprintEnv);
+  if (input.workerProcessEnv !== null) {
+    Object.assign(input.workerProcessEnv, input.fingerprintEnv);
   }
 }
 
@@ -1308,6 +1481,28 @@ function startHostedLocalMinioMonitor(input: {
         await inFlightPoll;
       }
     },
+  };
+}
+
+function buildHostedWorkerWebBaseUrlEnv(
+  config: HostedLocalDevConfig,
+): NodeJS.ProcessEnv {
+  return config.skipWeb
+    ? {}
+    : { HOSTED_WEB_BASE_URL: `http://${config.webHost}:${config.webPort}` };
+}
+
+function resolveHostedLocalWebBaseUrls(
+  config: HostedLocalDevConfig,
+  runtimeEnv: NodeJS.ProcessEnv,
+): { internalWebBaseUrl: string | null; webBaseUrl: string | null } {
+  if (config.skipWeb) {
+    return { internalWebBaseUrl: null, webBaseUrl: null };
+  }
+  const internalWebBaseUrl = `http://${config.webHost}:${config.webPort}`;
+  return {
+    internalWebBaseUrl,
+    webBaseUrl: runtimeEnv.HOSTED_WEB_BASE_URL?.trim() || internalWebBaseUrl,
   };
 }
 
@@ -1712,248 +1907,6 @@ function shouldUseIsolatedDockerConfig(env: NodeJS.ProcessEnv): boolean {
     && env[HOSTED_LOCAL_PRESERVE_DOCKER_CONFIG_ENV]?.trim() !== "1";
 }
 
-async function prepareHostedLocalCloudflareSourceSnapshot(input: {
-  abortSignal: AbortSignal | undefined;
-  tempDir: string;
-}): Promise<HostedLocalCloudflareSourceSnapshot> {
-  const workspaceRoot = path.join(
-    input.tempDir,
-    HOSTED_LOCAL_CLOUDFLARE_SOURCE_SNAPSHOT_DIR,
-  );
-  const cloudflareAppDir = path.join(workspaceRoot, "apps", "cloudflare");
-
-  await rm(workspaceRoot, { force: true, recursive: true });
-  await mkdir(cloudflareAppDir, { recursive: true });
-  throwIfAbortSignalAborted(input.abortSignal);
-
-  await copyFile(
-    path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner"),
-    path.join(workspaceRoot, "Dockerfile.cloudflare-hosted-runner"),
-  );
-  await copyFile(
-    path.join(cloudflareDir, "package.json"),
-    path.join(cloudflareAppDir, "package.json"),
-  );
-  await copyFile(
-    path.join(cloudflareDir, ".dockerignore"),
-    path.join(cloudflareAppDir, ".dockerignore"),
-  );
-  await cp(
-    path.join(cloudflareDir, "src"),
-    path.join(cloudflareAppDir, "src"),
-    { recursive: true },
-  );
-  throwIfAbortSignalAborted(input.abortSignal);
-
-  await mkdir(path.join(cloudflareAppDir, ".deploy"), { recursive: true });
-  await cp(
-    HOSTED_LOCAL_RUNNER_BUNDLE_ROOT,
-    path.join(cloudflareAppDir, ".deploy", "runner-bundle"),
-    { recursive: true },
-  );
-  await symlinkIfPresent(
-    path.join(repoRoot, "node_modules"),
-    path.join(workspaceRoot, "node_modules"),
-  );
-  await materializeHostedLocalCloudflareWorkspacePackages({
-    abortSignal: input.abortSignal,
-    cloudflareAppDir,
-  });
-
-  return { cloudflareAppDir, workspaceRoot };
-}
-
-async function materializeHostedLocalCloudflareWorkspacePackages(input: {
-  abortSignal: AbortSignal | undefined;
-  cloudflareAppDir: string;
-}): Promise<void> {
-  const packagesByName = discoverHostedLocalWorkspacePackages();
-  const packageNames = resolveHostedLocalCloudflareWorkspacePackageNames(packagesByName);
-  const nodeModulesRoot = path.join(input.cloudflareAppDir, "node_modules");
-  const cloudflarePackageJson = readPackageJsonRecord(
-    path.join(cloudflareDir, "package.json"),
-  );
-
-  await rm(
-    path.join(nodeModulesRoot, HOSTED_LOCAL_WORKSPACE_PACKAGE_SCOPE.slice(0, -1)),
-    { force: true, recursive: true },
-  );
-
-  for (const packageName of packageNames) {
-    throwIfAbortSignalAborted(input.abortSignal);
-    const workspacePackage = packagesByName.get(packageName);
-    if (!workspacePackage) {
-      throw new Error(
-        `Hosted local Cloudflare snapshot could not find workspace package ${packageName}.`,
-      );
-    }
-
-    const packageTargetDir = path.join(nodeModulesRoot, ...packageName.split("/"));
-    const sourceDistDir = path.join(workspacePackage.dir, "dist");
-    if (!existsSync(sourceDistDir)) {
-      throw new Error(
-        `Hosted local Cloudflare snapshot requires ${packageName}/dist. Run the package build before starting pnpm dev.`,
-      );
-    }
-
-    await mkdir(packageTargetDir, { recursive: true });
-    await copyFile(
-      workspacePackage.packageJsonPath,
-      path.join(packageTargetDir, "package.json"),
-    );
-    await cp(sourceDistDir, path.join(packageTargetDir, "dist"), {
-      recursive: true,
-    });
-    await linkHostedLocalExternalDependencies({
-      dependencyNames: workspacePackage.externalDependencies,
-      sourceNodeModulesRoot: path.join(workspacePackage.dir, "node_modules"),
-      targetNodeModulesRoot: path.join(packageTargetDir, "node_modules"),
-    });
-  }
-
-  await linkHostedLocalExternalDependencies({
-    dependencyNames: readExternalDependencyNames(cloudflarePackageJson),
-    sourceNodeModulesRoot: path.join(cloudflareDir, "node_modules"),
-    targetNodeModulesRoot: nodeModulesRoot,
-  });
-}
-
-async function linkHostedLocalExternalDependencies(input: {
-  dependencyNames: readonly string[];
-  sourceNodeModulesRoot: string;
-  targetNodeModulesRoot: string;
-}): Promise<void> {
-  for (const dependencyName of input.dependencyNames) {
-    const dependencyParts = dependencyName.split("/");
-    const sourcePath = path.join(input.sourceNodeModulesRoot, ...dependencyParts);
-    const targetPath = path.join(input.targetNodeModulesRoot, ...dependencyParts);
-
-    await mkdir(path.dirname(targetPath), { recursive: true });
-    await symlinkIfPresent(sourcePath, targetPath);
-  }
-}
-
-function resolveHostedLocalCloudflareWorkspacePackageNames(
-  packagesByName: ReadonlyMap<string, HostedLocalWorkspacePackage>,
-): readonly string[] {
-  const cloudflarePackageJsonPath = path.join(cloudflareDir, "package.json");
-  const cloudflarePackageJson = readPackageJsonRecord(cloudflarePackageJsonPath);
-  const queue = readWorkspaceDependencyNames(cloudflarePackageJson);
-  const names: string[] = [];
-  const seen = new Set<string>();
-
-  for (let index = 0; index < queue.length; index += 1) {
-    const packageName = queue[index];
-    if (seen.has(packageName)) {
-      continue;
-    }
-
-    const workspacePackage = packagesByName.get(packageName);
-    if (!workspacePackage) {
-      throw new Error(
-        `Cloudflare depends on ${packageName}, but no matching workspace package was found.`,
-      );
-    }
-
-    seen.add(packageName);
-    names.push(packageName);
-    queue.push(...workspacePackage.dependencies);
-  }
-
-  return names;
-}
-
-function discoverHostedLocalWorkspacePackages(): ReadonlyMap<string, HostedLocalWorkspacePackage> {
-  const packagesRoot = path.join(repoRoot, "packages");
-  const packagesByName = new Map<string, HostedLocalWorkspacePackage>();
-
-  for (const entry of readdirSync(packagesRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
-
-    const packageJsonPath = path.join(packagesRoot, entry.name, "package.json");
-    if (!existsSync(packageJsonPath)) {
-      continue;
-    }
-
-    const packageJson = readPackageJsonRecord(packageJsonPath);
-    const packageName = packageJson.name;
-    if (
-      typeof packageName !== "string"
-      || !packageName.startsWith(HOSTED_LOCAL_WORKSPACE_PACKAGE_SCOPE)
-    ) {
-      continue;
-    }
-
-    packagesByName.set(packageName, {
-      dependencies: readWorkspaceDependencyNames(packageJson),
-      dir: path.dirname(packageJsonPath),
-      externalDependencies: readExternalDependencyNames(packageJson),
-      packageJsonPath,
-    });
-  }
-
-  return packagesByName;
-}
-
-function readPackageJsonRecord(packageJsonPath: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-  if (!isRecord(parsed)) {
-    throw new Error(`Invalid package.json at ${formatRepoPath(packageJsonPath)}.`);
-  }
-
-  return parsed;
-}
-
-function readWorkspaceDependencyNames(
-  packageJson: Record<string, unknown>,
-): string[] {
-  return readPackageDependencyNames(packageJson, "workspace");
-}
-
-function readExternalDependencyNames(
-  packageJson: Record<string, unknown>,
-): string[] {
-  return readPackageDependencyNames(packageJson, "external");
-}
-
-function readPackageDependencyNames(
-  packageJson: Record<string, unknown>,
-  kind: "external" | "workspace",
-): string[] {
-  const dependencies = isRecord(packageJson.dependencies)
-    ? packageJson.dependencies
-    : {};
-
-  return Object.entries(dependencies)
-    .filter(([name, version]) => {
-      if (typeof version !== "string") {
-        return false;
-      }
-
-      const workspaceDependency =
-        name.startsWith(HOSTED_LOCAL_WORKSPACE_PACKAGE_SCOPE)
-        && version.startsWith("workspace:");
-      return kind === "workspace" ? workspaceDependency : !workspaceDependency;
-    })
-    .map(([name]) => name);
-}
-
-async function symlinkIfPresent(sourcePath: string, targetPath: string): Promise<void> {
-  try {
-    await access(sourcePath);
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return;
-    }
-
-    throw error;
-  }
-
-  await symlink(sourcePath, targetPath, "dir");
-}
-
 async function maybePersistHostedLocalLinqWebhookSecret(input: {
   envPath: string;
   existingEnv: Readonly<Record<string, string | undefined>>;
@@ -2064,9 +2017,32 @@ async function prepareIsolatedDockerConfig(input: {
   sourceEnv: NodeJS.ProcessEnv;
 }): Promise<void> {
   await mkdir(input.configDir, { mode: 0o700, recursive: true });
+  const context = await resolveIsolatedDockerContext({
+    sourceEnv: input.sourceEnv,
+    targetConfigDir: input.configDir,
+  });
+  if (context !== null) {
+    await copyIsolatedDockerContextDirectory({
+      contextId: context.id,
+      kind: "meta",
+      required: true,
+      sourceConfigDir: context.sourceConfigDir,
+      targetConfigDir: input.configDir,
+    });
+    await copyIsolatedDockerContextDirectory({
+      contextId: context.id,
+      kind: "tls",
+      required: false,
+      sourceConfigDir: context.sourceConfigDir,
+      targetConfigDir: input.configDir,
+    });
+  }
   await writeFile(
     path.join(input.configDir, "config.json"),
-    '{"auths":{}}\n',
+    `${JSON.stringify({
+      auths: {},
+      ...(context !== null ? { currentContext: context.name } : {}),
+    })}\n`,
     {
       encoding: "utf8",
       mode: 0o600,
@@ -2076,6 +2052,86 @@ async function prepareIsolatedDockerConfig(input: {
     targetConfigDir: input.configDir,
     sourceEnv: input.sourceEnv,
   });
+}
+
+async function resolveIsolatedDockerContext(input: {
+  sourceEnv: NodeJS.ProcessEnv;
+  targetConfigDir: string;
+}): Promise<{
+  id: string;
+  name: string;
+  sourceConfigDir: string;
+} | null> {
+  const configuredSourceDir = input.sourceEnv.DOCKER_CONFIG?.trim();
+  const defaultSourceDir = path.join(os.homedir(), ".docker");
+  const sourceConfigDir = path.resolve(
+    configuredSourceDir
+      && path.resolve(configuredSourceDir) !== path.resolve(input.targetConfigDir)
+      ? configuredSourceDir
+      : defaultSourceDir,
+  );
+  const sourceConfigText = await readOptionalTextFile(
+    path.join(sourceConfigDir, "config.json"),
+  );
+  let storedCurrentContext: unknown;
+  if (sourceConfigText !== null) {
+    try {
+      const sourceConfig: unknown = JSON.parse(sourceConfigText);
+      if (isRecord(sourceConfig)) {
+        storedCurrentContext = sourceConfig.currentContext;
+      }
+    } catch {
+      storedCurrentContext = undefined;
+    }
+  }
+  const currentContext = input.sourceEnv.DOCKER_CONTEXT?.trim()
+    || storedCurrentContext;
+  if (
+    typeof currentContext !== "string"
+    || currentContext.trim().length === 0
+    || currentContext === "default"
+  ) {
+    return null;
+  }
+
+  return {
+    id: createHash("sha256").update(currentContext).digest("hex"),
+    name: currentContext,
+    sourceConfigDir,
+  };
+}
+
+async function copyIsolatedDockerContextDirectory(input: {
+  contextId: string;
+  kind: "meta" | "tls";
+  required: boolean;
+  sourceConfigDir: string;
+  targetConfigDir: string;
+}): Promise<void> {
+  const sourceDir = path.join(
+    input.sourceConfigDir,
+    "contexts",
+    input.kind,
+    input.contextId,
+  );
+  const targetDir = path.join(
+    input.targetConfigDir,
+    "contexts",
+    input.kind,
+    input.contextId,
+  );
+  await mkdir(path.dirname(targetDir), { mode: 0o700, recursive: true });
+  try {
+    await cp(sourceDir, targetDir, { recursive: true });
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      if (input.required) {
+        throw new Error("Selected Docker context metadata is unavailable.");
+      }
+      return;
+    }
+    throw error;
+  }
 }
 
 async function symlinkDockerCliPluginsIfPresent(input: {
@@ -2105,7 +2161,7 @@ async function findDockerCliPluginSourceDir(input: {
     }
 
     try {
-      await access(candidate);
+      await access(path.join(candidate, "docker-buildx"), constants.X_OK);
       return candidate;
     } catch {
       continue;
@@ -2115,13 +2171,20 @@ async function findDockerCliPluginSourceDir(input: {
   return null;
 }
 
-function resolveDockerCliPluginSourceDirs(env: NodeJS.ProcessEnv): string[] {
+export function resolveDockerCliPluginSourceDirs(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+  homeDir: string = os.homedir(),
+): string[] {
   const dockerConfig = env.DOCKER_CONFIG?.trim();
   const candidates = [
     ...(dockerConfig ? [path.join(dockerConfig, "cli-plugins")] : []),
-    path.join(os.homedir(), ".docker", "cli-plugins"),
-    ...(process.platform === "darwin"
-      ? ["/Applications/Docker.app/Contents/Resources/cli-plugins"]
+    path.join(homeDir, ".docker", "cli-plugins"),
+    ...(platform === "darwin"
+      ? [
+        "/Applications/Docker.app/Contents/Resources/cli-plugins",
+        "/opt/homebrew/lib/docker/cli-plugins",
+      ]
       : []),
     "/usr/local/lib/docker/cli-plugins",
     "/usr/libexec/docker/cli-plugins",
@@ -2329,64 +2392,31 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
     throw new Error("Hosted local dev received a Codex model catalog without a models array.");
   }
 
-  const targetModel = parsed.models
-    .filter(isRecord)
-    .find((candidate) => candidate.slug === HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG);
-  if (!targetModel) {
-    throw new Error(
-      `Hosted local dev Codex model catalog is missing ${HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG}.`,
-    );
-  }
+  const catalogModels = parsed.models.filter(isRecord)
+    .filter((model) => model.slug !== "gpt-5.6-terra");
+  parsed.models = catalogModels;
 
-  const serviceTiers = Array.isArray(targetModel.service_tiers)
-    ? targetModel.service_tiers
-    : [];
-  const hasFlexTier = serviceTiers
-    .filter(isRecord)
-    .some((candidate) => candidate.id === HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER.id);
-  targetModel.service_tiers = hasFlexTier
-    ? serviceTiers
-    : [
-      ...serviceTiers,
-      HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER,
-    ];
-
-  const deploySmokeModel = parsed.models
-    .filter(isRecord)
-    .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG);
-  if (deploySmokeModel) {
-    Object.assign(deploySmokeModel, {
-      description: "Fast, low-cost model for deploy smoke checks.",
-      display_name: "GPT-5.4-Nano",
-      priority: 5,
-      service_tiers: [],
-      supports_parallel_tool_calls: false,
-      supports_search_tool: false,
-      // The OpenAI API rejects gpt-5.4-nano when Codex >= 0.143 sends the
-      // x-openai-internal-codex-responses-lite header.
-      use_responses_lite: false,
-    });
-  } else {
-    const templateModel = parsed.models
-      .filter(isRecord)
-      .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG);
-    if (!templateModel) {
+  for (const slug of HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS) {
+    const targetModel = catalogModels.find((candidate) => candidate.slug === slug);
+    if (!targetModel) {
       throw new Error(
-        `Hosted local dev Codex model catalog is missing ${HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG}.`,
+        `Hosted local dev Codex model catalog is missing ${slug}.`,
       );
     }
 
-    parsed.models.push({
-      ...templateModel,
-      description: "Fast, low-cost model for deploy smoke checks.",
-      display_name: "GPT-5.4-Nano",
-      priority: 5,
-      service_tiers: [],
-      slug: HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG,
-      supports_parallel_tool_calls: false,
-      supports_search_tool: false,
-      use_responses_lite: false,
-    });
+    const serviceTiers = Array.isArray(targetModel.service_tiers)
+      ? targetModel.service_tiers
+      : [];
+    const hasFlexTier = serviceTiers
+      .filter(isRecord)
+      .some((candidate) => candidate.id === HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER.id);
+    targetModel.service_tiers = hasFlexTier
+      ? serviceTiers
+      : [
+        ...serviceTiers,
+        HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER,
+      ];
+    targetModel.tool_mode = "code_mode";
   }
 
   return `${JSON.stringify(parsed, null, 2)}\n`;
@@ -2420,6 +2450,7 @@ function stripHostedCryptoMaterialEnv<TEnv extends Record<string, string | undef
 }
 
 async function maybeRunRunnerContainerSmoke(input: {
+  abortSignal?: AbortSignal;
   config: HostedLocalDevConfig;
   env: NodeJS.ProcessEnv | null;
   stderrTarget?: NodeJS.WritableStream;
@@ -2443,15 +2474,17 @@ async function maybeRunRunnerContainerSmoke(input: {
         ...input.env,
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: input.workerBaseUrl,
         HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS:
-          input.env.HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS?.trim() || "30",
+        // Keep the smoke owner's attempt budget: standby preparation can take
+        // longer than 30 quick polls. Explicit caller limits pass through above.
         HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS:
           input.env.HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS?.trim() || "1000",
       },
       name: "setup",
+      signal: input.abortSignal,
     });
     await markHostedLocalE2eRunnerSmokeProved(input.env);
   } catch (error) {
+    throwIfAbortSignalAborted(input.abortSignal);
     if (requiresHostedLocalE2eIsolation(input.env)) {
       throw error;
     }
@@ -2559,28 +2592,49 @@ function writeRunnerContainerSmokeWarning(
   );
 }
 
-function maybeStartTlsProxy(input: {
+async function maybeStartTlsProxy(input: {
   pipeOutput?: boolean;
   runtimeEnv: NodeJS.ProcessEnv;
   stderrTarget?: NodeJS.WritableStream;
   stdoutTarget?: NodeJS.WritableStream;
-}): BufferedNamedChildProcess | null {
+}): Promise<BufferedNamedChildProcess | null> {
   if (input.runtimeEnv.MURPH_DEV_SKIP_TLS_PROXY === "1") {
     return null;
   }
 
+  const requiresManagedHttps = input.runtimeEnv.HOSTED_WEB_BASE_URL?.trim()
+    === HOSTED_LOCAL_HTTPS_ORIGIN;
   const caddyfilePath = path.join(repoRoot, "Caddyfile");
   if (!existsSync(caddyfilePath)) {
+    if (requiresManagedHttps) {
+      throw new Error("Canonical local HTTPS requires the repository Caddyfile. Restore it before starting the stack.");
+    }
     return null;
   }
 
   try {
     execFileSync("which", ["caddy"], { stdio: "ignore" });
   } catch {
+    if (requiresManagedHttps) {
+      throw new Error(
+        "Canonical local HTTPS requires Caddy on PATH. Install Caddy before starting the stack, "
+        + "or use MURPH_DEV_SKIP_TLS_PROXY=1 for direct HTTP work without browser authentication or OAuth.",
+      );
+    }
     (input.stderrTarget ?? process.stderr).write(
       "[tls-proxy] Caddyfile found but `caddy` is not on PATH; skipping local HTTPS proxy. Install with `brew install caddy` to enable.\n",
     );
     return null;
+  }
+
+  if (requiresManagedHttps) {
+    await assertPortAvailable(
+      "127.0.0.1",
+      Number(new URL(HOSTED_LOCAL_HTTPS_ORIGIN).port),
+      "Canonical local HTTPS is already owned by another listener. "
+      + "Obtain an explicit handoff from its owner before starting this stack, "
+      + "or use MURPH_DEV_SKIP_TLS_PROXY=1 for direct HTTP work without browser authentication or OAuth.",
+    );
   }
 
   return spawnChildProcess("tls-proxy", "caddy", [
@@ -2806,6 +2860,15 @@ function appendStartupDiagnostics(
       redactHostedLocalDiagnosticText(diagnostics),
     ].filter((value): value is string => value !== null).join("\n"),
   );
+}
+
+function childReportedPortBindCollision(child: BufferedNamedChildProcess): boolean {
+  return [child.stdoutText(), child.stderrText()].some((output) => {
+    const plainOutput = stripVTControlCharacters(output);
+    return /\bEADDRINUSE\b/u.test(plainOutput)
+      || /\baddress already in use\b/ui.test(plainOutput)
+      || /\bport \d+ is already in use\b/ui.test(plainOutput);
+  });
 }
 
 function combineChildOutput(input: readonly BufferedNamedChildProcess[] | readonly string[]): string {

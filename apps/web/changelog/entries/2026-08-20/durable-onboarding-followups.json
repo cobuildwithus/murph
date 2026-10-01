@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 120,
+  "item": {
+    "id": "durable-onboarding-followups",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Setup follow-ups now survive every signup path",
+    "summary": "Murph now keeps the same short unfinished-setup follow-up available whether onboarding starts with a welcome or directly in chat.",
+    "details": "This includes instant-start conversations and Telegram, which still stays silent until you message the bot. Finished, dismissed, and expired setup follow-ups remain closed.",
+    "relevanceTags": [
+      "assistant",
+      "onboarding",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      2097
+    ]
+  }
+}

@@ -1,3 +1,6 @@
+import type { HostedRuntimeVoice } from "./hosted-runtime/voice-call.ts";
+export { createHostedRuntimeVoice, createHostedRuntimeVoiceCall } from "./hosted-runtime/voice-call.ts";
+export type { HostedRuntimeVoice } from "./hosted-runtime/voice-call.ts";
 import type {
   HostedRuntimeLatencyTraceStagedMilestones,
 } from "@murphai/hosted-execution/runtime-control";
@@ -13,6 +16,9 @@ export { drainHostedRuntimeDeferredUsageCompletionsBestEffort } from "./hosted-r
 import type {
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
+import type {
+  HostedWorkspaceRestorePreparation,
+} from "./hosted-workspace-restore-preparation.ts";
 import {
   drainHostedRuntimeLogWritesBestEffort,
 } from "./hosted-runtime/runtime-logs.ts";
@@ -44,15 +50,18 @@ export type {
 } from "./hosted-runtime/snapshot-bridge.ts";
 
 export interface HostedWorkspaceInvocationInput {
+  voice?: HostedRuntimeVoice | null;
   job: HostedAssistantWorkspaceRuntimeJobInput;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder;
-  onConversationActivityObserved?: () => void;
+  onConversationActivityObserved?: (receivedAtEpochMs: number) => void;
   platform: HostedRuntimePlatform;
+  preparedWorkspaceRestore?: HostedWorkspaceRestorePreparation | null;
   readCurrentLease: () =>
     | HostedRuntimeBridgeCheckpointLease
     | null
     | Promise<HostedRuntimeBridgeCheckpointLease | null>;
+  runtimeIssueProvenance?: HostedAssistantRuntimeIssueProvenance | null;
   runtimeWakeSignal: RuntimeWakeSignal;
   shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal | null;
@@ -60,6 +69,11 @@ export interface HostedWorkspaceInvocationInput {
   snapshotDiagnosticsHashSecret?: string | null;
   vaultRoot: string;
   waitForBackgroundAssistantWork(signal: AbortSignal | null): Promise<void>;
+}
+
+export interface HostedAssistantRuntimeIssueProvenance {
+  releaseSha: string | null;
+  runtimeName: string;
 }
 
 export async function runHostedWorkspaceInvocation(
@@ -83,10 +97,13 @@ export async function runHostedWorkspaceInvocation(
   try {
     return await runHostedWorkspaceRuntimeJobInProcess(input.job, {
       ...options,
+      voice: input.voice ?? null,
       latencyMilestones: input.latencyMilestones ?? null,
-      onConversationActivityObserved: input.onConversationActivityObserved
-        ? () => input.onConversationActivityObserved?.()
-        : undefined,
+      onConversationActivityObserved: input.onConversationActivityObserved,
+      ...(input.preparedWorkspaceRestore
+        ? { preparedWorkspaceRestore: input.preparedWorkspaceRestore }
+        : {}),
+      runtimeIssueProvenance: input.runtimeIssueProvenance ?? null,
       runtimeWakeSignal,
       shutdownSignal: input.shutdownSignal ?? null,
       signal: input.signal ?? null,

@@ -1,7 +1,12 @@
 export {
   buildInboxAttachmentRetentionLedgerPath,
+  INBOX_IMAGE_RETENTION_DAYS,
+  INBOX_IMAGE_RETENTION_WINDOW_MS,
   INBOX_MEDIA_RETENTION_DAYS,
   INBOX_MEDIA_RETENTION_WINDOW_MS,
+  INBOX_VIDEO_RETENTION_DAYS,
+  INBOX_VIDEO_RETENTION_WINDOW_MS,
+  listInboxAttachmentRetentionRecords,
   runInboxMediaRetention,
   type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,

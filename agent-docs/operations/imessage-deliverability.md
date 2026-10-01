@@ -2,7 +2,42 @@
 
 Last verified: 2026-08-12
 
+## Automatic contact sharing
+
+After a confirmed delivered iMessage, Web shares the sending line's native
+contact card into the member's current, unsuspended home chat. This covers
+instant text signup, app and website phone welcomes, later channel connections,
+and ordinary direct replies. Invite signup retains its correlated direct/group
+share. A receipt can precede delivery acceptance and home-route materialization;
+the runtime callback checks the exact persisted message/chat delivery receipts
+again after commit. Acceptance alone never authorizes a share.
+
+The existing chat-keyed reservation bounds native attempts to one per rolling
+24 hours, including concurrent receipts and ambiguous provider failures. Recent
+attempts return before provider preflight. An unverified or imaged line card does
+not consume the reservation; subsequent delivered activity can retry after line
+configuration recovers. Explicitly requested vCards keep their 90-second throttle.
+All provider work is post-response and best effort; it never retries or fails the
+original reply. No new scheduler, queue, migration, or runtime protocol is added.
+Email-only accounts wait for a direct iMessage route; native sharing does not work
+over SMS/RCS. Linq cannot confirm handset presentation or contact saving. See the
+[provider contract](https://docs.linqapp.com/channel/imessage/guides/contact-cards/).
+
+Native cards and requested vCards consult the existing line/chat egress policy
+before reserving or sending. Every saved vCard requires exactly one active self
+handle. Browser handoff issuance, like download, requires an assigned or pending
+texting line and returns the existing retryable not-ready response otherwise.
+
 ## Purpose
+
+Runtime-owned terminal Linq send failures have one bounded retry through the
+existing delivery-message owner. The exact eligibility, content-preservation,
+current route/line checks, and receipt-ordering contract lives in
+`agent-docs/RELIABILITY.md`. This does not permit retrying ambiguous delivery
+failures or bypassing a disabled, opted-out, flagged, critical, or unhealthy
+egress state.
+
+Direct Linq webhook duplicates preserve the verified chat identity in the existing mailbox handoff. Instant first-turn completion uses that same identity to reconcile an already-accepted reply. The duplicate planner does not attach an append-path checkpoint: the existing wake owner still repairs a missing workspace through its legacy signal path.
 
 This is required reading for any Murph change that can affect text-message or iMessage behavior. Read it before editing assistant/provider prompts, reply generation, outbound copy, reminder behavior, notification behavior, message scheduling, line selection, delivery monitoring, onboarding copy, or any runtime path that can cause Murph to send a message through a phone-number based channel.
 
@@ -63,7 +98,43 @@ Read and apply this guide when touching any of these surfaces:
    - Do not send to purchased, scraped, or otherwise untrusted contact lists.
    - Only message people with a clear user/product relationship and an expected reason to hear from Murph.
 
+## Production conversation canary
+
+The hourly Linq canary uses one explicitly configured Photon identity that
+exists only to contact Murph. It is a reciprocal five-turn private
+conversation, not a source of new-recipient outreach: Photon sends one greeting,
+waits for Murph, and sends each later turn only after Murph replies. Runs are
+serialized and never canceled in flight. Automatic admission comes from one
+staggered hourly schedule; manual dispatch remains available for recovery. Every
+run first resolves the actual Vercel production deployment, verifies exact
+deployment identity and protected-main ancestry, then resets only that identity through the
+fixed-target production route. The recreated canary member uses its existing
+assistant-model preference to keep all runtime turns on GPT-5.6 Luna.
+
+The canary must not log phone numbers, message text, chat or message ids, SDK
+errors, or provider bodies. It reports only bounded reset counts and per-turn
+latency and canonical outcome counts. A successful first turn must equal Murph's
+package-owned welcome; later turns must be non-empty and must not repeat it.
+After the identity turn, the canary observes a fresh zero-count baseline, asks
+Murph to save the fixed synthetic walking goal, and requires one canonical goal
+with one valid distinct ID and no additional goals. A later reciprocal turn asks
+Murph to read its saved title and requires both the delivered title and a fresh one-goal canonical
+readback. Observation waits for checkpointed conversation input and current
+replica publication, outside the reply latency budget. This proves canonical
+goal cardinality, not physical message delivery exactly once. Every reply must
+arrive in under twenty seconds. The existing deterministic hosted-local full-stack journey
+owns onboarding follow-up behavior. Do not hold this shared live identity open
+for the multi-day follow-up window or add a second reset lifecycle to the
+hourly canary; a separately authorized live follow-up proof must be run in a
+serialized maintenance window.
+
 ## Assistant response media
+
+The Linq adapter preserves idempotency keys up to the provider's 255-character
+limit. Longer internal keys are SHA-256 compacted only in the serialized provider
+body, after any rich-link or fallback suffix is added. Persisted outbox keys keep
+their complete automation authority metadata; retries derive the same wire key.
+See Linq's [idempotency contract](https://docs.linqapp.com/channel/imessage/guides/messaging/sending-messages/).
 
 Linq's messaging contract allows up to 100 total parts and up to 40 public-URL
 media parts in one message, but Murph does not treat that provider ceiling as a
@@ -77,8 +148,9 @@ replay compatibility. See Linq's
 and [attachment](https://docs.linqapp.com/guides/messaging/attachments/)
 limits.
 
-The Linq adapter includes distinct image alternative text in the provider text
-part for accessibility. It must reject a rendered text part over Linq's 10,000
+The Linq adapter sends the authored message without appending image alternative
+text as visible prose. Alt text remains on stored response media; image-only
+sends remain image-only. It must reject a rendered text part over Linq's 10,000
 character limit before private vault bytes are loaded or uploaded and before
 message-provider entry, with `deliveryMayHaveSucceeded: false`.
 An ordinary failed direct-chat image response remains outstanding image work:
@@ -96,7 +168,7 @@ body in these diagnostics.
 
 ## Assistant response cards
 
-Response cards are optional outbox-owned presentation siblings of response media, not a direct-send surface or a separate delivery owner. The general semantic attachment tool serves explicit current private-direct requests, exact private-direct scheduled turns whose saved instructions explicitly request a card, and the managed meal closeout; it remains unavailable in groups. Telegram-only presentation tools may be available in authenticated direct and group Telegram turns, but Linq group behavior stays unchanged. Occurrence authority alone is not card intent. A card replaces the whole final response, so it is eligible only when that card alone completely satisfies the current request. The outbox continues to own the semantic message, target, status, receipt, retry, and idempotency lifecycle, and a card cannot coexist with media.
+Response cards are optional outbox-owned presentation siblings of response media, not a direct-send surface or a separate delivery owner. The general semantic attachment tool serves explicit current private-direct requests, exact private-direct scheduled turns whose saved instructions explicitly request a card, and the managed meal closeout; it remains unavailable in groups. Telegram-only presentation tools may be available in authenticated direct and group Telegram turns, but Linq group behavior stays unchanged. Occurrence authority alone is not card intent. A card replaces the whole final response, so it is eligible only when that card alone completely satisfies the current request; the fixed first totals-only introduction described below is its only bounded companion exception. The outbox continues to own the semantic message, target, status, receipt, retry, and idempotency lifecycle, and a card cannot coexist with media.
 
 Exercise routines use a dedicated attachment tool only to keep both Codex tool
 schemas below the provider compaction limit. It creates the same outbox card
@@ -104,26 +176,30 @@ effect. Linq does not attempt a Messages-extension balloon for this card kind;
 it freezes and sends the deterministic routine text through the existing
 fallback identity before provider entry.
 
-Card values are immutable message content owned by the existing outbox effect. V1 remains a supported calorie/protein/carbs/fat compatibility input. V2 adds the exact canonical fiber total and nullable per-metric goal snapshots. Each non-null goal snapshot carries only an exact target copied after a complete bounded active-goal read proves exactly one qualifying record for that daily metric and unit, plus Murph's frozen semantic assessment. A saturated result or ambiguous match leaves the target null. Missing or partial totals can carry only an `unavailable` status, and an assessed status must not point opposite the frozen total and target. The snapshot is presentation for that message, not persisted goal progress or a new source of truth. A missing or untrusted target stays null and neutral. There is no persisted remote card state, authenticated fetch API, cleanup lifecycle, or card-specific queue. Linq explicitly enables interactive presentation so recipients with the shipping Messages extension see its SwiftUI balloon; recipients without it, including Messages on macOS, retain a provider static layout. A generated image mirrors the shipping SwiftUI balloon's compact default calorie-ring and one-row nutrient composition. The bitmap is rectangular so Linq and Messages own the outer card mask. The installed extension retains its native icon and interactive identity, while the Linq request omits the optional App Store id; app-absent static cards therefore receive no provider app art, and the bitmap embeds the checked-in canonical Murph mark in the native 36×27pt upper-left badge footprint. The static image intentionally omits the native tap-to-reveal target amounts and repeated direction labels; its visible native caption preserves only the date and meal count instead of repeating totals or targets, while the safe text recovery retains the complete status meaning outside the bitmap. Null and unavailable goals stay neutral. Null, incomplete, and unavailable calorie-goal states retain a neutral ring. A short subcaption appears only when some totals are partial. The value-free `fallback_text` derives only from the validated card kind: daily nutrition, tracked workouts, generic Murph summaries, and challenge standings each receive a stable descriptive preview followed by the member-directed request for the complete semantic text. Those labels keep card values out of conversation-list, lock-screen, and notification text and avoid Apple data detectors that can downgrade the card. New V1, V2, V3, V4, and V5 cards use the same bounded HTTPS Base64URL fragment family for immutable presentation values allowed by their versioned delivery contracts; the extension also retains legacy data-URL reads for already-sent nutrition cards. Nutrition cards additionally reuse their V1 or V2 presentation envelope in a queryless image path that Vercel renders and Linq rehosts. Encoding is not encryption. Every envelope must omit member identity, canonical record references, credentials, and other authority; V3 additionally strips its tracking reference before fragment encoding, and V5's public image envelope is identity-free. The offline Messages extension decodes the fragment locally. Only the static response-card image path reaches Web, where it is rejected before render-asset reads unless it is exact and bounded; it triggers no database or remote read, application log, analytics event, persistent cache, or indexing. Hosted inbound routing keeps the opaque conversation locator used for continuity separate from the trusted provider reply thread. An ordinary auto-reply sends through that thread binding and does not duplicate it as an explicit target, so Linq appends the card to the existing direct chat. The optional capability read gets one complete 2.5-second attempt, including successful or error response-body consumption, with no transport, server, or rate-limit retry; timeout, any other capability failure, or an ineligible route immediately falls back to the same deterministic ordinary text through the existing channel delivery path. Before that text enters Linq, the current outbox intent is atomically frozen as text-only under its existing delivery key. A caught capability-check failure writes one bounded warn entry to the durable hosted runtime log before that same fallback; a successful `available: false` result remains expected and silent. After capability succeeds, only a definitive pre-acceptance app-card rejection (HTTP 400, 415, or 422) may use that text fallback; the outbox writes the same bounded entry with the rejection class, then replaces the card and promotes its durable delivery key to the distinct stable fallback key. These entries are fire-and-forget and allowlist-projected: they carry only the fallback reason and safe error classification—never error messages, card values, request or response bodies, recipient or thread values, delivery keys, credentials, or provider prose—and a failed or stalled log write does not alter control flow. That committed text identity also replaces the in-flight card authority for provider entry, receipts, failure handling, and authorized stale-direct-thread materialization, so the original card request cannot veto recovery. A process interrupted after provider acceptance therefore replays only the frozen text and same key. A timeout, transport error, rate limit, or server failure from the message mutation remains ambiguous and cannot trigger a second send. Production-device proof of visible nutrition, compact-table, and challenge-standings balloons is required before interactive rollout because provider acceptance and delivery receipts do not prove extension rendering, the provider-owned static composition, image-failure recovery, or VoiceOver output.
+Card values are immutable message content owned by the existing outbox effect. V1 remains a supported calorie/protein/carbs/fat compatibility input. V2 adds the exact canonical fiber total and nullable per-metric goal snapshots. Each non-null goal snapshot carries only an exact target copied after a complete bounded active-goal read proves exactly one qualifying record for that daily metric and unit, plus Murph's frozen semantic assessment. Fresh saturated or ambiguous authority blocks the card rather than becoming totals-only. Missing or partial totals can carry only an `unavailable` status, and an assessed status must not point opposite the frozen total and target. The snapshot is presentation for that message, not persisted goal progress or a new source of truth. Historical missing or untrusted target snapshots stay null and neutral; fresh conflict/incompatible/capacity authority never becomes totals-only. There is no persisted remote card state, authenticated fetch API, cleanup lifecycle, or card-specific queue. Linq uses static presentation (`interactive:false`) for all-null totals-only V2 and otherwise explicitly enables interactive presentation so recipients with the shipping Messages extension see its SwiftUI balloon; recipients without it, including Messages on macOS, retain a provider static layout. For goal-aware cards, a generated image mirrors the shipping SwiftUI balloon's compact default calorie-ring and one-row nutrient composition. The bitmap is rectangular so Linq and Messages own the outer card mask. The installed extension retains its native icon and interactive identity. Every Linq app-card request includes Murph's App Store id so recipients without the extension can install the app through the provider's Get the app affordance. App-absent static cards may include provider App Store artwork; this is accepted to preserve the installation path. The bitmap also embeds the checked-in canonical Murph mark in the native 36×27pt upper-left badge footprint. The static image intentionally omits the native tap-to-reveal target amounts and repeated direction labels; its visible native caption preserves only the date and meal count instead of repeating totals or targets, while the safe text recovery retains the complete status meaning outside the bitmap. Null and unavailable goals stay neutral. Goal-aware null, incomplete, and unavailable calorie-goal states retain a neutral ring. All-null totals-only cards instead omit the ring, use neutral values, show the selected date and logged meal coverage, and label estimates as logged so far rather than everything eaten. Their subcaption is the fixed optional introduction or coverage copy; goal-aware subcaptions remain partial-only. The value-free `fallback_text` derives only from the validated card kind: daily nutrition, tracked workouts, generic Murph summaries, and challenge standings each receive one short, stable descriptive preview. Those labels keep card values out of conversation-list, lock-screen, and notification text and avoid Apple data detectors that can downgrade the card. New V1, V2, V3, V4, and V5 cards use the same bounded HTTPS Base64URL fragment family for immutable presentation values allowed by their versioned delivery contracts; the extension also retains legacy data-URL reads for already-sent nutrition cards. Nutrition cards additionally reuse their V1 or V2 presentation envelope in a queryless image path that Vercel renders and Linq rehosts. Encoding is not encryption. Every envelope must omit member identity, canonical record references, credentials, and other authority; V3 additionally strips its tracking reference before fragment encoding, and V5's public image envelope is identity-free. The offline Messages extension decodes the fragment locally. Only the static response-card image path reaches Web, where it is rejected before render-asset reads unless it is exact and bounded; it triggers no database or remote read, application log, analytics event, persistent cache, or indexing. Hosted inbound routing keeps the opaque conversation locator used for continuity separate from the trusted provider reply thread. An ordinary auto-reply sends through that thread binding and does not duplicate it as an explicit target, so Linq appends the card to the existing direct chat. The optional capability read gets one complete 2.5-second attempt, including successful or error response-body consumption, with no transport, server, or rate-limit retry; timeout, any other capability failure, or an ineligible route immediately falls back to the same deterministic ordinary text through the existing channel delivery path. Before that text enters Linq, the current outbox intent is atomically frozen as text-only under its existing delivery key. A caught capability-check failure writes one bounded warn entry to the durable hosted runtime log before that same fallback; a successful `available: false` result remains expected and silent. After capability succeeds, only a definitive pre-acceptance app-card rejection (HTTP 400, 415, or 422) may use that text fallback; the outbox writes the same bounded entry with the rejection class, then replaces the card and promotes its durable delivery key to the distinct stable fallback key. These entries are fire-and-forget and allowlist-projected: they carry only the fallback reason and safe error classification—never error messages, card values, request or response bodies, recipient or thread values, delivery keys, credentials, or provider prose—and a failed or stalled log write does not alter control flow. That committed text identity also replaces the in-flight card authority for provider entry, receipts, failure handling, and authorized stale-direct-thread materialization, so the original card request cannot veto recovery. A process interrupted after provider acceptance therefore replays only the frozen text and same key. A timeout, transport error, rate limit, or server failure from the message mutation remains ambiguous and cannot trigger a second send. Production-device proof of visible nutrition, compact-table, and challenge-standings balloons is required before interactive rollout because provider acceptance and delivery receipts do not prove extension rendering, the provider-owned static composition, image-failure recovery, or VoiceOver output.
 
-For the managed goal-aware daily-nutrition workflow, nullable goal snapshots remain replay/rendering compatibility only. New cards require the complete five-metric active bundle after the full current-context safety gate, including canonical memory, active-condition and active-regimen discovery, bounded lifetime procedure-event and encounter-diagnosis discovery, the bounded body-measurement read, and both bounded canonical pregnancy-evidence reads: `pregnancy-test` measurements and detailed canonical test events. A failed, saturated, unsafe, ambiguous, unit-incompatible, comparator-incompatible, or incomplete result suppresses the card with no Goal or measurement mutation. An explicit completed bariatric procedure, relevant active documented/suspected encounter diagnosis, or explicit positive pregnancy result from either canonical owner uses that same non-numeric path; a canonical test's `unknown` result classification may qualify only with strict pregnancy/hCG identity and explicit positive text. Planned, ordered, cancelled, inactive, resolved, historical, rule-out, ruled-out, pending, unknown status alone, numeric-only, ambiguous, or unrelated evidence does not prove a current exclusion. After explicit interactive card or target-setting intent, a genuinely missing bundle creates or updates one paused canonical proposal and explains its five provisional values in ordinary text; only a later unambiguous acceptance may recheck safety, activate and read back the proposal, re-read same-date totals, and attach the pending card. Scheduled closeout authority never permits safety questions, target setup, or proposal mutation.
+Daily nutrition targets are optional. Fresh V2 authoring is exactly all-null totals-only or all-five accepted compatible snapshots, never mixed; historical nullable replay remains supported. `meal totals --resolve-goals` owns exact same-date totals and target authority: `ready` uses all five snapshots, `missing` uses all nulls even with a compatible subset, and conflict/incompatible/capacity remains text-only without mutations. Ordinary private meal replies, including ordinary scheduled-check-in replies, have default card intent after verified capture, not authority to repair unrelated meals or accept targets. Explicit summaries retain exact-meal recovery and informed explicit partial requests. Complete stored records do not prove every meal eaten was logged. Number-sensitive/intuitive-eating/eating-disorder contexts suppress numerical cards; a constraint affecting target advice does not automatically suppress benign logged totals. Missing target-derivation inputs do not trigger a universal medical or measurement preflight. Only explicit target-setting enters the existing paused proposal, explanation, acceptance and decline workflow. A meal, summary, card request, silence or scheduled closeout never proposes, accepts, activates, revises or abandons targets. Scheduled work keeps its existing date, cleanup and question authority and never invites goal setup.
+
+The only companion allowance is the fixed, brief optional-goals introduction on a first suitable complete totals-only card. It is frozen in the same semantic message/outbox effect, not a second send or arbitrary analysis. Canonical memory/instructions and conversation own prior decline and number preferences; an existing managed proposal of any status or the canonical sent note suppresses introduction. The outbox records that note only after successful send evidence, including definitive text fallback; a confirmation failure retries reconciliation without resending. Pending/staged copy is not delivery. Concurrent pre-confirmation turns can both select the optional introduction; no new global reservation, store or workflow is introduced. See `agent-docs/product-specs/nutrition-totals-card.md` for the bounded tradeoff and proof requirements.
 
 Generic compact tables use V3. Workout static images use the compact V4 tuple
 wire, while an editable native workout uses V6 with its opaque action binding.
 V3 and V4 reuse their authority-free presentation envelope in the same bounded
 queryless image path. The static renderer mirrors the native table or
-workout summary. Generic Linq provider chrome retains its title, optional
-subtitle, rows, and footer. Structured-workout provider chrome stays bounded to
-the title plus derived progress instead of repeating every rendered set.
+workout summary. Generic Linq provider chrome retains only its title instead of
+repeating the image's subtitle, rows, or footer. Structured-workout provider
+chrome stays bounded to the title plus derived progress instead of repeating
+every rendered set.
 Workout authoring and native decoding admit up to 16 exercises and 16 sets per
 exercise, but the measured 2,048-character URL and image-path checks remain the
 final authority for each complete snapshot. The assistant must attempt the
 complete verified card instead of estimating capacity from counts or asking the
 member to simplify saved workout data; only an actual envelope rejection uses
 the complete deterministic text recovery.
-Generic static tables keep one shared header whenever exact intrinsic header and
-cell tracks plus gutters fit the raster, regardless of column count; only
-genuinely overwide content uses repeated full-width field labels.
+Generic static tables use compact grid typography and keep one shared header
+whenever exact intrinsic header and cell tracks plus gutters fit the raster,
+regardless of column count; only genuinely overwide content uses repeated
+full-width field labels.
 Complete workout semantics remain available through the deterministic text
 renderer and value-free text-recovery fallback. V3 tracking stays only in
 the semantic transcript and is stripped before both encodings; V4 contains no
@@ -170,7 +246,39 @@ If the answer is unknown, do not assume the path is safe. Add the missing guard,
 
 ## Murph Hosted Automation Engagement
 
-Murph pauses model-capable automation wakes for Linq members with no inbound day in the last 28 days, using `hosted_linq_daily_state` as the conversation source of truth. Conversational replies are never gated by this pause because fresh conversation mailbox lag bypasses it. An accepted meal capture is an explicit member interaction and therefore member-wide qualifying engagement for the same 28-day policy, so the ordinary 9pm closeout needs no second opt-in and other due automations may also resume. This engagement evidence does not bypass AI-usage authorization or current route authority. Deterministic system-mailbox work can still run in bounded model-free mode when model work is blocked.
+The 28-day inactivity pause belongs to proactive iMessage delivery, not to
+member-wide runtime admission. Email, Telegram and other channels remain
+runnable under their ordinary access, consent and AI-usage rules. Known SMS and
+RCS service projections bypass this pause too; an unknown Linq service retains
+the conservative iMessage policy. The signed
+Linq egress callback evaluates the pause after resolving exact route authority;
+scheduled Linq work uses that result to skip before model execution. A queued
+Linq send rechecks before provider dispatch and uses the existing nonretryable
+blocked-delivery classification with recipient-inbound metadata. That metadata
+does not automatically replay the failed intent; later eligible scheduled
+occurrences use their ordinary delivery path. It does not hold the system mailbox
+or another channel's scheduled work behind a member-wide blocked wake.
+
+The policy keeps `hosted_linq_daily_state` and the existing 28-day window.
+Accepted meal captures and Telegram/email conversations retain their existing
+qualification as explicit member engagement, including consumed or
+content-retired metadata within structural retention. Exact accepted Linq
+replies bypass the pause; a group reply can prove its exact ingress when the
+daily projection lags. Authorized initial signup participant delivery and
+validated Assistant Ask completion/fallback retain their own authority. The
+reviewed validator returns void on successful validation; only its fallback
+result is truthy. Private Ask replies must match their canonical mailbox
+notification, member, delivery key and resolved destination before bypassing
+inactivity. Their existing live private-authority checks still own exact reply
+content, permissions, expiry, route validation and safe group fallback.
+Engagement never substitutes for route, consent, or AI-usage authorization.
+
+Deploy the runtime reader for `automation_engagement_paused` delivery blocks
+before Web removes the global reconciliation gate. An older Worker ignores the
+unknown block during preflight; Web still withholds its provider-dispatch claim,
+so older runtime send-time claim validation prevents delivery. That skew can
+waste a model turn or retry instead of recording a normal policy skip; it is not
+a supported substitute for consumer-first rollout. No persisted schema changes.
 
 Linq egress should stay small and obvious:
 
@@ -199,17 +307,24 @@ Linq egress should stay small and obvious:
 - An unknown phone contacting a degraded line is materialized as the inbound member identity before the final fallback claim so web can re-read any concurrently created route authority. If the claim is rejected, that identity remains durable, but web creates no home or pending route, invite, delivery, fallback chat, or line-count increment; later inbound resolves the same member and retries normal routing.
 - After Linq accepts that canonical participant welcome, its signed delivery outcome must atomically promote the returned direct chat into the Web-owned home route. Manual dashboard sends and generic provider `message.sent` events remain observability-only and must not bind or retarget a member.
 - A terminal HTTPS URL on an existing Linq chat is sent as a provider-native link part, with no generated opener or filler text. Caller-supplied leading text remains its own preceding text message. Because the provider returns one receipt identity per message, both identities stay ordered beneath the existing `HostedLinqDelivery` owner: the link is the final scalar result for compatibility, cleanup receives every accepted identity, any failed part fails the logical delivery, and the logical delivery is delivered only after every part is delivered. A retryable or transport-ambiguous link response is reconciled once with the exact same `:link` request and provider idempotency key; a definitive rich-link rejection falls back to the original URL as ordinary text under a stable `:fallback` suffix. The link request must not begin until the successful primary response includes its provider identity; an identity-less primary response retries the same primary key and cannot become a link-only checkpoint. If every post-primary link attempt fails before acceptance can be confirmed, the accepted primary identity becomes a recoverable checkpoint rather than a completed reply. The assistant outbox remains retryable with confirmation promotion disabled, keeps that non-confirmability sticky across later ambiguous primary or required-callback failures, re-enters the same primary and `:link` provider keys, and relies on Linq idempotency to return the primary identity without accepting duplicate text. Web consumes the answered mailbox rows only after a two-identity recovery or the stable text fallback is accepted, and only a recovered response whose primary identity matches the checkpoint may supersede it. Two-part group sends persist their route directness on the existing delivery owner and derive every nonterminal aggregate from that immutable fact, so they retain `sent_no_receipt_expected` even when a failed child receipt is superseded and do not enter direct-message missing-receipt warnings; failed or fully delivered children still advance the parent terminally. The child rows contain only privacy-safe lookup keys and bounded suffixes; they do not create a second retry or delivery lifecycle.
+- A current foreground direct Linq reply that first checkpoints accepted text with an unresolved trailing link attempts one brief delay notice through the existing hosted progress transport, after the durable original retry is saved. The wording comes from a bank of 30 brief messages, selected by a digest of the existing intent ID so same-key attempts keep the same body within a runtime version. No model call or extra persisted state is needed. Its separate stable key and empty answered-mailbox set cannot complete or replace the original two-part send. An existing checkpoint suppresses further notices, and notice failure never changes link recovery. This is best-effort feedback: a crash after checkpointing can omit it. Normal successful sends, groups, background retries, approval waits and missing handset receipts do not trigger this notice.
 - Thread sends use same-user route authority as target context when it matches the requested thread, otherwise they fall back to the member's durable home or pending Linq route.
 - The Web Linq egress owner resolves the canonical delivery target and direct/group audience at send time. Stored automation routes are bounded authority evidence, not a second route-ownership system.
 - Proactive current-home fallback sends do not inherit replay-scoped route authority or inbound context; reply-anchored sends keep their matching inbound context.
 - Egress no longer owns a separate "recent inbound" recency check; hosted automation recency belongs to reconciliation/wake selection.
-- Typing indicators do not call web-owned egress assertions. They are locally throttled to one session per chat, capped at five minutes, with a restart cooldown after a max-length session.
+- Typing indicators do not call web-owned egress assertions. They are locally throttled to one session per chat, capped at five minutes, with a ten-minute restart cooldown after a max-length session. Refreshes serialize stop/start to recover client-cleared indicators and retry at the next scheduled tick after transient failure. Progress acceptance schedules a restart after one second and one follow-up four seconds later before returning to the 45-second cadence. Cleanup releases only its own target claim; provider acceptance remains best-effort UI evidence.
 - On the Linq instant-start path, web fires one best-effort typing start on the inbound chat right after the planner transaction creating the member commits, so a first-ever message is not met with a silent chat while the cold runtime boots. It is a one-shot feedback hint with a short timeout, no retries, no egress assertion, and no effect on webhook handling; on the success path the runtime's own typing session and reply supersede it. If the webhook instead fails after the hint started, web chains one best-effort typing stop behind the in-flight start and registers it with the request's post-response scheduler so the cleanup survives the error response; the later webhook retry starts fresh, and a rare redelivery racing the stop only loses its pre-runtime hint, which the runtime's own typing session re-establishes.
 - Delimiter-generated Linq reply bubbles send the first bubble immediately, then pause 1.5 seconds after each confirmed sibling send. The pause applies only within that reply's existing outbox sequence; it does not pace unrelated sends, retries, reactions, or progress updates.
 - A terminal HTTPS URL may be sent as Linq's native link-only rich-preview part. An unselected existing-chat link-only message, including a payment URL, remains one provider message with no added text. A selected link-only native reply stays one ordinary text message because Linq requires text to carry `reply_to`; it does not trade away the selected target for a preview. When caller-supplied text or media precedes the URL, the existing local or hosted egress owner accepts that primary message first and then sends the link-only preview under the same delivery's deterministic `:link` idempotency-key suffix. The final accepted provider message id remains the scalar compatibility result while the ordered identity list owns cleanup and receipts. Hosted primary requests retain half of the existing ten-second provider budget, while the link half is split across an initial request and one same-key reconciliation attempt. New-chat creation may use that two-step flow only when the caller supplied URL-free text or media for the required first message; link-only, multi-URL, or other URL-bearing first-message input must fail before provider entry instead of inventing or leaking opener copy. Reaction-bound messages keep their URL nonterminal and stay one provider message. In existing chats, embedded, other nonterminal, non-HTTPS, credentialed, and oversized URLs remain ordinary text.
 - An ordinary automatic model reply stays flat even when its delivery context carries an inbound message id. For automatic model responses, Murph requests a native reply only through `murph.select_reply_target`, and every delimiter-generated bubble from that response targets the same accepted message. This changes thread placement, not message count or pacing, and does not change explicit or manual low-level reply calls. Exact-message reactions continue through the separate existing reaction effect and do not select the text reply target.
 - Hosted native reply and app-card delivery may use raw direct-recipient details only from the invocation-local decoded delivery context. A conversation input admitted into an already-running turn carries that same ephemeral context into the existing delivery owner; durable assistant input remains blinded and no recipient lookup or second route owner is introduced.
 - Do not restart typing between reply bubbles. Linq clears the turn's existing indicator on send, and repeated typing cycles add line activity without proven deliverability value.
+
+The mailbox import context supplies the invocation's abort-guarded provider
+fetch to attachment typing. Preparation and the foreground turn must retain
+that same function identity so the existing typing claim can transfer without
+another provider start. An explicitly absent invocation provider overrides the
+bridge's original provider; standalone imports retain their supplied provider.
 
 ## Prompt and copy guidance
 
@@ -218,6 +333,12 @@ Preferred shape:
 - short, conversational, and specific to the recipient
 - one clear question when Murph needs to build trust or confirm intent
 - clear continuation of an existing user-requested thread
+- routine reminders and summaries carry their requested content; generic saved
+  change/pause notes describe controls and do not become repeated footers.
+  Explain those controls during setup when useful. Preserve explicit requested
+  copy, concrete stop conditions, bounded review decisions, and a cadence
+  question when the current engine policy requires one. A relevant reply to
+  the prior reminder rules out another silence-based cadence question.
 - full recognizable URLs only when links are necessary
 - calm, non-salesy language
 

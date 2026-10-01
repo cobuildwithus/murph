@@ -24,6 +24,9 @@ const TEST_TEMPLATE_KEYS = [
   "linq.invite_signup",
   "linq.daily_quota",
   "linq.home_redirect",
+  "linq.device_delivery_stalled",
+  "linq.apple_health_delivery_stalled",
+  "linq.device_connection_check",
   "linq.ai_usage.starter_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
@@ -51,6 +54,11 @@ const USAGE_RECOVERY_SETTINGS_URL =
   "https://withmurph.ai/settings?usageRecovery=true#subscription";
 
 const TEST_CONTEXT_BY_KEY = {
+  "linq.device_connection_check": {
+    companionAppName: "WHOOP",
+    deviceDisplayName: "WHOOP",
+    providerDisplayName: "WHOOP",
+  },
   "assistant.signup_welcome": {},
   "assistant.family_welcome": {},
   "linq.invite_signup": {
@@ -61,6 +69,16 @@ const TEST_CONTEXT_BY_KEY = {
   },
   "linq.home_redirect": {
     homeRecipientPhone: "+15555550123",
+  },
+  "linq.device_delivery_stalled": {
+    companionAppName: "Garmin Connect",
+    deviceDisplayName: "Garmin device",
+    providerDisplayName: "Garmin",
+  },
+  "linq.apple_health_delivery_stalled": {
+    companionAppName: "Murph",
+    deviceDisplayName: "iPhone",
+    providerDisplayName: "Apple Health",
   },
   "linq.ai_usage.starter_limit_reached": {
     settingsUrl: "https://withmurph.ai/settings?usageRecovery=true#subscription",
@@ -89,6 +107,21 @@ const TEST_CONTEXT_BY_KEY = {
 };
 
 describe("user-facing message variants", () => {
+  it("offers WHOOP help without asserting a cause or requiring reconnect", () => {
+    for (const text of collectRenderedTexts("linq.device_connection_check")) {
+      expect(text).toContain("WHOOP");
+      expect(text).toContain("?");
+      expect(text).not.toMatch(/expired|revoked|reconnect|disconnected|charged|Junction|OAuth|https?:/iu);
+    }
+  });
+  it("offers Apple Health recovery without inventing app closure or a device fault", () => {
+    for (const text of collectRenderedTexts("linq.apple_health_delivery_stalled")) {
+      expect(text).toContain("Apple Health");
+      expect(text).toContain("Murph");
+      expect(text).toContain("Check for new data");
+      expect(text).not.toMatch(/force.quit|closed|quit|battery|charged|revoked|reconnect|disconnected/iu);
+    }
+  });
   it("keeps at least 20 variants for every rotating message class", () => {
     for (const key of TEST_TEMPLATE_KEYS) {
       expect(collectRenderedTexts(key).size, key).toBeGreaterThanOrEqual(
@@ -155,6 +188,18 @@ describe("user-facing message variants", () => {
 
   it("identifies Murph in every phone signup invite", () => {
     expectEveryVariantMatches("linq.invite_signup", /Murph/u);
+  });
+
+  it("keeps wearable recovery checks practical, conversational, and link-free", () => {
+    for (const text of collectRenderedTexts("linq.device_delivery_stalled")) {
+      expect(text).toMatch(/Garmin/u);
+      expect(text).toMatch(/Garmin Connect/u);
+      expect(text).toMatch(/charg|battery/iu);
+      expect(text).toMatch(/sync/iu);
+      expect(text).toMatch(/\?$/u);
+      expect(text).not.toMatch(/https?:\/\//iu);
+      expect(text).not.toMatch(/\b(?:watch|usually|often)\b/iu);
+    }
   });
 
   it("keeps thread allowance copy neutral while explaining the pause", () => {

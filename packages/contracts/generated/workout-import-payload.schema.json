@@ -636,9 +636,29 @@
                     "maxLength": 4000
                   },
                   "memberRepsPerSet": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 999
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 999
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "targetWeightPerSet": {
+                    "type": "number",
+                    "minimum": 0.01,
+                    "maximum": 9999,
+                    "multipleOf": 0.01
+                  },
+                  "targetWeightUnit": {
+                    "type": "string",
+                    "enum": [
+                      "lb",
+                      "kg"
+                    ]
                   },
                   "setPlanIsFinite": {
                     "type": "boolean"
@@ -1005,9 +1025,29 @@
                 "maxLength": 4000
               },
               "memberRepsPerSet": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 999
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 999
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "targetWeightPerSet": {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 9999,
+                "multipleOf": 0.01
+              },
+              "targetWeightUnit": {
+                "type": "string",
+                "enum": [
+                  "lb",
+                  "kg"
+                ]
               },
               "setPlanIsFinite": {
                 "type": "boolean"

@@ -46,7 +46,8 @@ vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
     mocks.reconcileRefundNetReversal,
 }));
 
-vi.mock("@/src/lib/hosted-execution/usage-credit-grant-capacity", () => ({
+vi.mock("@/src/lib/hosted-execution/usage-credit-grant-capacity", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/lib/hosted-execution/usage-credit-grant-capacity")>(),
   readHostedUsageCreditGrantCapacityTx: mocks.readGrantCapacity,
 }));
 
@@ -85,10 +86,16 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
 
 vi.mock(
   "@/src/lib/hosted-onboarding/usage-credit-purchase-reservation-lock",
-  () => ({
-    lockHostedUsageCreditPurchaseReservationOwnersTx:
-      mocks.lockPurchaseReservationOwners,
-  }),
+  async (importOriginal) => {
+    const original = await importOriginal<typeof import(
+      "../src/lib/hosted-onboarding/usage-credit-purchase-reservation-lock"
+    )>();
+    return {
+      ...original,
+      lockHostedUsageCreditPurchaseReservationOwnersTx:
+        mocks.lockPurchaseReservationOwners,
+    };
+  },
 );
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -137,6 +144,7 @@ type MutableUsageCreditPurchase = ReturnType<typeof makeUsageCreditPurchase>;
 type UsageCreditStripeLookupFilter = string | { in: string[] };
 
 type UsageCreditStripePrismaHarnessClient = {
+  $queryRaw: () => Promise<unknown[]>;
   $transaction: <T>(
     callback: (tx: UsageCreditStripePrismaHarnessClient) => Promise<T>,
   ) => Promise<T>;
@@ -789,6 +797,7 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     }));
     expect(mocks.lockPurchaseReservationOwners).toHaveBeenLastCalledWith({
       beneficiaryMemberId: "member_beneficiary",
+      memberLockOrder: "beneficiary_first",
       payerMemberId: "member_payer",
       tx: harness.client,
     });
@@ -808,6 +817,31 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       harness.client.hostedUsageCreditPurchase.updateMany,
     );
     expect(updateMany).toHaveBeenCalledOnce();
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+  });
+
+  it("retries when Family payer detachment changes the prepared lock owner", async () => {
+    const successUrl = "https://murph.example/settings?usageFamily=return&usageMember=member_beneficiary";
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutSuccessUrl: successUrl,
+    }, {
+      beforeTransaction: () => {
+        harness.purchase.payerMemberId = null;
+      },
+    });
+    mocks.stripe.checkout.sessions.retrieve.mockResolvedValue({
+      ...makeCheckoutSession({
+        paymentIntentId: null, paymentStatus: "unpaid", status: "expired",
+      }),
+      success_url: successUrl,
+    });
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeCheckoutEvent("checkout.session.expired"),
+      prisma: harness.client,
+    })).rejects.toSatisfy(isHostedUsageCreditStripeRetryableError);
+    expect(harness.client.hostedUsageCreditPurchase.updateMany).not.toHaveBeenCalled();
+    expect(mocks.lockPurchaseReservationOwners).not.toHaveBeenCalled();
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
   });
 
@@ -1896,6 +1930,7 @@ function createUsageCreditStripePrismaHarness(
   const purchaseExists = options?.purchaseExists ?? true;
   let transactionCall = 0;
   const client: UsageCreditStripePrismaHarnessClient = {
+    $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(async (callback) => {
       transactionCall += 1;
       await options?.beforeTransaction?.(transactionCall);

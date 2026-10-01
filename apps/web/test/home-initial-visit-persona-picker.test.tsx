@@ -237,7 +237,7 @@ test("HomeInitialVisitPersonaPickerClient advances to the final Text Murph dialo
   }
 });
 
-test("HomeInitialVisitPersonaPickerClient uses settings as the final Text Murph fallback", async () => {
+test("HomeInitialVisitPersonaPickerClient offers messaging setup when no channel is ready", async () => {
   const { HomeInitialVisitPersonaPickerClient } = await import(
     "../app/(dashboard)/home/initial-visit-persona-picker-client"
   );
@@ -258,6 +258,8 @@ test("HomeInitialVisitPersonaPickerClient uses settings as the final Text Murph 
 
     assert.match(container.textContent ?? "", /Welcome to Murph/u);
     assert.equal(container.querySelector("a")?.getAttribute("href"), "/settings");
+    assert.match(container.querySelector("a")?.textContent ?? "", /Set up messaging/u);
+    assert.doesNotMatch(container.textContent ?? "", /Text Murph/u);
   } finally {
     await cleanup();
   }
@@ -330,10 +332,37 @@ test("HomeInitialVisitPersonaPickerClient preserves the resolved webmail compose
     assert.equal(contactLink?.getAttribute("rel"), "noopener noreferrer");
     assert.equal(
       contactLink?.getAttribute("aria-label"),
-      "Text Murph in Gmail (opens in a new tab)",
+      "Email Murph in Gmail (opens in a new tab)",
     );
   } finally {
     await cleanup();
+  }
+});
+
+test.each([
+  { kind: "email", label: "Email", href: "mailto:murph@example.test", action: "Email Murph" },
+  { kind: "telegram", label: "Telegram", href: "https://t.me/withmurph_bot", action: "Message Murph" },
+] as const)("Home welcome names the $kind channel it opens", async ({ action, ...contactAction }) => {
+  const { HomeInitialVisitPersonaPickerClient } = await import(
+    "../app/(dashboard)/home/initial-visit-persona-picker-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HomeInitialVisitPersonaPickerClient, { contactAction }),
+    { requireButton: false },
+  );
+  try {
+    const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Complete persona picker",
+    );
+    assert.ok(completeButton);
+    await act(async () => { completeButton.click(); });
+    const link = rendered.container.querySelector("a");
+    assert.equal(link?.getAttribute("href"), contactAction.href);
+    assert.equal(link?.textContent?.trim(), action);
+    assert.equal(link?.getAttribute("aria-label"), `${action} in ${contactAction.label}`);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/u);
+  } finally {
+    await rendered.cleanup();
   }
 });
 

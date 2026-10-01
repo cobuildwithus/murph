@@ -1,6 +1,7 @@
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
   type HostedExecutionDeviceSyncRuntimeApplyRequest,
 } from "@murphai/device-syncd/hosted-runtime";
 import { describe, expect, it, vi } from "vitest";
@@ -10,6 +11,47 @@ import {
 } from "../src/runtime-platform/device-sync-port.ts";
 
 describe("hosted device-sync runtime port", () => {
+  it("sends the accepted-input-bound no-data preference through the signed control port", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(
+        HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
+      );
+      await expect(request.json()).resolves.toEqual({
+        afterDays: 10,
+        assistantInputId: "ain_00000000000000000000000000000001",
+        mode: "after_days",
+        sourceProviderSlug: "garmin",
+      });
+      return Response.json({
+        action: "configure_no_data_outreach",
+        effectiveAfterDays: 10,
+        setting: "custom",
+        sourceProviderSlug: "garmin",
+        status: "saved",
+      });
+    });
+    const port = createHostedWebDeviceSyncPort({
+      boundUserId: "member_device_sync_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.configureNoDataOutreach?.({
+      afterDays: 10,
+      assistantInputId: "ain_00000000000000000000000000000001",
+      mode: "after_days",
+      sourceProviderSlug: "garmin",
+    })).resolves.toEqual({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: 10,
+      setting: "custom",
+      sourceProviderSlug: "garmin",
+      status: "saved",
+    });
+  });
+
   it("partitions runtime apply callbacks by final serialized body bytes", async () => {
     const received: Array<{
       body: HostedExecutionDeviceSyncRuntimeApplyRequest;

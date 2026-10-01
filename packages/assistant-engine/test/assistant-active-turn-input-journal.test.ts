@@ -1,8 +1,9 @@
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   appendAssistantAcceptedTurnInputItems,
-  assertAssistantAcceptedTurnInputAssistantInputEventsExist,
+  readAssistantAcceptedTurnInputEvents,
   assistantAcceptedTurnInputJournalSchema,
   readAssistantAcceptedTurnInputJournal,
   recordAssistantAcceptedTurnInputProviderRequest,
@@ -33,6 +34,54 @@ afterEach(async () => {
 })
 
 describe('assistant accepted active-turn input journal', () => {
+  it('prepares only journal state on an empty read and keeps its directory and file private', async () => {
+    const { paths, vaultRoot } = await createAssistantPaths('assistant-input-journal-private-path-')
+    await expect(readAssistantAcceptedTurnInputJournal(vaultRoot, 'turn-missing')).resolves.toBeNull()
+    expect(await readdir(paths.assistantStateRoot)).toEqual(['state'])
+    const journal = await appendTestAcceptedTurnInputItems({
+      inputs: [{ id: 'input-private-path', source: 'manual' }],
+      sessionId: 'session-private-path',
+      turnId: 'turn-private-path',
+      vault: vaultRoot,
+    })
+    const journalPath = resolveAssistantAcceptedTurnInputJournalPath(paths, journal.turnId)
+    const journalDirectory = path.dirname(journalPath)
+    expect((await stat(journalPath)).mode & 0o777).toBe(0o600)
+    await chmod(journalDirectory, 0o755)
+    await expect(readAssistantAcceptedTurnInputJournal(vaultRoot, journal.turnId)).resolves.toEqual(journal)
+    expect((await stat(journalDirectory)).mode & 0o777).toBe(0o700)
+    expect(await readdir(paths.assistantStateRoot)).toEqual(['state'])
+  })
+
+  it('rejects a symlinked journal directory before reading or changing its target', async () => {
+    const { paths, vaultRoot } = await createAssistantPaths('assistant-input-journal-symlink-')
+    const appendInput = {
+      inputs: [{ id: 'input-symlink', source: 'manual' as const }],
+      sessionId: 'session-symlink',
+      turnId: 'turn-symlink',
+      vault: vaultRoot,
+    }
+    const journal = await appendTestAcceptedTurnInputItems(appendInput)
+    const journalPath = resolveAssistantAcceptedTurnInputJournalPath(paths, journal.turnId)
+    const journalDirectory = path.dirname(journalPath)
+    const targetDirectory = path.join(vaultRoot, 'external-journals')
+    await rename(journalDirectory, targetDirectory)
+    await chmod(targetDirectory, 0o755)
+    await symlink(targetDirectory, journalDirectory)
+    const targetPath = path.join(targetDirectory, path.basename(journalPath))
+    const original = await readFile(targetPath, 'utf8')
+
+    await expect(readAssistantAcceptedTurnInputJournal(vaultRoot, journal.turnId)).rejects.toThrow('symlinks')
+    await expect(appendTestAcceptedTurnInputItems(appendInput)).rejects.toThrow('symlinks')
+    await expect(recordAssistantAcceptedTurnInputProviderRequest({
+      ordinal: 1,
+      turnId: journal.turnId,
+      vault: vaultRoot,
+    })).rejects.toThrow('symlinks')
+    expect(await readFile(targetPath, 'utf8')).toBe(original)
+    expect((await stat(targetDirectory)).mode & 0o777).toBe(0o755)
+  })
+
   it('requires caller-owned accepted times and derives the exact reference window', async () => {
     const { vaultRoot } = await createAssistantPaths(
       'assistant-active-turn-input-reference-window-',
@@ -304,8 +353,8 @@ describe('assistant accepted active-turn input journal', () => {
     })
 
     await expect(
-      assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-        journal: missing,
+      readAssistantAcceptedTurnInputEvents({
+        inputs: missing.inputs,
         vault: vaultRoot,
       }),
     ).rejects.toMatchObject({
@@ -348,11 +397,11 @@ describe('assistant accepted active-turn input journal', () => {
     })
 
     await expect(
-      assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-        journal: stored,
+      readAssistantAcceptedTurnInputEvents({
+        inputs: stored.inputs,
         vault: vaultRoot,
       }),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual([event])
   })
 
   it('updates transcript refs without persisting raw prompt fallback text', async () => {
@@ -609,6 +658,49 @@ describe('assistant accepted active-turn input journal', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_TURN_INPUT_JOURNAL_ADMISSION_CLOSED',
+    })
+  })
+
+  it('materializes accepted-input transcript refs after commit starts', async () => {
+    const { vaultRoot } = await createAssistantPaths(
+      'assistant-active-turn-input-commit-ref-update-',
+    )
+
+    await appendTestAcceptedTurnInputItems({
+      inputs: [{ id: 'input_initial', source: 'manual' }],
+      now: new Date('2026-04-22T10:00:00.000Z'),
+      sessionId: 'session_commit_ref_update',
+      turnId: 'turn_commit_ref_update',
+      vault: vaultRoot,
+    })
+    await updateAssistantAcceptedTurnInputAdmissionState({
+      admissionState: 'commit-started',
+      now: new Date('2026-04-22T10:00:01.000Z'),
+      turnId: 'turn_commit_ref_update',
+      vault: vaultRoot,
+    })
+
+    const updated = await updateAssistantAcceptedTurnInputTranscriptRefs({
+      now: new Date('2026-04-22T10:00:02.000Z'),
+      refs: [{
+        inputId: 'input_initial',
+        transcriptRef: {
+          entryCreatedAt: '2026-04-22T10:00:00.000Z',
+          entryIndex: 0,
+          entryKind: 'user',
+          sessionId: 'session_commit_ref_update',
+        },
+      }],
+      turnId: 'turn_commit_ref_update',
+      vault: vaultRoot,
+    })
+
+    expect(updated?.admissionState).toBe('commit-started')
+    expect(updated?.inputs[0]?.transcriptRef).toEqual({
+      entryCreatedAt: '2026-04-22T10:00:00.000Z',
+      entryIndex: 0,
+      entryKind: 'user',
+      sessionId: 'session_commit_ref_update',
     })
   })
 

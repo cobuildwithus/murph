@@ -1,0 +1,120 @@
+# Delegated Message Recovery
+
+## Outcome
+
+Restore both user-invoked delegated messaging directions so accepted work reaches
+one timely terminal outcome: private-to-group handoffs produce a valid delivery
+decision before their existing deadline, and group-to-private asks cannot starve
+behind retained model-free maintenance work.
+
+## Classification
+
+- Task class: high-risk cross-cutting runtime reliability fix.
+- Product UX effort: Patch.
+- Changelog: applicable because the recovery is member-visible.
+- Final review: preliminary Product UX, prompt, and coverage lenses plus the
+  sensitive cross-cutting final ReviewGPT gate.
+
+## Proven causes
+
+1. The private-to-group notification selects the ordinary conversation prompt
+   while its caller parses the strict notification decision contract. Existing
+   tests mock an already-valid provider response and do not inspect the planned
+   prompt.
+2. Imported private-to-group work loses its durable deadline and can retry after
+   the source mailbox row expires.
+3. A system-mailbox invocation executes only model-free actions. A later
+   user-invoked assistant ask can be imported locally while an older retained
+   model-free row keeps orchestration in that mode, leaving the ask unexecuted.
+
+## Affected people and journeys
+
+- A person delegating from a private conversation to a consented group: the
+  handoff uses current group context, sends at most once, and expires without a
+  stale later message.
+- A group participant asking the current sender's private assistant: the advance
+  notice remains disclosure-safe, accepted work reaches the private assistant,
+  and the existing fixed completion or cannot-answer result returns once.
+- A person whose delegated work crosses its deadline: no model call or delivery
+  occurs after expiry, retries stop, and the durable handled frontier can advance.
+- A person sending ordinary foreground conversation input while delegated work
+  is pending: foreground reply priority is unchanged.
+
+## Implementation plan
+
+1. Give context-handoff notification planning an explicit contract signal and
+   committed group transcript access without broadening ordinary output-only
+   turns.
+2. Enforce the existing handoff deadline in the local system-mailbox owner so
+   already-imported stale work terminalizes without provider or delivery work.
+3. Upgrade a system-mailbox invocation to the normal assistant path when the
+   selected local owner is a due user-invoked assistant ask, while preserving
+   foreground preemption and retained maintenance state.
+4. Remove any generic model-backed handoff from the pre-checkpoint exact-effect
+   family if direct proof confirms the current classification violates the hot
+   reply boundary.
+5. Add focused composed regressions, update public owner docs and changelog only
+   where the shipped behavior changes, then run scoped tests and typechecks.
+6. Push the exact candidate, run specialist and final ReviewGPT concurrently
+   with CI, disposition findings, perform the parent review, and close this plan.
+
+## Verification
+
+- Assistant-engine planning and notification runtime tests inspect the actual
+  contract-bearing prompt and committed transcript behavior.
+- Assistant-runtime system-mailbox and workspace-entrypoint tests cover fresh,
+  expired, retained-maintenance, foreground-preemption, and no-repeat paths.
+- Focused package typechecks for every changed owner.
+- Product UX walkthrough replays both directions plus expiry and foreground
+  interruption using synthetic, non-identifying fixtures.
+- Exact pushed-head CI, preliminary completion specialists, sensitive final
+  ReviewGPT, and a clean current-base merge-tree.
+
+## Review finding resolution
+
+- Accepted prompt-authority finding: the developer contract now owns the full
+  positive handoff task and limits the untrusted boundary to the tagged private
+  payload and committed group history. Production-shaped injection text covers
+  the assembled prompt without broadening capabilities.
+- Accepted foreground-owner coverage finding: a dedicated workspace-runtime
+  integration proves a later delegated ask upgrades system-mailbox processing
+  through Codex preparation into exactly one assistant phase while the older
+  device wake remains durable.
+- Accepted recovered-sending expiry finding: the existing assistant-notification
+  preparation boundary now revalidates the handoff's inclusive deadline before
+  any model or provider work. Expired in-flight recovery returns the existing
+  terminal no-send outcome, removes only the mailbox source item, and leaves any
+  already-durable outbox intent with its canonical idempotent delivery owner.
+- No coverage patch artifact was returned. All corrections remain inside the
+  existing prompt planner and runtime-owner boundaries; the expiry correction
+  adds no persisted field, queue, scheduler, or lifecycle state.
+
+## Round-two retrospective
+
+- The inclusive ten-minute deadline belongs at provider admission. A handoff
+  that has not crossed that boundary at expiry terminally stops; an outbox
+  intent durably created before provider admission remains owned by the
+  existing idempotent delivery drain and may finish afterward.
+- The previous correction checked expiry during system-mailbox notification
+  preparation, before asynchronous context hydration, the assistant turn lock,
+  and provider planning. That repeated the original separation between expiry
+  authority and the boundary where new provider work becomes possible.
+- The correction consolidates the decision in the existing
+  `beforeProviderAcceptedInputs` authority hook, derives the deadline from the
+  trusted wake timestamp and existing TTL, and removes the earlier duplicate
+  timing branch. It adds no persisted expiry field or new runtime owner.
+- Production-shaped proof begins before expiry, advances through the inclusive
+  boundary before provider admission, and requires zero provider starts, zero
+  new delivery intents, terminal source consumption, handled-frontier progress,
+  and preservation of any already-durable outbox intent. A companion case keeps
+  the final pre-expiry millisecond admissible.
+
+## Deployment
+
+Prefer a rolling-compatible public runtime change that derives the existing
+deadline from already-present trusted fields and does not require a new schema.
+If the final patch changes a cross-service contract, document and verify the
+compatible deployment order before handoff.
+Status: completed
+Updated: 2026-08-23
+Completed: 2026-08-23

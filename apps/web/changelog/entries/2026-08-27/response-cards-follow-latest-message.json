@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 100,
+  "item": {
+    "id": "response-cards-follow-latest-message",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Response cards follow your latest message",
+    "summary": "If you send a follow-up while Murph is preparing a response card, Murph can now attach a fresh card to the latest reply instead of falling back to text.",
+    "details": "A newer message still clears any card chosen for the earlier request, and the fresh card must fully answer the current request.",
+    "relevanceTags": ["assistant", "response-cards", "reliability"],
+    "sourcePullRequests": [2459]
+  }
+}

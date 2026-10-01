@@ -1,0 +1,177 @@
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
+
+import { expect, test, type Browser, type Page } from "@playwright/test";
+
+const REMOVAL_DESIGN_ROUTE = "/design?tab=components#linked-account-removal";
+const REMOVAL_STUDY_SELECTOR = '[data-design-component="linked-account-removal"]';
+const SETTINGS_DESIGN_ROUTE = "/screenshots/account#signup-referral-flow";
+const SETTINGS_STUDY_SELECTOR =
+  '[data-design-section="signup-referral-flow"] > section:first-child';
+const CHANGELOG_ROUTE = "/changelog";
+const CHANGELOG_SELECTOR = 'section[aria-labelledby="edition-2026-09-02"]';
+const CHANGELOG_DESIGN_ROUTE = "/screenshots/ops#changelog-archive";
+const CHANGELOG_DESIGN_SELECTOR = '[data-design-study="changelog-archive"]';
+
+function isLoopbackUrl(rawUrl: string): boolean {
+  try {
+    const { hostname } = new URL(rawUrl);
+    return hostname === "127.0.0.1"
+      || hostname === "localhost"
+      || hostname === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
+async function preparePage(page: Page): Promise<void> {
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+  await page.addInitScript(() => {
+    const style = document.createElement("style");
+    style.textContent =
+      "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}nextjs-portal{display:none!important}";
+    (document.head ?? document.documentElement).appendChild(style);
+  });
+}
+
+async function captureStudy({
+  browser,
+  fileName,
+  height,
+  outputDir,
+  routePath,
+  selector,
+  width,
+}: {
+  browser: Browser;
+  fileName: string;
+  height: number;
+  outputDir: string;
+  routePath: string;
+  selector: string;
+  width: number;
+}): Promise<void> {
+  const context = await browser.newContext({
+    colorScheme: "light",
+    reducedMotion: "reduce",
+    viewport: { width, height },
+  });
+  const page = await context.newPage();
+
+  try {
+    await preparePage(page);
+    const response = await page.goto(routePath, { waitUntil: "load" });
+    expect(response?.status(), "design study should respond 200").toBe(200);
+
+    const study = page.locator(selector);
+    await expect(study).toHaveCount(1);
+    await expect(study).toBeVisible();
+    await study.scrollIntoViewIfNeeded();
+    await page.evaluate(async () => {
+      await document.fonts?.ready;
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+      document.querySelectorAll("nextjs-portal").forEach((portal) => portal.remove());
+    });
+
+    await study.screenshot({
+      animations: "disabled",
+      path: path.join(outputDir, fileName),
+    });
+  } finally {
+    await context.close();
+  }
+}
+
+test("capture linked-account removal design proof", async ({ browser }) => {
+  test.skip(
+    !process.env.DESIGN_PROOF_OUTPUT_DIR,
+    "Run only in the dedicated design-proof capture workflow",
+  );
+  test.setTimeout(300_000);
+  const outputDir = process.env.DESIGN_PROOF_OUTPUT_DIR;
+  if (!outputDir) {
+    return;
+  }
+  await mkdir(outputDir, { recursive: true });
+
+  await captureStudy({
+    browser,
+    fileName: "desktop.png",
+    height: 1000,
+    outputDir,
+    routePath: REMOVAL_DESIGN_ROUTE,
+    selector: REMOVAL_STUDY_SELECTOR,
+    width: 1440,
+  });
+  await captureStudy({
+    browser,
+    fileName: "mobile.png",
+    height: 844,
+    outputDir,
+    routePath: REMOVAL_DESIGN_ROUTE,
+    selector: REMOVAL_STUDY_SELECTOR,
+    width: 390,
+  });
+  await captureStudy({
+    browser,
+    fileName: "settings-desktop.png",
+    height: 1000,
+    outputDir,
+    routePath: SETTINGS_DESIGN_ROUTE,
+    selector: SETTINGS_STUDY_SELECTOR,
+    width: 1440,
+  });
+  await captureStudy({
+    browser,
+    fileName: "settings-mobile.png",
+    height: 844,
+    outputDir,
+    routePath: SETTINGS_DESIGN_ROUTE,
+    selector: SETTINGS_STUDY_SELECTOR,
+    width: 390,
+  });
+  await captureStudy({
+    browser,
+    fileName: "changelog-desktop.png",
+    height: 1000,
+    outputDir,
+    routePath: CHANGELOG_ROUTE,
+    selector: CHANGELOG_SELECTOR,
+    width: 1440,
+  });
+  await captureStudy({
+    browser,
+    fileName: "changelog-mobile.png",
+    height: 844,
+    outputDir,
+    routePath: CHANGELOG_ROUTE,
+    selector: CHANGELOG_SELECTOR,
+    width: 390,
+  });
+  await captureStudy({
+    browser,
+    fileName: "changelog-design-desktop.png",
+    height: 1000,
+    outputDir,
+    routePath: CHANGELOG_DESIGN_ROUTE,
+    selector: CHANGELOG_DESIGN_SELECTOR,
+    width: 1440,
+  });
+  await captureStudy({
+    browser,
+    fileName: "changelog-design-mobile.png",
+    height: 844,
+    outputDir,
+    routePath: CHANGELOG_DESIGN_ROUTE,
+    selector: CHANGELOG_DESIGN_SELECTOR,
+    width: 390,
+  });
+});

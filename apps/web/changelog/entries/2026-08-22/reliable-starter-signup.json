@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-22",
+  "order": 100,
+  "item": {
+    "id": "reliable-starter-signup",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Starter signup finishes more reliably",
+    "summary": "Accepting the last required consent now safely continues signup on the server before the next screen.",
+    "details": "Starter-ready members finish automatically. If messaging or billing still needs attention, signup continues at that existing step without reporting that consent failed.",
+    "relevanceTags": ["onboarding", "reliability", "starter"],
+    "sourcePullRequests": [2166]
+  }
+}

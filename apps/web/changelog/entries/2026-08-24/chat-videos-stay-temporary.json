@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-24",
+  "order": 100,
+  "item": {
+    "id": "chat-videos-stay-temporary",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Chat videos stay temporary",
+    "summary": "Videos sent to Murph can support the current request without being carried into hosted workspace snapshots.",
+    "details": "Raw video bytes become eligible for removal at the next safe idle cleanup after active work no longer needs them. Attachment details and transcripts can remain so the conversation still makes sense, while videos explicitly saved as durable evidence keep their existing lifecycle.",
+    "relevanceTags": ["assistant", "privacy", "video"],
+    "sourcePullRequests": [2200]
+  }
+}

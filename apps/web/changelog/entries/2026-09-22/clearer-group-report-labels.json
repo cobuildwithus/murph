@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-22",
+  "order": 100,
+  "item": {
+    "id": "clearer-group-report-labels",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer participant labels in group reports",
+    "summary": "Group reports keep each person's shared results distinguishable when a profile name is missing or shared by someone else.",
+    "details": "Murph can use a safe contact name shared by the group owner or a stable participant label when no name is available. Reports do not expose phone numbers or email addresses.",
+    "relevanceTags": ["groups", "privacy", "reliability"],
+    "sourcePullRequests": [3656]
+  }
+}

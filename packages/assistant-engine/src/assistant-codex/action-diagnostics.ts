@@ -1,11 +1,19 @@
 import { Buffer } from 'node:buffer'
+import { cliTimingFailureCode, cliTimingFailureStage, cliTimingValidationFailure, type CliFailureTiming } from '@murphai/runtime-state/cli-timing'
+
+import { classifyToolFailureCode, type ToolErrorCategory, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 
 import type { CodexNormalizedEvent } from '../assistant-codex-events.js'
 import type {
   AssistantRuntimeIssueInput,
 } from '../assistant/issue-reporting.js'
+import type {
+  CodexCommandFamily,
+  CodexCommandAttribution,
+} from './command-family.js'
 import {
   resolveCodexCommandFamily,
+  resolveCodexCommandAttribution,
 } from './command-family.js'
 import {
   isCodexActionStructurallyFailed,
@@ -25,6 +33,7 @@ const TOOL_DIAGNOSTIC_LIMIT = 16
 const COMMAND_RUNTIME_ISSUE_TRACK_LIMIT = 256
 const COMMAND_RUNTIME_ISSUE_RECOVERY_LIMIT = 8
 const COMMAND_ORDINAL_MAX = 10_000
+const VAULT_CLI_ERROR_OUTPUT_MAX_BYTES = 16_384
 const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u
 
 type CodexActionKind =
@@ -50,11 +59,9 @@ type BytesBucket =
   | '10_100kb'
   | 'gt_100kb'
 
-type CommandDiagnosticFamily = 'search' | 'unknown'
-
-type TrackedCommandDiagnostic = {
+type TrackedCommandDiagnostic = CodexCommandAttribution & {
   commandOrdinal: number
-  commandFamily: CommandDiagnosticFamily
+  commandFamily: CodexCommandFamily
 }
 
 type TokenUsageSample = {
@@ -103,11 +110,14 @@ export interface CodexActionDiagnosticsReducer {
   buildTraceEvent(input: {
     codexThreadId: string | null
     providerActionCount: number
+    providerStartedAtMs: number | null
+    turnCorrelation: number | null
     turnId: string | null
   }): Record<string, unknown> | null
   recordEvent(input: {
     activeTurnId: string | null
     normalizedEvent: CodexNormalizedEvent
+    observedAtMs: number
     rawEvent: unknown
   }): void
 }
@@ -138,7 +148,7 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
     normalizedEvent: CodexNormalizedEvent,
   ): TrackedCommandDiagnostic => ({
     commandOrdinal: nextCommandOrdinal(),
-    commandFamily: resolveDirectSearchCommandFamily(normalizedEvent),
+    ...resolveDiagnosticCommand(normalizedEvent),
   })
 
   return {
@@ -195,9 +205,7 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
         ? {
             commandOrdinal:
               startedDiagnostic?.commandOrdinal ?? nextCommandOrdinal(),
-            commandFamily: resolveDirectSearchCommandFamily(
-              input.normalizedEvent,
-            ),
+            ...resolveDiagnosticCommand(input.normalizedEvent),
           }
         : startedDiagnostic ?? nextCommandDiagnostic(input.normalizedEvent)
       const exitCode = readCommandExitCode({
@@ -262,6 +270,9 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   let finalOutputTokens: number | null = null
   let finalReasoningOutputTokens: number | null = null
   let finalTotalTokens: number | null = null
+  let progressUpdateCallCount = 0
+  let progressUpdateFirstCallObservedAtMs: number | null = null
+  let progressUpdateSentCount = 0
 
   const actionCounts = new Map<CodexActionKind, number>()
   const actionKinds: string[] = []
@@ -413,6 +424,16 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         codexActionOutputBytesTotal: outputBytesTotal,
         codexActionOutputItemCount: outputItemCount,
         codexActionOutputUnitMax: outputTokensMax,
+        codexActionProgressUpdateCallCount: progressUpdateCallCount,
+        codexActionProgressUpdateFirstCallElapsedMs:
+          input.providerStartedAtMs === null
+          || progressUpdateFirstCallObservedAtMs === null
+            ? null
+            : Math.max(
+                0,
+                progressUpdateFirstCallObservedAtMs - input.providerStartedAtMs,
+              ),
+        codexActionProgressUpdateSentCount: progressUpdateSentCount,
         codexActionProviderActionCount: input.providerActionCount,
         codexActionReasoningOutputUnitMax: reasoningOutputTokensMax,
         codexActionSlowDurationMs: slowActions.map((action) => action.durationMs),
@@ -421,6 +442,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         codexActionThreadIdPresent: input.codexThreadId !== null,
         codexActionToolSummaries: topTools.map(toolDiagnosticSummary),
         codexActionTotalUnitMax: totalTokensMax,
+        codexActionTurnCorrelation: input.turnCorrelation,
         codexActionUsageSampleCount: tokenSampleCount,
         codexActionTurnIdPresent: input.turnId !== null,
         codexActionWebSearchCount: actionCounts.get('web.search') ?? 0,
@@ -447,6 +469,10 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
           ? `${kind}:${itemId}`
           : fallbackActionKeyFromNormalized(input.normalizedEvent, kind)
       const item = readEventItem(input.rawEvent)
+      const toolIdentity = resolveToolDiagnosticIdentity(kind, item)
+      const isProgressUpdate =
+        kind === 'dynamic.tool.call'
+        && toolIdentity.tool === 'send_progress_update'
       const counted = registerAction({
         actionKey,
         kind,
@@ -460,6 +486,12 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
           return
         }
         startedCount += 1
+        if (
+          isProgressUpdate
+          && progressUpdateFirstCallObservedAtMs === null
+        ) {
+          progressUpdateFirstCallObservedAtMs = input.observedAtMs
+        }
         const startedAtMs = readTimestampMs(input.rawEvent, 'startedAtMs', 'started_at_ms')
         if (
           actionKey !== null &&
@@ -475,10 +507,11 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         return
       }
       completedCount += 1
-      if (isCodexActionStructurallyFailed({
+      const structurallyFailed = isCodexActionStructurallyFailed({
         item,
         normalizedExitCode: readNormalizedExitCode(input.normalizedEvent),
-      })) {
+      })
+      if (structurallyFailed) {
         failedCount += 1
       }
 
@@ -492,11 +525,23 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
       if (actionKey !== null) {
         itemStarts.delete(actionKey)
       }
+      if (isProgressUpdate) {
+        progressUpdateCallCount += 1
+        if (!structurallyFailed) {
+          progressUpdateSentCount += 1
+        }
+        if (progressUpdateFirstCallObservedAtMs === null) {
+          progressUpdateFirstCallObservedAtMs = Math.max(
+            0,
+            input.observedAtMs - (durationMs ?? 0),
+          )
+        }
+      }
       recordCompletionMetrics({
         durationMs,
         kind,
         output: measureActionOutput(item),
-        toolIdentity: resolveToolDiagnosticIdentity(kind, item),
+        toolIdentity,
       })
     },
   }
@@ -535,6 +580,9 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
   // without pulling the web tier's request logs.
   const toolIdentity = resolveToolDiagnosticIdentity(kind, item)
   const commonDetails = {
+    ...completedActionFailureDiagnostic(kind, item),
+    diagnosticRole: 'completion',
+    errorCategory: 'unknown',
     actionKind: kind,
     durationMsBucket: durationMsBucket(durationMs),
     outputBytesBucket: bytesBucket(output.bytesTotal),
@@ -564,6 +612,10 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
           ? {
               commandFamily: input.commandDiagnostic.commandFamily,
               commandOrdinal: input.commandDiagnostic.commandOrdinal,
+              commandAttribution: input.commandDiagnostic.commandAttribution,
+              ...(input.commandDiagnostic.vaultCliCommand
+                ? { vaultCliCommand: input.commandDiagnostic.vaultCliCommand } : {}),
+              ...commandFailureCategory(input.commandDiagnostic, item),
               ...(input.commandDiagnostic.commandFamily === 'search'
                 ? { recoveredAfterFailure: false }
                 : {}),
@@ -599,23 +651,128 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
   }
 }
 
-function resolveDirectSearchCommandFamily(
+type VaultCliFailure = {
+  category: ToolErrorCategory
+  attribution: 'recognized' | 'unknown_code' | 'missing_output' | 'oversized_output' | 'unstructured_output'
+  code?: CliFailureTiming['code']
+  stage?: CliFailureTiming['stage']
+  validation?: CliFailureTiming['validation']
+}
+
+function readVaultCliFailure(
+  item: Record<string, unknown> | null,
+  command: string | undefined,
+): VaultCliFailure {
+  const output = readFirstString(item?.aggregatedOutput, item?.aggregated_output)
+  if (output === null || output.length === 0) {
+    return { category: 'unknown', attribution: 'missing_output' }
+  }
+  if (
+    output.length > VAULT_CLI_ERROR_OUTPUT_MAX_BYTES
+    || Buffer.byteLength(output, 'utf8') > VAULT_CLI_ERROR_OUTPUT_MAX_BYTES
+  ) {
+    return { category: 'unknown', attribution: 'oversized_output' }
+  }
+
+  try {
+    // CLI entry/formatting owns both direct and --full-output JSON envelopes.
+    // Parse the entire bounded output, never an excerpt or nested error prose.
+    const envelope = asRecord(JSON.parse(output))
+    if (envelope === null) {
+      return { category: 'unknown', attribution: 'unstructured_output' }
+    }
+    const error = envelope.ok === false
+      ? asRecord(envelope.error)
+      : envelope.ok === undefined && envelope.error === undefined ? envelope : null
+    if (
+      typeof error?.code !== 'string'
+      || typeof error.message !== 'string'
+      || (error.retryable !== undefined && typeof error.retryable !== 'boolean')
+    ) {
+      return { category: 'unknown', attribution: 'unstructured_output' }
+    }
+    const code = cliTimingFailureCode(error.code)
+    const stage = cliTimingFailureStage(error.stage)
+    return {
+      category: classifyToolFailureCode(error.code, error.stage),
+      attribution: code === 'unknown' ? 'unknown_code' : 'recognized',
+      ...(code === 'unknown' ? {} : { code }),
+      ...(stage === 'unknown' ? {} : { stage }),
+      ...cliTimingValidationFailure(command, code, error, 'fieldErrors'),
+    }
+  } catch {
+    return { category: 'unknown', attribution: 'unstructured_output' }
+  }
+}
+
+function completedActionFailureDiagnostic(
+  kind: CodexActionKind,
+  item: Record<string, unknown> | null,
+): ToolFailureDiagnostic {
+  if (kind === 'command.execution') {
+    return { failureStage: 'execution', failureReason: 'nonzero_exit' }
+  }
+  // An explicit returned failure differs from an opaque failed-status event.
+  // Do not interpret provider error bodies, names, codes or prose.
+  return item?.success === false
+    ? { failureStage: 'result', failureReason: 'reported_failure' }
+    : { failureStage: 'execution', failureReason: 'unknown' }
+}
+
+function commandFailureCategory(
+  command: TrackedCommandDiagnostic,
+  item: Record<string, unknown> | null,
+): Record<string, string | boolean> {
+  if (!command.vaultCli) return {}
+  const failure = readVaultCliFailure(item,
+    command.commandAttribution === 'recognized' ? command.vaultCliCommand : undefined)
+  return {
+    errorCategory: failure.category,
+    vaultCliErrorCategory: failure.category,
+    vaultCliErrorAttribution: failure.attribution,
+    ...(failure.code ? { vaultCliErrorCode: failure.code } : {}),
+    ...(failure.stage ? { vaultCliErrorStage: failure.stage } : {}),
+    ...(failure.validation ? {
+      vaultCliValidationField: failure.validation.field,
+      vaultCliValidationCode: failure.validation.code,
+      ...(failure.validation.missing === undefined ? {} : { vaultCliValidationMissing: failure.validation.missing }),
+    } : {}),
+  }
+}
+
+function resolveDiagnosticCommand(event: CodexNormalizedEvent) {
+  const commandFamily = resolveDiagnosticCommandFamily(event)
+  return { commandFamily, ...resolveCodexCommandAttribution({
+    commandLabel: event.kind === 'status_item' ? event.commandLabel : null,
+  }) }
+}
+
+function resolveDiagnosticCommandFamily(
   normalizedEvent: CodexNormalizedEvent,
-): CommandDiagnosticFamily {
+): CodexCommandFamily {
   if (
     normalizedEvent.kind !== 'status_item'
     || normalizedEvent.commandLabel === null
   ) {
-    return 'unknown'
+    return 'command'
   }
 
-  const command = normalizedEvent.commandLabel.trim()
-  return resolveCodexCommandFamily({
-    commandLabel: command,
+  const directFamily = resolveCodexCommandFamily({
+    commandLabel: normalizedEvent.commandLabel,
     source: 'display',
-  }) === 'search'
-    ? 'search'
-    : 'unknown'
+  })
+  if (directFamily !== 'command') {
+    return directFamily
+  }
+
+  const wrappedFamily = resolveCodexCommandFamily({
+    allowKnownShellWrapper: true,
+    commandLabel: normalizedEvent.commandLabel,
+    source: 'display',
+  })
+  // Only a bare direct search owns no-match suppression and recovery. The
+  // bounded wrapper pass exists to attribute non-search command failures.
+  return wrappedFamily === 'search' ? 'command' : wrappedFamily
 }
 
 function readCommandExitCode(input: {

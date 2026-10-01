@@ -200,8 +200,6 @@ const DESIGN_LAB_DETAIL: BrowserVaultLabBiomarkerDetail = {
   rows: [...DESIGN_LAB_ROWS],
 };
 
-const noopRetry = async () => undefined;
-
 function StudyState({
   children,
   label,
@@ -280,19 +278,17 @@ export function BrowserVaultLoadingTransitionsStudy() {
       >
         <div className="grid gap-5 xl:grid-cols-2">
           <StudyState label="Loading" state="loading">
-            <PrivateRunRouteState error={null} loading onRetry={noopRetry} />
+            <PrivateRunRouteState error={null} loading />
           </StudyState>
           <StudyState label="Error" state="error">
             <PrivateRunRouteState
               error="This synthetic private experiment could not be opened."
               loading={false}
-              onRetry={noopRetry}
             />
           </StudyState>
           <StudyState label="Result" state="result">
             <PrivateRunResultsView
               error={null}
-              onRetry={noopRetry}
               privateRun={DESIGN_PRIVATE_RUN}
               status="ready"
             />
@@ -309,14 +305,12 @@ export function BrowserVaultLoadingTransitionsStudy() {
           <StudyState label="Loading" state="loading">
             <BiomarkerPrivateTrendCardView
               biomarker={{ shortName: "recovery variability", unit: "ms", valuePrecision: 0 }}
-              onRetry={noopRetry}
               trend={{ status: "loading" }}
             />
           </StudyState>
           <StudyState label="Data" state="data">
             <BiomarkerPrivateTrendCardView
               biomarker={{ shortName: "recovery variability", unit: "ms", valuePrecision: 0 }}
-              onRetry={noopRetry}
               trend={DESIGN_TREND_READY}
             />
           </StudyState>

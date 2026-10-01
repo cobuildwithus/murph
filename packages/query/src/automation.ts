@@ -35,8 +35,8 @@ import {
   matchesLookup,
   matchesStatus,
   matchesText,
+  type MarkdownDocumentRecord,
 } from "./health/shared.ts";
-import { parseFrontmatterDocument, type FrontmatterObject } from "./health/shared.ts";
 
 const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
 const AUTOMATION_DOCUMENT_READ_CONCURRENCY = 16;
@@ -64,6 +64,8 @@ export interface AutomationQueryRecord {
   status: AutomationStatus;
   summary: string | null;
   activeUntil: string | null;
+  followUpSourceIntentId?: string;
+  followUpParentAutomationId?: string;
   schedule: AutomationSchedule;
   route: AutomationRoute;
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
@@ -495,9 +497,7 @@ function normalizeInstructions(body: string): string {
 }
 
 function parseAutomationRecord(
-  attributes: FrontmatterObject,
-  relativePath: string,
-  markdown: string,
+  { attributes, relativePath, markdown, body }: MarkdownDocumentRecord,
 ): AutomationQueryRecord {
   if (
     attributes.schemaVersion !== AUTOMATION_SCHEMA_VERSION ||
@@ -506,7 +506,6 @@ function parseAutomationRecord(
     throw new Error("Automation registry document has an unexpected shape.");
   }
 
-  const parsed = parseFrontmatterDocument(markdown);
   const schedule = normalizeAutomationSchedule(attributes.schedule);
   const activeUntil = normalizeAutomationActiveUntil(attributes.activeUntil);
   if (
@@ -536,6 +535,10 @@ function parseAutomationRecord(
     plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
       attributes.plannedOccurrenceOffsetMs,
     ),
+    ...(typeof attributes.followUpParentAutomationId === "string"
+      ? { followUpParentAutomationId: attributes.followUpParentAutomationId } : {}),
+    ...(typeof attributes.followUpSourceIntentId === "string"
+      ? { followUpSourceIntentId: attributes.followUpSourceIntentId } : {}),
     contextReferences: normalizeAutomationContextReferences(
       attributes.contextReferences,
     ),
@@ -547,13 +550,16 @@ function parseAutomationRecord(
       "scheduleAnchorAt",
     ),
     updatedAt: requireStringValue(attributes.updatedAt, "updatedAt"),
-    instructions: normalizeInstructions(parsed.body),
+    instructions: normalizeInstructions(body),
     relativePath,
     markdown,
   };
 }
 
-async function loadAutomationRecords(vaultRoot: string): Promise<AutomationQueryRecord[]> {
+async function loadAutomationRecords(
+  vaultRoot: string,
+  options: AutomationListOptions = {},
+): Promise<AutomationQueryRecord[]> {
   const relativePaths = await walkRelativeFiles(vaultRoot, AUTOMATIONS_DIRECTORY, ".md");
   const records: AutomationQueryRecord[] = [];
 
@@ -567,7 +573,7 @@ async function loadAutomationRecords(vaultRoot: string): Promise<AutomationQuery
         .slice(offset, offset + AUTOMATION_DOCUMENT_READ_CONCURRENCY)
         .map(async (relativePath) => {
           const document = await readMarkdownDocument(vaultRoot, relativePath);
-          return parseAutomationRecord(document.attributes, relativePath, document.markdown);
+          return parseAutomationRecord(document);
         }),
     );
 
@@ -575,7 +581,9 @@ async function loadAutomationRecords(vaultRoot: string): Promise<AutomationQuery
       if (outcome.status === "rejected") {
         throw outcome.reason;
       }
-      records.push(outcome.value);
+      if (matchesAutomationOptions(outcome.value, options)) {
+        records.push(outcome.value);
+      }
     }
   }
 
@@ -628,23 +636,20 @@ function matchesAutomationExactTag(
   return normalized === null || record.tags.includes(normalized);
 }
 
-function filterAutomationRecords(
-  records: readonly AutomationQueryRecord[],
+function matchesAutomationOptions(
+  record: AutomationQueryRecord,
   options: AutomationListOptions,
-): AutomationQueryRecord[] {
-  return records.filter((record) =>
-    matchesAutomationStatus(record.status, options.status) &&
+): boolean {
+  return matchesAutomationStatus(record.status, options.status) &&
     matchesAutomationExactTag(record, options.exactTag) &&
-    matchesAutomationText(record, options.text)
-  );
+    matchesAutomationText(record, options.text);
 }
 
 export async function listAutomations(
   vaultRoot: string,
   options: AutomationListOptions = {},
 ): Promise<AutomationQueryRecord[]> {
-  const records = await loadAutomationRecords(vaultRoot);
-  const filtered = filterAutomationRecords(records, options);
+  const filtered = await loadAutomationRecords(vaultRoot, options);
 
   return applyLimit(filtered, options.limit);
 }
@@ -653,8 +658,7 @@ export async function listAutomationPage(
   vaultRoot: string,
   options: AutomationListPageOptions = {},
 ): Promise<AutomationListPageResult> {
-  const records = await loadAutomationRecords(vaultRoot);
-  const filtered = filterAutomationRecords(records, options);
+  const filtered = await loadAutomationRecords(vaultRoot, options);
   const stablePagination = Boolean(
     normalizeNullableString(options.exactTag) || normalizeNullableString(options.cursor),
   );
@@ -705,11 +709,7 @@ export async function readAutomationByRelativePath(
     throw new Error(`Failed to parse automation at ${outcome.relativePath}: ${outcome.reason}`);
   }
 
-  return parseAutomationRecord(
-    outcome.document.attributes,
-    outcome.document.relativePath,
-    outcome.document.markdown,
-  );
+  return parseAutomationRecord(outcome.document);
 }
 
 export async function showAutomation(

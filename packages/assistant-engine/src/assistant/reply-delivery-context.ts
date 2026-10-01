@@ -12,6 +12,7 @@ export type AssistantReplyDeliveryContext = Pick<
   | 'deliverySubject'
   | 'deliveryTarget'
   | 'hostedDeliveryIdempotency'
+  | 'outboxAutomationContextReferences'
 >
 
 export type AssistantReplyDeliveryContextOverrides =
@@ -32,6 +33,8 @@ export function pickAssistantReplyDeliveryContext(
     deliverySubject: input.deliverySubject,
     deliveryTarget: input.deliveryTarget,
     hostedDeliveryIdempotency: input.hostedDeliveryIdempotency ?? null,
+    outboxAutomationContextReferences:
+      input.outboxAutomationContextReferences ?? null,
   }
 }
 
@@ -72,6 +75,12 @@ export function pickDefinedAssistantReplyDeliveryContext(
     ...(input.hostedDeliveryIdempotency === undefined
       ? {}
       : { hostedDeliveryIdempotency: input.hostedDeliveryIdempotency }),
+    ...(input.outboxAutomationContextReferences === undefined
+      ? {}
+      : {
+          outboxAutomationContextReferences:
+            input.outboxAutomationContextReferences,
+        }),
   }
 }
 
@@ -120,6 +129,10 @@ export function mergeAssistantReplyDeliveryContextOverrides(
       second?.hostedDeliveryIdempotency === undefined
         ? first.hostedDeliveryIdempotency
         : second.hostedDeliveryIdempotency,
+    outboxAutomationContextReferences:
+      second?.outboxAutomationContextReferences === undefined
+        ? first.outboxAutomationContextReferences
+        : second.outboxAutomationContextReferences,
   })
 }
 
@@ -145,6 +158,8 @@ export function applyAssistantReplyDeliveryContext(input: {
     deliverySubject: input.context.deliverySubject,
     deliveryTarget: input.context.deliveryTarget,
     hostedDeliveryIdempotency: input.context.hostedDeliveryIdempotency,
+    outboxAutomationContextReferences:
+      input.context.outboxAutomationContextReferences,
   }
 }
 

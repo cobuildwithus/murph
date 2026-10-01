@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "device-refresh-during-history",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Device refreshes keep moving while history waits",
+    "summary": "Scheduled device refreshes can continue while an older-data import is waiting to retry.",
+    "details": "Pending history stays queued with its original retry timing, including after a runtime restart.",
+    "relevanceTags": [
+      "devices"
+    ],
+    "sourcePullRequests": []
+  }
+}

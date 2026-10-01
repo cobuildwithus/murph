@@ -18,6 +18,7 @@ import {
   withHostedTelegramAttachmentDownloadLogging,
   withHostedTelegramAttachmentDownloadRetry,
 } from "../src/hosted-runtime/events/telegram.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 
 const originalTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
 const originalTelegramApiBaseUrl = process.env.TELEGRAM_API_BASE_URL;
@@ -43,7 +44,8 @@ function restoreTelegramEnv() {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
+  await drainHostedRuntimeLogWritesBestEffort();
   restoreTelegramEnv();
 });
 
@@ -588,6 +590,7 @@ describe("withHostedTelegramAttachmentDownloadLogging", () => {
       Uint8Array.from([1, 2, 3]),
     );
 
+    await drainHostedRuntimeLogWritesBestEffort();
     expect(logPort.entries()).toEqual([
       expect.objectContaining({
         eventCode: "mailbox.telegram_attachment_download_finished",

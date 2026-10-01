@@ -26,6 +26,7 @@ import type {
   AssistantProviderStartCriticalPathContext,
 } from './provider-start-critical-path.js'
 import type {
+  AutomationContextReference,
   AutomationAssistantTargetOverride,
 } from '@murphai/contracts'
 import type { AssistantUserMessageContentPart } from './content-types.js'
@@ -143,8 +144,6 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   // Automation-owned per-turn provider route override. It is execution input,
   // not durable session target state.
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
-  // Codex --config overrides for this turn only; never part of route identity.
-  codexConfigOverrides?: readonly string[] | null
   codexCommand?: string
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
@@ -173,6 +172,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   onProviderRequestStarted?: AssistantProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority?: AssistantOperatorAuthority
+  outboxFollowUpEvaluatedThrough?: AssistantOutboxIntent['followUpEvaluatedThrough']
   outboxAutomationAuthority?: AssistantOutboxIntent['automationAuthority']
   outboxAutomationContextReferences?: AssistantOutboxIntent['automationContextReferences']
   outboxPlannedOccurrenceAt?: string | null
@@ -186,6 +186,8 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   prompt: string
   suppressProviderFailureTranscriptAudit?: boolean
   turnContext?: string | null
+  /** Runtime-attested entity context for this turn; never model supplied. */
+  trustedContextReferences?: readonly AutomationContextReference[]
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
   scheduledAutomationAuthority?: HostedRuntimeGroupEmailScheduledAuthority | null
@@ -201,11 +203,6 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   turnEnvironment?: AssistantTurnEnvironment | null
   turnTrigger?: AssistantTurnTrigger
   workingDirectory?: string
-}
-
-export interface AssistantChatInput
-  extends Omit<AssistantMessageInput, 'deliverResponse' | 'deliveryTarget' | 'prompt'> {
-  initialPrompt?: string | null
 }
 
 export interface AssistantTurnSharedPlan {

@@ -22,7 +22,10 @@ export default defineProject({
         find: "@",
         replacement: path.resolve(repoRoot, "apps/web"),
       },
-      ...createVitestWorkspaceRuntimeAliases(resolveHostedWebWorkspaceSourceEntries(appDir)),
+      ...createVitestWorkspaceRuntimeAliases({
+        ...resolveHostedWebWorkspaceSourceEntries(appDir),
+        "@murphai/vault-usecases": path.resolve(repoRoot, "packages/vault-usecases/package.json"),
+      }),
     ],
   },
   test: {

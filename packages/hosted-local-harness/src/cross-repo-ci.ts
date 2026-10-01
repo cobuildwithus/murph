@@ -13,6 +13,10 @@ export interface HostedLocalCrossRepoCiRequirement {
  */
 export const hostedLocalCrossRepoCiRequirements = [
   {
+    reason: "Proves cold checkpoint restore preempts a stale invocation without fresh warm-runtime history.",
+    scenario: "stale-deferred-replay",
+  },
+  {
     reason: "Proves the complete Junction Link browser callback and persisted connection seam.",
     scenario: "junction-link-connect",
   },
@@ -31,6 +35,14 @@ export const hostedLocalCrossRepoCiRequirements = [
   {
     reason: "Proves scheduled work wakes and reaches the outbound messaging provider.",
     scenario: "linq-scheduled-reminder",
+  },
+  {
+    reason: "Proves scheduled Telegram delivery uses the route owner's direct or group audience.",
+    scenario: "telegram-scheduled-reminder",
+  },
+  {
+    reason: "Proves device-sync background admission stays bounded without starving a recurring reminder.",
+    scenario: "linq-reminder-device-sync-non-starvation",
   },
   {
     reason: "Proves a scheduled skill-authored recipe reaches generic authorized group email fanout.",

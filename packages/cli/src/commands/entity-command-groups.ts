@@ -7,7 +7,6 @@ import type {
 import {
   type AnyFactoryCommandConfig,
   type CommandExamples,
-  type CommandOptionShape,
   type FactoryCommandConfig,
   type InputFileCommandConfig,
   type NamedArgCommandConfig,
@@ -17,7 +16,6 @@ import {
   createFactoryCommandGroup,
   createInputFileFactoryCommand,
   createNamedArgFactoryCommand,
-  createNamedArgSchema,
 } from './command-factory-primitives.js'
 
 interface RegistryDocEntityGroupConfig<
@@ -103,41 +101,6 @@ interface ArtifactBackedEntityGroupConfig<
     run(input: CommandContext & { from?: string; to?: string; limit?: number }): Promise<TList>
   }
   manifest: NamedArgCommandConfig<TManifest>
-  additionalCommands?: readonly AnyFactoryCommandConfig[]
-}
-
-interface LifecycleEntityGroupConfig<
-  TCreate,
-  TShow,
-  TList,
-  TUpdate,
-  TCheckpoint,
-  TStop,
-> {
-  commandName: string
-  description: string
-  create: FactoryCommandConfig<TCreate>
-  show: NamedArgCommandConfig<TShow>
-  list: {
-    description: string
-    examples?: CommandExamples
-    hint?: string
-    output: z.ZodType<TList>
-    statusOption?: z.ZodType<string | undefined>
-    run(input: ListCommandContext): Promise<TList>
-  }
-  update: FactoryCommandConfig<TUpdate>
-  checkpoint: FactoryCommandConfig<TCheckpoint>
-  stop: {
-    description: string
-    argName: string
-    argSchema: z.ZodType<string>
-    examples?: CommandExamples
-    hint?: string
-    options?: CommandOptionShape
-    output: z.ZodType<TStop>
-    run(input: CommandContext & { id: string } & Record<string, unknown>): Promise<TStop>
-  }
   additionalCommands?: readonly AnyFactoryCommandConfig[]
 }
 
@@ -252,20 +215,6 @@ export function createLedgerEventEntityGroup<
   })
 }
 
-export function registerLedgerEventEntityGroup<
-  TScaffold,
-  TUpsert,
-  TShow,
-  TList,
->(
-  cli: Cli.Cli,
-  config: LedgerEventEntityGroupConfig<TScaffold, TUpsert, TShow, TList>,
-) {
-  const group = createLedgerEventEntityGroup(config)
-  cli.command(group)
-  return group
-}
-
 export function createArtifactBackedEntityGroup<
   TPrimary,
   TShow,
@@ -322,89 +271,6 @@ export function registerArtifactBackedEntityGroup<
   config: ArtifactBackedEntityGroupConfig<TPrimary, TShow, TList, TManifest>,
 ) {
   const group = createArtifactBackedEntityGroup(config)
-  cli.command(group)
-  return group
-}
-
-export function createLifecycleEntityGroup<
-  TCreate,
-  TShow,
-  TList,
-  TUpdate,
-  TCheckpoint,
-  TStop,
->(
-  config: LifecycleEntityGroupConfig<
-    TCreate,
-    TShow,
-    TList,
-    TUpdate,
-    TCheckpoint,
-    TStop
-  >,
-) {
-  return createFactoryCommandGroup({
-    commandName: config.commandName,
-    description: config.description,
-    commands: [
-      config.create,
-      createNamedArgFactoryCommand('show', config.show),
-      createCommonListCommand({
-        description: config.list.description,
-        examples: config.list.examples,
-        hint: config.list.hint,
-        options: {
-          limit: commonListLimitOptionSchema,
-          status: config.list.statusOption,
-        },
-        output: config.list.output,
-        run(input) {
-          return config.list.run(input)
-        },
-      }),
-      config.update,
-      config.checkpoint,
-      {
-        name: 'stop',
-        args: createNamedArgSchema(config.stop.argName, config.stop.argSchema),
-        description: config.stop.description,
-        examples: config.stop.examples,
-        hint: config.stop.hint,
-        options: config.stop.options,
-        output: config.stop.output,
-        async run({ args, options, requestId }) {
-          return config.stop.run({
-            id: String(args[config.stop.argName]),
-            requestId,
-            vault: options.vault,
-            ...(options as Record<string, unknown>),
-          })
-        },
-      },
-      ...(config.additionalCommands ?? []),
-    ],
-  })
-}
-
-export function registerLifecycleEntityGroup<
-  TCreate,
-  TShow,
-  TList,
-  TUpdate,
-  TCheckpoint,
-  TStop,
->(
-  cli: Cli.Cli,
-  config: LifecycleEntityGroupConfig<
-    TCreate,
-    TShow,
-    TList,
-    TUpdate,
-    TCheckpoint,
-    TStop
-  >,
-) {
-  const group = createLifecycleEntityGroup(config)
   cli.command(group)
   return group
 }

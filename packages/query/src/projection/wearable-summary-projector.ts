@@ -46,6 +46,7 @@ export function buildWearableSummaryProjection(vault: VaultReadModel): QueryWear
 }
 
 export function buildWearableSummaryProjectionFromDataset(dataset: WearableDataset): QueryWearableSummaryRow[] {
+  const rows: QueryWearableSummaryRow[] = [];
   const datasetsByProvider = groupWearableDatasetByPublicProvider(dataset);
   const providers = normalizeWearableProviders([...datasetsByProvider.keys()]);
   const activityCandidates = dataset.metricCandidates.filter(isActivitySummaryMetricCandidate);
@@ -57,21 +58,20 @@ export function buildWearableSummaryProjectionFromDataset(dataset: WearableDatas
     activityMetricEvidenceKeys,
   );
 
-  return providers.flatMap((provider) => {
+  for (const provider of providers) {
     const providerDataset = datasetsByProvider.get(provider) ?? emptyWearableDataset();
-    return materializeWearableSummaryRows(
+    rows.push(...materializeWearableSummaryRows(
       provider,
       buildWearableSummaryBundleFromDataset(providerDataset),
       groupActivityMetricCandidatesByDate(
-        activityMetricCandidates.filter(
-          (candidate) => candidate.publicProvider === provider,
-        ),
+        activityMetricCandidates.filter((candidate) => candidate.publicProvider === provider),
       ),
       groupActivitySessionEvidenceByDate(
         buildStoredActivitySessionEvidence(providerDataset.activitySessionCandidates),
       ),
-    );
-  });
+    ));
+  }
+  return rows;
 }
 
 interface ActivityMetricEvidenceKeys {

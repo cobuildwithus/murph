@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-29",
+  "order": 100,
+  "item": {
+    "id": "group-wearable-freshness",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer gaps in group wearable updates",
+    "summary": "Group updates distinguish stalled wearable delivery from a successful sync check.",
+    "details": "When device status is shared, sources with detected delivery gaps can show that they need attention. Missing sleep alone no longer prompts a later report time without evidence that records usually arrive late.",
+    "relevanceTags": [
+      "groups",
+      "wearables"
+    ],
+    "sourcePullRequests": []
+  }
+}

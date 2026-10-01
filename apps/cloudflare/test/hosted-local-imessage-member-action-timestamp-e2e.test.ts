@@ -9,19 +9,15 @@ import {
   workoutSessionSchema,
 } from "@murphai/contracts";
 import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   deriveWorkoutActionBinding,
 } from "@murphai/operator-config/workout-action-binding";
 import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
-import {
   addLiveWorkoutExercise,
+  setWorkoutUnitPreferences,
+  showWorkoutUnitPreferences,
   startLiveWorkout,
 } from "@murphai/vault-usecases/workouts";
 import {
@@ -35,6 +31,8 @@ import {
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
 
+import { withHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot-restore.ts";
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.ts";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -53,7 +51,7 @@ describe("hosted local Messages member-action timestamp e2e", () => {
   beforeAll(async () => {
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       },
       localDatabaseUrl,
@@ -81,6 +79,7 @@ describe("hosted local Messages member-action timestamp e2e", () => {
     const credential = await requireScenario().issueHostedIMessageMiniAppCredential({
       memberId,
     });
+    const actionBinding = deriveWorkoutActionBinding(workout.id, workout.session);
     const actionId = randomUUID();
     const requestedAt = new Date().toISOString().replace(/\.\d{3}Z$/u, "Z");
     expect(requestedAt).toMatch(/:\d{2}Z$/u);
@@ -91,7 +90,7 @@ describe("hosted local Messages member-action timestamp e2e", () => {
         body: JSON.stringify({
           action: {
             expectedWorkout: {
-              actionBinding: deriveWorkoutActionBinding(workout.id, workout.session),
+              actionBinding,
               exercises: [{
                 name: "Push-ups",
                 sets: [{ logged: false }],
@@ -107,6 +106,7 @@ describe("hosted local Messages member-action timestamp e2e", () => {
               setPosition: 1,
             }],
             version: 1,
+            weightUnitPreference: "kg",
           },
           actionId,
           requestedAt,
@@ -137,8 +137,91 @@ describe("hosted local Messages member-action timestamp e2e", () => {
       schemaVersion: 1,
       status: "applied",
     });
-    await requireScenario().waitForHostedCompletion(memberId);
+    const appliedStatus = await requireScenario().waitForHostedCompletion(memberId);
     await requireScenario().assertHealthyHostedRun(memberId);
+
+    await withHostedLocalWorkspaceSnapshot({
+      harness: requireScenario().harness,
+      status: appliedStatus,
+      userId: memberId,
+      read: async ({ vaultRoot }) => {
+        const shown = await createIntegratedVaultServices().query.show({
+          id: workout.id,
+          requestId: null,
+          vault: vaultRoot,
+        });
+        const canonicalWorkout = workoutSessionSchema.parse(
+          readRecord(shown.entity.data)?.workout,
+        );
+        expect(canonicalWorkout.exercises[0]?.sets[0]).toMatchObject({ reps: 12 });
+        await expect(
+          showWorkoutUnitPreferences(vaultRoot),
+        ).resolves.toMatchObject({
+          unitPreferences: { weight: "kg" },
+        });
+      },
+    });
+
+    const staleActionId = randomUUID();
+    const staleResponse = await fetch(
+      `${requireScenario().harness.webBaseUrl}/api/device-sync/companion/imessage-mini-app/member-actions`,
+      {
+        body: JSON.stringify({
+          action: {
+            expectedWorkout: {
+              actionBinding,
+              exercises: [{
+                name: "Push-ups",
+                sets: [{ logged: false }],
+              }],
+            },
+            kind: "workout.live.apply",
+            mutations: [{
+              exerciseName: "Push-ups",
+              exercisePosition: 1,
+              expectedResult: null,
+              kind: "set.put",
+              result: { kind: "reps", reps: 15 },
+              setPosition: 1,
+            }],
+            version: 1,
+            weightUnitPreference: "lb",
+          },
+          actionId: staleActionId,
+          requestedAt: new Date().toISOString(),
+          schemaVersion: 1,
+        }),
+        headers: {
+          authorization: `Bearer ${credential.token}`,
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(staleResponse.status).toBe(202);
+    const staleOutcome = await waitForMemberActionOutcome({
+      actionId: staleActionId,
+      token: credential.token,
+    });
+    expect(staleOutcome).toMatchObject({
+      actionId: staleActionId,
+      reason: "workout_changed",
+      status: "rejected",
+    });
+
+    const rejectedStatus = await requireScenario().waitForHostedCompletion(memberId);
+    await withHostedLocalWorkspaceSnapshot({
+      harness: requireScenario().harness,
+      status: rejectedStatus,
+      userId: memberId,
+      read: async ({ vaultRoot }) => {
+        await expect(
+          showWorkoutUnitPreferences(vaultRoot),
+        ).resolves.toMatchObject({
+          unitPreferences: { weight: "kg" },
+        });
+      },
+    });
   }, 600_000);
 });
 
@@ -156,6 +239,11 @@ async function seedWorkoutCheckpoint(): Promise<{
     requestId: `seed-member-action-${runId}`,
     timezone: "UTC",
     vault: vaultRoot,
+  });
+  await setWorkoutUnitPreferences({
+    recordedAt: new Date().toISOString(),
+    vault: vaultRoot,
+    weight: "lb",
   });
   const started = await startLiveWorkout({
     name: "Card action fixture",
@@ -175,31 +263,25 @@ async function seedWorkoutCheckpoint(): Promise<{
     throw new Error("The seeded workout did not return a canonical workout snapshot.");
   }
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
+    harness: requireScenario().harness,
     operatorHomeRoot,
+    userId: memberId,
     vaultRoot,
   });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createBrowserVaultReplicaRef(hash),
     environment: requireScenario().runtimeEnv,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: { seededMemberActionFixture: true },
-    snapshotRef: createSnapshotBundleRef(hash, snapshot.bundle.byteLength),
+    snapshotRef,
     userId: memberId,
   });
   expect(checkpoint.status).toBe("updated");
 
-  const upload = await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(memberId)}&sha256=${hash}`,
-    {
-      body: new Blob([new Uint8Array(snapshot.bundle)]),
-      headers: { [HOSTED_EXECUTION_USER_ID_HEADER]: memberId },
-      method: "PUT",
-    },
-  );
-  expect(upload.status).toBe(200);
   return workout;
 }
 
@@ -279,18 +361,6 @@ function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
-}
-
-function createSnapshotBundleRef(
-  hash: string,
-  size: number,
-): HostedExecutionSnapshotRef {
-  return {
-    hash,
-    key: `cloudflare-workspace-snapshots/${hash}.bundle`,
-    size,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 function createBrowserVaultReplicaRef(

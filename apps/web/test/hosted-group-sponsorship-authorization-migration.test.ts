@@ -8,13 +8,20 @@ const migrationSql = readFileSync(
   ),
   "utf8",
 );
+const fiftyCapMigrationSql = readFileSync(
+  new URL(
+    "../prisma/migrations/20260821120000_hosted_group_sponsorship_fifty_cap/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const schema = readFileSync(
   new URL("../prisma/schema.prisma", import.meta.url),
   "utf8",
 );
 
 describe("capped group sponsorship database contract", () => {
-  it("enforces one live sponsor per beneficiary and only the three caps", () => {
+  it("enforces one live sponsor per beneficiary and widens the closed cap set", () => {
     expect(migrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_group_sponsorship_authorization_live_beneficiary_key"',
     );
@@ -26,6 +33,18 @@ describe("capped group sponsorship database contract", () => {
     );
     expect(migrationSql).toContain(
       '"pending_monthly_cap_minor" IN (500, 1000, 2000)',
+    );
+    expect(fiftyCapMigrationSql).toContain(
+      'DROP CONSTRAINT "hosted_group_sponsorship_authorization_cap_valid"',
+    );
+    expect(fiftyCapMigrationSql).toContain(
+      '"monthly_cap_minor" IN (500, 1000, 2000, 5000)',
+    );
+    expect(fiftyCapMigrationSql).toContain(
+      '"pending_monthly_cap_minor" IN (500, 1000, 2000, 5000)',
+    );
+    expect(fiftyCapMigrationSql).toContain(
+      'VALIDATE CONSTRAINT "hosted_group_sponsorship_authorization_cap_valid"',
     );
   });
 

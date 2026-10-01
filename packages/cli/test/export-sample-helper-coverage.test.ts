@@ -94,8 +94,76 @@ test('stored export pack helpers tolerate a missing exports root and enforce man
 
   await assert.rejects(
     () => showStoredExportPack(vaultRoot, 'pack-alpha'),
-    (error) =>
-      isVaultCliErrorWithCode(error, 'manifest_invalid', 'different-pack-id'),
+    (error) => {
+      if (!isVaultCliErrorWithCode(error, 'manifest_invalid', 'does not match')) {
+        return false
+      }
+
+      const serialized = JSON.stringify(error)
+      assert.equal(serialized.includes('different-pack-id'), false)
+      assert.equal(serialized.includes('pack-alpha'), false)
+      assert.deepEqual(
+        (error as { context?: { issues?: unknown } }).context?.issues,
+        [{ publicPath: ['packId'], code: 'custom' }],
+      )
+      assert.equal(
+        (error as { context?: { stage?: unknown } }).context?.stage,
+        'read',
+      )
+      return true
+    },
+  )
+})
+
+test('stored export pack schema errors retain bounded issue paths without manifest values', async () => {
+  const vaultRoot = await createTempDir('murph-cli-export-invalid-manifest-')
+  const { showStoredExportPack } = await import(
+    '../src/commands/export-intake-read-helpers.js'
+  )
+  const privateValue = 'private-manifest-value'
+
+  await writeJsonFile(vaultRoot, 'exports/packs/pack-invalid/manifest.json', {
+    format: privateValue,
+    packId: 'pack-invalid',
+    generatedAt: '2026-04-08T00:00:00.000Z',
+    filters: {
+      from: null,
+      to: null,
+      experimentSlug: null,
+    },
+    manifest: {
+      recordCount: privateValue,
+    },
+    files: [],
+  })
+
+  await assert.rejects(
+    () => showStoredExportPack(vaultRoot, 'pack-invalid'),
+    (error) => {
+      if (!isVaultCliErrorWithCode(error, 'manifest_invalid', 'expected JSON shape')) {
+        return false
+      }
+
+      const serialized = JSON.stringify(error)
+      assert.equal(serialized.includes(privateValue), false)
+      assert.equal(serialized.includes(vaultRoot), false)
+      assert.equal(serialized.includes('pack-invalid'), false)
+      assert.equal(
+        (
+          error as {
+            context?: { issues?: Array<{ publicPath?: string[] }> }
+          }
+        ).context?.issues?.some(
+          (issue) => issue.publicPath?.[0] === 'manifest',
+        ),
+        true,
+      )
+      assert.equal(
+        (error as { context?: { stage?: unknown } }).context?.stage,
+        'read',
+      )
+      return true
+    },
   )
 })
 

@@ -681,7 +681,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             metricFamilies: ["activity"],
             snapshotParser: "schema",
           },
-          oauth: {
+          connection: {
+            kind: "oauth2",
             callbackPath: "/oauth/deletion-proof/callback",
             defaultScopes: ["read:data"],
           },

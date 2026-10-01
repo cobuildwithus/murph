@@ -1626,6 +1626,10 @@ test('workout format save, show, list, and log handle structured input and media
         'save',
         'Push Day B',
         '25 min strength training. 5 sets of 10 pushups.',
+        '--duration',
+        '25',
+        '--type',
+        'strength-training',
         '--vault',
         vaultRoot,
       ])

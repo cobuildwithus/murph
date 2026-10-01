@@ -178,4 +178,121 @@ describe('projectAttachmentEvidenceForModel', () => {
     expect(fragments[0]?.text).toContain('[truncated')
     expect(fragments[0]?.text.length).toBeLessThanOrEqual(120)
   })
+
+  it('emits exact duplicate attachment text once and preserves distinct evidence', () => {
+    const repeatedText = 'The synthetic transcript is intentionally duplicated.'
+    const fragments = projectAttachmentEvidenceForModel({
+      attachment: {
+        fileName: 'voice-note.m4a',
+        mime: 'audio/mp4',
+      },
+      sources: [
+        {
+          kind: 'attachment_transcript',
+          label: 'attachment-transcript',
+          path: 'derived/inbox/capture-1/attachment-1/transcript.txt',
+          text: repeatedText,
+        },
+        {
+          kind: 'derived_plain_text',
+          label: 'derived-plain-text',
+          path: 'derived/inbox/capture-1/attachment-1/plain.txt',
+          text: `  ${repeatedText}\n`,
+        },
+        {
+          kind: 'derived_markdown',
+          label: 'derived-markdown',
+          path: 'derived/inbox/capture-1/attachment-1/normalized.md',
+          text: 'A distinct parser note.',
+        },
+      ],
+    })
+
+    expect(fragments).toEqual([
+      {
+        kind: 'attachment_transcript',
+        label: 'attachment-transcript',
+        path: 'derived/inbox/capture-1/attachment-1/transcript.txt',
+        text: repeatedText,
+        truncated: false,
+      },
+      {
+        kind: 'derived_markdown',
+        label: 'derived-markdown',
+        path: 'derived/inbox/capture-1/attachment-1/normalized.md',
+        text: 'A distinct parser note.',
+        truncated: false,
+      },
+    ])
+  })
+
+  it('preserves distinct long sources that clamp to the same visible prefix', () => {
+    const sharedPrefix = 'A'.repeat(500)
+    const fragments = projectAttachmentEvidenceForModel({
+      attachment: {
+        fileName: 'notes.txt',
+        mime: 'text/plain',
+      },
+      maxFragmentChars: 120,
+      sources: [
+        {
+          kind: 'attachment_extracted_text',
+          label: 'first-note',
+          path: 'derived/inbox/capture-1/attachment-1/first.txt',
+          text: `${sharedPrefix}alpha-tail`,
+        },
+        {
+          kind: 'derived_plain_text',
+          label: 'second-note',
+          path: 'derived/inbox/capture-1/attachment-1/second.txt',
+          text: `${sharedPrefix}bravo-tail`,
+        },
+      ],
+    })
+
+    expect(fragments).toHaveLength(2)
+    expect(fragments.map((fragment) => fragment.label)).toEqual([
+      'first-note',
+      'second-note',
+    ])
+  })
+
+  it('retains a structured summary when another source matches its text', () => {
+    const csv = makeCsv(125)
+    const csvSource = {
+      kind: 'attachment_extracted_text' as const,
+      label: 'attachment-extracted-text',
+      path: 'derived/inbox/capture-1/attachment-1/plain.txt',
+      text: csv,
+    }
+    const summary = projectAttachmentEvidenceForModel({
+      attachment: {
+        fileName: 'readings.csv',
+        mime: 'text/csv',
+      },
+      sources: [csvSource],
+    })[0]
+
+    expect(summary?.kind).toBe('attachment_tabular_summary')
+    const fragments = projectAttachmentEvidenceForModel({
+      attachment: {
+        fileName: 'readings.csv',
+        mime: 'text/csv',
+      },
+      sources: [
+        {
+          kind: 'attachment_transcript',
+          label: 'attachment-transcript',
+          path: null,
+          text: summary?.text,
+        },
+        csvSource,
+      ],
+    })
+
+    expect(fragments.map((fragment) => fragment.kind)).toEqual([
+      'attachment_transcript',
+      'attachment_tabular_summary',
+    ])
+  })
 })

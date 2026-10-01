@@ -68,6 +68,11 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
+        action: "apply-clinical-enrichment",
+        kind: "clinical-records.enrichment-requested",
+        lane: "system",
+      },
+      {
         action: "run-device-sync-wake",
         kind: "device-sync.wake",
         lane: "system",
@@ -75,6 +80,11 @@ describe("hosted mailbox routing", () => {
       {
         action: "run-environment-voice",
         kind: "environment-voice.captured",
+        lane: "system",
+      },
+      {
+        action: "import-group-journal-fact",
+        kind: "journal.group-fact.recorded",
         lane: "system",
       },
       {

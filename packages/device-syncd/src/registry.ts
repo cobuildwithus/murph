@@ -47,7 +47,7 @@ export function assertDeviceSyncProviderCapabilities(provider: DeviceSyncProvide
   }
 
   const credentialPolicy = provider.credentialPolicy
-    ?? (provider.descriptor.oauth || connection.kind === "oauth2"
+    ?? (connection.kind === "oauth2"
       ? { kind: "oauth_tokens" as const }
       : { kind: "none" as const });
   const explicitlyNonRefreshable = provider.descriptor.sync?.supportsTokenRefresh === false;

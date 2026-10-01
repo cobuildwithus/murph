@@ -11,6 +11,7 @@ describe("lookup ID families", () => {
   it.each([
     ["core", "core", true],
     [" current ", "core", true],
+    ["vault_01JNV40W8VFYQ2H7CMJY5A9R4K", "core", true],
     ["journal:2026-07-15", "journal", true],
     ["hab_sleep-environment", "habitat", true],
     ["xfm_batch_1", "transform", false],

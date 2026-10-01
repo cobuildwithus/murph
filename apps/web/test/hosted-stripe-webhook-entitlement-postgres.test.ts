@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   HostedBillingStatus,
   HostedStripeEventStatus,
+  type Prisma,
   type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
@@ -12,6 +13,12 @@ const workflowBoundary = vi.hoisted(() => ({
   start: vi.fn(async () => ({ runId: "run_hosted_stripe_fixture" })),
 }));
 const runtimeRecheckBoundary = vi.hoisted(() => ({
+  signal: vi.fn(async () => ({
+    signalAccepted: true,
+    workflowId: "hosted-user-runtime:fixture",
+  })),
+}));
+const activationWakeBoundary = vi.hoisted(() => ({
   signal: vi.fn(async () => ({
     signalAccepted: true,
     workflowId: "hosted-user-runtime:fixture",
@@ -42,16 +49,12 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-orchestration/signal-runtime", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-orchestration/signal-runtime")
-  >("@/src/lib/hosted-orchestration/signal-runtime");
-
-  return {
-    ...actual,
-    signalHostedRuntimeRecheckRuntime: runtimeRecheckBoundary.signal,
-  };
-});
+// Importing the real module here can initialize cyclic activation consumers
+// before the replacement is installed, leaking a real Temporal call into proof.
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: activationWakeBoundary.signal,
+  signalHostedRuntimeRecheckRuntime: runtimeRecheckBoundary.signal,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<
@@ -111,6 +114,12 @@ import {
 import {
   recordHostedStripeEvent,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
+import {
+  claimHostedMailboxConversationSubscriptionAction,
+} from "@/src/lib/hosted-mailbox/store";
+import {
+  createHostedAssistantInputLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
   startHostedStripeHttpFixture,
@@ -132,6 +141,100 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted Stripe webhook entitlement with PostgreSQL",
   () => {
+    it.each([
+      ["start_pulse_now", "replayed"],
+      ["upgrade_edge", "conflict"],
+    ] as const)("admits one subscription action when concurrent %s returns %s", async (secondAction, losingResult) => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `hbm_subscription_claim_${randomUUID()}`;
+      const assistantInputId = `ain_${randomUUID()}`;
+      const mailboxItemId = `mailbox_${randomUUID()}`;
+      const contenders = [
+        { action: "start_pulse_now", prisma: firstClient },
+        { action: secondAction, prisma: secondClient },
+      ] as const;
+      const ownerLocked = createDeferred();
+      const releaseOwner = createDeferred();
+      const pending: Promise<unknown>[] = [];
+
+      try {
+        await observer.hostedMember.create({ data: { id: memberId } });
+        await observer.hostedMailboxItem.create({
+          data: {
+            assistantInputLookupKey: createHostedAssistantInputLookupKey(assistantInputId),
+            causalSeq: 1n,
+            dedupeKey: mailboxItemId,
+            id: mailboxItemId,
+            kind: "conversation.message",
+            lane: "conversation",
+            laneSeq: 1n,
+            occurredAt: new Date(),
+            payloadSchema: "hosted.mailbox.item.v1",
+            userId: memberId,
+          },
+        });
+        const pids = await Promise.all([
+          readBackendPid(firstClient),
+          readBackendPid(secondClient),
+        ]);
+        const lock = observer.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT id FROM hosted_mailbox_item
+            WHERE id = ${mailboxItemId} FOR UPDATE
+          `;
+          ownerLocked.resolve();
+          await releaseOwner.promise;
+        }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+        pending.push(lock);
+        await Promise.race([ownerLocked.promise, lock]);
+
+        const claims = Promise.allSettled(contenders.map(({ action, prisma }) =>
+          claimHostedMailboxConversationSubscriptionAction({
+            action,
+            assistantInputId,
+            memberId,
+            prisma,
+          })
+        ));
+        pending.push(claims);
+        // Both real transactions must read the unclaimed input and reach its
+        // locked write before either can win. No query result is simulated.
+        await Promise.all(pids.map((pid) => waitForBlockedBackend({ observer, pid })));
+        releaseOwner.resolve();
+        await lock;
+
+        const results = await claims;
+        expect(results).toEqual(expect.arrayContaining([
+          { status: "fulfilled", value: "claimed" },
+          { status: "fulfilled", value: losingResult },
+        ]));
+        const winner = results.findIndex((result) =>
+          result.status === "fulfilled" && result.value === "claimed"
+        );
+        const winningAction = contenders[winner]?.action;
+        if (!winningAction) {
+          throw new Error("Expected exactly one subscription action winner.");
+        }
+        await expect(observer.hostedMailboxItem.findUniqueOrThrow({
+          select: { subscriptionActionClaim: true },
+          where: { id: mailboxItemId },
+        })).resolves.toEqual({ subscriptionActionClaim: winningAction });
+        await expect(claimHostedMailboxConversationSubscriptionAction({
+          action: winningAction,
+          assistantInputId,
+          memberId,
+          prisma: observer,
+        })).resolves.toBe("replayed");
+      } finally {
+        releaseOwner.resolve();
+        await Promise.allSettled(pending);
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        await Promise.all([observer, firstClient, secondClient].map((client) => client.$disconnect()));
+      }
+    });
+
     it("applies an older proven-current full refund without moving the billing cursor backward", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
       const fixtureId = randomUUID();
@@ -1181,6 +1284,7 @@ describe.skipIf(!runPostgresProof)(
       const runtimeGlobals = readHostedStripeRuntimeGlobals();
 
       workflowBoundary.start.mockClear();
+      activationWakeBoundary.signal.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
       runtimeRecheckBoundary.signal.mockRejectedValue(
         new Error("Temporal fixture unavailable"),
@@ -1510,7 +1614,7 @@ describe.skipIf(!runPostgresProof)(
           eventId: stripeEventId,
           prisma,
           timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: true, required: false });
+        })).resolves.toEqual({ accepted: true, required: true });
 
         await expect(readUsageResetProof({ memberId, periodStart, prisma }))
           .resolves.toEqual({
@@ -1520,18 +1624,40 @@ describe.skipIf(!runPostgresProof)(
             planResetAt: eventCreatedAt,
             spentUsdMicros: 0n,
           });
-        await expect(readStripeReceiptProof({
+        const activationMailboxItems = await readAccessRestorationMailboxProof({
+          memberIds: [memberId, ownerMemberId],
+          prisma,
+        });
+        expect(activationMailboxItems).toHaveLength(2);
+        const completedReceipt = await readStripeReceiptProof({
           eventId: stripeEventId,
           prisma,
-        })).resolves.toMatchObject({
+        });
+        expect(completedReceipt).toMatchObject({
           attemptCount: 2,
           processedAt: expect.any(Date),
           status: HostedStripeEventStatus.completed,
         });
-        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(3);
-        expect(runtimeRecheckBoundary.signal).toHaveBeenLastCalledWith(
-          expect.objectContaining({ userId: ownerMemberId }),
+        const activationMailboxItemIds = readStripeActivationMailboxItemIds(
+          completedReceipt.activationResultJson,
         );
+        expect(activationMailboxItemIds).toHaveLength(2);
+        expect(activationMailboxItemIds).toEqual(expect.arrayContaining(
+          activationMailboxItems.map((item) => item.id),
+        ));
+        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(2);
+        expect(runtimeRecheckBoundary.signal).toHaveBeenLastCalledWith(
+          expect.objectContaining({ userId: memberId }),
+        );
+        expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(2);
+        for (const item of activationMailboxItems) {
+          expect(activationWakeBoundary.signal).toHaveBeenCalledWith(
+            expect.objectContaining({
+              expectedUserId: item.userId,
+              mailboxItemId: item.id,
+            }),
+          );
+        }
       } finally {
         clearHostedStripeFixtureEnvironment(runtimeGlobals);
         await stripeFixture.stop();
@@ -1598,6 +1724,10 @@ describe.skipIf(!runPostgresProof)(
       const runtimeGlobals = readHostedStripeRuntimeGlobals();
 
       workflowBoundary.start.mockClear();
+      activationWakeBoundary.signal.mockReset();
+      activationWakeBoundary.signal.mockRejectedValue(
+        new Error("Temporal fixture unavailable"),
+      );
       runtimeRecheckBoundary.signal.mockReset();
       runtimeRecheckBoundary.signal.mockRejectedValue(
         new Error("Temporal fixture unavailable"),
@@ -1677,7 +1807,7 @@ describe.skipIf(!runPostgresProof)(
           eventId: stripeEventId,
           prisma,
           timeoutMs: 5_000,
-        })).rejects.toBeDefined();
+        })).resolves.toEqual({ accepted: false, required: true });
 
         await expect(readHostedMemberBillingSnapshot({
           memberId: ownerMemberId,
@@ -1728,17 +1858,35 @@ describe.skipIf(!runPostgresProof)(
           aiUsageDeniedAt: expect.any(Date),
           consumedAt: null,
         });
-        await expect(readStripeReceiptProof({
+        const activationMailboxItems =
+          await readAccessRestorationMailboxProof({
+            memberIds: [ownerMemberId],
+            prisma,
+          });
+        expect(activationMailboxItems).toHaveLength(1);
+        const [activationMailboxItem] = activationMailboxItems;
+        if (!activationMailboxItem) {
+          throw new Error("Expected a Family access-restoration mailbox item.");
+        }
+        const completedReceipt = await readStripeReceiptProof({
           eventId: stripeEventId,
           prisma,
-        })).resolves.toMatchObject({
-          attemptCount: 1,
-          processedAt: null,
-          status: HostedStripeEventStatus.failed,
         });
-        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(1);
-        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledWith(
-          expect.objectContaining({ userId: ownerMemberId }),
+        expect(completedReceipt).toMatchObject({
+          attemptCount: 1,
+          processedAt: expect.any(Date),
+          status: HostedStripeEventStatus.completed,
+        });
+        expect(readStripeActivationMailboxItemIds(
+          completedReceipt.activationResultJson,
+        )).toEqual([activationMailboxItem.id]);
+        expect(runtimeRecheckBoundary.signal).not.toHaveBeenCalled();
+        expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(1);
+        expect(activationWakeBoundary.signal).toHaveBeenCalledWith(
+          expect.objectContaining({
+            expectedUserId: ownerMemberId,
+            mailboxItemId: activationMailboxItem.id,
+          }),
         );
 
         await postSignedHostedStripeEvent({
@@ -1765,21 +1913,18 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toEqual({
           lastStripeEventCreatedAt: newerEventCreatedAt,
         });
-        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(1);
+        expect(runtimeRecheckBoundary.signal).not.toHaveBeenCalled();
+        expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(1);
 
-        runtimeRecheckBoundary.signal.mockResolvedValue({
+        activationWakeBoundary.signal.mockResolvedValue({
           signalAccepted: true,
           workflowId: `hosted-user-runtime:${ownerMemberId}`,
-        });
-        await makeStripeReceiptImmediatelyRetryable({
-          eventId: stripeEventId,
-          prisma,
         });
         await expect(processRecordedHostedStripeWebhookEvent({
           eventId: stripeEventId,
           prisma,
           timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: true, required: false });
+        })).resolves.toEqual({ accepted: true, required: true });
 
         await expect(readUsageResetProof({
           memberId: ownerMemberId,
@@ -1796,13 +1941,16 @@ describe.skipIf(!runPostgresProof)(
           eventId: stripeEventId,
           prisma,
         })).resolves.toMatchObject({
-          attemptCount: 2,
+          attemptCount: 1,
           processedAt: expect.any(Date),
           status: HostedStripeEventStatus.completed,
         });
-        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(2);
-        expect(runtimeRecheckBoundary.signal).toHaveBeenLastCalledWith(
-          expect.objectContaining({ userId: ownerMemberId }),
+        expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(2);
+        expect(activationWakeBoundary.signal).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            expectedUserId: ownerMemberId,
+            mailboxItemId: activationMailboxItem.id,
+          }),
         );
       } finally {
         clearHostedStripeFixtureEnvironment(runtimeGlobals);
@@ -2189,6 +2337,12 @@ async function seedUsageBlockedPendingWork(input: {
       userId: input.memberId,
     },
   });
+  await input.prisma.hostedMailboxLaneCounter.createMany({
+    data: [
+      { lane: "causal", nextSeq: 2n, userId: input.memberId },
+      { lane: "conversation", nextSeq: 2n, userId: input.memberId },
+    ],
+  });
   await input.prisma.hostedAiUsagePeriod.create({
     data: {
       billingPlanCode: input.billingPlanCode,
@@ -2224,6 +2378,13 @@ async function seedHostedMemberActivationProof(input: {
       laneSeq: input.sequence,
       occurredAt: new Date(),
       payloadSchema: "murph.hosted-execution.member-activated.v1",
+      userId: input.memberId,
+    },
+  });
+  await input.prisma.hostedMailboxLaneCounter.create({
+    data: {
+      lane: "system",
+      nextSeq: input.sequence + 1n,
       userId: input.memberId,
     },
   });
@@ -2270,12 +2431,51 @@ function readStripeReceiptProof(input: {
 }) {
   return input.prisma.hostedStripeEvent.findUniqueOrThrow({
     select: {
+      activationResultJson: true,
       attemptCount: true,
       processedAt: true,
       status: true,
     },
     where: { eventId: input.eventId },
   });
+}
+
+function readAccessRestorationMailboxProof(input: {
+  memberIds: string[];
+  prisma: PrismaClient;
+}) {
+  return input.prisma.hostedMailboxItem.findMany({
+    select: {
+      id: true,
+      userId: true,
+    },
+    where: {
+      kind: "runtime.maintenance-requested",
+      userId: { in: input.memberIds },
+    },
+  });
+}
+
+function readStripeActivationMailboxItemIds(
+  value: Prisma.JsonValue | null,
+): string[] {
+  if (
+    value === null
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || value.schema !== "hosted.stripe.activation-result.v1"
+    || !Array.isArray(value.activationMailboxItemIds)
+  ) {
+    throw new Error("Expected persisted Stripe activation mailbox pointers.");
+  }
+  const mailboxItemIds = value.activationMailboxItemIds;
+  if (!mailboxItemIds.every(
+    (mailboxItemId): mailboxItemId is string =>
+      typeof mailboxItemId === "string",
+  )) {
+    throw new Error("Expected Stripe activation mailbox pointer strings.");
+  }
+  return mailboxItemIds;
 }
 
 function readFamilyCheckoutAttemptProof(input: {

@@ -1,19 +1,24 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { createDefaultVaultServices } from "../src/vault-cli-bootstrap.js";
+import { registerSearchCommands } from "../src/commands/search.js";
+import { registerReadCommands } from "../src/commands/read.js";
 import { initializeVault } from "@murphai/core";
 import { Cli } from "incur";
 import { afterEach, test } from "vitest";
 
 import {
+  registerClinicalNoteCommands,
   registerAssertionCommands,
+  registerDiagnosticTestCommands,
   registerSocialHistoryCommands,
 } from "../src/commands/clinical-imports.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import type { CliEnvelope } from "./cli-test-helpers.js";
-import { requireData } from "./cli-test-helpers.js";
+import { requireData, runCli } from "./cli-test-helpers.js";
 
 const cleanupPaths: string[] = [];
 
@@ -29,8 +34,12 @@ function createSliceCli() {
     version: "0.0.0-test",
   });
   cli.use(incurErrorBridge);
+  registerSearchCommands(cli);
+  registerClinicalNoteCommands(cli);
   registerAssertionCommands(cli);
+  registerDiagnosticTestCommands(cli);
   registerSocialHistoryCommands(cli);
+  registerReadCommands(cli, createDefaultVaultServices());
 
   return cli;
 }
@@ -135,6 +144,196 @@ test("clinical import payload-schema command emits the writable JSON contract", 
   ]);
 });
 
+test("clinical typed date options return native field-specific envelopes", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-clinical-dates-"));
+  cleanupPaths.push(vaultRoot);
+  const privateDate = "private-date-marker";
+  const cases: Array<{ args: string[]; path: string }> = [
+    {
+      args: [
+        "assertion",
+        "save",
+        "--assertion",
+        "denial_asserted",
+        "--asserted-on",
+        privateDate,
+        "--vault",
+        vaultRoot,
+      ],
+      path: "assertedOn",
+    },
+    {
+      args: [
+        "diagnostic-test",
+        "save",
+        "Synthetic panel",
+        "--reported-at",
+        privateDate,
+        "--vault",
+        vaultRoot,
+      ],
+      path: "reportedAt",
+    },
+  ];
+
+  for (const entry of cases) {
+    const result = await runSliceCli(entry.args);
+    assert.equal(result.ok, false);
+    if (result.ok) {
+      continue;
+    }
+    assert.equal(result.error.code, "VALIDATION_ERROR");
+    assert.equal(result.error.fieldErrors?.[0]?.path, entry.path);
+    assert.equal(result.error.fieldErrors?.[0]?.received, "invalid");
+    assert.equal(JSON.stringify(result).includes(privateDate), false);
+  }
+});
+
+test("built CLI accepts leap-day assertions and rejects impossible dates before writing", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-clinical-calendar-"));
+  cleanupPaths.push(vaultRoot);
+  const impossibleDate = "2026-02-30";
+  await runCli(["init", "--vault", vaultRoot]);
+
+  const leapDayResult = await runCli([
+    "assertion",
+    "save",
+    "--assertion",
+    "denial_asserted",
+    "--occurred-at",
+    "2024-02-29T12:00:00.000Z",
+    "--asserted-on",
+    "2024-02-29",
+    "--vault",
+    vaultRoot,
+  ]);
+
+  assert.equal(leapDayResult.ok, true);
+  await stat(path.join(vaultRoot, "ledger/events/2024/2024-02.jsonl"));
+
+  const result = await runCli([
+    "assertion",
+    "save",
+    "--assertion",
+    "denial_asserted",
+    "--occurred-at",
+    "2026-03-01T12:00:00.000Z",
+    "--asserted-on",
+    impossibleDate,
+    "--vault",
+    vaultRoot,
+  ]);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.code, "VALIDATION_ERROR");
+  assert.equal(result.error?.fieldErrors?.[0]?.path, "assertedOn");
+  assert.equal(JSON.stringify(result).includes(impossibleDate), false);
+  await assert.rejects(
+    () => stat(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+    { code: "ENOENT" },
+  );
+}, 120_000);
+
+test("clinical import validation returns bounded repair fields without payload values", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-clinical-invalid-"));
+  cleanupPaths.push(vaultRoot);
+  const inputFile = path.join(vaultRoot, "assertion.json");
+  const privateValue = "private-assertion-date";
+  await writeFile(inputFile, `${JSON.stringify({
+    occurredAt: "2026-06-17T14:00:00.000Z",
+    source: "import",
+    assertion: "denial_asserted",
+    assertedOn: privateValue,
+    externalRef: {
+      system: "synthetic-pdf",
+      resourceType: "clinical-assertion",
+      resourceId: "synthetic-assertion",
+    },
+  })}\n`, "utf8");
+
+  const result = await runSliceCli([
+    "assertion",
+    "import-json",
+    "--vault",
+    vaultRoot,
+    "--input",
+    `@${inputFile}`,
+  ]);
+
+  assert.equal(result.ok, false);
+  if (result.ok) {
+    return;
+  }
+  assert.equal(result.error.code, "invalid_payload");
+  assert.equal(result.error.stage, "validation");
+  assert.equal(result.error.fieldErrors?.[0]?.path, "assertedOn");
+  assert.equal(result.error.fieldErrors?.[0]?.code, "custom");
+  assert.equal(result.error.hint, undefined);
+  assert.equal(JSON.stringify(result).includes(privateValue), false);
+});
+
+test("built vitals import truncates private qualifier keys before any write", async () => {
+  const parentRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-vitals-private-"));
+  cleanupPaths.push(parentRoot);
+  const vaultRoot = path.join(parentRoot, "vault");
+  const inputFile = path.join(parentRoot, "vitals.json");
+  const privateQualifierKey = "private-qualifier-key-sentinel";
+  const privateQualifierValue = "private-qualifier-value-sentinel";
+
+  await runCli(["init", "--vault", vaultRoot]);
+  await writeFile(inputFile, `${JSON.stringify({
+    occurredAt: "2026-06-17T14:00:00.000Z",
+    source: "import",
+    title: "Synthetic vitals",
+    measurements: [{
+      metric: "heart-rate",
+      value: 72,
+      unit: "bpm",
+      qualifiers: {
+        [privateQualifierKey]: [privateQualifierValue],
+      },
+    }],
+    externalRef: {
+      system: "synthetic-source",
+      resourceType: "vitals",
+      resourceId: "synthetic-vitals",
+    },
+  })}\n`, "utf8");
+
+  const result = await runCli([
+    "vitals",
+    "import-json",
+    "--vault",
+    vaultRoot,
+    "--input",
+    `@${inputFile}`,
+  ]);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.code, "invalid_payload");
+  assert.equal(result.error?.stage, "validation");
+  assert.equal(
+    result.error?.fieldErrors?.some(
+      (field) =>
+        field.path === "measurements.0.qualifiers" &&
+        field.code === "invalid_union",
+    ),
+    true,
+    JSON.stringify(result),
+  );
+  const envelope = JSON.stringify(result);
+  assert.equal(envelope.includes(privateQualifierKey), false);
+  assert.equal(envelope.includes(privateQualifierValue), false);
+  await assert.rejects(
+    () => stat(path.join(vaultRoot, "ledger/events/2026/2026-06.jsonl")),
+    { code: "ENOENT" },
+  );
+  await assert.rejects(
+    () => stat(path.join(vaultRoot, "system/audit/2026-06.jsonl")),
+    { code: "ENOENT" },
+  );
+}, 120_000);
+
 test("social-history import-json retries return a schema-valid no-op result", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-social-history-"));
   cleanupPaths.push(vaultRoot);
@@ -186,4 +385,30 @@ test("social-history import-json retries return a schema-valid no-op result", as
   assert.equal(retryImport.ok, true, JSON.stringify(retryImport));
   assert.deepEqual(requireData(retryImport).eventIds, []);
   assert.equal("lookupId" in requireData(retryImport), false);
+});
+
+
+test("clinical-note import and show preserve typed answers and unknown dates across replay", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "clinical-note-fact-cli-"));
+  cleanupPaths.push(vaultRoot);
+  await initializeVault({ vaultRoot, createdAt: "2026-05-11T12:00:00.000Z", timezone: "UTC" });
+  const clinicalFact = { category: "observation", subject: "member", label: "Source assessment score",
+    statement: "Source assessment score was 4; its unit and clinical date were not recorded.", clinicalDate: null, value: 4, qualifiers: [{ name: "assessmentDomain", value: "synthetic-domain-token" }] };
+  const inputFile = path.join(vaultRoot, "fact.json");
+  await writeFile(inputFile, JSON.stringify({ source: "import", occurredAt: "2026-05-11T12:00:00.000Z",
+    title: clinicalFact.label, note: clinicalFact.statement, noteType: "clinical_fact", clinicalFact,
+    externalRef: { system: "synthetic-source", resourceType: "source-fact", resourceId: "score-1" },
+  }));
+  const args = ["clinical-note", "import-json", "--input", `@${inputFile}`, "--vault", vaultRoot];
+  const result = requireData(await runSliceCli<ClinicalImportCliResult>(args));
+  assert.equal(result.eventIds.length, 1);
+  const shown = requireData(await runSliceCli(["show", result.eventIds[0]!, "--vault", vaultRoot]));
+  const json = JSON.stringify(shown);
+  assert.ok(json.includes('"clinicalFact"'));
+  assert.ok(json.includes('"clinicalDate":null'));
+  assert.ok(json.includes('"value":4'));
+  const found = requireData(await runSliceCli(["search", "query", "synthetic-domain-token", "--vault", vaultRoot]));
+  assert.ok(JSON.stringify(found).includes(result.eventIds[0]!));
+  const replay = requireData(await runSliceCli<ClinicalImportCliResult>(args));
+  assert.deepEqual(replay.eventIds, []);
 });

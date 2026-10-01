@@ -6,7 +6,8 @@ import type {
 import {
   claimCurrentSenderTurnDecision,
   executeMurphDynamicToolRequest,
-  MURPH_GROUP_TOOL,
+  MURPH_GROUP_CONSULT_TOOL,
+  MURPH_GROUP_TOOL_NAME,
   readMurphDynamicToolRequest,
 } from "../src/assistant-codex/dynamic-tools.ts";
 
@@ -23,7 +24,7 @@ function groupToolCall(argumentsValue: unknown): Record<string, unknown> {
       callId: "call-test",
       namespace: "murph",
       threadId: "thread-test",
-      tool: MURPH_GROUP_TOOL.name,
+      tool: MURPH_GROUP_TOOL_NAME,
       turnId: "turn-test",
     },
   };
@@ -65,6 +66,7 @@ function createHostedToolContext(input: {
 function parseCurrentSenderRequest(input: {
   action?:
     | "ask_current_sender"
+    | "ask_current_sender_privately"
     | "clarify_current_sender"
     | "continue_current_sender_in_group"
     | "continue_current_sender_privately"
@@ -132,6 +134,14 @@ describe("murph.group current-sender intent", () => {
       mode: "new",
     });
     expect(parseCurrentSenderRequest({
+      action: "ask_current_sender_privately",
+    }).request).toEqual({
+      action: "ask_current_sender",
+      audience: "current_sender",
+      messageRef: NEWEST_SENDER_INPUT_ID,
+      mode: "new",
+    });
+    expect(parseCurrentSenderRequest({
       action: "message_current_sender",
     }).request).toMatchObject({
       audience: "current_sender",
@@ -157,6 +167,7 @@ describe("murph.group current-sender intent", () => {
     for (const argumentsValue of [
       { action: "message_current_sender" },
       { action: "ask_current_sender" },
+      { action: "ask_current_sender_privately" },
       { action: "ask_current_sender", message_ref: "provider-message-id" },
       {
         action: "ask_current_sender",
@@ -168,26 +179,35 @@ describe("murph.group current-sender intent", () => {
         .toMatchObject({ kind: "invalid-group-arguments" });
     }
 
-    const currentSenderSchema = MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf.find(
-      (schema) => schema.properties.action.enum.some(
-        (action) => action === "ask_current_sender",
-      ),
+    expect(MURPH_GROUP_CONSULT_TOOL.inputSchema.oneOf).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          additionalProperties: false,
+          properties: {
+            action: { enum: ["ask_current_sender"], type: "string" },
+            message_ref: expect.objectContaining({
+              pattern: "^ain_[0-9a-f]{32}$",
+            }),
+          },
+          required: ["action", "message_ref"],
+          type: "object",
+        }),
+        expect.objectContaining({
+          additionalProperties: false,
+          properties: {
+            action: {
+              enum: ["ask_current_sender_privately"],
+              type: "string",
+            },
+            message_ref: expect.objectContaining({
+              pattern: "^ain_[0-9a-f]{32}$",
+            }),
+          },
+          required: ["action", "message_ref"],
+          type: "object",
+        }),
+      ]),
     );
-    expect(currentSenderSchema).toMatchObject({
-      maxProperties: 2,
-      properties: {
-        action: {
-          enum: expect.arrayContaining([
-            "ask_current_sender",
-            "clarify_current_sender",
-            "continue_current_sender_in_group",
-            "continue_current_sender_privately",
-          ]),
-        },
-        message_ref: { pattern: "^ain_[0-9a-f]{32}$" },
-      },
-      required: ["action", "message_ref"],
-    });
   });
 
   it("sends the group notice before forwarding exact-source authority", async () => {
@@ -286,7 +306,9 @@ describe("murph.group current-sender intent", () => {
       hostedToolContext,
       nextUsageOrdinal: () => 2,
       progressDelivery,
-      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+      request: parseCurrentSenderRequest({
+        action: "ask_current_sender_privately",
+      }),
     });
 
     expect(result.rpcResult.success).toBe(false);
@@ -414,7 +436,9 @@ describe("murph.group current-sender intent", () => {
       hostedToolContext,
       nextUsageOrdinal: () => 1,
       progressDelivery,
-      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+      request: parseCurrentSenderRequest({
+        action: "ask_current_sender_privately",
+      }),
     });
     const groupResult = await executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 1,
@@ -477,7 +501,9 @@ describe("murph.group current-sender intent", () => {
       hostedToolContext,
       nextUsageOrdinal: () => 2,
       progressDelivery,
-      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+      request: parseCurrentSenderRequest({
+        action: "ask_current_sender_privately",
+      }),
     });
 
     expect(privateResult.rpcResult.success).toBe(false);
@@ -567,7 +593,9 @@ describe("murph.group current-sender intent", () => {
       hostedToolContext,
       nextUsageOrdinal: () => 2,
       progressDelivery: sentProgressDelivery(),
-      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+      request: parseCurrentSenderRequest({
+        action: "ask_current_sender_privately",
+      }),
     });
 
     expect(privateResult.rpcResult.success).toBe(false);
@@ -616,7 +644,7 @@ describe("murph.group current-sender intent", () => {
       nextUsageOrdinal: () => 2,
       progressDelivery,
       request: parseCurrentSenderRequest({
-        action: "message_current_sender",
+        action: "ask_current_sender_privately",
         messageRef: EARLIER_SENDER_INPUT_ID,
       }),
     });

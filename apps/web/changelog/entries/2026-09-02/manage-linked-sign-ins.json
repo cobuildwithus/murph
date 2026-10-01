@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-02",
+  "order": 100,
+  "item": {
+    "id": "manage-linked-sign-ins",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Manage your linked sign-ins",
+    "summary": "Settings now lets you replace Telegram or remove a linked Telegram, email, or phone sign-in when another supported sign-in remains.",
+    "details": "Murph confirms the provider disconnect before updating messaging access, preserves unrelated channels and billing records, and keeps cleanup available after a refresh if it is interrupted.",
+    "relevanceTags": ["settings", "account", "messaging"],
+    "sourcePullRequests": [2746],
+    "tryIt": {
+      "label": "Manage sign-ins",
+      "href": "/settings"
+    }
+  }
+}

@@ -4,11 +4,8 @@ import {
   type HostedPlanUsageToolRequest,
 } from "@murphai/hosted-execution/plan-usage";
 import {
-  HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
-} from "@murphai/hosted-execution/routes";
-
-import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -25,7 +22,7 @@ export function createHostedRuntimePlanUsageToolPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted plan usage tool",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.planUsageTool,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

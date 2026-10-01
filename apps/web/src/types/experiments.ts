@@ -126,6 +126,9 @@ export interface ExperimentSignal {
   label: string;
   value: string;
   unit?: string;
+  statistic?: ExperimentOutcomeStatistic;
+  /** Query-owned dated result; may summarize multiple measurements on that date. */
+  latestResult?: { date: string; value: string; unit?: string };
   delta: string;
   direction: "up" | "down" | "neutral";
   sentiment?: "positive" | "negative" | "neutral";

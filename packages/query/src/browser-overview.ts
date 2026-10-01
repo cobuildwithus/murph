@@ -1,12 +1,20 @@
 export {
-  selectBrowserVaultHistory,
-  selectBrowserVaultOverview,
+  selectBrowserVaultJournal,
 } from "./browser-replica/client-overview.ts";
+export type {
+  JournalDay,
+  JournalEvent,
+  JournalEventTiming,
+  JournalRecord,
+  JournalView,
+  JournalWeekSummary,
+} from "./journal-view.ts";
 export {
   selectBrowserVaultExperimentSummary,
   selectBrowserVaultTrackedExperiments,
 } from "./browser-replica/tracked-experiments.ts";
 export { buildOverviewWeeklyStatsFromDailySampleSummaries } from "./overview-weekly-stats.ts";
+export { resolveAdherenceObservationActivityKind } from "./experiment-adherence.ts";
 export {
   isActiveOverviewExperimentStatus,
   isCompletedOverviewExperimentStatus,
@@ -18,7 +26,6 @@ export type {
   BrowserVaultExperimentRunCardLookup,
   BrowserVaultExperimentRunCardMetric,
   BrowserVaultExperimentRunCardSummary,
-  BrowserVaultOverviewView,
   BrowserVaultQueryClient,
   BrowserVaultTimelineRow,
 } from "./browser-replica/shared.ts";
@@ -34,7 +41,10 @@ export type {
 } from "./overview-weekly-stats.ts";
 export type {
   PersonalPatternCell,
+  PersonalPatternClassification,
   PersonalPatternFactor,
+  PersonalPatternGrade,
+  PersonalPatternIcon,
   PersonalPatternOutcome,
   PersonalPatternReport,
   PersonalPatternStage,

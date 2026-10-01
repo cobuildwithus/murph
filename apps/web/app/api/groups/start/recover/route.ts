@@ -1,8 +1,20 @@
 import { isUniqueViolation } from "@/src/lib/device-sync/prisma-store/prisma-errors";
+import {
+  prepareHostedDomainRootForWeb,
+  revalidatePreparedHostedDomainRootForWebTx,
+} from "@/src/lib/hosted-crypto/domain-root-store";
+import {
+  runWithHostedDomainRootProviderCallsDisabled,
+  runWithHostedDomainRootUnwrapCache,
+} from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+  assertHostedMemberLinqEmailHandleOwnerTx,
+  bindHostedMemberLinqEmailHandleTx,
+} from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import {
   readHostedMemberRoutingState,
   upsertHostedMemberPendingLinqBindingTx,
@@ -14,7 +26,11 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import { openHostedLinqGroupEmailRecoveryToken } from "@/src/lib/hosted-onboarding/linq-group-setup";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+import { acquireHostedLinqParticipantContactLockTx } from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+} from "@/src/lib/hosted-onboarding/shared";
 import { acquireHostedLinqChatOwnershipLockTx } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
 import { readHostedThreadRouteByThreadIdentity } from "@/src/lib/hosted-routing/thread-route-store";
 import { getPrisma } from "@/src/lib/prisma";
@@ -25,7 +41,7 @@ export const revalidate = 0;
 
 const BODY_LIMIT_BYTES = 8_192;
 
-export const POST = withJsonError(async (request: Request) => {
+export const POST = withJsonError(async (request: Request) => runWithHostedDomainRootUnwrapCache(async () => {
   assertHostedOnboardingMutationOrigin(request);
   const session = await requireHostedAppSessionFromRequest(request);
   assertHostedMemberNotSuspended(session.member);
@@ -45,7 +61,19 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   const prisma = getPrisma();
-  const status = await prisma.$transaction(async (tx) => {
+  const preparedControlRoot = await prepareHostedDomainRootForWeb({
+    domain: "control",
+    prisma,
+    reason: "hosted-group.email-recovery",
+    userId: session.member.id,
+  });
+  // Warm existing private routing reads before taking any transaction locks.
+  await readHostedMemberRoutingState({ memberId: session.member.id, prisma });
+  const status = await runWithHostedDomainRootProviderCallsDisabled(() => prisma.$transaction(async (tx) => {
+    await acquireHostedLinqParticipantContactLockTx({
+      contact: recovery.participantContact,
+      tx,
+    });
     await acquireHostedLinqChatOwnershipLockTx({
       chatId: recovery.chatId,
       tx,
@@ -59,9 +87,15 @@ export const POST = withJsonError(async (request: Request) => {
       return "already_connected" as const;
     }
 
+    await assertHostedMemberLinqEmailHandleOwnerTx({
+      emailAddress: recovery.participantContact.value,
+      memberId: session.member.id,
+      prisma: tx,
+    });
     const verifiedEmail = await lookupHostedMemberByVerifiedEmailAddress({
       address: recovery.participantContact.value,
       prisma: tx,
+      projection: "core",
     });
     if (verifiedEmail) {
       if (verifiedEmail.core.id !== session.member.id) {
@@ -70,6 +104,11 @@ export const POST = withJsonError(async (request: Request) => {
       return "linked" as const;
     }
 
+    await revalidatePreparedHostedDomainRootForWebTx({
+      prepared: preparedControlRoot,
+      tx,
+    });
+    await lockHostedMemberRow(tx, session.member.id);
     const routing = await readHostedMemberRoutingState({
       memberId: session.member.id,
       prisma: tx,
@@ -90,6 +129,12 @@ export const POST = withJsonError(async (request: Request) => {
     }
 
     try {
+      await bindHostedMemberLinqEmailHandleTx({
+        emailAddress: recovery.participantContact.value,
+        lookupKey: recovery.participantContact.lookupKey,
+        memberId: session.member.id,
+        prisma: tx,
+      });
       await upsertHostedMemberPendingLinqBindingTx({
         homeLineAssignedAt: null,
         linqChatId: recovery.chatId,
@@ -110,13 +155,13 @@ export const POST = withJsonError(async (request: Request) => {
       throw error;
     }
     return "linked" as const;
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS));
 
   return jsonOk({
     ok: true,
     status,
   });
-});
+}));
 
 function throwRecoveryConflict(): never {
   throw hostedOnboardingError({

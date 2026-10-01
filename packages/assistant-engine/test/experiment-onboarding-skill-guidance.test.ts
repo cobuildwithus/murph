@@ -1,3 +1,4 @@
+import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -17,10 +18,7 @@ describe('experiment onboarding skill guidance', () => {
       throw new Error('experiment-onboarding skill is not registered')
     }
 
-    return readFile(
-      path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
-      'utf8',
-    )
+    return readWorkflowSkillPolicy('experiment-onboarding')
   }
 
   async function readBehaviorFollowthroughSkill() {
@@ -32,10 +30,7 @@ describe('experiment onboarding skill guidance', () => {
       throw new Error('behavior-followthrough skill is not registered')
     }
 
-    return readFile(
-      path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
-      'utf8',
-    )
+    return readWorkflowSkillPolicy('behavior-followthrough')
   }
 
   async function readSelfManagementExperimentsSkill() {
@@ -52,6 +47,21 @@ describe('experiment onboarding skill guidance', () => {
       'utf8',
     )
   }
+
+  it('offers bounded follow-through outside onboarding without bypassing consent', async () => {
+    const support = await readBehaviorFollowthroughSkill()
+    const trial = await readSelfManagementExperimentsSkill()
+    expect(support).toContain('advice alone is not the finished proposal')
+    expect(support).toContain('a practical cue, a bounded review point, and an offer of reminders and a check-in')
+    expect(support).toContain('if timing is missing, ask one narrow schedule question after giving the useful plan')
+    expect(support).toContain('Respect declined support and urgent-care priorities')
+    expect(support).toContain('never claim future outreach before it is scheduled')
+    expect(support).toContain('For any private repeated-behavior launch')
+    expect(support).toContain('A current request for help already')
+    expect(support).not.toContain('For the first onboarding launch, this offer is the authorization boundary')
+    expect(trial).toContain('lack of consent means offer or resolve it')
+    expect(trial).toContain('two weeks can be useful but is not a universal duration')
+  })
 
   it('requires every resolved safety question before any active start', async () => {
     const raw = await readExperimentOnboardingSkill()
@@ -271,7 +281,10 @@ describe('experiment onboarding skill guidance', () => {
       'do not leave related future session-support automations blindly active',
     )
     expect(raw).toContain(
-      'vault-cli automation list --support-series-id experiment:<experimentId>',
+      'vault-cli automation list --support-series-id experiment:<experimentId> --compact',
+    )
+    expect(raw).toContain(
+      'vault-cli automation show <automationId>` only when a fact needed for the reconciliation decision is absent from that compact inventory',
     )
     expect(raw).toContain(
       'never infer ownership from an experiment slug, generic tag, title, or text prefix',
@@ -547,6 +560,9 @@ describe('experiment onboarding skill guidance', () => {
       'Prefer a marked exact reply or reaction target, but do not treat the native edge alone as completion.',
     )
     expect(raw).toContain(
+      'context includes `plannedOccurrenceAt` and the matching experiment `supportSeriesId`',
+    )
+    expect(raw).toContain(
       'vault-cli experiment session log <id> --reminder-intent-id <intentId>',
     )
     expect(raw).toContain(
@@ -559,16 +575,19 @@ describe('experiment onboarding skill guidance', () => {
       'a second accepted reminder for that same planned occurrence returns the existing event',
     )
     expect(raw).toContain(
-      'A trusted legacy reminder with no `plannedOccurrenceAt` is conversational context only, not reminder-write provenance.',
+      'A trusted legacy reminder with no `plannedOccurrenceAt` or matching `supportSeriesId` is conversational context only, not reminder-write provenance.',
     )
     expect(raw).toContain(
       'Never pass its intent id to `--reminder-intent-id`, and never substitute its notification time for session chronology.',
     )
     expect(raw).toContain(
-      'only when the canonical plan identifies exactly one applicable uncompleted occurrence',
+      'Explicit repeated-set completions use the ordinary resolution below and do not require a scheduled slot or daily workout.',
     )
     expect(raw).toContain(
-      'ask one narrow question about which session was completed and write nothing',
+      'For other planned-session reconciliation, read the current experiment and progress',
+    )
+    expect(raw).toContain(
+      'with plan-derived chronology only when the plan identifies exactly one applicable uncompleted occurrence; otherwise ask one narrow question and write nothing.',
     )
     expect(raw).toContain(
       'A later change, archival, or deletion of the automation does not rewrite the historical message the member received.',

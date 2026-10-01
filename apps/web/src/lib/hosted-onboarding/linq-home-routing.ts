@@ -1,3 +1,4 @@
+import { isHostedMemberSignupWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
 import { type HostedMemberSnapshot } from "./hosted-member-store";
 import {
   createHostedLinqChatLookupKeyReadCandidates,
@@ -5,6 +6,7 @@ import {
 } from "./contact-privacy";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
+  finalizeHostedMemberActivationLinqRouteTx,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
@@ -42,9 +44,8 @@ import { normalizePhoneNumber } from "./phone";
 import { hostedOnboardingError } from "./errors";
 import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 import { lockHostedMemberRow } from "./shared";
+import { acquireHostedLinqChatOwnershipLockTx } from "../hosted-routing/linq-chat-ownership-lock";
 import type { Prisma } from "@prisma/client";
-
-const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 
 export interface HostedMemberActivationLinqRouteResolution {
   welcomeRoute: HostedMemberAssistantNotificationRoute | null;
@@ -124,8 +125,6 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
     input.directRecipientPhoneNumber,
   );
   const fromPhoneNumber = normalizePhoneNumber(input.fromPhoneNumber);
-  const expectedIdempotencyKey =
-    `${HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX}${input.memberId}`;
   const deliveryIdempotencyLookupKey =
     createHostedLinqDeliveryIdempotencyLookupKey(idempotencyKey);
   const directRecipientLookupKeys =
@@ -136,7 +135,7 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
     createHostedLinqChatLookupKeyReadCandidates(linqChatId);
 
   if (
-    idempotencyKey !== expectedIdempotencyKey
+    !isHostedMemberSignupWelcomeDeliveryIdentity(idempotencyKey, input.memberId)
     || !deliveryIdempotencyLookupKey
     || !directRecipientPhoneNumber
     || directRecipientLookupKeys.length === 0
@@ -148,9 +147,14 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
     throwHostedSignupWelcomeRouteAuthorityInvalid();
   }
 
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: linqChatId,
+    tx: input.prisma,
+  });
+
   // Identity reconciliation locks the member row before mutating verified
-  // identity. Taking the same lock closes the send-to-callback phone-change
-  // race without persisting the raw participant target.
+  // identity. Taking the same lock after chat ownership closes the
+  // send-to-callback phone-change race without reversing the routing order.
   await lockHostedMemberRow(input.prisma, input.memberId);
   await acquireHostedMemberHomeLinqRouteLockTx({
     memberId: input.memberId,
@@ -324,6 +328,13 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
+  return resolveHostedMemberLinqHomeLineRouteBindingWithLockedMemberTx(input);
+}
+
+/** The caller owns this member's row lock for the current transaction. */
+export async function resolveHostedMemberLinqHomeLineRouteBindingWithLockedMemberTx(
+  input: Parameters<typeof resolveHostedMemberLinqHomeLineRouteBindingTx>[0],
+): Promise<HostedLinqHomeLineRouteBindingResult> {
   const decision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
   if (decision.kind === "done") {
     return decision.result;
@@ -515,9 +526,9 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
 
   if (authority.kind === "home") {
     if (routing?.pendingLinqChatId) {
-      await upsertHostedMemberHomeLinqBindingTx({
-        clearPending: true,
-        linqChatId: authority.chatId,
+      await finalizeHostedMemberActivationLinqRouteTx({
+        chatId: authority.chatId,
+        kind: "home",
         memberId: input.member.core.id,
         participantContact: authority.participantContact,
         prisma: input.prisma,
@@ -546,9 +557,9 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
       memberPhoneNumber,
     })
   ) {
-    await upsertHostedMemberHomeLinqBindingTx({
-      clearPending: true,
-      linqChatId: authority.chatId,
+    await finalizeHostedMemberActivationLinqRouteTx({
+      chatId: authority.chatId,
+      kind: "pending",
       memberId: input.member.core.id,
       participantContact: authority.participantContact,
       prisma: input.prisma,
@@ -592,20 +603,6 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
       message: "A verified hosted member phone number is required before a Linq home line can be assigned.",
       httpStatus: 500,
     });
-  }
-
-  // Companion activation may succeed without proactive capacity. When this
-  // member did not already own routing authority, leave the route empty so
-  // their first provider-attested inbound can bind the managed line they
-  // actually contacted instead of redirecting from an undisclosed fallback.
-  if (
-    input.allowNoAssignableLine
-    && authority.kind === "none"
-    && !target.proactiveConversationReserved
-  ) {
-    return {
-      welcomeRoute: null,
-    };
   }
 
   await upsertHostedMemberHomeLinqRecipientPhoneTx({
@@ -816,6 +813,7 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   const existingRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
 
   const reservationResult = await reserveHostedLinqHomeLineFromAssignablePoolTx({
+    assignedRecipientPhone: existingRecipientPhone,
     excludedActiveMemberId: existingRecipientPhone ? input.member.core.id : null,
     preferredRecipientPhone:
       existingRecipientPhone
@@ -840,6 +838,7 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
 }
 
 async function reserveHostedLinqHomeLineFromAssignablePoolTx(input: {
+  assignedRecipientPhone?: string | null;
   excludedActiveMemberId?: string | null;
   now?: Date;
   preferredRecipientPhone: string | null;
@@ -847,11 +846,14 @@ async function reserveHostedLinqHomeLineFromAssignablePoolTx(input: {
   reservationKind: "inbound" | "signup_welcome";
 }): Promise<HostedLinqHomeLinePhoneReservationResult> {
   const lines = await listHostedLinqAssignableHomeLines({ prisma: input.prisma });
+  // A number already shown to the member remains their contact number while
+  // it remains eligible. A full proactive quota delays outreach, not that assignment.
+  const assignedLine = lines.find((line) => line.phoneNumber === input.assignedRecipientPhone);
   const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
     ...(input.excludedActiveMemberId
       ? { excludedActiveMemberId: input.excludedActiveMemberId }
       : {}),
-    lines,
+    lines: assignedLine ? [assignedLine] : lines,
     ...(input.now ? { now: input.now } : {}),
     preferredRecipientPhone: input.preferredRecipientPhone,
     prisma: input.prisma,

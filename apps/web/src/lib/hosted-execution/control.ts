@@ -2,7 +2,7 @@ import {
   createCloudflareHostedControlClient,
   type CloudflareHostedControlClient,
 } from "@murphai/cloudflare-hosted-control/client";
-import { Agent } from "undici";
+import { Agent, buildConnector } from "undici";
 
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
 import {
@@ -10,7 +10,27 @@ import {
   readHostedExecutionControlEnvironment,
 } from "./environment";
 
+const connectHostedControl = buildConnector({});
 const hostedExecutionControlKeepAliveAgent = new Agent({
+  connect(options, callback) {
+    const startedAt = performance.now();
+    connectHostedControl(options, (...result) => {
+      const elapsedMs = Math.round(performance.now() - startedAt);
+      // New-connection cost only; HTTP response time and reused sockets are
+      // not measured here. Native connector owns TLS, timeout and pooling.
+      try {
+        if (result[0] || elapsedMs >= 250) {
+          console.info("Hosted control connection timing.", {
+            event: "hosted-control.connect.timing",
+            elapsedMs,
+            encrypted: options.protocol === "https:",
+            completed: result[0] === null,
+          });
+        }
+      } catch { /* Optional diagnostics cannot replace connection completion. */ }
+      callback(...result);
+    });
+  },
   // Reused direct-ensure arrivals measured 12-255ms vs ~600-850ms after the
   // old 60s window expired; 300s covers common 1-5 minute conversation gaps
   // while staying below Cloudflare's ~400s idle edge window. Stale-socket

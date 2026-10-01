@@ -25,10 +25,9 @@ import {
   restoreHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import {
-  buildMurphGroupReadPermissionProfileTomlLines,
-  buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
-  buildMurphMemberWorkspacePermissionProfileTomlLines,
+  buildMurphHostedPermissionProfileTomlLines,
   MURPH_GROUP_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
@@ -51,6 +50,9 @@ import type {
 import {
   createHostedRunnerNativeParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
+import {
+  runHostedGoalCliSmoke,
+} from "./hosted-goal-cli-smoke.js";
 import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
@@ -181,6 +183,7 @@ async function runSmokeChecks(input: {
   }
 
   const healthCommonsRuntime = await runHealthCommonsSmoke();
+  await resetCanonicalGoalRegistryForSmoke(input.vaultRoot);
   const healthCommonsCli = await runHealthCommonsCliSmoke();
 
   const wavPath = path.join(input.vaultRoot, input.wavRelativePath);
@@ -252,6 +255,7 @@ async function runSmokeChecks(input: {
     codexHostedShellVaultCliLlmsBytes: hostedCodexConfig.vaultCliLlmsBytes,
     codexVersion: codexPreflight.version,
     healthCommonsCatalogHash: healthCommonsRuntime.catalogHash,
+    healthCommonsCliGoalProofCount: healthCommonsCli.goalProofCount,
     healthCommonsCliProtocolListBytes: healthCommonsCli.protocolListBytes,
     healthCommonsFinnishDrySaunaTitle: healthCommonsRuntime.finnishDrySaunaTitle,
     healthCommonsRuntimeProtocolHitKeys: healthCommonsRuntime.runtimeProtocolHitKeys,
@@ -761,7 +765,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
   const modelCatalogJson = readHostedCodexModelCatalogJsonPath();
 
   return [
-    'model = "gpt-5.6-terra"',
+    'model = "gpt-6.1-sol"',
     ...(modelCatalogJson
       ? [`model_catalog_json = ${JSON.stringify(modelCatalogJson)}`]
       : []),
@@ -774,9 +778,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     // exercises the same PATH semantics as production turns.
     "allow_login_shell = false",
     "",
-    ...buildMurphGroupReadPermissionProfileTomlLines(),
-    ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
-    ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
+    ...buildMurphHostedPermissionProfileTomlLines(),
     "[skills]",
     "include_instructions = false",
     "",
@@ -1049,8 +1051,18 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
       expectedVaultId: input.expectedVaultId,
       vaultRoot: input.vaultRoot,
     });
-    const groupReadProof = await runCodexGroupReadPermissionProbe({
+    const groupReadProof = await runCodexReadOnlyPermissionProbe({
       execCommand,
+      label: "group-read",
+      permissionProfile: MURPH_GROUP_READ_PERMISSION_PROFILE,
+      sendRequest,
+      vaultRoot: input.vaultRoot,
+      workspaceRoot: input.workspaceRoot,
+    });
+    await runCodexReadOnlyPermissionProbe({
+      execCommand,
+      label: "member-read",
+      permissionProfile: MURPH_MEMBER_READ_PERMISSION_PROFILE,
       sendRequest,
       vaultRoot: input.vaultRoot,
       workspaceRoot: input.workspaceRoot,
@@ -1063,7 +1075,14 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
     });
 
     return {
-      ...groupReadProof,
+      groupReadAuthorizedFileRead: groupReadProof.authorizedFileRead,
+      groupReadDeepEnvReadDenied: groupReadProof.deepEnvReadDenied,
+      groupReadGroupWriteDenied: groupReadProof.vaultWriteDenied,
+      groupReadNetworkDenied: groupReadProof.networkDenied,
+      groupReadOutsideRootReadDenied: groupReadProof.outsideRootReadDenied,
+      groupReadRuntimeReadDenied: groupReadProof.runtimeReadDenied,
+      groupReadSecretEnvironmentDenied: groupReadProof.secretEnvironmentDenied,
+      groupReadSiblingRootReadDenied: groupReadProof.siblingRootReadDenied,
       ...memberWorkspaceProof,
       murphPathBytes: environmentProbe.murphPathBytes,
       pythonVersion,
@@ -1475,12 +1494,14 @@ async function hashDirectoryTree(root: string): Promise<string> {
   return sha256Hex(entries.join("\n"));
 }
 
-async function runCodexGroupReadPermissionProbe(input: {
+async function runCodexReadOnlyPermissionProbe(input: {
   execCommand: (
     label: string,
     command: readonly string[],
     options?: CodexCommandExecOptions,
   ) => Promise<CodexCommandExecResult>;
+  label: string;
+  permissionProfile: string;
   sendRequest: (
     label: string,
     method: string,
@@ -1489,13 +1510,15 @@ async function runCodexGroupReadPermissionProbe(input: {
   ) => Promise<Record<string, unknown>>;
   vaultRoot: string;
   workspaceRoot: string;
-}): Promise<CodexGroupReadPermissionProof> {
+}): Promise<CodexReadOnlyPermissionProof> {
   const operatorHomeRoot = process.env.HOME;
   if (!operatorHomeRoot) {
-    throw new Error("Hosted runner smoke group-read probe requires the rebound HOME root.");
+    throw new Error(
+      `Hosted runner smoke ${input.label} probe requires the rebound HOME root.`,
+    );
   }
 
-  const fixtureRoot = path.join(input.vaultRoot, "raw", "smoke", "group-read");
+  const fixtureRoot = path.join(input.vaultRoot, "raw", "smoke", input.label);
   const authorizedFilePath = path.join(fixtureRoot, "authorized.txt");
   const deniedWritePath = path.join(fixtureRoot, "denied-write.txt");
   const deepEnvSecretPath = path.join(
@@ -1511,13 +1534,13 @@ async function runCodexGroupReadPermissionProbe(input: {
   );
   const siblingRootSecretPath = path.join(
     operatorHomeRoot,
-    "group-read-sibling-secret.txt",
+    `${input.label}-sibling-secret.txt`,
   );
   const outsideRootSecretPath = path.join(
     input.workspaceRoot,
-    "group-read-outside-secret.txt",
+    `${input.label}-outside-secret.txt`,
   );
-  const authorizedFileContents = "authorized group data\n";
+  const authorizedFileContents = `authorized ${input.label} data\n`;
 
   await mkdir(fixtureRoot, { mode: 0o700, recursive: true });
   await mkdir(path.dirname(deepEnvSecretPath), { mode: 0o700, recursive: true });
@@ -1530,7 +1553,7 @@ async function runCodexGroupReadPermissionProbe(input: {
   await rm(deniedWritePath, { force: true });
 
   await input.sendRequest(
-    "group-read-thread-start",
+    `${input.label}-thread-start`,
     "thread/start",
     {
       approvalPolicy: "never",
@@ -1543,7 +1566,7 @@ async function runCodexGroupReadPermissionProbe(input: {
       },
       cwd: input.vaultRoot,
       ephemeral: true,
-      permissions: MURPH_GROUP_READ_PERMISSION_PROFILE,
+      permissions: input.permissionProfile,
       runtimeWorkspaceRoots: [input.vaultRoot],
     },
     CODEX_SHELL_ENV_PROBE_TIMEOUT_MS,
@@ -1557,11 +1580,11 @@ async function runCodexGroupReadPermissionProbe(input: {
 
   try {
     const result = await input.execCommand(
-      "group-read-permission-probe",
+      `${input.label}-permission-probe`,
       [
         "node",
         "-e",
-        buildCodexGroupReadPermissionProbeScript(),
+        buildCodexReadOnlyPermissionProbeScript(),
         JSON.stringify({
           authorizedFilePath,
           authorizedFileSha256: sha256Hex(authorizedFileContents),
@@ -1579,14 +1602,14 @@ async function runCodexGroupReadPermissionProbe(input: {
       ],
       {
         cwd: input.vaultRoot,
-        permissionProfile: MURPH_GROUP_READ_PERMISSION_PROFILE,
+        permissionProfile: input.permissionProfile,
       },
     );
-    const proof = parseCodexGroupReadPermissionProof(result.stdout);
+    const proof = parseCodexReadOnlyPermissionProof(result.stdout, input.label);
 
     if (acceptedNetworkConnections !== 0) {
       throw new Error(
-        "Hosted runner smoke group-read sandbox allowed a loopback network connection.",
+        `Hosted runner smoke ${input.label} sandbox allowed a loopback network connection.`,
       );
     }
 
@@ -1599,7 +1622,7 @@ async function runCodexGroupReadPermissionProbe(input: {
     }
     if (deniedWriteExists) {
       throw new Error(
-        "Hosted runner smoke group-read sandbox created its denied write target.",
+        `Hosted runner smoke ${input.label} sandbox created its denied write target.`,
       );
     }
 
@@ -1609,7 +1632,7 @@ async function runCodexGroupReadPermissionProbe(input: {
   }
 }
 
-function buildCodexGroupReadPermissionProbeScript(): string {
+function buildCodexReadOnlyPermissionProbeScript(): string {
   return `
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -1655,55 +1678,56 @@ void (async () => {
       === input.authorizedFileSha256;
   } catch {}
   const proof = {
-    groupReadAuthorizedFileRead: authorizedFileRead,
-    groupReadDeepEnvReadDenied: readDenied(input.deepEnvSecretPath),
-    groupReadGroupWriteDenied: writeDenied(input.deniedWritePath),
-    groupReadNetworkDenied: await networkDenied(input.networkPort),
-    groupReadOutsideRootReadDenied: readDenied(input.outsideRootSecretPath),
-    groupReadRuntimeReadDenied: readDenied(input.runtimeSecretPath),
-    groupReadSecretEnvironmentDenied: input.secretEnvironmentNames.every(
+    authorizedFileRead,
+    deepEnvReadDenied: readDenied(input.deepEnvSecretPath),
+    networkDenied: await networkDenied(input.networkPort),
+    outsideRootReadDenied: readDenied(input.outsideRootSecretPath),
+    runtimeReadDenied: readDenied(input.runtimeSecretPath),
+    secretEnvironmentDenied: input.secretEnvironmentNames.every(
       (name) => !Object.hasOwn(process.env, name),
     ),
-    groupReadSiblingRootReadDenied: readDenied(input.siblingRootSecretPath),
+    siblingRootReadDenied: readDenied(input.siblingRootSecretPath),
+    vaultWriteDenied: writeDenied(input.deniedWritePath),
   };
   process.stdout.write(JSON.stringify(proof));
 })().catch(() => process.exit(1));
 `;
 }
 
-function parseCodexGroupReadPermissionProof(
+function parseCodexReadOnlyPermissionProof(
   stdout: string,
-): CodexGroupReadPermissionProof {
+  label: string,
+): CodexReadOnlyPermissionProof {
   const record = readObject(
-    parseJsonFromCommandStdout(stdout, "group-read-permission-probe"),
-    "Codex group-read permission proof",
+    parseJsonFromCommandStdout(stdout, `${label}-permission-probe`),
+    `Codex ${label} permission proof`,
   );
   const expectedTrueFields = [
-    "groupReadAuthorizedFileRead",
-    "groupReadDeepEnvReadDenied",
-    "groupReadGroupWriteDenied",
-    "groupReadNetworkDenied",
-    "groupReadOutsideRootReadDenied",
-    "groupReadRuntimeReadDenied",
-    "groupReadSecretEnvironmentDenied",
-    "groupReadSiblingRootReadDenied",
+    "authorizedFileRead",
+    "deepEnvReadDenied",
+    "networkDenied",
+    "outsideRootReadDenied",
+    "runtimeReadDenied",
+    "secretEnvironmentDenied",
+    "siblingRootReadDenied",
+    "vaultWriteDenied",
   ] as const;
 
   for (const field of expectedTrueFields) {
     if (record[field] !== true) {
-      throw new Error(`Codex group-read permission proof.${field} must be true.`);
+      throw new Error(`Codex ${label} permission proof.${field} must be true.`);
     }
   }
 
   return {
-    groupReadAuthorizedFileRead: true,
-    groupReadDeepEnvReadDenied: true,
-    groupReadGroupWriteDenied: true,
-    groupReadNetworkDenied: true,
-    groupReadOutsideRootReadDenied: true,
-    groupReadRuntimeReadDenied: true,
-    groupReadSecretEnvironmentDenied: true,
-    groupReadSiblingRootReadDenied: true,
+    authorizedFileRead: true,
+    deepEnvReadDenied: true,
+    networkDenied: true,
+    outsideRootReadDenied: true,
+    runtimeReadDenied: true,
+    secretEnvironmentDenied: true,
+    siblingRootReadDenied: true,
+    vaultWriteDenied: true,
   };
 }
 
@@ -2410,15 +2434,15 @@ interface CodexMemberWorkspacePermissionProof {
   memberWorkspaceVaultWriteAllowed: boolean;
 }
 
-interface CodexGroupReadPermissionProof {
-  groupReadAuthorizedFileRead: boolean;
-  groupReadDeepEnvReadDenied: boolean;
-  groupReadGroupWriteDenied: boolean;
-  groupReadNetworkDenied: boolean;
-  groupReadOutsideRootReadDenied: boolean;
-  groupReadRuntimeReadDenied: boolean;
-  groupReadSecretEnvironmentDenied: boolean;
-  groupReadSiblingRootReadDenied: boolean;
+interface CodexReadOnlyPermissionProof {
+  authorizedFileRead: boolean;
+  deepEnvReadDenied: boolean;
+  networkDenied: boolean;
+  outsideRootReadDenied: boolean;
+  runtimeReadDenied: boolean;
+  secretEnvironmentDenied: boolean;
+  siblingRootReadDenied: boolean;
+  vaultWriteDenied: boolean;
 }
 
 function readCodexCommandExecResult(value: unknown): CodexCommandExecResult {
@@ -2448,6 +2472,7 @@ function parsePositiveByteCount(value: string | undefined, label: string): numbe
 }
 
 async function runHealthCommonsCliSmoke(): Promise<{
+  goalProofCount: number;
   protocolListBytes: number;
 }> {
   const protocolListOutput = await runTextCommand("vault-cli", [
@@ -2471,9 +2496,26 @@ async function runHealthCommonsCliSmoke(): Promise<{
     );
   }
 
+  const goalSmoke = await runHostedGoalCliSmoke({
+    async runCommand(_label, args) {
+      return await runTextCommand("vault-cli", [...args]);
+    },
+  });
+
   return {
+    goalProofCount: goalSmoke.proofCount,
     protocolListBytes: Buffer.byteLength(protocolListOutput, "utf8"),
   };
+}
+
+async function resetCanonicalGoalRegistryForSmoke(vaultRoot: string): Promise<void> {
+  // The shared Web fixture carries historical hv/goal@v1 query examples in
+  // bank/goals. They are not canonical Goal-bank documents, so the disposable
+  // hosted write round trip owns a clean registry instead of mutating them.
+  await rm(path.join(vaultRoot, "bank", "goals"), {
+    force: true,
+    recursive: true,
+  });
 }
 
 async function runCommand(

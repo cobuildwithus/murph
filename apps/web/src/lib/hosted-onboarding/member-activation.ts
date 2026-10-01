@@ -3,12 +3,12 @@ import {
   type Prisma,
 } from "@prisma/client";
 import {
-  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedMemberChannelWelcomeDeliveryIdentity,
+  buildHostedMemberSignupWelcomeNotificationWake,
   type HostedExecutionMemberActivationSignupWelcome,
   type HostedExecutionMemberActivatedWake,
   type HostedExecutionAssistantNotificationRoute,
-  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -29,6 +29,9 @@ import {
   isHostedAccessBlockedBillingStatus,
   isHostedMemberSuspended,
 } from "./entitlement";
+import {
+  appendHostedAccessRestorationRuntimeHandoffTx,
+} from "./member-access-runtime-handoff";
 import { readActiveHostedMemberAccess } from "./member-access";
 import {
   clearHostedMemberPendingActivationTimeZone,
@@ -151,6 +154,7 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
 }
 
 export async function activateHostedMemberForFamilySponsorshipTx(input: {
+  accessRestorationSourceEventId?: string;
   memberId: string;
   occurredAt: Date;
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
@@ -160,6 +164,12 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
   return runWithHostedDomainRootUnwrapCache(() =>
     activateHostedMemberForPositiveSourceTxInner({
       allowLegacyCryptoPreparation: !input.preparedCryptoDomainRoots,
+      ...(input.accessRestorationSourceEventId
+        ? {
+            accessRestorationSourceEventId:
+              input.accessRestorationSourceEventId,
+          }
+        : {}),
       dispatchContext: {
         eventCreatedAt: input.occurredAt,
         occurredAt: input.occurredAt.toISOString(),
@@ -181,6 +191,7 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
 }
 
 async function activateHostedMemberForPositiveSourceTxInner(input: {
+  accessRestorationSourceEventId?: string;
   allowLegacyCryptoPreparation: boolean;
   allowSignupWelcomeWithoutAssignableLinqLine?: boolean;
   dispatchContext: HostedStripeDispatchContext;
@@ -254,6 +265,18 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
         prisma: input.prisma,
       });
 
+      if (input.accessRestorationSourceEventId) {
+        return {
+          activated: false,
+          ...await appendHostedAccessRestorationRuntimeHandoffTx({
+            memberId: currentMember.core.id,
+            sourceEventId: input.accessRestorationSourceEventId,
+            sourceType: input.dispatchContext.sourceType,
+            tx: input.prisma,
+          }),
+        };
+      }
+
       return {
         activated: false,
         hostedExecutionEventId: existingWake?.dedupeKey ?? null,
@@ -308,32 +331,37 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     prisma: input.prisma,
   });
 
-  const signupWelcomeRoute = input.suppressSignupWelcome
-    ? null
-    : (await resolveHostedMemberActivationWelcomeLinqRoute({
-        ...(input.allowSignupWelcomeWithoutAssignableLinqLine
-          ? { allowNoAssignableLine: true }
-          : {}),
-        member: currentMember,
-        prisma: input.prisma,
-      })).welcomeRoute;
+  const resolvedLinqRoute = await resolveHostedMemberActivationDirectLinqRoute({
+    ...(input.allowSignupWelcomeWithoutAssignableLinqLine
+      ? { allowNoAssignableLine: true }
+      : {}),
+    member: currentMember,
+    prisma: input.prisma,
+  });
+  const onboardingFollowupRoute = resolvedLinqRoute
+    ?? buildHostedMemberActivationOnboardingFollowupRouteForMember(
+      currentMember,
+    );
+  const { signupWelcomeRoute, phoneWelcomeRoute } = resolveHostedMemberActivationWelcomeRoutes({
+    linqRoute: resolvedLinqRoute,
+    member: currentMember,
+    onboardingFollowupRoute,
+    suppress: input.suppressSignupWelcome,
+  });
   const activationWake = buildHostedMemberActivationWakeForMember({
     emailLinked: input.emailLinked ?? resolveHostedMemberActivationEmailLinked(currentMember),
     member: currentMember,
     occurredAt: input.dispatchContext.occurredAt,
+    onboardingFollowupRoute,
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
     signupWelcomeRoute,
     welcomeMessage: input.welcomeMessage,
   });
-  const legacyWelcomeWake = buildHostedMemberSignupWelcomeNotificationWake({
-    activationWake,
-    occurredAt: input.dispatchContext.occurredAt,
-  });
   const appendedWake = await materializeHostedMemberActivationWakesTx({
     prisma: input.prisma,
     activationWake,
-    legacyWelcomeWake,
+    phoneWelcomeRoute,
   });
 
   return {
@@ -369,7 +397,9 @@ async function prewarmHostedMemberActivationWriteDomainRoots(input: {
   }
 }
 
-export function buildHostedMemberActivationWelcomeRoute(input: {
+export function buildHostedMemberActivationOnboardingFollowupRoute(input: {
+  emailAddress?: string | null;
+  emailLookupKey?: string | null;
   linqChatId: string | null;
   linqContactLookupKey?: string | null;
   linqRecipientPhone?: string | null;
@@ -383,7 +413,9 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
   telegramThreadId: string | null;
   telegramUserId: string | null;
 }): HostedExecutionAssistantNotificationRoute | null {
-  const route = resolveHostedMemberAssistantNotificationRoute({
+  return resolveHostedMemberAssistantNotificationRoute({
+    emailAddress: input.emailAddress ?? null,
+    emailLookupKey: input.emailLookupKey ?? null,
     linqChatId: input.linqChatId,
     linqContactLookupKey: input.linqContactLookupKey,
     linqRecipientPhone: input.linqRecipientPhone ?? null,
@@ -402,15 +434,37 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
       },
     }),
   });
-
-  return route?.channel === "linq" ? route : null;
 }
 
-async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
+function buildHostedMemberActivationOnboardingFollowupRouteForMember(
+  member: HostedMemberActivationSnapshot,
+): HostedExecutionAssistantNotificationRoute | null {
+  return buildHostedMemberActivationOnboardingFollowupRoute({
+    emailAddress: member.emailAuthorization?.verifiedEmail?.address ?? null,
+    emailLookupKey: member.emailAuthorization?.verifiedEmail?.lookupKey ?? null,
+    linqChatId: member.routing?.linqChatId ?? null,
+    linqContactLookupKey:
+      member.identity?.phoneLookupKey
+      ?? member.routing?.pendingLinqParticipantContact?.lookupKey
+      ?? member.emailAuthorization?.verifiedEmail?.lookupKey
+      ?? null,
+    linqRecipientPhone: member.routing?.linqRecipientPhone ?? null,
+    memberId: member.core.id,
+    memberPhoneNumber: member.identity?.phoneNumber ?? null,
+    phoneLookupKey: member.identity?.phoneLookupKey ?? null,
+    pendingLinqChatId: member.routing?.pendingLinqChatId ?? null,
+    pendingLinqParticipantContact:
+      member.routing?.pendingLinqParticipantContact ?? null,
+    telegramThreadId: member.routing?.telegramThreadId ?? null,
+    telegramUserId: member.routing?.telegramUserId ?? null,
+  });
+}
+
+async function resolveHostedMemberActivationDirectLinqRoute(input: {
   allowNoAssignableLine?: boolean;
   member: HostedMemberActivationSnapshot;
   prisma: Prisma.TransactionClient;
-}): Promise<{ welcomeRoute: HostedExecutionAssistantNotificationRoute | null }> {
+}): Promise<HostedExecutionAssistantNotificationRoute | null> {
   const linqContactLookupKey =
     input.member.identity?.phoneLookupKey
     ?? input.member.routing?.pendingLinqParticipantContact?.lookupKey
@@ -428,30 +482,18 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
       || !hasReusableLinqThread
     )
   ) {
-    return {
-      welcomeRoute: buildHostedMemberActivationWelcomeRoute({
-        linqChatId: input.member.routing?.linqChatId ?? null,
-        linqContactLookupKey,
-        linqRecipientPhone: input.member.routing?.linqRecipientPhone ?? null,
-        memberId: input.member.core.id,
-        memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
-        phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
-        pendingLinqChatId: input.member.routing?.pendingLinqChatId ?? null,
-        pendingLinqParticipantContact:
-          input.member.routing?.pendingLinqParticipantContact ?? null,
-        telegramThreadId: input.member.routing?.telegramThreadId ?? null,
-        telegramUserId: input.member.routing?.telegramUserId ?? null,
-      }),
-    };
+    const route =
+      buildHostedMemberActivationOnboardingFollowupRouteForMember(input.member);
+    return route?.channel === "linq" ? route : null;
   }
 
-  return resolveHostedMemberActivationLinqRoute({
+  return (await resolveHostedMemberActivationLinqRoute({
     ...(input.allowNoAssignableLine
       ? { allowNoAssignableLine: true }
       : {}),
     member: input.member,
     prisma: input.prisma,
-  });
+  })).welcomeRoute;
 }
 
 async function readActivationReadyHostedMemberTx(input: {
@@ -554,9 +596,38 @@ function buildHostedInactiveMemberActivationResult(
   };
 }
 
+function resolveHostedMemberActivationWelcomeRoutes(input: {
+  linqRoute: HostedExecutionAssistantNotificationRoute | null;
+  member: HostedMemberActivationSnapshot;
+  onboardingFollowupRoute: HostedExecutionAssistantNotificationRoute | null;
+  suppress?: boolean;
+}): {
+  signupWelcomeRoute: HostedExecutionAssistantNotificationRoute | null;
+  phoneWelcomeRoute: HostedExecutionAssistantNotificationRoute | null;
+} {
+  if (input.suppress) {
+    return { signupWelcomeRoute: null, phoneWelcomeRoute: null };
+  }
+  const email = input.member.emailAuthorization?.verifiedEmail;
+  if (!input.linqRoute || !email) {
+    return { signupWelcomeRoute: input.onboardingFollowupRoute, phoneWelcomeRoute: null };
+  }
+  const emailRoute = resolveHostedMemberAssistantNotificationRoute({
+    emailAddress: email.address,
+    emailLookupKey: email.lookupKey,
+    linqChatId: null,
+    memberId: input.member.core.id,
+    messaging: resolveHostedMemberMessagingState({ identity: null, routing: null }),
+  });
+  return {
+    signupWelcomeRoute: emailRoute ?? input.onboardingFollowupRoute,
+    phoneWelcomeRoute: emailRoute ? input.linqRoute : null,
+  };
+}
+
 async function materializeHostedMemberActivationWakesTx(input: {
   activationWake: HostedExecutionMemberActivatedWake;
-  legacyWelcomeWake: HostedExecutionWake | null;
+  phoneWelcomeRoute: HostedExecutionAssistantNotificationRoute | null;
   prisma: Prisma.TransactionClient;
 }): Promise<{ eventId: string; mailboxItemId: string }> {
   const appendedWake = await appendHostedMailboxEnvelopeTx({
@@ -564,11 +635,32 @@ async function materializeHostedMemberActivationWakesTx(input: {
     tx: input.prisma,
   });
 
-  if (input.legacyWelcomeWake) {
-    await appendHostedMailboxEnvelopeTx({
-      envelope: input.legacyWelcomeWake,
-      tx: input.prisma,
-    });
+  const { signupWelcome } = input.activationWake;
+  if (signupWelcome) {
+    const routes = [signupWelcome.route, input.phoneWelcomeRoute].filter(
+      (route): route is HostedExecutionAssistantNotificationRoute => route !== null,
+    );
+    for (const route of routes) {
+      const deliveryIdentity = route.identityId && (route.channel === "email" || route.channel === "linq")
+        ? buildHostedMemberChannelWelcomeDeliveryIdentity({
+            memberId: input.activationWake.userId,
+            channel: route.channel,
+            destinationLookupKey: route.identityId,
+          })
+        : undefined;
+      await appendHostedMailboxEnvelopeTx({
+        envelope: buildHostedMemberSignupWelcomeNotificationWake({
+          ...(deliveryIdentity
+            ? { deliveryIdentity }
+            : { eventId: buildHostedMemberSignupWelcomeNotificationEventId(input.activationWake) }),
+          memberId: input.activationWake.userId,
+          occurredAt: input.activationWake.occurredAt,
+          route,
+          text: signupWelcome.text,
+        }),
+        tx: input.prisma,
+      });
+    }
   }
 
   return {
@@ -580,6 +672,7 @@ async function materializeHostedMemberActivationWakesTx(input: {
 function buildHostedMemberActivationWakeForMember(input: {
   emailLinked: boolean;
   member: HostedMemberActivationSnapshot;
+  onboardingFollowupRoute: HostedExecutionAssistantNotificationRoute | null;
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
@@ -598,6 +691,7 @@ function buildHostedMemberActivationWakeForMember(input: {
     telegramThreadId: input.member.routing?.telegramThreadId ?? null,
     telegramUserId: input.member.routing?.telegramUserId ?? null,
     occurredAt: input.occurredAt,
+    onboardingFollowupRoute: input.onboardingFollowupRoute,
     sourceEventId: input.sourceEventId,
     sourceType: input.sourceType,
     signupWelcomeRoute: input.signupWelcomeRoute,
@@ -609,6 +703,7 @@ function buildHostedMemberActivationWakeForMember(input: {
 function buildHostedMemberActivationWake(input: {
   emailLinked?: boolean;
   memberId: string;
+  onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   memberPhoneNumber?: string | null;
   phoneLookupKey?: string | null;
   linqChatId?: string | null;
@@ -641,6 +736,8 @@ function buildHostedMemberActivationWake(input: {
       },
     }),
     memberId: input.memberId,
+    onboardingFollowupEnrollment: true,
+    onboardingFollowupRoute: input.onboardingFollowupRoute ?? null,
     occurredAt: input.occurredAt,
     signupWelcome: buildHostedMemberSignupWelcomePayload({
       route: input.signupWelcomeRoute ?? null,
@@ -676,47 +773,8 @@ function buildHostedMemberSignupWelcomeMessageSeed(input: {
   return buildHostedMemberSignupWelcomeDeliveryIdentity(input.memberId);
 }
 
-function buildHostedMemberSignupWelcomeNotificationWake(input: {
-  activationWake: HostedExecutionMemberActivatedWake;
-  occurredAt: string;
-}): HostedExecutionWake | null {
-  const signupWelcome = input.activationWake.signupWelcome;
-  if (!signupWelcome) {
-    return null;
-  }
-  const deliveryIdentity = buildHostedMemberSignupWelcomeDeliveryIdentity(input.activationWake.userId);
-
-  return buildHostedExecutionAssistantNotificationRequestedWake({
-    eventId: buildHostedMemberSignupWelcomeNotificationEventId(input.activationWake),
-    memberId: input.activationWake.userId,
-    notification: {
-      deliveryDedupeToken: deliveryIdentity,
-      deliveryDispatchMode: "queue-only",
-      deliveryIdempotencyKey: deliveryIdentity,
-      firstContact: {
-        markSeenOnDeliveryAccepted: true,
-      },
-      instructions: buildHostedMemberSignupWelcomeInstructions(signupWelcome.text),
-      responsePolicy: {
-        kind: "require_send_exact_text",
-        text: signupWelcome.text,
-      },
-      route: signupWelcome.route,
-    },
-    occurredAt: input.occurredAt,
-  });
-}
-
 function buildHostedMemberSignupWelcomeDeliveryIdentity(memberId: string): string {
   return `signup-welcome:${memberId}`;
-}
-
-function buildHostedMemberSignupWelcomeInstructions(text: string): string {
-  return [
-    "Prepare the first in-chat onboarding reply.",
-    "Use this user-facing reply only:",
-    text,
-  ].join("\n\n");
 }
 
 function buildHostedMemberSignupWelcomeNotificationEventId(

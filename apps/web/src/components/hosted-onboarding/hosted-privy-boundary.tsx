@@ -7,7 +7,11 @@ import {
 
 import { HostedPrivyProvider } from "./privy-provider";
 
-export function HostedPrivyBoundary({ children }: { children: ReactNode }) {
+export function HostedPrivyBoundary({ children, legacyApprovalRequired = true }: {
+  children: ReactNode;
+  legacyApprovalRequired?: boolean;
+}) {
+  if (!legacyApprovalRequired) return children;
   const privyAppId = requireHostedPrivyClientAppId();
   const privyClientId = resolveHostedPrivyClientId();
 

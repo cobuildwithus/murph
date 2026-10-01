@@ -123,7 +123,6 @@ describe('hosted image completion effect authority', () => {
     }
 
     const styleResult = await executeMurphDynamicToolRequest({
-      assistantStyleSettingsAvailable: true,
       env: {},
       fetchImpl: fetch,
       hostedToolContext,

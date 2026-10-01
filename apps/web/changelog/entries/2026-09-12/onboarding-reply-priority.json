@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "onboarding-reply-priority",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less waiting during onboarding",
+    "summary": "Incoming messages take priority while Murph sets up your onboarding follow-ups.",
+    "details": "Setup can pause between saves and resume afterward, preserving your original follow-up schedule.",
+    "relevanceTags": [
+      "messaging",
+      "onboarding"
+    ],
+    "sourcePullRequests": [
+      3381
+    ]
+  }
+}

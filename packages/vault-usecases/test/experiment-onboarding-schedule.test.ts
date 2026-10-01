@@ -63,6 +63,7 @@ test("applyExperimentOnboardingRecord writes structured run-plan schedules", asy
   const queryRuntime = {
     readVault: vi.fn(async () => ({ entities: [experimentEntity] })),
     lookupEntityById: vi.fn(() => experimentEntity),
+    resolveCanonicalEntityInFamily: vi.fn(async () => experimentEntity),
   };
   const updateExperiment = vi.fn(
     async (_input: { runPlan?: { schedule?: unknown } }) => ({
@@ -139,6 +140,7 @@ test("applyExperimentOnboardingRecord accepts status-only updates", async () => 
   const queryRuntime = {
     readVault: vi.fn(async () => ({ entities: [experimentEntity] })),
     lookupEntityById: vi.fn(() => experimentEntity),
+    resolveCanonicalEntityInFamily: vi.fn(async () => experimentEntity),
   };
   const updateExperiment = vi.fn(
     async (_input: { runPlan?: unknown; status?: string }) => ({
@@ -215,6 +217,7 @@ test("applyExperimentOnboardingRecord preserves untouched hypothesis fields on p
   const queryRuntime = {
     readVault: vi.fn(async () => ({ entities: [experimentEntity] })),
     lookupEntityById: vi.fn(() => experimentEntity),
+    resolveCanonicalEntityInFamily: vi.fn(async () => experimentEntity),
   };
   const updateExperiment = vi.fn(
     async (_input: { analysisPlan?: Record<string, unknown> }) => ({
@@ -299,6 +302,7 @@ test("applyExperimentOnboardingRecord clears run baseline windows with zero base
   const queryRuntime = {
     readVault: vi.fn(async () => ({ entities: [experimentEntity] })),
     lookupEntityById: vi.fn(() => experimentEntity),
+    resolveCanonicalEntityInFamily: vi.fn(async () => experimentEntity),
   };
   const updateExperiment = vi.fn(
     async (_input: { runPlan?: Record<string, unknown> }) => ({
@@ -373,6 +377,7 @@ test("applyExperimentOnboardingRecord rejects legacy string schedule payloads", 
   const queryRuntime = {
     readVault: vi.fn(async () => ({ entities: [experimentEntity] })),
     lookupEntityById: vi.fn(() => experimentEntity),
+    resolveCanonicalEntityInFamily: vi.fn(async () => experimentEntity),
   };
   const updateExperiment = vi.fn();
 
@@ -414,6 +419,7 @@ test("applyExperimentOnboardingRecord rejects legacy string schedule payloads", 
 
 test("experiment onboarding writers do not preserve legacy string run-plan schedules", async () => {
   const sourceFiles = [
+    "packages/vault-usecases/src/experiment-onboarding-options.ts",
     "packages/vault-usecases/src/usecases/experiment-journal-vault.ts",
     "packages/vault-usecases/src/usecases/types.ts",
     "packages/cli/src/commands/experiment.ts",

@@ -3,11 +3,8 @@ import {
   parseHostedRuntimeAssistantAskControlResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
-  HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
-} from "@murphai/hosted-execution/routes";
-
-import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -26,7 +23,7 @@ export function createHostedRuntimeAssistantAskPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted Assistant Ask control",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.assistantAsk,
         replayOnceOnRetryableFailure: true,
         sensitiveResponseBody: {
           maxBytes: HOSTED_RUNTIME_ASSISTANT_ASK_RESPONSE_MAX_BYTES,

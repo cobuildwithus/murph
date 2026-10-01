@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import type { ReactNode } from "react";
-import type { BiomarkerFallbackRangeForDisplay } from "@murphai/health-commons/biomarker-fallback-ranges";
+import type { BiomarkerFallbackRangeForDisplay } from "@murphai/health-metrics";
 import {
   type BrowserVaultLabBiomarkerDetail,
   type BrowserVaultPresentedLabResultRow,

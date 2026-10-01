@@ -101,6 +101,40 @@ describe('release workflow guards', () => {
     expect(workflow).not.toContain('npm pack --json')
   })
 
+  it('assembles the release CLI surface from the built workspace CLI after compilation', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8')
+    const packHelper = readFileSync(
+      path.join(repoRoot, 'scripts', 'pack-publishables.mjs'),
+      'utf8',
+    )
+    const assemblyCommand = readFileSync(
+      path.join(repoRoot, 'scripts', 'assemble-assistant-cli-surface.mjs'),
+      'utf8',
+    )
+    const assistantEnginePackage = JSON.parse(
+      readFileSync(
+        path.join(repoRoot, 'packages', 'assistant-engine', 'package.json'),
+        'utf8',
+      ),
+    ) as { scripts?: { build?: string } }
+
+    const workspaceBuildIndex = workflow.indexOf('run: pnpm build:workspace:clean')
+    const packIndex = workflow.indexOf('node scripts/pack-publishables.mjs')
+
+    expect(workspaceBuildIndex).toBeGreaterThanOrEqual(0)
+    expect(packIndex).toBeGreaterThan(workspaceBuildIndex)
+    expect(assistantEnginePackage.scripts?.build).toBe(
+      'node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json',
+    )
+    expect(packHelper).toContain("'scripts',\n  'assemble-assistant-cli-surface.mjs'")
+    expect(packHelper).toContain('[assistantCliSurfaceAssemblyPath]')
+    expect(packHelper).not.toContain('--manifest-timeout-ms')
+    expect(assemblyCommand).toContain(
+      "path.join('packages', 'cli', 'dist', 'bin.js')",
+    )
+    expect(assemblyCommand).not.toContain('prefer-built-workspace-cli')
+  })
+
   it('derives a complete non-empty release matrix from package coverage owners', () => {
     const validation = validateReleaseVerificationPlan(repoRoot)
     const plannedDirs = PACKAGE_COVERAGE_PLAN.map(({ dir }) => dir).sort()

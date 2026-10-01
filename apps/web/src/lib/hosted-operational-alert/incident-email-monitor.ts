@@ -73,6 +73,7 @@ export interface HostedOperationalAlertMonitorSpec<
   kind: string;
   readHealth(input: { now: Date; prisma: Client }): Promise<Health>;
   reminderIntervalMs?: number;
+  sendDuringQuietHours?: true;
   status: {
     alertFailed: string;
     alertSending: string;
@@ -624,6 +625,10 @@ function isHostedOperationalAlertQuietTime<
   spec: HostedOperationalAlertMonitorSpec<Health, Client>;
   timeZone: string;
 }): boolean {
+  if (input.spec.sendDuringQuietHours === true) {
+    return false;
+  }
+
   const local = formatTimeZoneDateTimeParts(input.now, input.timeZone);
   if (
     local.hour >= HOSTED_OPERATIONAL_ALERT_QUIET_HOURS_START_HOUR

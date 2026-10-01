@@ -36,7 +36,9 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS,
+  HOSTED_RUNTIME_MAILBOX_TO_ASSISTANT_TIMING_SUBDIVISION_KEYS,
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
+  inspectHostedRuntimeMailboxToAssistantTimingSubdivision,
   readHostedIngressLatencySource,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -150,7 +152,8 @@ export async function runHostedAssistantAutomationLane(input: {
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
   freshAssistantInputIds?: readonly string[] | null;
-  idleCheckpointDelayMs?: number | null;
+  readForegroundInputIds?: (() => readonly string[]) | null;
+  runnerIdleTtlMs?: number | null;
   now?: Date | null;
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
@@ -158,6 +161,7 @@ export async function runHostedAssistantAutomationLane(input: {
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
+  onProviderRequestStarted?: (() => void) | null;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
@@ -220,11 +224,12 @@ export async function runHostedAssistantAutomationLane(input: {
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           commitTimeoutMs: input.runtime.commitTimeoutMs,
-          idleCheckpointDelayMs: input.idleCheckpointDelayMs ?? null,
+          runnerIdleTtlMs: input.runnerIdleTtlMs ?? null,
           now: input.now ?? null,
           preProviderPhase: input.preProviderPhase ?? null,
           ...(providerStartCriticalPath ? { providerStartCriticalPath } : {}),
           runtimeAttemptId: input.runtimeAttemptId ?? null,
+          onProviderRequestStarted: input.onProviderRequestStarted,
           ...(input.beforeProviderAcceptedInputs
             ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
             : {}),
@@ -234,6 +239,7 @@ export async function runHostedAssistantAutomationLane(input: {
                   input.shouldYieldBackgroundMaintenance,
               }
             : {}),
+          readForegroundInputIds: input.readForegroundInputIds,
         },
       )
     : {
@@ -301,13 +307,15 @@ export async function runHostedAssistantAutomation(
     operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     commitTimeoutMs?: number | null;
-    idleCheckpointDelayMs?: number | null;
+    runnerIdleTtlMs?: number | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
+    onProviderRequestStarted?: (() => void) | null;
     beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
     providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
+    readForegroundInputIds?: (() => readonly string[]) | null;
     shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
 ): Promise<{
@@ -346,7 +354,9 @@ export async function runHostedAssistantAutomation(
   let activeProviderMilestoneTraceContext: HostedAssistantMilestoneTraceContext | null = null;
   const recordedProviderMilestones = new Set<string>();
   const freshAssistantInputIdCount = new Set(freshAssistantInputIds).size;
-  let providerStartCriticalPath = options?.providerStartCriticalPath ?? null;
+  const automationOptions = options ?? {};
+  let providerStartCriticalPath =
+    automationOptions.providerStartCriticalPath ?? null;
   const selectedInputIds = await selectHostedAssistantInputIds(
     freshAssistantInputIdCount > 0
         ? {
@@ -370,6 +380,7 @@ export async function runHostedAssistantAutomation(
       selectedInputIds.mode === "foreground" ? "none" : "compact",
     preserveSelectedInputOrder:
       selectedInputIds.preserveInputOrder,
+    readForegroundInputIds: automationOptions.readForegroundInputIds,
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });
@@ -492,12 +503,12 @@ export async function runHostedAssistantAutomation(
         if (
           shouldPersistHostedAssistantAutomationEvent(event.type)
           && (
-            shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)
+            shouldAlwaysPersistHostedAssistantAutomationEvent(event)
             || redactedAutomationEventLogCount < HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT
           )
         ) {
           redactedLogEntries.push(logEntry);
-          if (!shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)) {
+          if (!shouldAlwaysPersistHostedAssistantAutomationEvent(event)) {
             redactedAutomationEventLogCount += 1;
           }
         }
@@ -536,6 +547,7 @@ export async function runHostedAssistantAutomation(
         recordHostedAssistantMilestonesBestEffort({ context, milestones });
       },
       onProviderRequestStarted: (event) => {
+        options?.onProviderRequestStarted?.();
         const source = readHostedIngressLatencySource(event.source);
         const runtimeAttemptId = options?.runtimeAttemptId?.trim() ?? "";
         activeProviderMilestoneTraceContext = source && runtimeAttemptId
@@ -557,7 +569,7 @@ export async function runHostedAssistantAutomation(
         recordHostedAssistantTerminalNonReplyBestEffort({
           commitTimeoutMs: options?.commitTimeoutMs ?? null,
           event,
-          idleCheckpointDelayMs: options?.idleCheckpointDelayMs ?? null,
+          runnerIdleTtlMs: options?.runnerIdleTtlMs ?? null,
           latencyTracePort: options?.latencyTracePort ?? null,
           runtimeAttemptId: options?.runtimeAttemptId ?? null,
         });
@@ -732,7 +744,7 @@ function recordHostedAssistantTerminalNonReplyBestEffort(input: {
     recordedAt: string;
     source: string;
   };
-  idleCheckpointDelayMs: number | null;
+  runnerIdleTtlMs: number | null;
   latencyTracePort: HostedRuntimePlatform["latencyTracePort"];
   runtimeAttemptId: string | null;
 }): void {
@@ -746,7 +758,7 @@ function recordHostedAssistantTerminalNonReplyBestEffort(input: {
     ? new Date(resolveHostedRuntimeCheckpointPublicationExpectedByMs({
         checkpointStartByMs:
           recordedAtMs
-          + resolveHostedRuntimeIdleCheckpointDelayMs(input.idleCheckpointDelayMs),
+          + resolveHostedRuntimeIdleCheckpointDelayMs(input.runnerIdleTtlMs),
         commitTimeoutMs: input.commitTimeoutMs,
       })).toISOString()
     : null;
@@ -820,6 +832,11 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
         input.providerStartCriticalPath,
       )
     : { kind: "absent" } as const;
+  const mailboxToAssistantSubdivision = input.providerStartCriticalPath
+    ? inspectHostedRuntimeMailboxToAssistantTimingSubdivision(
+        input.providerStartCriticalPath,
+      )
+    : { kind: "absent" } as const;
   const preProvider: NonNullable<
     HostedRuntimeLatencyPhaseBreakdown["preProvider"]
   > = {
@@ -834,11 +851,22 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
             : {}),
           mailboxImportDoneToAssistantPhaseMs:
             input.providerStartCriticalPath.mailboxImportDoneToAssistantPhaseMs,
+          ...(mailboxToAssistantSubdivision.kind === "complete"
+            ? mailboxToAssistantSubdivision.subdivision
+            : {}),
           workspaceAssistantPreAutomationMs:
             input.providerStartCriticalPath.workspaceAssistantPreAutomationMs,
         }
       : {}),
   };
+  if (
+    inspectHostedRuntimeMailboxToAssistantTimingSubdivision(preProvider).kind
+      === "invalid"
+  ) {
+    for (const key of HOSTED_RUNTIME_MAILBOX_TO_ASSISTANT_TIMING_SUBDIVISION_KEYS) {
+      delete preProvider[key];
+    }
+  }
   if (
     inspectHostedRuntimeAutomationLaneTimingSubdivision(preProvider).kind
       === "invalid"
@@ -1178,9 +1206,16 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
   ]).has(type);
 }
 
-function shouldAlwaysPersistHostedAssistantAutomationEvent(type: string): boolean {
-  return type === "input.reply-failed"
-    || type === "onboarding.followup.completed";
+function shouldAlwaysPersistHostedAssistantAutomationEvent(
+  event: AssistantRunEvent,
+): boolean {
+  return event.type === "input.reply-failed"
+    || event.type === "onboarding.followup.completed"
+    || (
+      (event.type === "cron.job.completed"
+        || event.type === "cron.occurrence.expired")
+      && event.failureContext?.automationSlug === "personal-patterns-update"
+    );
 }
 
 export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {

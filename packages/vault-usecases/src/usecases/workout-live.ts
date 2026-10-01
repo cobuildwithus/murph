@@ -1,23 +1,30 @@
 import {
+  eventRecordSchema,
+  eventRevisionFromLifecycle,
   type WorkoutLiveApplyMemberActionV1,
+  type WorkoutLiveSnapshotMemberActionResultV1,
+  type WorkoutLiveSnapshotMemberActionV1,
   type WorkoutExercise,
   type WorkoutMemberActionExpectedSetResultV1,
   type WorkoutMemberActionExpectedSetStateV1,
   type WorkoutMemberActionSetResultV1,
   type WorkoutSession,
   type WorkoutSessionDetailV1,
+  type WorkoutSessionPresentationV1,
   type WorkoutSet,
   memberActionIdV1Schema,
   workoutLiveApplyMemberActionV1Schema,
+  workoutLiveSnapshotMemberActionV1Schema,
   workoutSessionSchema,
   workoutTemplateSchema,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  deriveWorkoutActionBinding,
   deriveWorkoutSetRemovalBinding,
   hasAmbiguousWorkoutActionExerciseCoordinates,
+  workoutActionBindingMatchesCurrentState,
 } from '@murphai/operator-config/workout-action-binding'
+import { buildWorkoutSessionAppCardEnvelopeV6, type WorkoutSessionAppCardEnvelopeV6 } from '@murphai/contracts'
 
 import { showWorkoutFormat } from './workout-format.js'
 import {
@@ -30,12 +37,14 @@ import {
   type ApplyLiveWorkoutMemberActionResult,
   type AddLiveWorkoutExerciseInput,
   type ClearLiveWorkoutSetInput,
+  type RemoveLiveWorkoutExerciseInput,
   type FinishLiveWorkoutInput,
   type LogLiveWorkoutSetInput,
   type StartLiveWorkoutExerciseInput,
   type SetLiveWorkoutExerciseRepsInput,
   type StartLiveWorkoutInput,
   buildLiveWorkoutCardEditor,
+  buildLiveWorkoutCardSnapshot,
   buildLiveWorkoutSessionFromTemplate,
   elapsedDurationMinutes,
   hasCompletedFiniteLiveWorkoutPlan,
@@ -46,6 +55,7 @@ import {
   assertTargetableLiveWorkout,
   compactSetPatch,
   findLiveWorkoutActionTargets,
+  findLiveWorkoutRefreshTargets,
   normalizeLiveWorkoutActivityType,
   normalizeOptionalText,
   normalizeWorkoutTimestamp,
@@ -71,14 +81,89 @@ export async function readLiveWorkoutCardEditor(input: {
   const shown = await resolveLiveWorkout({
     vault: input.vault,
     workoutId: input.workoutId,
-  }, { requireOpen: true })
+  })
   const workout = parseShownWorkout(shown)
-  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(workout)
   return buildLiveWorkoutCardEditor({
     presentation: input.presentation,
     workout,
     workoutId: shown.entity.id,
   })
+}
+
+export async function readLiveWorkoutCardSnapshot(input: {
+  action: WorkoutLiveSnapshotMemberActionV1
+  vault: string
+}): Promise<
+  | {
+      result: WorkoutLiveSnapshotMemberActionResultV1
+      status: 'unchanged'
+    }
+  | { reason: 'workout_changed'; status: 'rejected' }
+> {
+  if (!workoutLiveSnapshotMemberActionV1Schema.safeParse(input.action).success) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  const targets = await findLiveWorkoutRefreshTargets(
+    input.vault,
+    input.action.workoutBinding,
+  )
+  if (targets.length !== 1) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  const card = buildLiveWorkoutMemberActionCard({
+    presentation: input.action.presentation,
+    shown: targets[0]!,
+  })
+  if (card === null) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  return {
+    result: { card, kind: 'workout.live.snapshot', version: 1 },
+    status: 'unchanged',
+  }
+}
+
+function buildLiveWorkoutMemberActionCard(input: {
+  presentation: WorkoutSessionPresentationV1
+  shown: WorkoutShowResult
+}): WorkoutSessionAppCardEnvelopeV6 | null {
+  try {
+    const snapshot = buildLiveWorkoutCardSnapshot({
+      presentation: input.presentation.workout,
+      workout: parseShownWorkout(input.shown),
+      workoutId: input.shown.entity.id,
+    })
+    if (snapshot === null) return null
+
+    return buildWorkoutSessionAppCardEnvelopeV6({
+      ...input.presentation,
+      editor: snapshot.editor,
+      workout: snapshot.workout,
+    })
+  } catch {
+    return null
+  }
+}
+
+function buildLiveWorkoutApplySuccess(input: {
+  action: WorkoutLiveApplyMemberActionV1
+  shown: WorkoutShowResult
+  status: 'applied' | 'unchanged'
+}): ApplyLiveWorkoutMemberActionResult {
+  if (input.action.presentation === undefined) {
+    return { status: input.status }
+  }
+  const card = buildLiveWorkoutMemberActionCard({
+    presentation: input.action.presentation,
+    shown: input.shown,
+  })
+  return card === null
+    ? { status: input.status }
+    : {
+        result: { card, kind: 'workout.live.apply', version: 1 },
+        status: input.status,
+      }
 }
 
 const MAX_LIVE_WORKOUT_EXERCISES = 100
@@ -100,9 +185,14 @@ export async function applyLiveWorkoutMemberAction(
     input.action.expectedWorkout.actionBinding,
   )
   if (targets.exactReplays.length > 0) {
-    return targets.exactReplays.length === 1
-      ? { status: 'unchanged' }
-      : { reason: 'workout_changed', status: 'rejected' }
+    if (targets.exactReplays.length !== 1) {
+      return { reason: 'workout_changed', status: 'rejected' }
+    }
+    return buildLiveWorkoutApplySuccess({
+      action: input.action,
+      shown: targets.exactReplays[0]!,
+      status: 'unchanged',
+    })
   }
   if (targets.bindingMatches.length !== 1) {
     return { reason: 'workout_changed', status: 'rejected' }
@@ -128,12 +218,13 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
     })
     workout = parseShownWorkout(shown)
     if (workout.lastMemberActionId === input.actionId) {
-      return { status: 'unchanged' }
+      return buildLiveWorkoutApplySuccess({
+        action: input.action,
+        shown,
+        status: 'unchanged',
+      })
     }
-    if (!isOpenLiveWorkout(workout)) {
-      return { reason: 'workout_changed', status: 'rejected' }
-    }
-    assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+    assertTargetableLiveWorkout(workout)
     acceptedAt = normalizeWorkoutTimestamp(input.acceptedAt, 'acceptedAt')
   } catch {
     return { reason: 'workout_changed', status: 'rejected' }
@@ -142,8 +233,11 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
     return { reason: 'workout_changed', status: 'rejected' }
   }
   if (
-    input.action.expectedWorkout.actionBinding
-      !== deriveWorkoutActionBinding(shown.entity.id, workout)
+    !workoutActionBindingMatchesCurrentState(
+      shown.entity.id,
+      workout,
+      input.action.expectedWorkout.actionBinding,
+    )
   ) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
@@ -170,6 +264,10 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
 
   const appendMutations = input.action.mutations.filter(
     (mutation) => mutation.kind === 'exercise.append',
+  )
+  const renameMutations = input.action.mutations.filter(
+    (mutation): mutation is ExerciseRenameMutation =>
+      mutation.kind === 'exercise.rename',
   )
   const removeMutations = input.action.mutations.filter(
     (mutation): mutation is SetRemoveMutation => mutation.kind === 'set.remove',
@@ -254,6 +352,19 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   if (!applyMemberActionSetAppends(exercises, newSetMutations)) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
+  if (!applyMemberActionExerciseRenames(
+    exercises,
+    renameMutations,
+    input.action.expectedWorkout.exercises,
+  )) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  if (
+    renameMutations.length > 0
+    && hasAmbiguousWorkoutActionExerciseCoordinates({ exercises })
+  ) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
 
   const parsed = workoutSessionSchema.safeParse({
     ...workout,
@@ -262,24 +373,33 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   if (!parsed.success) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
-  const endedAt = resolveObservedWorkoutEndBoundary({
+  const endedAt = workout.endedAt === undefined ? resolveObservedWorkoutEndBoundary({
     afterExercises: parsed.data.exercises,
     appendedExtraSet: newSetMutations.some((mutation) => mutation.result !== null),
     beforeExercises,
     completedPendingSet,
     observedAt: acceptedAt,
     workout,
-  })
+  }) : undefined
   const changed = JSON.stringify(parsed.data.exercises)
       !== JSON.stringify(workout.exercises)
     || endedAt !== undefined
 
-  await updateLiveWorkoutExercises(shown, workout, parsed.data.exercises, {
-    ...(endedAt === undefined ? {} : { endedAt }),
-    lastMemberActionId: input.actionId,
-    observedAt: acceptedAt,
+  const updated = await updateLiveWorkoutExercises(
+    shown,
+    workout,
+    parsed.data.exercises,
+    {
+      ...(endedAt === undefined ? {} : { endedAt }),
+      lastMemberActionId: input.actionId,
+      observedAt: acceptedAt,
+    },
+  )
+  return buildLiveWorkoutApplySuccess({
+    action: input.action,
+    shown: updated,
+    status: changed ? 'applied' : 'unchanged',
   })
-  return { status: changed ? 'applied' : 'unchanged' }
 }
 
 function memberActionCompletesPendingSet(
@@ -360,6 +480,27 @@ function applyMemberActionSetPuts(
       existing,
       mutation.result,
     )
+  }
+  return true
+}
+
+function applyMemberActionExerciseRenames(
+  exercises: WorkoutExercise[],
+  mutations: ExerciseRenameMutation[],
+  expectedExercises: WorkoutLiveApplyMemberActionV1['expectedWorkout']['exercises'],
+): boolean {
+  for (const mutation of mutations) {
+    const exercise = exercises[mutation.exercisePosition - 1]
+    const expectedExercise = expectedExercises[mutation.exercisePosition - 1]
+    if (
+      !exercise
+      || !expectedExercise
+      || exercise.name !== expectedExercise.name
+      || mutation.name === expectedExercise.name
+    ) {
+      return false
+    }
+    exercise.name = mutation.name
   }
   return true
 }
@@ -452,6 +593,10 @@ function buildMemberActionWorkoutSet(input: {
 
 type MemberActionSetResult = WorkoutMemberActionSetResultV1 | null
 type MemberActionSetResultKind = NonNullable<MemberActionSetResult>['kind']
+type ExerciseRenameMutation = Extract<
+  WorkoutLiveApplyMemberActionV1['mutations'][number],
+  { kind: 'exercise.rename' }
+>
 type SetPutMutation = Extract<
   WorkoutLiveApplyMemberActionV1['mutations'][number],
   { kind: 'set.put' }
@@ -562,6 +707,43 @@ function buildInitialLiveWorkoutExercises(
         'Exercise repetitions per set must be an integer between 1 and 999.',
       )
     }
+    if (
+      (exercise.targetWeight === undefined)
+      !== (exercise.targetWeightUnit === undefined)
+      || (
+        exercise.targetWeight !== undefined
+        && (
+          !Number.isFinite(exercise.targetWeight)
+          || exercise.targetWeight < 0.01
+          || exercise.targetWeight > 9999
+        )
+      )
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Exercise target weight must be between 0.01 and 9999 with at most two decimal places and an lb or kg unit.',
+      )
+    }
+    if (
+      exercise.targetWeight !== undefined
+      && exercise.mode !== undefined
+      && exercise.mode !== 'weight_reps'
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Exercise target weight requires weight_reps mode.',
+      )
+    }
+    if (
+      exercise.targetWeightUnit !== undefined
+      && exercise.unitOverride !== undefined
+      && exercise.targetWeightUnit !== exercise.unitOverride
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Exercise target weight unit must match unitOverride.',
+      )
+    }
 
     const sourceExerciseId = normalizeOptionalText(exercise.sourceExerciseId)
     const groupId = normalizeOptionalText(exercise.groupId)
@@ -571,12 +753,26 @@ function buildInitialLiveWorkoutExercises(
       order: index + 1,
       ...(sourceExerciseId ? { sourceExerciseId } : {}),
       ...(groupId ? { groupId } : {}),
-      ...(exercise.mode ? { mode: exercise.mode } : {}),
-      ...(exercise.unitOverride ? { unitOverride: exercise.unitOverride } : {}),
+      ...(exercise.mode
+        ? { mode: exercise.mode }
+        : exercise.targetWeight === undefined
+          ? {}
+          : { mode: 'weight_reps' as const }),
+      ...(exercise.unitOverride
+        ? { unitOverride: exercise.unitOverride }
+        : exercise.targetWeightUnit
+          ? { unitOverride: exercise.targetWeightUnit }
+          : {}),
       ...(note ? { note } : {}),
       ...(exercise.reps === undefined
         ? {}
         : { memberRepsPerSet: exercise.reps }),
+      ...(exercise.targetWeight === undefined
+        ? {}
+        : {
+            targetWeightPerSet: exercise.targetWeight,
+            targetWeightUnit: exercise.targetWeightUnit,
+          }),
       setPlanIsFinite: exercise.setCount !== undefined,
       sets: Array.from({ length: setCount }, (_, setIndex) => ({
         order: setIndex + 1,
@@ -625,10 +821,7 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
       startedAt,
       sessionNote: note,
     })
-    assertTargetableLiveWorkout(
-      workout,
-      `Workout routine "${routineTitle}"`,
-    )
+    assertTargetableLiveWorkout(workout)
 
     return addStructuredWorkoutRecord({
       vault: input.vault,
@@ -685,7 +878,7 @@ async function addLiveWorkoutExerciseWithLockHeld(
 ) {
   const shown = await resolveLiveWorkout(input, { requireOpen: true })
   const workout = parseShownWorkout(shown)
-  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(workout)
   const exercises = structuredClone(workout.exercises)
   const order = input.order
   const setCount = input.setCount ?? 1
@@ -774,25 +967,20 @@ async function setLiveWorkoutExerciseRepsWithLockHeld(
 
   const shown = await resolveLiveWorkout(input)
   const workout = parseShownWorkout(shown)
-  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(workout)
   const exercises = structuredClone(workout.exercises)
   const exerciseIndex = resolveExerciseIndex(exercises, input)
   const exercise = exercises[exerciseIndex]!
   if (
-    (clear && exercise.memberRepsPerSet === undefined)
+    (clear && exercise.memberRepsPerSet === null)
     || (!clear && exercise.memberRepsPerSet === reps)
   ) {
     return shown
   }
 
   if (clear) {
-    return editWorkoutRecord({
-      vault: shown.vault,
-      lookup: shown.entity.id,
-      clear: [`workout.exercises.${exerciseIndex}.memberRepsPerSet`],
-    })
-  }
-  if (reps !== undefined) {
+    exercise.memberRepsPerSet = null
+  } else if (reps !== undefined) {
     exercise.memberRepsPerSet = reps
   }
   exercises[exerciseIndex] = exercise
@@ -813,7 +1001,7 @@ async function logLiveWorkoutSetWithLockHeld(
   const setOrder = requireLiveWorkoutSetOrder(input.setOrder)
   const shown = await resolveLiveWorkout(input)
   const workout = parseShownWorkout(shown)
-  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(workout)
   const beforeExercises = structuredClone(workout.exercises)
   const exercises = structuredClone(beforeExercises)
   const exerciseIndex = resolveExerciseIndex(exercises, input)
@@ -823,7 +1011,7 @@ async function logLiveWorkoutSetWithLockHeld(
   const patch = compactSetPatch(input)
   if (
     input.reps === undefined
-    && exercise.memberRepsPerSet !== undefined
+    && typeof exercise.memberRepsPerSet === 'number'
     && (currentSet === undefined || !hasLoggedWorkoutSet(currentSet))
   ) {
     patch.reps = exercise.memberRepsPerSet
@@ -832,7 +1020,7 @@ async function logLiveWorkoutSetWithLockHeld(
     if (
       currentSet !== undefined
       && hasLoggedWorkoutSet(currentSet)
-      && exercise.memberRepsPerSet !== undefined
+      && typeof exercise.memberRepsPerSet === 'number'
     ) {
       return shown
     }
@@ -901,6 +1089,29 @@ async function logLiveWorkoutSetWithLockHeld(
   })
 }
 
+export async function removeLiveWorkoutExercise(input: RemoveLiveWorkoutExerciseInput) {
+  if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
+    throw new VaultCliError('invalid_option', 'Expected revision must be a positive integer.')
+  }
+  return withLiveWorkoutMutationLock(input.vault, input.workoutId, async () => {
+    const shown = await resolveLiveWorkout(input)
+    const event = eventRecordSchema.safeParse(shown.entity.data)
+    if (!event.success) {
+      throw new VaultCliError('contract_invalid', 'The workout does not contain a valid canonical event.')
+    }
+    if (eventRevisionFromLifecycle(event.data.lifecycle) !== input.expectedRevision) {
+      throw new VaultCliError('conflict', 'The workout changed. Read it again before removing the exercise.')
+    }
+    const workout = parseShownWorkout(shown)
+    assertTargetableLiveWorkout(workout)
+    const index = resolveExerciseIndex(workout.exercises, input)
+    const exercises = workout.exercises.filter((_, position) => position !== index)
+    return updateLiveWorkoutExercises(shown, workout, exercises, {
+      observedAt: new Date().toISOString(),
+    })
+  })
+}
+
 export async function clearLiveWorkoutSet(input: ClearLiveWorkoutSetInput) {
   const observedAt = new Date().toISOString()
   return withLiveWorkoutMutationLock(input.vault, input.workoutId, () =>
@@ -915,7 +1126,7 @@ async function clearLiveWorkoutSetWithLockHeld(
   const setOrder = requireLiveWorkoutSetOrder(input.setOrder)
   const shown = await resolveLiveWorkout(input)
   const workout = parseShownWorkout(shown)
-  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(workout)
   const exercises = structuredClone(workout.exercises)
   const exerciseIndex = resolveExerciseIndex(exercises, input)
   const exercise = exercises[exerciseIndex]!

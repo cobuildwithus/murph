@@ -12,7 +12,7 @@ import {
 import {
   areJunctionProviderSlugsDataEquivalent,
 } from "@murphai/device-syncd/junction-inline-authority";
-import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
+import { describeHostedDeviceSyncCoalescibleFetch, shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
@@ -37,9 +37,14 @@ import type {
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
+  JUNCTION_RECONCILE_PROOF_METADATA_KEY,
+  JUNCTION_TEMPORAL_SWEEP_METADATA_KEY,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+  findHostedExecutionDeviceSyncRuntimeApplyEntry,
+  encodeJunctionReconcileProof,
+  readJunctionReconcileProof,
   mergeHostedDeviceSyncConnectionMetadata,
   mergeHostedDeviceSyncEventToProviderSendBuckets,
   normalizeHostedDeviceSyncJobHints,
@@ -163,7 +168,8 @@ type HostedDirtyDeviceSyncStateSkipReason =
 type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required";
 
 const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON = "retained_completion_fence";
-const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS = 30_000;
+const HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_HINT_REASON = "retained_dirty_remainder";
+const HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_DELAY_MS = 30_000;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
@@ -182,9 +188,56 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     );
   }
 
+  const state = await hydrateHostedDeviceSyncControlPlaneState({
+    deviceSyncPort: client,
+    secret: input.secret,
+    service: input.service,
+    signal: input.signal ?? null,
+    snapshot: input.snapshot,
+    wake: input.wake,
+  });
+  if (state.wakeSuperseded === true) {
+    return state;
+  }
+
+  if (input.wake.kind === "device-sync.wake") {
+    await applyHostedDeviceSyncWakeHint({
+      wake: input.wake,
+      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
+      service: input.service,
+    });
+  }
+  if (
+    input.skipDirtyPendingFetch !== true
+    && resolveHostedDeviceSyncWakeLocalAccountId({ state, wake: input.wake })
+  ) {
+    const dirtyState = await applyHostedPendingDirtyDeviceSyncState({
+      deviceSyncPort: client,
+      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
+      signal: input.signal ?? null,
+      service: input.service,
+      stagedDirtyAcks: input.stagedDirtyAcks ?? null,
+      wake: input.wake,
+    });
+    state.pendingDirtyAcks = dirtyState.acks;
+    state.pendingDirtyPayloadJobs = dirtyState.pendingDirtyPayloadJobs;
+    state.dirtyWorkRemaining = dirtyState.hasMoreForWake;
+  }
+
+  return state;
+}
+
+export async function hydrateHostedDeviceSyncControlPlaneState(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  secret: string;
+  service: DeviceSyncService;
+  snapshot?: HostedDeviceSyncRuntimeSnapshotResponse | null;
+  signal?: AbortSignal | null;
+  wake: HostedRuntimeEvent;
+}): Promise<HostedDeviceSyncRuntimeSyncState> {
   const snapshot = input.snapshot === undefined
     ? await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
-        deviceSyncPort: client,
+        deviceSyncPort: input.deviceSyncPort,
         includeCredentialMaterial: true,
         signal: input.signal ?? null,
       })
@@ -400,35 +453,119 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     );
   }
 
-  if (input.wake.kind === "device-sync.wake") {
-    const superseded = await applyHostedDeviceSyncWakeHint({
-      wake: input.wake,
-      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
-      service: input.service,
-    });
-    if (superseded) {
-      state.wakeSuperseded = true;
-      return state;
-    }
+  if (isHostedDeviceSyncWakeSuperseded({
+    service: input.service,
+    state,
+    wake: input.wake,
+  })) {
+    state.wakeSuperseded = true;
   }
+  return state;
+}
+
+export function isHostedDeviceSyncCompletionFenceWake(
+  wake: HostedRuntimeEvent,
+): wake is HostedExecutionDeviceSyncWake {
+  if (wake.kind !== "device-sync.wake") {
+    return false;
+  }
+  const wakeContext = resolveHostedDeviceSyncWakeContext(wake);
+  return wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
+    && normalizeHostedDeviceSyncJobHints(wakeContext.hint).length === 0;
+}
+
+export async function publishHostedDeviceSyncCheckpointedProgress(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  signal?: AbortSignal | null;
+  wake: HostedExecutionDeviceSyncWake;
+}): Promise<void> {
+  const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
   if (
-    input.skipDirtyPendingFetch !== true
-    && resolveHostedDeviceSyncWakeLocalAccountId({ state, wake: input.wake })
+    !wakeContext.hint
+    || !Object.hasOwn(wakeContext.hint, "nextReconcileAt")
+    || (!isHostedDeviceSyncCompletionFenceWake(input.wake)
+      && normalizeHostedDeviceSyncJobHints(wakeContext.hint).length === 0)
   ) {
-    const dirtyState = await applyHostedPendingDirtyDeviceSyncState({
-      deviceSyncPort: client,
-      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
-      signal: input.signal ?? null,
-      service: input.service,
-      stagedDirtyAcks: input.stagedDirtyAcks ?? null,
-      wake: input.wake,
-    });
-    state.pendingDirtyAcks = dirtyState.acks;
-    state.pendingDirtyPayloadJobs = dirtyState.pendingDirtyPayloadJobs;
-    state.dirtyWorkRemaining = dirtyState.hasMoreForWake;
+    throw new TypeError(
+      "Hosted device-sync checkpoint publication requires its canonical cadence and retained work or completion.",
+    );
+  }
+  const connectionId = wakeContext.connectionId;
+  if (!connectionId) {
+    return;
   }
 
-  return state;
+  const snapshot = await input.deviceSyncPort.fetchSnapshot({
+    connectionId,
+    includeCredentialMaterial: false,
+    limit: 1,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  const baseline = snapshot.connections.find((entry) =>
+    entry.connection.id === connectionId
+  ) ?? null;
+  if (
+    wakeContext.expectedConnectedAt === null
+    || !baseline
+    || baseline.connection.connectedAt !== wakeContext.expectedConnectedAt
+    || baseline.connection.status !== "active"
+  ) {
+    return;
+  }
+
+  const update = buildHostedDeviceSyncCompletionFenceUpdate(baseline, wakeContext.hint);
+  if (!update) {
+    return;
+  }
+  const response = await input.deviceSyncPort.applyUpdates({
+    occurredAt: input.wake.occurredAt,
+    ...(input.signal ? { signal: input.signal } : {}),
+    updates: [update],
+  });
+  const applied = findHostedExecutionDeviceSyncRuntimeApplyEntry(
+    response,
+    connectionId,
+  );
+  if (!applied) {
+    throw new Error(
+      "Hosted device-sync completion fence apply response omitted its connection.",
+    );
+  }
+  switch (applied.writeUpdate) {
+    case "applied":
+    case "unchanged":
+    case "missing":
+      return;
+    case "skipped_version_mismatch":
+      throw new Error(
+        "Hosted device-sync completion fence lost its connection version fence.",
+      );
+  }
+}
+
+function buildHostedDeviceSyncCompletionFenceUpdate(
+  baseline: HostedDeviceSyncRuntimeConnectionSnapshot,
+  hint: NonNullable<ReturnType<typeof resolveHostedDeviceSyncWakeContext>["hint"]>,
+): (HostedDeviceSyncRuntimeConnectionUpdate & {
+  localState: { nextReconcileAt: string | null };
+}) | null {
+  const advancedReconcileAt = resolveHostedWakeNextReconcileAt(
+    baseline.localState.nextReconcileAt, hint.nextReconcileAt,
+  );
+  const metadata = projectHostedCheckpointedConnectionMetadata(
+    baseline.connection.metadata, baseline.connection.metadata, hint.junctionTemporalSweepKey, hint.junctionReconcileProof,
+  );
+  const metadataChanged = !equalJsonRecords(metadata, baseline.connection.metadata);
+  if (!advancedReconcileAt && !metadataChanged) {
+    return null;
+  }
+  return {
+    connectionId: baseline.connection.id,
+    ...(metadataChanged ? { connection: { metadata } } : {}),
+    localState: { nextReconcileAt: advancedReconcileAt ?? baseline.localState.nextReconcileAt },
+    observedConnectedAt: baseline.connection.connectedAt,
+    observedUpdatedAt: baseline.connection.updatedAt ?? null,
+  };
 }
 
 export async function applyHostedPendingDirtyDeviceSyncStateForWake(input: {
@@ -637,9 +774,9 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
   wake: HostedRuntimeEvent;
-}): Promise<void> {
+}): Promise<boolean> {
   if (!input.state.snapshot) {
-    return;
+    return true;
   }
 
   const client = resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
@@ -664,6 +801,9 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
     }
 
     const baseline = snapshotByConnectionId.get(hostedConnectionId) ?? null;
+    const checkpointedHint = readHostedCheckpointedConnectionHint(
+      input.wake, hostedConnectionId, account.connectedAt,
+    );
     const update = buildHostedDeviceSyncRuntimeConnectionUpdate({
       account,
       baseline,
@@ -671,6 +811,9 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       deferNextReconcileAtToBaseline:
         input.deferNextReconcileAtForLocalAccountId === localAccountId,
       hostedConnectionId,
+      checkpointedNextReconcileAt: checkpointedHint?.nextReconcileAt,
+      checkpointedTemporalSweepKey: checkpointedHint?.junctionTemporalSweepKey,
+      checkpointedReconcileProof: checkpointedHint?.junctionReconcileProof,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({
@@ -684,17 +827,36 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   }
 
   let offset = 0;
-  do {
-    await client.applyUpdates({
+  let accepted = true;
+  while (offset < updates.length) {
+    const updatesBatch = updates.slice(
+      offset,
+      offset + HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
+    );
+    const response = await client.applyUpdates({
       occurredAt: input.wake.occurredAt,
       ...(input.signal ? { signal: input.signal } : {}),
-      updates: updates.slice(
-        offset,
-        offset + HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
-      ),
+      updates: updatesBatch,
     });
+    for (const update of updatesBatch) {
+      const applied = findHostedExecutionDeviceSyncRuntimeApplyEntry(
+        response,
+        update.connectionId,
+      );
+      if (!applied) {
+        accepted = false;
+        continue;
+      }
+      if (
+        applied.writeUpdate === "skipped_version_mismatch"
+        || applied.tokenUpdate === "skipped_version_mismatch"
+      ) {
+        accepted = false;
+      }
+    }
     offset += HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT;
-  } while (offset < updates.length);
+  }
+  return accepted;
 }
 
 function createEmptyHostedDeviceSyncRuntimeSyncState(
@@ -751,13 +913,37 @@ function markHostedTerminalDeviceSyncJobsDead(input: {
   );
 }
 
+function isHostedDeviceSyncWakeSuperseded(input: {
+  service: DeviceSyncService;
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): boolean {
+  if (input.wake.kind !== "device-sync.wake") {
+    return false;
+  }
+  const wake = resolveHostedDeviceSyncWakeContext(input.wake);
+  const localAccountId = wake.connectionId
+    ? input.state.hostedToLocalAccountIds.get(wake.connectionId) ?? null
+    : null;
+  const account = localAccountId
+    ? requireHostedRuntimeDeviceSyncStore(input.service).getAccountById(localAccountId)
+    : null;
+  return Boolean(
+    account
+    && (
+      wake.expectedConnectedAt === null
+      || wake.expectedConnectedAt !== account.connectedAt
+    ),
+  );
+}
+
 async function applyHostedDeviceSyncWakeHint(input: {
   wake: HostedRuntimeEvent;
   hostedToLocalAccountIds: Map<string, string>;
   service: DeviceSyncService;
-}): Promise<boolean> {
+}): Promise<void> {
   if (input.wake.kind !== "device-sync.wake") {
-    return false;
+    return;
   }
 
   const wake = resolveHostedDeviceSyncWakeContext(input.wake);
@@ -765,21 +951,13 @@ async function applyHostedDeviceSyncWakeHint(input: {
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
 
   if (!localAccountId) {
-    return false;
+    return;
   }
 
   const account = store.getAccountById(localAccountId);
 
   if (!account) {
-    return false;
-  }
-
-  // Missing epochs remain readable during deploy skew, but have no authority.
-  if (
-    wake.expectedConnectedAt === null
-    || wake.expectedConnectedAt !== account.connectedAt
-  ) {
-    return true;
+    return;
   }
 
   const terminalStatus = readHostedTerminalDeviceSyncStatus(account);
@@ -790,7 +968,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       status: terminalStatus,
       store,
     });
-    return false;
+    return;
   }
 
   if (input.wake.reason === "disconnected") {
@@ -801,7 +979,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_DISCONNECTED",
       "Hosted device-sync wake marked the connection as disconnected.",
     );
-    return false;
+    return;
   }
 
   if (input.wake.reason === "reauthorization_required") {
@@ -815,7 +993,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_REAUTHORIZATION_REQUIRED",
       "Hosted device-sync wake marked the connection as requiring reconnection.",
     );
-    return false;
+    return;
   }
 
   const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
@@ -828,7 +1006,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
     && jobHints.length === 0
   ) {
     input.service.queueManualReconcile(localAccountId);
-    return false;
+    return;
   }
 
   for (const [index, hint] of jobHints.entries()) {
@@ -855,12 +1033,14 @@ async function applyHostedDeviceSyncWakeHint(input: {
     });
   }
 
+  if (wake.hint?.reason === "manual_reconcile_pending") {
+    input.service.queueManualReconcile(localAccountId);
+  }
+
   const wakePatch = buildHostedDeviceSyncWakeAccountPatch(account, wake.hint);
   if (wakePatch) {
     store.patchAccount(localAccountId, wakePatch);
   }
-
-  return false;
 }
 
 export function resolveHostedDeviceSyncWakeLocalAccountId(input: {
@@ -881,13 +1061,18 @@ export function resolveHostedDeviceSyncSchedulerAccountId(input: {
   wake: HostedRuntimeEvent;
 }): string | null {
   const localAccountId = resolveHostedDeviceSyncWakeLocalAccountId(input);
-  if (!localAccountId || input.wake.kind !== "device-sync.wake") {
+  if (
+    !localAccountId
+    || input.wake.kind !== "device-sync.wake"
+  ) {
     return null;
   }
   const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
   if (
-    wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
-    || normalizeHostedDeviceSyncJobHints(wakeContext.hint).length > 0
+    normalizeHostedDeviceSyncJobHints(wakeContext.hint).length === 0
+    && (wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
+      || wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_HINT_REASON
+      || input.wake.reason === "webhook_hint")
   ) {
     return null;
   }
@@ -916,48 +1101,43 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     return null;
   }
 
-  const pendingJobs = store.listPendingJobsForAccount(
-    localAccountId,
-    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
-  );
-  if (pendingJobs.length > HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT) {
-    throw new Error(
-      "Hosted device-sync retained work exceeds the per-pass durable job limit.",
-    );
-  }
-  if (pendingJobs.length > 0) {
-    let retryAt: string | null = null;
-    const retryHints: HostedExecutionDeviceSyncJobHint[] = [];
-    for (const job of pendingJobs) {
-      const dedupeKey = job.dedupeKey
-        ?? `hosted-device-sync-job:${createHash("sha256").update(job.id).digest("hex")}`;
-      const payload = shapeHostedDeviceSyncJobHintPayload(account.provider, job);
-      const jobRetryAt = job.status === "running"
-        ? job.leaseExpiresAt ?? job.availableAt
-        : job.availableAt;
-      const remainingAttempts = Math.max(1, job.maxAttempts - job.attempts);
-      retryAt = retryAt === null || Date.parse(jobRetryAt) < Date.parse(retryAt)
-        ? jobRetryAt
-        : retryAt;
-      retryHints.push({
-        availableAt: jobRetryAt,
-        dedupeKey,
-        kind: job.kind,
-        maxAttempts: remainingAttempts,
-        ...(Object.keys(payload).length > 0 ? { payload } : {}),
-        priority: job.priority,
-      });
-    }
-    if (!retryAt) {
-      return null;
-    }
+  const retainedHint = buildHostedRetainedDeviceSyncWakeHint(account.metadata, input.wake.hint);
 
+  // A provider job can create multiple follow-ups. The execution/admission
+  // budget must never truncate or reject work already accepted by the queue.
+  let retryAt: string | null = null;
+  const retryHints: HostedExecutionDeviceSyncJobHint[] = [];
+  for (const job of store.iteratePendingJobsForAccount(localAccountId)) {
+    const dedupeKey = job.dedupeKey
+      ?? `hosted-device-sync-job:${createHash("sha256").update(job.id).digest("hex")}`;
+    const payload = shapeHostedDeviceSyncJobHintPayload(account.provider, job);
+    const jobRetryAt = job.status === "running"
+      ? job.leaseExpiresAt ?? job.availableAt
+      : job.availableAt;
+    const remainingAttempts = Math.max(1, job.maxAttempts - job.attempts);
+    retryAt = retryAt === null || Date.parse(jobRetryAt) < Date.parse(retryAt)
+      ? jobRetryAt
+      : retryAt;
+    retryHints.push({
+      availableAt: jobRetryAt,
+      dedupeKey,
+      kind: job.kind,
+      maxAttempts: remainingAttempts,
+      ...(Object.keys(payload).length > 0 ? { payload } : {}),
+      priority: job.priority,
+    });
+  }
+  if (retryAt) {
+    const schedule = resolveHostedHistoryWakeSchedule(
+      input.service, store, account, retryAt, input.state.dirtyWorkRemaining === true,
+    );
     return {
-      retryAt,
+      retryAt: schedule.retryAt,
       wake: {
         ...input.wake,
         hint: {
-          ...(input.wake.hint ?? {}),
+          ...retainedHint,
+          ...schedule.hint,
           jobs: retryHints,
           nextReconcileAt: account.nextReconcileAt ?? null,
         },
@@ -968,15 +1148,15 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
   if (input.state.dirtyWorkRemaining) {
     return {
       retryAt: new Date(
-        Date.now() + HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS,
+        Date.now() + HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_DELAY_MS,
       ).toISOString(),
       wake: {
         ...input.wake,
         hint: {
-          ...(input.wake.hint ?? {}),
+          ...retainedHint,
           jobs: [],
           nextReconcileAt: account.nextReconcileAt ?? null,
-          reason: "retained_dirty_remainder",
+          reason: HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_HINT_REASON,
         },
       },
     };
@@ -985,31 +1165,96 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
   if (wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON) {
     return null;
   }
-  const hostedConnectionId = input.state.localToHostedAccountIds.get(localAccountId) ?? null;
-  const baselineNextReconcileAt = hostedConnectionId
-    ? input.state.snapshot?.connections.find(
-        (entry) => entry.connection.id === hostedConnectionId,
-      )?.localState.nextReconcileAt ?? null
-    : null;
+  const baseline = input.state.snapshot?.connections.find(
+    (entry) => entry.connection.id === input.state.localToHostedAccountIds.get(localAccountId),
+  );
+  const baselineNextReconcileAt = baseline?.localState.nextReconcileAt ?? null;
   const nextReconcileAt = account.nextReconcileAt ?? null;
-  if (nextReconcileAt === baselineNextReconcileAt) {
+  if (nextReconcileAt === baselineNextReconcileAt
+    && !hasUnpublishedCheckpointProof(account.metadata, baseline?.connection.metadata ?? {})) {
     return null;
   }
 
   return {
-    retryAt: new Date(
-      Date.now() + HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS,
-    ).toISOString(),
+    retryAt: new Date(Date.now()).toISOString(),
     wake: {
       ...input.wake,
       hint: {
-        ...(input.wake.hint ?? {}),
+        ...retainedHint,
         jobs: [],
         nextReconcileAt,
         reason: HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON,
       },
     },
   };
+}
+
+function buildHostedRetainedDeviceSyncWakeHint(
+  metadata: Record<string, unknown>,
+  hint: HostedExecutionDeviceSyncWake["hint"],
+): NonNullable<HostedExecutionDeviceSyncWake["hint"]> {
+  const sweep = metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
+  const rawProof = metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY];
+  const parsedProof = readJunctionReconcileProof(rawProof);
+  // Every retained projection must re-prove future queue ownership. Never carry
+  // a prior deferral through a changed, failed, or completed set of jobs.
+  const proof = parsedProof
+    ? encodeJunctionReconcileProof({ ...parsedProof, historyDeferredUntil: undefined })
+    : rawProof;
+  return {
+    ...hint,
+    // Exact recovered jobs now own the manual request. A cold restore must not
+    // recreate its root while those jobs retain provider continuation cursors.
+    ...(hint?.reason === "manual_reconcile_pending" ? { reason: "manual_reconcile" } : {}),
+    ...(typeof sweep === "string" ? { junctionTemporalSweepKey: sweep } : {}),
+    ...(typeof proof === "string" ? { junctionReconcileProof: proof } : {}),
+  };
+}
+
+function hasUnpublishedCheckpointProof(local: Record<string, unknown>, hosted: Record<string, unknown>): boolean {
+  return [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, JUNCTION_RECONCILE_PROOF_METADATA_KEY]
+    .some((key) => typeof local[key] === "string" && local[key] !== hosted[key]);
+}
+
+function resolveHostedDeviceSyncRetainedWakeAt(cadenceAt: string | null, retryAt: string): string {
+  // A failed scheduler leaves a past cadence. Keep its retry bounded instead
+  // of creating a due-now loop; a future cadence can share the existing owner.
+  return cadenceAt && Date.parse(cadenceAt) > Date.now()
+    && Date.parse(cadenceAt) < Date.parse(retryAt)
+    ? cadenceAt
+    : retryAt;
+}
+
+function resolveHostedHistoryWakeSchedule(
+  service: DeviceSyncService,
+  store: ReturnType<typeof requireHostedRuntimeDeviceSyncStore>,
+  account: StoredDeviceSyncAccount,
+  retryAt: string,
+  dirtyWorkRemaining: boolean,
+): { retryAt: string; hint: { junctionReconcileProof?: string } } {
+  const fallback = { retryAt: resolveHostedDeviceSyncRetainedWakeAt(account.nextReconcileAt, retryAt), hint: {} };
+  if (dirtyWorkRemaining || account.provider !== "junction" || Date.parse(retryAt) <= Date.now()) return fallback;
+  const proof = readJunctionReconcileProof(account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY]);
+  if (!proof || Date.parse(proof.validUntil) <= Date.now()) return fallback;
+  const executor = service.registry.get(account.provider)?.jobExecutor;
+  // This is the ordinary pure scheduler with its bounded account-scoped lookup.
+  // Any root that has no queue owner must still reach a normal runtime pass.
+  let scheduled;
+  try {
+    scheduled = executor?.createScheduledJobs?.(account, new Date().toISOString(), {
+      findActiveDedupeKeys: (dedupeKeys) => store.findActiveJobDedupeKeys({
+        accountId: account.id, provider: account.provider, dedupeKeys,
+      }),
+    });
+  } catch {
+    return fallback;
+  }
+  if (!scheduled || scheduled.jobs.length !== 1 || scheduled.jobs[0]?.kind !== "reconcile") return fallback;
+  const historyDeferredUntil = Math.min(Date.parse(retryAt), Date.parse(proof.validUntil));
+  const encoded = encodeJunctionReconcileProof({ ...proof, historyDeferredUntil });
+  // Keep the existing metadata envelope. An unrepresentable proof falls open.
+  if (!readJunctionReconcileProof(encoded)) return fallback;
+  return { hint: { junctionReconcileProof: encoded }, retryAt: new Date(historyDeferredUntil).toISOString() };
 }
 
 function resolveHostedDeviceSyncWakeJobDedupeKey(input: {
@@ -1217,6 +1462,54 @@ function applyHostedDirtyDeviceSyncState(input: {
   };
 }
 
+/** Share pull work within one bounded dirty page, retaining each original completion obligation. */
+function coalesceHostedDirtyDeviceSyncFetches(
+  provider: string,
+  jobs: readonly HostedDirtyDeviceSyncJob[],
+): Map<HostedDirtyDeviceSyncJob, DeviceSyncJobInput> {
+  type Candidate = { job: HostedDirtyDeviceSyncJob; start: number; end: number };
+  const byKey = new Map<string, Candidate[]>();
+  for (const job of jobs) {
+    const fetch = describeHostedDeviceSyncCoalescibleFetch(provider, job.input);
+    // Payload IDs distinguish a fresh notification from earlier fetched work.
+    if (!fetch || !job.dirtyPayloadId) continue;
+    const candidates = byKey.get(fetch.key) ?? [];
+    candidates.push({ job, start: fetch.start, end: fetch.end });
+    byKey.set(fetch.key, candidates);
+  }
+  const result = new Map<HostedDirtyDeviceSyncJob, DeviceSyncJobInput>();
+  for (const candidates of byKey.values()) {
+    candidates.sort((a, b) => a.start - b.start || a.end - b.end);
+    let index = 0;
+    while (index < candidates.length) {
+      const first = candidates[index]!;
+      const members = [first.job];
+      let end = first.end;
+      index += 1;
+      while (index < candidates.length) {
+        const next = candidates[index]!;
+        const unionEnd = Math.max(end, next.end);
+        if (next.start > end || unionEnd - first.start > 366 * 86_400_000) break;
+        members.push(next.job);
+        end = unionEnd;
+        index += 1;
+      }
+      if (members.length < 2) continue;
+      const windowStart = new Date(first.start).toISOString();
+      const windowEnd = new Date(end).toISOString();
+      const identity = members.map((member) => [member.dirtyPayloadId, member.input.dedupeKey]).sort();
+      const sharedInput: DeviceSyncJobInput = {
+        ...first.job.input,
+        payload: { ...first.job.input.payload, windowStart, windowEnd },
+        dedupeKey: `hosted-dirty:coalesced:${createHash("sha256")
+          .update(JSON.stringify([identity, windowStart, windowEnd])).digest("hex")}`,
+      };
+      for (const member of members) result.set(member, sharedInput);
+    }
+  }
+  return result;
+}
+
 function admitHostedDirtyDeviceSyncJobsForAccount(input: {
   accountId: string;
   connectionId: string;
@@ -1225,25 +1518,35 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
   provider: string;
   store: HostedRuntimeDeviceSyncStore;
 }): HostedDirtyDeviceSyncAdmissionResult {
-  const pendingJobs = input.store.listPendingJobsForAccount(
-    input.accountId,
-    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
-  );
-  let availableSlots = Math.max(
-    0,
-    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT - pendingJobs.length,
-  );
+  let availableSlots = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
+  const coalesced = coalesceHostedDirtyDeviceSyncFetches(input.provider, input.jobs);
+  const requestedDedupeKeys = new Set([
+    ...input.jobs.map((job) => job.input.dedupeKey),
+    ...[...coalesced.values()].map((job) => job.dedupeKey),
+  ]);
   const jobIdsByDedupeKey = new Map<string, string>();
-  for (const job of pendingJobs) {
-    if (job.provider === input.provider && job.dedupeKey) {
+  for (const job of input.store.iteratePendingJobsForAccount(input.accountId)) {
+    availableSlots = Math.max(0, availableSlots - 1);
+    if (
+      job.provider === input.provider
+      && job.dedupeKey
+      && requestedDedupeKeys.has(job.dedupeKey)
+    ) {
       jobIdsByDedupeKey.set(job.dedupeKey, job.id);
     }
+  }
+  // A pre-upgrade job or its suffix still owns the original window. Do not fork it.
+  const retainedGroups = new Set<DeviceSyncJobInput>();
+  for (const [job, group] of coalesced) {
+    if (job.input.dedupeKey && jobIdsByDedupeKey.has(job.input.dedupeKey)) retainedGroups.add(group);
   }
   const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
   let admittedJobCount = 0;
 
   for (const job of input.jobs) {
-    const dedupeKey = job.input.dedupeKey;
+    const group = coalesced.get(job);
+    const jobInput = group && !retainedGroups.has(group) ? group : job.input;
+    const dedupeKey = jobInput.dedupeKey;
     let jobId = dedupeKey ? jobIdsByDedupeKey.get(dedupeKey) ?? null : null;
     if (!jobId) {
       if (availableSlots === 0) {
@@ -1251,12 +1554,12 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
       }
       const enqueued = input.store.enqueueJob({
         accountId: input.accountId,
-        availableAt: job.input.availableAt,
+        availableAt: jobInput.availableAt,
         dedupeKey,
-        kind: job.input.kind,
-        maxAttempts: job.input.maxAttempts,
-        payload: job.input.payload ?? {},
-        priority: job.input.priority ?? 0,
+        kind: jobInput.kind,
+        maxAttempts: jobInput.maxAttempts,
+        payload: jobInput.payload ?? {},
+        priority: jobInput.priority ?? 0,
         provider: input.provider,
       });
       jobId = enqueued.id;
@@ -1591,9 +1894,35 @@ function hostedDirtyResourceToDeviceSyncJobInput(
   if (!hasManifestPayload && resource.jobKind === "resource" && resource.sourceProviderSlug) {
     payload.sourceProviderSlug = resource.sourceProviderSlug;
   }
-  const dedupeKey = [
+  return {
+    kind: resource.jobKind,
+    payload,
+    priority: 60,
+    dedupeKey: buildHostedDirtyResourceDedupeKey(resource, dirtyState.provider, payload),
+  };
+}
+
+function buildHostedDirtyResourceDedupeKey(
+  resource: HostedExecutionDeviceSyncDirtyResource,
+  provider: string,
+  payload: Record<string, unknown>,
+): string {
+  // A provider-derived key already names the work from stable provider facts,
+  // so re-sent webhooks join the job or continuation that carries it instead
+  // of forking on receipt-time windows and timestamps.
+  const providerDedupeKey = readHostedDirtyPayloadString(resource.providerDedupeKey);
+  if (providerDedupeKey) {
+    return [
+      "hosted-dirty",
+      provider,
+      resource.jobKind,
+      "provider-key",
+      createHash("sha256").update(providerDedupeKey).digest("hex").slice(0, 24),
+    ].join(":");
+  }
+  return [
     "hosted-dirty",
-    dirtyState.provider,
+    provider,
     resource.jobKind,
     resource.sourceProviderSlug ?? "provider",
     resource.resourceCategory ?? "category",
@@ -1602,13 +1931,6 @@ function hostedDirtyResourceToDeviceSyncJobInput(
     payload.windowStart,
     payload.windowEnd,
   ].join(":");
-
-  return {
-    kind: resource.jobKind,
-    payload,
-    priority: 60,
-    dedupeKey,
-  };
 }
 
 function readHostedDirtyPayloadString(value: unknown): string | null {
@@ -1658,10 +1980,10 @@ function fingerprintHostedDeviceSyncRuntimeId(value: string): string {
 }
 
 function buildHostedDeviceSyncWakeAccountPatch(
-  account: Pick<StoredDeviceSyncAccount, "nextReconcileAt">,
+  account: Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "metadata">,
   hint: ReturnType<typeof resolveHostedDeviceSyncWakeContext>["hint"],
-): Partial<Pick<StoredDeviceSyncAccount, "nextReconcileAt">> | null {
-  if (!hint || hint.nextReconcileAt === undefined) {
+): Partial<Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "metadata">> | null {
+  if (!hint) {
     return null;
   }
 
@@ -1669,13 +1991,69 @@ function buildHostedDeviceSyncWakeAccountPatch(
     account.nextReconcileAt ?? null,
     hint.nextReconcileAt,
   );
-  return nextReconcileAt ? { nextReconcileAt } : null;
+  const sweepChanged = hint.junctionTemporalSweepKey !== undefined
+    && hint.junctionTemporalSweepKey !== account.metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
+  const proofChanged = hint.junctionReconcileProof !== undefined
+    && hint.junctionReconcileProof !== account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY];
+  if (!nextReconcileAt && !sweepChanged && !proofChanged) {
+    return null;
+  }
+  return {
+    ...(nextReconcileAt ? { nextReconcileAt } : {}),
+    ...(sweepChanged || proofChanged ? {
+      metadata: {
+        ...account.metadata,
+        ...(hint.junctionTemporalSweepKey === undefined ? {} : {
+          [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY]: hint.junctionTemporalSweepKey,
+        }),
+        ...(hint.junctionReconcileProof === undefined ? {} : {
+          [JUNCTION_RECONCILE_PROOF_METADATA_KEY]: hint.junctionReconcileProof,
+        }),
+      },
+    } : {}),
+  };
+}
+
+function readHostedCheckpointedConnectionHint(
+  wake: HostedRuntimeEvent,
+  connectionId: string,
+  connectedAt: string,
+): NonNullable<ReturnType<typeof resolveHostedDeviceSyncWakeContext>["hint"]> | undefined {
+  return wake.kind === "device-sync.wake"
+      && wake.connectionId === connectionId
+      && wake.expectedConnectedAt === connectedAt
+    ? wake.hint ?? undefined
+    : undefined;
+}
+
+function projectHostedCheckpointedConnectionMetadata(
+  localMetadata: Record<string, unknown>,
+  baselineMetadata: Record<string, unknown>,
+  checkpointedSweepKey: string | undefined,
+  checkpointedReconcileProof: string | undefined,
+): Record<string, unknown> {
+  const metadata = { ...localMetadata };
+  for (const [key, checkpointedValue] of [
+    [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, checkpointedSweepKey],
+    [JUNCTION_RECONCILE_PROOF_METADATA_KEY, checkpointedReconcileProof],
+  ] as const) {
+    const publishedValue = checkpointedValue ?? baselineMetadata[key];
+    if (publishedValue === undefined) {
+      delete metadata[key];
+    } else {
+      metadata[key] = publishedValue;
+    }
+  }
+  return metadata;
 }
 
 function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   account: StoredDeviceSyncAccount;
   baseline: HostedDeviceSyncRuntimeConnectionSnapshot | null;
   codec: ReturnType<typeof createSecretCodec>;
+  checkpointedNextReconcileAt?: string | null;
+  checkpointedTemporalSweepKey?: string;
+  checkpointedReconcileProof?: string;
   deferNextReconcileAtToBaseline: boolean;
   hostedConnectionId: string;
   observedTokenVersion: number | null;
@@ -1714,28 +2092,45 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     update.sources = sources;
   }
 
-  if (input.account.status === "disconnected") {
-    if (baselineConnection?.status !== "disconnected") {
-      update.connection = {
-        ...(update.connection ?? {}),
-        status: "disconnected",
-      };
+  const disconnected = input.account.status === "disconnected";
+  const setupPhase = disconnected ? null : input.account.setupPhase ?? null;
+  const setupExpiresAt = disconnected ? null : input.account.setupExpiresAt ?? null;
+  const connection: NonNullable<HostedDeviceSyncRuntimeConnectionUpdate["connection"]> = {};
+
+  if (input.account.status !== baselineConnection?.status) {
+    connection.status = input.account.status;
+  }
+  if (setupPhase !== (baselineConnection?.setupPhase ?? null)) {
+    connection.setupPhase = setupPhase;
+  }
+  if (setupExpiresAt !== (baselineConnection?.setupExpiresAt ?? null)) {
+    connection.setupExpiresAt = setupExpiresAt;
+  }
+
+  if (!disconnected) {
+    if (input.account.displayName !== (baselineConnection?.displayName ?? null)) {
+      connection.displayName = input.account.displayName ?? null;
+    }
+    if (!equalStringArrays(input.account.scopes, baselineConnection?.scopes ?? [])) {
+      connection.scopes = [...input.account.scopes];
     }
 
-    if ((baselineConnection?.setupPhase ?? null) !== null) {
-      update.connection = {
-        ...(update.connection ?? {}),
-        setupPhase: null,
-      };
+    // A local marker only proves SQLite enqueue committed. Publish it only from
+    // an incoming retained wake: that wake and its exact remaining jobs already
+    // survived the workspace checkpoint. Before then, retain Web's marker.
+    const baselineMetadata = baselineConnection?.metadata ?? {};
+    const metadata = projectHostedCheckpointedConnectionMetadata(
+      input.account.metadata, baselineMetadata, input.checkpointedTemporalSweepKey, input.checkpointedReconcileProof,
+    );
+    if (!equalJsonRecords(metadata, baselineMetadata)) {
+      connection.metadata = metadata;
     }
+  }
+  if (Object.keys(connection).length > 0) {
+    update.connection = connection;
+  }
 
-    if ((baselineConnection?.setupExpiresAt ?? null) !== null) {
-      update.connection = {
-        ...(update.connection ?? {}),
-        setupExpiresAt: null,
-      };
-    }
-
+  if (disconnected) {
     if (baselineTokenBundle !== null) {
       update.observedTokenVersion = input.observedTokenVersion;
       assignHostedDeviceSyncRuntimeCredentialUpdate(update, {
@@ -1749,6 +2144,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
       account: input.account,
       baseline: baselineLocalState,
       deferToBaseline: input.deferNextReconcileAtToBaseline,
+      checkpointedNextReconcileAt: input.checkpointedNextReconcileAt,
     });
     assignMonotonicTimestampUpdate(
       update,
@@ -1760,52 +2156,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     return hasHostedDeviceSyncRuntimeConnectionUpdateChanges(update) ? update : null;
   }
 
-  if (input.account.status !== baselineConnection?.status) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      status: input.account.status,
-    };
-  }
-
-  if ((input.account.setupPhase ?? null) !== (baselineConnection?.setupPhase ?? null)) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      setupPhase: input.account.setupPhase ?? null,
-    };
-  }
-
-  if ((input.account.setupExpiresAt ?? null) !== (baselineConnection?.setupExpiresAt ?? null)) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      setupExpiresAt: input.account.setupExpiresAt ?? null,
-    };
-  }
-
-  if (input.account.displayName !== (baselineConnection?.displayName ?? null)) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      displayName: input.account.displayName ?? null,
-    };
-  }
-
-  if (!equalStringArrays(input.account.scopes, baselineConnection?.scopes ?? [])) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      scopes: [...input.account.scopes],
-    };
-  }
-
-  if (!equalJsonRecords(input.account.metadata, baselineConnection?.metadata ?? {})) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      metadata: { ...input.account.metadata },
-    };
-  }
-
   assignCanonicalNextReconcileAtUpdate(update, {
     account: input.account,
     baseline: baselineLocalState,
     deferToBaseline: input.deferNextReconcileAtToBaseline,
+    checkpointedNextReconcileAt: input.checkpointedNextReconcileAt,
   });
 
   if (!equalHostedDeviceSyncRuntimeCredentials(credential, baselineCredential)) {
@@ -2776,11 +3131,19 @@ function assignCanonicalNextReconcileAtUpdate(
     account: Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "status">;
     baseline: HostedDeviceSyncRuntimeLocalStateSnapshot | null;
     deferToBaseline: boolean;
+    checkpointedNextReconcileAt?: string | null;
   },
 ): void {
   const baselineValue = input.baseline?.nextReconcileAt ?? null;
+  // A retained wake already checkpointed the preceding pass's provider cadence.
+  // Future history jobs must not hold that proven progress at an old Web date.
+  // Never publish this pass's later cadence or bypass an earlier local due time.
+  const checkpointedNextReconcileAt = input.account.status === "active"
+    && input.account.nextReconcileAt && input.checkpointedNextReconcileAt
+    ? earliestIsoTimestamp(input.account.nextReconcileAt, input.checkpointedNextReconcileAt)
+    : null;
   const nextReconcileAt = input.deferToBaseline
-    ? baselineValue
+    ? resolveHostedWakeNextReconcileAt(baselineValue, checkpointedNextReconcileAt) ?? baselineValue
     : input.account.nextReconcileAt ?? null;
 
   if (

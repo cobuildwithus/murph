@@ -20,7 +20,7 @@ const replaySafeRequests = [
     action: "ask",
     request: {
       action: "ask",
-      groupLabel: "100 Club",
+      membershipId: "membership_100_club",
       originAssistantInputId: `ain_${"a".repeat(32)}`,
       originSessionId: "session_private",
       question: "What exercises are scheduled today?",
@@ -47,6 +47,21 @@ const replaySafeRequests = [
     response: {
       action: "ask_member",
       result: { status: "accepted" },
+    },
+    wireRequest: undefined,
+    wireResponse: undefined,
+  },
+  {
+    action: "handoff",
+    request: {
+      action: "handoff",
+      context: "The member set a personal record today.",
+      membershipId: "membership_100_club",
+      originAssistantInputId: `ain_${"f".repeat(32)}`,
+    },
+    response: {
+      action: "handoff",
+      result: { status: "accepted", targetLabel: "100 Club" },
     },
     wireRequest: undefined,
     wireResponse: undefined,
@@ -166,6 +181,9 @@ const hostedGroupToolTransports = [
   },
 ] as const;
 const dailyMetricReplay = replaySafeRequests.at(-1)!;
+const handoffReplay = replaySafeRequests.find(
+  ({ request }) => request.action === "handoff",
+)!;
 
 describe("hosted group tool exact replay", () => {
   it.each(replaySafeRequests)(
@@ -220,6 +238,66 @@ describe("hosted group tool exact replay", () => {
         return requestBodies.length === 1
           ? createLostBodyResponse(200)
           : createJsonResponse(response);
+      });
+      const port = createHostedRuntimeGroupToolPort({
+        boundUserId: "member-bound",
+        fetchImpl,
+        timeoutMs: 5_000,
+        transport: create(),
+      });
+
+      await expect(port.request(request)).resolves.toEqual(response);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(requestBodies).toEqual([
+        JSON.stringify(request),
+        JSON.stringify(request),
+      ]);
+    },
+  );
+
+  it.each(hostedGroupToolTransports)(
+    "exact-replays a committed handoff after a lost $mode response body",
+    async ({ create }) => {
+      const { request, response } = handoffReplay;
+      const requestBodies: BodyInit[] = [];
+      const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
+        if (init?.body) {
+          requestBodies.push(init.body);
+        }
+        return requestBodies.length === 1
+          ? createLostBodyResponse(200)
+          : createJsonResponse(response);
+      });
+      const port = createHostedRuntimeGroupToolPort({
+        boundUserId: "member-bound",
+        fetchImpl,
+        timeoutMs: 5_000,
+        transport: create(),
+      });
+
+      await expect(port.request(request)).resolves.toEqual(response);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(requestBodies).toEqual([
+        JSON.stringify(request),
+        JSON.stringify(request),
+      ]);
+    },
+  );
+
+  it.each(hostedGroupToolTransports)(
+    "exact-replays a committed handoff after a retryable $mode 5xx",
+    async ({ create }) => {
+      const { request, response } = handoffReplay;
+      const responses = [
+        createJsonResponse({ error: "temporarily unavailable" }, 503),
+        createJsonResponse(response),
+      ];
+      const requestBodies: BodyInit[] = [];
+      const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
+        if (init?.body) {
+          requestBodies.push(init.body);
+        }
+        return responses.shift()!;
       });
       const port = createHostedRuntimeGroupToolPort({
         boundUserId: "member-bound",

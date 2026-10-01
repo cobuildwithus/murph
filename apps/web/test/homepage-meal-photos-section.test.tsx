@@ -7,9 +7,12 @@ import { test } from "vitest";
 import { MealPhotosSection } from "@/src/components/homepage/meal-photos-section";
 
 test("MealPhotosSection renders the static photo calorie counting copy", () => {
-  const markup = renderToStaticMarkup(createElement(MealPhotosSection));
+  const markup = renderToStaticMarkup(
+    createElement(MealPhotosSection, { authenticated: false }),
+  );
 
-  assert.match(markup, /Calorie counting/);
+  assert.doesNotMatch(markup, /Calorie counting/);
+  assert.match(markup, /Try it now/);
   assert.doesNotMatch(markup, /Coming next week/);
   assert.match(markup, /The calorie tracker you never open\./);
   assert.match(
@@ -26,7 +29,6 @@ test("MealPhotosSection renders the static photo calorie counting copy", () => {
     markup,
     /No app to open\. Your phone flags the food photos on its own, and Murph logs them for you\./,
   );
-  assert.match(markup, /Your camera roll/);
   assert.match(markup, /✓ Logged/);
   assert.match(markup, /Grain bowl/);
   assert.match(markup, /≈ 570 cal/);
@@ -40,8 +42,6 @@ test("MealPhotosSection renders the static photo calorie counting copy", () => {
     markup,
     /Dinner closed you out at 2,140\. That&#x27;s five days straight hitting your protein target\./,
   );
-  assert.match(markup, /Daily tally/);
-  assert.match(markup, /3 meals/);
   assert.match(markup, /2,140 cal/);
   assert.match(markup, /138 g/);
   assert.match(markup, /214 g/);

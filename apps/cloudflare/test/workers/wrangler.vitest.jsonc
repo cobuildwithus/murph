@@ -7,10 +7,6 @@
   "durable_objects": {
     "bindings": [
       {
-        "name": "USER_RUNNER",
-        "class_name": "VitestUserRunnerDurableObject"
-      },
-      {
         "name": "RUNNER_CONTAINER",
         "class_name": "RunnerContainerTestDouble"
       },
@@ -21,14 +17,14 @@
       {
         "name": "DEVICE_WEBHOOK_QUEUE_MONITOR",
         "class_name": "DeviceWebhookQueueHealthDurableObject"
+      },
+      {
+        "name": "OPENAI_AUTHORIZATION_ALERT_MONITOR",
+        "class_name": "VitestOpenAiAuthorizationAlertDurableObject"
       }
     ]
   },
   "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["VitestUserRunnerDurableObject"]
-    },
     {
       "tag": "v2",
       "new_sqlite_classes": ["RunnerContainerTestDouble"]
@@ -40,6 +36,10 @@
     {
       "tag": "v4",
       "new_sqlite_classes": ["DeviceWebhookQueueHealthDurableObject"]
+    },
+    {
+      "tag": "v5",
+      "new_sqlite_classes": ["VitestOpenAiAuthorizationAlertDurableObject"]
     }
   ],
   "queues": {
@@ -75,7 +75,7 @@
     "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION": "org-worker-test",
     "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN": "service-token",
     "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID": "service-token-id",
-    "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS": "54000",
+    "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS": "54000",
     "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS": "3",
     "HOSTED_EXECUTION_RETRY_DELAY_MS": "1000",
     "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME": "murph-web",
@@ -83,6 +83,7 @@
     "HOSTED_WEB_BASE_URL": "http://127.0.0.1:8913",
     "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK": "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"d\":\"HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ\",\"ext\":true,\"key_ops\":[\"sign\"]}",
     "LINQ_API_TOKEN": "linq-token",
+    "OPENAI_API_KEY": "openai-worker-test-key",
     "MURPH_HOSTED_EXECUTION_STDIO_LOGS": "0",
     "VITEST": "true"
   }

@@ -1,21 +1,9 @@
 import { MessageCircle } from "lucide-react";
 
-import {
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@/src/components/ui/sidebar";
-import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
-import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { SidebarMenuButton, SidebarMenuItem } from "@/src/components/ui/sidebar";
+import { HostedMurphChatAction } from "@/src/components/murph/hosted-murph-contact-action";
 import { cn } from "@/src/lib/utils";
-import {
-  SIDEBAR_NAV_ICON_CLASS,
-  SIDEBAR_NAV_ITEM_CLASS,
-} from "./sidebar-nav-classes";
-import {
-  SidebarChatWithMurphAuthGate,
-  SidebarChatWithMurphSettingsGate,
-} from "./sidebar-chat-auth-gate";
-import { SidebarChatWithMurphContactDialog } from "./sidebar-chat-contact-dialog";
+import { SIDEBAR_NAV_ICON_CLASS, SIDEBAR_NAV_ITEM_CLASS } from "./sidebar-nav-classes";
 
 export function SidebarChatWithMurphFallback() {
   return (
@@ -34,41 +22,15 @@ export function SidebarChatWithMurphFallback() {
 }
 
 export async function SidebarChatWithMurphAction() {
-  const options = await resolveHostedMurphContactOptions();
+  const action = await HostedMurphChatAction({
+    label: "Chat with Murph",
+    button: (
+      <SidebarMenuButton size="lg" className={SIDEBAR_NAV_ITEM_CLASS}>
+        <MessageCircle className={SIDEBAR_NAV_ICON_CLASS} />
+        Chat with Murph
+      </SidebarMenuButton>
+    ),
+  });
 
-  if (options.length === 0) {
-    const auth = await getHostedPageAuthSnapshot();
-    return auth.authenticated
-      ? <SidebarChatWithMurphSettingsGate />
-      : <SidebarChatWithMurphAuthGate />;
-  }
-
-  if (options.length > 1) {
-    return <SidebarChatWithMurphContactDialog options={options} />;
-  }
-
-  const option = options[0];
-  const opensInNewTab = option.target === "_blank";
-
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        size="lg"
-        className={SIDEBAR_NAV_ITEM_CLASS}
-        render={
-          <a
-            href={option.href}
-            target={option.target}
-            rel={option.rel}
-            aria-label={`Chat with Murph in ${option.label}${
-              opensInNewTab ? " (opens in a new tab)" : ""
-            }`}
-          >
-            <MessageCircle className={SIDEBAR_NAV_ICON_CLASS} />
-            Chat with Murph
-          </a>
-        }
-      />
-    </SidebarMenuItem>
-  );
+  return <SidebarMenuItem>{action}</SidebarMenuItem>;
 }

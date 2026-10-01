@@ -19,9 +19,6 @@ import {
   mapHostedInferenceConnectionError,
 } from "@/src/lib/hosted-inference/route-helpers";
 import {
-  scheduleHostedInferenceRuntimeWake,
-} from "@/src/lib/hosted-inference/runtime-wake";
-import {
   verifyHostedInferenceConnectionCandidate,
 } from "@/src/lib/hosted-inference/verification-client";
 import {
@@ -95,7 +92,6 @@ export const PUT = withJsonError(async (request: Request) => {
       memberId: auth.member.id,
       prisma,
     });
-    scheduleHostedInferenceRuntimeWake(auth.member.id);
     return jsonOk({ connection });
   } catch (error) {
     throw mapHostedInferenceConnectionError(error);
@@ -121,9 +117,6 @@ export const DELETE = withJsonError(async (request: Request) => {
       expectedRevision,
       memberId: auth.member.id,
     });
-    if (result.selected) {
-      scheduleHostedInferenceRuntimeWake(auth.member.id);
-    }
     return jsonOk(result);
   } catch (error) {
     throw mapHostedInferenceConnectionError(error);

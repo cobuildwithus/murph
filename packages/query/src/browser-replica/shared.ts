@@ -8,12 +8,13 @@ import {
 } from "@murphai/contracts/browser-vault";
 import type {
   OverviewExperiment,
-  OverviewExperimentSummary,
-  OverviewJournalEntry,
-  OverviewMetric,
   OverviewWeeklySampleSummary,
 } from "../overview.ts";
-import type { PersonalPatternReport } from "../personal-patterns.ts";
+import type {
+  PersonalPatternReport,
+  PersonalPatternVocabulary,
+} from "../personal-patterns.ts";
+import type { JournalView } from "../journal-view.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import type { TimelineEntry } from "../timeline.ts";
 import type {
@@ -323,6 +324,8 @@ export interface BrowserVaultReplica {
   /** Absent only on legacy replicas produced before generation-aware freshness. */
   generation?: number;
   labResultRows: BrowserVaultLabResultRow[];
+  /** Absent only on replicas produced before the derived Journal view shipped. */
+  journal?: JournalView;
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
   metricSelectionRows: BrowserVaultMetricSelectionRow[];
@@ -347,6 +350,7 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   | "generatedAt"
   | "generation"
   | "hasLabBiomarkers"
+  | "journal"
   | "personalPatterns"
   | "policy"
   | "schema"
@@ -394,6 +398,8 @@ export interface CreateBrowserVaultReplicaInput {
   experimentOutcomes?: readonly ExperimentOutcome[];
   generatedAt?: string;
   metricPoints: readonly MetricPoint[];
+  personalPatternVocabulary?: PersonalPatternVocabulary | null;
+  signal?: AbortSignal;
   sourceBundleHash: string;
   vault: VaultReadModel;
 }
@@ -544,12 +550,3 @@ export type BrowserVaultLabsCapableQueryClient =
   | BrowserVaultLabsQueryClient
   | BrowserVaultInteractiveQueryClient
   | BrowserVaultQueryClient;
-
-export interface BrowserVaultOverviewView {
-  experimentSummary: OverviewExperimentSummary;
-  metrics: OverviewMetric[];
-  personalPatterns: PersonalPatternReport;
-  recentJournals: OverviewJournalEntry[];
-  trackedExperiments: OverviewExperiment[];
-  weeklySampleSummaries: OverviewWeeklySampleSummary[];
-}

@@ -2,7 +2,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import {
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
-  requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
   requireDeviceProviderWebhookDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
@@ -75,10 +74,9 @@ const OURA_AUTHORIZE_PATH = "/oauth/authorize";
 const OURA_REVOKE_PATH = "/oauth/revoke";
 const OURA_TOKEN_PATH = "/oauth/token";
 const OURA_PROVIDER_DESCRIPTOR = OURA_DEVICE_PROVIDER_DESCRIPTOR;
-const OURA_OAUTH = requireDeviceProviderOAuthDescriptor(OURA_PROVIDER_DESCRIPTOR);
 const OURA_WEBHOOK = requireDeviceProviderWebhookDescriptor(OURA_PROVIDER_DESCRIPTOR);
 const OURA_SYNC = requireDeviceProviderSyncDescriptor(OURA_PROVIDER_DESCRIPTOR);
-const OURA_CALLBACK_PATH = OURA_OAUTH.callbackPath;
+const OURA_CALLBACK_PATH = OURA_PROVIDER_DESCRIPTOR.connection.callbackPath;
 const OURA_WEBHOOK_PATH = OURA_WEBHOOK.path;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_BACKFILL_DAYS = OURA_SYNC.windows.backfillDays;

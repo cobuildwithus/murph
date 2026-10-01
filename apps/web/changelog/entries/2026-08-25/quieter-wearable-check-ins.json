@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "quieter-wearable-check-ins",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Quieter wearable check-ins",
+    "summary": "Murph now waits five days before checking on a quiet supported wearable, and you can ask Murph to wait longer or stop checking.",
+    "details": "Missing data by itself is no longer described as a disconnected account; reconnect guidance is reserved for an authorization problem.",
+    "relevanceTags": ["wearables", "reliability"],
+    "sourcePullRequests": [2253]
+  }
+}

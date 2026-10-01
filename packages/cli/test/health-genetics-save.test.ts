@@ -281,10 +281,12 @@ test("genetics save rejects invalid source family member ids before writing", as
     assert.notEqual(saveResult.exitCode, null);
     assert.equal(saveResult.envelope.ok, false);
     if (!saveResult.envelope.ok) {
-      assert.match(
-        saveResult.envelope.error.message ?? "",
-        /family member id matching fam_<ULID>/u,
+      assert.equal(saveResult.envelope.error.message, "The command input is invalid.");
+      assert.equal(
+        saveResult.envelope.error.fieldErrors?.[0]?.path,
+        "sourceFamilyMemberId",
       );
+      assert.equal(saveResult.envelope.error.fieldErrors?.[0]?.received, "invalid");
     }
     assert.deepEqual(
       await listMarkdownFiles(path.join(vaultRoot, "bank/genetics")),
@@ -323,10 +325,9 @@ test("genetics save rejects invalid variant ids before writing", async () => {
     assert.equal(saveResult.envelope.ok, false);
     if (!saveResult.envelope.ok) {
       assert.equal(saveResult.envelope.error.code, "VALIDATION_ERROR");
-      assert.match(
-        saveResult.envelope.error.message ?? "",
-        /genetic variant id matching var_<ULID>/u,
-      );
+      assert.equal(saveResult.envelope.error.message, "The command input is invalid.");
+      assert.equal(saveResult.envelope.error.fieldErrors?.[0]?.path, "id");
+      assert.equal(saveResult.envelope.error.fieldErrors?.[0]?.received, "invalid");
     }
     assert.deepEqual(
       await listMarkdownFiles(path.join(vaultRoot, "bank/genetics")),

@@ -17,7 +17,7 @@
     "slug": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 120,
+      "maxLength": 160,
       "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
     },
     "title": {
@@ -657,9 +657,29 @@
                         "maxLength": 4000
                       },
                       "memberRepsPerSet": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 999
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 999
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "targetWeightPerSet": {
+                        "type": "number",
+                        "minimum": 0.01,
+                        "maximum": 9999,
+                        "multipleOf": 0.01
+                      },
+                      "targetWeightUnit": {
+                        "type": "string",
+                        "enum": [
+                          "lb",
+                          "kg"
+                        ]
                       },
                       "setPlanIsFinite": {
                         "type": "boolean"

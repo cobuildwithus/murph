@@ -27,6 +27,7 @@ import type {
   VaultInitResult,
   VaultValidateResult,
 } from "@murphai/operator-config/vault-cli-contracts"
+import type { AssistantOutboxIntent } from "@murphai/operator-config/assistant-cli-contracts"
 import type {
   AddCaptureRecordInput,
   CaptureAddResult,
@@ -55,12 +56,20 @@ import type {
   QueryMealNutritionDayTotal,
   QueryMealNutritionMetricTotal,
   QueryMealNutritionTotals,
+  QueryMealNutritionTotalsResult,
   QueryPersonalPatternReport,
   QueryRuntimeModule as SharedQueryRuntimeModule,
   QueryWearableSleepPatternSummary,
 } from "../query-runtime.js"
 
 export type { CommandContext } from "../health-cli-method-types.js"
+
+export interface IntegratedVaultServiceDependencies {
+  readAssistantOutboxIntent?: (
+    vault: string,
+    intentId: string,
+  ) => Promise<AssistantOutboxIntent | null>
+}
 
 export interface ProjectAssessmentInput extends CommandContext {
   assessmentId: string
@@ -96,6 +105,7 @@ type RegistryScheduleText = string
 
 export interface RegimenSaveInput extends CommandContext {
   regimenId?: string
+  requireExistingRegimenId?: boolean
   slug?: string
   allowSlugRename?: boolean
   rejectExistingSlug?: boolean
@@ -126,6 +136,7 @@ export interface RegimenSaveInput extends CommandContext {
 
 export interface SupplementSaveInput extends CommandContext {
   regimenId?: string
+  requireExistingRegimenId?: boolean
   slug?: string
   status?: RegimenStatus
   startedOn?: string
@@ -336,6 +347,7 @@ export type MealNutritionTotals = QueryMealNutritionTotals
 export type MealNutritionDayResult = QueryMealNutritionDayTotal
 
 export interface MealNutritionTotalsResult {
+  goalContext?: QueryMealNutritionTotalsResult['goalContext']
   vault: string
   filters: {
     from: string | null
@@ -1360,6 +1372,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
   ): Promise<FoodListResult>
   showMealNutritionTotals(
     input: CommandContext & {
+      resolveGoals?: boolean
       from?: string
       to?: string
     },
@@ -1524,6 +1537,8 @@ export interface QueryServices extends HealthQueryServiceMethods {
       to?: string
       providers?: string[]
       limit: number
+      includeWorkoutDetails?: boolean
+      includeWorkoutSummaries?: boolean
     },
   ): Promise<WearableActivityListResult>
   listWearableBodyState(
@@ -1812,6 +1827,7 @@ export interface ImportersRuntime {
     mealId: string
     event: {
       id: string
+      dayKey: string
       occurredAt?: string | null
       note?: string | null
       source?: ImporterSource | null
@@ -1868,6 +1884,9 @@ export interface ImportersRuntime {
     filePath: string
     vaultRoot: string
     title?: string
+    assessmentType?: string
+    questionnaireSlug?: string
+    relatedIds?: string[]
     occurredAt?: string
     importedAt?: string
     source?: string

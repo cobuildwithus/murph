@@ -8,7 +8,8 @@ import type {
 export function buildResponseCardValidationFeedback(
   digest: SafeToolCallValidationDigest,
 ): string {
-  return buildToolCallValidationFeedback(digest, {
-    error: 'invalid_response_card_arguments',
-  })
+  return buildToolCallValidationFeedback(
+    digest,
+    'invalid_response_card_arguments',
+  )
 }

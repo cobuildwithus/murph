@@ -11,9 +11,10 @@ const MEMBER_ID = "member_orch_1";
 const UNSAFE_SENTINEL = "UNSAFE_STATUS_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
   getPrisma: vi.fn(),
-  hasHostedMailboxMealPhotoCaptureSince: vi.fn(),
+  hasHostedMailboxAutomationEngagementSince: vi.fn(),
   hasHostedLinqInboundWithinDays: vi.fn(),
   hasHostedMemberEstablishedLinqThreadRoute: vi.fn(),
   hasHostedMemberEstablishedLinqHomeRoute: vi.fn(),
@@ -26,7 +27,6 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxLatestPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMailboxPayload: vi.fn(),
-  readPendingHostedEnvironmentInterviewMailboxItem: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readSelectedHostedInferenceConnectionOverride: vi.fn(),
@@ -38,14 +38,31 @@ const mocks = vi.hoisted(() => ({
   tryMarkHostedMailboxConversationAiUsageDenied: vi.fn(),
 }));
 
+// Row fixtures retain their state-based access decisions; the PostgreSQL
+// proof exercises the database-filtered boolean gate.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  after: mocks.after,
+}));
+
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   decodeHostedMailboxStoredPayload: mocks.decodeHostedMailboxStoredPayload,
-  hasHostedMailboxMealPhotoCaptureSince:
-    mocks.hasHostedMailboxMealPhotoCaptureSince,
+  hasHostedMailboxAutomationEngagementSince:
+    mocks.hasHostedMailboxAutomationEngagementSince,
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxFirstLiveSystemItemAfterSeq:
     mocks.readHostedMailboxFirstLiveSystemItemAfterSeq,
@@ -53,8 +70,6 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
     mocks.readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload: mocks.readHostedMailboxPayload,
-  readPendingHostedEnvironmentInterviewMailboxItem:
-    mocks.readPendingHostedEnvironmentInterviewMailboxItem,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
   tryMarkHostedMailboxConversationAiUsageDenied:
     mocks.tryMarkHostedMailboxConversationAiUsageDenied,
@@ -150,12 +165,11 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.getPrisma.mockReturnValue(createPrismaClientStub());
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
-    mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue(null);
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord());
     mocks.hostedConsentGrantFindUnique.mockResolvedValue(null);
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
     mocks.hasHostedMemberEstablishedLinqThreadRoute.mockResolvedValue(false);
-    mocks.hasHostedMailboxMealPhotoCaptureSince.mockResolvedValue(false);
+    mocks.hasHostedMailboxAutomationEngagementSince.mockResolvedValue(false);
     mocks.hasHostedLinqInboundWithinDays.mockImplementation(async () => {
       throw new Error("Configure Linq inbound evidence explicitly for engagement tests.");
     });
@@ -223,6 +237,45 @@ describe("hosted orchestration reconciliation facts", () => {
         nextWakeAt: FIXED_NOW,
         nextWakeReason: "assistant",
       }));
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(false);
+    });
+
+    it("signals for an imported live system item beyond handled-through", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        redactedStatusJson: {
+          hostedMailboxSystemHandledThroughSeq: "0",
+          systemImportedSeq: "1",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "system", maxSeq: "1" },
+      ]);
+      mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockResolvedValue({
+        dedupeKey: "device-sync.wake:owner-release-actionable",
+        kind: "device-sync.wake",
+        laneSeq: "1",
+      });
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(true);
+      expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenCalledWith({
+        afterSeq: "0",
+        at: new Date(FIXED_NOW),
+        prisma: expect.any(Object),
+        userId: MEMBER_ID,
+      });
+    });
+
+    it("preserves the owner horizon when the system high-water has no live item", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        redactedStatusJson: {
+          hostedMailboxSystemHandledThroughSeq: "0",
+          systemImportedSeq: "1",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "system", maxSeq: "1" },
+      ]);
 
       await expect(readOwnerReleaseActionable()).resolves.toBe(false);
     });
@@ -364,6 +417,88 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(JSON.stringify(body)).not.toContain("redactedStatus");
     expect(JSON.stringify(body)).not.toContain(UNSAFE_SENTINEL);
     expect(JSON.stringify(body)).not.toMatch(/payload|message|transcript|source/u);
+    expect(facts.workspace).not.toHaveProperty("nextDefaultProcessingWakeAt");
+    expect(facts.workspace).not.toHaveProperty("nextDefaultProcessingWakeReason");
+    expect(facts.workspace).not.toHaveProperty("systemMailboxProgressGeneration");
+  });
+
+  it("returns the capable system progress projection as one reconciliation facts group", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextDefaultProcessingWakeAt: "2026-05-20T12:05:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    }));
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.workspace).toMatchObject({
+      nextDefaultProcessingWakeAt: "2026-05-20T12:05:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["nextWakeAt"],
+    ["nextDefaultProcessingWakeAt"],
+    ["inboxMediaRetentionWakeAt"],
+  ] as const)("logs due %s as work pending without mailbox lag", async (field) => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      [field]: FIXED_NOW,
+      systemMailboxProgressGeneration: "1",
+    }));
+
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime reconciliation facts.",
+      expect.objectContaining({ conversationLagPresent: false, status: "work_pending" }),
+    );
+  });
+
+  it("logs future workspace wakes as idle", async () => {
+    const future = "2026-05-20T12:01:00.000Z";
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: future,
+      nextDefaultProcessingWakeAt: future,
+      nextWakeAt: future,
+      systemMailboxProgressGeneration: "1",
+    }));
+
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime reconciliation facts.",
+      expect.objectContaining({ status: "idle" }),
+    );
+  });
+
+  it("keeps blocked status when a workspace wake is due", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(null);
+    mocks.hostedMemberFindUnique.mockResolvedValue(null);
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW,
+    }));
+
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime reconciliation facts.",
+      expect.objectContaining({ status: "blocked" }),
+    );
   });
 
   it("logs one metadata-only reconciliation record", async () => {
@@ -373,7 +508,9 @@ describe("hosted orchestration reconciliation facts", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(consoleInfoSpy).toHaveBeenCalledTimes(1);
+    expect(consoleInfoSpy.mock.calls.filter(
+      ([message]: readonly unknown[]) => message === "Hosted runtime reconciliation facts.",
+    )).toHaveLength(1);
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "Hosted runtime reconciliation facts.",
       {
@@ -389,9 +526,12 @@ describe("hosted orchestration reconciliation facts", () => {
         usageGateStatus: "not_required",
         userIdPresent: true,
         workspaceInboxMediaRetentionWakeAtPresent: false,
+        workspaceNextDefaultProcessingWakeAtPresent: false,
+        workspaceNextDefaultProcessingWakeReason: null,
         workspaceNextWakeAtPresent: false,
         workspaceNextWakeReason: null,
         workspacePresent: true,
+        workspaceSystemMailboxProgressGenerationPresent: false,
       },
     );
     const loggedMetadata = consoleInfoSpy.mock.calls[0]?.[1];
@@ -400,6 +540,84 @@ describe("hosted orchestration reconciliation facts", () => {
     );
     expect(JSON.stringify(loggedMetadata)).not.toContain(MEMBER_ID);
   });
+
+  it.each([
+    {
+      arrange: (failure: Error) => {
+        mocks.readHostedWorkspace.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_access_workspace",
+    },
+    {
+      arrange: (failure: Error) => {
+        mocks.hostedConsentGrantFindUnique.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_consent",
+    },
+    {
+      arrange: (failure: Error) => {
+        mocks.readHostedMailboxMaxSeqByLane.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_mailbox",
+    },
+    {
+      arrange: (failure: Error) => {
+        const workspace = buildWorkspaceRecord();
+        Object.defineProperty(workspace, "nextWakeAt", {
+          get() { throw failure; },
+        });
+        mocks.readHostedWorkspace.mockResolvedValueOnce(workspace);
+      },
+      stage: "canonical_projection",
+    },
+    {
+      arrange: (failure: Error) => {
+        mocks.readHostedWorkspace.mockResolvedValueOnce(buildWorkspaceRecord({
+          nextWakeAt: "2026-05-20T11:59:59.000Z",
+          nextWakeReason: "assistant_due",
+        }));
+        mocks.resolveHostedRuntimeAiUsageGate.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_usage",
+    },
+  ] as const)(
+    "logs a fixed failure record for $stage",
+    async ({ arrange, stage }) => {
+      const failure = new Error("synthetic canonical reconciliation failure");
+      const consoleErrorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      arrange(failure);
+
+      const response = await reconciliationRoute.GET(
+        requestForFacts(),
+        routeContext(),
+      );
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Internal error.",
+        },
+      });
+      expect(
+        consoleErrorSpy.mock.calls.filter(
+          ([message]) =>
+            message === "Hosted runtime reconciliation facts failed.",
+        ),
+      ).toEqual([
+        [
+          "Hosted runtime reconciliation facts failed.",
+          {
+            errorClass: "error",
+            schema: "murph.hosted-runtime.reconciliation-facts.failure.v1",
+            stage,
+          },
+        ],
+      ]);
+    },
+  );
 
   it("imports pending system mailbox work before applying model gates", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -572,6 +790,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(facts.workspace).toMatchObject({
       inboxMediaRetentionWakeAt: FIXED_NOW,
+      systemMailboxFrontier: null,
       version: "4",
     });
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
@@ -619,6 +838,16 @@ describe("hosted orchestration reconciliation facts", () => {
   it.each([
     ["device-sync.wake", "device-sync.wake:item", "model_free"],
     [
+      "health.daily-metric.reported",
+      "health.daily-metric.reported:item",
+      "model_free",
+    ],
+    [
+      "environment-interview.completed",
+      "environment-interview.completed:item",
+      "model_free",
+    ],
+    [
       "assistant.notification.requested",
       "assistant.notification.requested:group-join:membership",
       "model_free",
@@ -665,6 +894,28 @@ describe("hosted orchestration reconciliation facts", () => {
       });
     },
   );
+
+  it("exposes independent model-free work behind an assistant item without advancing handled progress", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "0", hostedMailboxSystemHandledThroughSeq: "4", systemImportedSeq: "4",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "0" }, { lane: "system", maxSeq: "6" },
+    ]);
+    mocks.readHostedMailboxFirstLiveSystemItemAfterSeq
+      .mockResolvedValueOnce({ dedupeKey: "assistant.ask.completed:synthetic", kind: "assistant.ask.completed", laneSeq: "5" })
+      .mockResolvedValueOnce({ dedupeKey: "device-sync.wake:synthetic", kind: "device-sync.wake", laneSeq: "6" });
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    expect(facts.workspace?.systemMailboxFrontier).toBe("model_free");
+    expect(facts.workspace?.hostedMailboxSystemHandledThroughSeq).toBe("4");
+    expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenLastCalledWith({
+      afterSeq: "4", at: new Date(FIXED_NOW), modelFreeOnly: true,
+      prisma: expect.objectContaining({ kind: "prisma" }), userId: MEMBER_ID,
+    });
+  });
 
   it("uses zero as the system handled frontier when no checkpoint exists", async () => {
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
@@ -845,6 +1096,55 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
+  it.each(["allowed", "health_data_consent_withdrawn"] as const)(
+    "does not depend on custom inference lookup when usage admission is %s",
+    async (status) => {
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "conversation", maxSeq: "1" },
+      ]);
+      mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status });
+      mocks.readSelectedHostedInferenceConnectionOverride.mockRejectedValue(
+        new Error("Unavailable custom inference selection."),
+      );
+
+      const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+      const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+      expect(response.status).toBe(200);
+      expect(facts.blocked?.reason ?? null).toBe(
+        status === "allowed" ? null : "health_data_consent_withdrawn",
+      );
+      expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+        mode: "mutating",
+        now: new Date(FIXED_NOW),
+        userId: MEMBER_ID,
+      });
+      expect(mocks.readSelectedHostedInferenceConnectionOverride).not.toHaveBeenCalled();
+      expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails closed without issuing a usage notice when a denied override lookup fails", async () => {
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "1" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildUsageLimitExceededGateDecision(),
+      status: "denied",
+    });
+    mocks.readSelectedHostedInferenceConnectionOverride.mockRejectedValue(
+      new Error("Unavailable custom inference selection."),
+    );
+
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(response.status).toBe(500);
+    expect(mocks.readSelectedHostedInferenceConnectionOverride).toHaveBeenCalledOnce();
+    expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).not.toHaveBeenCalled();
+  });
+
   it("admits member-funded custom core inference when managed usage is denied", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: FIXED_NOW,
@@ -861,7 +1161,7 @@ describe("hosted orchestration reconciliation facts", () => {
       revision: 3,
       supportsImages: false,
       verificationProfile:
-        "murph-codex-0.147.0-portable-responses-v1",
+        "murph-codex-0.151.0-portable-responses-v1",
     });
 
     const response = await reconciliationRoute.GET(
@@ -1275,6 +1575,35 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])("observes authoritative usage-limited=%s without changing admission", async (usageLimited) => {
+    const onUsageGateDecision = vi.fn();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW, nextWakeReason: "assistant_due",
+    }));
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue(usageLimited
+      ? { status: "denied", decision: buildUsageLimitExceededGateDecision() }
+      : { status: "allowed" });
+    const { readHostedRuntimeReconciliationFacts } = await import(
+      "../src/lib/hosted-orchestration/runtime-reconciliation-facts"
+    );
+    const facts = await readHostedRuntimeReconciliationFacts({ userId: MEMBER_ID, onUsageGateDecision });
+    expect(onUsageGateDecision).toHaveBeenCalledExactlyOnceWith({ at: FIXED_NOW, usageLimited });
+    expect(facts.blocked?.reason ?? null).toBe(usageLimited ? "ai_usage_denied" : null);
+    onUsageGateDecision.mockClear();
+    await readHostedRuntimeReconciliationFacts({ userId: MEMBER_ID, usageGateMode: "read_only", onUsageGateDecision });
+    expect(onUsageGateDecision).not.toHaveBeenCalled();
+    mocks.readSelectedHostedInferenceConnectionOverride.mockResolvedValue({ kind: "synthetic_override" });
+    const overrideFacts = await readHostedRuntimeReconciliationFacts({ userId: MEMBER_ID, onUsageGateDecision });
+    expect(overrideFacts.blocked).toBeNull();
+    expect(onUsageGateDecision).toHaveBeenCalledExactlyOnceWith({ at: FIXED_NOW, usageLimited: false });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await expect(readHostedRuntimeReconciliationFacts({
+        userId: MEMBER_ID, onUsageGateDecision: () => { throw new Error("synthetic scheduling failure"); },
+      })).resolves.toMatchObject({ blocked: null });
+    } finally { warning.mockRestore(); }
+  });
+
   it("does not gate future model-capable workspace wakes", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T12:05:00.000Z",
@@ -1289,6 +1618,41 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("AI-gates a due default-processing wake hidden behind an earlier system wake", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    }));
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildUsageLimitExceededGateDecision(),
+      status: "denied",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked?.reason).toBe("ai_usage_denied");
+    expect(facts.workspace).toMatchObject({
+      nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "mutating",
+      now: new Date(FIXED_NOW),
+      userId: MEMBER_ID,
+    });
   });
 
   it("does not block thread-container runtime facts when an active participant keeps an inactive-owner group alive", async () => {
@@ -1325,216 +1689,40 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
-  it("does not pause due automation wakes for members without an established Linq route", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: "2026-05-20T11:59:59.000Z",
-      nextWakeReason: "assistant_due",
-    }));
-    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+  it.each(["allowed", "denied"] as const)(
+    "admits default work independently of dormant Linq engagement with %s usage",
+    async (usageStatus) => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",
+        nextDefaultProcessingWakeReason: "assistant_due",
+        nextWakeAt: "2026-05-20T13:00:00.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        systemMailboxProgressGeneration: "7",
+      }));
+      mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(true);
+      mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
+      mocks.hasHostedMailboxAutomationEngagementSince.mockResolvedValue(false);
+      mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue(
+        usageStatus === "allowed"
+          ? { status: "allowed" }
+          : { decision: buildUsageLimitExceededGateDecision(), status: "denied" },
+      );
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(facts.blocked).toBeNull();
-    expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-    });
-    expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-    });
-    expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
-      now: new Date(FIXED_NOW),
-      userId: MEMBER_ID,
-    });
-  });
-
-  it("pauses due automation wakes when a Linq thread-container route has no recent inbound day", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: "2026-05-20T11:59:59.000Z",
-      nextWakeReason: "assistant_due",
-      redactedStatusJson: {
-        conversationImportedSeq: "0",
-        hostedMailboxSystemHandledThroughSeq: "4",
-        systemImportedSeq: "4",
-      },
-    }));
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      { lane: "conversation", maxSeq: "0" },
-      { lane: "system", maxSeq: "5" },
-    ]);
-    mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockResolvedValue({
-      dedupeKey: "assistant.ask.completed:item",
-      kind: "assistant.ask.completed",
-      laneSeq: "5",
-    });
-    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
-    mocks.hasHostedMemberEstablishedLinqThreadRoute.mockResolvedValue(true);
-    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(facts.blocked).toEqual({
-      reason: "automation_engagement_paused",
-      retryAt: "2026-05-21T12:00:00.000Z",
-    });
-    expect(facts.workspace?.systemMailboxFrontier).toBe("default_owned");
-    expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-    });
-    expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-    });
-    expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      now: new Date(FIXED_NOW),
-      prisma: expect.objectContaining({ kind: "prisma" }),
-    });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-  });
-
-  it("allows due automation wakes when a Linq thread-container route has a qualifying inbound day", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: "2026-05-20T11:59:59.000Z",
-      nextWakeReason: "assistant_due",
-    }));
-    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
-    mocks.hasHostedMemberEstablishedLinqThreadRoute.mockResolvedValue(true);
-    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(true);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(facts.blocked).toBeNull();
-    expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-    });
-    expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-    });
-    expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      now: new Date(FIXED_NOW),
-      prisma: expect.objectContaining({ kind: "prisma" }),
-    });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
-      now: new Date(FIXED_NOW),
-      userId: MEMBER_ID,
-    });
-  });
-
-  it("pauses due automation wakes when an established Linq home route has no recent inbound day", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: "2026-05-20T11:59:59.000Z",
-      nextWakeReason: "assistant_due",
-    }));
-    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(true);
-    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(facts.blocked).toEqual({
-      reason: "automation_engagement_paused",
-      retryAt: "2026-05-21T12:00:00.000Z",
-    });
-    expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-    });
-    expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).not.toHaveBeenCalled();
-    expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      now: new Date(FIXED_NOW),
-      prisma: expect.objectContaining({ kind: "prisma" }),
-    });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-  });
-
-  it("allows due automation wakes when an established Linq home route has a qualifying inbound day", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: "2026-05-20T11:59:59.000Z",
-      nextWakeReason: "assistant_due",
-    }));
-    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(true);
-    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(true);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(facts.blocked).toBeNull();
-    expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-    });
-    expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).not.toHaveBeenCalled();
-    expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalled();
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
-      now: new Date(FIXED_NOW),
-      userId: MEMBER_ID,
-    });
-  });
-
-  it("uses an accepted meal capture as member-wide engagement for a generic due automation wake", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: "2026-05-20T11:59:59.000Z",
-      nextWakeReason: "assistant_due",
-    }));
-    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(true);
-    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
-    mocks.hasHostedMailboxMealPhotoCaptureSince.mockResolvedValue(true);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(facts.blocked).toBeNull();
-    expect(mocks.hasHostedMailboxMealPhotoCaptureSince).toHaveBeenCalledWith({
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      since: new Date("2026-04-22T12:00:00.000Z"),
-      userId: MEMBER_ID,
-    });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
-      now: new Date(FIXED_NOW),
-      userId: MEMBER_ID,
-    });
-  });
+      const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+      const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+      expect(response.status).toBe(200);
+      expect(facts.blocked?.reason ?? null).toBe(
+        usageStatus === "allowed" ? null : "ai_usage_denied",
+      );
+      expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).not.toHaveBeenCalled();
+      expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).not.toHaveBeenCalled();
+      expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
+      expect(mocks.hasHostedMailboxAutomationEngagementSince).not.toHaveBeenCalled();
+      expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+        mode: "mutating", now: new Date(FIXED_NOW), userId: MEMBER_ID,
+      });
+    },
+  );
 
   it("keeps deterministic system import admissible while model work is denied", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -1640,20 +1828,6 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.blocked).toBeNull();
   });
 
-  it("keeps pending Environment interviews off the deployed orchestration wire", async () => {
-    mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue({
-      id: "mailbox_environment_interview_1",
-    });
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = await response.json();
-
-    expect(facts).not.toHaveProperty("environmentInterviewPending");
-  });
-
   it("blocks inactive members while preserving workspace facts", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "paused",
@@ -1673,24 +1847,26 @@ describe("hosted orchestration reconciliation facts", () => {
         reason: "user_not_active",
         retryAt: null,
       },
-      environmentInterviewPending: false,
       mailboxLag: [],
       workspace: {
         inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,
         nextWakeReason: null,
+        systemMailboxFrontier: null,
         version: "4",
       },
     });
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.hostedMemberFindUnique).toHaveBeenCalledTimes(1);
   });
 });
 
-function requestForFacts(): Request {
+function requestForFacts(search = ""): Request {
   return new Request(
     `https://join.example.test/api/internal/hosted-orchestration/users/${
       encodeURIComponent(MEMBER_ID)
-    }/reconciliation-facts`,
+    }/reconciliation-facts${search}`,
     { method: "GET" },
   );
 }
@@ -1835,10 +2011,10 @@ function routeContext(): { params: Promise<{ userId: string }> } {
 
 async function readOwnerReleaseActionable(): Promise<boolean> {
   const {
-    readHostedRuntimeOwnerReleaseMailboxLagActionable,
+    readHostedRuntimeOwnerReleaseActionable,
   } = await import("../src/lib/hosted-orchestration/runtime-reconciliation-facts");
 
-  return await readHostedRuntimeOwnerReleaseMailboxLagActionable({
+  return await readHostedRuntimeOwnerReleaseActionable({
     userId: MEMBER_ID,
   });
 }
@@ -1915,10 +2091,13 @@ function buildWorkspaceRecord(overrides: Partial<{
   checkpointedAt: string | null;
   createdAt: string;
   inboxMediaRetentionWakeAt: string | null;
+  nextDefaultProcessingWakeAt: string | null;
+  nextDefaultProcessingWakeReason: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
   redactedStatusJson: Record<string, unknown> | null;
   snapshotRef: Record<string, unknown> | null;
+  systemMailboxProgressGeneration: string | null;
   updatedAt: string;
   userId: string;
   version: string;
@@ -1928,6 +2107,8 @@ function buildWorkspaceRecord(overrides: Partial<{
     checkpointedAt: FIXED_NOW,
     createdAt: FIXED_NOW,
     inboxMediaRetentionWakeAt: null,
+    nextDefaultProcessingWakeAt: null,
+    nextDefaultProcessingWakeReason: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: {
@@ -1940,6 +2121,7 @@ function buildWorkspaceRecord(overrides: Partial<{
       size: 128,
       updatedAt: FIXED_NOW,
     },
+    systemMailboxProgressGeneration: null,
     updatedAt: FIXED_NOW,
     userId: MEMBER_ID,
     version: "4",

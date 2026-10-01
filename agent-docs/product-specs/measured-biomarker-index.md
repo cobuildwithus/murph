@@ -79,10 +79,10 @@ member-facing biomarker.
   dashed-only; do not reuse the sage/sienna lab-range bands or let it imply
   source status. Keep the imported source flag authoritative. A qualified
   source range stays exact in the ledger and blocks every published comparator.
-- Health Commons owns two authored comparator inputs at one package boundary:
-  page-specific `referenceGuidance.fallbackRanges` and the reviewed common
-  catalog in `packages/health-commons/src/biomarker-fallback-ranges.ts`. The
-  result route asks that owner for both and keeps page-authored entries first;
+- Health Commons owns page-specific `referenceGuidance.fallbackRanges`.
+  The reviewed runtime catalog belongs to `@murphai/health-metrics` in
+  `packages/health-metrics/src/lab-reference-ranges.ts`. The result route
+  consumes both owners directly and keeps page-authored entries first;
   `apps/web` does not own numeric values or maintain an independent range table.
 - The reviewed catalog covers 30 canonical biomarker identities through 33
   exact-unit comparator records: 8 page-authored serum intervals plus 25 common

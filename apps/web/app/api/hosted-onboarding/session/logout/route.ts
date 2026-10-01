@@ -4,11 +4,11 @@ import { revokeHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/a
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
-  const clearCookie = await revokeHostedAppSessionFromRequest({
+  const clearCookies = await revokeHostedAppSessionFromRequest({
     reason: "logout",
     request,
   });
   const response = jsonOk({ ok: true });
-  response.headers.append("Set-Cookie", clearCookie);
+  for (const cookie of clearCookies) response.headers.append("Set-Cookie", cookie);
   return response;
 });

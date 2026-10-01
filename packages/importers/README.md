@@ -12,6 +12,12 @@ Adding a new wearable provider? Pair the importer work with the transport half d
 - Clinical FHIR planning is available only from `@murphai/importers/clinical-records`; it stays off the broad importer root and hosted cold-start path until a clinical intake owner wires that explicit seam.
 - No OCR, transcription, or structured lab parsing is performed in the baseline.
 
+The sample and workout CSV planners share `src/csv-parsing.ts` for delimited
+rows and flexible timestamp parsing. The sample planner owns file loading,
+vault timezone discovery, and sample inference; the workout planner owns
+provider dialects, unit gates, and source-session identity. The public
+`parseDelimitedRows` export points directly to the parsing owner.
+
 ## Built-in Device Providers
 
 `createImporters()` and `prepareDeviceProviderSnapshotImport()` ship with built-in adapters for `whoop`, `oura`, and `strava`. Garmin data is supported exclusively through the `junction` provider.
@@ -22,9 +28,22 @@ Junction keeps its existing daily timeseries summaries as the compatibility surf
 
 The wearable raw ingest envelope is only a receipt: it stores the payload hash and the raw artifact roles for replay/audit, but it must not store another copy of the provider payload. Raw provider data belongs in the adapter's raw artifacts, and product/query surfaces should consume compact events, metric facts, or derived metric read models instead.
 
-If a provider adapter returns a non-empty snapshot without any provider-owned raw artifacts, the import bridge adds one fallback `provider-snapshot` raw artifact before building the receipt. Adapters that intentionally drop dense provider payloads must sanitize those dropped sections or emit a tiny compact artifact first, so the fallback never re-stores the firehose under a generic role.
+A valid explicit snapshot `observedAt` owns the prepared receipt timestamp and
+batch `importedAt`, even for a backfill of older events. When it is absent or
+invalid, the bridge preserves its deterministic earliest timestamp fallback
+from request windows, event/sample times, and the normalized batch. That
+fallback is a replay anchor, not proof of actual arrival time. Receipt identity
+remains payload-derived and does not change with an explicit receipt time.
+
+If a provider adapter returns a non-empty snapshot without any provider-owned raw artifacts, the import bridge adds one fallback `provider-snapshot` raw artifact before building the receipt. Adapters that intentionally drop dense provider payloads must sanitize those dropped sections or emit a tiny compact artifact first, so the fallback never re-stores the firehose under a generic role. Explicitly empty Junction collections retain their resource evidence independently of poll timestamps and window bounds, so an unchanged empty poll does not create another raw receipt or ingest/audit write. Complete-set normalization continues to own absence authority, and nonempty unnormalized provider evidence remains retained.
 
 Built-in providers now share one descriptor surface in `device-providers/provider-descriptors.ts`. That descriptor is the single source for provider key, transport modes, OAuth paths/scopes, webhook support, default sync windows, metric families, and source-priority hints, so importers and `device-syncd` no longer drift on provider metadata.
+
+Junction's `device-providers/junction-canonical-coverage.ts` owns accepted-event
+coverage, provider-day finalization, and migration fence admission. The snapshot
+import bridge derives coverage from the canonical writer's returned events.
+Normalization applies the fence to its original event array before finalizing
+authoritative sets; device-sync continues to own persisted migration progress.
 
 The iOS companion's direct WHOOP overnight-HRV path is a deliberately narrower
 Junction-account ingress rather than a fourth transport provider. It accepts

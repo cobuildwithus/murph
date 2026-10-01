@@ -5,9 +5,9 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 cd "$repo_root"
 
-workspace_artifact_lock_label="workspace-verify"
+verification_label="workspace-verify"
 if [[ "$#" -gt 0 ]]; then
-  workspace_artifact_lock_label+=" $1"
+  verification_label+=" $1"
 fi
 
 if [[ -n "${MURPH_VERIFY_SHARED_HOST+x}" ]]; then
@@ -36,17 +36,6 @@ esac
 readonly verification_profile
 export MURPH_VERIFY_PROFILE="$verification_profile"
 
-command_requires_workspace_artifact_lock() {
-  case "${1:-}" in
-    "typecheck" | "typecheck:packages" | "test" | "test:packages" | "test:apps" | "test:diff" | "test:packages:coverage" | "test:coverage" | "verify:acceptance" | "verify:cli")
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 command_requires_host_verification_slot() {
   case "${1:-}" in
     "typecheck" | "typecheck:packages" | "test" | "test:packages" | "test:apps" | "test:packages:coverage" | "test:coverage" | "verify:acceptance" | "verify:cli")
@@ -58,13 +47,8 @@ command_requires_host_verification_slot() {
   esac
 }
 
-if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]] && command_requires_workspace_artifact_lock "${1:-}"; then
-  exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "$workspace_artifact_lock_label" -- \
-    bash "$repo_root/scripts/workspace-verify.sh" "$@"
-fi
-
 if [[ "$shared_host_mode" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]] && command_requires_host_verification_slot "$verification_command"; then
-  exec node "$repo_root/scripts/run-with-host-verification-slot.mjs" "$workspace_artifact_lock_label" -- \
+  exec node "$repo_root/scripts/run-with-host-verification-slot.mjs" "$verification_label" -- \
     bash "$repo_root/scripts/workspace-verify.sh" "$@"
 fi
 
@@ -100,7 +84,6 @@ readonly node_syntax_check_scripts=(
   "scripts/benchmark-typescript.mjs"
   "scripts/run-typescript.mjs"
   "scripts/run-with-host-verification-slot.mjs"
-  "scripts/run-with-workspace-artifact-lock.mjs"
   "scripts/check-workspace-package-cycles.mjs"
   "scripts/check-runner-bundle-budget-ci.mjs"
   "scripts/check-hosted-crypto-hardcut.mjs"
@@ -138,7 +121,6 @@ readonly typecheck_package_dirs=(
   "packages/gateway-core"
   "packages/cli"
   "packages/openclaw-plugin"
-  "packages/assistantd"
   "packages/assistant-runtime"
   "packages/vault-usecases"
   "apps/web"
@@ -618,6 +600,8 @@ readonly cli_verify_test_files=(
   "packages/cli/test/health-tail.test.ts"
   "packages/cli/test/canonical-write-source-audit.test.ts"
   "packages/cli/test/assistant-cron.test.ts"
+  "packages/cli/test/incur-config-schema.test.ts"
+  "packages/cli/test/incur-skill-hash.test.ts"
   "packages/cli/test/incur-smoke.test.ts"
   "packages/cli/test/inbox-service-boundaries.test.ts"
   "packages/cli/test/search-runtime.test.ts"
@@ -647,8 +631,12 @@ run_dependency_policy_check() {
 }
 
 run_workspace_boundary_check() {
-  node "scripts/verify-workspace-boundaries.mjs"
-  node "scripts/check-workspace-package-cycles.mjs"
+  local status=0
+
+  node "scripts/verify-workspace-boundaries.mjs" || status=$?
+  node "scripts/check-workspace-package-cycles.mjs" || status=$?
+
+  return "$status"
 }
 
 run_typecheck_packages() {
@@ -675,8 +663,17 @@ run_typecheck_packages() {
   fi
 
   if [[ "$contracts_prerequisite_required" == "1" ]]; then
-    run_diff_contracts_build_with_workspace_artifact_lock || return $?
+    run_command_with_retry "Incremental contracts prerequisite" pnpm --dir "packages/contracts" build:incremental || return $?
   fi
+
+  for package_dir in "${package_dirs[@]}"; do
+    if [[ "$package_dir" == "apps/cloudflare" ]]; then
+      run_command_with_retry \
+        "Hosted web Prisma client" \
+        pnpm --dir "apps/web" prisma:generate || return $?
+      break
+    fi
+  done
 
   if [[ "$typecheck_workspace_concurrency" -le 1 ]]; then
     for package_dir in "${package_dirs[@]}"; do
@@ -699,7 +696,7 @@ run_typecheck_packages() {
 
   # The package/app typecheck scripts are no-emit: they read sibling sources or
   # already-built dist and produce nothing another package's typecheck consumes.
-  # The one real prerequisite (the contracts build) is sequenced explicitly
+  # The contracts build and Web-owned Prisma client are sequenced explicitly
   # before this fanout, so topological ordering would only serialize the lane.
   run_command_with_retry \
     "Workspace package typecheck" \
@@ -913,15 +910,6 @@ run_test_apps() {
   run_app_verify_command_with_retry "apps/cloudflare" "$skip_app_typechecks" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared"
 }
 
-run_test_apps_with_workspace_artifact_lock() {
-  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
-    run_test_apps "$@" || return $?
-    return 0
-  fi
-
-  bash "$repo_root/scripts/workspace-verify.sh" test:apps
-}
-
 prepare_repo_vitest_runtime_artifacts() {
   local health_commons_generated_prepared="${1:-0}"
 
@@ -947,14 +935,7 @@ run_repo_vitest() {
   # Keep worker selection centralized in the Vitest configs so local runs use
   # the faster 75% default while CI stays at 50%, with the same env override
   # path (`MURPH_VITEST_MAX_WORKERS`) for both lanes.
-  pnpm exec vitest run --config "vitest.config.ts" \
-    --project="!assistant-engine" "$@" || return $?
-
-  # The curated Assistant Engine project has a proven 6 GiB requirement. Keep
-  # that ceiling at this owner instead of lifting every repo test and build.
-  NODE_OPTIONS=--max-old-space-size=6144 \
-    pnpm exec vitest run --config "vitest.config.ts" \
-      --project="assistant-engine" "$@"
+  pnpm exec vitest run --config "vitest.config.ts" "$@"
 }
 
 run_workspace_package_coverage() {
@@ -974,15 +955,6 @@ run_workspace_package_coverage() {
       "$label" \
       env MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" \
         pnpm --dir packages/contracts test:coverage:prepared
-    return $?
-  fi
-
-  if [[ "$package_dir" == "packages/assistant-engine" ]]; then
-    run_timed_step \
-      "$label" \
-      env NODE_OPTIONS=--max-old-space-size=6144 \
-        MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" \
-        pnpm --dir "$package_dir" test:coverage
     return $?
   fi
 
@@ -1090,6 +1062,7 @@ run_all_package_coverage() {
 
   while [[ "$package_index" -lt "$package_count" ]]; do
     local active_pids=()
+    local active_package_dirs=()
     local active_failure_files=()
     local active_labels=()
     local active_status_files=()
@@ -1103,8 +1076,40 @@ run_all_package_coverage() {
       printf '%s\n' "$package_coverage_concurrency"
     }
 
+    package_coverage_conflicts_with_active() {
+      local next_package_dir="$1"
+      local active_package_dir
+
+      if [[ -z "${active_package_dirs[*]-}" ]]; then
+        return 1
+      fi
+
+      for active_package_dir in "${active_package_dirs[@]}"; do
+        # Both owners start real child runtimes. Their isolated CI shards pass,
+        # but overlapping them makes wall-clock readiness assertions measure
+        # shared-host contention instead of either package's behavior.
+        if [[
+          "$next_package_dir" == "packages/assistant-engine"
+          && "$active_package_dir" == "packages/hosted-local-harness"
+        ]] || [[
+          "$next_package_dir" == "packages/hosted-local-harness"
+          && "$active_package_dir" == "packages/assistant-engine"
+        ]]; then
+          return 0
+        fi
+      done
+
+      return 1
+    }
+
     can_launch_next_package_coverage() {
       if [[ "$package_index" -ge "$package_count" ]]; then
+        return 1
+      fi
+
+      local next_package_dir="${package_coverage_dirs[$package_index]}"
+
+      if package_coverage_conflicts_with_active "$next_package_dir"; then
         return 1
       fi
 
@@ -1113,7 +1118,7 @@ run_all_package_coverage() {
       # built-runtime coverage may be importing prepared dist outputs.
       if [[
         "$cli_coverage_active" == "1"
-        && "${package_coverage_dirs[$package_index]}" == "packages/contracts"
+        && "$next_package_dir" == "packages/contracts"
         && "$contracts_artifacts_prepared" != "1"
       ]]; then
         return 1
@@ -1158,6 +1163,7 @@ run_all_package_coverage() {
       ) &
       local coverage_pid="$!"
       active_pids+=("$coverage_pid")
+      active_package_dirs+=("$package_dir")
       active_failure_files+=("$failure_file")
       active_labels+=("$package_label")
       active_status_files+=("$status_file")
@@ -1171,6 +1177,7 @@ run_all_package_coverage() {
 
     reap_finished_package_coverage() {
       local remaining_pids=()
+      local remaining_package_dirs=()
       local remaining_failure_files=()
       local remaining_labels=()
       local remaining_status_files=()
@@ -1179,6 +1186,7 @@ run_all_package_coverage() {
 
       for active_index in "${!active_pids[@]}"; do
         local active_pid="${active_pids[$active_index]}"
+        local active_package_dir="${active_package_dirs[$active_index]}"
         local failure_file="${active_failure_files[$active_index]}"
         local active_label="${active_labels[$active_index]}"
         local status_file="${active_status_files[$active_index]}"
@@ -1200,6 +1208,7 @@ run_all_package_coverage() {
             continue
           fi
           remaining_pids+=("$active_pid")
+          remaining_package_dirs+=("$active_package_dir")
           remaining_failure_files+=("$failure_file")
           remaining_labels+=("$active_label")
           remaining_status_files+=("$status_file")
@@ -1224,12 +1233,14 @@ run_all_package_coverage() {
       done
 
       active_pids=()
+      active_package_dirs=()
       active_failure_files=()
       active_labels=()
       active_status_files=()
 
       if [[ "${#remaining_pids[@]}" -gt 0 ]]; then
         active_pids=("${remaining_pids[@]}")
+        active_package_dirs=("${remaining_package_dirs[@]}")
         active_failure_files=("${remaining_failure_files[@]}")
         active_labels=("${remaining_labels[@]}")
         active_status_files=("${remaining_status_files[@]}")
@@ -1309,38 +1320,11 @@ run_diff_package_boundary_verification() {
   esac
 }
 
-run_diff_contracts_test_with_workspace_artifact_lock() {
-  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
-    run_package_command_with_retry "packages/contracts" test || return $?
-    return 0
-  fi
-
-  run_command_with_retry \
-    "Package command for packages/contracts (test)" \
-    node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "test:diff contracts" -- \
-      pnpm --dir "packages/contracts" test
-}
-
-run_diff_contracts_build_with_workspace_artifact_lock() {
-  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
-    run_command_with_retry \
-      "Incremental contracts prerequisite" \
-      pnpm --dir "packages/contracts" build:incremental || return $?
-    return 0
-  fi
-
-  run_command_with_retry \
-    "Incremental contracts prerequisite" \
-    node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "test:diff contracts build" -- \
-      pnpm --dir "packages/contracts" build:incremental
-}
-
 run_test_diff_package_tests() {
   local package_dirs=("$@")
   local filter_args=()
   local package_test_env=(env)
   local package_dir
-  local assistant_engine_selected=0
   local cli_selected=0
   local contracts_selected=0
 
@@ -1348,10 +1332,6 @@ run_test_diff_package_tests() {
     [[ -n "$package_dir" ]] || continue
     if [[ "$package_dir" == "packages/contracts" ]]; then
       contracts_selected=1
-      continue
-    fi
-    if [[ "$package_dir" == "packages/assistant-engine" ]]; then
-      assistant_engine_selected=1
       continue
     fi
     if [[ "$package_dir" == "packages/cli" ]]; then
@@ -1362,7 +1342,7 @@ run_test_diff_package_tests() {
 
   # Diff selection can reach CLI command tests through a changed source
   # dependency without selecting the dedicated verify:cli lane. Prepare the
-  # shared runtime once under test:diff's workspace artifact lock so individual
+  # shared runtime once before package fanout so individual
   # Vitest workers never contend on the fallback repair lock.
   if [[ "$cli_selected" == "1" ]]; then
     run_timed_step \
@@ -1372,21 +1352,10 @@ run_test_diff_package_tests() {
   fi
   package_test_env+=(MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers")
 
-  # Contracts verification rebuilds shared dist artifacts. Complete it under
-  # the artifact lock before source-first dependents start importing them.
+  # Contracts verification rebuilds shared dist artifacts. Complete it before
+  # source-first dependents start importing them.
   if [[ "$contracts_selected" == "1" ]]; then
-    run_diff_contracts_test_with_workspace_artifact_lock || return $?
-  fi
-
-  # Keep the affected-owner lane aligned with the full coverage lane: the
-  # Assistant Engine suite can exceed Node's default 4 GiB heap even with one
-  # Vitest worker, so run that owner separately with its proven heap ceiling.
-  if [[ "$assistant_engine_selected" == "1" ]]; then
-    run_command_with_retry \
-      "Affected package test for packages/assistant-engine" \
-      env NODE_OPTIONS=--max-old-space-size=6144 \
-        MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers" \
-        pnpm --dir "packages/assistant-engine" test || return $?
+    run_package_command_with_retry "packages/contracts" test || return $?
   fi
 
   if [[ "${#filter_args[@]}" -gt 0 ]]; then
@@ -1420,7 +1389,7 @@ run_test_diff_app_verification() {
   done
 
   if [[ "$has_cloudflare" == "1" && "$has_web" == "1" ]]; then
-    run_test_apps_with_workspace_artifact_lock || return $?
+    run_test_apps || return $?
     return 0
   fi
 
@@ -1507,13 +1476,13 @@ run_typecheck_overlapped() {
   pids+=("$package_typecheck_pid")
   register_background_pid "$package_typecheck_pid"
 
-  wait_for_background_jobs "${pids[@]}"
+  wait_for_background_jobs_allow_failures "${pids[@]}"
 }
 
 run_typecheck() {
   if [[ "$typecheck_preflight_parallel" == "1" ]]; then
     run_typecheck_overlapped
-    return 0
+    return $?
   fi
 
   run_typecheck_preflight
@@ -1677,6 +1646,7 @@ run_test_coverage() {
 
 run_verify_acceptance() {
   run_typecheck
+  run_timed_step "Repo tools tests" pnpm test:repo-tools
   run_test_coverage 1
 }
 
@@ -1720,7 +1690,7 @@ run_test_diff() {
     return 0
   fi
 
-  if [[ "$diff_repo_internal_fast_path" == "1" ]]; then
+  if [[ "$diff_repo_internal_fast_path" == "1" && "$diff_run_verify_cli" != "1" ]]; then
     verify_log "diff-aware verification selected the repo-internal fast path"
     run_diff_repo_internal_fast_path
     if [[ "$run_repo_tools_tests" == "1" ]]; then
@@ -1748,7 +1718,7 @@ run_test_diff() {
   fi
 
   if [[ "$diff_run_verify_cli" == "1" ]]; then
-    run_timed_step "CLI targeted verification" run_verify_cli_with_workspace_artifact_lock
+    run_timed_step "CLI targeted verification" run_verify_cli
   fi
 
   if [[ "$run_repo_tools_tests" == "1" ]]; then
@@ -1761,6 +1731,10 @@ run_test_diff() {
 
   if [[ "${#test_dirs[@]}" -gt 0 ]]; then
     run_timed_step "Affected package tests" run_test_diff_package_tests "${test_dirs[@]}"
+  fi
+
+  if [[ "${diff_run_fixture_smoke:-0}" == "1" ]]; then
+    run_timed_step "Fixture smoke verification" run_fixture_smoke_verification
   fi
 
   if [[ "${#affected_app_dirs[@]}" -gt 0 ]]; then
@@ -1776,15 +1750,6 @@ run_verify_cli() {
   run_timed_step \
     "CLI workspace Vitest" \
     env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
-}
-
-run_verify_cli_with_workspace_artifact_lock() {
-  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
-    run_verify_cli || return $?
-    return 0
-  fi
-
-  bash "$repo_root/scripts/workspace-verify.sh" verify:cli
 }
 
 log_acceptance_resource_plan() {

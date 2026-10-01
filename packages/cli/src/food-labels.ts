@@ -5,6 +5,7 @@ import {
   hostedDataApiLabelBatchSearchInputSchema,
   hostedDataApiLabelSearchInputSchema,
   hostedDataApiLabelSearchItemSchema,
+  MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH,
   type HostedDataApiLabelsDependencies,
 } from './hosted-data-api-labels.js'
 
@@ -21,6 +22,7 @@ const foodLabelsClient = createHostedDataApiLabelsClient({
 export const foodLabelSearchInputSchema = hostedDataApiLabelSearchInputSchema.extend({
   fullLabel: z.boolean().optional(),
   genericOnly: z.boolean().optional(),
+  q: z.string().trim().min(1).max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH),
 })
 export const foodLabelSearchItemSchema = hostedDataApiLabelSearchItemSchema
 export const foodLabelSearchResultSchema = foodLabelsClient.searchResultSchema

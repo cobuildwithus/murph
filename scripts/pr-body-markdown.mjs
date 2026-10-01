@@ -78,11 +78,20 @@ async function renderPrBody(markdown) {
   return response.text();
 }
 
-function readChangedPaths(baseSha, headSha) {
+function readChangedPaths(
+  baseSha,
+  headSha,
+  { cwd, detectRenames = true } = {},
+) {
+  const args = ["diff", "--name-only"];
+  if (!detectRenames) {
+    args.push("--no-renames");
+  }
+  args.push("--diff-filter=ACDMRT", `${baseSha}...${headSha}`);
   return execFileSync(
     "git",
-    ["diff", "--name-only", "--diff-filter=ACDMRT", `${baseSha}...${headSha}`],
-    { encoding: "utf8" },
+    args,
+    { cwd, encoding: "utf8" },
   )
     .split("\n")
     .map((line) => line.trim())

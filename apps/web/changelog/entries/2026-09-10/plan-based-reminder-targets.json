@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "plan-based-reminder-targets",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Reminders follow your current routine",
+    "summary": "Plan-based reminders use your saved routine to choose the day\u2019s action.",
+    "details": "One-day exceptions and pauses keep their scope without resetting an ongoing rotation.",
+    "relevanceTags": [
+      "reminders",
+      "reliability"
+    ],
+    "sourcePullRequests": [3209]
+  }
+}

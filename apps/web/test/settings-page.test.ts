@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
       null,
       `Customize murph settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
-  HostedAccountSettingsCards: vi.fn((props: {
+  HostedLoginMethodSettings: vi.fn((props: {
     account: unknown;
     murphPhoneNumber?: string | null;
     openEmailLink?: boolean;
@@ -122,6 +122,7 @@ const mocks = vi.hoisted(() => ({
     )),
   HostedDataPrivacySettings: vi.fn((props: {
     authenticated: boolean;
+    authorizationEnabled?: boolean;
   }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
   HostedHealthDataConsentSettings: vi.fn((props: {
@@ -170,13 +171,15 @@ const mocks = vi.hoisted(() => ({
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
   readHostedUsageCreditPurchaseTargetForPayer: vi.fn(),
   readHostedSecureApprovalStatus: vi.fn(),
+  readApprovalPasskeyState: vi.fn(),
   withServerApprovedPrivyAccountHints: vi.fn((input: {
-    serverApprovedPrivyLinkedAccounts?: unknown;
+    serverApprovedPrivyUser?: unknown;
     snapshot: unknown;
   }) => input.snapshot),
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/src/lib/sensitive-actions/passkey-store", () => ({ readApprovalPasskeyState: mocks.readApprovalPasskeyState }));
 
 const redirectMock = vi.hoisted(() => vi.fn((path: string) => {
   throw new Error(`NEXT_REDIRECT:${path}`);
@@ -269,8 +272,8 @@ vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
   HostedBillingSettings: mocks.HostedBillingSettings,
 }));
 
-vi.mock("@/src/components/settings/hosted-account-settings-cards", () => ({
-  HostedAccountSettingsCards: mocks.HostedAccountSettingsCards,
+vi.mock("@/src/components/settings/hosted-login-method-settings", () => ({
+  HostedLoginMethodSettings: mocks.HostedLoginMethodSettings,
 }));
 
 vi.mock("@/src/components/settings/customize-murph-settings", () => ({
@@ -605,28 +608,43 @@ test("SettingsPage suppresses a personal plan return for a sponsored member", as
 test.each(["active", "checkout"])(
   "SettingsDataPrivacyPage exposes the existing deletion owner for a %s member",
   async (stage) => {
-    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-      authenticated: true,
-      authenticatedMember: {
-        billingStatus: stage === "active" ? "active" : "not_started",
-        id: "member_123",
-        suspendedAt: null,
-      },
-      session: {
-        privyUserId: "did:privy:user_123",
-      },
-    });
+    const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 
-    const { default: SettingsDataPrivacyPage } =
-      await import("../app/settings/data-privacy/page");
+    try {
+      mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+        authenticated: true,
+        authenticatedMember: {
+          billingStatus: stage === "active" ? "active" : "not_started",
+          id: "member_123",
+          suspendedAt: null,
+        },
+        session: {
+          privyUserId: "did:privy:user_123",
+        },
+      });
 
-    const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
+      const { default: SettingsDataPrivacyPage } =
+        await import("../app/settings/data-privacy/page");
 
-    assert.match(markup, /Data &amp; privacy/);
-    assert.match(markup, /Hosted data privacy settings true/);
-    assert.match(markup, /without an active subscription or health-data consent/);
-    expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
-    expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+      const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
+
+      assert.match(markup, /Data &amp; privacy/);
+      assert.match(markup, /Hosted data privacy settings true/);
+      assert.match(markup, /without an active subscription or health-data consent/);
+      expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
+      expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+      expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+        authenticated: true,
+        authorizationEnabled: true,
+      }, undefined);
+    } finally {
+      if (originalPrivyAppId === undefined) {
+        delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+      } else {
+        process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalPrivyAppId;
+      }
+    }
   },
 );
 
@@ -652,6 +670,23 @@ test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for s
   assert.match(markup, /external carrier, Telegram, Linq, or email systems cannot be recalled/);
   assert.match(markup, /mailto:legal@justco\.build/);
   assert.match(markup, /href="\/legal\/privacy"/);
+});
+
+test.each(["legacy", "passkey", "outage"])("Data privacy preserves deletion without loading an SDK for %s factor state", async (state) => {
+  const original = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  process.env.NEXT_PUBLIC_PRIVY_APP_ID = "synthetic-app";
+  try {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({ authenticated: true, session: { member: { id: "synthetic-member" }, privyUserId: "did:privy:synthetic" } });
+    if (state === "outage") mocks.readApprovalPasskeyState.mockRejectedValueOnce(new Error("storage unavailable"));
+    else mocks.readApprovalPasskeyState.mockResolvedValueOnce({ credentials: state === "passkey" ? [{ id: "synthetic" }] : [] });
+    const { default: Page } = await import("../app/settings/data-privacy/page");
+    expect(renderToStaticMarkup(await Page())).toContain("Hosted data privacy settings true");
+    expect(mocks.HostedPrivyProvider).not.toHaveBeenCalled();
+    expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
+  } finally {
+    if (original === undefined) delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    else process.env.NEXT_PUBLIC_PRIVY_APP_ID = original;
+  }
 });
 
 test("SettingsPage redirects signed-out visitors before reading member settings", async () => {
@@ -912,6 +947,16 @@ test("SettingsPage reads the app session and persisted account settings into the
         username: "sample_user",
       },
     ],
+    verifiedPrivyUser: {
+      id: "did:privy:user_123",
+      linkedAccounts: [
+        {
+          id: 456,
+          type: "telegram",
+          username: "sample_user",
+        },
+      ],
+    },
   });
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -1130,20 +1175,13 @@ test("SettingsPage reads the app session and persisted account settings into the
       prisma: mocks.prisma,
     });
     expect(mocks.readHostedSecureApprovalStatus).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
       privyUserId: "did:privy:user_123",
     });
-    expect(mocks.getHostedPrivySession).toHaveBeenCalledTimes(1);
-    expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
-      snapshot: accountSnapshot,
-      serverApprovedPrivyLinkedAccounts: [
-        {
-          id: 456,
-          type: "telegram",
-          username: "sample_user",
-        },
-      ],
-    });
-    expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+    expect(mocks.withServerApprovedPrivyAccountHints).not.toHaveBeenCalled();
+    expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(expect.objectContaining({
       account: accountSnapshot,
       murphPhoneNumber: "+15550100001",
       openEmailLink: true,
@@ -1200,7 +1238,7 @@ test("SettingsPage reads the app session and persisted account settings into the
       authenticated: true,
       secureApprovalStatus: { status: "configured" },
     }), undefined);
-    expect(mocks.HostedPrivyProvider).toHaveBeenCalledTimes(1);
+    expect(mocks.HostedPrivyProvider).not.toHaveBeenCalled();
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
     }), undefined);
@@ -1218,6 +1256,15 @@ test("SettingsPage reads the app session and persisted account settings into the
       authenticated: true,
       initialStatus: null,
     }, undefined);
+    expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+      authenticated: true,
+      authorizationEnabled: true,
+    }, undefined);
+
+    delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    mocks.HostedDataPrivacySettings.mockClear();
+    renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
       authenticated: true,
       authorizationEnabled: true,
@@ -2456,7 +2503,7 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
   const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Hosted account settings \+15550100003/);
-  expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
+  expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(expect.objectContaining({
     account: accountSnapshot,
     murphPhoneNumber: "+15550100003",
   }), undefined);
@@ -2870,12 +2917,6 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
   mocks.readHostedActiveUsageCreditPurchaseForPayer.mockImplementation(
     trackDatabaseRead("usageTopUpActivePurchase", null),
   );
-  // Privy network reads resolve after every database read so the render
-  // proves the page still waits for their values.
-  mocks.getHostedPrivySession.mockImplementation(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    return null;
-  });
   mocks.readHostedSecureApprovalStatus.mockImplementation(async () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     return { status: "configured" };
@@ -2919,7 +2960,7 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
   }
 });
 
-test("SettingsPage preserves billing when optional usage and Privy reads fail", async () => {
+test("SettingsPage preserves billing when optional usage fails without querying Privy", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -2955,10 +2996,11 @@ test("SettingsPage preserves billing when optional usage and Privy reads fail", 
     }),
     undefined,
   );
-  expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
-    snapshot: EMPTY_ACCOUNT_SETTINGS,
-    serverApprovedPrivyLinkedAccounts: null,
-  });
+  expect(mocks.withServerApprovedPrivyAccountHints).not.toHaveBeenCalled();
+  expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+  expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ account: EMPTY_ACCOUNT_SETTINGS }), undefined,
+  );
   expect(mocks.HostedAiUsageActivity).not.toHaveBeenCalled();
 });
 
@@ -3002,7 +3044,7 @@ test("SettingsPage renders fallback values without reading settings data when th
       }),
       undefined,
     );
-    expect(mocks.HostedAccountSettingsCards).not.toHaveBeenCalled();
+    expect(mocks.HostedLoginMethodSettings).not.toHaveBeenCalled();
     expect(mocks.HostedFamilySettings).not.toHaveBeenCalled();
   } finally {
     if (originalPrivyAppId === undefined) {
@@ -3013,7 +3055,7 @@ test("SettingsPage renders fallback values without reading settings data when th
   }
 });
 
-test("SettingsPage ignores Privy Telegram display hints from a stale Privy session identity", async () => {
+test("SettingsPage renders canonical Telegram ownership without reading provider display hints", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue({
     identity: {
@@ -3058,10 +3100,11 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
 
   renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
-  expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
-    snapshot: accountSnapshot,
-    serverApprovedPrivyLinkedAccounts: null,
-  });
+  expect(mocks.withServerApprovedPrivyAccountHints).not.toHaveBeenCalled();
+  expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+  expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ account: accountSnapshot }), undefined,
+  );
 });
 
 describe("settings subscription composition", () => {

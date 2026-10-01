@@ -98,77 +98,6 @@ describe("Crabbox verification environment", () => {
     )).toContain("requires PATH");
   });
 
-  it("runs the frozen install before the exact workspace verifier under the synthetic environment", () => {
-    const tempRoot = makeTempRoot();
-    const binDir = path.join(tempRoot, "bin");
-    const installArgsPath = path.join(tempRoot, "install-args.txt");
-    const installEnvironmentPath = path.join(tempRoot, "install-env.txt");
-    const installMarkerPath = path.join(tempRoot, "install-complete");
-    const verifierArgsPath = path.join(tempRoot, "verifier-args.txt");
-    const verifierEnvironmentPath = path.join(tempRoot, "verifier-env.txt");
-
-    writeExecutable(
-      path.join(binDir, "corepack"),
-      [
-        "#!/bin/sh",
-        `printf "%s\\n" "$@" > ${shellQuote(installArgsPath)}`,
-        `printf "CI=%s\\nCUSTOM_PROVIDER_TOKEN=%s\\n" "\${CI-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" > ${shellQuote(installEnvironmentPath)}`,
-        `: > ${shellQuote(installMarkerPath)}`,
-      ].join("\n"),
-    );
-    writeExecutable(
-      path.join(binDir, "bash"),
-      [
-        "#!/bin/sh",
-        `[ -f ${shellQuote(installMarkerPath)} ] || exit 41`,
-        `printf "%s\\n" "$@" > ${shellQuote(verifierArgsPath)}`,
-        `printf "CI=%s\\nMURPH_CRABBOX_REMOTE=%s\\nMURPH_VERIFY_EXECUTOR=%s\\nMURPH_VERIFY_PROFILE=%s\\nCUSTOM_PROVIDER_TOKEN=%s\\n" "\${CI-unset}" "\${MURPH_CRABBOX_REMOTE-unset}" "\${MURPH_VERIFY_EXECUTOR-unset}" "\${MURPH_VERIFY_PROFILE-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" > ${shellQuote(verifierEnvironmentPath)}`,
-      ].join("\n"),
-    );
-
-    const result = spawnSync(
-      process.execPath,
-      [
-        runnerPath,
-        "test:diff",
-        "scripts/verification-dispatch.mjs",
-        ".crabbox.yaml",
-      ],
-      {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env: {
-          CI: "source-ci-must-not-reach-verifier",
-          CUSTOM_PROVIDER_TOKEN: "secret-custom-token",
-          HOME: path.join(tempRoot, "home"),
-          MURPH_CRABBOX_TRUSTED_ENTRYPOINT: "1",
-          MURPH_CRABBOX_NO_FORWARD: "must-not-reach-verifier",
-          PATH: `${binDir}${path.delimiter}/usr/bin:/bin`,
-        },
-      },
-    );
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(installArgsPath, "utf8").trim().split("\n")).toEqual([
-      "pnpm",
-      "install",
-      "--frozen-lockfile",
-      "--prefer-offline",
-    ]);
-    expect(readFileSync(installEnvironmentPath, "utf8")).toBe(
-      "CI=1\nCUSTOM_PROVIDER_TOKEN=unset\n",
-    );
-    expect(readFileSync(verifierArgsPath, "utf8").trim().split("\n")).toEqual([
-      "scripts/workspace-verify.sh",
-      "test:diff",
-      "scripts/verification-dispatch.mjs",
-      ".crabbox.yaml",
-    ]);
-    expect(readFileSync(verifierEnvironmentPath, "utf8")).toBe(
-      "CI=unset\nMURPH_CRABBOX_REMOTE=1\nMURPH_VERIFY_EXECUTOR=local\nMURPH_VERIFY_PROFILE=default\nCUSTOM_PROVIDER_TOKEN=unset\n",
-    );
-  });
-
   it("rejects unsupported remote command surfaces", () => {
     expect(callModule(
       "parseRemoteVerificationRequest",
@@ -1062,50 +991,20 @@ describe("Crabbox verification environment", () => {
     },
   );
 
-  it("rejects direct candidate execution outside the trusted Testbox entrypoint", () => {
-    expect(callModuleFailure(
-      "assertTrustedEntrypoint",
-      {
-        ACTIONS_RUNTIME_TOKEN: "ambient-actions-token",
+  it("fails closed when the sanitized core is invoked directly", () => {
+    const result = spawnSync(process.execPath, [runnerPath, "test:diff"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: {
         HOME: "/home/crabbox",
         PATH: "/usr/bin:/bin",
       },
-    )).toContain("trusted Testbox entrypoint");
-  });
-
-  it("fails closed before starting candidate-controlled child commands", () => {
-    const tempRoot = makeTempRoot();
-    const binDir = path.join(tempRoot, "bin");
-    const childMarkerPath = path.join(tempRoot, "child-started");
-    for (const command of ["corepack", "bash"]) {
-      writeExecutable(
-        path.join(binDir, command),
-        [
-          "#!/bin/sh",
-          `: > ${shellQuote(childMarkerPath)}`,
-          "exit 0",
-        ].join("\n"),
-      );
-    }
-
-    const result = spawnSync(
-      process.execPath,
-      [runnerPath, "test:diff", "scripts/verification-dispatch.mjs"],
-      {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env: {
-          ACTIONS_RUNTIME_TOKEN: "ambient-actions-token",
-          HOME: path.join(tempRoot, "home"),
-          PATH: `${binDir}${path.delimiter}/usr/bin:/bin`,
-        },
-      },
-    );
+    });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("trusted Testbox entrypoint");
-    expect(existsSync(childMarkerPath)).toBe(false);
+    expect(result.stderr).toContain("Direct execution is unsupported");
   });
+
 });
 
 function createStaticRunnerWorkspace(tempRoot: string): {

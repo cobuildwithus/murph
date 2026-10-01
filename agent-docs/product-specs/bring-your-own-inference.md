@@ -16,6 +16,10 @@ uses.
 - Managed inference remains the default.
 - A member may save one custom inference connection in authenticated Settings.
 - Saving a connection does not select it automatically.
+- Inference settings changes save to Postgres without waking a runner.
+  Normal mailbox fetches carry the selected custom revision (or null for
+  managed inference). A provider or revision mismatch uses the existing
+  invocation handoff before admitting the next turn.
 - Selecting **Your endpoint** affects the next bounded provider turn. A turn
   already admitted under another provider may finish under that provider.
 - Updating or removing the saved connection first returns the member to managed
@@ -124,6 +128,12 @@ Murph normalizes every supported Codex function, namespace, custom, and shell
 tool shape into deterministic standard function calls before Chat translation.
 The mapping is reversible from the request history and call ids. An unknown or
 unrepresentable required tool fails explicitly; no tool is silently dropped.
+Tool descriptions are preserved completely, including the canonical JSON Schema
+supplement and code-mode instructions. The adapter does not truncate individual
+descriptions. Existing admission still bounds the entire request at 8 MiB,
+aggregate tool JSON at 256 KiB, and input/flattened tool counts at 128; oversized
+contracts fail explicitly instead of becoming incomplete instructions.
+
 
 LiteLLM is not a product owner or required gateway. It may replace the small
 adapter later only if a production-faithful failing test proves the current

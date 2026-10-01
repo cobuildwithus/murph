@@ -2,11 +2,11 @@ import type {
   WearableCanonicalMetricKey,
   WearableProviderMetricFamily,
 } from "@murphai/health-metrics";
-import type { DeviceDataOrigin } from "@murphai/contracts";
+import type { DeviceDataOrigin, SleepSessionEventRecord } from "@murphai/contracts";
 
 export type WearableConfidenceLevel = "none" | "low" | "medium" | "high";
 export type WearableCandidateSourceFamily = "canonical" | "event" | "sample" | "derived";
-export type WearableSleepSessionType = "main_sleep" | "nap" | "unknown";
+export type WearableSleepSessionType = NonNullable<SleepSessionEventRecord["sleepType"]>;
 
 export interface WearableExternalRef {
   system: string | null;
@@ -297,6 +297,7 @@ export interface WearableSleepNight {
   sleepScore: WearableResolvedMetric;
   sleepStartAt: string | null;
   sleepType: WearableSleepSessionType;
+  sleepState?: SleepSessionEventRecord["sleepState"];
   sleepWindowEvidence?: WearableSleepWindowEvidence[];
   sleepWindowEvidenceOmittedCount?: number;
   sleepWindowEvidenceOmittedExactDuplicateCount?: number;
@@ -317,6 +318,7 @@ export interface WearableSleepWindowEvidence {
   provider: string;
   recordedAt: string | null;
   sleepType: WearableSleepSessionType;
+  sleepState?: SleepSessionEventRecord["sleepState"];
   startAt: string | null;
   timeZone: string | null;
 }
@@ -653,6 +655,7 @@ export interface WearableSleepWindowCandidate {
   sourceKind: string;
   startAt: string | null;
   sleepType?: WearableSleepSessionType;
+  sleepState?: SleepSessionEventRecord["sleepState"];
   timeZone?: string | null;
   title: string | null;
 }

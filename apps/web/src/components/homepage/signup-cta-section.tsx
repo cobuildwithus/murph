@@ -20,10 +20,7 @@ export function SignupCtaSection({
         }}
       />
       <div className="relative mx-auto flex max-w-[700px] flex-col items-center text-center">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#c4a882]">
-          {signupCta.eyebrow}
-        </span>
-        <h2 className="mx-auto mt-4 max-w-[22ch] text-balance font-serif text-[clamp(1.9rem,3.5vw,2.85rem)] font-semibold leading-[1.02] tracking-[-0.04em] text-[#f5f0e8]">
+        <h2 className="mx-auto max-w-[22ch] text-balance font-serif text-[clamp(1.9rem,3.5vw,2.85rem)] font-semibold leading-[1.02] tracking-[-0.04em] text-[#f5f0e8]">
           {signupCta.title}
         </h2>
         {signupCta.body ? (
@@ -48,16 +45,9 @@ export function SignupCtaSection({
             authLabel={signupCta.signupLabel}
             authenticated={authenticated}
             context="footer"
-            preloadAuthPanel
             signupLabel={signupCta.signupLabel}
           />
         </div>
-
-        {signupCta.note ? (
-          <p className="mt-4 text-[0.8125rem] leading-[1.6] text-[#f5f0e8]/65">
-            {signupCta.note}
-          </p>
-        ) : null}
       </div>
     </section>
   );

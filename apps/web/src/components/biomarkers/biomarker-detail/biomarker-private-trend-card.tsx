@@ -12,8 +12,7 @@ import {
   type BrowserVaultMetricSeriesCapableQueryClient,
 } from "@murphai/query/browser-biomarkers";
 
-import { Button } from "@/src/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import {
   ChartContainer,
   ChartTooltip,
@@ -80,7 +79,7 @@ export function BiomarkerPrivateTrendCard({
   const metricBucketsLoaded = useBrowserVaultMetricKeyDemand(
     biomarker.privateMetricBindings.map((binding) => binding.metricKey),
   );
-  const { client, deviceSyncImportPending, error, refresh, status } = useBrowserVault();
+  const { client, deviceSyncImportPending, error, status } = useBrowserVault();
   const metricsClient = isBrowserVaultMetricsCapable(client) ? client : null;
   const privateTrendStatus = status === "loading"
     || (status === "ready" && !metricBucketsLoaded)
@@ -107,7 +106,6 @@ export function BiomarkerPrivateTrendCard({
   return (
     <BiomarkerPrivateTrendCardView
       biomarker={biomarker}
-      onRetry={refresh}
       trend={trend}
     />
   );
@@ -115,11 +113,9 @@ export function BiomarkerPrivateTrendCard({
 
 export function BiomarkerPrivateTrendCardView({
   biomarker,
-  onRetry,
   trend,
 }: {
   biomarker: Pick<BiomarkerOverviewProjection, "shortName" | "unit" | "valuePrecision">;
-  onRetry: () => Promise<void>;
   trend: BiomarkerPrivateTrendState;
 }) {
   const { avg7, avg30, pctChange, pctDirection } = useMemo(
@@ -183,11 +179,6 @@ export function BiomarkerPrivateTrendCardView({
           <CardTitle>Your private {biomarker.shortName}</CardTitle>
           <CardDescription>{trend.message}</CardDescription>
         </CardHeader>
-        <CardContent>
-          <Button size="sm" variant="outline" onClick={() => void onRetry()}>
-            Retry private trend
-          </Button>
-        </CardContent>
       </Card>
     );
   }
@@ -307,7 +298,7 @@ function resolvePrivateTrend(input: {
 
   if (input.browserVaultStatus === "error") {
     return {
-      message: input.error ?? "We couldn't unlock your private trend right now. Try again.",
+      message: input.error ?? "We couldn't unlock your private trend right now.",
       status: "error",
     };
   }

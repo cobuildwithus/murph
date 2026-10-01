@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-01",
+  "order": 100,
+  "item": {
+    "id": "rapid-group-followups-stay-together",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Rapid group follow-ups stay together",
+    "summary": "When several quick messages arrive while Murph is composing in a group conversation, Murph now considers the complete beat before sending one reply.",
+    "details": "Only consecutive messages in the same group can join the active response. Unrelated conversations and messages that arrive after the reply window remain separate.",
+    "relevanceTags": ["assistant", "groups", "reliability"],
+    "sourcePullRequests": [2701]
+  }
+}

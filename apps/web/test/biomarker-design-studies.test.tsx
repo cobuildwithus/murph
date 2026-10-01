@@ -144,7 +144,7 @@ test("screenshot categories keep the production studies available without one gi
   expect(sectionsMarkup).toContain(
     "Settings inference routing, locked models, and endpoint",
   );
-  expect(sectionsMarkup).toContain("High usage · Edge required");
+  expect(sectionsMarkup).toContain("Highest usage · Edge required");
   expect(sectionsMarkup).toContain(">Upgrade to Edge</button>");
   expect(sectionsMarkup).not.toContain("Sol requires an active Edge plan.");
   expect(sectionsMarkup).toContain(
@@ -241,6 +241,13 @@ test("screenshot categories keep the production studies available without one gi
 
   expect(componentsMarkup).toContain(">Components<");
   expect(componentsMarkup).not.toContain(">Sections<");
+  expect(componentsMarkup).toContain(
+    'data-design-study="goal-category-browse"',
+  );
+  expect(componentsMarkup).toContain('id="goal-category-browse"');
+  expect(componentsMarkup).toContain('data-goal-catalog="cardio"');
+  expect(componentsMarkup).toContain('data-design-study="goal-composer"');
+  expect(componentsMarkup).toContain('aria-pressed="true"');
   expect(componentsMarkup).toContain("WHOOP Completion Dialog");
   expect(componentsMarkup).toContain("Preview WHOOP completion");
   expect(componentsMarkup).toContain("Preview capacity fallback");

@@ -6,6 +6,7 @@ import {
   type HostedExecutionAssistantAskConsentedMemberTarget,
   type HostedExecutionAssistantAskCurrentSenderTarget,
   type HostedExecutionAssistantAskJoinedGroupTarget,
+  type HostedExecutionAssistantAskOperatorTaskTarget,
   type HostedExecutionAssistantAskOrigin,
   type HostedExecutionAssistantAskRequestedPayload,
   type HostedExecutionAssistantAskResultDestination,
@@ -58,6 +59,15 @@ export function parseHostedExecutionAssistantAskRequestedPayload(
       question,
       target,
     };
+  }
+
+  if (target.kind === "operator_task") {
+    assertExactHostedExecutionAssistantAskKeys(record, [
+      "expiresAt",
+      "question",
+      "target",
+    ], label);
+    return { expiresAt, question, target };
   }
 
   const origin = parseHostedExecutionAssistantAskOrigin(
@@ -306,6 +316,7 @@ function parseHostedExecutionAssistantAskTarget(
   label: string,
 ): HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
+  | HostedExecutionAssistantAskOperatorTaskTarget
   | HostedExecutionAssistantAskCurrentSenderTarget {
   const target = requireObject(value, label);
   const kind = requireString(target.kind, `${label}.kind`);
@@ -349,6 +360,16 @@ function parseHostedExecutionAssistantAskTarget(
       permissionDigest: parseHostedExecutionAssistantAskOpaqueId(
         target.permissionDigest,
         `${label}.permissionDigest`,
+      ),
+    };
+  }
+  if (kind === "operator_task") {
+    assertExactHostedExecutionAssistantAskKeys(target, ["kind", "taskId"], label);
+    return {
+      kind,
+      taskId: parseHostedExecutionAssistantAskOpaqueId(
+        target.taskId,
+        `${label}.taskId`,
       ),
     };
   }

@@ -38,6 +38,7 @@ import {
 } from "./usage-credit-purchase-stripe";
 import {
   lockHostedUsageCreditPurchaseReservationOwnersTx,
+  type HostedUsageCreditMemberLockOrder,
 } from "./usage-credit-purchase-reservation-lock";
 import {
   HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
@@ -992,7 +993,7 @@ export function canCancelHostedUsageCreditDirectPayment(
 }
 
 export async function cancelHostedUsageCreditDirectPayment(input: {
-  groupBeneficiaryMemberId?: string;
+  memberLockOrder?: HostedUsageCreditMemberLockOrder;
   now: Date;
   prisma: PrismaClient;
   purchase: HostedUsageCreditPurchase;
@@ -1016,7 +1017,9 @@ export async function cancelHostedUsageCreditDirectPayment(input: {
   ) {
     return requireHostedUsageCreditDirectPaymentBinding(
       await bindHostedUsageCreditDirectPaymentIntent({
-        groupBeneficiaryMemberId: input.groupBeneficiaryMemberId,
+        ...(input.memberLockOrder
+          ? { memberLockOrder: input.memberLockOrder }
+          : {}),
         now: input.now,
         payerMemberId,
         paymentIntent,
@@ -1038,7 +1041,9 @@ export async function cancelHostedUsageCreditDirectPayment(input: {
   if (canceled.status === "succeeded" || canceled.status === "processing") {
     return requireHostedUsageCreditDirectPaymentBinding(
       await bindHostedUsageCreditDirectPaymentIntent({
-        groupBeneficiaryMemberId: input.groupBeneficiaryMemberId,
+        ...(input.memberLockOrder
+          ? { memberLockOrder: input.memberLockOrder }
+          : {}),
         now: input.now,
         payerMemberId,
         paymentIntent: canceled,
@@ -1054,7 +1059,9 @@ export async function cancelHostedUsageCreditDirectPayment(input: {
     );
   }
   const expired = await transitionCanceledHostedUsageCreditDirectPaymentIntent({
-    groupBeneficiaryMemberId: input.groupBeneficiaryMemberId,
+    ...(input.memberLockOrder
+      ? { memberLockOrder: input.memberLockOrder }
+      : {}),
     now: input.now,
     paymentIntent: canceled,
     prisma: input.prisma,
@@ -1071,7 +1078,7 @@ export async function cancelHostedUsageCreditDirectPayment(input: {
 
 async function transitionCanceledHostedUsageCreditDirectPaymentIntent(input: {
   billingAuthority?: HostedUsageCreditSavedCardBillingAuthority;
-  groupBeneficiaryMemberId?: string;
+  memberLockOrder?: HostedUsageCreditMemberLockOrder;
   now: Date;
   paymentIntent: Stripe.PaymentIntent;
   prisma: PrismaClient;
@@ -1086,22 +1093,20 @@ async function transitionCanceledHostedUsageCreditDirectPaymentIntent(input: {
   const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
     input.purchase,
   );
-  const groupBeneficiaryMemberId =
-    input.billingAuthority?.kind === "group"
-      ? input.purchase.beneficiaryMemberId
-      : input.groupBeneficiaryMemberId ??
-        (input.purchase.groupSponsorshipAuthorizationId
-          ? input.purchase.beneficiaryMemberId
-          : null);
+  const memberLockOrder = input.billingAuthority
+    ? input.billingAuthority.kind === "family"
+      ? "payer_first"
+      : input.billingAuthority.kind === "group"
+        ? "beneficiary_first"
+        : undefined
+    : input.memberLockOrder;
   return input.prisma.$transaction(async (tx) => {
-    if (input.transition === "release") {
-      if (groupBeneficiaryMemberId) {
-        await lockHostedMemberRow(tx, groupBeneficiaryMemberId);
-      }
+    if (!memberLockOrder) {
       await lockHostedMemberRow(tx, payerMemberId);
     } else {
       await lockHostedUsageCreditPurchaseReservationOwnersTx({
         beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+        memberLockOrder,
         payerMemberId,
         tx,
       });
@@ -1221,7 +1226,7 @@ async function transitionCanceledHostedUsageCreditDirectPaymentIntent(input: {
 async function bindHostedUsageCreditDirectPaymentIntent(input: {
   billingAuthority?: HostedUsageCreditSavedCardBillingAuthority;
   customerId?: string;
-  groupBeneficiaryMemberId?: string;
+  memberLockOrder?: HostedUsageCreditMemberLockOrder;
   now: Date;
   payerMemberId: string;
   paymentIntent: Stripe.PaymentIntent;
@@ -1240,18 +1245,24 @@ async function bindHostedUsageCreditDirectPaymentIntent(input: {
         "charge",
       )
     : null;
-  const groupBeneficiaryMemberId =
-    input.billingAuthority?.kind === "group"
-      ? input.purchase.beneficiaryMemberId
-      : input.groupBeneficiaryMemberId ??
-        (input.purchase.groupSponsorshipAuthorizationId
-          ? input.purchase.beneficiaryMemberId
-          : null);
+  const memberLockOrder = input.billingAuthority
+    ? input.billingAuthority.kind === "family"
+      ? "payer_first"
+      : input.billingAuthority.kind === "group"
+        ? "beneficiary_first"
+        : undefined
+    : input.memberLockOrder;
   return input.prisma.$transaction(async (tx) => {
-    if (groupBeneficiaryMemberId) {
-      await lockHostedMemberRow(tx, groupBeneficiaryMemberId);
+    if (memberLockOrder) {
+      await lockHostedUsageCreditPurchaseReservationOwnersTx({
+        beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+        memberLockOrder,
+        payerMemberId,
+        tx,
+      });
+    } else {
+      await lockHostedMemberRow(tx, payerMemberId);
     }
-    await lockHostedMemberRow(tx, payerMemberId);
     const current = await tx.hostedUsageCreditPurchase.findUnique({
       where: { id: input.purchase.id },
     });

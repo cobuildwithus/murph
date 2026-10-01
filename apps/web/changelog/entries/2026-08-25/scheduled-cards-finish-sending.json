@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "scheduled-cards-finish-sending",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Scheduled cards finish sending",
+    "summary": "Scheduled cards now arrive when the finished card is the complete response.",
+    "details": "This covers private nutrition and workout updates plus existing authenticated group cards. Complete text fallbacks also keep moving when a rich card cannot fit.",
+    "relevanceTags": ["assistant", "groups", "messaging", "reliability"],
+    "sourcePullRequests": [2262]
+  }
+}

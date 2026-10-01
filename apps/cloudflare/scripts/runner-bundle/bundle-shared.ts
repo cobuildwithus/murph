@@ -24,6 +24,14 @@ import type { Metafile } from "esbuild";
 //   megabytes when esbuild inlines them, while the runner already installs the
 //   same dependency closure. Keep one on-disk SDK copy and resolve its root and
 //   generated subpaths from that package.
+// - mpg123-decoder: generated audio lazily loads its WASM decoder. Keep the
+//   installed codec copy instead of duplicating it in both CLI and runner
+//   chunks; ordinary replies do not initialize it.
+// - @murphai/runtime-state/node/cli-timing: the CLI opens timing scopes
+//   through a literal lazy import, but query loads through a native variable
+//   import. Both must resolve the installed AsyncLocalStorage owner (and its
+//   relative timing catalog), not an isolated bundled copy. Keep only this
+//   stateful leaf external; the rest of runtime-state remains bundleable.
 // - @murphai/exercise-library: its runtime loads generated JSON artifacts via
 //   `new URL("../generated/...", import.meta.url)`; inlining the JS moves
 //   import.meta.url into the bundle directory and the assets stop resolving.
@@ -40,9 +48,11 @@ export const RUNNER_BUNDLE_SHARED_EXTERNALS = [
   "@linqapp/sdk/*",
   "@murphai/exercise-library",
   "@murphai/exercise-library/*",
+  "@murphai/runtime-state/node/cli-timing",
   "exa-js",
   "exa-js/*",
   "ink",
+  "mpg123-decoder",
   "react",
   "react/*",
   "react-devtools-core",
@@ -61,8 +71,10 @@ export const RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS = [
   "/@junction-api/sdk/",
   "/@linqapp/sdk/",
   "/@murphai/exercise-library/",
+  "/@murphai/runtime-state/dist/node/cli-timing.js",
   "/exa-js/",
   "/ink/",
+  "/mpg123-decoder/",
   "/react/",
   "/react-devtools-core/",
   "/sharp/",

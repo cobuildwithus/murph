@@ -196,7 +196,7 @@ test("Subprocessor register separates connected services and powers the public p
   );
 
   assert.match(register, /# Murph Subprocessors, Model Providers, and Connected Services/u);
-  assert.match(register, /\*\*Last Updated:\*\* August 20, 2026/u);
+  assert.match(register, /\*\*Last Updated:\*\* September 3, 2026/u);
   assert.match(
     register,
     /\| Google \(Gemini API\) \| On-demand analysis of one user-requested video attachment for the requested assistant response\./u,
@@ -225,6 +225,14 @@ test("Subprocessor register separates connected services and powers the public p
   assert.match(
     register,
     /Status-page provider \/ subprocessor; independent controller for provider-owned security or legal processing where applicable\./u,
+  );
+  assert.match(
+    register,
+    /\| Brandfetch \| Optional brand search and brand-logo images on the public food comparison page\./u,
+  );
+  assert.match(
+    register,
+    /Requests use no referrer or credentials and send no user search term, UPC, nutrition data, product-test data, account data, or health data\./u,
   );
   assert.match(register, /\| Oura \|/u);
   assert.match(register, /\| WHOOP \|/u);

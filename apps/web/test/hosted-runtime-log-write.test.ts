@@ -15,6 +15,7 @@ import {
   getHostedRuntimeLogPool,
   isHostedRuntimeLogDatabaseConfigured,
 } from "@/src/lib/hosted-runtime-log/database";
+import { reportHostedRuntimeUsageGateObservation } from "@/src/lib/hosted-runtime-log/usage-gate";
 import {
   writeHostedRuntimeLogs,
 } from "@/src/lib/hosted-runtime-log/write";
@@ -64,6 +65,23 @@ describe("hosted runtime log write routing", () => {
     const input = runtimeLogBatch();
     await expect(writeHostedRuntimeLogs(input)).resolves.toBe(1);
     expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledWith(input);
+  });
+
+  it("records only usage decision metadata and contains diagnostic failures", async () => {
+    vi.stubEnv("HOSTED_RUNTIME_LOG_DATABASE_URL", "postgresql://runtime.test:5432/runtime_logs");
+    const observation = { at: "2026-08-01T12:00:00.000Z", usageLimited: true, userId: "member_gate_test" };
+    await reportHostedRuntimeUsageGateObservation(observation);
+    expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledExactlyOnceWith({
+      userId: observation.userId,
+      entries: [{ at: observation.at, component: "runtime", eventCode: "assistant.automation_detail",
+        level: "info", phase: "invoke", redactedJson: { type: "runtime.ai_usage_gate", usageLimited: true } }],
+    });
+    mocks.recordHostedRuntimeLogs.mockRejectedValueOnce(new Error("synthetic private failure"));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await expect(reportHostedRuntimeUsageGateObservation(observation)).resolves.toBeUndefined();
+      expect(warning).toHaveBeenCalledExactlyOnceWith("Runtime usage-gate diagnostic could not be recorded.");
+    } finally { warning.mockRestore(); }
   });
 
   it("keeps dedicated write failures visible", async () => {

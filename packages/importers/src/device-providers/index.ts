@@ -4,6 +4,7 @@ export {
   resolveDeviceProviderSnapshotDefaultTimeZone,
   type DeviceProviderImporterExecutionOptions,
   type DeviceProviderSnapshotImportInput,
+  type DeviceProviderSnapshotImportTiming,
 } from "./import-device-provider-snapshot.ts";
 export {
   createDeviceProviderRegistry,
@@ -85,7 +86,6 @@ export type {
 export {
   createNamedDeviceProviderRegistry,
   normalizeDeviceProviderKey,
-  requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
   requireDeviceProviderWebhookDescriptor,
   resolveDeviceProviderConnectionDescriptor,
@@ -97,8 +97,9 @@ export type {
   DeviceProviderConnectionDescriptor,
   DeviceProviderDescriptor,
   DeviceProviderMetricFamily,
+  DeviceProviderNonOAuthConnectionDescriptor,
   DeviceProviderNormalizationDescriptor,
-  DeviceProviderOAuthDescriptor,
+  DeviceProviderOAuth2ConnectionDescriptor,
   DeviceProviderSnapshotParserKind,
   DeviceProviderSourcePriorityHints,
   DeviceProviderSyncDescriptor,
@@ -110,18 +111,6 @@ export type {
   ResolveDeviceProviderSourcePriorityInput,
 } from "./provider-descriptors.ts";
 
-export {
-  resolveWearableCanonicalMetricKey,
-  resolveWearableMetricCatalogEntry,
-  resolveWearableMetricTolerance,
-  wearableCanonicalMetricKeys,
-  wearableMetricCatalog,
-} from "./metric-catalog.ts";
-export type {
-  WearableCanonicalMetricKey,
-  WearableMetricCatalogEntry,
-  WearableMetricRecordKind,
-} from "./metric-catalog.ts";
 export {
   buildWearableRawIngestReceipt,
   stableStringify,

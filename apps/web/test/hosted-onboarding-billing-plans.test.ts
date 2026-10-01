@@ -44,6 +44,10 @@ describe("hosted billing plans", () => {
       displayName: "Edge",
       recurringAmountUsdCents: 2_000,
     });
+    expect(getHostedBillingPlanDefinition("launch_group_monthly")).toMatchObject({
+      displayName: "Core",
+      recurringAmountUsdCents: 350,
+    });
     expect(getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly"))
       .toBe(6_400_000n);
     expect(getHostedAiUsageMonthlyAllowanceUsdMicros("launch_edge_monthly"))

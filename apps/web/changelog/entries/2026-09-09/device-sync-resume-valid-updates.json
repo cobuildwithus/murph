@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 100,
+  "item": {
+    "id": "device-sync-resume-valid-updates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Device sync keeps its place",
+    "summary": "Device sync can save and resume pending calendar refreshes and source-specific updates after a pause.",
+    "details": "Accepted companion health updates and silent-source recovery jobs also retain the information they need to continue.",
+    "relevanceTags": ["device-sync", "reliability"],
+    "sourcePullRequests": [3084]
+  }
+}

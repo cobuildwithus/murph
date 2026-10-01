@@ -43,6 +43,7 @@ describe("Clinical Records connect start route", () => {
     expect(request.url).not.toContain(claim);
     expect(mocks.startClinicalRecordConnection).toHaveBeenCalledWith({
       claim,
+      keepUpdated: false,
       providerDirectoryEntryId: "epic-example",
       request,
     });
@@ -55,6 +56,7 @@ describe("Clinical Records connect start route", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const response = await route.POST(jsonRequest({
       claim,
+      keepUpdated: false,
       providerDirectoryEntryId: "epic-example",
       returnTo: "/records",
     }));

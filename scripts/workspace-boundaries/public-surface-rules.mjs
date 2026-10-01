@@ -76,6 +76,21 @@ export async function verifyAssistantRuntimePublicSourceSurface(failures) {
 export async function verifyFocusedOwnerSourceSurfaces(failures) {
   const deletedCompatibilityFiles = [
     {
+      path: path.join(repoRoot, "packages", "importers", "src", "sample-series-summary.ts"),
+      message:
+        "packages/importers/src/sample-series-summary.ts exists; sample summaries belong to @murphai/health-metrics and must not return through an importer shim.",
+    },
+    {
+      path: path.join(repoRoot, "packages", "importers", "src", "device-providers", "metric-catalog.ts"),
+      message:
+        "packages/importers/src/device-providers/metric-catalog.ts exists; the wearable metric catalog belongs to @murphai/health-metrics and must not return through an importer shim.",
+    },
+    {
+      path: path.join(repoRoot, "packages", "health-commons", "src", "biomarker-fallback-ranges.ts"),
+      message:
+        "packages/health-commons/src/biomarker-fallback-ranges.ts exists; reviewed runtime lab ranges belong to @murphai/health-metrics and must not return through a Health Commons shim.",
+    },
+    {
       path: path.join(repoRoot, "packages", "messaging-ingress", "src", "index.ts"),
       message:
         "packages/messaging-ingress/src/index.ts exists; messaging-ingress is subpath-only and must not revive a package-root barrel beside its explicit provider entrypoints.",

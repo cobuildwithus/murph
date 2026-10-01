@@ -33,7 +33,7 @@ import {
 } from "../src/user-runner/runtime-command-budget.ts";
 import {
   runHostedWorkspaceSnapshotRestorePreparationWithinBudget,
-} from "../src/user-runner/runtime-invocation.ts";
+} from "../src/runtime-invocation-preparation.ts";
 import {
   prepareHostedWorkspaceSnapshotRestore,
   type HostedWorkspaceSnapshotPreparedRestore,
@@ -312,7 +312,7 @@ describe("workspace snapshot restore preparation", () => {
     }
   });
 
-  it("starts legacy unwrap and presign fallback reads in parallel", async () => {
+  it.each([false, true])("starts fresh unwrap and presign reads in parallel with prepared bypass=%s", async (bypassPrepared) => {
     const fixture = await createSnapshotFixture();
     const getUrl = "https://r2.example.test/fallback-snapshot.enc";
     const unwrapStarted = createDeferred<void>();
@@ -344,6 +344,10 @@ describe("workspace snapshot restore preparation", () => {
     });
     const port = createCloudflareWorkspaceSnapshotPort({
       boundUserId: TEST_USER_ID,
+      ...(bypassPrepared ? { preparedSnapshotRestore: {
+        ...createPreparedRestore(fixture, createPreparedGetUrl("unused.enc")),
+        snapshotFingerprint: "f".repeat(64),
+      } } : {}),
       fetchImpl: fetchMock as typeof fetch,
       timeoutMs: 5_000,
       workspaceCheckpointBridge: createWorkspaceCheckpointBridge(),
@@ -353,6 +357,7 @@ describe("workspace snapshot restore preparation", () => {
       await expect(port.restoreWorkspaceSnapshot({
         durableRoot: "/tmp/unused-fallback-snapshot-restore",
         ref: fixture.ref,
+        ...(bypassPrepared ? { usePreparedRestore: false } : {}),
       })).rejects.toThrow(/Hosted workspace snapshot fetch failed with HTTP 500/u);
       expect(events.slice(0, 2).sort()).toEqual([
         "presign:start",
@@ -389,11 +394,10 @@ describe("runHostedWorkspaceSnapshotRestorePreparationWithinBudget", () => {
       vi.setSystemTime(new Date("2026-06-24T00:00:00.000Z"));
       const onBudgetTimeout = vi.fn();
       const budget = createRuntimeProcessingCommandBudget({
-        commandTimeoutMs: null,
+        commandTimeoutMs: 1_002,
         startedAtMs: Date.now(),
         // Margin is 1000ms, so an effective deadline of +2ms keeps the step's
         // setTimeout small enough to fire deterministically under fake timers.
-        webControlTimeoutMs: 1002,
       });
 
       const promise = runHostedWorkspaceSnapshotRestorePreparationWithinBudget({
@@ -421,7 +425,6 @@ describe("runHostedWorkspaceSnapshotRestorePreparationWithinBudget", () => {
     const budget = createRuntimeProcessingCommandBudget({
       commandTimeoutMs: null,
       startedAtMs: Date.now(),
-      webControlTimeoutMs: 60_000,
     });
 
     await expect(runHostedWorkspaceSnapshotRestorePreparationWithinBudget({

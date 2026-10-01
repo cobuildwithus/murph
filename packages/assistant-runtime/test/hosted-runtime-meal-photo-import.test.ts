@@ -27,6 +27,13 @@ import {
 import type { HostedRuntimeEffectsPort } from "../src/hosted-runtime/platform.ts";
 import type { HostedMailboxResolvedImportItem } from "../src/hosted-runtime/mailbox-import.ts";
 import { importHostedMealPhotoCapturedMailboxItem } from "../src/hosted-runtime/meal-photo-import.ts";
+import { createHostedWorkspaceBridgeMailboxImporter } from "../src/hosted-runtime/snapshot-bridge-mailbox.ts";
+import {
+  readHostedSystemMailboxState,
+  resolveHostedSystemMailboxNextWakeCandidate,
+  selectHostedModelFreeSystemMailboxItems,
+} from "../src/hosted-runtime/system-mailbox-state.ts";
+import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
 
 const CAPTURED_AT = "2026-07-12T21:15:00.000Z";
 const CAPTURE_ID = "a".repeat(64);
@@ -43,6 +50,63 @@ afterEach(async () => {
 });
 
 describe("hosted meal photo mailbox import", () => {
+  it.each(["manual", "automatic", "consumed"] as const)(
+    "queues immediate estimation only for an unconsumed manual capture: %s",
+    async (mode) => {
+      const vaultRoot = await createTestVault();
+      const wake = createMealPhotoWake();
+      if (mode !== "automatic") wake.eventId = `meal-photo:manual:${CAPTURE_ID}`;
+      const item = createMealPhotoMailboxItem();
+      item.item.dedupeKey = wake.eventId;
+      item.durablyConsumed = mode === "consumed";
+      const readMealPhoto = vi.fn(async () => JPEG_BYTES);
+      const deleteMealPhoto = vi.fn(async () => undefined);
+      const importer = createHostedWorkspaceBridgeMailboxImporter({
+        decodeMailboxPayload: { decode: async () => ({ status: "decoded", wake }) },
+        runtime: {
+          commitTimeoutMs: null,
+          forwardedEnv: {},
+          parserToolchain: { tools: {} },
+          platformEnv: {},
+          resolvedConfig: createHostedRuntimeResolvedConfig(),
+          userEnv: {},
+          platform: {
+            artifactStore: { get: async () => null, put: async () => undefined },
+            deviceSyncPort: null,
+            effectsPort: createEffectsPort({ readMealPhoto, deleteMealPhoto }),
+            usageRecordPort: null,
+          },
+        },
+        vaultRoot,
+      });
+      const first = await importer(item);
+      expect(first.status).toBe("imported");
+      expect((await importer(item)).status).toBe("imported");
+      expect(readMealPhoto).toHaveBeenCalledTimes(1);
+      expect(deleteMealPhoto).not.toHaveBeenCalled();
+      const state = await readHostedSystemMailboxState(vaultRoot);
+      expect(state.pending).toHaveLength(mode === "manual" ? 1 : 0);
+      expect(selectHostedModelFreeSystemMailboxItems(state).pending).toHaveLength(0);
+      if (mode === "manual") {
+        expect(await resolveHostedSystemMailboxNextWakeCandidate({
+          now: () => CAPTURED_AT, vaultRoot,
+        })).toMatchObject({ at: CAPTURED_AT, executionClass: "default_owned" });
+        expect(state.pending[0]).toMatchObject({
+          itemId: item.item.id,
+          mailboxDedupeKey: wake.eventId,
+          routeAction: "dispatch-assistant-notification",
+          status: "pending",
+          wake,
+        });
+      }
+      expect(await findEventByExternalRef({
+        resourceId: CAPTURE_ID, resourceType: "photo", system: "meal-photo-capture", vaultRoot,
+      })).not.toBeNull();
+      if (first.status === "imported") await first.afterCheckpoint?.();
+      expect(deleteMealPhoto).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("imports one canonical meal idempotently and deletes staging only after checkpoint", async () => {
     const vaultRoot = await createTestVault();
     const readMealPhoto = vi.fn(async () => JPEG_BYTES);

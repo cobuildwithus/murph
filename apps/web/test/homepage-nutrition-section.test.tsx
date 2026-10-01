@@ -9,7 +9,6 @@ import { NutritionSection } from "@/src/components/homepage/nutrition-section";
 test("NutritionSection renders the static nutrition database copy", () => {
   const markup = renderToStaticMarkup(createElement(NutritionSection));
 
-  assert.match(markup, /Nutrition/);
   assert.match(markup, /Murph reads the label so you don&#x27;t have to\./);
   assert.match(
     markup,

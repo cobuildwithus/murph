@@ -5,7 +5,8 @@ import {
   HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
   HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
 } from "@murphai/runtime-state";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { runHostedWorkerDeployment } from "../scripts/deploy-worker-version.shared.js";
 
 import {
   assertHostedDeployEnvironment,
@@ -19,9 +20,9 @@ import {
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 const HOSTED_ASSISTANT_MODEL_PRICING_ERROR =
-  "HOSTED_ASSISTANT_MODEL must be one of gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna for hosted AI usage allowance pricing.";
-const HOSTED_STATE_ISOLATION_ROLLOUT_ERROR =
-  "production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is the audience-key, selector-scope, and runner-schema-v16 media-effect bundle.";
+  "HOSTED_ASSISTANT_MODEL must be one of gpt-6.1-sol, gpt-6-sol, gpt-6-luna, gpt-6-astra, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna for hosted AI usage allowance pricing.";
+const HOSTED_CONTAINER_ROLLOUT_ERROR =
+  "HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual', 'immediate', or 'worker-only'.";
 
 function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefined> = {}): EnvSource {
   return {
@@ -951,7 +952,7 @@ describe("deploy preflight helpers", () => {
         }),
         { deployWorker: true },
       ),
-    ).toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+    ).not.toContain(HOSTED_CONTAINER_ROLLOUT_ERROR);
 
     expect(
       listHostedDeployEnvironmentInvariantErrors(
@@ -961,7 +962,7 @@ describe("deploy preflight helpers", () => {
         }),
         { deployWorker: true },
       ),
-    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+    ).not.toContain(HOSTED_CONTAINER_ROLLOUT_ERROR);
 
     expect(
       listHostedDeployEnvironmentInvariantErrors(
@@ -996,47 +997,18 @@ describe("deploy preflight helpers", () => {
     ]));
   });
 
-  it("requires immediate production container rollout while state-isolation keys migrate", () => {
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv({
-          HOSTED_EXECUTION_CONTAINER_ROLLOUT: "gradual",
-        }),
-        { deployWorker: true },
-      ),
-    ).toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+  it.each([undefined, "gradual", "immediate", "worker-only"])("accepts production rollout mode %s without weakening the remaining preflight", (mode) => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredWorkerDeployEnv({ HOSTED_EXECUTION_CONTAINER_ROLLOUT: mode }),
+      { deployWorker: true },
+    )).toEqual([]);
+  });
 
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv({
-          HOSTED_EXECUTION_CONTAINER_ROLLOUT: undefined,
-        }),
-        { deployWorker: true },
-      ),
-    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
-
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv(),
-        { deployWorker: true },
-      ),
-    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
-
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv({
-          CF_PUBLIC_BASE_URL: "http://localhost:8787",
-          HOSTED_CRYPTO_ENV: "development",
-          HOSTED_DATABASE_ALERT_ENABLED: undefined,
-          HOSTED_EXECUTION_CONTAINER_ROLLOUT: "gradual",
-          HOSTED_EXECUTION_DEPLOY_CONTEXT: "development",
-          HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-          HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
-          HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
-        }),
-        { deployWorker: true },
-      ),
-    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+  it("rejects unknown production rollout modes", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredWorkerDeployEnv({ HOSTED_EXECUTION_CONTAINER_ROLLOUT: "unexpected" }),
+      { deployWorker: true },
+    )).toContain(HOSTED_CONTAINER_ROLLOUT_ERROR);
   });
 
   it("rejects deploy timeout settings that cannot contain the web-control request", () => {
@@ -1100,9 +1072,29 @@ describe("deploy preflight helpers", () => {
     }), { deployWorker: true })).not.toThrow();
   });
 
-  it("allows production deploy DNS records only when they resolve to public addresses", async () => {
+  it("reaches Worker-only deployment through the real production preflight", async () => {
+    const deployDirect = vi.fn(async () => ({ containers: [], workerVersionId: "synthetic-version" }));
+    await runHostedWorkerDeployment({
+      env: createRequiredWorkerDeployEnv({ HOSTED_EXECUTION_CONTAINER_ROLLOUT: "worker-only" }),
+      workerName: "hosted-runner", configPath: "/tmp/synthetic-config.json",
+      resultPath: "/tmp/synthetic-result.json", runnerBundleDir: "/tmp/synthetic-bundle",
+      secretsFilePath: "/tmp/synthetic-secrets.json",
+      dependencies: {
+        deployDirect,
+        validateDeployEnvironment: ({ source, deployWorker }) => assertHostedDeployEnvironmentAsync(source, { deployWorker }, {
+          readR2BucketInfo: readValidR2BucketInfo, resolveHostnameAddresses: async () => ["8.8.8.8"],
+        }),
+        validatePreparedArtifacts: async () => {}, mkdir: async () => {}, writeFile: async () => {},
+        readCurrentDeployment: async () => ({ created_on: "2026-01-01T00:00:00Z", versions: [{ percentage: 100, version_id: "synthetic-version" }] }),
+      },
+    });
+    expect(deployDirect).toHaveBeenCalledOnce();
+    expect(deployDirect).toHaveBeenCalledWith(expect.objectContaining({ containerRolloutMode: "worker-only" }));
+  });
+
+  it.each(["immediate", "worker-only"])("accepts %s with valid production DNS and bucket evidence", async (mode) => {
     await expect(assertHostedDeployEnvironmentAsync(
-      createRequiredWorkerDeployEnv(),
+      createRequiredWorkerDeployEnv({ HOSTED_EXECUTION_CONTAINER_ROLLOUT: mode }),
       { deployWorker: true },
       {
         readR2BucketInfo: readValidR2BucketInfo,

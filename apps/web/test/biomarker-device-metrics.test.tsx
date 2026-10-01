@@ -1,4 +1,4 @@
-import { act, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -133,7 +133,7 @@ test("wearable-only biomarkers wait for demanded buckets before showing a genuin
   }
 });
 
-test("failed wearable demand shows the recoverable alert without replacing ready data", async () => {
+test("failed wearable demand shows a stable alert without replacing ready data", async () => {
   browserVaultMock.value.client = clientWithMetricRows([], [labRow()]);
   browserVaultMock.value.error = "Your dashboard data is not available right now.";
   browserVaultMock.value.status = "error";
@@ -150,15 +150,12 @@ test("failed wearable demand shows the recoverable alert without replacing ready
     expect(rendered.container.querySelector('[aria-label="Loading biomarkers"]')).toBeNull();
     expect(rendered.container.querySelector("[data-biomarker-index-state]")).toBeNull();
 
-    const retry = [...rendered.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Retry",
-    );
-    expect(retry).toBeDefined();
-    await act(async () => {
-      retry?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-    expect(browserVaultMock.value.refresh).toHaveBeenCalledOnce();
-    expect(browserVaultMock.value.refresh).toHaveBeenCalledWith({ background: true });
+    expect(
+      [...rendered.container.querySelectorAll("button")].some(
+        (button) => button.textContent === "Retry",
+      ),
+    ).toBe(false);
+    expect(browserVaultMock.value.refresh).not.toHaveBeenCalled();
   } finally {
     await rendered.cleanup();
   }

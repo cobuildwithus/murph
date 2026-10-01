@@ -1,3 +1,4 @@
+import { CLI_TIMING_EVENT_METHOD, normalizeCliTiming } from '@murphai/runtime-state/cli-timing'
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 
@@ -23,11 +24,11 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  VAULT_CLI_BATCH_MAX_COMMANDS,
-  VAULT_CLI_BATCH_RESULT_SCHEMA,
+  vaultCliBatchResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   resolveCodexCommandFamily,
+  resolveCodexVaultCliCommandArgv,
 } from '../../assistant-codex/command-family.js'
 import {
   isCodexActionStructurallyFailed,
@@ -37,6 +38,8 @@ import {
   ASSISTANT_TURN_PROFILE_MAX_REQUESTS,
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_TURN_PROFILE_SCHEMA,
+  ASSISTANT_TURN_PROFILE_KNOWLEDGE_COUNT_KEYS,
+  type AssistantTurnProfileKnowledgeCounts,
   type AssistantUsageTokenPricingBasis,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
@@ -46,6 +49,7 @@ import type {
   AssistantUserMessageContentPart,
 } from '../content-types.js'
 import type {
+  AssistantProviderRequestOutcome,
   AssistantProviderServiceTier,
   AssistantProviderTurnExecutionInput,
   AssistantProviderUsage,
@@ -152,6 +156,7 @@ export function resolveAssistantProviderFlatPromptConversationHistorySection(
 function serializeAssistantConversationMessages(
   messages: ReadonlyArray<{
     content: string | AssistantUserMessageContentPart[]
+    occurredAt?: string
     role: 'assistant' | 'user'
   }>,
 ): string[] {
@@ -164,7 +169,8 @@ function serializeAssistantConversationMessages(
     }
 
     const label = message.role === 'assistant' ? 'Assistant' : 'User'
-    return [`${label}:\n${content}`]
+    const occurredAt = normalizeNullableString(message.occurredAt)
+    return [`${label}${occurredAt ? ` at ${occurredAt}` : ''}:\n${content}`]
   })
 }
 
@@ -211,12 +217,11 @@ export function resolveAssistantProviderPrompt(
     .join('\n\n')
 }
 
-export function mergeCodexConfigOverrides(input: {
-  modelProvider?: string | null
-  showThinkingTraces: boolean
-}): readonly string[] | undefined {
+export function resolveCodexModelProviderConfigOverrides(
+  modelProviderInput?: string | null,
+): readonly string[] | undefined {
   const overrides: string[] = []
-  const modelProvider = normalizeNullableString(input.modelProvider)
+  const modelProvider = normalizeNullableString(modelProviderInput)
   const modelProviderConfig =
     resolveAssistantCodexModelProviderConfig(modelProvider)
 
@@ -262,20 +267,7 @@ export function mergeCodexConfigOverrides(input: {
       'false',
     )
   }
-  // Multi-agent V2 is enabled by the hosted config.toml's
-  // [features.multi_agent_v2] table (which also carries Murph's
-  // proactive-delegation tool and mode hints). A CLI
-  // `--config features.multi_agent_v2=true` boolean would take precedence
-  // over that table and silently reset the feature to defaults, dropping
-  // those configured hints — never emit it.
-  if (!input.showThinkingTraces) {
-    return overrides.length > 0 ? overrides : undefined
-  }
-
-  upsertCodexConfigOverride(overrides, 'model_reasoning_summary', '"auto"')
-  upsertCodexConfigOverride(overrides, 'hide_agent_reasoning', 'false')
-
-  return overrides
+  return overrides.length > 0 ? overrides : undefined
 }
 
 function formatCodexTomlString(value: string): string {
@@ -508,11 +500,26 @@ interface AssistantTurnProfileToolAggregate {
   label: string
   outputBytesMax: number
   outputBytesTotal: number
+  knowledgeCounts?: AssistantTurnProfileKnowledgeCounts
 }
 
 interface AssistantTurnProfileToolAggregateRead {
   aggregates: AssistantTurnProfileToolAggregate[]
   attributionTruncated: boolean
+}
+
+// The receiver appends this event; never inspect tool result text for diagnostics.
+// Keep optional validation outside the legacy aggregate/accounting reducer.
+function readAssistantCliTiming(input: { rawEvents: readonly unknown[]; turnId: string | null }) {
+  for (let index = input.rawEvents.length - 1; index >= 0; index -= 1) {
+    const record = readCodexRecord(input.rawEvents[index])
+    const params = readCodexRecord(record?.params)
+    if (record?.method === CLI_TIMING_EVENT_METHOD && params?.turnId === input.turnId) {
+      const cliTiming = normalizeCliTiming(params?.timing)
+      return cliTiming ? { cliTiming } : {}
+    }
+  }
+  return {}
 }
 
 // Compact per-turn profile derived entirely from notifications Codex already
@@ -584,6 +591,7 @@ export function buildAssistantCodexTurnProfileJson(input: {
   })
 
   return {
+    ...readAssistantCliTiming(input),
     modelContextWindow,
     requestCount: requests.length,
     requests: requests.slice(-ASSISTANT_TURN_PROFILE_MAX_REQUESTS),
@@ -598,6 +606,7 @@ export function buildAssistantCodexTurnProfileJson(input: {
       label: tool.label,
       outputBytesMax: tool.outputBytesMax,
       outputBytesTotal: tool.outputBytesTotal,
+      ...(tool.knowledgeCounts ? { knowledgeCounts: tool.knowledgeCounts } : {}),
     })),
     toolsTruncated:
       toolAttributionTruncated
@@ -632,17 +641,28 @@ function readAssistantTurnProfileToolAggregates(
 
     const durationMs = readAssistantProviderInteger(item, 'durationMs')
     const outputBytes = readAssistantTurnProfileUtf8Bytes(aggregatedOutput)
+    const failed = isCodexActionStructurallyFailed({ item })
 
     return {
       aggregates: [{
         calls: 1,
         durationKnownCalls: durationMs === null ? 0 : 1,
         durationMs: durationMs ?? 0,
-        failedCalls: isCodexActionStructurallyFailed({ item }) ? 1 : 0,
+        failedCalls: failed ? 1 : 0,
         kind: 'command',
         label,
         outputBytesMax: outputBytes,
         outputBytesTotal: outputBytes,
+        ...(label === 'vault-cli knowledge' ? {
+          knowledgeCounts: readAssistantKnowledgeCounts(
+            resolveCodexVaultCliCommandArgv({
+              allowKnownShellWrapper: true,
+              commandLabel: readAssistantProviderString(item.command),
+            })?.[2],
+            failed,
+            failed ? readAssistantKnowledgeErrorCode(aggregatedOutput) : undefined,
+          ),
+        } : {}),
       }],
       attributionTruncated: label === 'vault-cli batch',
     }
@@ -692,87 +712,37 @@ function readAssistantTurnProfileBatchToolAggregates(
     return null
   }
 
-  const result = readAssistantProviderRecord(parsed)
-  if (result?.schema !== VAULT_CLI_BATCH_RESULT_SCHEMA) {
+  const parsedResult = vaultCliBatchResultSchema.safeParse(parsed)
+  if (!parsedResult.success) {
     return null
   }
-  const commands = result?.commands
-  const count = result?.count
-  const failed = result?.failed
-  if (
-    !Array.isArray(commands)
-    || commands.length === 0
-    || commands.length > VAULT_CLI_BATCH_MAX_COMMANDS
-    || typeof count !== 'number'
-    || !Number.isSafeInteger(count)
-    || count !== commands.length
-    || typeof failed !== 'number'
-    || !Number.isSafeInteger(failed)
-    || failed < 0
-  ) {
-    return null
-  }
+  const { commands } = parsedResult.data
 
   const aggregates: AssistantTurnProfileToolAggregate[] = []
-  let failedCommands = 0
-  for (const value of commands) {
-    const command = readAssistantProviderRecord(value)
-    const argv = command?.argv
-    const durationMs = command?.durationMs
-    const ok = command?.ok
+  for (const command of commands) {
+    const { argv, durationMs, ok, outputBytes, stdout } = command
     // The v1 batch envelope counts UTF-16 code units, not bytes. Validate it
     // only as part of the envelope; byte metrics come from source-owned bytes.
-    const legacyOutputChars = command?.outputChars
-    const outputBytes = command?.outputBytes
-    const stdout = command?.stdout
     if (
-      !command
-      || !Array.isArray(argv)
-      || argv.some((token) => typeof token !== 'string')
-      || typeof durationMs !== 'number'
-      || !Number.isSafeInteger(durationMs)
-      || durationMs < 0
-      || typeof ok !== 'boolean'
-      || typeof legacyOutputChars !== 'number'
-      || !Number.isSafeInteger(legacyOutputChars)
-      || legacyOutputChars < 0
-      || typeof outputBytes !== 'number'
-      || !Number.isSafeInteger(outputBytes)
-      || outputBytes < 0
-      || typeof stdout !== 'string'
-      || (stdout.length > 0 && Buffer.byteLength(stdout, 'utf8') !== outputBytes)
+      stdout.length > 0 && Buffer.byteLength(stdout, 'utf8') !== outputBytes
     ) {
       return null
     }
 
-    if (!ok) {
-      const nextFailedCommands = safeAssistantTurnProfileIntegerSum(
-        failedCommands,
-        1,
-      )
-      if (nextFailedCommands === null) {
-        return null
-      }
-      failedCommands = nextFailedCommands
-    }
-
+    const label = resolveCodexCommandFamily({ argv, source: 'batch_argv' })
     aggregates.push({
       calls: 1,
       durationKnownCalls: 1,
       durationMs,
       failedCalls: ok ? 0 : 1,
       kind: 'command',
-      label: resolveCodexCommandFamily({
-        argv,
-        source: 'batch_argv',
-      }),
+      label,
       outputBytesMax: outputBytes,
       outputBytesTotal: outputBytes,
+      ...(label === 'vault-cli knowledge' ? {
+        knowledgeCounts: readAssistantKnowledgeCounts(argv[1], !ok, command.error?.code),
+      } : {}),
     })
-  }
-
-  if (failedCommands !== failed) {
-    return null
   }
 
   return aggregates
@@ -815,7 +785,60 @@ function mergeAssistantTurnProfileToolAggregate(
   target.failedCalls = failedCalls
   target.outputBytesMax = Math.max(target.outputBytesMax, source.outputBytesMax)
   target.outputBytesTotal = outputBytesTotal
+  if (target.knowledgeCounts && source.knowledgeCounts) {
+    for (const key of ASSISTANT_TURN_PROFILE_KNOWLEDGE_COUNT_KEYS) {
+      target.knowledgeCounts[key] += source.knowledgeCounts[key]
+    }
+  }
   return true
+}
+
+function readAssistantKnowledgeCounts(
+  operation: string | undefined,
+  failed: boolean,
+  code: unknown,
+): AssistantTurnProfileKnowledgeCounts {
+  const counts: AssistantTurnProfileKnowledgeCounts = {
+    showCalls: 0, listCalls: 0, searchCalls: 0, writeCalls: 0, otherCalls: 0,
+    notFoundFailures: 0, invalidFailures: 0, conflictFailures: 0, otherFailures: 0,
+  }
+  switch (operation) {
+    case 'show': counts.showCalls = 1; break
+    case 'list': counts.listCalls = 1; break
+    case 'search': counts.searchCalls = 1; break
+    case 'upsert':
+    case 'append-section': counts.writeCalls = 1; break
+    default: counts.otherCalls = 1
+  }
+  if (!failed) {
+    return counts
+  }
+  switch (code) {
+    case 'knowledge_page_not_found': counts.notFoundFailures = 1; break
+    case 'knowledge_page_invalid': counts.invalidFailures = 1; break
+    case 'knowledge_page_conflict':
+    case 'knowledge_duplicate_slug': counts.conflictFailures = 1; break
+    default: counts.otherFailures = 1
+  }
+  return counts
+}
+
+function readAssistantKnowledgeErrorCode(output: unknown): unknown {
+  // Inspect only a bounded complete JSON error envelope. Unknown errors stay
+  // numeric; no command argument, page content, path, or error string persists.
+  if (typeof output === 'string' && output.length <= 65_536) {
+    try {
+      const envelope = readCodexRecord(JSON.parse(output))
+      if (envelope?.ok === false) {
+        return readCodexRecord(envelope.error)?.code
+      } else if (envelope?.ok === undefined && typeof envelope?.retryable === 'boolean') {
+        return envelope.code
+      }
+    } catch {
+      // Non-JSON and truncated output remain unknown failures.
+    }
+  }
+  return undefined
 }
 
 function safeAssistantTurnProfileIntegerSum(
@@ -1010,31 +1033,15 @@ export interface CodexSubagentTurnTokenUsageSample {
   firstEvent: unknown
   lastEvent: unknown
   occurredAt: string
+  providerRequestOutcome: AssistantProviderRequestOutcome
   threadId: string
   turnId: string
 }
 
-// Codex ships no aggregate usage primitive for spawned subagent threads (no
-// usage RPC, no usage on the protocol Turn, no parent-side aggregation), so
-// the canonical pattern is consuming each child thread's tokenUsage
-// notifications. This converts the buffered first/final tokenUsage samples
-// per child turn into additional usage drafts on the parent turn, using the
-// same total-delta arithmetic as the parent's billed usage. Billing is
-// gated on spawn evidence: only threads named by a parent-thread
-// collabAgentToolCall item's receiverThreadIds (multi-agent V1: spawnAgent,
-// sendInput, wait, resume — covering freshly spawned and reused children) or
-// by a subAgentActivity item's agentThreadId (multi-agent V2, which emits
-// activity items instead of collab tool calls) become drafts. The model is
-// attributed directly from V1 spawn items or optional V2 activity evidence;
-// same-model children without explicit evidence inherit parentModel. Warm
-// processes are reused across threads, so a foreign thread id alone is not
-// proof of a subagent — a stale flush from a previous thread must never mint a
-// usage row.
 export function extractCodexSubagentUsageDrafts(input: {
   modelProvider: string | null
   ordinalStart: number
   parentModel?: string | null
-  parentRawEvents: readonly unknown[]
   serviceTier?: AssistantProviderServiceTier | null
   subagentTokenUsageByTurn: ReadonlyMap<
     string,
@@ -1045,71 +1052,87 @@ export function extractCodexSubagentUsageDrafts(input: {
     return []
   }
 
-  const spawnModelByThreadId = readCodexCollabSpawnModelsByThread(
-    input.parentRawEvents,
-  )
   const drafts: AssistantProviderUsageDraft[] = []
   let ordinal = input.ordinalStart
 
   for (const sample of input.subagentTokenUsageByTurn.values()) {
-    if (!spawnModelByThreadId.has(sample.threadId)) {
-      continue
-    }
-
-    const pairs = (
-      sample.firstEvent === sample.lastEvent
-        ? [sample.firstEvent]
-        : [sample.firstEvent, sample.lastEvent]
-    ).flatMap((event) => {
-      const pair = readAssistantCodexTokenUsagePairFromEvent(event)
-      return pair &&
-        pair.threadId === sample.threadId &&
-        pair.turnId === sample.turnId
-        ? [pair]
-        : []
-    })
-    const delta = resolveAssistantCodexThreadTokenUsageTotalDelta(pairs)
-    if (!delta) {
-      continue
-    }
-
-    const model = spawnModelByThreadId.get(sample.threadId)
-      ?? input.parentModel
-      ?? null
-    const rawUsageJson = sanitizeCodexUsage(delta)
-    drafts.push({
-      occurredAt: sample.occurredAt,
-      provider: 'codex-cli',
-      providerRequestOrdinal: ordinal++,
-      providerRequestOutcome: 'succeeded',
-      usage: {
-        apiKeyEnv: null,
-        baseUrl: null,
-        cacheWriteTokens: delta.cacheWriteInputTokens,
-        cachedInputTokens: delta.cachedInputTokens,
-        inputTokens: delta.inputTokens,
-        outputTokens: delta.outputTokens,
-        providerMetadataJson: null,
-        providerName: resolveAssistantCodexUsageProviderName(input.modelProvider),
-        providerRequestId: null,
-        rawUsageJson,
-        rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
-        reasoningTokens: delta.reasoningOutputTokens,
-        requestedModel: model,
-        servedModel: model,
-        tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
-          model,
-          modelProvider: input.modelProvider,
-          serviceTier: input.serviceTier ?? null,
-        }),
-        totalTokens: delta.totalTokens,
-        usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
-        usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
+    const draft = buildCodexSubagentUsageDraft({
+      metadata: {
+        model: input.parentModel ?? null,
+        modelProvider: input.modelProvider,
+        serviceTier: input.serviceTier ?? null,
       },
+      ordinal,
+      sample,
     })
+    if (draft) {
+      drafts.push(draft)
+      ordinal += 1
+    }
   }
 
   return drafts
+}
+
+export function buildCodexSubagentUsageDraft(input: {
+  metadata: {
+    model: string | null
+    modelProvider: string | null
+    serviceTier: AssistantProviderServiceTier | null
+  }
+  ordinal: number
+  sample: CodexSubagentTurnTokenUsageSample
+}): AssistantProviderUsageDraft | null {
+  const pairs = (
+    input.sample.firstEvent === input.sample.lastEvent
+      ? [input.sample.firstEvent]
+      : [input.sample.firstEvent, input.sample.lastEvent]
+  ).flatMap((event) => {
+    const pair = readAssistantCodexTokenUsagePairFromEvent(event)
+    return pair &&
+      pair.threadId === input.sample.threadId &&
+      pair.turnId === input.sample.turnId
+      ? [pair]
+      : []
+  })
+  const usage = resolveAssistantCodexThreadTokenUsageTotalDelta(pairs)
+  if (!usage) {
+    return null
+  }
+
+  const rawUsageJson = sanitizeCodexUsage(usage)
+  return {
+    occurredAt: input.sample.occurredAt,
+    provider: 'codex-cli',
+    providerRequestOrdinal: input.ordinal,
+    providerRequestOutcome: input.sample.providerRequestOutcome,
+    usage: {
+      apiKeyEnv: null,
+      baseUrl: null,
+      cacheWriteTokens: usage.cacheWriteInputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      providerMetadataJson: null,
+      providerName: resolveAssistantCodexUsageProviderName(
+        input.metadata.modelProvider,
+      ),
+      providerRequestId: null,
+      rawUsageJson,
+      rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
+      reasoningTokens: usage.reasoningOutputTokens,
+      requestedModel: input.metadata.model,
+      servedModel: input.metadata.model,
+      tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
+        model: input.metadata.model,
+        modelProvider: input.metadata.modelProvider,
+        serviceTier: input.metadata.serviceTier,
+      }),
+      totalTokens: usage.totalTokens,
+      usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
+      usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
+    },
+  }
 }
 
 export function resolveCodexAssistantProviderTokenPricingBasis(input: {
@@ -1122,84 +1145,6 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
     providerName: resolveAssistantCodexUsageProviderName(input.modelProvider),
     serviceTier: input.serviceTier ?? null,
   })
-}
-
-// Spawn evidence map: every thread id named by a canonical collab tool call
-// or subAgentActivity item is a key. That membership authorizes billing a
-// foreign thread's usage. Only spawnAgent carries an explicit model in the
-// pinned protocol; activity-only evidence inherits the parent model.
-function readCodexCollabSpawnModelsByThread(
-  rawEvents: readonly unknown[],
-): Map<string, string | null> {
-  const modelByThreadId = new Map<string, string | null>()
-  for (const rawEvent of rawEvents) {
-    const collabToolCall = readCodexCollabToolCallFromEvent(rawEvent)
-    if (!collabToolCall) {
-      continue
-    }
-
-    for (const receiverThreadId of collabToolCall.receiverThreadIds) {
-      modelByThreadId.set(
-        receiverThreadId,
-        modelByThreadId.get(receiverThreadId) ?? collabToolCall.spawnModel,
-      )
-    }
-  }
-
-  return modelByThreadId
-}
-
-// Receiver thread ids named by a single parent-thread collab tool call or
-// subagent activity event, if any. Exported so the live turn loop can
-// prioritize evidenced subagent threads when its bounded usage buffer fills
-// up.
-export function readCodexCollabReceiverThreadIds(
-  rawEvent: unknown,
-): readonly string[] {
-  return readCodexCollabToolCallFromEvent(rawEvent)?.receiverThreadIds ?? []
-}
-
-function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
-  receiverThreadIds: string[]
-  spawnModel: string | null
-} | null {
-  const notification = readCodexServerNotification(rawEvent)
-  if (
-    notification?.method !== 'item/started' &&
-    notification?.method !== 'item/completed'
-  ) {
-    return null
-  }
-
-  const item = readCodexRecord(notification.params.item)
-  const itemType = readCodexNonEmptyString(item?.type)
-  if (itemType === 'subAgentActivity') {
-    const agentThreadId = readCodexNonEmptyString(item?.agentThreadId)
-    return agentThreadId
-      ? {
-          receiverThreadIds: [agentThreadId],
-          spawnModel: null,
-        }
-      : null
-  }
-  if (itemType !== 'collabAgentToolCall' || !Array.isArray(item?.receiverThreadIds)) {
-    return null
-  }
-
-  const receiverThreadIds = item.receiverThreadIds.flatMap((receiverThreadId) => {
-    const normalized = readCodexNonEmptyString(receiverThreadId)
-    return normalized ? [normalized] : []
-  })
-  if (receiverThreadIds.length === 0) {
-    return null
-  }
-
-  return {
-    receiverThreadIds,
-    spawnModel: item.tool === 'spawnAgent'
-      ? readCodexNonEmptyString(item.model)
-      : null,
-  }
 }
 
 function findAssistantCodexCompletionEvent(

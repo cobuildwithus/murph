@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import * as hostedRuntime from "../src/hosted-runtime.ts";
+import { shapeHostedDeviceSyncJobHintPayload } from "../src/hosted-hints.ts";
+import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
@@ -24,6 +26,8 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
   parseHostedExecutionDeviceSyncDirtyStateResponse,
+  parseHostedExecutionDeviceSyncNoDataOutreachRequest,
+  parseHostedExecutionDeviceSyncNoDataOutreachResponse,
   parseHostedExecutionDeviceSyncReconcileRequest,
   parseHostedExecutionDeviceSyncReconcileResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -55,6 +59,46 @@ function isDeviceSyncCredentialIndependentImportJob(input: {
       : undefined,
   );
 }
+
+describe("hosted continuation producer and reader compatibility", () => {
+  it("round-trips bounded reconcile proofs and rejects invalid continuation values", () => {
+    const hint = { jobs: [], junctionReconcileProof: "v1|2026-04-24T12:00:00.000Z|" + "a".repeat(64) };
+    expect(parseHostedExecutionDeviceSyncWakeHint(JSON.parse(JSON.stringify(hint)))).toEqual(hint);
+    expect(parseHostedExecutionDeviceSyncWakeHint({ junctionReconcileProof: "a".repeat(256) })?.junctionReconcileProof)
+      .toHaveLength(256);
+    for (const junctionReconcileProof of [null, 123, "", "  ", "a".repeat(257)]) {
+      expect(() => parseHostedExecutionDeviceSyncWakeHint({ junctionReconcileProof })).toThrow(/256 characters/u);
+    }
+  });
+
+  it("round-trips bounded sweep recovery hashes and rejects malformed markers", () => {
+    const hint = { jobs: [], junctionTemporalSweepKey: "a".repeat(64) };
+    expect(parseHostedExecutionDeviceSyncWakeHint(JSON.parse(JSON.stringify(hint)))).toEqual(hint);
+    for (const junctionTemporalSweepKey of [null, 123, "", "a".repeat(65), "not-a-hash"]) {
+      expect(() => parseHostedExecutionDeviceSyncWakeHint({ junctionTemporalSweepKey })).toThrow(/SHA-256/u);
+    }
+  });
+
+  it.each([
+    ["resource", "calendarRefreshDay", "2026-04-02"],
+    ["resource", "companionAdmissionId", "admission_example"],
+    ["resource", "companionObservationJson", JSON.stringify({ schemaVersion: 1, records: [] })],
+    ["resource", "sourceInstanceId", "example-watch"],
+    ["resource", "sourceType", "watch"],
+    ["push_source_recovery", "silentSinceAt", "2026-04-02T00:00:00.000Z"],
+  ])("retains manifest-valid %s field %s across wake serialization", (kind, field, value) => {
+    const job = normalizeConfiguredDeviceSyncJobInput("junction", {
+      kind,
+      payload: { sourceProviderSlug: "garmin", [field]: value },
+    }, "continuation round trip");
+    const hint = {
+      jobs: [{ kind, payload: shapeHostedDeviceSyncJobHintPayload("junction", job) }],
+    };
+
+    expect(parseHostedExecutionDeviceSyncWakeHint(JSON.parse(JSON.stringify(hint))))
+      .toEqual(hint);
+  });
+});
 
 describe("wearable import delay buckets", () => {
   it.each([
@@ -146,6 +190,66 @@ describe("hosted device-sync dirty timing source parsing", () => {
       timingSourceProviderSlug: null,
     });
     expect(parsed?.dirtyResources[2]).not.toHaveProperty("timingSourceProviderSlug");
+  });
+
+  it("carries the provider dedupe key only when the resource declares one", () => {
+    const buildResource = (providerDedupeKey: string | null | undefined) => ({
+      count: 1,
+      jobKind: "resource",
+      payload: {
+        eventType: "historical.data.steps.created",
+        resource: "steps",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "apple_health_kit",
+        windowEnd: "2026-04-08T00:04:00.000Z",
+        windowStart: "2026-03-09T00:00:00.000Z",
+      },
+      ...(providerDedupeKey === undefined ? {} : { providerDedupeKey }),
+      resource: "steps",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "apple_health_kit",
+      windowEnd: "2026-04-08T00:04:00.000Z",
+      windowStart: "2026-03-09T00:00:00.000Z",
+    });
+
+    const parsed = parseHostedExecutionDeviceSyncDirtyStateResponse({
+      connectionId: "dsc_provider_keys",
+      dirtyRevision: "4",
+      dirtyResources: [
+        buildResource("junction-webhook:history-steps"),
+        buildResource(null),
+        buildResource(undefined),
+      ],
+      eventCount: "3",
+      latestDirtyAt: "2026-04-08T00:04:00.000Z",
+      processedRevision: "0",
+      provider: "junction",
+      resourceCategoryCounts: { timeseries: 3 },
+      sourceProviderCounts: { apple_health_kit: 3 },
+      userId: "member_provider_keys",
+      windowEnd: "2026-04-08T00:04:00.000Z",
+      windowStart: "2026-03-09T00:00:00.000Z",
+    });
+
+    expect(parsed?.dirtyResources[0]).toMatchObject({
+      providerDedupeKey: "junction-webhook:history-steps",
+    });
+    expect(parsed?.dirtyResources[1]).not.toHaveProperty("providerDedupeKey");
+    expect(parsed?.dirtyResources[2]).not.toHaveProperty("providerDedupeKey");
+    expect(() => parseHostedExecutionDeviceSyncDirtyStateResponse({
+      connectionId: "dsc_provider_keys",
+      dirtyRevision: "5",
+      dirtyResources: [{ ...buildResource(undefined), providerDedupeKey: 42 }],
+      eventCount: "1",
+      latestDirtyAt: "2026-04-08T00:04:00.000Z",
+      processedRevision: "0",
+      provider: "junction",
+      resourceCategoryCounts: { timeseries: 1 },
+      sourceProviderCounts: { apple_health_kit: 1 },
+      userId: "member_provider_keys",
+      windowEnd: "2026-04-08T00:04:00.000Z",
+      windowStart: "2026-03-09T00:00:00.000Z",
+    })).toThrow(/providerDedupeKey/u);
   });
 });
 
@@ -277,6 +381,79 @@ describe("hosted device-sync reconcile contract", () => {
   });
 });
 
+describe("hosted device-sync no-data outreach contract", () => {
+  it("accepts the three-day Apple Health default while preserving custom limits", () => {
+    const response = {
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: 3,
+      setting: "default",
+      sourceProviderSlug: "apple_health_kit",
+      status: "saved",
+    };
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachResponse(response)).toEqual(response);
+    for (const invalid of [
+      { ...response, setting: "custom" },
+      { ...response, sourceProviderSlug: "garmin" },
+      { ...response, effectiveAfterDays: 2 },
+    ]) {
+      expect(() => parseHostedExecutionDeviceSyncNoDataOutreachResponse(invalid)).toThrow(/inconsistent/u);
+    }
+  });
+
+  it("accepts explicit bounded settings and rejects ambiguous shapes", () => {
+    const authority = {
+      assistantInputId: "ain_00000000000000000000000000000001",
+      sourceProviderSlug: "garmin",
+    };
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      afterDays: 10,
+      mode: "after_days",
+    })).toEqual({ ...authority, afterDays: 10, mode: "after_days" });
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      mode: "off",
+    })).toEqual({ ...authority, mode: "off" });
+    for (const afterDays of [4, 31]) {
+      expect(() => parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+        ...authority,
+        afterDays,
+        mode: "after_days",
+      })).toThrow(/between 5 and 30/u);
+    }
+    expect(() => parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      afterDays: 10,
+      mode: "off",
+    })).toThrow(/afterDays is not supported/u);
+    expect(() => parseHostedExecutionDeviceSyncNoDataOutreachRequest({
+      ...authority,
+      assistantInputId: "not-an-input-id",
+      mode: "off",
+    })).toThrow(/assistantInputId is invalid/u);
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachResponse({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: null,
+      setting: "off",
+      sourceProviderSlug: "garmin",
+      status: "saved",
+    })).toEqual({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: null,
+      setting: "off",
+      sourceProviderSlug: "garmin",
+      status: "saved",
+    });
+    expect(() => parseHostedExecutionDeviceSyncNoDataOutreachResponse({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: null,
+      setting: "custom",
+      sourceProviderSlug: "garmin",
+      status: "saved",
+    })).toThrow(/inconsistent/u);
+  });
+});
+
 describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
   const companionPayload = {
     eventType: "companion.health_metadata.v1",
@@ -314,6 +491,42 @@ describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
 });
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
+  it("keeps unpublished reconcile proofs out of the accepted Web baseline during warm hydration", () => {
+    const hostedMetadata = { junctionReconcileProofV1: "previous-proof", otherProgress: "remote" };
+    const input = { hostedMetadata, localConnectionStateUnpublished: false };
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input,
+      localMetadata: { junctionReconcileProofV1: "new-proof" },
+    })).toEqual({
+      metadata: { ...hostedMetadata, junctionReconcileProofV1: "new-proof" },
+      preservedLocalProgress: true,
+    });
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input,
+      localMetadata: { junctionReconcileProofV1: "previous-proof" },
+    }).preservedLocalProgress).toBe(false);
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input, localMetadata: undefined }).metadata)
+      .toEqual(hostedMetadata);
+  });
+
+  it("preserves uncheckpointed local sweep scheduling but drops it when the epoch has no local state", () => {
+    const localKey = "a".repeat(64);
+    const hostedKey = "b".repeat(64);
+    const input = {
+      hostedMetadata: { junctionTemporalSweepV1: hostedKey, otherProgress: "remote" },
+      localConnectionStateUnpublished: false,
+    };
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input,
+      localMetadata: { junctionTemporalSweepV1: localKey },
+    })).toEqual({
+      metadata: { junctionTemporalSweepV1: localKey, otherProgress: "remote" },
+      preservedLocalProgress: true,
+    });
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input,
+      localMetadata: { junctionTemporalSweepV1: hostedKey },
+    }).preservedLocalProgress).toBe(false);
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input, localMetadata: undefined }).metadata)
+      .toEqual(input.hostedMetadata);
+  });
+
   it("keeps newer blood-pressure source-coverage semantics immutable to older runtimes", () => {
     const metadata = { junctionBloodPressureHistoryBackfillCoverage: "v3|withings" };
     const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
@@ -455,6 +668,39 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     for (const [key, value] of Object.entries(sharedMetadata)) {
       expect(result.metadata[key]).toBe(value);
     }
+  });
+
+  it("retains summary progress while composing coverage into a full envelope", () => {
+    const progress = {
+      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2025-01-01",
+      junctionHistoricalBackfillWindowEnd: "2025-04-01",
+    };
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: progress,
+      providerSlug: "omron",
+      resource: "caffeine",
+      version: historyCoverageVersion("caffeine"),
+    });
+    if (!coverage) {
+      throw new TypeError("Expected representable Junction coverage.");
+    }
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        ...Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`diagnostic${index}`, index])),
+        ...progress,
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: { ...progress, [coverage.metadataKey]: coverage.value },
+    });
+    expect(result.metadata).toMatchObject({
+      ...progress,
+      [coverage.metadataKey]: coverage.value,
+    });
+    expect(Object.keys(result.metadata)).toHaveLength(16);
+    expect(result.preservedLocalProgress).toBe(true);
   });
 
   it("compacts split coverage slots before merging a full hosted envelope", () => {
@@ -3285,10 +3531,13 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         {
           kind: "resource",
           payload: {
+            historicalPullPending: true,
             objectId: "",
-            resource: "heartrate",
+            resource: "workout_stream",
             resourceCategory: "timeseries",
             sourceProviderSlug: "",
+            workoutStreamEmptyReplay: true,
+            workoutStreamEmptySeen: true,
             windowStart: "2026-04-08T00:00:00Z",
           },
         },
@@ -3296,8 +3545,11 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
 
     expect(hint?.jobs?.[0]?.payload).toEqual({
-      resource: "heartrate",
+      historicalPullPending: true,
+      resource: "workout_stream",
       resourceCategory: "timeseries",
+      workoutStreamEmptyReplay: true,
+      workoutStreamEmptySeen: true,
       windowStart: "2026-04-08T00:00:00.000Z",
     });
   });
@@ -3686,43 +3938,29 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
   });
 });
 
-describe("member-owned provider runtime snapshot config", () => {
-  it("parses the bounded invocation-scoped provider config", () => {
-    expect(parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
-      connections: [],
-      generatedAt: "2026-08-10T00:00:00.000Z",
-      providerConfigs: {
-        strava: {
-          clientId: "member-client",
-          clientSecret: "member-secret",
-        },
-      },
-      userId: "member_123",
-    })).toEqual({
-      connections: [],
-      generatedAt: "2026-08-10T00:00:00.000Z",
-      providerConfigs: {
-        strava: {
-          clientId: "member-client",
-          clientSecret: "member-secret",
-        },
-      },
-      userId: "member_123",
+describe("Junction timeout failure diagnostic boundary", () => {
+  const valid = { providerRequestTimeoutMs: 12_000, providerRequestElapsedMs: 12_003,
+    providerRequestAttempt: 1, providerRequestStage: "awaiting_headers", providerResponseHeadersPresent: false };
+  it.each([
+    { label: "valid", code: "JUNCTION_API_REQUEST_TIMEOUT", details: valid, expected: valid },
+    { label: "other code", code: "WHOOP_TOKEN_REQUEST_FAILED", details: valid, expected: {} },
+    { label: "unbounded", code: "JUNCTION_API_REQUEST_TIMEOUT", details: {
+      providerRequestTimeoutMs: 300_001, providerRequestElapsedMs: Infinity, providerRequestAttempt: 101,
+      providerRequestStage: "https://example.test/private", providerResponseHeadersPresent: "false",
+    }, expected: {} },
+    { label: "wrong types", code: "JUNCTION_API_REQUEST_TIMEOUT", details: {
+      providerRequestTimeoutMs: "12000", providerRequestElapsedMs: NaN, providerRequestAttempt: 1.5,
+      providerRequestStage: ["response_body"], providerResponseHeadersPresent: 1,
+    }, expected: {} },
+    { label: "negative or zero", code: "JUNCTION_API_REQUEST_TIMEOUT", details: {
+      providerRequestTimeoutMs: 0, providerRequestElapsedMs: -1, providerRequestAttempt: 0,
+      providerRequestStage: " post_body ", providerResponseHeadersPresent: null,
+    }, expected: {} },
+  ])("$label", ({ code, details, expected }) => {
+    const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      userId: "synthetic-user", updates: [{ connectionId: "synthetic-connection",
+        failureDiagnostic: { accountStatus: null, code, details, retryable: true } }],
     });
-  });
-
-  it("rejects control-plane-only webhook secrets", () => {
-    expect(() => parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
-      connections: [],
-      generatedAt: "2026-08-10T00:00:00.000Z",
-      providerConfigs: {
-        strava: {
-          clientId: "member-client",
-          clientSecret: "member-secret",
-          webhookSigningSecret: "must-stay-on-web",
-        },
-      },
-      userId: "member_123",
-    })).toThrow(/webhookSigningSecret/u);
+    expect(parsed.updates[0]?.failureDiagnostic?.details).toEqual(expected);
   });
 });

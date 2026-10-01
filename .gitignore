@@ -25,6 +25,8 @@ apps/web/src/lib/changelog-fragments.generated.ts
 /.agents/*
 !/.agents/skills/
 /.agents/skills/*
+!/.agents/skills/feedback-diagnostics/
+!/.agents/skills/feedback-diagnostics/SKILL.md
 !/.agents/skills/github-project-issues/
 !/.agents/skills/github-project-issues/SKILL.md
 !/.agents/skills/write-changelog/
@@ -33,6 +35,10 @@ apps/web/src/lib/changelog-fragments.generated.ts
 !/.agents/skills/write-changelog/agents/openai.yaml
 !/.agents/skills/frog/
 !/.agents/skills/frog/SKILL.md
+!/.agents/skills/verify-murph-assistant/
+!/.agents/skills/verify-murph-assistant/SKILL.md
+!/.agents/skills/verify-murph-assistant/agents/
+!/.agents/skills/verify-murph-assistant/agents/openai.yaml
 !/.agents/skills/crabbox/
 !/.agents/skills/crabbox/SKILL.md
 !/.agents/friction-log/
@@ -95,6 +101,7 @@ apps/cloudflare/.runner.env*
 apps/cloudflare/.deploy
 .vercel
 .gstack/
+/graft/
 
 # Local staged research artifacts
 research-artifacts/
@@ -110,3 +117,6 @@ agent-docs/product-ideas.md
 .plasticlist-work/
 .product-tests-work/
 .env*.local
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

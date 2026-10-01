@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   buildEffectiveSnapshotFromCommonsProtocol,
@@ -14,7 +14,7 @@ import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { registerProtocolCommands } from '../src/commands/protocol.js'
 import { registerReadCommands } from '../src/commands/read.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
-import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { createIntegratedVaultServices, type VaultServices } from '@murphai/vault-usecases'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import { commonsProtocolRefSchema } from '@murphai/contracts'
 import { loadGeneratedHealthCommonsProtocolRunSpecs } from '@murphai/health-commons/runtime'
@@ -28,7 +28,7 @@ import {
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
-function createSliceCli(input: { config?: boolean } = {}) {
+function createSliceCli(input: { config?: boolean; services?: VaultServices } = {}) {
   const cli = Cli.create('vault-cli', {
     ...(input.config
       ? {
@@ -42,7 +42,7 @@ function createSliceCli(input: { config?: boolean } = {}) {
     version: '0.0.0-test',
   })
   cli.use(incurErrorBridge)
-  const services = createIntegratedVaultServices()
+  const services = input.services ?? createIntegratedVaultServices()
 
   registerVaultCommands(cli, services, createIntegratedInboxServices())
   registerExperimentCommands(cli, services)
@@ -56,7 +56,7 @@ function createSliceCli(input: { config?: boolean } = {}) {
 
 async function runSliceCli<TData>(
   args: string[],
-  input: { config?: boolean } = {},
+  input: { config?: boolean; services?: VaultServices } = {},
 ): Promise<CliEnvelope<TData>> {
   const cli = createSliceCli(input)
   const output: string[] = []
@@ -467,6 +467,146 @@ test.sequential('custom experiment start explains the required primary outcome b
       vaultRoot,
     ])
     assert.equal(shownAfterFailure.ok, false)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('experiment start preserves option-error precedence and bounded factual fields', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-option-repair-'))
+  const services = createIntegratedVaultServices()
+  const startSpy = vi.spyOn(services.core, 'startExperiment')
+  const run = (args: string[]) => runSliceCli(args, { services })
+  const privateDirection = 'private-direction-marker'
+  const privateOutcomeKey = 'private-primary-marker'
+
+  try {
+    await run(['init', '--vault', vaultRoot])
+    const invalidDirection = await run([
+      'experiment',
+      'start',
+      'direction-repair',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Direction Repair',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:direction-repair',
+      '--expected-direction',
+      `biomarker:direction-repair=${privateDirection}`,
+      '--schedule-cron',
+      '0 18 * * *',
+      '--vault',
+      vaultRoot,
+    ])
+    const invalidOutcome = await run([
+      'experiment',
+      'start',
+      'outcome-repair',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Outcome Repair',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      privateOutcomeKey,
+      '--primary-outcome-kind',
+      'structured_review',
+      '--vault',
+      vaultRoot,
+    ])
+
+    for (const [result, expectedPath, privateValue] of [
+      [invalidDirection, 'expectedDirection.0', privateDirection],
+      [invalidOutcome, 'primaryOutcomeKey', privateOutcomeKey],
+    ] as const) {
+      assert.equal(result.ok, false)
+      if (result.ok) {
+        assert.fail('expected invalid experiment start option to fail')
+      }
+      assert.equal(result.error.code, 'invalid_option')
+      assert.equal(result.error.stage, 'validation')
+      assert.equal(
+        result.error.fieldErrors?.some((field) => field.path === expectedPath),
+        true,
+      )
+      assert.equal(result.error.retryable, false)
+      assert.equal(result.error.hint, undefined)
+      assert.equal(JSON.stringify(result).includes(privateValue), false)
+      assert.equal(JSON.stringify(result).includes(vaultRoot), false)
+    }
+
+    assert.equal(startSpy.mock.calls.length, 0)
+    for (const slug of ['direction-repair', 'outcome-repair']) {
+      const shown = await run([
+        'experiment',
+        'show',
+        slug,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(shown.ok, false)
+      assert.equal(shown.error.code, 'not_found')
+    }
+  } finally {
+    startSpy.mockRestore()
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('experiment start maps canonical plan conflicts without echoing plan data', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-conflict-repair-'))
+  const slug = 'private-conflict-slug'
+  const changedTitle = 'Private changed plan title'
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const startArgs = (title: string) => [
+      'experiment',
+      'start',
+      slug,
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      title,
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:conflict-repair',
+      '--vault',
+      vaultRoot,
+    ]
+    const started = await runSliceCli(startArgs('Original plan title'))
+    assert.equal(started.ok, true, started.ok ? undefined : started.error.message)
+
+    const conflict = await runSliceCli(startArgs(changedTitle))
+    assert.equal(conflict.ok, false)
+    if (conflict.ok) {
+      assert.fail('expected changed canonical plan data to conflict')
+    }
+    assert.equal(conflict.error.code, 'conflict')
+    assert.equal(conflict.error.stage, 'write')
+    assert.equal(conflict.error.fieldErrors?.[0]?.path, 'experiment.slug')
+    assert.equal(conflict.error.retryable, false)
+    assert.equal(conflict.error.hint, undefined)
+    const encoded = JSON.stringify(conflict)
+    for (const forbidden of [slug, changedTitle, vaultRoot]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden)
+    }
+
+    const shown = requireData(await runSliceCli<{
+      entity: { data: { title?: string } }
+    }>([
+      'experiment',
+      'show',
+      slug,
+      '--vault',
+      vaultRoot,
+    ]))
+    assert.equal(shown.entity.data.title, 'Original plan title')
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -1300,10 +1440,9 @@ test.sequential(
         /requires --protocol-key, --page-revision-id, and --run-spec-revision-id/u,
       )
       assert.equal(invalidRevision.ok, false)
-      assert.match(
-        invalidRevision.error.message ?? '',
-        /sha256: followed by 64 lowercase hexadecimal characters|sha256:<64 lowercase hex>/u,
-      )
+      assert.equal(invalidRevision.error.code, 'VALIDATION_ERROR')
+      assert.equal(invalidRevision.error.message, 'The command input is invalid.')
+      assert.equal(invalidRevision.error.fieldErrors?.[0]?.path, 'pageRevisionId')
       assert.equal(invalidProtocolKey.ok, false)
       assert.match(invalidProtocolKey.error.message ?? '', /protocol_variant key/u)
       assert.equal(invalidMixedEdit.ok, false)
@@ -1725,6 +1864,11 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'biomarker:sleep-efficiency',
       'biomarker:deep-sleep-minutes',
     ])
+    assert.equal('desiredDirection' in analysisPlan, false)
+    assert.deepEqual(analysisPlan.expectedDirections, [
+      { biomarkerKey: 'biomarker:morning-blood-pressure', direction: 'decrease' },
+      { biomarkerKey: 'biomarker:sleep-efficiency', direction: 'increase' },
+    ])
     const onboarding = requireRecord(experimentData.onboarding, 'onboarding')
     assert.equal(onboarding.completedAt, '2026-04-30T15:00:00.000Z')
     const setupAnswers = requireRecord(onboarding.setupAnswers, 'onboarding.setupAnswers')
@@ -1837,6 +1981,112 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       throw new Error('Rejected draft start must not persist an experiment.')
     }
     assert.equal(draftAlcoholShown.error.code, 'not_found')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('experiment start composes protocol overrides without conflating direction defaults', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-composition-'))
+
+  try {
+    assert.equal((await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])).ok, true)
+    const protocolOptions = [
+      '--from-protocol', 'finnish-sauna',
+      '--status', 'planned',
+      '--intervention-start', '2026-05-01',
+      '--vault', vaultRoot,
+    ]
+    const legacyStarted = await runSliceCli([
+      'experiment', 'start', 'signal-overrides', ...protocolOptions,
+      '--primary-biomarker-key', 'biomarker:sleep-efficiency',
+      '--secondary-biomarker-key', ' biomarker:blood-oxygen-spo2 ',
+      '--secondary-biomarker-key', 'biomarker:morning-blood-pressure',
+      '--secondary-biomarker-key', 'biomarker:sleep-efficiency',
+      '--secondary-biomarker-key', 'biomarker:blood-oxygen-spo2',
+      '--secondary-biomarker-key', 'biomarker:SyntheticContext',
+      '--expected-direction', 'biomarker:blood-oxygen-spo2=decrease',
+      '--baseline-start', '2026-04-01',
+      '--baseline-end', '2026-04-14',
+      '--baseline-days', '0',
+      '--sessions-per-week', '0',
+      '--target-sessions', '0',
+      '--minimum-useful-sessions', '0',
+      '--session-field', 'session_date',
+      '--confounder-field', 'synthetic_context',
+      '--stop-condition', 'Stop the synthetic session.',
+      '--no-reminders-enabled',
+      '--no-weekly-digest-enabled',
+    ])
+    assert.equal(legacyStarted.ok, true, legacyStarted.ok ? undefined : legacyStarted.error.message)
+
+    const legacyShown = await runSliceCli<{ entity: { data: Record<string, unknown> } }>([
+      'experiment', 'show', 'signal-overrides', '--vault', vaultRoot,
+    ])
+    const legacyData = requireData(legacyShown).entity.data
+    const legacyAnalysis = requireRecord(legacyData.analysisPlan, 'legacy analysisPlan')
+    assert.equal(legacyAnalysis.primaryBiomarkerKey, 'biomarker:sleep-efficiency')
+    assert.equal('primaryOutcome' in legacyAnalysis, false)
+    assert.deepEqual(legacyAnalysis.secondaryBiomarkerKeys, [
+      'biomarker:blood-oxygen-spo2',
+      'biomarker:morning-blood-pressure',
+      'biomarker:SyntheticContext',
+    ])
+    // Explicit expected directions replace the list, not the primary's desired default.
+    assert.equal(legacyAnalysis.desiredDirection, 'increase')
+    assert.deepEqual(legacyAnalysis.expectedDirections, [
+      { biomarkerKey: 'biomarker:blood-oxygen-spo2', direction: 'decrease' },
+    ])
+    const runPlan = requireRecord(legacyData.runPlan, 'runPlan')
+    assert.equal('baselineStart' in runPlan, false)
+    assert.equal('baselineEnd' in runPlan, false)
+    assert.equal(runPlan.interventionStart, '2026-05-01')
+    assert.equal(runPlan.interventionEnd, '2026-05-14')
+    assert.equal(runPlan.sessionsPerWeek, 0)
+    assert.equal(runPlan.targetSessions, 0)
+    assert.equal(runPlan.minimumUsefulSessions, 0)
+    assert.deepEqual(runPlan.logging, {
+      sessionFields: ['session_date'],
+      confounderFields: ['synthetic_context'],
+    })
+    assert.deepEqual(runPlan.stopConditions, ['Stop the synthetic session.'])
+    assert.equal('onboarding' in legacyData, false)
+    assert.deepEqual(legacyData.assistantSupport, {
+      remindersEnabled: false,
+      weeklyDigestEnabled: false,
+    })
+
+    const outcomeStarted = await runSliceCli([
+      'experiment', 'start', 'outcome-overrides', ...protocolOptions,
+      '--primary-outcome-key', 'biomarker:morning-blood-pressure',
+      '--secondary-biomarker-key', 'biomarker:sleep-efficiency',
+      '--secondary-biomarker-key', 'biomarker:blood-oxygen-spo2',
+      '--secondary-biomarker-key', 'biomarker:morning-blood-pressure',
+      '--desired-direction', 'stabilize',
+    ])
+    assert.equal(outcomeStarted.ok, true, outcomeStarted.ok ? undefined : outcomeStarted.error.message)
+    const outcomeShown = await runSliceCli<{ entity: { data: Record<string, unknown> } }>([
+      'experiment', 'show', 'outcome-overrides', '--vault', vaultRoot,
+    ])
+    const outcomeData = requireData(outcomeShown).entity.data
+    const outcomeAnalysis = requireRecord(outcomeData.analysisPlan, 'outcome analysisPlan')
+    const primaryOutcome = requireRecord(outcomeAnalysis.primaryOutcome, 'primaryOutcome')
+    assert.equal(primaryOutcome.key, 'biomarker:morning-blood-pressure')
+    assert.equal(primaryOutcome.kind, 'metric')
+    assert.equal('primaryBiomarkerKey' in outcomeAnalysis, false)
+    assert.deepEqual(outcomeAnalysis.secondaryBiomarkerKeys, [
+      'biomarker:sleep-efficiency',
+      'biomarker:blood-oxygen-spo2',
+    ])
+    // The independent desired override must not replace the protocol's expected signals.
+    assert.equal(outcomeAnalysis.desiredDirection, 'stabilize')
+    assert.deepEqual(outcomeAnalysis.expectedDirections, [
+      { biomarkerKey: 'biomarker:morning-blood-pressure', direction: 'decrease' },
+      { biomarkerKey: 'biomarker:sleep-efficiency', direction: 'increase' },
+      { biomarkerKey: 'biomarker:blood-oxygen-spo2', direction: 'stabilize' },
+    ])
+    assert.equal('onboarding' in outcomeData, false)
+    assert.deepEqual(outcomeData.assistantSupport, {})
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -2556,6 +2806,92 @@ test.sequential(
     }
   },
 )
+
+test.sequential('experiment edit preserves canonical write order and failure cutoffs', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-edit-order-'))
+  const services = createIntegratedVaultServices()
+  const run = (args: string[]) => runSliceCli(args, { services })
+  const edit = (options: string[]) => run([
+    'experiment', 'edit', 'dispatch-proof', ...options, '--vault', vaultRoot,
+  ])
+  const calls: { kind: string; hasStatus: boolean; status: string | undefined }[] = []
+  const update = services.core.updateExperiment.bind(services.core)
+  const apply = services.core.applyExperimentOnboarding.bind(services.core)
+  const updateSpy = vi.spyOn(services.core, 'updateExperiment').mockImplementation((input) => {
+    calls.push({
+      kind: input.runPlan ? 'hydrate' : 'scalar',
+      hasStatus: Object.hasOwn(input, 'status'),
+      status: input.status,
+    })
+    return update(input)
+  })
+  const applySpy = vi.spyOn(services.core, 'applyExperimentOnboarding').mockImplementation((input) => {
+    calls.push({ kind: 'structured', hasStatus: Object.hasOwn(input, 'status'), status: input.status })
+    return apply(input)
+  })
+  try {
+    assert.equal((await run(['init', '--vault', vaultRoot, '--timezone', 'UTC'])).ok, true)
+    const created = await run([
+      'experiment', 'start', 'dispatch-proof',
+      '--from-protocol', 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+      '--test-plan-id', 'rhr-21d', '--intervention-start', '2026-04-08',
+      '--onboarding-completed-at', '2026-04-07T15:00:00.000Z',
+      '--vault', vaultRoot,
+    ])
+    assert.equal(created.ok, true, created.ok ? undefined : created.error.message)
+
+    const scenarios = [
+      { flags: ['--title', 'Dispatch proof'], kinds: ['scalar'] },
+      { flags: ['--status', 'paused'], kinds: ['scalar'] },
+      { flags: ['--target-sessions', '8'], kinds: ['structured'] },
+      { flags: ['--target-sessions', '9', '--title', 'Mixed proof', '--status', 'active'], kinds: ['structured', 'scalar'] },
+      { flags: ['--hydrate-protocol-defaults'], kinds: ['hydrate'] },
+      { flags: ['--hydrate-protocol-defaults', '--title', 'Hydrated proof'], kinds: ['hydrate', 'scalar'] },
+      { flags: ['--hydrate-protocol-defaults', '--status', 'paused'], kinds: ['hydrate', 'structured'] },
+      { flags: ['--hydrate-protocol-defaults', '--analysis-note', 'Synthetic analysis note', '--title', 'Full proof', '--status', 'active'], kinds: ['hydrate', 'structured', 'scalar'] },
+    ]
+    for (const scenario of scenarios) {
+      calls.length = 0
+      assert.equal((await edit(scenario.flags)).ok, true, scenario.flags.join(' '))
+      assert.deepEqual(calls.map((call) => call.kind), scenario.kinds)
+      const scalar = calls.find((call) => call.kind === 'scalar')
+      if (scalar) {
+        assert.equal(scalar.hasStatus, scenario.kinds.length === 1)
+      }
+      for (const call of calls) {
+        if (call.kind !== 'scalar' && scenario.flags.includes('--status')) {
+          assert.equal(call.status, scenario.flags[scenario.flags.indexOf('--status') + 1])
+        }
+      }
+    }
+
+    calls.length = 0
+    assert.equal((await edit([])).ok, false)
+    assert.equal(calls.length, 0)
+
+    calls.length = 0
+    applySpy.mockRejectedValueOnce(new Error('Synthetic structured write failure'))
+    assert.equal((await edit(['--hydrate-protocol-defaults', '--target-sessions', '10', '--title', 'Must not write'])).ok, false)
+    assert.deepEqual(calls.map((call) => call.kind), ['hydrate'])
+
+    calls.length = 0
+    updateSpy.mockRejectedValueOnce(new Error('Synthetic hydration failure'))
+    assert.equal((await edit(['--hydrate-protocol-defaults', '--target-sessions', '11', '--title', 'Must not write'])).ok, false)
+    assert.equal(calls.length, 0)
+
+    calls.length = 0
+    updateSpy.mockRejectedValueOnce(new Error('Synthetic scalar write failure'))
+    assert.equal((await edit(['--target-sessions', '12', '--title', 'Must not write'])).ok, false)
+    assert.deepEqual(calls.map((call) => call.kind), ['structured'])
+    const shown = await services.query.showExperiment({ vault: vaultRoot, requestId: null, lookup: 'dispatch-proof' })
+    assert.equal(requireRecord(shown.entity.data.runPlan, 'run plan').targetSessions, 12)
+    assert.equal(shown.entity.title, 'Full proof')
+  } finally {
+    updateSpy.mockRestore()
+    applySpy.mockRestore()
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
 
 test.sequential(
   'experiment edit, checkpoint, and stop mutate the experiment page and append lifecycle events',
@@ -3414,6 +3750,13 @@ test.sequential(
     try {
       await runSliceCli(['init', '--vault', vaultRoot])
 
+      const invalidCalendarDate = await runSliceCli([
+        'journal',
+        'ensure',
+        '2026-02-30',
+        '--vault',
+        vaultRoot,
+      ])
       const appended = await runSliceCli<{
         created: boolean
         updated: boolean
@@ -3568,10 +3911,14 @@ test.sequential(
         vaultRoot,
       ])
 
+      assert.equal(invalidCalendarDate.ok, false)
+      assert.equal(invalidCalendarDate.error?.code, 'VALIDATION_ERROR')
+      assert.equal(invalidCalendarDate.error?.message, 'The command input is invalid.')
+      assert.equal(invalidCalendarDate.error?.fieldErrors?.[0]?.path, 'date')
       assert.equal(appended.ok, true)
       assert.equal(appended.meta?.command, 'journal append')
       assert.equal(requireData(appended).updated, true)
-      assert.equal(linked.ok, true)
+      assert.equal(linked.ok, true, JSON.stringify(linked))
       assert.equal(requireData(linked).changed, 2)
       assert.deepEqual(requireData(linked).eventIds, [firstEventId, secondEventId])
       assert.equal(linkedStreams.ok, true)
@@ -3583,15 +3930,13 @@ test.sequential(
         /Pass either --event-id or --stream in one command/u,
       )
       assert.equal(commaDelimitedEventLink.ok, false)
-      assert.match(
-        commaDelimitedEventLink.error?.message ?? '',
-        /repeat the flag instead|comma-delimited values are not supported/iu,
-      )
+      assert.equal(commaDelimitedEventLink.error?.code, 'VALIDATION_ERROR')
+      assert.equal(commaDelimitedEventLink.error?.message, 'The command input is invalid.')
+      assert.equal(commaDelimitedEventLink.error?.fieldErrors?.[0]?.path, 'eventId')
       assert.equal(commaDelimitedStreamLink.ok, false)
-      assert.match(
-        commaDelimitedStreamLink.error?.message ?? '',
-        /repeat the flag instead|comma-delimited values are not supported/iu,
-      )
+      assert.equal(commaDelimitedStreamLink.error?.code, 'VALIDATION_ERROR')
+      assert.equal(commaDelimitedStreamLink.error?.message, 'The command input is invalid.')
+      assert.equal(commaDelimitedStreamLink.error?.fieldErrors?.[0]?.path, 'stream')
       assert.equal(unlinked.ok, true)
       assert.equal(requireData(unlinked).changed, 1)
       assert.deepEqual(requireData(unlinked).eventIds, [firstEventId])
@@ -3626,6 +3971,7 @@ test.sequential(
       )
       assert.equal('markdown' in (requireData(listed).items[0] ?? {}), false)
 
+      await assert.rejects(access(path.join(vaultRoot, 'journal/2026/2026-02-30.md')))
       const journalPath = path.join(vaultRoot, 'journal/2026/2026-03-12.md')
       const journalMarkdown = await readFile(journalPath, 'utf8')
       assert.match(journalMarkdown, /Evening note from the CLI append helper\./u)

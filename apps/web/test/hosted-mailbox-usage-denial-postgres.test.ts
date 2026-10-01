@@ -249,7 +249,7 @@ describe.skipIf(!runPostgresProof)(
           });
           expect(sendAlert).toHaveBeenCalledTimes(1);
 
-          const progressAt = new Date(resumedAt.getTime() + 29_999);
+          const progressAt = new Date(resumedAt.getTime() + 59_999);
           await tx.$executeRaw(Prisma.sql`
             UPDATE hosted_ingress_latency_trace
             SET phase_breakdown_json = ${JSON.stringify({
@@ -269,7 +269,7 @@ describe.skipIf(!runPostgresProof)(
             unresolvedReplyCount: 0,
           });
 
-          const deliveryAt = new Date(resumedAt.getTime() + 40_000);
+          const deliveryAt = new Date(resumedAt.getTime() + 60_000);
           await tx.$executeRaw(Prisma.sql`
             INSERT INTO hosted_linq_delivery (id, accepted_at)
             VALUES ('delivery-after-resume', ${deliveryAt})
@@ -291,7 +291,7 @@ describe.skipIf(!runPostgresProof)(
             prisma: tx,
           })).resolves.toMatchObject({
             anomalous: true,
-            maxFirstVisibleResponseLatencyMs: 40_000,
+            maxFirstVisibleResponseLatencyMs: 60_000,
             recentCompletedReplyCount: 1,
             recentSlowInitialResponseCount: 1,
           });

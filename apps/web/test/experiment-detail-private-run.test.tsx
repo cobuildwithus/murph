@@ -35,7 +35,7 @@ import {
   splitHomeExperimentCards,
 } from "@/src/lib/experiments/library-cards";
 import { buildExperimentRunCardSummary } from "@/src/lib/experiments/run-card-summary";
-import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
+import { resolveExperimentProjectionFixture } from "./health-commons-projection-fixtures";
 
 type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 
@@ -156,6 +156,13 @@ describe("experiment detail private-run composition", () => {
       }),
     ]);
 
+    expect(privateRun?.signals[0]?.latestResult).toBeUndefined();
+    const savedMarkup = renderToStaticMarkup(
+      <ResultsSummary signals={privateRun!.signals} trends={privateRun!.trends} />,
+    );
+    expect(savedMarkup).toContain("Experiment average");
+    expect(savedMarkup).not.toContain("Latest dated result");
+
     const [homeCard] = buildExperimentLibraryCards({
       client,
       protocols: [],
@@ -241,7 +248,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("matches browser-vault tracked experiments against Health Commons protocol aliases", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -446,7 +453,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("does not bind a private run on title-only collisions", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -470,7 +477,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("uses the newest completed matching run when no live run exists", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -509,7 +516,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("uses the run time zone for active timeline reference dates near UTC boundaries", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -558,7 +565,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("matches browser-vault tracked experiments by canonical commonsProtocolRef key", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -605,7 +612,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("prefers canonical runPlan windows for baseline days and analysis availability", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -672,7 +679,7 @@ describe("experiment detail private-run composition", () => {
   it.each(["active", "running", "in progress"])(
     "does not keep a stale %s label after the run window ends",
     async (sourceStatus) => {
-      const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+      const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
       expect(protocol).not.toBeNull();
 
@@ -776,7 +783,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders honest baseline progress before the protocol window starts", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -832,7 +839,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders honest result states without inventing personal outcomes", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -917,7 +924,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("keeps the exact canonical saved outcome and charts its saved daily points", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     const outcome = createSavedOutcome({
       deltaAbs: null,
       id: "exp_sauna_saved_outcome",
@@ -933,12 +940,6 @@ describe("experiment detail private-run composition", () => {
           phase: "baseline",
           unit: "bpm",
           value: 62,
-        },
-        {
-          date: "2026-04-03",
-          phase: "baseline",
-          unit: "bpm",
-          value: 61,
         },
         {
           date: "2026-04-04",
@@ -957,6 +958,13 @@ describe("experiment detail private-run composition", () => {
           phase: "intervention",
           unit: "bpm",
           value: 57,
+        },
+        // Saved points need not be ordered by date.
+        {
+          date: "2026-04-03",
+          phase: "baseline",
+          unit: "bpm",
+          value: 61,
         },
       ],
       schemaVersion: "murph.experiment-outcome.v2",
@@ -1023,7 +1031,15 @@ describe("experiment detail private-run composition", () => {
     }));
     expect(privateRun?.summaryDetail).toBe(outcome.conclusion.plainLanguage);
     expect(privateRun?.outcomeConfidence).toBe("medium");
-    expect(privateRun?.signals).toEqual([]);
+    expect(privateRun?.signals).toEqual([
+      expect.objectContaining({
+        delta: "",
+        direction: "neutral",
+        value: "58",
+        latestResult: { date: "2026-04-06", value: "57", unit: "bpm" },
+      }),
+    ]);
+    expect(privateRun?.signals[0]?.sentiment).toBeUndefined();
     expect(privateRun?.trends).toEqual([
       expect.objectContaining({
         active: [
@@ -1063,6 +1079,8 @@ describe("experiment detail private-run composition", () => {
     expect(markup).toContain(outcome.confidence.reasons[0]);
     expect(markup).toContain(outcome.conclusion.caveats[0]);
     expect(markup).toContain("Saved result");
+    expect(markup).toMatch(/<time datetime="2026-04-06">2026-04-06<\/time>/iu);
+    expect(markup).toContain("57 bpm");
     expect(markup.match(/medium confidence/gu)).toHaveLength(1);
     expect(markup).toContain('data-slot="chart"');
     expect(markup).toContain("Baseline");
@@ -1129,11 +1147,11 @@ describe("experiment detail private-run composition", () => {
     expect(markup).toContain("flex min-w-0 flex-col gap-4");
     expect(markup).not.toContain("md:grid-cols-2");
     expect(markup).not.toContain("xl:grid-cols-2");
-    expect(markup).toContain("Daily measurements and declared window summaries, where available.");
+    expect(markup).toContain("Dated results may summarize multiple measurements.");
   });
 
   it("renders a saved structured review without a false empty-metrics state", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     expect(protocol).not.toBeNull();
 
     const base = createSavedOutcome({
@@ -1223,7 +1241,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("keeps incomplete structured-review states recoverable in the browser UI", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     expect(protocol).not.toBeNull();
 
     const states = [
@@ -1445,7 +1463,12 @@ describe("experiment detail private-run composition", () => {
 
       expect(trend?.statistic).toBe(item.statistic);
       expect(trend?.unit).toBe(item.statistic === "count" ? "" : item.unit);
-      const markup = renderToStaticMarkup(<TrendChart data={trend!} />);
+      expect(privateRun?.signals[0]?.latestResult).toBeUndefined();
+      const markup = renderToStaticMarkup(
+        <ResultsSummary signals={privateRun!.signals} trends={privateRun!.trends} />,
+      );
+
+      expect(markup).not.toContain("Latest dated result");
 
       expect(markup).toContain(`Window statistic: ${item.expectedLabel}`);
       expect(markup).toContain(`Baseline ${item.expectedLabel}`);
@@ -1462,20 +1485,31 @@ describe("experiment detail private-run composition", () => {
     }
   });
 
-  it("keeps daily trend dates stable outside UTC", () => {
+  it.each(["America/New_York", "Pacific/Kiritimati"])("keeps result dates stable in %s", (timeZone) => {
     const previousTimeZone = process.env.TZ;
-    process.env.TZ = "America/New_York";
+    process.env.TZ = timeZone;
 
     try {
       expect(formatTrendDay("2026-05-29", 1)).toBe("May 29");
+      const markup = renderToStaticMarkup(
+        <ResultsSummary
+          signals={[{
+            label: "Secondary measurement", value: "7", delta: "", direction: "neutral", expected: "",
+            latestResult: { date: "2026-05-29", value: "7" },
+          }]}
+          trends={[]}
+        />,
+      );
+      expect(markup).toMatch(/<time datetime="2026-05-29">2026-05-29<\/time>/iu);
       expect(formatTrendDay("2026-05-29", 2)).toBe("May 30");
     } finally {
-      process.env.TZ = previousTimeZone;
+      if (previousTimeZone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTimeZone;
     }
   });
 
   it("renders done private runs as finished results", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -1511,8 +1545,16 @@ describe("experiment detail private-run composition", () => {
     expect(doneMarkup).toContain("does not have a canonical saved outcome to render");
   });
 
-  it("maps real browser-vault biomarker trends without inventing an expected range band", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+  it.each([
+    { statistic: "mean", label: "average", baseline: 62, current: 59, latest: 58, delta: "-3 bpm" },
+    { statistic: "max", label: "maximum", baseline: 63, current: 60, latest: 58, delta: "-3 bpm" },
+    { statistic: "min", label: "minimum", baseline: 61, current: 58, latest: 58, delta: "-3 bpm" },
+    { statistic: "median", label: "median", baseline: 62, current: 59, latest: 58, delta: "-3 bpm" },
+    { statistic: "sum", label: "total", baseline: 186, current: 177, latest: 58, delta: "-9 bpm" },
+    { statistic: "count", label: "count", baseline: 3, current: 3, latest: 1, delta: "0" },
+    { statistic: "latest", label: "latest", baseline: 61, current: 58, latest: 58, delta: "-3 bpm" },
+  ] as const)("separates the latest dated result from the $statistic comparison", async (item) => {
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -1531,7 +1573,13 @@ describe("experiment detail private-run composition", () => {
           frontmatter: createExperimentFrontmatter({
             analysisPlan: {
               desiredDirection: "decrease",
-              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+              primaryOutcome: {
+                capture: { kind: "measurement" },
+                key: "biomarker:resting-heart-rate",
+                kind: "metric",
+                label: "Resting Heart Rate",
+                statistic: item.statistic,
+              },
               secondaryBiomarkerKeys: ["biomarker:morning-blood-pressure"],
             },
             id: "exp_sauna_real_metrics",
@@ -1565,47 +1613,58 @@ describe("experiment detail private-run composition", () => {
       protocol: protocol!,
     });
 
+    const unit = item.statistic === "count" ? undefined : "bpm";
+    const suffix = unit ? ` ${unit}` : "";
     expect(privateRun?.signals).toEqual([
       expect.objectContaining({
-        baseline: "62 bpm",
-        delta: "-3 bpm",
+        baseline: `${item.baseline}${suffix}`,
+        delta: item.delta,
         expected: "",
         label: "Resting Heart Rate",
-        value: "59",
+        value: String(item.current),
+        latestResult: { date: "2026-04-10", value: String(item.latest), unit },
       }),
     ]);
     expect(privateRun?.trends).toEqual([
       expect.objectContaining({
         baseline: [
-          { day: 1, value: 63 },
-          { day: 2, value: 62 },
-          { day: 3, value: 61 },
+          { day: 1, value: item.statistic === "count" ? 1 : 63 },
+          { day: 2, value: item.statistic === "count" ? 1 : 62 },
+          { day: 3, value: item.statistic === "count" ? 1 : 61 },
         ],
         active: [
-          { day: 8, value: 60 },
-          { day: 9, value: 59 },
-          { day: 10, value: 58 },
+          { day: 8, value: item.statistic === "count" ? 1 : 60 },
+          { day: 9, value: item.statistic === "count" ? 1 : 59 },
+          { day: 10, value: item.statistic === "count" ? 1 : 58 },
         ],
         expectedRange: undefined,
-        statistic: "mean",
+        baselineAvg: item.baseline,
+        currentValue: item.current,
+        statistic: item.statistic,
       }),
     ]);
 
     const trendMarkup = renderToStaticMarkup(
-      <TrendChart data={privateRun!.trends[0]!} />,
+      <ResultsSummary signals={privateRun!.signals} trends={privateRun!.trends} />,
     );
 
     expect(trendMarkup).not.toContain("Expected");
-    expect(trendMarkup).toContain("experiment average");
-    expect(trendMarkup).not.toContain("latest");
+    expect(trendMarkup).toContain("Latest dated result");
+    expect(trendMarkup).toMatch(/<time datetime="2026-04-10">2026-04-10<\/time>/iu);
+    expect(trendMarkup).toContain(`>${item.latest}${suffix}</span>`);
     expect(trendMarkup).toContain('role="region"');
     expect(trendMarkup).toContain(
-      'aria-label="Resting Heart Rate: baseline average 62 bpm; experiment average 59 bpm."',
+      `aria-label="Resting Heart Rate: baseline ${item.label} ${item.baseline}${suffix}; experiment ${item.label} ${item.current}${suffix}."`,
     );
+    expect(buildExperimentRunCardSummary(privateRun!).metric).toEqual(expect.objectContaining({
+      current: `${item.current}${suffix}`,
+      delta: item.delta,
+    }));
+    if (item.statistic === "count") expect(trendMarkup).not.toContain("bpm");
   });
 
-  it("projects ordered comparable card metrics from production browser-vault signals", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+  it("keeps comparable card summaries while showing secondary results without a baseline", async () => {
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -1638,10 +1697,8 @@ describe("experiment detail private-run composition", () => {
             ["2026-04-10", 90],
           ]),
           ...metricRows("rem-sleep-minutes", "min", [
-            ["2026-04-01", 80],
-            ["2026-04-02", 80],
-            ["2026-04-03", 80],
             ["2026-04-08", 82],
+            ["2026-04-10", 0],
           ]),
         ],
         trackedExperiments: [{
@@ -1688,11 +1745,27 @@ describe("experiment detail private-run composition", () => {
       { label: "Hrv Rmssd", sentiment: "negative" },
       { label: "Deep Sleep Minutes", sentiment: "neutral" },
     ]);
-    expect(privateRun?.signals.find((signal) => signal.label === "Rem Sleep Minutes")?.delta).toBe("");
+    const secondary = privateRun!.signals.find((signal) => signal.label === "Rem Sleep Minutes");
+    expect(secondary).toEqual(expect.objectContaining({
+      baseline: undefined,
+      delta: "",
+      direction: "neutral",
+      value: "41",
+      latestResult: { date: "2026-04-10", value: "0", unit: "min" },
+    }));
+    expect(secondary?.sentiment).toBeUndefined();
+    expect(privateRun!.trends.some((trend) => trend.label === secondary?.label)).toBe(false);
+    const markup = renderToStaticMarkup(
+      <ResultsSummary signals={privateRun!.signals} trends={privateRun!.trends} />,
+    );
+    expect(markup).toContain("Rem Sleep Minutes");
+    expect(markup).toContain("Window average");
+    expect(markup).toContain(">0 min</span>");
+    expect(markup.match(/Latest dated result/gu)).toHaveLength(4);
   });
 
   it("hides deltas until the intervention window has enough days to compare", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -1742,11 +1815,17 @@ describe("experiment detail private-run composition", () => {
         direction: "neutral",
         label: "Resting Heart Rate",
         value: "60",
+        latestResult: { date: "2026-04-08", value: "60", unit: "bpm" },
       }),
     ]);
     expect(privateRun?.signals[0]?.sentiment).toBeUndefined();
     expect(privateRun?.trends[0]?.delta).toBe("");
     expect(privateRun?.summary).toBe("Protocol in progress");
+    const markup = renderToStaticMarkup(
+      <ResultsSummary signals={privateRun!.signals} trends={privateRun!.trends} />,
+    );
+    expect(markup).toContain("Latest dated result");
+    expect(markup).not.toContain("-2 bpm");
   });
 
   it("bridges shown history into the first baseline point", () => {
@@ -1856,7 +1935,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("formats converted percent expected ranges with measured biomarker units", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -1919,7 +1998,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders partial and not-logged schedule cells from real browser-vault sessions", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2010,7 +2089,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders repeated-session Results from occurrence counts instead of date cells", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2142,7 +2221,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders all-assumed schedule cells as done with assumed detail copy", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2221,7 +2300,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders mixed confirmed and assumed schedule copy without calling all sessions logged", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2305,7 +2384,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("keeps device-observed schedule copy on logged wording", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+    const protocol = resolveExperimentProjectionFixture("norwegian-4x4");
 
     expect(protocol).not.toBeNull();
 
@@ -2364,7 +2443,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("does not synthesize a schedule grid for calendar-less count adherence", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+    const protocol = resolveExperimentProjectionFixture("norwegian-4x4");
 
     expect(protocol).not.toBeNull();
 
@@ -2439,7 +2518,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("does not synthesize a schedule grid for unsupported explicit adherence", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2508,7 +2587,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders browser-vault session confounders in private results context", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2585,7 +2664,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders experiment-context entries in private results context", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2646,7 +2725,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("preserves same-day planned target cells in the schedule UI projection", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2724,7 +2803,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("starts protocol week numbering from the real intervention window", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2779,7 +2858,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("returns no private run when the browser selector has no matching run", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2795,7 +2874,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("keeps paused runs distinct from active runs", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2855,7 +2934,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders stopped runs as saved but incomplete results", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2934,7 +3013,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("keeps a post-stop point measurement out of stopped Results", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     const outcome = createSavedOutcome({
       id: "exp_sauna_stopped_anchor",
       slug: "finnish-sauna",
@@ -3041,6 +3120,7 @@ describe("experiment detail private-run composition", () => {
       expect.objectContaining({
         label: "Resting Heart Rate",
         value: "59",
+        latestResult: { date: "2026-04-05", value: "59", unit: "bpm" },
       }),
     ]);
     expect(stoppedRun?.trends[0]?.active).toEqual([{ day: 5, value: 59 }]);
@@ -3055,10 +3135,12 @@ describe("experiment detail private-run composition", () => {
     );
     expect(stoppedMarkup).toContain("Your experiment was stopped");
     expect(stoppedMarkup).toContain("Resting Heart Rate");
+    expect(stoppedMarkup).toMatch(/<time datetime="2026-04-05">2026-04-05<\/time>/iu);
+    expect(stoppedMarkup).not.toContain("2026-04-06");
   });
 
   it("projects stopped runs from live boundaries when they diverge from a suppressed outcome", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     const outcome = createSavedOutcome({
       id: "exp_sauna_divergent_stop",
       slug: "finnish-sauna",

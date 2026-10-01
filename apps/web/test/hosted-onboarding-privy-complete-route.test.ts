@@ -285,6 +285,7 @@ describe("hosted onboarding Privy completion route", () => {
       privyUserId: "did:privy:user_123",
     });
     expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
+      prisma: { prisma: "mock" },
       authenticatedMember: createHostedMember(),
       inviteCode: "invite_123",
     });
@@ -400,6 +401,7 @@ describe("hosted onboarding Privy completion route", () => {
       stage: "checkout",
     });
     expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
+      prisma: { prisma: "mock" },
       authenticatedMember: member,
       inviteCode: "invite_123",
     });

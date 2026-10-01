@@ -345,8 +345,7 @@ async function hasValidMigrationEvidence(input: {
     input.signal?.throwIfAborted();
     if (actual.kind === "missing") {
       if (input.retainedAttachments.some((retained) =>
-        retained.reason === "inbox_media_retention"
-        && retained.captureId === input.record.captureId
+        retained.captureId === input.record.captureId
         && retained.attachmentId === attachment.attachmentId
         && retained.storedPath === attachment.storedPath
       )) {

@@ -1,7 +1,9 @@
+import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime, nativeProviderTestNamespace } from "./postgres-owner-fixtures.ts";
 import { readFile } from "node:fs/promises";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -47,12 +49,6 @@ import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "../src/runner-egress-intercept.ts";
 import {
-  createHostedProviderEgressCredential,
-} from "../src/hosted-provider-egress-credential.ts";
-import {
-  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
-} from "../src/runner-effects-contract.ts";
-import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -64,6 +60,10 @@ import type {
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const TRANSCRIBE_URL = "http://murph-transcribe.worker/v1/transcribe";
 const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET = "provider-egress-signing-secret";
@@ -194,6 +194,11 @@ function createOutboundEnv(input: {
   openAiApiKey?: string;
   ownsRuntimeWriteFence?: boolean;
 } = {}): RunnerOutboundEnvironmentSource {
+  mockPostgresOwnerCommand(async ({ userId, command }) => {
+    if (command.operation !== "authorize_provider" && command.operation !== "authorize_effect") throw new Error("Unexpected owner operation.");
+    const owns = command.operation === "authorize_provider" ? Boolean(command.runnerContainerName) : input.ownsRuntimeWriteFence ?? false;
+    return { cutover: "postgres", status: owns ? "authorized" : "stale", owner: owns ? createPostgresTestOwner({ userId, attemptId: command.operation === "authorize_effect" ? command.attemptId : "attempt_provider_egress_credential", generation: command.operation === "authorize_effect" ? command.generation : "7", runnerContainerName: command.runnerContainerName ?? "member_123--v-test" }) : null };
+  });
   return {
     ...createHostedExecutionTestEnv(),
     AI: input.AI,
@@ -201,35 +206,10 @@ function createOutboundEnv(input: {
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
       PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
     ...(input.openAiApiKey ? { OPENAI_API_KEY: input.openAiApiKey } : {}),
-    RUNNER_CONTAINER: {
-      get: () => ({
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-      }),
-      getByName: () => ({
-        destroyInstance: async () => {},
-        invoke: async () => {
-          throw new Error("Runner container must not be invoked by outbound wrapper tests.");
-        },
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        smokeHealth: async () => {
-          throw new Error("Runner container smoke must not run in outbound wrapper tests.");
-        },
-      }),
-      idFromString: (id: string) => id,
-    },
-    USER_RUNNER: {
-      getByName: () => ({
-        validateRuntimeProviderEgressCredential: async (credentialInput: { userId: string }) => ({
-          attemptId: "attempt_provider_egress_credential",
-          leaseGeneration: "7",
-          owns: true,
-          userId: credentialInput.userId,
-          workspaceVersion: "4",
-        }),
-        validateRuntimeProviderEgressToken: async () => ({ owns: false }),
-        validateRuntimeWriteFence: async () => input.ownsRuntimeWriteFence ?? false,
-      }),
-    },
+    RUNNER_CONTAINER: nativeProviderTestNamespace(() => createPostgresTestOwner({
+      attemptId: "attempt_provider_egress_credential",
+    })),
+    USER_RUNNER: forbiddenLegacyRuntime,
   };
 }
 
@@ -238,15 +218,7 @@ async function createAuthorizedTranscribeRequest(input: {
   headers?: Record<string, string>;
   method?: string;
 }): Promise<Request> {
-  const credential = await createHostedProviderEgressCredential({
-    providerKind: "workers_ai_transcribe",
-    runnerContainerName: RUNNER_CONTAINER_NAME,
-    source: {
-      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-        PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
-    },
-    userId: "member_123",
-  });
+  const credential = "__cloudflare_injected__";
   return new Request(TRANSCRIBE_URL, {
     body: input.body ?? null,
     headers: {
@@ -258,15 +230,7 @@ async function createAuthorizedTranscribeRequest(input: {
 }
 
 async function createAuthorizedOpenAiImagesRequest(): Promise<Request> {
-  const credential = await createHostedProviderEgressCredential({
-    providerKind: "openai",
-    runnerContainerName: RUNNER_CONTAINER_NAME,
-    source: {
-      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-        PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
-    },
-    userId: "member_123",
-  });
+  const credential = "__cloudflare_injected__";
   return new Request("https://api.openai.com/v1/images/generations", {
     body: JSON.stringify({
       model: "gpt-image-2",
@@ -386,17 +350,17 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       await snapshotHandler(
         createSnapshotStartRequest(userId),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       await webHandler(
         createMailboxFetchRequest(userId, "2"),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       await webHandler(
         createCanonicalCheckpointRequest(userId),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       recordForegroundPriorityAssistantProviderStart(userId);
 
@@ -487,7 +451,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       await expect(webHandler(
         createMailboxFetchRequest(userId),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       ).then((response) => response.status)).resolves.toBe(200);
       expect(readForegroundPriorityOrderingObservation(userId)).toMatchObject({
         barrierState: "armed",
@@ -496,7 +460,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       await expect(snapshotHandler(
         createSnapshotStartRequest(userId),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       ).then((response) => response.status)).resolves.toBe(200);
 
       await expect(webHandler(
@@ -504,7 +468,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
           { importedSeq: "0", lane: "system" },
         ]),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       ).then((response) => response.status)).resolves.toBe(200);
       expect(readForegroundPriorityOrderingObservation(userId)).toMatchObject({
         barrierState: "armed",
@@ -518,10 +482,10 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
             { importedSeq: "0", lane: "conversation" },
             { importedSeq: "0", lane: "system" },
           ],
-          "hosted-invocation:checkpoint-interrupt-rearm-foreground-prefetch:1",
+          "hosted-invocation:checkpoint-interrupt-foreground-prefetch:1",
         ),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       await vi.waitFor(() => {
         expect(readForegroundPriorityOrderingObservation(userId)).toEqual({
@@ -553,7 +517,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
               conversationSeqEnd: null,
               kind: "mailbox_fetch_finished",
               ordinal: 4,
-              probeKind: "checkpoint_interrupt_rearm",
+              probeKind: "checkpoint_interrupt",
               responseStatus: 200,
             },
           ],
@@ -587,7 +551,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       const heldCommit = handler(
         createCanonicalCheckpointRequest(userId),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       await vi.waitFor(() => {
         expect(readForegroundPriorityOrderingObservation(userId)).toEqual({
@@ -636,7 +600,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
         },
       ),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     await expect(run({
@@ -680,43 +644,12 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     }).then((response) => response.status)).resolves.toBe(404);
   });
 
-  it("returns the generated-image URL upload compatibility tombstone", async () => {
-    const handler = readHostedLocalTestOutboundByHost()[
-      HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort
-    ];
-    if (!handler) {
-      throw new Error("Generated-image outbound handler is missing.");
-    }
-    const userId = "member_123";
-
-    const response = await handler(
-      new Request(
-        `http://${HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort}`
-          + HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
-        {
-          headers: {
-            [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt-1",
-            [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "1",
-            [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "4",
-            [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: userId,
-          },
-          method: "POST",
-        },
-      ),
-      createOutboundEnv({
-        ownsRuntimeWriteFence: true,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(410);
-    await expect(response.json()).resolves.toEqual({
-      error:
-        "Legacy generated-image URL uploads have moved to private provider attachments.",
+  it.each([true, false])("enforces image access before the hosted-local OpenAI Images stub (allowed=%s)", async (allowed) => {
+    const imageAccessFetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      expect(url.pathname).toBe(HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH);
+      return Response.json({ allowed, reason: allowed ? "allowed" : "subscription_required" });
     });
-  });
-
-  it("returns priceable modality usage from the hosted-local OpenAI Images stub", async () => {
     const handler = readHostedLocalTestOutboundByHost()[
       HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi
     ];
@@ -727,9 +660,15 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     const response = await handler(
       await createAuthorizedOpenAiImagesRequest(),
       createOutboundEnv({ openAiApiKey: "openai-worker-secret" }),
-      { containerId: RUNNER_CONTAINER_NAME },
+      { className: "RunnerContainer", containerId: RUNNER_CONTAINER_NAME },
     );
 
+    expect(imageAccessFetch).toHaveBeenCalledTimes(1);
+    if (!allowed) {
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED" } });
+      return;
+    }
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       usage: {
@@ -763,7 +702,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     const lostAckResponse = await handler(
       createCanonicalCheckpointRequest(userId),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     expect(lostAckResponse.status).toBe(503);
@@ -784,7 +723,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     const retryResponse = await handler(
       createCanonicalCheckpointRequest(userId),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
     expect(retryResponse.status).toBe(200);
     await expect(retryResponse.text()).resolves.toBe(committedResponse);
@@ -806,7 +745,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     const failedCommitResponse = await handler(
       createCanonicalCheckpointRequest(userId),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
     expect(failedCommitResponse.status).toBe(200);
     await expect(failedCommitResponse.json()).resolves.toEqual({ checkpointed: false });
@@ -814,14 +753,14 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     const lostAckResponse = await handler(
       createCanonicalCheckpointRequest(userId),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
     expect(lostAckResponse.status).toBe(503);
 
     const retryResponse = await handler(
       createCanonicalCheckpointRequest(userId),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
     expect(retryResponse.status).toBe(200);
     expect(realHandler).toHaveBeenCalledTimes(3);
@@ -841,12 +780,12 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       handler(
         createCanonicalCheckpointRequest(userId),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       ),
       handler(
         createCanonicalCheckpointRequest(userId),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       ),
     ]);
 
@@ -873,7 +812,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
         "idle_window",
       ),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     expect(rejectedResponse.status).toBe(409);
@@ -897,7 +836,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
         "idle_window",
       ),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
     expect(cleanResponse.status).toBe(409);
     expect(observedSha256).toEqual([
@@ -920,7 +859,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     await handler(
       createSnapshotCompleteRequest(userId, originalSha256, "idle_shutdown"),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
     await handler(
       createSnapshotCompleteRequest(
@@ -930,7 +869,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
         "runtime_wake",
       ),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     expect(observedSha256).toEqual([
@@ -952,7 +891,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     await handler(
       createSnapshotCompleteRequest(userId, "not-a-sha256"),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
     await handler(
       createSnapshotCompleteRequest(
@@ -962,7 +901,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
         "idle_window",
       ),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     expect(observedSha256).toEqual([
@@ -984,12 +923,12 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       await handler(
         createSnapshotCompleteRequest(otherUserId, "a".repeat(64), "idle_shutdown"),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       await handler(
         createSnapshotCompleteRequest(userId, "a".repeat(64), "canonical_runtime_commit"),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       expect(realHandler).toHaveBeenCalledTimes(2);
       expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("armed");
@@ -997,7 +936,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       const heldPublication = handler(
         createSnapshotCompleteRequest(userId, "a".repeat(64), "idle_shutdown"),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       await vi.waitFor(() => {
         expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("entered");
@@ -1021,7 +960,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       await handler(
         createSnapshotCompleteRequest(userId, "a".repeat(64), "idle_shutdown"),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       expect(realHandler).toHaveBeenCalledTimes(4);
       expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(false);
@@ -1040,7 +979,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       const heldStart = handler(
         createSnapshotStartRequest(userId),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       await vi.waitFor(() => {
         expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("entered");
@@ -1074,7 +1013,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       const heldPublication = handler(
         createCanonicalCheckpointRequest(userId),
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       await vi.waitFor(() => {
         expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("entered");
@@ -1118,7 +1057,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       const heldPublication = handler(
         abortableCheckpointRequest,
         createOutboundEnv(),
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
       await vi.waitFor(() => {
         expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("entered");
@@ -1161,7 +1100,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
         method: "POST",
       }),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(200);
@@ -1199,7 +1138,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
         method: "POST",
       }),
       createOutboundEnv({ AI: { run: aiRun } }),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(200);
@@ -1220,7 +1159,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     const response = await handler(
       await createAuthorizedTranscribeRequest({ method: "POST" }),
       createOutboundEnv(),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(400);

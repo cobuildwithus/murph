@@ -34,22 +34,13 @@ export const POST = withJsonError(async (request: Request) => {
       prisma,
       source: consent.source,
     });
-    const runtimeConsent = await reconcileHostedHealthDataRuntimeConsent({
-      memberId: auth.member.id,
-    });
-    const status = await readHostedConsentStatus({
+    after(() => cleanupWithdrawnHostedHealthDataConsent({
       memberId: auth.member.id,
       prisma,
-    });
-    if (runtimeConsent.consentState === "revoked") {
-      after(() =>
-        cleanupWithdrawnHostedHealthDataConsent({
-          memberId: auth.member.id,
-          prisma,
-          request: cleanupRequest,
-        })
-      );
-    }
+      request: cleanupRequest,
+    }));
+    await reconcileHostedHealthDataRuntimeConsent({ memberId: auth.member.id });
+    const status = await readHostedConsentStatus({ memberId: auth.member.id, prisma });
     return jsonOk(status);
   }
 

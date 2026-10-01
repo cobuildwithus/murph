@@ -1,8 +1,6 @@
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { access, readFile } from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { access } from 'node:fs/promises'
 
 import {
   normalizeNullableString,
@@ -12,7 +10,6 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { prepareAssistantDirectCliEnv } from '../assistant-cli-access.js'
 import { sanitizeChildProcessEnv } from '../child-process-env.js'
-import type { AssistantExecutionContext } from './execution-context.js'
 
 export interface AssistantCliLlmsManifestSchemaNode {
   description?: string
@@ -42,12 +39,7 @@ export interface AssistantCliLlmsManifest {
   version?: string
 }
 
-interface AssistantCliLauncher {
-  argvPrefix: string[]
-  command: string
-}
-
-const assistantCliManifestTimeoutMs = 60_000
+const assistantCliSurfaceAssemblyTimeoutMs = 5 * 60_000
 const assistantCliManifestMaxOutputChars = 80_000
 const assistantCliFullManifestMaxOutputChars = 8_000_000
 
@@ -82,41 +74,19 @@ const assistantCliManifestAllowedEnvKeys = new Set<string>([
   'XDG_DATA_HOME',
 ])
 
-export async function readAssistantCliLlmsManifest(input: {
-  cliEnv?: NodeJS.ProcessEnv
-  executionContext?: AssistantExecutionContext | null
+export async function readAssistantCliLlmsFullManifestFromCliEntry(input: {
+  cliEntryPath: string
   workingDirectory?: string | null
 }): Promise<AssistantCliLlmsManifest> {
-  const result = await executeAssistantCliManifestCommand({
-    args: ['--llms', '--format', 'json'],
-    cliEnv: input.cliEnv,
-    executionContext: input.executionContext,
-    workingDirectory: input.workingDirectory,
-  })
-
-  if (!isAssistantCliLlmsManifest(result.json)) {
+  if (!(await pathExists(input.cliEntryPath))) {
     throw new VaultCliError(
       'ASSISTANT_CLI_COMMAND_FAILED',
-      'vault-cli --llms --format json returned an unexpected manifest shape.',
-      {
-        argv: result.argv,
-      },
+      'Could not assemble the assistant CLI surface because the required built workspace CLI is unavailable. Build `@murphai/murph` first.',
     )
   }
 
-  return result.json
-}
-
-export async function readAssistantCliLlmsFullManifest(input: {
-  cliEnv?: NodeJS.ProcessEnv
-  executionContext?: AssistantExecutionContext | null
-  workingDirectory?: string | null
-}): Promise<AssistantCliLlmsManifest> {
   const result = await executeAssistantCliManifestCommand({
-    args: ['--llms-full', '--format', 'json'],
-    cliEnv: input.cliEnv,
-    executionContext: input.executionContext,
-    maxOutputChars: assistantCliFullManifestMaxOutputChars,
+    cliEntryPath: input.cliEntryPath,
     workingDirectory: input.workingDirectory,
   })
 
@@ -151,10 +121,7 @@ export function buildAssistantCliProcessEnv(input: {
 }
 
 async function executeAssistantCliManifestCommand(input: {
-  args: readonly string[]
-  cliEnv?: NodeJS.ProcessEnv
-  executionContext?: AssistantExecutionContext | null
-  maxOutputChars?: number
+  cliEntryPath: string
   workingDirectory?: string | null
 }): Promise<{
   argv: string[]
@@ -163,17 +130,12 @@ async function executeAssistantCliManifestCommand(input: {
   stderr: string
   stdout: string
 }> {
-  const disableConfigAutodiscovery = Boolean(input.executionContext?.hosted?.memberId)
-  const argv = disableConfigAutodiscovery
-    ? ['--no-config', ...input.args]
-    : [...input.args]
-  const env = buildAssistantCliProcessEnv({
-    cliEnv: input.cliEnv,
-  })
-  const launcher = await resolveAssistantCliLauncher(env)
+  const timeoutMs = assistantCliSurfaceAssemblyTimeoutMs
+  const argv = ['--llms-full', '--format', 'json']
+  const env = buildAssistantCliProcessEnv({})
 
   return await new Promise((resolve, reject) => {
-    const child = spawn(launcher.command, [...launcher.argvPrefix, ...argv], {
+    const child = spawn(process.execPath, [input.cliEntryPath, ...argv], {
       cwd: normalizeNullableString(input.workingDirectory) ?? process.cwd(),
       env,
       stdio: 'pipe',
@@ -195,12 +157,12 @@ async function executeAssistantCliManifestCommand(input: {
             `vault-cli ${argv.join(' ')} timed out while loading the CLI manifest.`,
             {
               argv,
-              timeoutMs: assistantCliManifestTimeoutMs,
+              timeoutMs,
             },
           ),
         )
       })
-    }, assistantCliManifestTimeoutMs)
+    }, timeoutMs)
 
     const settle = (handler: () => void) => {
       if (settled) {
@@ -233,7 +195,7 @@ async function executeAssistantCliManifestCommand(input: {
       stdout = appendAssistantCliManifestOutputChunk(
         stdout,
         String(chunk),
-        input.maxOutputChars ?? assistantCliManifestMaxOutputChars,
+        assistantCliFullManifestMaxOutputChars,
       )
     })
 
@@ -319,156 +281,10 @@ function copyAllowedAssistantCliManifestEnvEntries(
   }
 }
 
-async function resolveAssistantCliLauncher(
-  cliProcessEnv: NodeJS.ProcessEnv,
-): Promise<AssistantCliLauncher> {
-  const localWorkspaceCliSourceLauncher =
-    await resolveLocalWorkspaceCliSourceLauncher(cliProcessEnv)
-  if (localWorkspaceCliSourceLauncher) {
-    return localWorkspaceCliSourceLauncher
-  }
-
-  const vaultCliBinaries = await resolveExecutablesOnPath('vault-cli', cliProcessEnv)
-  for (const vaultCliBinary of vaultCliBinaries) {
-    if (await isKnownStaleSetupCliShim(vaultCliBinary)) {
-      continue
-    }
-
-    return {
-      argvPrefix: [],
-      command: vaultCliBinary,
-    }
-  }
-
-  const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
-  if (localBuiltCliBinPath && await pathExists(localBuiltCliBinPath)) {
-    return {
-      argvPrefix: [localBuiltCliBinPath],
-      command: process.execPath,
-    }
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_CLI_COMMAND_FAILED',
-    'Could not resolve `vault-cli` on PATH and no local built workspace CLI artifact was available.',
-  )
-}
-
-function resolveLocalBuiltWorkspaceCliBinPath(): string | null {
-  try {
-    return path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '../../../cli/dist/bin.js',
-    )
-  } catch {
-    return null
-  }
-}
-
-function resolveLocalWorkspaceCliSourceEntryPath(): string | null {
-  try {
-    return path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '../../../cli/src/bin.ts',
-    )
-  } catch {
-    return null
-  }
-}
-
-function resolveLocalWorkspaceCliSourceTsconfigPath(
-  sourceEntryPath: string,
-): string {
-  return path.resolve(path.dirname(sourceEntryPath), '../../..', 'tsconfig.base.json')
-}
-
-async function resolveLocalWorkspaceCliSourceLauncher(
-  cliProcessEnv: NodeJS.ProcessEnv,
-): Promise<AssistantCliLauncher | null> {
-  const sourceEntryPath = resolveLocalWorkspaceCliSourceEntryPath()
-  if (!sourceEntryPath || !(await pathExists(sourceEntryPath))) {
-    return null
-  }
-
-  const tsconfigPath = resolveLocalWorkspaceCliSourceTsconfigPath(sourceEntryPath)
-  if (!(await pathExists(tsconfigPath))) {
-    return null
-  }
-
-  const tsxBinary = await resolveExecutableOnPath('tsx', cliProcessEnv)
-  if (!tsxBinary) {
-    return null
-  }
-
-  return {
-    argvPrefix: ['--tsconfig', tsconfigPath, sourceEntryPath],
-    command: tsxBinary,
-  }
-}
-
-async function resolveExecutableOnPath(
-  command: string,
-  env: NodeJS.ProcessEnv,
-): Promise<string | null> {
-  const candidates = await resolveExecutablesOnPath(command, env)
-  return candidates[0] ?? null
-}
-
-async function resolveExecutablesOnPath(
-  command: string,
-  env: NodeJS.ProcessEnv,
-): Promise<string[]> {
-  if (path.isAbsolute(command)) {
-    return (await isExecutable(command)) ? [command] : []
-  }
-
-  const pathValue = env.PATH ?? env.Path ?? ''
-  const entries = pathValue
-    .split(path.delimiter)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
-  const candidates = process.platform === 'win32'
-    ? [command, `${command}.cmd`, `${command}.exe`, `${command}.bat`]
-    : [command]
-  const resolvedCandidates: string[] = []
-
-  for (const entry of entries) {
-    for (const candidate of candidates) {
-      const candidatePath = path.join(entry, candidate)
-      if (await isExecutable(candidatePath)) {
-        resolvedCandidates.push(candidatePath)
-      }
-    }
-  }
-
-  return resolvedCandidates
-}
-
-async function isExecutable(candidatePath: string): Promise<boolean> {
-  try {
-    await access(candidatePath, constants.X_OK)
-    return true
-  } catch {
-    return false
-  }
-}
-
 async function pathExists(candidatePath: string): Promise<boolean> {
   try {
     await access(candidatePath, constants.F_OK)
     return true
-  } catch {
-    return false
-  }
-}
-
-async function isKnownStaleSetupCliShim(candidatePath: string): Promise<boolean> {
-  try {
-    const contents = await readFile(candidatePath, 'utf8')
-    return (
-      contents.includes('packages/setup-cli/dist/bin.js') ||
-      contents.includes('packages\\setup-cli\\dist\\bin.js')
-    )
   } catch {
     return false
   }

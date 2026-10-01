@@ -6,14 +6,17 @@ import type {
   HostedEmailDeliverySummary,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
-  HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
+  emitHostedExecutionStructuredLog,
+  parseHostedOperatorTaskControlResponse,
+} from "@murphai/hosted-execution";
+import {
+  parseHostedExternalThreadRouteAuthorityResponse,
+  parseHostedExecutionAssistantNotificationRoute,
+} from "@murphai/hosted-execution/parsers";
+import {
+  parseHostedExecutionResolvedLinqDeliveryRoute,
   HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES,
   HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES,
-  HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
-  HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
-  HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
-  HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
-  HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
 } from "@murphai/hosted-execution/routes";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
@@ -30,6 +33,7 @@ import {
   parseHostedRunnerTelegramDownloadFileResponse,
   parseHostedRunnerTelegramGetFileResponse,
 } from "../runner-effects-contract.ts";
+import { HOSTED_RUNTIME_ATTEMPT_ID_HEADER } from "../runner-outbound/headers.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import { requireHostedRuntimeWriteFenceHeaders } from "./authority-headers.ts";
 import {
@@ -40,6 +44,7 @@ import {
 } from "./hosted-http.ts";
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -244,7 +249,7 @@ export function createCloudflareEffectsPort(input: {
                 description,
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.threadRouteAuthority,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -266,6 +271,10 @@ export function createCloudflareEffectsPort(input: {
             }
           },
           async assertExternalThreadRouteAuthority(authority, context) {
+            const headers = await requireHostedEffectsRuntimeWriteFenceHeaders({
+              description: "Hosted external thread route authority assertion",
+              workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+            });
             const payload = await fetchHostedWebControlPlaneJson({
               body: context?.assistantAskCompletion
                 ? {
@@ -276,35 +285,66 @@ export function createCloudflareEffectsPort(input: {
               boundUserId: input.boundUserId,
               description: "Hosted external thread route authority assertion",
               fetchImpl: input.fetchImpl,
-              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
-                description: "Hosted external thread route authority assertion",
-                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
-              }),
-              path: HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+              headers,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.threadRouteAuthority,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
             });
-            const assistantAskFallbackRequired =
-              (payload as { assistantAskFallbackRequired?: unknown } | null)
-                ?.assistantAskFallbackRequired;
-            if (
-              !payload
-              || typeof payload !== "object"
-              || Array.isArray(payload)
-              || (payload as { authorized?: unknown }).authorized !== true
-              || (
-                assistantAskFallbackRequired !== undefined
-                && typeof assistantAskFallbackRequired !== "boolean"
-              )
-            ) {
-              throw new TypeError(
-                "Hosted external thread route authority response is invalid.",
-              );
+            try {
+              return parseHostedExternalThreadRouteAuthorityResponse(payload);
+            } catch (error) {
+              try {
+                const record = payload !== null
+                  && typeof payload === "object"
+                  && !Array.isArray(payload)
+                  ? payload as Record<string, unknown>
+                  : null;
+                emitHostedExecutionStructuredLog({
+                  component: "hosted.runtime.control-plane",
+                  details: {
+                    operation: HOSTED_RUNNER_WEB_CONTROL_ROUTES.threadRouteAuthority.operation,
+                    responseIsObject: record !== null,
+                    authorizedValid: record !== null && record.authorized === true,
+                    assistantAskFallbackRequiredValid: record !== null && (
+                      record.assistantAskFallbackRequired === undefined
+                      || typeof record.assistantAskFallbackRequired === "boolean"
+                    ),
+                    threadIsDirectValid: record !== null && (
+                      record.threadIsDirect === undefined
+                      || typeof record.threadIsDirect === "boolean"
+                    ),
+                    transport: webControlTransport.mode,
+                    workspaceAttemptId: headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER),
+                  },
+                  level: "warn",
+                  message: "Hosted external thread route authority response validation failed.",
+                  phase: "runtime.starting",
+                  userId: null,
+                });
+              } finally {
+                // Even a failing log sink must preserve the parser's exact error.
+                throw error;
+              }
             }
-            return typeof assistantAskFallbackRequired === "boolean"
-              ? { assistantAskFallbackRequired }
-              : undefined;
+          },
+          async controlOperatorTask(request, context) {
+            return parseHostedOperatorTaskControlResponse(
+              await fetchHostedWebControlPlaneJson({
+                body: request,
+                boundUserId: input.boundUserId,
+                description: "Hosted operator task control",
+                fetchImpl: input.fetchImpl,
+                headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                  description: "Hosted operator task control",
+                  workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+                }),
+                route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.operatorTaskControl,
+                signal: context?.signal ?? null,
+                timeoutMs: input.timeoutMs,
+                transport: webControlTransport,
+              }),
+            );
           },
           async resolveCurrentVerifiedEmailRecipient(context) {
             const payload = await fetchHostedWebControlPlaneJson({
@@ -316,7 +356,7 @@ export function createCloudflareEffectsPort(input: {
                 description: "Hosted email recipient authority resolution",
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.emailEgressRecipient,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -339,6 +379,28 @@ export function createCloudflareEffectsPort(input: {
             }
             return deliveryTarget;
           },
+          async resolveMemberNotificationRoute(context) {
+            const description = "Hosted member notification route";
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: {},
+              boundUserId: input.boundUserId,
+              description,
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description,
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.memberNotificationRoute,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            if (!payload || typeof payload !== "object" || !("route" in payload)) {
+              throw new TypeError("Hosted member notification route response is invalid.");
+            }
+            return payload.route === null ? null
+              : parseHostedExecutionAssistantNotificationRoute(payload.route, description);
+          },
           async assertLinqRecentInboundEngagement(request, context) {
             const payload = await fetchHostedWebControlPlaneJson({
               body: request,
@@ -349,7 +411,7 @@ export function createCloudflareEffectsPort(input: {
                 description: "Hosted Linq egress authority assertion",
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.linqEgressEngagement,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -366,7 +428,7 @@ export function createCloudflareEffectsPort(input: {
                 description: "Hosted Linq delivery outcome recording",
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.linqDeliveryOutcome,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -385,7 +447,7 @@ export function createCloudflareEffectsPort(input: {
                 workspaceCheckpointBridge:
                   input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.phoneCallResultDelivery,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -401,7 +463,7 @@ export function createCloudflareEffectsPort(input: {
                 description: "Hosted outbound message-volume receipt recording",
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.outboundMessageVolumeReceipt,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -485,63 +547,9 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     result.providerDispatchClaimed = response.providerDispatchClaimed;
   }
 
-  const resolvedRoute = response.resolvedRoute;
-  if (
-    !resolvedRoute ||
-    typeof resolvedRoute !== "object" ||
-    Array.isArray(resolvedRoute)
-  ) {
-    return result;
-  }
-
-  const record = resolvedRoute as Record<string, unknown>;
-  const target = readOptionalStringField(record, "target");
-  const targetKind = readOptionalStringField(record, "targetKind");
-  const conversationThreadId = readHostedRuntimeNullableStringField(
-    record,
-    "conversationThreadId",
-  );
-  const directRecipientPhoneNumber = readHostedRuntimeNullableStringField(
-    record,
-    "directRecipientPhoneNumber",
-  );
-  const fromPhoneNumber = readHostedRuntimeNullableStringField(
-    record,
-    "fromPhoneNumber",
-  );
-  if (
-    target
-    && (targetKind === "participant" || targetKind === "thread")
-    && conversationThreadId !== undefined
-    && directRecipientPhoneNumber !== undefined
-    && fromPhoneNumber !== undefined
-    && typeof record.threadIsDirect === "boolean"
-  ) {
-    result.resolvedRoute = {
-      conversationThreadId,
-      directRecipientPhoneNumber,
-      fromPhoneNumber,
-      target,
-      targetKind,
-      threadIsDirect: record.threadIsDirect,
-    };
-  }
+  const resolvedRoute = parseHostedExecutionResolvedLinqDeliveryRoute(response.resolvedRoute);
+  if (resolvedRoute) result.resolvedRoute = resolvedRoute;
   return result;
-}
-
-function readHostedRuntimeNullableStringField(
-  record: Record<string, unknown>,
-  field: string,
-): string | null | undefined {
-  const value = record[field];
-  if (value === null) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : undefined;
 }
 
 function readOptionalHostedEmailDeliverySummary(

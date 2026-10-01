@@ -5,15 +5,12 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 
 import {
-  mergeCodexConfigOverrides,
+  resolveCodexModelProviderConfigOverrides,
 } from '../src/assistant/providers/helpers.ts'
 
 describe('Codex provider config overrides', () => {
   it('emits Venice provider table overrides without raw credential values', () => {
-    const overrides = mergeCodexConfigOverrides({
-      modelProvider: 'venice',
-      showThinkingTraces: false,
-    })
+    const overrides = resolveCodexModelProviderConfigOverrides('venice')
 
     expect(overrides).toEqual([
       'model_providers.venice.name="Venice.ai"',
@@ -27,63 +24,32 @@ describe('Codex provider config overrides', () => {
   })
 
   it('keeps reserved OpenAI provider ids on built-in Codex config', () => {
-    const overrides = mergeCodexConfigOverrides({
-      modelProvider: 'openai',
-      showThinkingTraces: true,
-    })
-
-    expect(overrides).toEqual([
-      'model_reasoning_summary="auto"',
-      'hide_agent_reasoning=false',
-    ])
-  })
-
-  it('never emits a multi_agent_v2 CLI override that would shadow the hosted config table', () => {
-    // A CLI `--config features.multi_agent_v2=true` boolean takes precedence
-    // over the hosted config.toml [features.multi_agent_v2] table and resets
-    // the feature to defaults, dropping Murph's tool and mode hints.
-    const overrides = mergeCodexConfigOverrides({
-      modelProvider: 'openai-local-test',
-      showThinkingTraces: true,
-    })
-
-    expect(
-      overrides?.some((override) => override.includes('multi_agent')),
-    ).toBe(false)
+    expect(resolveCodexModelProviderConfigOverrides('openai')).toBeUndefined()
   })
 
   it('fails closed when a provider id has no known provider config', () => {
     expect(() =>
-      mergeCodexConfigOverrides({
-        modelProvider: 'unknown-provider',
-        showThinkingTraces: false,
-      }),
+      resolveCodexModelProviderConfigOverrides('unknown-provider'),
     ).toThrow(/Unknown Codex model provider: unknown-provider/u)
   })
 
   it('does not emit custom tables for reserved built-in provider ids without registry configs', () => {
-    const overrides = mergeCodexConfigOverrides({
-      modelProvider: 'ollama',
-      showThinkingTraces: false,
-    })
+    const overrides = resolveCodexModelProviderConfigOverrides('ollama')
 
     expect(overrides).toBeUndefined()
   })
 
   it('allows hosted-local test provider ids to use the prewritten Codex config', () => {
-    const overrides = mergeCodexConfigOverrides({
-      modelProvider: 'openai-local-test',
-      showThinkingTraces: false,
-    })
+    const overrides =
+      resolveCodexModelProviderConfigOverrides('openai-local-test')
 
     expect(overrides).toBeUndefined()
   })
 
   it('allows hosted ChatGPT auth to use the prewritten Codex config', () => {
-    const overrides = mergeCodexConfigOverrides({
-      modelProvider: HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
-      showThinkingTraces: false,
-    })
+    const overrides = resolveCodexModelProviderConfigOverrides(
+      HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+    )
 
     expect(overrides).toBeUndefined()
   })

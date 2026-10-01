@@ -16,6 +16,9 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { validatePrChangelog } from "./check-pr-changelog.mjs";
+import { validatePrComplexitySummary } from "./check-pr-complexity-summary.mjs";
+import { validatePrDeploymentConcerns } from "./check-pr-deployment-concerns.mjs";
 import {
   normalizeFrogPullRequestBody,
   selectFrogPullRequest,
@@ -31,6 +34,21 @@ function actionRefs(workflow: string): string[] {
     const match = /^\s*-?\s*uses:\s+[^@\s]+@([^\s#]+)/u.exec(line);
     return match?.[1] ? [match[1]] : [];
   });
+}
+
+function renderPlainFooterDeclaration(
+  body: string,
+  heading: "Changelog" | "Deployment concerns",
+): string {
+  const items = new RegExp(`^## ${heading}\\n\\n(?<items>(?:- .+\\n?)+)`, "mu")
+    .exec(body)?.groups?.items.trim().split("\n");
+  expect(items).toBeDefined();
+  return [
+    `<h2>${heading}</h2>`,
+    "<ul>",
+    ...(items ?? []).map((item) => `<li>${item.replace(/^- /u, "")}</li>`),
+    "</ul>",
+  ].join("\n");
 }
 
 describe("Frog workflow guards", () => {
@@ -216,40 +234,6 @@ fi
     ]) {
       expect(skill).toContain(heading);
     }
-
-    const agents = readRepoFile("AGENTS.md");
-    expect(agents).toContain("§ Developer Friction Logging");
-    expect(agents).toContain("commit each created entry with the task");
-
-    const workflowRouting = readRepoFile(
-      "agent-docs",
-      "operations",
-      "agent-workflow-routing.md",
-    );
-    expect(workflowRouting).toContain("### Developer Friction Logging");
-    expect(workflowRouting).toContain(
-      "For every edit-authorized repository task",
-    );
-    expect(workflowRouting).toMatch(
-      /Creating or\s+updating a tracked plan file is edit-authorized repository work/u,
-    );
-    expect(workflowRouting).toContain("planning-only");
-    expect(workflowRouting).toContain("run `scripts/frog list`");
-    expect(workflowRouting).toMatch(
-      /record it\s+through `scripts\/frog log`/u,
-    );
-    expect(workflowRouting).toContain(
-      "A task is not complete while its Frog entry is untracked",
-    );
-
-    const completionWorkflow = readRepoFile(
-      "agent-docs",
-      "operations",
-      "completion-workflow.md",
-    );
-    expect(completionWorkflow).toContain(
-      "Include every public-safe Frog entry created or modified during the task in that same scoped commit",
-    );
   });
 
   it("keeps the Action on trusted default-branch events with narrow authority", () => {
@@ -432,6 +416,25 @@ fi
     expect(normalizedBody.match(/^## Architecture and reuse$/gmu)).toHaveLength(
       1,
     );
+    expect(normalizedBody.match(/^## Complexity impact$/gmu)).toHaveLength(1);
+    const complexityItems = /^## Complexity impact\n\n(?<items>(?:- .+\n?)+)/mu
+      .exec(normalizedBody)?.groups?.items
+      .trim()
+      .split("\n");
+    expect(complexityItems).toHaveLength(3);
+    expect(
+      validatePrComplexitySummary({
+        changedPaths: [".agents/friction-log/example.md"],
+        prBodyHtml: [
+          "<h2>Complexity impact</h2>",
+          "<ul>",
+          ...(complexityItems ?? []).map((item) =>
+            `<li>${item.replace(/^- /u, "")}</li>`
+          ),
+          "</ul>",
+        ].join("\n"),
+      }),
+    ).toEqual([]);
     expect(normalizedBody.match(/^## Hot reply path impact$/gmu)).toHaveLength(
       1,
     );
@@ -446,34 +449,20 @@ fi
     expect(
       normalizedBody.match(/<!-- murph:frog-pr-context:end -->/gu),
     ).toHaveLength(1);
-    const changelogValidation = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "check-pr-changelog.mjs")],
-      {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          MURPH_PR_BASE_SHA: "HEAD",
-          MURPH_PR_BODY: normalizedBody,
-          MURPH_PR_HEAD_SHA: "HEAD",
-        },
-      },
-    );
-    expect(changelogValidation.status, changelogValidation.stderr).toBe(0);
-    const deploymentValidation = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "check-pr-deployment-concerns.mjs")],
-      {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          MURPH_PR_BODY: normalizedBody,
-        },
-      },
-    );
-    expect(deploymentValidation.status, deploymentValidation.stderr).toBe(0);
+    expect(
+      validatePrChangelog({
+        changedPaths: [".agents/friction-log/example.md"],
+        prBodyHtml: renderPlainFooterDeclaration(normalizedBody, "Changelog"),
+      }),
+    ).toEqual([]);
+    expect(
+      validatePrDeploymentConcerns({
+        prBodyHtml: renderPlainFooterDeclaration(
+          normalizedBody,
+          "Deployment concerns",
+        ),
+      }),
+    ).toEqual([]);
 
     const readme = readRepoFile(".agents", "friction-log", "README.md");
     expect(readme).toContain("FROG_APP_CLIENT_ID");

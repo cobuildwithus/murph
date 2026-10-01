@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks'
 
 export interface AssistantProviderStartCriticalPathContext {
+  readonly assistantPhaseCallbackStartedAtMonotonicMs?: number
   readonly assistantPhaseStartedAtMonotonicMs?: number
   readonly assistantServiceStartedAtMonotonicMs?: number
   readonly assistantTurnLockAcquiredAtMonotonicMs?: number
@@ -18,11 +19,14 @@ export interface AssistantProviderStartCriticalPathContext {
   readonly automationTerminalEvidenceDoneAtMonotonicMs?: number
   readonly codexAppServerProcessTurnStartedAtMonotonicMs?: number
   readonly codexAppServerTurnStartedAtMonotonicMs?: number
+  readonly foregroundPassStartedAtMonotonicMs?: number
   readonly mailboxImportDoneAtMonotonicMs: number
   readonly preProviderSetupDoneAtMonotonicMs?: number
+  readonly workspaceForegroundPassStartedAtMonotonicMs?: number
 }
 
 export type AssistantProviderStartCriticalPathBoundary =
+  | 'assistantPhaseCallbackStartedAtMonotonicMs'
   | 'assistantPhaseStartedAtMonotonicMs'
   | 'assistantServiceStartedAtMonotonicMs'
   | 'assistantTurnLockAcquiredAtMonotonicMs'
@@ -39,7 +43,9 @@ export type AssistantProviderStartCriticalPathBoundary =
   | 'automationTerminalEvidenceDoneAtMonotonicMs'
   | 'codexAppServerProcessTurnStartedAtMonotonicMs'
   | 'codexAppServerTurnStartedAtMonotonicMs'
+  | 'foregroundPassStartedAtMonotonicMs'
   | 'preProviderSetupDoneAtMonotonicMs'
+  | 'workspaceForegroundPassStartedAtMonotonicMs'
 
 export interface AssistantProviderStartCriticalPathTiming {
   assistantServicePreLockMs: number
@@ -54,12 +60,16 @@ export interface AssistantProviderStartCriticalPathTiming {
   automationServiceHandoffMs?: number
   automationSessionPreflightMs?: number
   automationTerminalEvidenceMs?: number
+  assistantPhaseCallbackToAssistantPhaseMs?: number
   codexAppServerPreProviderMs: number
   codexProcessPreparationMs: number
+  foregroundPassToWorkspaceForegroundPassMs?: number
+  mailboxImportDoneToForegroundPassMs?: number
   mailboxImportDoneToAssistantPhaseMs: number
   preProviderSetupMs: number
   providerPlanAndGateMs: number
   turnLockWaitMs: number
+  workspaceForegroundPassToAssistantPhaseCallbackMs?: number
   workspaceAssistantPreAutomationMs: number
 }
 
@@ -137,10 +147,13 @@ export function completeAssistantProviderStartCriticalPath(
   ] = boundaries as [number, number, number, number, number, number, number, number, number, number]
 
   const automationLaneTiming = completeAssistantAutomationLaneTiming(context)
+  const mailboxImportDoneToAssistantPhaseTiming =
+    completeMailboxImportDoneToAssistantPhaseTiming(context)
 
   return {
     mailboxImportDoneToAssistantPhaseMs:
       assistantPhaseStarted - mailboxImportDone,
+    ...(mailboxImportDoneToAssistantPhaseTiming ?? {}),
     workspaceAssistantPreAutomationMs:
       automationLaneStarted - assistantPhaseStarted,
     automationLaneToAssistantServiceMs:
@@ -156,6 +169,55 @@ export function completeAssistantProviderStartCriticalPath(
       codexAppServerProcessTurnStarted - codexAppServerTurnStarted,
     codexAppServerPreProviderMs:
       providerStarted - codexAppServerProcessTurnStarted,
+  }
+}
+
+function completeMailboxImportDoneToAssistantPhaseTiming(
+  context: AssistantProviderStartCriticalPathContext,
+): Pick<
+  AssistantProviderStartCriticalPathTiming,
+  | 'assistantPhaseCallbackToAssistantPhaseMs'
+  | 'foregroundPassToWorkspaceForegroundPassMs'
+  | 'mailboxImportDoneToForegroundPassMs'
+  | 'workspaceForegroundPassToAssistantPhaseCallbackMs'
+> | null {
+  const boundaries = [
+    context.mailboxImportDoneAtMonotonicMs,
+    context.foregroundPassStartedAtMonotonicMs,
+    context.workspaceForegroundPassStartedAtMonotonicMs,
+    context.assistantPhaseCallbackStartedAtMonotonicMs,
+    context.assistantPhaseStartedAtMonotonicMs,
+  ]
+  let previousBoundary: number | null = null
+  for (const boundary of boundaries) {
+    if (
+      typeof boundary !== 'number'
+      || !Number.isSafeInteger(boundary)
+      || boundary < 0
+      || (previousBoundary !== null && boundary < previousBoundary)
+    ) {
+      return null
+    }
+    previousBoundary = boundary
+  }
+
+  const [
+    mailboxImportDone,
+    foregroundPassStarted,
+    workspaceForegroundPassStarted,
+    assistantPhaseCallbackStarted,
+    assistantPhaseStarted,
+  ] = boundaries as [number, number, number, number, number]
+
+  return {
+    mailboxImportDoneToForegroundPassMs:
+      foregroundPassStarted - mailboxImportDone,
+    foregroundPassToWorkspaceForegroundPassMs:
+      workspaceForegroundPassStarted - foregroundPassStarted,
+    workspaceForegroundPassToAssistantPhaseCallbackMs:
+      assistantPhaseCallbackStarted - workspaceForegroundPassStarted,
+    assistantPhaseCallbackToAssistantPhaseMs:
+      assistantPhaseStarted - assistantPhaseCallbackStarted,
   }
 }
 

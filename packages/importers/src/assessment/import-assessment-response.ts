@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import * as z from "@murphai/contracts/zod-runtime";
+import { assessmentResponseSchema } from "@murphai/contracts";
 
 import {
   inspectFileAsset,
@@ -25,6 +26,9 @@ export interface AssessmentResponseImportInput {
   occurredAt?: string | number | Date;
   importedAt?: string | number | Date;
   source?: string;
+  assessmentType?: string;
+  questionnaireSlug?: string;
+  relatedIds?: string[];
 }
 
 const assessmentResponseImportInputSchema = z
@@ -35,6 +39,9 @@ const assessmentResponseImportInputSchema = z
     occurredAt: optionalTimestampSchema("occurredAt"),
     importedAt: optionalTimestampSchema("importedAt"),
     source: optionalTrimmedStringSchema("source"),
+    assessmentType: assessmentResponseSchema.shape.assessmentType.optional(),
+    questionnaireSlug: assessmentResponseSchema.shape.questionnaireSlug,
+    relatedIds: assessmentResponseSchema.shape.relatedIds,
   })
   .passthrough();
 
@@ -55,6 +62,9 @@ export async function prepareAssessmentResponseImport(
     recordedAt: request.occurredAt,
     importedAt: request.importedAt,
     source: request.source,
+    assessmentType: request.assessmentType,
+    questionnaireSlug: request.questionnaireSlug,
+    relatedIds: request.relatedIds,
   });
 }
 

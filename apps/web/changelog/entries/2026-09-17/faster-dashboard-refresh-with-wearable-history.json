@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 100,
+  "item": {
+    "id": "faster-dashboard-refresh-with-wearable-history",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster dashboard refreshes",
+    "summary": "Dashboard refreshes do less unnecessary processing when your history includes wearable data.",
+    "details": "Your recorded values and existing sleep-data checks stay the same.",
+    "relevanceTags": ["dashboard", "reliability"],
+    "sourcePullRequests": [3535]
+  }
+}

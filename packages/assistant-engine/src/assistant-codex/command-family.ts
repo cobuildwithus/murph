@@ -1,3 +1,5 @@
+import { cliTimingCommand } from '@murphai/runtime-state/cli-timing'
+
 import type {
   AssistantTurnProfileCommandFamily,
 } from '@murphai/hosted-execution/assistant-usage'
@@ -12,10 +14,13 @@ const KNOWN_SHELL_WRAPPER_PREFIX_PATTERN =
   /^\s*(?:(?:\/bin|\/usr\/bin)\/)?(?:bash|zsh|dash)\s+-[a-z]*c[a-z]*\s+/u
 
 const BATCH_COMMAND_FAMILIES = new Map<string, CodexCommandFamily>([
+  ['event payload-schema', 'vault-cli event'],
+  ['event show', 'vault-cli event'],
   ['food search-labels', 'food.search-labels'],
   ['food search-labels-batch', 'food.search-labels-batch'],
   ['goal list', 'goal.list'],
   ['goal show', 'goal.show'],
+  ['knowledge show', 'vault-cli knowledge'],
   ['meal add', 'meal.add'],
   ['meal edit', 'meal.edit'],
   ['meal nutrients', 'meal.nutrients'],
@@ -63,6 +68,18 @@ export type CodexCommandFamilyInput =
       source: 'display'
     }
 
+export function resolveCodexVaultCliCommandArgv(input: {
+  allowKnownShellWrapper?: boolean
+  commandLabel: string | null
+}): readonly string[] | null {
+  const command = normalizeCodexDisplayCommand(input)
+  if (command === null) {
+    return null
+  }
+  const tokens = command.split(/\s+/u)
+  return tokens[0] === 'vault-cli' ? tokens : null
+}
+
 /**
  * Return only a finite server-owned command family. Command text and argv are
  * inspected transiently and never returned. Display commands fail closed to
@@ -79,29 +96,21 @@ export function resolveCodexCommandFamily(
     return BATCH_COMMAND_FAMILIES.get(`${head} ${subcommand}`) ?? 'other'
   }
 
-  if (input.commandLabel === null) {
+  const command = normalizeCodexDisplayCommand(input)
+  if (command === null) {
     return 'command'
   }
-  const outerCommand = input.commandLabel.trim()
-  if (hasExecutableShellControl(outerCommand)) {
-    return 'command'
-  }
-  const command = input.allowKnownShellWrapper
-    ? unwrapKnownShellWrapper(outerCommand) ?? outerCommand
-    : outerCommand
-  if (hasExecutableShellControl(command)) {
-    return 'command'
-  }
+  const directArgv = resolveCodexVaultCliCommandArgv(input)
   if (DIRECT_SEARCH_COMMAND_PATTERN.test(command)) {
     return 'search'
   }
 
-  const tokens = command.split(/\s+/u)
+  const tokens = directArgv ?? command.split(/\s+/u)
   const directFamily = DIRECT_EXECUTABLE_FAMILIES.get(tokens[0] ?? '')
   if (directFamily) {
     return directFamily
   }
-  if (tokens[0] !== 'vault-cli') {
+  if (directArgv === null) {
     return 'command'
   }
 
@@ -115,6 +124,64 @@ export function resolveCodexCommandFamily(
     return exactFamily
   }
   return VAULT_CLI_TOP_LEVEL_FAMILIES.get(tokens[1] ?? '') ?? 'command'
+}
+
+export interface CodexCommandAttribution {
+  commandAttribution: 'recognized' | 'missing_command' | 'oversized_command'
+    | 'shell_syntax' | 'unrecognized_executable' | 'unrecognized_cli_path'
+  vaultCli: boolean
+  vaultCliCommand?: string
+}
+
+/** Diagnostic-only explanation. Reuse the lexical guard, never shell-evaluate
+ * or retain the command. Only literal leading words can prove a catalog path;
+ * option-first/quoted paths stay unattributed rather than parsing argument data.
+ */
+export function resolveCodexCommandAttribution(input: {
+  commandLabel: string | null
+}): CodexCommandAttribution {
+  const label = input.commandLabel?.trim()
+  if (!label) return { commandAttribution: 'missing_command', vaultCli: false }
+  if (label.length > COMMAND_CLASSIFICATION_SCAN_LIMIT) {
+    return { commandAttribution: 'oversized_command', vaultCli: false }
+  }
+  const command = normalizeCodexDisplayCommand({
+    allowKnownShellWrapper: true, commandLabel: label,
+  })
+  if (command === null) return { commandAttribution: 'shell_syntax', vaultCli: false }
+  const tokens = command.split(/\s+/u)
+  if (tokens[0] !== 'vault-cli') {
+    const recognized = DIRECT_EXECUTABLE_FAMILIES.has(tokens[0] ?? '')
+      || DIRECT_SEARCH_COMMAND_PATTERN.test(command)
+    return { vaultCli: false, commandAttribution: recognized
+      ? 'recognized' : 'unrecognized_executable' }
+  }
+  // The source-owned catalog's deepest registered path has three words.
+  // Do not skip options: a whitespace-split option value is not parsed argv.
+  for (let size = Math.min(3, tokens.length - 1); size > 0; size -= 1) {
+    const name = cliTimingCommand(tokens.slice(1, size + 1).join(' '))
+    if (name !== 'other') {
+      return { commandAttribution: 'recognized', vaultCli: true, vaultCliCommand: name }
+    }
+  }
+  return { commandAttribution: 'unrecognized_cli_path', vaultCli: true }
+}
+
+function normalizeCodexDisplayCommand(input: {
+  allowKnownShellWrapper?: boolean
+  commandLabel: string | null
+}): string | null {
+  if (input.commandLabel === null) {
+    return null
+  }
+  const outerCommand = input.commandLabel.trim()
+  if (hasExecutableShellControl(outerCommand)) {
+    return null
+  }
+  const command = input.allowKnownShellWrapper
+    ? unwrapKnownShellWrapper(outerCommand) ?? outerCommand
+    : outerCommand
+  return hasExecutableShellControl(command) ? null : command
 }
 
 // Codex shlex-joins a known shell's single script argument. Unwrap exactly one

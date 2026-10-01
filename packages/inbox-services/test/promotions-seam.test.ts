@@ -130,7 +130,7 @@ function createCapture(
     text: 'capture note',
     attachments: [],
     raw: {},
-    sourceDirectory: `raw/inbox/email/default/${captureId}`,
+    sourceDirectory: `raw/inbox/email/${captureId}`,
     createdAt: '2026-04-08T11:22:55.000Z',
     ...overrides,
   }
@@ -285,6 +285,15 @@ function createCoreRuntimeModule(
         documentId: 'document-created',
         event: { id: 'document-created' },
       }
+    },
+    async listInboxDocumentDefaultPromotionCorrelations() {
+      return []
+    },
+    async listLiveExactDocumentImportEvidence(input) {
+      return input.sources.map((source) => ({ ...source, evidence: [] }))
+    },
+    async recordInboxDocumentDefaultPromotion() {
+      return { created: true }
     },
     async promoteInboxJournal() {
       return {
@@ -1042,8 +1051,11 @@ test('document preservation and experiment helper branches are deterministic', a
     'raw/inbox/email/capture-preserve/attachments/existing.pdf'
   const newDocumentPath =
     'raw/inbox/email/capture-preserve/attachments/new.pdf'
+  const duplicateDocumentPath =
+    'raw/inbox/email/capture-preserve/attachments/duplicate.pdf'
   await writeTextFile(paths.absoluteVaultRoot, canonicalDocumentPath, 'existing document')
   await writeTextFile(paths.absoluteVaultRoot, newDocumentPath, 'new document')
+  await writeTextFile(paths.absoluteVaultRoot, duplicateDocumentPath, 'new document')
 
   const capture = createCapture('capture-preserve', {
     text: ' preserved note ',
@@ -1058,6 +1070,12 @@ test('document preservation and experiment helper branches are deterministic', a
         ordinal: 2,
         kind: 'document',
         storedPath: newDocumentPath,
+        fileName: ' New.pdf ',
+      }),
+      createAttachment({
+        ordinal: 3,
+        kind: 'document',
+        storedPath: duplicateDocumentPath,
         fileName: ' New.pdf ',
       }),
     ],
@@ -1087,6 +1105,9 @@ test('document preservation and experiment helper branches are deterministic', a
   )
 
   const importedFiles: string[] = []
+  const preservedDocumentCorrelations: Array<
+    Parameters<NonNullable<CoreRuntimeModule['recordInboxDocumentDefaultPromotion']>>[0]
+  > = []
   let closed = 0
   const result = await preserveCanonicalDocumentAttachments({
     input: {
@@ -1094,12 +1115,53 @@ test('document preservation and experiment helper branches are deterministic', a
       captureId: capture.captureId,
       requestId: null,
     },
-    loadCore: async () => createCoreRuntimeModule(),
+    loadCore: async () => createCoreRuntimeModule({
+      async listLiveExactDocumentImportEvidence(input) {
+        return input.sources.map((source) => ({
+          ...source,
+          evidence:
+            source.sha256 === sha256('existing document')
+              ? [{
+                  defaultPromotions: [],
+                  documentId: 'document-existing',
+                  manifestPath: 'raw/documents/existing/manifest.json',
+                  rawRef: 'raw/documents/existing/existing.pdf',
+                }]
+              : [],
+        }))
+      },
+      async recordInboxDocumentDefaultPromotion(input) {
+        preservedDocumentCorrelations.push(input)
+        return { created: true }
+      },
+    }),
     loadImporters: async () => ({
       createImporters() {
         return {
           async importDocument(input) {
             importedFiles.push(input.filePath)
+            await writeJsonFile(
+              paths.absoluteVaultRoot,
+              'raw/documents/created/manifest.json',
+              {
+                importId: 'document-created',
+                importKind: 'document',
+                importedAt: '2026-04-08T12:00:00.000Z',
+                source: input.source ?? null,
+                artifacts: [
+                  {
+                    role: 'source_document',
+                    sha256: sha256('new document'),
+                  },
+                ],
+                provenance: {
+                  occurredAt: input.occurredAt ?? null,
+                  note: input.note ?? null,
+                  lookupId: 'document-created',
+                  title: input.title ?? null,
+                },
+              },
+            )
             return {
               documentId: 'document-created',
               event: { id: 'document-created' },
@@ -1116,13 +1178,39 @@ test('document preservation and experiment helper branches are deterministic', a
       ),
   })
 
-  assert.equal(result.preservedCount, 2)
+  assert.equal(result.preservedCount, 3)
   assert.equal(result.createdCount, 1)
   assert.equal(result.documents[0]?.created, false)
   assert.equal(result.documents[1]?.lookupId, 'document-created')
+  assert.equal(result.documents[2]?.created, false)
+  assert.equal(result.documents[2]?.lookupId, 'document-created')
   assert.deepEqual(importedFiles, [
     path.join(paths.absoluteVaultRoot, newDocumentPath),
   ])
+  assert.deepEqual(
+    preservedDocumentCorrelations.map(({ attachmentId, captureId, documentId }) => ({
+      attachmentId,
+      captureId,
+      documentId,
+    })),
+    [
+      {
+        attachmentId: 'attachment-1',
+        captureId: capture.captureId,
+        documentId: 'document-existing',
+      },
+      {
+        attachmentId: 'attachment-2',
+        captureId: capture.captureId,
+        documentId: 'document-created',
+      },
+      {
+        attachmentId: 'attachment-3',
+        captureId: capture.captureId,
+        documentId: 'document-created',
+      },
+    ],
+  )
   assert.equal(closed, 1)
 
   await assert.rejects(
@@ -1479,6 +1567,17 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
         }),
       ],
     }),
+    createCapture('capture-document-default-retry', {
+      text: 'default retry note',
+      attachments: [
+        createAttachment({
+          ordinal: 1,
+          kind: 'document',
+          storedPath: 'raw/inbox/email/capture-document-default-retry/attachments/retry.pdf',
+          fileName: 'Retry.pdf',
+        }),
+      ],
+    }),
     createCapture('capture-document-overrides', {
       text: 'document override fallback',
       attachments: [
@@ -1572,6 +1671,11 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   )
   await writeTextFile(
     paths.absoluteVaultRoot,
+    'raw/inbox/email/capture-document-default-retry/attachments/retry.pdf',
+    'default retry body',
+  )
+  await writeTextFile(
+    paths.absoluteVaultRoot,
     'raw/inbox/email/capture-document-overrides/attachments/manual.pdf',
     'manual document draft body',
   )
@@ -1622,6 +1726,25 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   )
   await writeJsonFile(
     paths.absoluteVaultRoot,
+    'raw/documents/default-retry/manifest.json',
+    {
+      importId: 'document-default-existing',
+      importKind: 'document',
+      importedAt: '2026-04-08T07:05:30.000Z',
+      source: 'import',
+      artifacts: [
+        { role: 'source_document', sha256: sha256('default retry body') },
+      ],
+      provenance: {
+        occurredAt: '2026-04-08T11:22:33.000Z',
+        note: 'default retry note',
+        lookupId: 'document-default-existing',
+        title: 'Retry.pdf',
+      },
+    },
+  )
+  await writeJsonFile(
+    paths.absoluteVaultRoot,
     'raw/documents/overrides-existing/manifest.json',
     {
       importId: 'document-overrides-existing',
@@ -1644,6 +1767,9 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   const journalCalls: Array<Parameters<NonNullable<CoreRuntimeModule['promoteInboxJournal']>>[0]> = []
   const experimentCalls: Array<Parameters<NonNullable<CoreRuntimeModule['promoteInboxExperimentNote']>>[0]> = []
   const importedFiles: Array<Parameters<ReturnType<ImportersFactoryRuntimeModule['createImporters']>['importDocument']>[0]> = []
+  const documentCorrelationCalls: Array<
+    Parameters<NonNullable<CoreRuntimeModule['recordInboxDocumentDefaultPromotion']>>[0]
+  > = []
 
   const env = createInboxAppEnvironment({
     inbox: createInboxRuntimeModule(createRuntimeStore(captures)),
@@ -1655,6 +1781,10 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
           event: { id: 'meal-created' },
           manifestPath: 'raw/meals/meal-created/manifest.json',
         }
+      },
+      async recordInboxDocumentDefaultPromotion(input) {
+        documentCorrelationCalls.push(input)
+        return { created: true }
       },
       async promoteInboxJournal(input) {
         journalCalls.push(input)
@@ -1736,6 +1866,12 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
     requestId: null,
   })
   assert.equal(preserved.createdCount, 1)
+  assert.deepEqual(documentCorrelationCalls, [{
+    attachmentId: 'attachment-1',
+    captureId: 'capture-preserve-delegated',
+    documentId: 'document-created',
+    vaultRoot: paths.absoluteVaultRoot,
+  }])
 
   const canonicalMeal = await ops.promoteMeal({
     vault: paths.absoluteVaultRoot,
@@ -1829,6 +1965,28 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   assert.equal(createdDocumentImport?.note, 'document note')
   assert.equal(createdDocumentImport?.occurredAt, '2026-04-08T11:22:33.000Z')
   assert.equal(createdDocumentImport?.source, 'import')
+  assert.deepEqual(documentCorrelationCalls.at(-1), {
+    attachmentId: 'attachment-1',
+    captureId: 'capture-document-created',
+    documentId: 'document-created',
+    vaultRoot: paths.absoluteVaultRoot,
+  })
+  const documentImportsBeforeDefaultRetry = importedFiles.length
+  const retriedDefaultDocument = await ops.promoteDocument({
+    vault: paths.absoluteVaultRoot,
+    captureId: 'capture-document-default-retry',
+    requestId: null,
+  })
+  assert.equal(retriedDefaultDocument.created, false)
+  assert.equal(retriedDefaultDocument.relatedId, 'document-default-existing')
+  assert.equal(importedFiles.length, documentImportsBeforeDefaultRetry)
+  assert.deepEqual(documentCorrelationCalls.at(-1), {
+    attachmentId: 'attachment-1',
+    captureId: 'capture-document-default-retry',
+    documentId: 'document-default-existing',
+    vaultRoot: paths.absoluteVaultRoot,
+  })
+  const correlationsBeforeOverride = documentCorrelationCalls.length
 
   const overriddenDocument = await ops.promoteDocument({
     vault: paths.absoluteVaultRoot,
@@ -1847,6 +2005,7 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
     '2026-04-08T14:20:00.000Z',
   )
   assert.equal(overriddenDocumentImport?.source, 'manual')
+  assert.equal(documentCorrelationCalls.length, correlationsBeforeOverride)
   assert.match(
     overriddenDocumentImport?.filePath ?? '',
     /capture-document-overrides\/attachments\/manual\.pdf$/,
@@ -1874,6 +2033,12 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   const emptyDocumentImport = importedFiles.at(-1)
   assert.equal(emptyDocumentImport?.title, undefined)
   assert.equal(emptyDocumentImport?.note, undefined)
+  assert.deepEqual(documentCorrelationCalls.at(-1), {
+    attachmentId: 'attachment-1',
+    captureId: 'capture-document-empty',
+    documentId: 'document-created',
+    vaultRoot: paths.absoluteVaultRoot,
+  })
 
   const journalResult = await ops.promoteJournal({
     vault: paths.absoluteVaultRoot,

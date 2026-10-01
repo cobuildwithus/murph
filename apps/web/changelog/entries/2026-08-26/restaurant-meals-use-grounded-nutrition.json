@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "restaurant-meals-use-grounded-nutrition",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Restaurant meals use grounded nutrition",
+    "summary": "When you log a recognizable restaurant menu item, Murph now looks up available menu nutrition before saving the meal.",
+    "details": "Murph uses its food database first, checks the restaurant's official source when an exact match is unavailable, and labels estimates when the evidence is still incomplete.",
+    "relevanceTags": ["assistant", "meals", "nutrition", "restaurants"],
+    "sourcePullRequests": [2386]
+  }
+}

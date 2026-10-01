@@ -20,11 +20,11 @@ import {
   parseBrowserVaultReplica,
   selectBrowserVaultExperimentResults,
   selectBrowserVaultExperimentMetricKeys,
-  selectBrowserVaultHistory,
-  selectBrowserVaultOverview,
+  selectBrowserVaultExperimentSummary,
   selectBrowserVaultTrackedExperiments,
 } from "../src/browser.ts";
 import { analyzeExperimentOutcome, buildMetricProjection } from "../src/index.ts";
+import { stringifyJsonCooperatively } from "../src/browser-replica/json.ts";
 
 type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 type CreateReplicaInput = Omit<Parameters<typeof createBrowserVaultReplica>[0], "metricPoints">;
@@ -92,14 +92,39 @@ test("browser vault replicas round-trip and expose the query-client selectors", 
   assert.match(replica.source.dataVersion, /^[0-9a-f]{64}$/u);
 
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
-  const overview = selectBrowserVaultOverview(client);
-  const history = selectBrowserVaultHistory(client);
 
   assert.equal(selectBrowserVaultTrackedExperiments(client)[0]?.title, "Morning walk");
-  assert.equal(overview.recentJournals[0]?.title, "Travel recovery note");
-  assert.ok(history.timeline.some((entry) => entry.title === "Travel recovery note"));
+  assert.ok(client.timeline.list().some((entry) => entry.title === "Travel recovery note"));
   assert.equal(client.entities.get("exp_1")?.title, "Morning walk");
   assert.ok(client.search("steadier").some((row) => row.entityId === "journal_1"));
+});
+
+test("browser vault Journal keeps the next local day in positive time zones", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-08-31T17:30:00.000Z",
+    sourceBundleHash: "local-day-journal".padEnd(64, "a"),
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("event", "singapore_evening_note", {
+          attributes: {
+            note: "Evening walk",
+            noteType: "journal-factor",
+            source: "manual",
+            timeZone: "Asia/Singapore",
+          },
+          date: "2026-09-01",
+          kind: "note",
+          occurredAt: "2026-09-01T00:30:00.000Z",
+          title: "Evening walk",
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://positive-time-zone-journal",
+    }),
+  });
+
+  assert.equal(replica.journal?.days[0]?.date, "2026-09-01");
+  assert.equal(replica.journal?.days[0]?.events[0]?.title, "Evening walk");
 });
 
 test("exact experiment metric demand is not bounded by the 24-card display projection", async () => {
@@ -414,15 +439,17 @@ test("browser vault overview experiment summary is uncapped and completed-status
       vaultRoot: "browser://vault",
     }),
   });
-  const overview = selectBrowserVaultOverview(createBrowserVaultQueryClient(replica));
+  const client = createBrowserVaultQueryClient(replica);
+  const trackedExperiments = selectBrowserVaultTrackedExperiments(client);
+  const experimentSummary = selectBrowserVaultExperimentSummary(client);
 
-  assert.equal(overview.trackedExperiments.length, 24);
-  assert.equal(overview.experimentSummary.activeCount, 25);
-  assert.equal(overview.experimentSummary.activePreview.length, 4);
-  assert.equal(overview.experimentSummary.completedCount, 2);
-  assert.equal(overview.experimentSummary.latestCompleted?.title, "Finished repeat");
+  assert.equal(trackedExperiments.length, 24);
+  assert.equal(experimentSummary.activeCount, 25);
+  assert.equal(experimentSummary.activePreview.length, 4);
+  assert.equal(experimentSummary.completedCount, 2);
+  assert.equal(experimentSummary.latestCompleted?.title, "Finished repeat");
   assert.equal(
-    overview.trackedExperiments.some((entry) => entry.id === "done_old"),
+    trackedExperiments.some((entry) => entry.id === "done_old"),
     false,
   );
 });
@@ -508,6 +535,66 @@ test("browser vault replica generation is content-addressed and legacy-readable"
     () => parseBrowserVaultReplica({ ...replica, generation: Number.MAX_SAFE_INTEGER + 1 }),
     /generation must be a positive safe integer/u,
   );
+});
+
+test("cooperative Browser Vault serialization matches JSON across bounded chunks", async () => {
+  const shared = {
+    nested: {
+      value: 42,
+    },
+  };
+  const sparse: unknown[] = [];
+  sparse.length = 3;
+  sparse[1] = "middle";
+  const value = {
+    array: [undefined, Number.NaN, () => "omitted", Symbol("omitted"), sparse],
+    escaped: "line one\nline two \"quoted\" ☃",
+    large: "x".repeat(20_000),
+    omitted: undefined,
+    rows: Array.from({ length: 2_500 }, (_entry, index) => ({ index })),
+    sharedFirst: shared,
+    sharedSecond: shared,
+  };
+  assert.equal(await stringifyJsonCooperatively(value), JSON.stringify(value));
+});
+
+test("cooperative Browser Vault serialization preserves recursive sorted-key bytes", async () => {
+  assert.equal(
+    await stringifyJsonCooperatively({
+      zebra: {
+        delta: 4,
+        alpha: 1,
+      },
+      alpha: [{ gamma: 3, beta: 2 }],
+    }, { sortKeys: true }),
+    '{"alpha":[{"beta":2,"gamma":3}],"zebra":{"alpha":1,"delta":4}}',
+  );
+});
+
+test("cooperative Browser Vault serialization rejects unsupported roots and cycles", async () => {
+  await assert.rejects(
+    stringifyJsonCooperatively(undefined),
+    new TypeError("Browser Vault replica values must be JSON serializable."),
+  );
+
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  await assert.rejects(
+    stringifyJsonCooperatively(cyclic),
+    new TypeError("Browser Vault replica values must not contain cycles."),
+  );
+});
+
+test("cooperative Browser Vault serialization observes cancellation", async () => {
+  const controller = new AbortController();
+  const reason = new DOMException("Foreground work took priority.", "AbortError");
+  const serialization = stringifyJsonCooperatively(
+    Array.from({ length: 20_000 }, (_entry, index) => ({ index })),
+    { signal: controller.signal },
+  );
+  setImmediate(() => controller.abort(reason));
+
+  await assert.rejects(serialization, (error: unknown) => error === reason);
 });
 
 test("browser vault query client freezes the exposed replica graph", async () => {

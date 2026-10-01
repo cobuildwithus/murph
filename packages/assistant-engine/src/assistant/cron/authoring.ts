@@ -49,6 +49,7 @@ import {
   assistantCronTargetAudienceEquals,
   buildCanonicalAutomationRoute,
   resolveAssistantCronTargetDefaults,
+  type AssistantCronDeliveryRouteValidationProfile,
   validateAssistantCronDeliveryTarget,
 } from './targets.js'
 
@@ -80,7 +81,9 @@ export interface UpsertAssistantCronAutomationInput {
   instructions: string
   now?: Date
   route: AutomationRoute
+  routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
   schedule: AssistantCronScheduleInput
+  shouldYield?: (() => boolean) | null
   slug: string
   summary?: string | null
   tags?: string[]
@@ -206,11 +209,15 @@ export async function addAssistantCronJob(
 export async function upsertAssistantCronAutomation(
   input: UpsertAssistantCronAutomationInput,
 ): Promise<AssistantCronJob | null> {
+  const shouldYield = input.shouldYield ?? (() => false)
+  if (shouldYield()) return null
   const lockPaths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantCronState(lockPaths)
 
   return withAssistantCronWriteLock(lockPaths, async () => {
+    if (shouldYield()) return null
     const existingAutomation = await showCanonicalAutomation(input.vault, input.slug)
+    if (shouldYield()) return null
     const existingStatus = existingAutomation?.status ?? null
     if (existingStatus === 'archived') {
       return null
@@ -225,7 +232,11 @@ export async function upsertAssistantCronAutomation(
       schedule: input.schedule,
       vault: input.vault,
     })
-    const target = validateAssistantCronDeliveryTarget(input.route)
+    if (shouldYield()) return null
+    const target = validateAssistantCronDeliveryTarget(
+      input.route,
+      input.routeValidationProfile ?? 'local',
+    )
     const localStore = await readAssistantCronStore(resolvedCreation.paths)
     assertAssistantCronJobNameIsAvailable(localStore, resolvedCreation.name)
 
@@ -303,50 +314,44 @@ export async function upsertAssistantCronAutomation(
     // one-shot. A failed runtime-state write can therefore under-send, but it
     // cannot expose the replacement recurrence early on the current local day.
     const initialSchedule =
-      transferExistingPendingOccurrence &&
-        existingAssistantSchedule?.success === true
+      transferExistingPendingOccurrence
         ? existingAssistantSchedule.data
         : bindRecurringFirstOccurrence
           ? deferredSchedule
           : desiredSchedule
-    const activeWindowFirstOccurrenceAt =
-      requestedFirstOccurrenceAt ?? firstOccurrenceAt
-    const activeUntil =
-      input.activeUntil === undefined &&
-      input.firstOccurrencePolicy !== undefined &&
-      input.firstOccurrenceActiveUntilLocalTime !== undefined &&
-      activeWindowFirstOccurrenceAt !== null
-        ? typeof existingAutomation?.activeUntil === 'string'
-          ? existingAutomation.activeUntil
-          : resolveFirstOccurrenceActiveUntil({
-              activeDayCount: input.firstOccurrenceActiveDayCount ?? 1,
-              activeUntilLocalTime: input.firstOccurrenceActiveUntilLocalTime,
-              now: resolvedCreation.now,
-              occurrenceSchedule: {
-                kind: 'at',
-                at: activeWindowFirstOccurrenceAt,
-              },
-              resolvedSchedule: resolvedCreation.resolvedSchedule,
-            })
-        : input.activeUntil
+    const activeUntil = resolveFirstOccurrenceActiveUntil({
+      activeUntil: input.activeUntil,
+      existingActiveUntil: existingAutomation?.activeUntil,
+      firstOccurrenceAt: requestedFirstOccurrenceAt ?? firstOccurrenceAt,
+      firstOccurrencePolicy: input.firstOccurrencePolicy,
+      activeDayCount: input.firstOccurrenceActiveDayCount ?? 1,
+      activeUntilLocalTime: input.firstOccurrenceActiveUntilLocalTime,
+      resolvedSchedule: resolvedCreation.resolvedSchedule,
+    })
+    const sourceFields = {
+      activeUntil,
+      vault: resolvedCreation.vault,
+      now: resolvedCreation.now,
+      title: resolvedCreation.name,
+      status,
+      route: buildCanonicalAutomationRoute(target),
+      instructions: resolvedCreation.prompt,
+      slug: input.slug,
+      summary: input.summary ?? null,
+      tags: input.tags,
+    } as const
 
+    if (shouldYield()) return null
     let created = await upsertAutomation(
       buildCanonicalAutomationUpsertInput({
-        activeUntil,
-        vault: resolvedCreation.vault,
-        now: resolvedCreation.now,
+        ...sourceFields,
         automationId: existingAutomation?.automationId,
         automation: existingAutomation,
-        title: resolvedCreation.name,
-        status,
         schedule: initialSchedule,
-        route: buildCanonicalAutomationRoute(target),
-        instructions: resolvedCreation.prompt,
-        slug: input.slug,
-        summary: input.summary ?? null,
-        tags: input.tags,
       }),
     )
+    // The finite source remains replayable until the cursor and recurrence finish.
+    if (shouldYield()) return null
     const timeZone = await resolveAssistantCronDefaultTimeZone(resolvedCreation.vault)
     let source = requireCanonicalAutomationCronRecord(
       created.record,
@@ -383,28 +388,21 @@ export async function upsertAssistantCronAutomation(
             },
           }
 
+    if (shouldYield()) return null
     upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, persistedRuntimeState)
     await writeAssistantCronCanonicalRuntimeStore(
       resolvedCreation.paths,
       runtimeStore,
     )
 
+    if (shouldYield()) return null
     if (bindRecurringFirstOccurrence) {
       created = await upsertAutomation(
         buildCanonicalAutomationUpsertInput({
-          activeUntil,
-          vault: resolvedCreation.vault,
-          now: resolvedCreation.now,
+          ...sourceFields,
           automationId: source.automationId,
           automation: created.record,
-          title: resolvedCreation.name,
-          status,
           schedule: desiredSchedule,
-          route: buildCanonicalAutomationRoute(target),
-          instructions: resolvedCreation.prompt,
-          slug: input.slug,
-          summary: input.summary ?? null,
-          tags: input.tags,
         }),
       )
       source = requireCanonicalAutomationCronRecord(created.record, timeZone)
@@ -518,15 +516,25 @@ function resolveFirstOccurrenceAfterCurrentLocalDay(input: {
 }
 
 function resolveFirstOccurrenceActiveUntil(input: {
+  activeUntil: string | null | undefined
+  existingActiveUntil: string | null | undefined
+  firstOccurrenceAt: string | null
+  firstOccurrencePolicy: UpsertAssistantCronAutomationInput['firstOccurrencePolicy']
   activeDayCount: number
-  activeUntilLocalTime: string
-  now: Date
-  occurrenceSchedule: AssistantCronSchedule
+  activeUntilLocalTime: string | undefined
   resolvedSchedule:
     | AssistantCronSchedule
     | ({ kind: 'cron'; expression: string; timeZone: string })
     | ({ kind: 'dailyLocal'; localTime: string; timeZone: string })
-}): string {
+}): string | null | undefined {
+  if (
+    input.activeUntil !== undefined ||
+    input.firstOccurrencePolicy === undefined ||
+    input.activeUntilLocalTime === undefined ||
+    input.firstOccurrenceAt === null
+  ) return input.activeUntil
+  if (typeof input.existingActiveUntil === 'string') return input.existingActiveUntil
+
   const timeZone =
     input.resolvedSchedule.kind === 'dailyLocal'
       ? input.resolvedSchedule.timeZone
@@ -546,18 +554,12 @@ function resolveFirstOccurrenceActiveUntil(input: {
       'A finite local cutoff requires at least one active local day.',
     )
   }
-  const firstOccurrenceAt =
-    input.occurrenceSchedule.kind === 'at'
-      ? input.occurrenceSchedule.at
-      : resolveFirstOccurrenceAfterCurrentLocalDay({
-          now: input.now,
-          schedule: input.resolvedSchedule,
-        })
   const cutoffSchedule = {
     kind: 'dailyLocal' as const,
     localTime: input.activeUntilLocalTime,
     timeZone,
   }
+  const firstOccurrenceAt = input.firstOccurrenceAt
   let activeUntilAnchor = firstOccurrenceAt
   let activeUntil: string | null = null
   for (let day = 0; day < input.activeDayCount; day += 1) {

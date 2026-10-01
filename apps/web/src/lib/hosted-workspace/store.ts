@@ -50,6 +50,9 @@ export interface HostedWorkspaceRow {
   browserVaultReplicaRef: Prisma.JsonValue | null;
   nextWakeAt: Date | null;
   nextWakeReason: string | null;
+  nextDefaultProcessingWakeAt: Date | null;
+  nextDefaultProcessingWakeReason: string | null;
+  systemMailboxProgressGeneration: bigint | null;
   inboxMediaRetentionWakeAt: Date | null;
   redactedStatusJson: Prisma.JsonValue | null;
   checkpointedAt: Date | null;
@@ -64,6 +67,9 @@ export interface HostedWorkspaceRecord {
   browserVaultReplicaRef: Prisma.JsonValue | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
+  nextDefaultProcessingWakeAt: string | null;
+  nextDefaultProcessingWakeReason: string | null;
+  systemMailboxProgressGeneration: string | null;
   inboxMediaRetentionWakeAt: string | null;
   redactedStatusJson: Prisma.JsonValue | null;
   checkpointedAt: string | null;
@@ -72,6 +78,8 @@ export interface HostedWorkspaceRecord {
 }
 
 export interface HostedWorkspaceCheckpointResult {
+  /** Internal optimization only; absence preserves the callback recovery signal. */
+  canSkipRuntimeRecheck?: true;
   conversationInputAhead?: boolean;
   replacedSnapshotRef: HostedExecutionSnapshotRefState;
   status: "updated" | "conflict";
@@ -116,17 +124,38 @@ export async function readHostedWorkspace(input: {
   return row ? projectHostedWorkspace(row) : null;
 }
 
+/** Read only the published replica pointer and version needed by dashboard sessions. */
+export async function readHostedBrowserVaultReplicaState(input: {
+  prisma?: HostedWorkspaceStoreClient;
+  userId: string;
+}): Promise<Pick<HostedWorkspaceRecord, "browserVaultReplicaRef" | "version"> | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const row = await prisma.hostedWorkspace.findUnique({
+    where: {
+      userId: requireNonEmptyString(input.userId, "Hosted workspace userId"),
+    },
+    select: { browserVaultReplicaRef: true, version: true },
+  });
+  return row ? {
+    browserVaultReplicaRef: row.browserVaultReplicaRef,
+    version: row.version.toString(),
+  } : null;
+}
+
 export async function checkpointHostedWorkspace(input: {
   checkpointedAt?: Date | string | null;
   expectedVersion: bigint | number | string;
   handledConversationMailboxItemIds?: readonly string[];
   inboxMediaRetentionWakeAt?: Date | string | null;
+  nextDefaultProcessingWakeAt?: Date | string | null;
+  nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
   prisma?: PrismaClient;
   reason: HostedWorkspaceCheckpointReason | string;
   redactedStatusJson?: Record<string, unknown> | null;
   snapshotRef: unknown | null;
+  systemMailboxProgressGeneration?: bigint | number | string | null;
   userId: string;
 }): Promise<HostedWorkspaceCheckpointResult> {
   const prisma = input.prisma ?? getPrisma();
@@ -137,11 +166,29 @@ export async function checkpointHostedWorkspace(input: {
   }));
 }
 
+/** Acknowledge only the exact checkpoint whose post-commit signal succeeded. */
+export async function acknowledgeHostedWorkspaceRuntimeRecheck(input: {
+  prisma?: HostedWorkspaceStoreClient;
+  userId: string;
+  version: string;
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+  const version = normalizeBigInt(input.version, "Hosted workspace signaled version");
+  await prisma.$executeRaw(Prisma.sql`
+    UPDATE hosted_workspace
+    SET runtime_recheck_signaled_version = ${version}
+    WHERE user_id = ${requireNonEmptyString(input.userId, "Hosted workspace userId")}
+      AND version = ${version}
+  `);
+}
+
 interface CheckpointHostedWorkspaceMutationRow extends HostedWorkspaceRow {
+  runtimeRecheckSignaled: boolean;
   replacedSnapshotRef: Prisma.JsonValue | null;
 }
 
 interface CheckpointHostedWorkspaceMailboxMutationRow {
+  mailboxProgressed: boolean;
   conversationInputAhead: boolean;
 }
 
@@ -150,11 +197,14 @@ export async function checkpointHostedWorkspaceTx(input: {
   expectedVersion: bigint | number | string;
   handledConversationMailboxItemIds?: readonly string[];
   inboxMediaRetentionWakeAt?: Date | string | null;
+  nextDefaultProcessingWakeAt?: Date | string | null;
+  nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
   reason: HostedWorkspaceCheckpointReason | string;
   redactedStatusJson?: Record<string, unknown> | null;
   snapshotRef: unknown | null;
+  systemMailboxProgressGeneration?: bigint | number | string | null;
   tx: HostedWorkspaceMutationTx;
   userId: string;
 }): Promise<HostedWorkspaceCheckpointResult> {
@@ -175,6 +225,54 @@ export async function checkpointHostedWorkspaceTx(input: {
   const checkpointedAt = input.checkpointedAt === undefined || input.checkpointedAt === null
     ? new Date()
     : requireDate(input.checkpointedAt, "Hosted workspace checkpointedAt");
+  const progressProjectionKeys = [
+    "nextDefaultProcessingWakeAt",
+    "nextDefaultProcessingWakeReason",
+    "systemMailboxProgressGeneration",
+  ] as const;
+  const progressProjectionKeyCount = progressProjectionKeys.filter((key) => key in input).length;
+  if (
+    progressProjectionKeyCount !== 0
+    && progressProjectionKeyCount !== progressProjectionKeys.length
+  ) {
+    throw new TypeError(
+      "Hosted workspace checkpoint system progress projection must include generation, wake, and reason together.",
+    );
+  }
+  const requestedSystemMailboxProgressGeneration =
+    progressProjectionKeyCount === 0
+      || input.systemMailboxProgressGeneration === undefined
+      || input.systemMailboxProgressGeneration === null
+      ? null
+      : normalizeBigInt(
+          input.systemMailboxProgressGeneration,
+          "Hosted workspace checkpoint systemMailboxProgressGeneration",
+        );
+  const requestedNextDefaultProcessingWakeAt =
+    progressProjectionKeyCount === 0
+      || input.nextDefaultProcessingWakeAt === undefined
+      || input.nextDefaultProcessingWakeAt === null
+      ? null
+      : requireDate(
+          input.nextDefaultProcessingWakeAt,
+          "Hosted workspace nextDefaultProcessingWakeAt",
+        );
+  const requestedNextDefaultProcessingWakeReason =
+    progressProjectionKeyCount === 0
+      ? null
+      : normalizeNullableString(input.nextDefaultProcessingWakeReason);
+  if (
+    progressProjectionKeyCount > 0
+    && requestedSystemMailboxProgressGeneration === null
+    && (
+      requestedNextDefaultProcessingWakeAt !== null
+      || requestedNextDefaultProcessingWakeReason !== null
+    )
+  ) {
+    throw new TypeError(
+      "Hosted workspace checkpoint disabled system progress projection must be entirely null.",
+    );
+  }
   const workspaceAssignments: Prisma.Sql[] = [
     Prisma.sql`checkpointed_at = ${checkpointedAt}`,
     Prisma.sql`snapshot_ref = ${snapshotRef === null ? null : JSON.stringify(snapshotRef)}::jsonb`,
@@ -182,32 +280,35 @@ export async function checkpointHostedWorkspaceTx(input: {
     Prisma.sql`updated_at = NOW()`,
   ];
 
+  // Use the same normalized values for mutation and equality: omitted fields
+  // remain unchanged, and JSONB equality ignores object key order.
+  const checkpointFacts: Array<readonly [Prisma.Sql, Prisma.Sql]> = [];
   if ("nextWakeAt" in input) {
-    workspaceAssignments.push(Prisma.sql`next_wake_at = ${
+    checkpointFacts.push([Prisma.sql`next_wake_at`, Prisma.sql`${
       input.nextWakeAt === undefined || input.nextWakeAt === null
         ? null
         : requireDate(input.nextWakeAt, "Hosted workspace nextWakeAt")
-    }`);
+    }::timestamp`]);
   }
-
   if ("nextWakeReason" in input) {
-    workspaceAssignments.push(
-      Prisma.sql`next_wake_reason = ${normalizeNullableString(input.nextWakeReason)}`,
+    checkpointFacts.push([
+      Prisma.sql`next_wake_reason`, Prisma.sql`${normalizeNullableString(input.nextWakeReason)}::text`,
+    ]);
+  }
+  if (progressProjectionKeyCount > 0) {
+    checkpointFacts.push(
+      [Prisma.sql`next_default_processing_wake_at`, Prisma.sql`${requestedNextDefaultProcessingWakeAt}::timestamp`],
+      [Prisma.sql`next_default_processing_wake_reason`, Prisma.sql`${requestedNextDefaultProcessingWakeReason}::text`],
+      [Prisma.sql`system_mailbox_progress_generation`, Prisma.sql`${requestedSystemMailboxProgressGeneration}::bigint`],
     );
   }
-
   if ("inboxMediaRetentionWakeAt" in input) {
-    workspaceAssignments.push(Prisma.sql`inbox_media_retention_wake_at = ${
-      input.inboxMediaRetentionWakeAt === undefined
-        || input.inboxMediaRetentionWakeAt === null
+    checkpointFacts.push([Prisma.sql`inbox_media_retention_wake_at`, Prisma.sql`${
+      input.inboxMediaRetentionWakeAt === undefined || input.inboxMediaRetentionWakeAt === null
         ? null
-        : requireDate(
-          input.inboxMediaRetentionWakeAt,
-          "Hosted workspace inboxMediaRetentionWakeAt",
-        )
-    }`);
+        : requireDate(input.inboxMediaRetentionWakeAt, "Hosted workspace inboxMediaRetentionWakeAt")
+    }::timestamp`]);
   }
-
   if ("redactedStatusJson" in input) {
     const redactedStatusJson = input.redactedStatusJson === undefined
       ? null
@@ -216,12 +317,25 @@ export async function checkpointHostedWorkspaceTx(input: {
         "Hosted workspace redactedStatusJson",
         HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET,
       );
-    workspaceAssignments.push(
-      Prisma.sql`redacted_status_json = ${
-        redactedStatusJson === null ? null : JSON.stringify(redactedStatusJson)
-      }::jsonb`,
-    );
+    checkpointFacts.push([Prisma.sql`redacted_status_json`, Prisma.sql`${
+      redactedStatusJson === null ? null : JSON.stringify(redactedStatusJson)
+    }::jsonb`]);
   }
+  const factsUnchanged = Prisma.join([
+    Prisma.sql`TRUE`,
+    ...checkpointFacts.map(([column, value]) =>
+      Prisma.sql`workspace.${column} IS NOT DISTINCT FROM ${value}`
+    ),
+  ], " AND ");
+  workspaceAssignments.push(
+    ...checkpointFacts.map(([column, value]) => Prisma.sql`${column} = ${value}`),
+    // Carry a successful signal only across an equivalent checkpoint. A failed
+    // or racing callback cannot authorize suppression of a newer schedule.
+    Prisma.sql`runtime_recheck_signaled_version = CASE
+      WHEN workspace.runtime_recheck_signaled_version = workspace.version
+        AND (${factsUnchanged})
+      THEN workspace.version + 1 ELSE NULL END`,
+  );
 
   const conversationImportedSeq = readCheckpointConversationImportedSeq(input.redactedStatusJson);
   const handledConversationMailboxItemIds =
@@ -236,6 +350,24 @@ export async function checkpointHostedWorkspaceTx(input: {
       nextWakeReason: input.nextWakeReason,
       redactedStatus: input.redactedStatusJson,
     });
+  const systemMailboxProgressGenerationAllowed =
+    (
+      progressProjectionKeyCount === 0
+      || requestedSystemMailboxProgressGeneration === null
+    )
+      ? Prisma.sql`TRUE`
+      : Prisma.sql`(
+          (
+            workspace.system_mailbox_progress_generation IS NULL
+            AND ${requestedSystemMailboxProgressGeneration} IN (0, 1)
+          )
+          OR workspace.system_mailbox_progress_generation = ${
+            requestedSystemMailboxProgressGeneration
+          }
+          OR workspace.system_mailbox_progress_generation + 1 = ${
+            requestedSystemMailboxProgressGeneration
+          }
+        )`;
 
   const updatedRows = await input.tx.$queryRaw<CheckpointHostedWorkspaceMutationRow[]>(Prisma.sql`
     WITH current_workspace AS MATERIALIZED (
@@ -249,6 +381,7 @@ export async function checkpointHostedWorkspaceTx(input: {
     FROM current_workspace
     WHERE workspace.user_id = ${userId}
       AND workspace.version = ${expectedVersion}
+      AND ${systemMailboxProgressGenerationAllowed}
     RETURNING
       workspace.user_id AS "userId",
       workspace.version,
@@ -256,12 +389,17 @@ export async function checkpointHostedWorkspaceTx(input: {
       workspace.browser_vault_replica_ref AS "browserVaultReplicaRef",
       workspace.next_wake_at AS "nextWakeAt",
       workspace.next_wake_reason AS "nextWakeReason",
+      workspace.next_default_processing_wake_at AS "nextDefaultProcessingWakeAt",
+      workspace.next_default_processing_wake_reason AS "nextDefaultProcessingWakeReason",
+      workspace.system_mailbox_progress_generation AS "systemMailboxProgressGeneration",
       workspace.inbox_media_retention_wake_at AS "inboxMediaRetentionWakeAt",
       workspace.redacted_status_json AS "redactedStatusJson",
       workspace.checkpointed_at AS "checkpointedAt",
       workspace.created_at AS "createdAt",
       workspace.updated_at AS "updatedAt",
-      current_workspace.replaced_snapshot_ref AS "replacedSnapshotRef"
+      current_workspace.replaced_snapshot_ref AS "replacedSnapshotRef",
+      COALESCE(workspace.runtime_recheck_signaled_version = workspace.version, FALSE)
+        AS "runtimeRecheckSignaled"
   `);
 
   if (updatedRows.length === 0) {
@@ -270,6 +408,17 @@ export async function checkpointHostedWorkspaceTx(input: {
         userId,
       },
     });
+    if (
+      currentWorkspace
+      && currentWorkspace.version === expectedVersion
+      && progressProjectionKeyCount > 0
+      && requestedSystemMailboxProgressGeneration !== null
+    ) {
+      assertHostedSystemMailboxProgressGenerationTransition({
+        current: currentWorkspace.systemMailboxProgressGeneration,
+        requested: requestedSystemMailboxProgressGeneration,
+      });
+    }
     return {
       replacedSnapshotRef: null,
       status: "conflict",
@@ -281,6 +430,7 @@ export async function checkpointHostedWorkspaceTx(input: {
   }
 
   let conversationInputAhead: true | undefined;
+  let mailboxProgressed = false;
   if (systemHandledThroughSeq !== null || shouldHandleConversation) {
     const observedAt = new Date();
     const handledConversationItemIdsSql = handledConversationMailboxItemIds.length > 0
@@ -368,6 +518,16 @@ export async function checkpointHostedWorkspaceTx(input: {
           AND counter.consumed_seq < LEAST(${systemHandledBound}, counter.next_seq - 1)
         RETURNING counter.consumed_seq
       ),
+      invalidated_recheck AS (
+        UPDATE hosted_workspace
+        SET runtime_recheck_signaled_version = NULL
+        WHERE user_id = ${userId}
+          AND runtime_recheck_signaled_version IS NOT NULL
+          AND (EXISTS (SELECT 1 FROM stamped_conversation)
+            OR EXISTS (SELECT 1 FROM advanced_conversation)
+            OR EXISTS (SELECT 1 FROM advanced_system))
+        RETURNING user_id
+      ),
       conversation_ahead AS (
         SELECT ${shouldObserveConversationAhead}
           AND EXISTS (
@@ -381,7 +541,9 @@ export async function checkpointHostedWorkspaceTx(input: {
           ) AS value
       )
       SELECT
-        conversation_ahead.value AS "conversationInputAhead"
+        conversation_ahead.value AS "conversationInputAhead",
+        (stamped_count.count > 0 OR conversation_count.count > 0
+          OR system_count.count > 0) AS "mailboxProgressed"
       FROM conversation_ahead
       CROSS JOIN (
         SELECT COUNT(*) FROM stamped_conversation
@@ -398,23 +560,56 @@ export async function checkpointHostedWorkspaceTx(input: {
         "Hosted workspace checkpoint mailbox mutation returned an invalid row count.",
       );
     }
+    mailboxProgressed = mailboxRows[0].mailboxProgressed;
     if (mailboxRows[0].conversationInputAhead) {
       conversationInputAhead = true;
     }
   }
 
-  const { replacedSnapshotRef: replacedSnapshotRefValue, ...updatedWorkspace } = updatedRows[0];
+  const {
+    runtimeRecheckSignaled,
+    replacedSnapshotRef: replacedSnapshotRefValue,
+    ...updatedWorkspace
+  } = updatedRows[0];
   const replacedSnapshotRef = parseHostedExecutionSnapshotRef(
     replacedSnapshotRefValue,
     "Hosted workspace checkpoint replaced snapshotRef",
   );
 
   return {
+    ...projectCheckpointRuntimeRecheck({
+      workspace: updatedWorkspace, runtimeRecheckSignaled, reason,
+      mailboxProgressed, conversationInputAhead,
+    }),
     ...(conversationInputAhead === true ? { conversationInputAhead } : {}),
     replacedSnapshotRef,
     status: "updated",
     workspace: projectHostedWorkspace(updatedWorkspace),
   };
+}
+
+function projectCheckpointRuntimeRecheck(input: {
+  workspace: HostedWorkspaceRow;
+  runtimeRecheckSignaled: boolean;
+  reason: string;
+  mailboxProgressed: boolean;
+  conversationInputAhead: true | undefined;
+}): Pick<HostedWorkspaceCheckpointResult, "canSkipRuntimeRecheck"> {
+  // A version/snapshot change alone cannot change a future timer. Keep the full
+  // status comparison conservative as new facts consumers evolve. Due work,
+  // legacy projections and shutdown retain their existing recovery signals.
+  const nowMs = Date.now();
+  const canSkip = input.runtimeRecheckSignaled === true
+    && input.reason !== "idle_shutdown"
+    && !input.mailboxProgressed
+    && !input.conversationInputAhead
+    && input.workspace.systemMailboxProgressGeneration !== null
+    && [
+      input.workspace.nextWakeAt,
+      input.workspace.nextDefaultProcessingWakeAt,
+      input.workspace.inboxMediaRetentionWakeAt,
+    ].every((wakeAt) => wakeAt === null || wakeAt.getTime() > nowMs);
+  return canSkip ? { canSkipRuntimeRecheck: true } : {};
 }
 
 function readCheckpointSystemHandledThroughSeq(
@@ -749,6 +944,12 @@ export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorksp
     createdAt: record.createdAt.toISOString(),
     nextWakeAt: record.nextWakeAt?.toISOString() ?? null,
     nextWakeReason: record.nextWakeReason,
+    nextDefaultProcessingWakeAt:
+      record.nextDefaultProcessingWakeAt?.toISOString() ?? null,
+    nextDefaultProcessingWakeReason:
+      record.nextDefaultProcessingWakeReason ?? null,
+    systemMailboxProgressGeneration:
+      record.systemMailboxProgressGeneration?.toString() ?? null,
     inboxMediaRetentionWakeAt: record.inboxMediaRetentionWakeAt?.toISOString() ?? null,
     redactedStatusJson: record.redactedStatusJson,
     snapshotRef: record.snapshotRef,
@@ -756,6 +957,20 @@ export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorksp
     userId: record.userId,
     version: record.version.toString(),
   };
+}
+
+function assertHostedSystemMailboxProgressGenerationTransition(input: {
+  current: bigint | null;
+  requested: bigint;
+}): void {
+  const transitionAllowed = input.current === null
+    ? input.requested === 0n || input.requested === 1n
+    : input.requested === input.current || input.requested === input.current + 1n;
+  if (!transitionAllowed) {
+    throw new TypeError(
+      "Hosted workspace systemMailboxProgressGeneration must stay equal or advance by one.",
+    );
+  }
 }
 
 function sanitizeHostedRuntimeRedactedJson(

@@ -3,10 +3,19 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { MURPH_ATTACH_RESPONSE_CARD_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
+
 import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
+import { buildManualMealEstimationInstructions } from '../src/assistant/manual-meal-estimation.js'
 
-function buildPrompt(): string {
+function compact(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim()
+}
+
+function buildPrompt(
+  conversationScope: 'direct' | 'group' = 'direct',
+): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantHostedDeviceConnectAvailable: false,
@@ -19,6 +28,7 @@ function buildPrompt(): string {
     },
     currentLocalDate: '2026-06-24',
     currentTimeZone: 'America/New_York',
+    conversationScope,
     onboardingGuidance: false,
     modelBehaviorProfile: 'gpt5-agentic',
     turnTrigger: null,
@@ -27,6 +37,69 @@ function buildPrompt(): string {
 }
 
 describe('assistant food journal skill', () => {
+  it('composes direct meal execution with bounded official-source inspection', async () => {
+    const root = resolveAssistantSkillsRoot()
+    const instructions = compact([
+      buildPrompt(),
+      await readFile(path.join(root, 'food-journal/SKILL.md'), 'utf8'),
+      await readFile(path.join(root, 'computer-use/SKILL.md'), 'utf8'),
+    ].join('\n'))
+    for (const rule of [
+      'Meal capture and saved-day reviews: run `cat "$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md"` first unless already loaded this turn',
+      'execute its typed CLI commands without preflight help/schema, repository searches, or CLI-source inspection',
+      'Use `--nutrition-source label` for published official item/serving facts',
+      'Do not list meals as a prerequisite to a new capture',
+      'meal list --from <date> --to <same-date> --limit 50 --format json',
+      '`meal list` has no `--date` option',
+      'Use the typed save flags below directly',
+      'This command shape is the execution contract',
+      'help/schema calls, repository searches, or CLI implementation reads',
+      'optional enrichment is not a reason to rediscover the schema before saving',
+      'An official menu or label does not itself require a live browser',
+      'make one targeted web search for the official label/menu',
+      'Use returned official text when product, variant, serving, and requested values are clear',
+      'Do not force a nutrition lookup, clarification, or safety preflight just to capture the meal',
+      'Never invent an exact label',
+    ]) {
+      expect(instructions.includes(rule), rule).toBe(true)
+    }
+  })
+
+  it('composes the saved-day summary with card authority without redundant reads', async () => {
+    const root = resolveAssistantSkillsRoot()
+    const food = compact(await readFile(path.join(root, 'food-journal/SKILL.md'), 'utf8'))
+    const goals = compact(await readFile(path.join(root, 'nutrition-strategy/references/daily-nutrition-card-goals.md'), 'utf8'))
+    const tool = MURPH_ATTACH_RESPONSE_CARD_TOOL.description
+    for (const instructions of [food, goals, tool]) {
+      expect(instructions).toContain('--with-daily-totals')
+      expect(instructions).toContain('dailyTotals.data')
+      expect(instructions).toContain('available')
+    }
+    expect(food).toContain('never repeat the meal mutation')
+    expect(food).toContain('before adding estimates or `--with-daily-totals`, not after receiving totals')
+    expect(food).toContain('Omit `--with-daily-totals` when numeric guidance is suppressed')
+    expect(tool).not.toContain('Before every daily_nutrition card or explicit target-proposal decision, run')
+    expect(food).toContain('Incomplete coverage still triggers the selected-date recovery')
+    expect(food).toContain('Do not read the goal-derivation reference or full nutrition-strategy skill unless the member explicitly engages in target-setting')
+  })
+
+  it('composes manual estimation with ordinary meal recovery and numeric preferences', async () => {
+    const instructions = [
+      buildPrompt(),
+      buildManualMealEstimationInstructions({
+        mealId: 'meal_synthetic', capturedAt: '2026-06-24T12:00:00Z',
+      }),
+      await readFile(path.join(resolveAssistantSkillsRoot(), 'food-journal/SKILL.md'), 'utf8'),
+      await readFile(path.join(resolveAssistantSkillsRoot(), 'automatic-meal-capture/SKILL.md'), 'utf8'),
+    ].join('\n')
+    expect(instructions).toContain('Complete that existing meal now')
+    expect(instructions).toContain('ask one concise follow-up')
+    expect(instructions).toContain('without estimate-enabling questions')
+    expect(instructions).toContain('do not wait for nightly closeout or add a duplicate')
+    expect(instructions).not.toContain('do not inspect or edit a different meal')
+    expect(instructions).not.toContain('Only an explicit day-card request')
+  })
+
   it('keeps food journaling discoverable in the compact skill router', () => {
     const prompt = buildPrompt()
 
@@ -38,6 +111,12 @@ describe('assistant food journal skill', () => {
     )
     expect(prompt).toContain(
       'Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation',
+    )
+    expect(prompt).toContain(
+      'In a private direct conversation, when someone asks how to start recurring meal tracking or how Murph can track meals, load both automatic-meal-capture and food-journal even when they do not say "automatic."',
+    )
+    expect(buildPrompt('group')).not.toContain(
+      'when someone asks how to start recurring meal tracking or how Murph can track meals, load both automatic-meal-capture and food-journal',
     )
     expect(prompt).toContain(
       'When exact food or supplement identity, ingredients, allergens, dose, or movement instruction matters, follow the owning skill',
@@ -64,6 +143,15 @@ describe('assistant food journal skill', () => {
 
     expect(skill).toContain(
       'Do not create a new food-journal store, observation entity, scoring model, streak, or CLI family.',
+    )
+    expect(compact(skill)).toContain(
+      'In a private direct conversation, when the member asks how to start recurring meal tracking or how Murph can track meals, read `$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/SKILL.md` even when they do not say "automatic."',
+    )
+    expect(compact(skill)).toContain(
+      'That skill owns whether the compatible-iPhone path or this skill\'s manual text, voice-note, and user-sent-photo path should lead based on known device, preference, and setup context.',
+    )
+    expect(compact(skill)).toContain(
+      'For a generic group request, keep the response on group-safe manual capture',
     )
     expect(skill).toContain(
       'A photo, voice note, or rough phrase can be a complete meal log.',
@@ -114,78 +202,156 @@ describe('assistant food journal skill', () => {
       'default attachment intent for its eligible daily nutrition card',
     )
     expect(skill).toContain(
-      'the card alone completely answers the turn',
+      "the card completely answers the turn",
     )
     expect(skill).toContain(
-      'attach that card as the complete response with no companion prose',
+      "Never add analysis,\nnumeric values, a second summary, or a follow-up question around that fixed copy.",
     )
     expect(skill).toContain(
-      'this is not an explicit numeric-card request and does not authorize target derivation, a paused proposal, or any Goal mutation',
+      "Never author a mixed bundle or derive, propose, accept, activate, or mutate goals to send a summary.",
     )
     expect(skill).toContain(
-      'Without an already accepted complete bundle',
+      "`missing` uses five explicit null goals, even when a subset of compatible targets exists.",
     )
     expect(skill).not.toContain(
       'Do not turn every meal confirmation into analysis or a nutrition report.',
     )
     expect(compactCardGoals).toContain(
-      'An ordinary verified private meal log carries default attachment intent only.',
+      "including ordinary meal replies and replies to scheduled check-ins.",
     )
     expect(compactCardGoals).toContain(
-      'it does not authorize this proposal workflow, target setting, or any Goal mutation.',
+      "Only explicit target-setting intent authorizes the proposal workflow below.",
     )
     expect(compactCardGoals).toContain(
-      "When that accepted bundle is absent or any card gate fails, return the owning food-journal skill's short truthful fallback.",
+      "Conflict, incompatible and capacity remain text-only; never relabel them missing.",
     )
-    expect(skill).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
-    )
+    expect(skill).not.toContain('daily-nutrition-card-safety.md')
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
     )
-    expect(skill.indexOf('daily-nutrition-card-safety.md')).toBeLessThan(
-      skill.indexOf('daily-nutrition-card-goals.md'),
-    )
-    expect(skill).toContain('even when all five goals already appear to exist')
     expect(skill).toContain(
-      'complete active-condition\nand active-regimen discovery is mandatory before numeric target derivation as\nwell as before a card',
+      'apply the concise known-context\nnumeric-suitability rule in the `murph.attach_response_card` prompt',
     )
     expect(skill).toContain(
-      'the five-record context projection is not completeness\nproof',
-    )
-    expect(skill).toContain(
-      'lifetime canonical procedure-event and encounter-diagnosis discovery,\nbounded body-measurement read, separate `pregnancy-test` measurement read, and\nbounded canonical test-event list plus required detail reads are likewise\nmandatory before deriving, saving, or surfacing a proposal and again before\nactivating one',
-    )
-    expect(skill).toContain(
-      'complete `vault-cli memory show --format json` read is also mandatory',
-    )
-    expect(skill).toContain(
-      'the snapshot does not inject the canonical Identity, Preferences,\nInstructions, and Context memory document',
-    )
-    expect(skill).toContain(
-      'a failed or unreadable memory read\nfails closed, while missing or ambiguous age alone is not a universal block',
+      'Do not run\na universal medical-history or measurement preflight.',
     )
     expect(skill).toContain(
       'target-authority and complete active-Goal discovery contract',
     )
     expect(skill).toContain(
+      "before selecting the all-null or accepted all-five presentation.",
+    )
+    expect(skill).not.toContain(
       'before deciding that the five canonical daily goals are complete',
     )
     expect(skill).toContain(
-      'Use its\nproposal workflow only if a target is genuinely missing after that read and the\nmember made an explicit numeric-card or target-setting request. Default meal-card\nintent never invokes it.',
+      "and use its proposal workflow only for an explicit target-setting request,\nnever merely a meal log, daily summary, numeric-card request, or scheduled closeout.",
     )
     expect(skill).toContain(
-      'first setup response explains a paused canonical proposal in ordinary text',
-    )
-    expect(skill).toContain('does not attach a goal-less card')
-    expect(skill).toContain(
-      'An unambiguous acceptance may complete the\npending explicit card request in that next response after the complete safety',
+      'Treat a routine daily-card request, including a requested meal estimate needed\nfor that card, as one fulfillment workflow.',
     )
     expect(skill).toContain(
-      'recheck passes, activation and readback succeed, and a fresh same-date totals\nread completes.',
+      'Reply once with the card or one\nconcise truthful fallback',
     )
-    expect(skill).toContain('vault-cli food search-labels`')
+    expect(skill).toContain(
+      'concise truthful fallback. Never narrate individual safety, totals, estimation,\nor target-resolution mechanics.',
+    )
+    expect(skill).toContain(
+      '### Complete an interactive day before attaching its card',
+    )
+    expect(skill).toContain(
+      "compare every\nmetric's `mealCount` with the top-level `mealCount`",
+    )
+    expect(skill).toContain(
+      'List only that selected date, show the exact meals that lack\nnutrition',
+    )
+    expect(skill).toContain(
+      "A member's current statement that the\nmeal is equivalent to a specific prior meal is usable evidence.",
+    )
+    expect(skill).toContain(
+      'Use only the canonical meal surface for this recovery: `vault-cli meal list',
+    )
+    expect(skill).toContain(
+      '`vault-cli meal show\n<meal-id> --format json`, and `vault-cli meal edit <meal-id>` with the typed',
+    )
+    expect(skill).toContain(
+      '`--nutrition-calories`, `--nutrition-protein-grams`,',
+    )
+    expect(skill).toContain(
+      '`--nutrition-confidence`, and `--nutrition-source-detail` flags.',
+    )
+    expect(skill).toContain(
+      'Never inspect\nor modify raw vault files.',
+    )
+    expect(skill).toContain(
+      'show the\nselected prior meal before copying its saved totals.',
+    )
+    expect(skill).toContain(
+      'Use `--nutrition-source inherited` for\ncopied prior-meal totals',
+    )
+    expect(skill).toContain(
+      'Use this selected-date recovery during private meal logging and estimation,',
+    )
+    expect(compact(skill)).not.toContain(
+      'does not authorize reading, editing, or asking about another meal',
+    )
+    expect(skill).toContain(
+      'A similar\ninformal name alone is not: require matching saved ingredients and portion\nevidence or ask instead of copying nutrition.',
+    )
+    expect(skill).toContain(
+      'edit and read\nback the exact existing meal, then rerun fresh same-date totals before any card',
+    )
+    expect(skill).toContain(
+      'ask one compact question for only\nthat missing detail and stop without a card',
+    )
+    expect(skill).toContain(
+      'Do not ask merely to\nenable numeric output for an intuitive-eating, eating-disorder-risk, or\nnumber-sensitive member.',
+    )
+    expect(skill).toContain(
+      'This generic recovery question is interactive-only.',
+    )
+    expect(skill).toContain(
+      'partial-card schema and\nrendering remain compatibility surfaces, not the normal interactive closeout.',
+    )
+    expect(skill).toContain(
+      "An explicit target-setting response still explains a paused canonical proposal\nin ordinary text, not a card.",
+    )
+    expect(skill).toContain("Ordinary summary requests use\nall-null goals when accepted authority is missing;")
+    expect(skill).toContain(
+      "When an explicit combined target-setting and card\nrequest remains pending, the acceptance response may complete it after suitability,",
+    )
+    expect(skill).toContain(
+      "activation/readback, and fresh same-date totals.",
+    )
+    expect(skill).toContain("vault-cli food search-labels 'rolled oats' --generic --format json`")
     expect(skill).toContain('vault-cli food search-labels-batch`')
+    expect(skill).toContain(
+      'When the user names a restaurant and recognizable menu item, and known context\ndoes not trigger one of the numeric safety exceptions below, resolve nutrition\nbefore the meal mutation.',
+    )
+    expect(skill).toContain(
+      'Use a normal exact restaurant/menu search rather\nthan a generic substitute.',
+    )
+    expect(skill).toContain(
+      'Run this database search first even when the user\nsupplies an official restaurant URL.',
+    )
+    expect(skill).toContain(
+      'When a numeric safety exception already applies, save the meal without calorie\nor macro estimates.',
+    )
+    expect(skill).toContain(
+      'Do not force a nutrition lookup, clarification, or safety\npreflight just to capture the meal.',
+    )
+    expect(skill).toContain(
+      "If that search has no exact result, use the bounded\nsource fallback below.",
+    )
+    expect(skill).toContain(
+      'When using that official source, retain its URL in nutrition source detail.',
+    )
+    expect(skill).toContain(
+      'Only after the database result, official source, or clearly marked last-resort\nestimate is resolved may you call `meal add` or `meal edit`',
+    )
+    expect(skill).toContain(
+      'Do not save a nutrition-free restaurant meal first\nand then ask the member to repeat the item.',
+    )
     expect(skill).toContain('Use `--generic` for ordinary ingredients')
     expect(skill).toContain(
       'For a fridge or pantry photo, enumerate distinct visible products and resolve\nthem in one batch.',

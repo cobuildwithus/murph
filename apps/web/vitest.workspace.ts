@@ -1,4 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import path from "node:path";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig, defineProject } from "vitest/config";
@@ -18,6 +21,7 @@ import { hostedWebVitestProjectSpecs } from "./vitest-project-specs.mjs";
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(appDir, "../..");
+const requireFromHere = createRequire(import.meta.url);
 const hostedWebVitestConcurrency = resolveMurphVitestConcurrency();
 const hostedWebVitestMaxWorkers = resolveMurphAppVitestMaxWorkers();
 const hostedWebAliases = [
@@ -25,7 +29,10 @@ const hostedWebAliases = [
     find: "@",
     replacement: path.resolve(repoRoot, "apps/web"),
   },
-  ...createVitestWorkspaceRuntimeAliases(resolveHostedWebWorkspaceSourceEntries(appDir)),
+  ...createVitestWorkspaceRuntimeAliases({
+    ...resolveHostedWebWorkspaceSourceEntries(appDir),
+    "@murphai/vault-usecases": path.resolve(repoRoot, "packages/vault-usecases/package.json"),
+  }),
 ];
 
 function hostedWebPattern(pattern: string): string {
@@ -55,10 +62,51 @@ export const hostedWebVitestProjects = hostedWebVitestProjectSpecs.map(
   ({ fileNames, name }) => createHostedWebProject(name, fileNames),
 );
 
-export default defineConfig({
-  test: {
-    ...murphVitestNoTimeouts,
-    maxWorkers: hostedWebVitestMaxWorkers,
-    projects: hostedWebVitestProjects,
-  },
-});
+function isHostedWebPrismaClientGenerated(): boolean {
+  try {
+    const prismaClientPackageJsonPath = requireFromHere.resolve(
+      "@prisma/client/package.json",
+      { paths: [appDir] },
+    );
+    requireFromHere.resolve(".prisma/client/default", {
+      paths: [path.dirname(prismaClientPackageJsonPath)],
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "MODULE_NOT_FOUND") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function generateHostedWebPrismaClient(): void {
+  execFileSync(
+    process.platform === "win32" ? "pnpm.cmd" : "pnpm",
+    ["--dir", "apps/web", "prisma:generate"],
+    {
+      cwd: repoRoot,
+      env: process.env,
+      stdio: "inherit",
+    },
+  );
+}
+
+export function createHostedWebVitestConfig(
+  isPrismaClientGenerated: () => boolean = isHostedWebPrismaClientGenerated,
+  generatePrismaClient: () => void = generateHostedWebPrismaClient,
+) {
+  if (!isPrismaClientGenerated()) {
+    generatePrismaClient();
+  }
+
+  return {
+    test: {
+      ...murphVitestNoTimeouts,
+      maxWorkers: hostedWebVitestMaxWorkers,
+      projects: hostedWebVitestProjects,
+    },
+  };
+}
+
+export default defineConfig(() => createHostedWebVitestConfig());

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 200,
+  "item": {
+    "id": "activity-nudge-message-delivery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable activity nudges",
+    "summary": "Fixed a delivery failure that could prevent an activity-triggered iMessage from being sent.",
+    "details": "Saved activity automations keep their existing instructions and duplicate-send protection.",
+    "relevanceTags": ["devices", "messages"],
+    "sourcePullRequests": [3281]
+  }
+}

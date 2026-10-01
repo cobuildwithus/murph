@@ -108,6 +108,7 @@ describe('assistant outbox thresholds', () => {
         message: 'provider acceptance remains unconfirmed',
       },
       nextAttemptAt: '2026-04-08T10:30:00.000Z',
+      preparedDispatchToken: 'confirmation-retry-exhausted-token',
       status: 'retryable',
       updatedAt: '2026-04-08T10:01:00.000Z',
     })
@@ -126,24 +127,38 @@ describe('assistant outbox thresholds', () => {
 
     expect(first).toMatchObject({
       deliveryError: {
-        code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+        code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
       },
       intent: {
         attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        deliveryConfirmationPending: false,
+        lastError: {
+          code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+        },
         nextAttemptAt: null,
-        status: 'failed',
+        preparedDispatchToken: null,
+        status: 'abandoned',
       },
       session: null,
     })
     expect(second.intent).toMatchObject({
+      deliveryConfirmationPending: false,
       intentId: seeded.intentId,
-      status: 'failed',
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+      },
+      nextAttemptAt: null,
+      preparedDispatchToken: null,
+      status: 'abandoned',
     })
     expect(deliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
   it('terminalizes an exhausted hosted prepared claim without taking ownership', async () => {
-    const { outbox } = await loadOutboxModule()
+    const deliverAssistantMessageOverBinding = vi.fn()
+    const { outbox } = await loadOutboxModule({
+      deliverAssistantMessageOverBinding,
+    })
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-thresholds-prepared-exhausted-',
     )
@@ -164,6 +179,7 @@ describe('assistant outbox thresholds', () => {
         message: 'provider acceptance remains unconfirmed',
       },
       nextAttemptAt: '2026-04-08T10:30:00.000Z',
+      preparedDispatchToken: 'prepared-confirmation-retry-exhausted-token',
       status: 'retryable',
       updatedAt: '2026-04-08T10:01:00.000Z',
     })
@@ -177,11 +193,13 @@ describe('assistant outbox thresholds', () => {
     })).resolves.toMatchObject({
       intent: {
         attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        deliveryConfirmationPending: false,
         lastError: {
-          code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+          code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
         },
         nextAttemptAt: null,
-        status: 'failed',
+        preparedDispatchToken: null,
+        status: 'abandoned',
       },
       ownsDispatch: false,
       preparedDispatchToken: null,
@@ -191,6 +209,7 @@ describe('assistant outbox thresholds', () => {
         status: 'retryable',
       },
     })
+    expect(deliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
   it('terminalizes the final hosted prepared claim after a definite failure', async () => {
@@ -241,10 +260,12 @@ describe('assistant outbox thresholds', () => {
       vault: vaultRoot,
     })).resolves.toMatchObject({
       attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+      deliveryConfirmationPending: false,
       lastError: {
         code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
       },
       nextAttemptAt: null,
+      preparedDispatchToken: null,
       status: 'failed',
     })
 
@@ -257,6 +278,12 @@ describe('assistant outbox thresholds', () => {
     })).resolves.toMatchObject({
       intent: {
         attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        deliveryConfirmationPending: false,
+        lastError: {
+          code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+        },
+        nextAttemptAt: null,
+        preparedDispatchToken: null,
         status: 'failed',
       },
       ownsDispatch: false,
@@ -1372,12 +1399,17 @@ describe('assistant outbox thresholds', () => {
     })
     expect(exhausted).toMatchObject({
       deliveryError: {
-        code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+        code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
       },
       intent: {
         attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        deliveryConfirmationPending: false,
+        lastError: {
+          code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+        },
         nextAttemptAt: null,
-        status: 'failed',
+        preparedDispatchToken: null,
+        status: 'abandoned',
       },
       session: null,
     })

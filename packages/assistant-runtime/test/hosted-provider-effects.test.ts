@@ -398,7 +398,7 @@ describe("hosted provider effects", () => {
     })).resolves.toEqual({
       providerMessageEffects: [{
         carriesIntentMedia: true,
-        message: "hello\n\nDead bug setup",
+        message: "hello",
         providerMessageId: "recovered-message",
       }],
       providerMessageId: "recovered-message",
@@ -415,6 +415,70 @@ describe("hosted provider effects", () => {
       String(fetchMock.mock.calls[1]?.[0]),
       "https://api.linqapp.com/api/partner/v3/chats",
     );
+  });
+
+  it.each([
+    {
+      label: "redacted target",
+      stale: false,
+      target: "h1_111111111111111111111111",
+      targetKind: "explicit" as const,
+    },
+    {
+      label: "stale target",
+      stale: true,
+      target: "stale-chat",
+      targetKind: "thread" as const,
+    },
+  ])("keeps identity-less $label materialization pending confirmation", async ({
+    stale,
+    target,
+    targetKind,
+  }) => {
+    const idempotencyKey = "assistant-outbox:intent_identity_pending";
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (stale && url.endsWith(`/chats/${target}/messages`)) {
+        return new Response(JSON.stringify({ code: "CHAT_NOT_FOUND" }), {
+          headers: { "content-type": "application/json" },
+          status: 404,
+        });
+      }
+      if (url.endsWith("/chats")) {
+        return new Response(JSON.stringify({
+          chat: {
+            id: "materialized-chat",
+            message: {},
+          },
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected Linq provider request: ${url}`);
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
+      idempotencyKey,
+      message: "hello",
+      target,
+      targetKind,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(stale ? 2 : 1);
+    const createCall = fetchImplementation.mock.calls.find(([input]) =>
+      String(input).endsWith("/chats")
+    );
+    expect(createCall).toBeDefined();
+    const body = JSON.parse(String(createCall?.[1]?.body));
+    expect(body.message.idempotency_key).toBe(idempotencyKey);
   });
 
   it("persists hosted app-card text fallback before its provider send", async () => {
@@ -875,7 +939,7 @@ describe("hosted provider effects", () => {
     })).resolves.toEqual({
       providerMessageEffects: [{
         carriesIntentMedia: true,
-        message: "hello\n\nDead bug setup",
+        message: "hello",
         providerMessageId: "recovered-message",
       }],
       providerMessageId: "recovered-message",
@@ -901,7 +965,7 @@ describe("hosted provider effects", () => {
           parts: [
             {
               type: "text",
-              value: "hello\n\nDead bug setup",
+              value: "hello",
             },
             {
               type: "media",

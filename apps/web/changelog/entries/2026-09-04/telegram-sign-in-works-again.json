@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "telegram-sign-in-works-again",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Telegram sign-in works again",
+    "summary": "Telegram sign-in and account linking now use Telegram's current secure authorization flow.",
+    "details": "Returning from Telegram now finishes through the Telegram path instead of showing unrelated phone recovery. Phone and email sign-in are unchanged.",
+    "relevanceTags": ["telegram", "onboarding", "reliability"],
+    "sourcePullRequests": [2816, 2817]
+  }
+}

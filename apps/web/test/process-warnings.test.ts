@@ -7,21 +7,21 @@ const SQLITE_WARNING_FILTER_FLAG = Symbol.for("murph.sqliteExperimentalWarningFi
 const SQLITE_WARNING_FILTER_INCLUDES_FLAG = Symbol.for(
   "murph.sqliteExperimentalWarningFilterInstalled.includes",
 );
-const PG_WARNING_FILTER_FLAG = Symbol.for(
-  "murph.pgConcurrentQueryDeprecationWarningFilterInstalled",
+const HOSTED_WARNING_FILTER_FLAG = Symbol.for(
+  "murph.hostedWebNoiseWarningFilterInstalled",
 );
 const PG_CONCURRENT_QUERY_DEPRECATION_MESSAGE =
   "Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.";
 type ProcessWithWarningFilterFlags = NodeJS.Process & {
   [SQLITE_WARNING_FILTER_FLAG]?: boolean;
   [SQLITE_WARNING_FILTER_INCLUDES_FLAG]?: boolean;
-  [PG_WARNING_FILTER_FLAG]?: boolean;
+  [HOSTED_WARNING_FILTER_FLAG]?: boolean;
 };
 
 function deleteWarningFilterFlags(): void {
   delete (process as ProcessWithWarningFilterFlags)[SQLITE_WARNING_FILTER_FLAG];
   delete (process as ProcessWithWarningFilterFlags)[SQLITE_WARNING_FILTER_INCLUDES_FLAG];
-  delete (process as ProcessWithWarningFilterFlags)[PG_WARNING_FILTER_FLAG];
+  delete (process as ProcessWithWarningFilterFlags)[HOSTED_WARNING_FILTER_FLAG];
 }
 
 describe("hosted web warning filters", () => {
@@ -172,6 +172,48 @@ describe("hosted web warning filters", () => {
     expect(
       isPgConcurrentQueryDeprecationWarning(PG_CONCURRENT_QUERY_DEPRECATION_MESSAGE, []),
     ).toBe(false);
+  });
+
+  it.each([
+    "The supports Web Crypto API method is an experimental feature and might change at any time",
+    "The ML-DSA-44 Web Crypto API algorithm is an experimental feature and might change at any time",
+  ])("suppresses only the exact crypto experimental notice: %s", async (message) => {
+    const forwardedWarnings: unknown[][] = [];
+    process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+      forwardedWarnings.push([warning, ...args]);
+    }) as typeof process.emitWarning;
+
+    const { installHostedWebWarningFilters, isHostedWebNoiseWarning } = await import(
+      "@/src/lib/process-warnings"
+    );
+    installHostedWebWarningFilters();
+
+    process.emitWarning(message, "ExperimentalWarning");
+    process.emitWarning(message, { type: "ExperimentalWarning" });
+    process.emitWarning(Object.assign(new Error(message), { name: "ExperimentalWarning" }));
+
+    const cryptoFailure = Object.assign(new Error("Signature verification failed"), {
+      name: "OperationError",
+    });
+    const differentAlgorithm = message.replace("ML-DSA-44", "ML-DSA-65").replace(
+      "supports Web Crypto API method",
+      "different Web Crypto API method",
+    );
+    process.emitWarning(message, "Warning");
+    process.emitWarning(message);
+    process.emitWarning(`${message} (extra context)`, "ExperimentalWarning");
+    process.emitWarning(differentAlgorithm, "ExperimentalWarning");
+    process.emitWarning(cryptoFailure);
+
+    expect(forwardedWarnings).toEqual([
+      [message, "Warning"],
+      [message],
+      [`${message} (extra context)`, "ExperimentalWarning"],
+      [differentAlgorithm, "ExperimentalWarning"],
+      [cryptoFailure],
+    ]);
+    expect(isHostedWebNoiseWarning(message, ["ExperimentalWarning"])).toBe(true);
+    expect(isHostedWebNoiseWarning(cryptoFailure, [])).toBe(false);
   });
 
   it("is idempotent", async () => {

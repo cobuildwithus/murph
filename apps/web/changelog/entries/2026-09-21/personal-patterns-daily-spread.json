@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-21",
+  "order": 100,
+  "item": {
+    "id": "personal-patterns-daily-spread",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Personal Patterns checks spread throughout the day",
+    "summary": "Murph now gives each member a stable daily time for background Personal Patterns checks, reducing the shared midday rush.",
+    "details": "Existing default-time checks move to their new slot after any running work finishes, beginning the next local day. Custom times, paused checks, and reminders you schedule keep their timing.",
+    "relevanceTags": [
+      "personal-patterns",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3631
+    ]
+  }
+}

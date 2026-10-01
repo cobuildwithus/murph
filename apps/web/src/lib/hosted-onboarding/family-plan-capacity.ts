@@ -21,16 +21,7 @@ export function createEmptyHostedFamilyPlanCapacities(): HostedFamilyPlanCapacit
 
 export function readHostedFamilyPlanCapacities(
   rows: readonly { billedQuantity: number; planCode: string }[],
-  legacyPulseQuantity: number | null = null,
 ): HostedFamilyPlanCapacities | null {
-  if (rows.length === 0 && legacyPulseQuantity !== null) {
-    return parseHostedFamilyPlanCapacities({
-      edge: 0,
-      max: 0,
-      pulse: legacyPulseQuantity,
-    });
-  }
-
   const capacities = createEmptyHostedFamilyPlanCapacities();
   for (const row of rows) {
     const planCode = parseHostedFamilyPlanCode(row.planCode);

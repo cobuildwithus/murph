@@ -1,6 +1,6 @@
 # Giant File Composability Seams
 
-Last verified: 2026-06-03
+Last verified: 2026-09-10
 
 Murph is still greenfield, so the bias here is to cut cleaner module seams before compatibility glue, broad helper surfaces, and public re-export paths harden around accidental file shape.
 
@@ -46,23 +46,7 @@ Hosted assistant usage is now recorded directly into the web-owned usage ledger 
 
 ### Worth planning
 
-#### 1. Split `RunnerQueueStore` by persistence concern before the Durable Object becomes the next accidental framework
-
-**Seam:** `apps/cloudflare/src/user-runner/runner-queue-store.ts`
-
-**Symbols/clusters:** `enqueueDispatch`, `claimNextDuePendingDispatch`, `applyCommittedDispatch`, `syncCommittedBundles`, `compareAndSwapBundleRefs`, `recordRunPhase`, `readPendingDispatch*`, `writeConsumedEventSync`, `writeQuarantinedEventSync`, `writeBackpressuredEventSync`
-
-**Current cost:** one file owns pending queue storage, payload hydration, bundle compare-and-swap state, consumed/quarantined/backpressured event history, wake scheduling inputs, and run/timeline meta projection. Local changes are risky because readers have to keep several tables and invariants in mind at once.
-
-**Simpler target:** keep `RunnerQueueStore` as the orchestration façade, but move concrete persistence seams into smaller modules such as:
-
-- `user-runner/runner-queue/pending-dispatches.ts` for pending row CRUD and payload hydration
-- `user-runner/runner-queue/event-history.ts` for consumed/quarantined/backpressured tables
-- `user-runner/runner-queue/bundle-state.ts` for bundle slot reads and compare-and-swap
-
-**Incremental extraction path:** move one helper cluster at a time behind context-aware module functions that receive `sql` and `dispatchPayloadStore`, without changing the SQL schema or the public `RunnerQueueStore` API first.
-
-#### 2. Split assistant cron authoring/projection from claiming/execution
+#### Split assistant cron authoring/projection from claiming/execution
 
 **Seam:** `packages/assistant-engine/src/assistant/cron.ts`
 
@@ -91,6 +75,15 @@ This file is large, but the size comes from one real boundary: canonical high-le
 **Why keep it:** the helpers are tightly coupled to the four exported mutation façades and the canonical event/sample/document write semantics they share.
 
 **Guardrail:** only split this file when a helper cluster clearly belongs to a stable record family with its own durable owner, not just because the helper section is long.
+
+Exact document-source evidence now has that owner in
+`packages/core/src/domains/documents/source-evidence.ts`. It joins content
+receipts, audit ownership, document lifecycle, manifests, and raw-byte integrity
+for document reuse, once-only workout imports, inbox preservation, and inbox
+retention. The module owns read-only proof and correlation inspection;
+`mutations.ts` retains source hashing, import orchestration, and the correlation
+audit write, while `public-mutations.ts` retains canonical lock routing. Shared
+raw-manifest, integrity, and event-spine primitives stay in their existing owners.
 
 #### B. Keep `packages/core/src/operations/write-batch.ts` as one staged-write boundary
 

@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "automation-edit-progress",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Smoother edits and clearer progress",
+    "summary": "Murph handles reminder changes, nutrition cards and saved reply preferences more reliably, with earlier progress during longer requests.",
+    "details": "Quick changes stay concise. Longer work gets a brief progress note, and changes preserve settings you did not ask to update.",
+    "relevanceTags": [
+      "reminders",
+      "assistant"
+    ],
+    "sourcePullRequests": [3256]
+  }
+}

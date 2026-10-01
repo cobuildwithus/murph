@@ -17,6 +17,7 @@ import {
   preferencesDocumentRelativePath,
   preferencesDocumentSchema,
   preferencesDocumentSchemaVersion,
+  workoutDefaultDurationMinutesSchema,
   type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   type AssistantPersonalityScores,
@@ -29,6 +30,7 @@ import {
   type AssistantVoiceOptionId,
   type PreferencesDocument,
   type WearablePreferences,
+  type WorkoutCapturePreferences,
   type WorkoutUnitPreferences,
 } from "@murphai/contracts";
 
@@ -54,8 +56,14 @@ export type {
   AssistantVoiceOptionId,
   PreferencesDocument,
   WearablePreferences,
+  WorkoutCapturePreferences,
   WorkoutUnitPreferences,
 } from "@murphai/contracts";
+
+export interface WorkoutCapturePreferencesUpdate {
+  defaultDurationMinutes?: number | null;
+  legacyMemoryMigrationVersion?: 1;
+}
 
 export type AssistantPersonalityPreferencesUpdate = {
   [TSetting in AssistantPersonalitySettingId]?: AssistantPersonalityScores[TSetting] | null;
@@ -68,10 +76,14 @@ export interface AssistantPreferencesUpdate {
   personality?: AssistantPersonalityPreferencesUpdate;
 }
 
-export interface PreferencesDocumentSnapshot extends Omit<PreferencesDocument, "updatedAt"> {
+export interface PreferencesDocumentSnapshot extends Omit<
+  PreferencesDocument,
+  "updatedAt" | "workoutCapturePreferences"
+> {
   exists: boolean;
   sourcePath: string;
   updatedAt: string | null;
+  workoutCapturePreferences: WorkoutCapturePreferences;
 }
 
 export function resolvePreferencesDocumentPath(vaultRoot: string): string {
@@ -286,12 +298,19 @@ function buildPreferencesDocument(input: {
   assistant?: AssistantPreferences;
   updatedAt: string;
   wearablePreferences: WearablePreferences;
+  workoutCapturePreferences: WorkoutCapturePreferences;
   workoutUnitPreferences: WorkoutUnitPreferences;
 }): PreferencesDocument {
+  const hasWorkoutCapturePreferences =
+    input.workoutCapturePreferences.defaultDurationMinutes !== undefined
+    || input.workoutCapturePreferences.legacyMemoryMigrationVersion !== undefined;
   const document: PreferencesDocument = {
     schemaVersion: preferencesDocumentSchemaVersion,
     updatedAt: input.updatedAt,
     ...(input.assistant ? { assistant: input.assistant } : {}),
+    ...(hasWorkoutCapturePreferences
+      ? { workoutCapturePreferences: input.workoutCapturePreferences }
+      : {}),
     workoutUnitPreferences: input.workoutUnitPreferences,
     wearablePreferences: input.wearablePreferences,
   };
@@ -310,6 +329,7 @@ export async function readPreferencesDocument(
       schemaVersion: preferencesDocumentSchemaVersion,
       sourcePath: resolved.relativePath,
       updatedAt: null,
+      workoutCapturePreferences: {},
       workoutUnitPreferences: {},
       wearablePreferences: {
         desiredProviders: [],
@@ -326,6 +346,7 @@ export async function readPreferencesDocument(
   const document = buildPreferencesDocument({
     ...(assistantPreferences ? { assistant: assistantPreferences } : {}),
     updatedAt: parsedDocument.updatedAt,
+    workoutCapturePreferences: parsedDocument.workoutCapturePreferences ?? {},
     workoutUnitPreferences: parsedDocument.workoutUnitPreferences,
     wearablePreferences: normalizeWearablePreferencesForRead(
       parsedDocument.wearablePreferences,
@@ -337,7 +358,112 @@ export async function readPreferencesDocument(
     exists: true,
     sourcePath: resolved.relativePath,
     updatedAt: document.updatedAt,
+    workoutCapturePreferences: document.workoutCapturePreferences ?? {},
   };
+}
+
+export async function updateWorkoutCapturePreferences(input: {
+  vaultRoot: string;
+  preferences: WorkoutCapturePreferencesUpdate;
+  onlyIfLegacyMigrationPending?: boolean;
+  updatedAt?: string;
+}): Promise<{
+  created: boolean;
+  document: PreferencesDocumentSnapshot;
+}> {
+  if (!isPlainRecord(input.preferences)) {
+    throw new TypeError("Workout capture preferences must be an object.");
+  }
+  for (const key of Object.keys(input.preferences)) {
+    if (
+      key !== "defaultDurationMinutes"
+      && key !== "legacyMemoryMigrationVersion"
+    ) {
+      throw new TypeError(`Unknown workout capture preference: ${key}.`);
+    }
+  }
+
+  return await withLockedPreferencesDocument(input.vaultRoot, async () => {
+    const current = await readPreferencesDocument(input.vaultRoot);
+    if (
+      input.onlyIfLegacyMigrationPending === true
+      && (
+        current.workoutCapturePreferences.defaultDurationMinutes !== undefined
+        || current.workoutCapturePreferences.legacyMemoryMigrationVersion !== undefined
+      )
+    ) {
+      return {
+        created: false,
+        document: current,
+      };
+    }
+    const nextPreferences: WorkoutCapturePreferences = {
+      ...current.workoutCapturePreferences,
+    };
+    if (input.preferences.defaultDurationMinutes === null) {
+      delete nextPreferences.defaultDurationMinutes;
+    } else if (input.preferences.defaultDurationMinutes !== undefined) {
+      nextPreferences.defaultDurationMinutes = workoutDefaultDurationMinutesSchema.parse(
+        input.preferences.defaultDurationMinutes,
+      );
+    }
+    if (input.preferences.legacyMemoryMigrationVersion !== undefined) {
+      nextPreferences.legacyMemoryMigrationVersion =
+        input.preferences.legacyMemoryMigrationVersion;
+    }
+    const hasChanges =
+      JSON.stringify(current.workoutCapturePreferences)
+      !== JSON.stringify(nextPreferences);
+
+    if (!hasChanges) {
+      return {
+        created: false,
+        document: current,
+      };
+    }
+
+    const validatedDocument = buildPreferencesDocument({
+      ...(current.assistant ? { assistant: current.assistant } : {}),
+      updatedAt: input.updatedAt ?? new Date().toISOString(),
+      workoutCapturePreferences: nextPreferences,
+      workoutUnitPreferences: current.workoutUnitPreferences,
+      wearablePreferences: current.wearablePreferences,
+    });
+
+    await commitAuditedCanonicalWrite({
+      vaultRoot: input.vaultRoot,
+      operationType: "preferences_update",
+      summary: "Update canonical workout capture preferences",
+      occurredAt: validatedDocument.updatedAt,
+      audit: {
+        action: "preferences_update",
+        commandName: "core.updateWorkoutCapturePreferences",
+        summary: "Updated canonical workout capture preferences.",
+      },
+      mutate: async ({ batch }) => {
+        await batch.stageTextWrite(
+          preferencesDocumentRelativePath,
+          `${JSON.stringify(validatedDocument, null, 2)}\n`,
+          { overwrite: true },
+        );
+
+        return {
+          result: null,
+          changes: [
+            {
+              path: preferencesDocumentRelativePath,
+              op: current.exists ? "update" : "create",
+            },
+          ],
+        };
+      },
+    });
+
+    return {
+      created: !current.exists,
+      document: await readPreferencesDocument(input.vaultRoot),
+    };
+  });
 }
 
 export async function updateWorkoutUnitPreferences(input: {
@@ -367,6 +493,7 @@ export async function updateWorkoutUnitPreferences(input: {
     const validatedDocument = buildPreferencesDocument({
       ...(current.assistant ? { assistant: current.assistant } : {}),
       updatedAt: input.updatedAt ?? new Date().toISOString(),
+      workoutCapturePreferences: current.workoutCapturePreferences,
       workoutUnitPreferences: nextPreferences,
       wearablePreferences: current.wearablePreferences,
     });
@@ -433,6 +560,7 @@ export async function updateWearablePreferences(input: {
     const validatedDocument = buildPreferencesDocument({
       ...(current.assistant ? { assistant: current.assistant } : {}),
       updatedAt: input.updatedAt ?? new Date().toISOString(),
+      workoutCapturePreferences: current.workoutCapturePreferences,
       workoutUnitPreferences: current.workoutUnitPreferences,
       wearablePreferences: nextPreferences,
     });
@@ -557,6 +685,7 @@ export async function updateAssistantPreferences(input: {
     const validatedDocument = buildPreferencesDocument({
       ...(nextPreferences ? { assistant: nextPreferences } : {}),
       updatedAt: hasChanges ? operationAt : (current.updatedAt ?? operationAt),
+      workoutCapturePreferences: current.workoutCapturePreferences,
       workoutUnitPreferences: current.workoutUnitPreferences,
       wearablePreferences: current.wearablePreferences,
     });

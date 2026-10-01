@@ -33,10 +33,7 @@ export function HowItWorksSection() {
       className="bg-[#f5f0e8] px-5 py-16 sm:px-10 lg:px-16 lg:py-24"
     >
       <div className="mx-auto max-w-[1080px]">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#5a6e32]">
-          How it works
-        </span>
-        <h2 className="mt-5 max-w-[20ch] font-serif text-[clamp(1.75rem,3.5vw,2.75rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-[#2d3436]">
+        <h2 className="max-w-[20ch] font-serif text-[clamp(1.75rem,3.5vw,2.75rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-[#2d3436]">
           Improve your health, one experiment at a time.
         </h2>
         <p className="mt-5 max-w-[48ch] text-base leading-[1.7] text-pretty text-[#635a48]">

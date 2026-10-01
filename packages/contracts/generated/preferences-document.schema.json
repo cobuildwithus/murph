@@ -94,6 +94,21 @@
       },
       "additionalProperties": false
     },
+    "workoutCapturePreferences": {
+      "type": "object",
+      "properties": {
+        "defaultDurationMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        },
+        "legacyMemoryMigrationVersion": {
+          "type": "number",
+          "const": 1
+        }
+      },
+      "additionalProperties": false
+    },
     "workoutUnitPreferences": {
       "default": {},
       "type": "object",

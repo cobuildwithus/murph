@@ -1,0 +1,293 @@
+import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { stripTypeScriptTypes } from 'node:module'
+import { test } from 'vitest'
+
+import { ASSISTANT_USAGE_SCHEMA, parseAssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
+import { emptyCliTiming, normalizeCliTiming, type CliTiming } from '@murphai/runtime-state/cli-timing'
+import { timeCliDispatch, withCliTiming } from '@murphai/runtime-state/node/cli-timing'
+import { VAULT_CLI_BATCH_RESULT_SCHEMA } from '@murphai/operator-config/vault-cli-contracts'
+import { buildAssistantCodexTurnProfileJson } from '../src/assistant/providers/helpers.ts'
+
+const turnId = 'turn-synthetic'
+function native(command: string, output = 'PRIVATE_SENTINEL', extra = {}) {
+  return { method: 'item/completed', params: { turnId, item: {
+    id: 'item-synthetic', type: 'commandExecution', command,
+    aggregatedOutput: output, durationMs: 3_032, exitCode: 0, ...extra,
+  } } }
+}
+function usage(profile: unknown) {
+  return parseAssistantUsageRecord({ schema: ASSISTANT_USAGE_SCHEMA, provider: 'codex-cli',
+    credentialSource: 'platform', inputTokens: 17, outputTokens: 11,
+    occurredAt: '2026-09-04T20:36:00.000Z', sessionId: 'synthetic', turnId,
+    attemptCount: 1, usageId: `${turnId}.attempt-1`, turnProfileJson: profile })
+}
+const baseEvents = [
+  { method: 'turn/started', params: { turn: { id: turnId } } },
+  { method: 'thread/tokenUsage/updated', params: { turnId, threadId: 'thread-synthetic', tokenUsage: {
+    last: { inputTokens: 17, cachedInputTokens: 2, outputTokens: 11, reasoningOutputTokens: 0, totalTokens: 28 },
+    total: { inputTokens: 17, cachedInputTokens: 2, outputTokens: 11, reasoningOutputTokens: 0, totalTokens: 28 }, modelContextWindow: 258400,
+  } } },
+]
+
+test('production timing scope -> raw event -> profile -> hosted serialization preserves legacy accounting exactly', async () => {
+  let report!: CliTiming
+  await withCliTiming(() => timeCliDispatch('goal list', async () => {}), (value) => { report = value })
+  for (const command of ['vault-cli goal list --vault /PRIVATE_SENTINEL',
+    "/bin/bash -lc 'vault-cli goal list --vault /PRIVATE_SENTINEL'",
+    'unsupported-shell PRIVATE_SENTINEL']) {
+    const rawEvents = [...baseEvents, native(command)]
+    const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
+    const metadata = { method: 'murph/cliTiming', params: { turnId, timing: {
+      ...report, argv: ['PRIVATE_SENTINEL'], output: 'PRIVATE_SENTINEL',
+    } } }
+    const profile = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents, metadata], turnId })!
+    const { cliTiming, ...legacy } = profile
+    assert.deepEqual(legacy, baseline)
+    assert.equal(baseline.requestCount, 1)
+    assert.deepEqual(baseline.requests, [{ cachedInput: 2, input: 17, output: 11 }])
+    assert.deepEqual(cliTiming, report)
+    assert.equal(JSON.stringify(profile).includes('PRIVATE_SENTINEL'), false)
+    const parsed = usage(JSON.parse(JSON.stringify(profile)))
+    assert.deepEqual(parsed.turnProfileJson, profile)
+    assert.equal(parsed.inputTokens, 17)
+    assert.equal(parsed.outputTokens, 11)
+    assert.deepEqual(usage(baseline).turnProfileJson, baseline)
+    // Field-stripped roundtrip through the CURRENT consumer, not mixed-version proof.
+    assert.deepEqual(usage(legacy).turnProfileJson, baseline)
+  }
+})
+
+test('malformed or wrong-turn optional diagnostics do not delete valid legacy profile/token data', () => {
+  const rawEvents = [...baseEvents, native('vault-cli memory show')]
+  const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
+  for (const timing of [null, 'PRIVATE_SENTINEL', { ...emptyCliTiming(), commands: [{}] },
+    { ...emptyCliTiming(), droppedCalls: Number.MAX_SAFE_INTEGER + 1 }]) {
+    const produced = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents,
+      { method: 'murph/cliTiming', params: { turnId, timing } }], turnId })
+    assert.deepEqual(produced, baseline)
+    const parsed = usage({ ...baseline, cliTiming: timing })
+    assert.deepEqual(parsed.turnProfileJson, baseline)
+    assert.equal(parsed.inputTokens, 17)
+  }
+  assert.deepEqual(buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents,
+    { method: 'murph/cliTiming', params: { turnId: 'wrong', timing: emptyCliTiming() } }], turnId }), baseline)
+})
+
+test('structured batch child bytes, timings and stop-on-error semantics remain the existing profile contract', async () => {
+  let report!: CliTiming
+  await withCliTiming(() => timeCliDispatch('batch', async () => {
+    await withCliTiming(() => timeCliDispatch('goal list', async () => {}))
+    await assert.rejects(withCliTiming(() => timeCliDispatch('memory show', async () => { throw Error('synthetic') })))
+  }), (r) => { report = r })
+  const batch = { schema: VAULT_CLI_BATCH_RESULT_SCHEMA, vault: '/PRIVATE_SENTINEL',
+    count: 2, requested: 3, executed: 2, succeeded: 1, failed: 1, stoppedEarly: true,
+    commands: [
+      { index: 0, argv: ['goal', 'list'], ok: true, durationMs: 4,
+        stdout: '', data: [], outputChars: 2, outputBytes: 2 },
+      { index: 1, argv: ['memory', 'show'], ok: false, durationMs: 8,
+        stdout: '', outputChars: 0, outputBytes: 0,
+        error: { code: 'invalid_option', message: 'PRIVATE_SENTINEL' } },
+    ] }
+  const rawEvents = [...baseEvents, native('vault-cli batch --PRIVATE_SENTINEL', JSON.stringify(batch))]
+  const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
+  const profile = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents,
+    { method: 'murph/cliTiming', params: { turnId, timing: report } }], turnId })!
+  const { cliTiming, ...legacy } = profile
+  assert.deepEqual(legacy, baseline)
+  assert.deepEqual(normalizeCliTiming(cliTiming), report)
+  assert.deepEqual(usage(profile).turnProfileJson, profile)
+  assert.equal((baseline.tools as Array<{ calls: number }>).reduce((n, tool) => n + tool.calls, 0), 2)
+  const commands = report.commands
+  assert.equal(commands.reduce((sum, c) => sum + c.calls, 0), 2)
+  assert.equal(report.batchContainers, 1)
+  assert.equal(commands.some((c) => c.command === 'batch'), false)
+})
+
+test('old v1 records remain readable with absent or malformed optional timing', () => {
+  const old = { schema: 'murph.assistant-turn-profile.v1', modelContextWindow: null,
+    requestCount: 0, requests: [], requestsTruncated: false, toolsTruncated: false,
+    tools: [{ calls: 1, durationMs: 20, label: 'vault-cli memory show', outputChars: 4 }] }
+  assert.deepEqual(usage(old).turnProfileJson, old)
+  assert.deepEqual(usage({ ...old, cliTiming: { command: 'PRIVATE_SENTINEL' } }).turnProfileJson, old)
+})
+
+// History-dependent rollout proof. No copied legacy parser and no pretending that
+// the current consumer is the old one. CI/parent supplies the exact available base.
+const compatibilityBase = process.env.MURPH_CLI_TIMING_COMPAT_BASE;
+test.skipIf(!compatibilityBase)('actual base consumer accepts the new producer and drops only optional diagnostics', async () => {
+  assert.match(compatibilityBase ?? '', /^[a-f0-9]{40}$/u);
+  const source = execFileSync('git', [
+    'show', `${compatibilityBase}:packages/hosted-execution/src/assistant-usage.ts`,
+  ], { encoding: 'utf8', maxBuffer: 1_000_000 });
+  // At the declared base this portable owner imports only node:crypto. A future
+  // incompatible base must fail here, not accidentally resolve current siblings.
+  const baseModule: { parseAssistantUsageRecord: typeof parseAssistantUsageRecord } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`,
+  );
+  assert.equal(typeof baseModule.parseAssistantUsageRecord, 'function');
+  let report!: CliTiming;
+  await withCliTiming(() => timeCliDispatch('goal list', async () => {}), (value) => { report = value; });
+  for (const failed of [false, true]) {
+    const rawEvents = [...baseEvents, native('vault-cli goal list', 'PRIVATE_SENTINEL', {
+      exitCode: failed ? 1 : 0,
+    })];
+    const legacy = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!;
+    const produced = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents,
+      { method: 'murph/cliTiming', params: { turnId, timing: report } }], turnId })!;
+    for (const cliTiming of [produced.cliTiming, { raw: 'PRIVATE_SENTINEL', ...report }]) {
+      const input = { ...usage(legacy), turnProfileJson: { ...produced, cliTiming } };
+      const old = baseModule.parseAssistantUsageRecord(JSON.parse(JSON.stringify(input)));
+      assert.deepEqual(old, baseModule.parseAssistantUsageRecord({ ...input, turnProfileJson: legacy }));
+      assert.deepEqual(old.turnProfileJson, legacy);
+      assert.deepEqual(usage(JSON.parse(JSON.stringify(produced))).turnProfileJson, produced);
+      assert.equal(JSON.stringify(old).includes('PRIVATE_SENTINEL'), false);
+    }
+  }
+});
+
+test('failure diagnostics cross profile extraction and hosted parsing without changing native accounting or output', async () => {
+  let report!: CliTiming
+  const failure = Object.assign(new Error('PRIVATE_SENTINEL'), { code: 'invalid_payload', context: { stage: 'validation' } })
+  await assert.rejects(withCliTiming(() => timeCliDispatch('experiment session log', async () => { throw failure }),
+    (value) => { report = value }), (error) => error === failure)
+  const rawEvents = [...baseEvents, native("/bin/bash -lc 'vault-cli experiment session log; true'", 'PRIVATE_SENTINEL')]
+  const untouched = structuredClone(rawEvents)
+  const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
+  const produced = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents,
+    { method: 'murph/cliTiming', params: { turnId, timing: report } }], turnId })!
+  const { cliTiming, ...legacy } = produced
+  assert.deepEqual(legacy, baseline)
+  assert.deepEqual(rawEvents, untouched)
+  assert.deepEqual(normalizeCliTiming(cliTiming)?.commands[0]!.failures,
+    [{ code: 'invalid_payload', stage: 'validation', count: 1 }])
+  assert.deepEqual(usage(JSON.parse(JSON.stringify(produced))).turnProfileJson, produced)
+  assert.equal(JSON.stringify(produced).includes('PRIVATE_SENTINEL'), false)
+  const malformed = { ...report, commands: [{ ...report.commands[0], failures: 'PRIVATE_SENTINEL' }] }
+  const withoutFailures = structuredClone(report)
+  delete withoutFailures.commands[0]!.failures
+  assert.deepEqual(usage({ ...produced, cliTiming: malformed }).turnProfileJson,
+    { ...produced, cliTiming: withoutFailures })
+})
+
+// Unlike the older timing rollout above, this base already knows cliTiming.
+// Load BOTH actual base owners so this cannot accidentally use today's normalizer.
+const failureCompatibilityBase = process.env.MURPH_CLI_FAILURE_COMPAT_BASE
+
+test.skipIf(!failureCompatibilityBase)('actual pre-failure reader preserves command/outcome identities and accounting', async () => {
+  assert.match(failureCompatibilityBase ?? '', /^[a-f0-9]{7,40}$/u)
+  const source = (file: string) => execFileSync('git', ['show', `${failureCompatibilityBase}:${file}`],
+    { encoding: 'utf8', maxBuffer: 1_000_000 })
+  const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(text)).toString('base64')}`
+  const oldTimingUrl = moduleUrl(source('packages/runtime-state/src/cli-timing.ts'))
+  const oldUsageSource = source('packages/hosted-execution/src/assistant-usage.ts')
+  assert.ok(oldUsageSource.includes('"@murphai/runtime-state/cli-timing"'))
+  const old: { parseAssistantUsageRecord: typeof parseAssistantUsageRecord } = await import(moduleUrl(
+    oldUsageSource.replace('"@murphai/runtime-state/cli-timing"', JSON.stringify(oldTimingUrl))))
+  let report!: CliTiming
+  await withCliTiming(() => timeCliDispatch('batch', async () => {
+    for (const code of ['invalid_payload', 'conflict'] as const) {
+      await assert.rejects(withCliTiming(() => timeCliDispatch('experiment session log', async () => {
+        throw Object.assign(new Error('PRIVATE_SENTINEL'), { code, context: { stage: 'validation' } })
+      })))
+    }
+    await withCliTiming(() => timeCliDispatch('experiment session log', async () => {}))
+  }), (value) => { report = value })
+  const oldReport = { ...report, commands: report.commands.map(({ failures, droppedFailures, ...command }) => command) }
+  const legacy = buildAssistantCodexTurnProfileJson({ rawEvents: [...baseEvents, native('vault-cli batch')], turnId })!
+  for (const schema of ['murph.assistant-turn-profile.v1', 'murph.assistant-turn-profile.v2']) {
+    // Empty tools are valid for either profile version; legacy token accounting
+    // remains real, and mixed ok/error timing shares only the old identity keys.
+    const profile = { ...legacy, schema, tools: [], cliTiming: report }
+    const input = usage(profile)
+    const expected = old.parseAssistantUsageRecord({ ...input, turnProfileJson: { ...profile, cliTiming: oldReport } })
+    assert.deepEqual(old.parseAssistantUsageRecord(JSON.parse(JSON.stringify(input))), expected)
+    assert.deepEqual(expected.turnProfileJson?.cliTiming, oldReport)
+    assert.deepEqual(parseAssistantUsageRecord(expected), expected)
+    assert.deepEqual(usage(profile).turnProfileJson, profile)
+  }
+})
+
+
+test('research source codes survive profile and hosted readback without changing native accounting', async () => {
+  const codes = ['research_scout_invalid_batch_payload', 'research_scout_invalid_window', 'research_exa_token_missing'] as const
+  let report!: CliTiming
+  await withCliTiming(() => timeCliDispatch('batch', async () => {
+    for (const code of codes) {
+      const error = Object.assign(new Error('PRIVATE_SENTINEL'), { code })
+      await assert.rejects(withCliTiming(() => timeCliDispatch('research scout-batch', async () => { throw error })),
+        (caught) => caught === error)
+    }
+    await withCliTiming(() => timeCliDispatch('research scout-batch', async () => {}))
+  }), (value) => { report = value })
+  const rawEvents = [...baseEvents, native('vault-cli research scout-batch --input @/PRIVATE_SENTINEL',
+    'PRIVATE_SENTINEL', { exitCode: 1 })]
+  const untouched = structuredClone(rawEvents)
+  const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
+  const profile = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents,
+    { method: 'murph/cliTiming', params: { turnId, timing: report } }], turnId })!
+  const { cliTiming, ...legacy } = profile
+  assert.deepEqual(legacy, baseline)
+  assert.deepEqual(rawEvents, untouched)
+  assert.deepEqual(cliTiming, report)
+  assert.deepEqual(report.commands[0]!.failures, codes.map((code) => ({ code, stage: 'unknown', count: 1 })))
+  assert.deepEqual(report.commands.map(({ calls, outcome }) => ({ calls, outcome })), [
+    { calls: 3, outcome: 'error' }, { calls: 1, outcome: 'ok' },
+  ])
+  assert.equal(report.commands[1]!.failures, undefined)
+  const parsed = usage(JSON.parse(JSON.stringify(profile)))
+  assert.deepEqual(parsed.turnProfileJson, profile)
+  assert.equal(parsed.inputTokens, 17)
+  assert.equal(parsed.outputTokens, 11)
+  assert.ok(!JSON.stringify(parsed).includes('PRIVATE_SENTINEL'))
+  const future = structuredClone(report)
+  const futureInput = { ...future, commands: [{ ...future.commands[0]!, failures: [
+    { code: 'PRIVATE_FUTURE_CODE', stage: 'PRIVATE_FUTURE_STAGE', count: 3 },
+  ] }, future.commands[1]!] }
+  future.commands[0]!.failures = [{ code: 'unknown', stage: 'unknown', count: 3 }]
+  assert.deepEqual(usage({ ...profile, cliTiming: futureInput }).turnProfileJson, { ...profile, cliTiming: future })
+  delete future.commands[0]!.failures
+  assert.deepEqual(usage({ ...profile, cliTiming: future }).turnProfileJson, { ...profile, cliTiming: future })
+})
+
+// Bind both hosted readback and its portable normalizer to the actual old base.
+const researchCompatibilityBase = process.env.MURPH_CLI_RESEARCH_FAILURE_COMPAT_BASE
+test.skipIf(!researchCompatibilityBase)('actual pre-research hosted reader loses only specificity, not counts or tokens', async () => {
+  assert.match(researchCompatibilityBase ?? '', /^[a-f0-9]{7,40}$/u)
+  const source = (file: string) => execFileSync('git', ['show', `${researchCompatibilityBase}:${file}`],
+    { encoding: 'utf8', maxBuffer: 1_000_000 })
+  const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(text)).toString('base64')}`
+  const oldTimingUrl = moduleUrl(source('packages/runtime-state/src/cli-timing.ts'))
+  const oldTiming: { cliTimingFailureCode: (code: unknown) => string } = await import(oldTimingUrl)
+  const oldUsageSource = source('packages/hosted-execution/src/assistant-usage.ts')
+  assert.ok(oldUsageSource.includes('"@murphai/runtime-state/cli-timing"'))
+  const old: { parseAssistantUsageRecord: typeof parseAssistantUsageRecord } = await import(moduleUrl(
+    oldUsageSource.replace('"@murphai/runtime-state/cli-timing"', JSON.stringify(oldTimingUrl))))
+  let report!: CliTiming
+  await withCliTiming(() => timeCliDispatch('batch', async () => {
+    for (const code of ['research_scout_invalid_batch_payload', 'research_scout_invalid_window', 'research_exa_token_missing']) {
+      assert.equal(oldTiming.cliTimingFailureCode(code), 'unknown')
+      await assert.rejects(withCliTiming(() => timeCliDispatch('research scout-batch', async () => {
+        throw Object.assign(new Error('PRIVATE_SENTINEL'), { code })
+      })))
+    }
+    await withCliTiming(() => timeCliDispatch('research scout-batch', async () => {}))
+  }), (value) => { report = value })
+  const oldReport = structuredClone(report)
+  oldReport.commands[0]!.failures = [{ code: 'unknown', stage: 'unknown', count: 3 }]
+  const legacy = buildAssistantCodexTurnProfileJson({ rawEvents: baseEvents, turnId })!
+  for (const schema of ['murph.assistant-turn-profile.v1', 'murph.assistant-turn-profile.v2']) {
+    const profile = { ...legacy, schema, tools: [], cliTiming: report }
+    const input = usage(profile)
+    const expected = { ...input, turnProfileJson: { ...profile, cliTiming: oldReport } }
+    assert.deepEqual(old.parseAssistantUsageRecord(JSON.parse(JSON.stringify(input))), expected)
+    assert.deepEqual(parseAssistantUsageRecord(expected), expected)
+    assert.equal(expected.inputTokens, 17)
+    assert.equal(expected.outputTokens, 11)
+    const absent = structuredClone(expected)
+    delete absent.turnProfileJson.cliTiming.commands[0]!.failures
+    assert.deepEqual(old.parseAssistantUsageRecord(absent), absent)
+    assert.deepEqual(parseAssistantUsageRecord(absent), absent)
+    assert.ok(!JSON.stringify(expected).includes('PRIVATE_SENTINEL'))
+  }
+})

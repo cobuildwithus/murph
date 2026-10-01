@@ -9,6 +9,6 @@
     "summary": "Murph reuses checked nutrition facts when you correct a meal and keeps routine ingredient research bounded.",
     "details": "Food search better distinguishes complete product names and finds longer names from short misspelled queries. When a routine label lookup is inconclusive, Murph can give a clearly marked estimate; exact allergen and dosing questions still need verified evidence.",
     "relevanceTags": ["nutrition", "food-journal"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3942]
   }
 }

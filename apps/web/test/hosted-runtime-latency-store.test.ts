@@ -14,6 +14,7 @@ import {
   type HostedIngressLatencyDashboardInput,
 } from "@/src/lib/hosted-runtime-latency/store";
 import {
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
 } from "@murphai/hosted-execution/runtime-control";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,6 +51,7 @@ type LatencyDashboardRow = {
   linqDelivery?: {
     acceptedAt: Date | null;
     attemptedAt: Date;
+    deliveredAt: Date | null;
     lastReceiptAt: Date | null;
     sourceRef: string | null;
     status: string;
@@ -220,11 +222,12 @@ describe("hosted runtime latency dashboard store", () => {
     });
   });
 
-  it("reports deduplicated cold and warm reply delivery spans", async () => {
+  it("reports deduplicated cold and warm reply spans using first delivery, not the latest notification", async () => {
     const coldDelivery = {
       acceptedAt: instant("2026-05-27T12:00:11.000Z"),
       attemptedAt: instant("2026-05-27T12:00:10.000Z"),
-      lastReceiptAt: instant("2026-05-27T12:00:12.000Z"),
+      deliveredAt: instant("2026-05-27T12:00:12.000Z"),
+      lastReceiptAt: instant("2026-05-27T12:10:12.000Z"),
       sourceRef: deliverySourceRef("intent_cold"),
       status: "delivered",
     };
@@ -264,6 +267,7 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:01:09.000Z"),
           attemptedAt: instant("2026-05-27T12:01:08.000Z"),
+          deliveredAt: null,
           lastReceiptAt: null,
           sourceRef: deliverySourceRef("intent_warm"),
           status: "accepted",
@@ -285,6 +289,7 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:02:05.000Z"),
           attemptedAt: instant("2026-05-27T12:02:04.000Z"),
+          deliveredAt: instant("2026-05-27T12:02:06.000Z"),
           lastReceiptAt: instant("2026-05-27T12:02:06.000Z"),
           sourceRef: deliverySourceRef("intent_unknown"),
           status: "delivered",
@@ -303,6 +308,7 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:03:05.000Z"),
           attemptedAt: instant("2026-05-27T12:03:04.000Z"),
+          deliveredAt: null,
           lastReceiptAt: null,
           sourceRef: deliverySourceRef("intent_handoff"),
           status: "accepted",
@@ -432,6 +438,7 @@ describe("hosted runtime latency dashboard store", () => {
         attemptedAt: "2026-05-27T12:00:04.000Z",
         deliveryId: "delivery_failed_receipt",
         deliveryStatus: "failed",
+        deliveredAt: "2026-05-27T12:00:05.000Z",
         intentId: "intent_failed_receipt",
         providerStartAt: "2026-05-27T12:00:01.000Z",
         receiptAt: "2026-05-27T12:00:07.000Z",
@@ -499,6 +506,7 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:00:05.000Z"),
           attemptedAt: instant("2026-05-27T12:00:04.000Z"),
+          deliveredAt: instant("2026-05-27T12:00:06.000Z"),
           lastReceiptAt: instant("2026-05-27T12:00:06.000Z"),
           sourceRef: deliverySourceRef("intent_telegram"),
           status: "delivered",
@@ -541,6 +549,7 @@ describe("hosted runtime latency dashboard store", () => {
     const handoffDelivery = {
       acceptedAt: instant("2026-05-27T12:00:06.000Z"),
       attemptedAt: instant("2026-05-27T12:00:05.000Z"),
+      deliveredAt: instant("2026-05-27T12:00:07.000Z"),
       lastReceiptAt: instant("2026-05-27T12:00:07.000Z"),
       sourceRef: deliverySourceRef("intent_handoff_grouped"),
       status: "delivered",
@@ -574,6 +583,7 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:01:05.000Z"),
           attemptedAt: instant("2026-05-27T12:01:04.000Z"),
+          deliveredAt: instant("2026-05-27T12:01:06.000Z"),
           lastReceiptAt: instant("2026-05-27T12:01:06.000Z"),
           sourceRef: deliverySourceRef("intent_without_generation_diagnostics"),
           status: "delivered",
@@ -855,6 +865,31 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTrace()?.linqDeliveryId).toBe("delivery_latency_1");
   });
 
+  it("links a Web instant reply without inventing a runtime attempt and retains the link through later ingress writes", async () => {
+    const prisma = createLatencyWritePrisma({
+      deliveryLinkMatches: [true],
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T18:36:52.229Z")),
+    });
+    await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+      answeredMailboxItemIds: ["mailbox_latency_1"],
+      authenticatedUserId: "member_latency_1",
+      linqDeliveryId: "delivery_latency_1",
+      prisma,
+      replyRuntimeAttemptId: null,
+    })).resolves.toEqual({ matchedCount: 1, recorded: true });
+    await recordHostedIngressAcceptedFromMailboxItem({
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      source: "linq",
+      webhookReceivedAt: instant("2026-06-02T18:36:50.000Z"),
+    });
+    expect(prisma.readTrace()).toMatchObject({
+      linqDeliveryId: "delivery_latency_1",
+      replyRuntimeAttemptId: null,
+      runtimeAttemptId: null,
+    });
+  });
+
   it("links delivery after a restart without replacing the generation attempt", async () => {
     const prisma = createLatencyWritePrisma({
       deliveryLinkMatches: [true],
@@ -1066,7 +1101,7 @@ describe("hosted runtime latency dashboard store", () => {
         triggeredByWebDirect: true,
       },
     });
-    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
+    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO UPDATE");
   });
 
   it("merges direct ensure timing when a trace row already won creation", async () => {
@@ -1090,6 +1125,8 @@ describe("hosted runtime latency dashboard store", () => {
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
           directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+          directEnsureAuthDurationMs: 0,
+          directEnsureHandlerDurationMs: 42,
         },
       },
       prisma,
@@ -1107,9 +1144,11 @@ describe("hosted runtime latency dashboard store", () => {
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+        directEnsureAuthDurationMs: 0,
+        directEnsureHandlerDurationMs: 42,
       },
     });
-    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
+    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO UPDATE");
   });
 
   it("stores retry_later as a bounded outcome without retry or error detail", async () => {
@@ -1309,7 +1348,7 @@ describe("hosted runtime latency dashboard store", () => {
       assistantInputIds: ["input_untraced_2"],
       at: instant("2026-06-02T19:11:41.000Z"),
       authenticatedUserId: "member_latency_1",
-      milestone: "first_codex_output_observed",
+      milestone: "pending_reply_admitted",
       prisma,
       runtimeAttemptId: "attempt_untraced_2",
       runtimeLeaseGeneration: "1",
@@ -1320,6 +1359,213 @@ describe("hosted runtime latency dashboard store", () => {
       unmatchedCount: 1,
       untracedCount: 1,
     });
+  });
+
+  it("persists earliest lifecycle and legacy selection timestamps", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:11:50.000Z")),
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_lifecycle_milestones_1",
+      at: instant("2026-06-02T19:11:51.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_lifecycle_milestones_1",
+      source: "linq",
+    });
+
+    for (const at of [
+      "2026-06-02T19:11:51.300Z",
+      "2026-06-02T19:11:51.200Z",
+      "2026-06-02T19:11:51.400Z",
+    ]) {
+      await expect(recordHostedIngressAssistantMilestone({
+        assistantInputIds: ["input_lifecycle_milestones_1"],
+        at: instant(at),
+        authenticatedUserId: "member_latency_1",
+        milestone: "pending_reply_admitted",
+        prisma,
+        runtimeAttemptId: "attempt_lifecycle_milestones_1",
+        runtimeLeaseGeneration: "1",
+        source: "linq",
+      })).resolves.toEqual({
+        matchedCount: 1,
+        recorded: true,
+        unmatchedCount: 0,
+      });
+    }
+    for (const milestone of [
+      "foreground_input_selected",
+      "assistant_input_accepted_for_execution",
+    ] as const) {
+      for (const at of [
+        "2026-06-02T19:11:51.600Z",
+        "2026-06-02T19:11:51.500Z",
+        "2026-06-02T19:11:51.700Z",
+      ]) {
+        await expect(recordHostedIngressAssistantMilestone({
+          assistantInputIds: ["input_lifecycle_milestones_1"],
+          at: instant(at),
+          authenticatedUserId: "member_latency_1",
+          milestone,
+          prisma,
+          runtimeAttemptId: "attempt_lifecycle_milestones_1",
+          runtimeLeaseGeneration: "1",
+          source: "linq",
+        })).resolves.toEqual({
+          matchedCount: 1,
+          recorded: true,
+          unmatchedCount: 0,
+        });
+      }
+    }
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      assistant: {
+        assistantInputAcceptedForExecutionAtEpochMs:
+          Date.parse("2026-06-02T19:11:51.500Z"),
+        foregroundInputSelectedAtEpochMs:
+          Date.parse("2026-06-02T19:11:51.500Z"),
+        pendingReplyAdmittedAtEpochMs:
+          Date.parse("2026-06-02T19:11:51.200Z"),
+        runtimeLeaseGeneration: "1",
+      },
+      schemaVersion: 1,
+    });
+
+    for (const [milestone, runtimeLeaseGeneration] of [
+      ["foreground_input_selected", "2"],
+      ["assistant_input_accepted_for_execution", "1"],
+    ] as const) {
+      await expect(recordHostedIngressAssistantMilestone({
+        assistantInputIds: ["input_lifecycle_milestones_1"],
+        at: instant("2026-06-02T19:11:51.100Z"),
+        authenticatedUserId: "member_latency_1",
+        milestone,
+        prisma,
+        runtimeAttemptId: "attempt_other_lifecycle_milestones_1",
+        runtimeLeaseGeneration,
+        source: "linq",
+      })).resolves.toEqual({
+        matchedCount: 0,
+        recorded: false,
+        unmatchedCount: 1,
+      });
+    }
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      assistant: {
+        assistantInputAcceptedForExecutionAtEpochMs:
+          Date.parse("2026-06-02T19:11:51.500Z"),
+        foregroundInputSelectedAtEpochMs:
+          Date.parse("2026-06-02T19:11:51.500Z"),
+        pendingReplyAdmittedAtEpochMs:
+          Date.parse("2026-06-02T19:11:51.200Z"),
+        runtimeLeaseGeneration: "1",
+      },
+      schemaVersion: 1,
+    });
+  });
+
+  it("transfers unresolved lifecycle ownership monotonically to a recovery attempt", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:12:00.000Z")),
+    });
+    const assistantInputId = "input_lifecycle_recovery_1";
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId,
+      at: instant("2026-06-02T19:12:01.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_lifecycle_recovery_a",
+      source: "linq",
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: [assistantInputId],
+      at: instant("2026-06-02T19:12:02.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "assistant_input_accepted_for_execution",
+      prisma,
+      runtimeAttemptId: "attempt_lifecycle_recovery_b",
+      runtimeLeaseGeneration: "2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: [assistantInputId],
+      at: instant("2026-06-02T19:12:03.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "first_codex_output_observed",
+      prisma,
+      runtimeAttemptId: "attempt_lifecycle_recovery_b",
+      runtimeLeaseGeneration: "2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: [assistantInputId],
+      at: instant("2026-06-02T19:12:01.500Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "assistant_input_accepted_for_execution",
+      prisma,
+      runtimeAttemptId: "attempt_lifecycle_recovery_a",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 1,
+    });
+
+    expect(prisma.readTrace()).toMatchObject({
+      phaseBreakdownJson: {
+        assistant: {
+          assistantInputAcceptedForExecutionAtEpochMs:
+            Date.parse("2026-06-02T19:12:02.000Z"),
+          firstCodexOutputObservedAtEpochMs:
+            Date.parse("2026-06-02T19:12:03.000Z"),
+          runtimeLeaseGeneration: "2",
+        },
+        schemaVersion: 1,
+      },
+      runtimeAttemptId: "attempt_lifecycle_recovery_b",
+    });
+
+    await recordHostedIngressProviderStarted({
+      assistantInputIds: [assistantInputId],
+      at: instant("2026-06-02T19:12:04.000Z"),
+      authenticatedUserId: "member_latency_1",
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_lifecycle_recovery_b",
+      source: "linq",
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: [assistantInputId],
+      at: instant("2026-06-02T19:12:05.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "assistant_input_accepted_for_execution",
+      prisma,
+      runtimeAttemptId: "attempt_lifecycle_recovery_c",
+      runtimeLeaseGeneration: "3",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 1,
+    });
+    expect(prisma.readTrace()?.runtimeAttemptId).toBe(
+      "attempt_lifecycle_recovery_b",
+    );
   });
 
   it("transfers terminal refresh ownership to the recovery attempt", async () => {
@@ -1552,24 +1798,32 @@ describe("hosted runtime latency dashboard store", () => {
       "UPDATE hosted_ingress_latency_trace AS trace",
     );
     expect(prisma.readTransactionCallCount()).toBe(
-      transactionCountBeforeCheckpointPublication,
+      transactionCountBeforeCheckpointPublication + 3,
     );
   });
 
   it("caps checkpoint-publication collection writes with truncation evidence", async () => {
     const queryRaw = vi.fn(async (query: unknown) => {
-      void query;
+      const sql = (query as { strings: string[] }).strings.join("");
+      if (sql.includes(
+        "hosted_ingress_checkpoint_publication_expected_by_lock",
+      )) {
+        return [{ id: "trace_checkpoint_bounded_1" }];
+      }
       return [{
         matchedCount: 250n,
         truncated: true,
       }];
     });
+    const transaction = vi.fn(async (
+      callback: (tx: { $queryRaw: typeof queryRaw }) => Promise<unknown>,
+    ) => await callback({ $queryRaw: queryRaw }));
 
     await expect(recordHostedIngressRuntimeMilestone({
       at: instant("2026-06-02T19:50:00.000Z"),
       authenticatedUserId: "member_latency_1",
       milestone: "checkpoint_publication_expected_by",
-      prisma: { $queryRaw: queryRaw } as never,
+      prisma: { $transaction: transaction } as never,
       runtimeAttemptId: "attempt_checkpoint_bounded_1",
       runtimeLeaseGeneration: "1",
       source: "linq",
@@ -1580,14 +1834,31 @@ describe("hosted runtime latency dashboard store", () => {
       unmatchedCount: 0,
     });
 
-    const query = queryRaw.mock.calls[0]?.[0] as unknown as {
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: "ReadCommitted" },
+    );
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    const lockQuery = queryRaw.mock.calls[0]?.[0] as unknown as {
       strings: string[];
       values: unknown[];
     };
+    const query = queryRaw.mock.calls[1]?.[0] as unknown as {
+      strings: string[];
+      values: unknown[];
+    };
+    const lockSql = lockQuery.strings.join("");
     const sql = query.strings.join("");
+    expect(lockSql).toContain(
+      "hosted_ingress_checkpoint_publication_expected_by_lock",
+    );
+    expect(lockSql).toContain("ORDER BY trace.id");
+    expect(lockSql).toContain("FOR UPDATE OF trace");
     expect(sql).toContain("eligible_candidates AS MATERIALIZED");
     expect(sql).toContain("ORDER BY trace.accepted_at DESC");
+    expect(sql).toContain("trace.id IN (");
     expect(sql).toMatch(/LIMIT\s+/u);
+    expect(lockQuery.values).toContain(251);
     expect(query.values).toContain(251);
     expect(query.values).toContain(250);
   });
@@ -1734,47 +2005,6 @@ describe("hosted runtime latency dashboard store", () => {
     });
   });
 
-  it("ignores legacy Linq egress guard-only provider events", async () => {
-    const prisma = createLatencyWritePrisma({
-      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:20:20.000Z")),
-    });
-
-    await recordHostedIngressAssistantInputStaged({
-      assistantInputId: "input_legacy_guard_1",
-      at: instant("2026-06-02T19:20:21.000Z"),
-      authenticatedUserId: "member_latency_1",
-      mailboxItemId: "mailbox_latency_1",
-      prisma,
-      runtimeAttemptId: "attempt_legacy_guard_1",
-      source: "linq",
-    });
-    const result = await recordHostedIngressProviderStarted({
-      assistantInputIds: ["input_legacy_guard_1"],
-      at: instant("2026-06-02T19:20:22.000Z"),
-      authenticatedUserId: "member_latency_1",
-      phaseBreakdown: {
-        provider: {
-          linqEgressGuardMs: 17,
-        },
-        schemaVersion: 1,
-      },
-      prisma,
-      providerRequestOrdinal: 0,
-      runtimeAttemptId: "attempt_legacy_guard_1",
-      source: "linq",
-    });
-
-    expect(result).toEqual({
-      matchedCount: 0,
-      recorded: false,
-      unmatchedCount: 0,
-    });
-    expect(prisma.readTrace()?.providerStartAt).toBeNull();
-    expect(prisma.readTrace()?.providerRequestOrdinal).toBeNull();
-    expect(prisma.readTrace()?.phaseBreakdownJson).toBeNull();
-    expect(prisma.readSetBasedMutationSql()).toHaveLength(0);
-  });
-
   it("uses one set-based mutation at the maximum admitted assistant-input cardinality", async () => {
     const assistantInputIds = Array.from(
       { length: HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS },
@@ -1846,7 +2076,11 @@ describe("hosted runtime latency dashboard store", () => {
       expect(sql.match(/UPDATE hosted_ingress_latency_trace AS trace/gu)).toHaveLength(1);
       expect(sql).toContain("statement_timestamp() AT TIME ZONE 'UTC'");
       expect(sql).not.toContain("CURRENT_TIMESTAMP");
-      expect(sql).not.toContain("FOR UPDATE");
+      expect(sql).toContain("ORDER BY trace.id");
+      expect(sql).toContain("FOR UPDATE OF trace SKIP LOCKED");
+      expect(sql).toMatch(
+        /FROM locked\s+WHERE locked\.assistant_input_id = requested\.assistant_input_id/u,
+      );
     }
     expect(prisma.readTransactionCallCount()).toBe(0);
   });
@@ -2029,6 +2263,17 @@ describe("hosted runtime latency dashboard store", () => {
           replacedStaleFence: true,
           freshStartRequestedAtEpochMs: 1_777_000_000_070,
           freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+          freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
+          freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
+          freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_083,
+          freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_084,
+          freshStartContainerOnStartAtEpochMs: 1_777_000_000_085,
+          freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_086,
+          freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_087,
+          freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_088,
+          freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_084,
+          freshStartContainerListeningAtEpochMs: 1_777_000_000_085,
+          freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_089,
           freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
           freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
           freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
@@ -2077,6 +2322,17 @@ describe("hosted runtime latency dashboard store", () => {
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+        freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
+        freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
+        freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_083,
+        freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_084,
+        freshStartContainerOnStartAtEpochMs: 1_777_000_000_085,
+        freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_086,
+        freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_087,
+        freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_088,
+        freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_084,
+        freshStartContainerListeningAtEpochMs: 1_777_000_000_085,
+        freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_089,
         freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
@@ -2145,6 +2401,17 @@ describe("hosted runtime latency dashboard store", () => {
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+        freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
+        freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
+        freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_083,
+        freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_084,
+        freshStartContainerOnStartAtEpochMs: 1_777_000_000_085,
+        freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_086,
+        freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_087,
+        freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_088,
+        freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_084,
+        freshStartContainerListeningAtEpochMs: 1_777_000_000_085,
+        freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_089,
         freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
@@ -2203,6 +2470,17 @@ describe("hosted runtime latency dashboard store", () => {
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
+        freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
+        freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
+        freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_083,
+        freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_084,
+        freshStartContainerOnStartAtEpochMs: 1_777_000_000_085,
+        freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_086,
+        freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_087,
+        freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_088,
+        freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_084,
+        freshStartContainerListeningAtEpochMs: 1_777_000_000_085,
+        freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_089,
         freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
@@ -2318,6 +2596,14 @@ describe("hosted runtime latency dashboard store", () => {
       wake: { foregroundImportStartedAtEpochMs: 1_777_000_001_011 },
     });
     const setBasedSql = prisma.readSetBasedMutationSql().join("\n");
+    const sharedRuleKinds = new Set(
+      Object.values(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES)
+        .flatMap((phaseRules) => Object.values(phaseRules))
+        .map((rule) => rule.kind),
+    );
+    for (const ruleKind of sharedRuleKinds) {
+      expect(setBasedSql).toContain(`WHEN '${ruleKind}'`);
+    }
     expect(setBasedSql).toContain("WHEN 'opaque_identifier'");
     expect(setBasedSql).toContain("length(leaf.value #>> '{}') <= 192");
     expect(setBasedSql).toContain("~ '^[A-Za-z0-9][A-Za-z0-9._:-]*$'");
@@ -2555,6 +2841,7 @@ function createLinkedDashboardRow(input: {
   acceptedAt: string;
   attemptedAt: string;
   deliveryAcceptedAt?: string | null;
+  deliveredAt?: string | null;
   deliveryId: string;
   deliveryStatus?: string;
   intentId: string;
@@ -2564,6 +2851,11 @@ function createLinkedDashboardRow(input: {
 }): LatencyDashboardRow {
   const acceptedAt = instant(input.acceptedAt);
   const attemptedAt = instant(input.attemptedAt);
+  const receiptAt = input.receiptAt === null
+    ? null
+    : input.receiptAt
+      ? instant(input.receiptAt)
+      : new Date(attemptedAt.getTime() + 1_000);
   return {
     acceptedAt,
     assistantInputStagedAt: new Date(acceptedAt.getTime() + 500),
@@ -2574,11 +2866,10 @@ function createLinkedDashboardRow(input: {
           ? instant(input.deliveryAcceptedAt)
           : new Date(attemptedAt.getTime() + 500),
       attemptedAt,
-      lastReceiptAt: input.receiptAt === null
-        ? null
-        : input.receiptAt
-          ? instant(input.receiptAt)
-          : new Date(attemptedAt.getTime() + 1_000),
+      deliveredAt: input.deliveredAt === undefined
+        ? receiptAt
+        : input.deliveredAt === null ? null : instant(input.deliveredAt),
+      lastReceiptAt: receiptAt,
       sourceRef: deliverySourceRef(input.intentId),
       status: input.deliveryStatus ?? "delivered",
     },
@@ -2671,6 +2962,9 @@ function createLatencyWritePrisma(input: {
           sql.includes("hosted_ingress_provider_started_set_based")
           || sql.includes("hosted_ingress_assistant_milestone_set_based")
           || sql.includes(
+            "hosted_ingress_checkpoint_publication_expected_by_lock",
+          )
+          || sql.includes(
             "hosted_ingress_checkpoint_publication_expected_by_set_based",
           )
         ) {
@@ -2690,6 +2984,11 @@ function createLatencyWritePrisma(input: {
               trace,
               query.values,
             );
+          }
+          if (sql.includes(
+            "hosted_ingress_checkpoint_publication_expected_by_lock",
+          )) {
+            return trace ? [{ id: trace.id }] : [];
           }
           return applyHostedIngressCheckpointPublicationSetBasedMutation(
             trace,
@@ -2713,7 +3012,7 @@ function createLatencyWritePrisma(input: {
         const traceId = query.values[2];
         const mailboxItemId = query.values[3];
         if (
-          typeof replyRuntimeAttemptId !== "string"
+          (replyRuntimeAttemptId !== null && typeof replyRuntimeAttemptId !== "string")
           || typeof linqDeliveryId !== "string"
           || typeof traceId !== "string"
           || typeof mailboxItemId !== "string"
@@ -2774,6 +3073,8 @@ function createLatencyWritePrisma(input: {
         mailboxItemId,
         mailboxLane,
         mailboxLaneSeq,
+        _ingressTypingAcceptedAt,
+        _webhookReceivedAt,
         acceptedAt,
       ] = values;
       trace = createMutableLatencyTrace({
@@ -2820,7 +3121,10 @@ function createLatencyWritePrisma(input: {
   type LatencyPrismaFake = {
     $executeRaw: typeof executeRaw;
     $queryRaw: typeof queryRaw;
-    $transaction: <T>(callback: (tx: LatencyPrismaFake) => Promise<T>) => Promise<T>;
+    $transaction: <T>(
+      callback: (tx: LatencyPrismaFake) => Promise<T>,
+      options?: { isolationLevel?: string },
+    ) => Promise<T>;
     hostedIngressLatencyTrace: {
       findMany: typeof findMany;
       findUnique: typeof findUnique;
@@ -2837,7 +3141,11 @@ function createLatencyWritePrisma(input: {
     readDeliveryLinkSql: () => string;
   };
   const prisma: LatencyPrismaFake = {
-    $transaction: async <T>(callback: (tx: LatencyPrismaFake) => Promise<T>): Promise<T> => {
+    $transaction: async <T>(
+      callback: (tx: LatencyPrismaFake) => Promise<T>,
+      options?: { isolationLevel?: string },
+    ): Promise<T> => {
+      void options;
       transactionCallCount += 1;
       return await callback(prisma);
     },
@@ -2965,11 +3273,15 @@ function applyHostedIngressAssistantMilestoneSetBasedMutation(
   );
   const milestoneLeaf = readNullableSqlString(values[6], "assistant milestone leaf");
   const keepEarliest = readSqlBoolean(values[7], "assistant milestone earliest flag");
-  const terminalNonReplyProjection = readSqlBoolean(
+  const lifecycleProjection = readSqlBoolean(
     values[8],
+    "assistant milestone lifecycle projection",
+  );
+  const terminalNonReplyProjection = readSqlBoolean(
+    values[9],
     "assistant milestone terminal projection",
   );
-  const assistantInputIds = values.slice(10).map((value) =>
+  const assistantInputIds = values.slice(11).map((value) =>
     readSqlString(value, "assistant milestone assistant input id")
   );
 
@@ -2978,8 +3290,38 @@ function applyHostedIngressAssistantMilestoneSetBasedMutation(
       && trace.assistantInputId === assistantInputId
       && trace.userId === userId
       && trace.source === source;
-    const matched = traced
-      && (terminalNonReplyProjection || trace.runtimeAttemptId === runtimeAttemptId);
+    const phaseBreakdown = trace
+      ? readJsonRecord(trace.phaseBreakdownJson) ?? {}
+      : {};
+    const assistant = readJsonRecord(phaseBreakdown.assistant) ?? {};
+    const storedRuntimeLeaseGeneration = readLatencyLeaseGeneration(
+      assistant.runtimeLeaseGeneration,
+    );
+    const generationComparison = storedRuntimeLeaseGeneration === null
+      ? 1
+      : compareLatencyLeaseGenerations(
+          runtimeLeaseGeneration,
+          storedRuntimeLeaseGeneration,
+        );
+    const exactAttempt = trace?.runtimeAttemptId === runtimeAttemptId;
+    const unresolved = trace !== null
+      && trace.providerStartAt === null
+      && trace.replyRuntimeAttemptId === null
+      && trace.linqDeliveryId === null
+      && !isSafeLatencyJsonInteger(
+        assistant.terminalNonReplyCommittedAtEpochMs,
+      );
+    const matched = traced && (
+      terminalNonReplyProjection
+      || (
+        lifecycleProjection
+        && (
+          (exactAttempt && generationComparison >= 0)
+          || (unresolved && generationComparison > 0)
+        )
+      )
+      || (!lifecycleProjection && exactAttempt)
+    );
     if (!matched || !trace) {
       return { assistantInputId, matched: false, traced };
     }
@@ -2988,6 +3330,17 @@ function applyHostedIngressAssistantMilestoneSetBasedMutation(
       applyTerminalNonReplyMilestoneMutation(trace, {
         atEpochMs,
         checkpointPublicationExpectedByEpochMs,
+        runtimeAttemptId,
+        runtimeLeaseGeneration,
+      });
+    } else if (lifecycleProjection) {
+      if (!milestoneLeaf) {
+        throw new Error("Lifecycle assistant milestone test stub is missing its leaf.");
+      }
+      applyLifecycleAssistantMilestoneMutation(trace, {
+        atEpochMs,
+        keepEarliest,
+        milestoneLeaf,
         runtimeAttemptId,
         runtimeLeaseGeneration,
       });
@@ -3103,6 +3456,27 @@ function applyOrdinaryAssistantMilestoneMutation(
   nextPhaseBreakdown.assistant = nextAssistant;
   trace.phaseBreakdownJson = nextPhaseBreakdown;
   trace.updatedAt = instant("2026-06-02T12:00:00.000Z");
+}
+
+function applyLifecycleAssistantMilestoneMutation(
+  trace: MutableLatencyTrace,
+  input: {
+    atEpochMs: number;
+    keepEarliest: boolean;
+    milestoneLeaf: string;
+    runtimeAttemptId: string;
+    runtimeLeaseGeneration: string;
+  },
+): void {
+  applyOrdinaryAssistantMilestoneMutation(trace, input);
+  const phaseBreakdown = readJsonRecord(trace.phaseBreakdownJson) ?? {};
+  const assistant = readJsonRecord(phaseBreakdown.assistant) ?? {};
+  phaseBreakdown.assistant = {
+    ...assistant,
+    runtimeLeaseGeneration: input.runtimeLeaseGeneration,
+  };
+  trace.phaseBreakdownJson = phaseBreakdown;
+  trace.runtimeAttemptId = input.runtimeAttemptId;
 }
 
 function applyTerminalNonReplyMilestoneMutation(

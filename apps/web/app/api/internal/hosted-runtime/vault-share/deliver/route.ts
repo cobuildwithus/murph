@@ -1,4 +1,8 @@
 import {
+  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD,
+} from "@murphai/hosted-execution/routes";
+import {
+  filterHostedVaultShareHistoryRecords,
   isHostedVaultShareCurrentStateProjectionKind,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
@@ -27,17 +31,20 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
-  findActiveHostedVaultShares,
-  buildHostedVaultShareGenerationToken,
+  findActiveHostedVaultSharePage,
   hasUnmaterializedHostedVaultShareProjectionGeneration,
   replaceHostedVaultShareProjectionSnapshot,
+  type HostedVaultShareReplacementDeferralReason,
 } from "@/src/lib/hosted-vault-share/projection-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
-const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS = 60;
 const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+type HostedVaultShareDeliverPageResponse = HostedVaultShareDeliverResponse & {
+  [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD]?: string;
+};
 
 const NO_ACTIVE_SHARE_RESPONSE: HostedVaultShareDeliverResponse = {
   status: "no-active-share",
@@ -85,29 +92,46 @@ export const POST = withJsonError(async (request: Request) => {
   }
   const body = parseHostedVaultShareDeliverRequest(rawBody);
 
-  const shares = await findActiveHostedVaultShares({
+  const continuation = rawBody[
+    HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD
+  ];
+  const page = await findActiveHostedVaultSharePage({
+    ...(continuation === undefined ? {} : { continuation }),
     grantorMemberId,
     ...(body.projectionMode ? { projectionMode: body.projectionMode } : {}),
     projectionScope: body.projectionScope,
+    sourceWorkspaceVersion: body.sourceWorkspaceVersion,
   });
-  if (shares.length === 0) {
+  if (body.expectedGenerationToken !== page.generationToken) {
+    // A continuation proves that an earlier page only partially drained the
+    // expected cohort. If that cohort changes between pages, never acknowledge
+    // completion: the durable caller must restart against the new generation.
+    if (continuation !== undefined) {
+      throw createHostedVaultShareDeliveryDeferredError("pagination_generation_changed");
+    }
     if (await hasUnmaterializedHostedVaultShareProjectionGeneration({
       grantorMemberId,
       projectionScope: body.projectionScope,
     })) {
-      throw createHostedVaultShareDeliveryDeferredError();
+      throw createHostedVaultShareDeliveryDeferredError("stale_generation_unmaterialized");
     }
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
-  if (
-    body.expectedGenerationToken
-      !== buildHostedVaultShareGenerationToken(shares.map((share) => share.id))
-  ) {
+  if (page.shares.length === 0) {
+    if (page.continuation !== null) {
+      return jsonOk(buildHostedVaultShareDeliverPageResponse(
+        NO_ACTIVE_SHARE_RESPONSE,
+        page.continuation,
+      ));
+    }
+    if (page.hasActiveShares) {
+      return jsonOk(DELIVERED_RESPONSE);
+    }
     if (await hasUnmaterializedHostedVaultShareProjectionGeneration({
       grantorMemberId,
       projectionScope: body.projectionScope,
     })) {
-      throw createHostedVaultShareDeliveryDeferredError();
+      throw createHostedVaultShareDeliveryDeferredError("inactive_generation_unmaterialized");
     }
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
@@ -115,20 +139,28 @@ export const POST = withJsonError(async (request: Request) => {
   // An all-stale offer replaces the prior snapshot with an encrypted empty snapshot. The
   // response still reflects share configuration only, so staleness cannot probe finer-
   // grained share state or leave old records visible after an empty refresh.
-  const records = filterDeliverableRecords(body.records, body.projectionKind);
+  const records = filterDeliverableRecords(body.records, body.projectionScope, body.memberTimeZone);
   let delivered = false;
   let deliveryFailed = false;
   let scopeFailed = false;
   let deliveryDeferred = false;
+  let replacementDeferralReason: HostedVaultShareReplacementDeferralReason | undefined;
 
-  for (const share of shares) {
+  for (const share of page.shares) {
     if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
+      console.error("Hosted vault-share delivery stopped before destination admission.", {
+        errorCode: HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
+        deadlineElapsed: Date.now() >= effectDeadlineAtEpochMs,
+        requestAborted: request.signal.aborted,
+      });
       deliveryFailed = true;
       break;
     }
     try {
       const outcome = await replaceHostedVaultShareProjectionSnapshot({
         deadlineAtEpochMs: effectDeadlineAtEpochMs,
+        memberTimeZone: body.memberTimeZone,
+        onDeferral: (reason) => { replacementDeferralReason ??= reason; },
         ...(body.projectionMode ? { projectionMode: body.projectionMode } : {}),
         records,
         share,
@@ -138,6 +170,15 @@ export const POST = withJsonError(async (request: Request) => {
       delivered ||= outcome === "replaced";
       deliveryDeferred ||= outcome === "no-active-share";
     } catch (error) {
+      // Preserve the original failure even when the effect deadline has elapsed.
+      // Never include payload fields, timestamps, or raw destination identifiers.
+      console.error("Hosted vault-share delivery to a destination share failed.", {
+        ...formatHostedExecutionSafeLogErrorDetails(error, {
+          code: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
+        }),
+        deadlineElapsed: Date.now() >= effectDeadlineAtEpochMs,
+        requestAborted: request.signal.aborted,
+      });
       if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
         deliveryFailed = true;
         break;
@@ -150,12 +191,6 @@ export const POST = withJsonError(async (request: Request) => {
       // Best-effort per destination: one failing share must not block replacement for
       // the others when its member-specific root is absent. Unknown crypto, access,
       // database, and transaction failures stop fanout because they may be systemic.
-      // Log only redacted error details — never payload fields, timestamps, or raw ids.
-      console.error("Hosted vault-share delivery to a destination share failed.", {
-        ...formatHostedExecutionSafeLogErrorDetails(error, {
-          code: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
-        }),
-      });
       if (deliveryFailed) {
         break;
       }
@@ -173,14 +208,29 @@ export const POST = withJsonError(async (request: Request) => {
     );
   }
   if (deliveryDeferred) {
-    throw createHostedVaultShareDeliveryDeferredError();
-  }
-  if (deliveryDeferred) {
-    throw createHostedVaultShareDeliveryDeferredError();
+    throw createHostedVaultShareDeliveryDeferredError(
+      "replacement_no_active_share",
+      replacementDeferralReason,
+    );
   }
 
-  return jsonOk(delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE);
+  return jsonOk(buildHostedVaultShareDeliverPageResponse(
+    delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE,
+    page.continuation,
+  ));
 });
+
+function buildHostedVaultShareDeliverPageResponse(
+  response: HostedVaultShareDeliverResponse,
+  continuation: string | null,
+): HostedVaultShareDeliverPageResponse {
+  return continuation === null
+    ? response
+    : {
+        ...response,
+        [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD]: continuation,
+      };
+}
 
 function createHostedVaultShareDeliveryError(
   code:
@@ -195,7 +245,23 @@ function createHostedVaultShareDeliveryError(
   });
 }
 
-function createHostedVaultShareDeliveryDeferredError(): Error {
+function createHostedVaultShareDeliveryDeferredError(
+  reason:
+    | "pagination_generation_changed"
+    | "stale_generation_unmaterialized"
+    | "inactive_generation_unmaterialized"
+    | "replacement_no_active_share",
+  replacementDeferralReason?: HostedVaultShareReplacementDeferralReason,
+): Error {
+  try {
+    console.warn("Hosted vault-share delivery deferred.", {
+      schema: "murph.hosted-vault-share-delivery-deferred.v1",
+      reason,
+      ...(replacementDeferralReason === undefined ? {} : { replacementDeferralReason }),
+    });
+  } catch {
+    // Best-effort telemetry must not change the deferred response.
+  }
   return hostedOnboardingError({
     code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
     httpStatus: 503,
@@ -204,31 +270,22 @@ function createHostedVaultShareDeliveryDeferredError(): Error {
   });
 }
 
-/**
- * Bounds each replacement snapshot to records inside a sane recency window. Out-of-window
- * records are silently dropped rather than rejected so one stale record never poisons
- * delivery of the fresh ones. Honest runtimes only ever offer the latest few records.
- *
- * The age bound applies only to time-series kinds whose recordKey space grows with time.
- * Current-state kinds have one parser-enforced fixed recordKey and a content-only delivery
- * revision (see isHostedVaultShareCurrentStateProjectionKind), so occurredAt neither mints
- * dedupe keys nor needs a recency bound — a name set long ago is still the current name at
- * a member's first group join.
- */
+/** The signed runtime supplies canonical date context, never consent authority. */
 function filterDeliverableRecords(
   records: readonly HostedVaultShareDeliveryRecord[],
-  projectionKind: HostedVaultShareProjectionScope["projectionKind"],
+  projectionScope: HostedVaultShareProjectionScope,
+  memberTimeZone?: string,
 ): HostedVaultShareDeliveryRecord[] {
+  if (memberTimeZone) {
+    return filterHostedVaultShareHistoryRecords({ records, scope: projectionScope, timeZone: memberTimeZone });
+  }
+  // Preserve the deployed legacy guard during consumer-first rollout.
   const nowMs = Date.now();
-  const minOccurredAtMs = isHostedVaultShareCurrentStateProjectionKind(projectionKind)
-    ? Number.NEGATIVE_INFINITY
-    : nowMs - HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS * DAY_MS;
-
+  const earliest = isHostedVaultShareCurrentStateProjectionKind(projectionScope.projectionKind)
+    ? Number.NEGATIVE_INFINITY : nowMs - 60 * DAY_MS;
+  const latest = nowMs + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS * DAY_MS;
   return records.filter((record) => {
-    const occurredAtMs = Date.parse(record.occurredAt);
-
-    return !Number.isNaN(occurredAtMs)
-      && occurredAtMs <= nowMs + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS * DAY_MS
-      && occurredAtMs >= minOccurredAtMs;
+    const occurredAt = Date.parse(record.occurredAt);
+    return occurredAt >= earliest && occurredAt <= latest;
   });
 }

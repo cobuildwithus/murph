@@ -93,8 +93,19 @@ assert_clean_cli_inputs() {
 
 assert_clean_cli_inputs
 
-if ! pnpm --dir "$repo_root/packages/cli" gen:config-schema >/dev/null 2>&1; then
+if schema_generator_output="$(
+  pnpm --dir "$repo_root/packages/cli" gen:config-schema 2>&1
+)"; then
+  :
+else
+  schema_generator_output="${schema_generator_output//$repo_root/<repo>}"
+  schema_generator_output="${schema_generator_output//$HOME/<home>}"
+  if [[ -n "$schema_generator_output" ]]; then
+    echo "pre-commit: CLI config-schema generator output:" >&2
+    printf '%s\n' "$schema_generator_output" >&2
+  fi
   echo "pre-commit: CLI config-schema generation failed; commit continues, CI will verify." >&2
+  echo "pre-commit: refresh workspace artifacts with 'pnpm --dir packages/cli verify:prepared-runtime', then rerun 'pnpm --dir packages/cli gen:config-schema'." >&2
   exit 0
 fi
 

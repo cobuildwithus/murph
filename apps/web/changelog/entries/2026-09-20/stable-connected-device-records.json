@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "stable-connected-device-records",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Fewer duplicate device records",
+    "summary": "Connected-device sync keeps the same source identity when background processing restarts.",
+    "details": "Repeated imports continue to refer to the same connected source, reducing duplicate records from unchanged readings. Existing records are preserved.",
+    "relevanceTags": ["devices", "sync"],
+    "sourcePullRequests": [3620]
+  }
+}

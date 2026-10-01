@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 50,
+  "item": {
+    "id": "faster-replies-after-idle-time",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster wake-ups for replies",
+    "summary": "When Murph's hosted assistant wakes after idle time, it now skips unnecessary setup work and retries a stalled startup check sooner before working on your message.",
+    "details": "Older saved state still receives full compatibility checks. Overall startup and health checks remain in place, and unsupported state or true startup failures still stop safely.",
+    "relevanceTags": ["assistant", "performance", "reliability"],
+    "sourcePullRequests": [2462, 2669]
+  }
+}

@@ -203,10 +203,14 @@ status: available
 
     await assert.rejects(
       () => readVault(vaultRoot),
-      (error) =>
-        typeof error === "object" &&
-        error !== null &&
-        (error as { code?: string }).code === "FRONTMATTER_INVALID",
+      {
+        code: "QUERY_SOURCE_INVALID",
+        details: {
+          issue: "frontmatter_contract_invalid",
+          querySource: true,
+          relativePath: "bank/protocols/broken.md",
+        },
+      },
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

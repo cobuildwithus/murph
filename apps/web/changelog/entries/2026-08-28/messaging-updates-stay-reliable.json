@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-28",
+  "order": 100,
+  "item": {
+    "id": "messaging-updates-stay-reliable",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Messaging updates stay reliable",
+    "summary": "Murph now keeps overlapping replies, edits, and conversation updates in a consistent order, preventing a rare failure when several happen together.",
+    "details": "Private signup and access follow-ups stay tied to the member's authorized phone or email address, with recipient checks repeated immediately before sending.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": [2400]
+  }
+}

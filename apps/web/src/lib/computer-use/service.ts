@@ -31,7 +31,6 @@ import {
   type ComputerRunCheckpointContext,
   type ComputerRunRecord,
   type ComputerUseStore,
-  type PersistedComputerHandoffPurpose,
 } from "./store";
 
 const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
@@ -49,6 +48,7 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
 type ReplaceRunBrowserInput = Parameters<ComputerUseStore["replaceRunBrowser"]>[0];
 type PreparedRunBrowser = {
+  liveViewUrl: string;
   replaceInput: ReplaceRunBrowserInput;
 };
 type AmbiguousBrowserWriteReplayResult = ComputerRunRecord | "unknown" | null;
@@ -146,7 +146,7 @@ export type ComputerHandoffPageState =
     }
   | {
       kind: "checkpointing";
-      purpose: PersistedComputerHandoffPurpose;
+      purpose: HostedComputerHandoffPurpose;
       returnContactKind: HostedComputerReturnContactKind | null;
       suggestedReply: string | null;
     }
@@ -400,7 +400,6 @@ export class ComputerUseService {
         saveChanges: true,
         timeoutSeconds: requireRemainingKernelTimeoutSeconds(reservedRun, browserCreateNow),
       });
-      this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       const initialState = startUrl
         ? await this.navigateKernelBrowserToUrl({
             sessionId: browser.sessionId,
@@ -658,11 +657,9 @@ export class ComputerUseService {
 
     const handoff = input.handoffPurpose
       ? await this.createHandoff({
-          memberId: input.memberId,
           purpose: input.handoffPurpose,
           returnContactKind: input.pauseDeliveryContext?.returnContactKind ?? null,
-          runExpiresAt: run.expiresAt,
-          runId: run.id,
+          run,
           suggestedReply: input.suggestedReply,
         }, store)
       : null;
@@ -924,20 +921,6 @@ export class ComputerUseService {
       };
     }
 
-    if (isRetiredStaticPreviewHandoff(handoff)) {
-      const expired = await this.store.markHandoffExpired({
-        expectedStatus: "open",
-        expectedUpdatedAt: handoff.updatedAt,
-        handoffId: handoff.id,
-        now,
-      });
-      return {
-        kind: "expired",
-        returnContactKind: expired.returnContactKind,
-        suggestedReply: expired.suggestedReply,
-      };
-    }
-
     if (handoff.purpose === "managed_login") {
       return {
         kind: "managed_login",
@@ -945,21 +928,7 @@ export class ComputerUseService {
       };
     }
 
-    const liveViewUrl = await this.crypto.decryptRunSecret({
-      field: "kernel-live-view-url",
-      memberId: run.memberId,
-      runId: run.id,
-      value: run.kernelLiveViewUrlEncrypted,
-    });
-
-    if (!liveViewUrl) {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_LIVE_VIEW_MISSING",
-        message: "Computer handoff is not available.",
-        retryable: true,
-      });
-    }
-    this.assertAllowedLiveViewUrl(liveViewUrl);
+    const liveViewUrl = await this.requireAllowedLiveViewUrl(run);
 
     return {
       handoffId: handoff.id,
@@ -967,7 +936,7 @@ export class ComputerUseService {
       interaction: "takeover",
       kind: "open",
       liveViewUrl,
-      purpose: requireSupportedPersistedHandoffPurpose(handoff.purpose),
+      purpose: handoff.purpose,
       suggestedReply: handoff.suggestedReply,
     };
   }
@@ -1448,6 +1417,20 @@ export class ComputerUseService {
           input.run,
           input.claimed.updatedAt,
         );
+    if (prepared) {
+      try {
+        this.assertAllowedLiveViewUrl(prepared.liveViewUrl);
+      } catch (error) {
+        if (!await this.deleteBrowserBestEffort(
+          prepared.replaceInput.kernelSessionId,
+        )) {
+          throw browserCleanupFailedError();
+        }
+        throw error;
+      }
+    } else {
+      await this.requireAllowedLiveViewUrl(input.run);
+    }
     const terminalInput = {
       browser: prepared ? managedLoginBrowserFromPrepared(prepared) : null,
       expectedHandoffUpdatedAt: input.claimed.updatedAt,
@@ -1754,27 +1737,28 @@ export class ComputerUseService {
   }
 
   private async createHandoff(input: {
-    memberId: string;
     purpose: HostedComputerHandoffPurpose;
     returnContactKind: HostedComputerReturnContactKind | null;
-    runExpiresAt: Date;
-    runId: string;
+    run: ComputerRunRecord;
     suggestedReply: string | null;
   }, store: ComputerUseStore = this.store): Promise<{
     handoffUrl: string;
     record: ComputerHandoffRecord;
   }> {
+    if (input.purpose !== "managed_login") {
+      await this.requireAllowedLiveViewUrl(input.run);
+    }
     const token = createComputerHandoffToken();
     const expiresAt = new Date(Math.min(
       this.now().getTime() + COMPUTER_HANDOFF_TTL_MS,
-      input.runExpiresAt.getTime(),
+      input.run.expiresAt.getTime(),
     ));
     const record = await store.createHandoff({
       expiresAt,
-      memberId: input.memberId,
+      memberId: input.run.memberId,
       purpose: input.purpose,
       returnContactKind: input.returnContactKind,
-      runId: input.runId,
+      runId: input.run.id,
       suggestedReply: input.suggestedReply,
       tokenHash: sha256Hex(token),
     });
@@ -1892,11 +1876,6 @@ export class ComputerUseService {
     }
 
     const run = input.run;
-    // Interactive handoff links stay interactive once issued.
-    const replacementPurpose =
-      isRetiredStaticPreviewHandoff(existing)
-        ? input.handoffPurpose
-        : requireSupportedPersistedHandoffPurpose(existing.purpose);
     if (existing.status === "open" && existing.expiresAt <= input.now) {
       existing = await input.store.markHandoffExpired({
         expectedStatus: "open",
@@ -1914,11 +1893,10 @@ export class ComputerUseService {
     }
 
     const handoff = await this.createHandoff({
-      memberId: input.memberId,
-      purpose: replacementPurpose,
+      // Interactive handoff links stay interactive once issued.
+      purpose: existing.purpose,
       returnContactKind: existing.returnContactKind,
-      runExpiresAt: run.expiresAt,
-      runId: run.id,
+      run,
       suggestedReply: existing.suggestedReply,
     }, input.store);
     try {
@@ -1973,11 +1951,9 @@ export class ComputerUseService {
     }
 
     const handoff = await this.createHandoff({
-      memberId: input.memberId,
       purpose: input.handoffPurpose,
       returnContactKind: input.pauseDeliveryContext?.returnContactKind ?? null,
-      runExpiresAt: input.run.expiresAt,
-      runId: input.run.id,
+      run: input.run,
       suggestedReply: input.run.suggestedReply,
     }, input.store);
     try {
@@ -2094,7 +2070,7 @@ export class ComputerUseService {
         handoffId: authority.expireHandoffAfterResume.id,
         now: input.now,
       }).catch(() => {
-        // The run is no longer awaiting this stale or retired handoff.
+        // The run is no longer awaiting this stale handoff.
       });
     }
     const sanitizedUrl = sanitizeComputerDisplayUrl(state.url);
@@ -2479,8 +2455,8 @@ export class ComputerUseService {
         saveChanges: true,
         timeoutSeconds: requireRemainingKernelTimeoutSeconds(run, createNow),
       });
-      this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       return {
+        liveViewUrl: browser.liveViewUrl,
         replaceInput: {
           expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
           expectedPendingHandoffId: run.pendingHandoffId,
@@ -2588,7 +2564,6 @@ export class ComputerUseService {
     }
     const pausedAt = run.pausedAt;
     let completedLoginHandoff: ComputerHandoffRecord | null = null;
-    let retiredStaticPreviewHandoff: ComputerHandoffRecord | null = null;
 
     if (run.pendingHandoffId) {
       const pendingHandoff = await store.findHandoffByRun({
@@ -2657,39 +2632,35 @@ export class ComputerUseService {
               message: "Computer run expired.",
             });
           }
-          if (isRetiredStaticPreviewHandoff(pendingHandoff)) {
-            retiredStaticPreviewHandoff = pendingHandoff;
-          } else {
-            if (isExpiredHandoff(pendingHandoff, input.now)) {
-              if (pendingHandoff.status !== "expired") {
-                await store.markHandoffExpired({
-                  expectedStatus: pendingHandoff.status === "checkpointing"
-                    ? "checkpointing"
-                    : "open",
-                  expectedUpdatedAt: pendingHandoff.updatedAt,
-                  handoffId: pendingHandoff.id,
-                  now: input.now,
-                });
-              }
-              throw computerUseConflictError({
-                code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
-                message: "Computer handoff expired.",
-              });
-            }
-            if (isStaleCheckpointingHandoff(pendingHandoff, input.now)) {
+          if (isExpiredHandoff(pendingHandoff, input.now)) {
+            if (pendingHandoff.status !== "expired") {
               await store.markHandoffExpired({
-                expectedStatus: "checkpointing",
+                expectedStatus: pendingHandoff.status === "checkpointing"
+                  ? "checkpointing"
+                  : "open",
                 expectedUpdatedAt: pendingHandoff.updatedAt,
                 handoffId: pendingHandoff.id,
                 now: input.now,
               });
-              throw computerUseConflictError({
-                code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
-                message: "Computer handoff expired.",
-              });
             }
-            return runHandle(run, true);
+            throw computerUseConflictError({
+              code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
+              message: "Computer handoff expired.",
+            });
           }
+          if (isStaleCheckpointingHandoff(pendingHandoff, input.now)) {
+            await store.markHandoffExpired({
+              expectedStatus: "checkpointing",
+              expectedUpdatedAt: pendingHandoff.updatedAt,
+              handoffId: pendingHandoff.id,
+              now: input.now,
+            });
+            throw computerUseConflictError({
+              code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
+              message: "Computer handoff expired.",
+            });
+          }
+          return runHandle(run, true);
         }
       } else if (!run.kernelSessionId) {
         if (await this.expireRunAndDeleteBrowserBestEffort(run, input.now, store) === "failed") {
@@ -2748,10 +2719,6 @@ export class ComputerUseService {
         })
       : await store.markRunRunning({
           awaitingReason: run.awaitingReason,
-          expectedHandoffUpdatedAt:
-            retiredStaticPreviewHandoff?.updatedAt ?? null,
-          expectedHandoffStatus:
-            retiredStaticPreviewHandoff?.status ?? null,
           expectedKernelSessionId: requireKernelSessionId(run),
           expectedPausedAt: pausedAt,
           expectedPendingHandoffId: run.pendingHandoffId,
@@ -2759,16 +2726,6 @@ export class ComputerUseService {
           now: input.now,
           runId: run.id,
         });
-    if (retiredStaticPreviewHandoff?.status === "open") {
-      await store.markHandoffExpired({
-        expectedStatus: "open",
-        expectedUpdatedAt: retiredStaticPreviewHandoff.updatedAt,
-        handoffId: retiredStaticPreviewHandoff.id,
-        now: input.now,
-      }).catch(() => {
-        // The run is no longer awaiting this retired legacy link.
-      });
-    }
     return runHandle(resumed, true);
   }
 
@@ -3483,6 +3440,26 @@ export class ComputerUseService {
   private requireKernel(): ComputerKernelClient {
     this.kernel ??= new KernelComputerClient({ env: this.env });
     return this.kernel;
+  }
+
+  private async requireAllowedLiveViewUrl(
+    run: ComputerRunRecord,
+  ): Promise<string> {
+    const liveViewUrl = await this.crypto.decryptRunSecret({
+      field: "kernel-live-view-url",
+      memberId: run.memberId,
+      runId: run.id,
+      value: run.kernelLiveViewUrlEncrypted,
+    });
+    if (!liveViewUrl) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_LIVE_VIEW_MISSING",
+        message: "Computer handoff is not available.",
+        retryable: true,
+      });
+    }
+    this.assertAllowedLiveViewUrl(liveViewUrl);
+    return liveViewUrl;
   }
 
   private assertAllowedLiveViewUrl(url: string): void {
@@ -4225,21 +4202,6 @@ function isDeferredLoginCheckpointHandoff(
   return handoff.purpose === "login" &&
     handoff.completedAt !== null &&
     (handoff.status === "completed" || handoff.status === "checkpointing");
-}
-
-function isRetiredStaticPreviewHandoff(
-  handoff: { purpose: PersistedComputerHandoffPurpose },
-): handoff is { purpose: "screen_inspection" } {
-  return handoff.purpose === "screen_inspection";
-}
-
-function requireSupportedPersistedHandoffPurpose(
-  purpose: PersistedComputerHandoffPurpose,
-): HostedComputerHandoffPurpose {
-  if (purpose === "screen_inspection") {
-    throw new TypeError("Retired static-preview handoff purpose is unsupported here.");
-  }
-  return purpose;
 }
 
 function isStaleCheckpointingHandoff(

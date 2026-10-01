@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-21",
+  "order": 100,
+  "item": {
+    "id": "messages-interrupt-background-saves",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting behind background saves",
+    "summary": "New messages can interrupt a background save so Murph can begin responding sooner.",
+    "details": "Work in progress stays available for a later save. A save already being committed finishes safely before the message continues.",
+    "relevanceTags": ["conversations", "performance"],
+    "sourcePullRequests": [3644]
+  }
+}

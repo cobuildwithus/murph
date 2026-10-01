@@ -10,7 +10,7 @@ import type {
 } from "@murphai/health-commons/runtime";
 
 const ROUTE_INDEX_SCHEMA_VERSION = "murph.commons.web.route-index.v1";
-const BIOMARKER_INDEX_SCHEMA_VERSION = "murph.commons.web.biomarker-index.v3";
+const BIOMARKER_INDEX_SCHEMA_VERSION = "murph.commons.web.biomarker-index.v4";
 const BIOMARKER_SHELL_SCHEMA_VERSION = "murph.commons.web.biomarker-shell.v1";
 const BIOMARKER_OVERVIEW_SCHEMA_VERSION = "murph.commons.web.biomarker-overview.v1";
 const BIOMARKER_RESEARCH_SCHEMA_VERSION = "murph.commons.web.biomarker-research.v1";
@@ -41,6 +41,8 @@ export interface GeneratedBiomarkerIndexEntry {
   aliases: string[];
   categories: string[];
   fallbackRanges: HealthCommonsWebBiomarkerFallbackRange[];
+  privateMetricBindings: HealthCommonsWebBiomarkerOverview["privateMetricBindings"];
+  valuePrecision: number;
   hidden: boolean;
   key: string;
   published: boolean;
@@ -453,6 +455,7 @@ function isGeneratedBiomarkerIndexEntry(value: unknown): value is GeneratedBioma
     && entry["categories"].every((category) => typeof category === "string")
     && Array.isArray(entry["fallbackRanges"])
     && entry["fallbackRanges"].every(isGeneratedBiomarkerFallbackRange)
+    && isGeneratedBiomarkerMetricFields(entry)
     && typeof entry["hidden"] === "boolean"
     && typeof entry["key"] === "string"
     && typeof entry["published"] === "boolean"
@@ -461,6 +464,14 @@ function isGeneratedBiomarkerIndexEntry(value: unknown): value is GeneratedBioma
     && (typeof entry["summary"] === "string" || entry["summary"] === null)
     && typeof entry["title"] === "string"
     && (typeof entry["unit"] === "string" || entry["unit"] === null);
+}
+
+function isGeneratedBiomarkerMetricFields(entry: Record<string, unknown>): boolean {
+  return Array.isArray(entry["privateMetricBindings"])
+    && typeof entry["valuePrecision"] === "number"
+    && Number.isInteger(entry["valuePrecision"])
+    && entry["valuePrecision"] >= 0
+    && entry["valuePrecision"] <= 4;
 }
 
 function isGeneratedBiomarkerFallbackRange(

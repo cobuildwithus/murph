@@ -9,6 +9,9 @@ import {
 } from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+} from "@murphai/device-syncd/junction-resources";
+import {
   isDeviceSyncCredentialIndependentImportJob,
   isHostedDeviceSyncEventToProviderSendBucket,
   mergeHostedDeviceSyncEventToProviderSendBuckets,
@@ -23,11 +26,12 @@ import {
   sha256Hex,
   toIsoTimestamp,
 } from "../shared";
-import { HostedDomainRootPreparationMismatchError } from "../../hosted-crypto/domain-root-store";
+import { runWithHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import { toNullablePrismaJsonValue } from "./prisma-json";
 import {
   openHostedDeviceSyncDirtyPayloadJson,
   prepareHostedDeviceSyncDirtyPayloadCrypto,
+  rebindHostedDeviceSyncDirtyPayloadRevision,
   revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx,
   sealHostedDeviceSyncDirtyPayloadJson,
   sealHostedDeviceSyncDirtyPayloadJsonFromPreparedCrypto,
@@ -121,7 +125,11 @@ export function hasHostedDeviceSyncDirtyResourcePayload(
 export class HostedDeviceSyncDirtyPreparationMismatchError extends Error {
   readonly code = "HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH";
 
-  constructor() {
+  constructor(readonly reason:
+    | "dirty_marker_missing"
+    | "dirty_marker_changed"
+    | "dirty_acknowledgement_changed"
+    | "dirty_owner_changed" = "dirty_marker_changed") {
     super("Hosted device-sync dirty preparation is stale.");
     this.name = "HostedDeviceSyncDirtyPreparationMismatchError";
   }
@@ -138,109 +146,11 @@ const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION = 500;
 const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_RESPONSE = 1_000;
 const DIRTY_PAYLOAD_HYDRATE_RESPONSE_MAX_ESTIMATED_BYTES = 8 * 1024 * 1024;
 const DIRTY_PAYLOAD_PRESEAL_CONCURRENCY = 16;
-const DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT = 100;
-const DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_MAX_BATCHES = 8;
-const HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING_CODE =
-  "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING";
 const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
 const COMPANION_HRV_NIGHT_RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const COMPANION_HRV_NIGHT_RECEIPT_MAX_PER_CONNECTION = 64;
 
 export type CompanionHrvNightReceiptInspection = "conflict" | "exact" | "missing";
-
-export async function classifyHostedUnclassifiedDirtyPayloadsForConnection(input: {
-  connectionId: string;
-  tx: HostedPrismaTransactionClient;
-  userId: string;
-}): Promise<void> {
-  const classifyResource = createDirtyPayloadCredentialClassifier();
-
-  for (
-    let batch = 0;
-    batch < DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_MAX_BATCHES;
-    batch += 1
-  ) {
-    const rows = await input.tx.deviceSyncDirtyPayload.findMany({
-      orderBy: [
-        { createdAt: "asc" },
-        { id: "asc" },
-      ],
-      select: {
-        connectionId: true,
-        dirtyRevision: true,
-        id: true,
-        provider: true,
-        resourceEncrypted: true,
-      },
-      take: DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT + 1,
-      where: {
-        connectionId: input.connectionId,
-        credentialIndependent: null,
-        userId: input.userId,
-      },
-    });
-    if (rows.length === 0) {
-      return;
-    }
-
-    const classified = await mapLimit(
-      rows.slice(0, DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT),
-      DIRTY_PAYLOAD_PRESEAL_CONCURRENCY,
-      async (row) => {
-        const resource = await readDirtyPayloadResourceJson({
-          row,
-          tx: input.tx,
-          userId: input.userId,
-        });
-        return {
-          credentialIndependent: resource
-            ? await classifyResource({
-                provider: row.provider,
-                resource,
-              })
-            : false,
-          id: row.id,
-        };
-      },
-    );
-
-    for (const credentialIndependent of [false, true] as const) {
-      const ids = classified
-        .filter((entry) => entry.credentialIndependent === credentialIndependent)
-        .map((entry) => entry.id);
-      if (ids.length === 0) {
-        continue;
-      }
-      await input.tx.deviceSyncDirtyPayload.updateMany({
-        data: { credentialIndependent },
-        where: {
-          connectionId: input.connectionId,
-          credentialIndependent: null,
-          id: { in: ids },
-          userId: input.userId,
-        },
-      });
-    }
-
-    if (rows.length <= DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT) {
-      return;
-    }
-  }
-
-  throw createDirtyPayloadClassificationPendingError();
-}
-
-export function isHostedDirtyPayloadClassificationPendingError(
-  error: unknown,
-): boolean {
-  return Boolean(
-    typeof error === "object"
-      && error !== null
-      && "code" in error
-      && (error as { code?: unknown }).code
-        === HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING_CODE,
-  );
-}
 
 export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(input: {
   connectionId: string;
@@ -263,30 +173,6 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
   `);
   if (!existing) {
     return;
-  }
-
-  let unclassifiedPayloadCount = await input.tx.deviceSyncDirtyPayload.count({
-    where: {
-      connectionId: input.connectionId,
-      credentialIndependent: null,
-      userId: input.userId,
-    },
-  });
-  if (unclassifiedPayloadCount > 0) {
-    // Acknowledgement takes this dirty-marker lock before deleting payload
-    // rows. Keep reconnect on the same marker-before-payload order while
-    // mixed-version nullable rows are classified behind the consent fence.
-    await classifyHostedUnclassifiedDirtyPayloadsForConnection(input);
-    unclassifiedPayloadCount = await input.tx.deviceSyncDirtyPayload.count({
-      where: {
-        connectionId: input.connectionId,
-        credentialIndependent: null,
-        userId: input.userId,
-      },
-    });
-  }
-  if (unclassifiedPayloadCount > 0) {
-    throw createDirtyPayloadClassificationPendingError();
   }
 
   const updated = await input.tx.deviceSyncDirtyConnection.updateMany({
@@ -425,10 +311,7 @@ export class PrismaHostedDirtyConnectionStore {
 
     return prepareDirtyPayloadRows({
       connectionId: input.connectionId,
-      dirtyRevision: resolveDirtyPayloadRevision({
-        existing,
-        resourceBatch,
-      }),
+      dirtyRevision: resolveDirtyPayloadRevision(existing),
       provider: input.provider,
       resources: resourceBatch.payloadResources,
       traceId: input.traceId,
@@ -450,10 +333,7 @@ export class PrismaHostedDirtyConnectionStore {
       throw new TypeError("Dirty connection preparation owner did not match the dirty connection.");
     }
 
-    const dirtyRevision = resolveDirtyPayloadRevision({
-      existing,
-      resourceBatch,
-    });
+    const dirtyRevision = resolveDirtyPayloadRevision(existing);
     const payloadCrypto = resourceBatch.payloadResources.length === 0
       ? undefined
       : await prepareHostedDeviceSyncDirtyPayloadCrypto({
@@ -584,25 +464,18 @@ export class PrismaHostedDirtyConnectionStore {
       },
     });
     if (input.preparedPayloadCrypto) {
-      try {
-        await revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx({
-          prepared: input.preparedPayloadCrypto,
-          tx: prisma,
-        });
-      } catch (error) {
-        if (error instanceof HostedDomainRootPreparationMismatchError) {
-          throw new HostedDeviceSyncDirtyPreparationMismatchError();
-        }
-        throw error;
-      }
+      await revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx({
+        prepared: input.preparedPayloadCrypto,
+        tx: prisma,
+      });
     }
-    if (input.expectedPreparationSnapshot?.exists === true) {
+    if (input.expectedPreparationSnapshot && existing) {
       const locked = await lockDirtyConnectionForCompanionReceipt({
         connectionId: input.connectionId,
         tx: prisma,
       });
       if (!locked) {
-        throw new HostedDeviceSyncDirtyPreparationMismatchError();
+        throw new HostedDeviceSyncDirtyPreparationMismatchError("dirty_marker_missing");
       }
       existing = await prisma.deviceSyncDirtyConnection.findUnique({
         where: {
@@ -610,29 +483,17 @@ export class PrismaHostedDirtyConnectionStore {
         },
       });
     }
-    if (
-      input.expectedPreparationSnapshot
-      && !dirtyConnectionMatchesPreparationSnapshot(
-        existing,
-        input.expectedPreparationSnapshot,
-      )
-    ) {
-      throw new HostedDeviceSyncDirtyPreparationMismatchError();
-    }
+    let preparedDirtyPayloadRows = await resolvePreparedDirtyPayloadRowsForSnapshot(existing, input);
     const hasCompanionNightResource = input.resourceBatch.payloadResources.some(
       (resource) => readCompanionHrvDirtyResourceNightDate(resource) !== null,
     );
-    let preparedDirtyPayloadRows = input.precomputedPayloadRows;
     if (
       input.resourceBatch.payloadResources.length > 0
       && !preparedDirtyPayloadRows
     ) {
       preparedDirtyPayloadRows = await prepareDirtyPayloadRows({
         connectionId: input.connectionId,
-        dirtyRevision: resolveDirtyPayloadRevision({
-          existing,
-          resourceBatch: input.resourceBatch,
-        }),
+        dirtyRevision: resolveDirtyPayloadRevision(existing),
         provider: input.provider,
         resources: input.resourceBatch.payloadResources,
         traceId: input.traceId,
@@ -643,7 +504,7 @@ export class PrismaHostedDirtyConnectionStore {
     if (
       hasCompanionNightResource
       && existing
-      && input.expectedPreparationSnapshot?.exists !== true
+      && !input.expectedPreparationSnapshot
     ) {
       // Companion replay receipts reference the parent connection. Lock the
       // dirty marker first so account deletion and ingress retain one lock
@@ -662,10 +523,7 @@ export class PrismaHostedDirtyConnectionStore {
       });
       if (
         !existing
-        || preparedDirtyPayloadRows?.dirtyRevision !== resolveDirtyPayloadRevision({
-          existing,
-          resourceBatch: input.resourceBatch,
-        })
+        || preparedDirtyPayloadRows?.dirtyRevision !== resolveDirtyPayloadRevision(existing)
       ) {
         throw createDirtyStateContentionError("update");
       }
@@ -748,30 +606,6 @@ export class PrismaHostedDirtyConnectionStore {
     }
 
     const becameDirty = existing.processedRevision >= existing.dirtyRevision;
-    if (
-      !becameDirty
-      && isPayloadOnlyDirtyAppend(resourceBatch)
-    ) {
-      const payloadCreateResult = await createDirtyPayloadRows({
-        connectionId: input.connectionId,
-        dirtyRevision: existing.dirtyRevision,
-        provider: input.provider,
-        precomputed: filteredPayloadRows,
-        resources: resourceBatch.payloadResources,
-        traceId: input.traceId,
-        tx: prisma,
-        userId: input.userId,
-      });
-
-      return {
-        dirty: withDirtyPayloadResources(
-          mapDirtyConnectionRecord(existing),
-          payloadCreateResult.resources,
-        ),
-        shouldRequestWake: false,
-      };
-    }
-
     const priorResources = becameDirty ? {} : readDirtyResourcesJson(existing.dirtyResourcesJson);
     const resources = mergeDirtyResources(
       priorResources,
@@ -1223,16 +1057,6 @@ function createDirtyStateContentionError(operation: "ack" | "update"): Error {
   });
 }
 
-function createDirtyPayloadClassificationPendingError(): Error {
-  return deviceSyncError({
-    code: HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING_CODE,
-    httpStatus: 503,
-    message:
-      "Hosted device-sync payload classification did not converge before reconnect. Retry the request.",
-    retryable: true,
-  });
-}
-
 function isDirtyStateContentionError(error: unknown): boolean {
   return Boolean(
     typeof error === "object"
@@ -1441,22 +1265,14 @@ async function mapLimit<TInput, TOutput>(
   return results;
 }
 
-function resolveDirtyPayloadRevision(input: {
-  existing: DeviceSyncDirtyConnectionPrismaRecord | null;
-  resourceBatch: DirtyResourceBatch;
-}): bigint {
-  if (!input.existing) {
+function resolveDirtyPayloadRevision(
+  existing: DeviceSyncDirtyConnectionPrismaRecord | null,
+): bigint {
+  if (!existing) {
     return 1n;
   }
 
-  if (
-    input.existing.processedRevision < input.existing.dirtyRevision
-    && isPayloadOnlyDirtyAppend(input.resourceBatch)
-  ) {
-    return input.existing.dirtyRevision;
-  }
-
-  return input.existing.dirtyRevision + 1n;
+  return existing.dirtyRevision + 1n;
 }
 
 function createDirtyConnectionPreparationSnapshot(
@@ -1490,6 +1306,91 @@ function dirtyConnectionMatchesPreparationSnapshot(
     && existing.userId === snapshot.userId;
 }
 
+function canRebasePreparedDirtyIngress(
+  existing: DeviceSyncDirtyConnectionPrismaRecord | null,
+  snapshot: DirtyConnectionPreparationSnapshot,
+  input: {
+    provider: string;
+    userId: string;
+  },
+): boolean {
+  // Only sibling ingress may move the snapshot. An acknowledgement, deletion,
+  // owner change, or clean marker still needs the ordinary full replan so its
+  // mailbox and connection admission are prepared against current authority.
+  return existing !== null
+    && existing.userId === input.userId
+    && existing.provider === input.provider
+    && existing.dirtyRevision > existing.processedRevision
+    && (snapshot.exists
+      ? existing.userId === snapshot.userId
+        && existing.provider === snapshot.provider
+        && existing.processedRevision === snapshot.processedRevision
+        && existing.dirtyRevision > snapshot.dirtyRevision
+      : existing.processedRevision === 0n);
+}
+
+async function rebindPreparedDirtyPayloadRows(input: {
+  crypto: PreparedHostedDeviceSyncDirtyPayloadCrypto;
+  nextDirtyRevision: bigint;
+  prepared: PreparedDirtyPayloadRows;
+}): Promise<PreparedDirtyPayloadRows> {
+  const rows: PreparedDirtyPayloadRow[] = [];
+  // Payload ids identify these exact prepared resources, independently of the
+  // marker's eventual commit revision. Preserve them inside the compressed
+  // envelope and bind both the stored row and its AAD to the new revision.
+  for (const row of input.prepared.rows) {
+    rows.push({
+      ...row,
+      dirtyRevision: input.nextDirtyRevision,
+      resourceEncrypted: await rebindHostedDeviceSyncDirtyPayloadRevision({
+        ...row,
+        nextDirtyRevision: input.nextDirtyRevision,
+        payloadId: row.id,
+        prepared: input.crypto,
+        value: row.resourceEncrypted,
+      }),
+    });
+  }
+  return { ...input.prepared, dirtyRevision: input.nextDirtyRevision, rows };
+}
+
+async function resolvePreparedDirtyPayloadRowsForSnapshot(
+  existing: DeviceSyncDirtyConnectionPrismaRecord | null,
+  input: {
+    expectedPreparationSnapshot?: DirtyConnectionPreparationSnapshot;
+    preparedPayloadCrypto?: PreparedHostedDeviceSyncDirtyPayloadCrypto;
+    precomputedPayloadRows?: PreparedDirtyPayloadRows;
+    provider: string;
+    userId: string;
+  },
+): Promise<PreparedDirtyPayloadRows | undefined> {
+  const snapshot = input.expectedPreparationSnapshot;
+  if (!snapshot || dirtyConnectionMatchesPreparationSnapshot(existing, snapshot)) {
+    return input.precomputedPayloadRows;
+  }
+  if (!input.precomputedPayloadRows || !input.preparedPayloadCrypto
+    || !canRebasePreparedDirtyIngress(existing, snapshot, input)) {
+    throw new HostedDeviceSyncDirtyPreparationMismatchError(
+      !existing ? "dirty_marker_missing"
+        : existing.userId !== input.userId || existing.provider !== input.provider
+          ? "dirty_owner_changed"
+          : snapshot.exists && existing.processedRevision !== snapshot.processedRevision
+            ? "dirty_acknowledgement_changed"
+            : "dirty_marker_changed",
+    );
+  }
+  const rebound = await rebindPreparedDirtyPayloadRows({
+    nextDirtyRevision: resolveDirtyPayloadRevision(existing),
+    prepared: input.precomputedPayloadRows,
+    crypto: input.preparedPayloadCrypto,
+  });
+  console.info("Hosted device-sync prepared payload revision rebound.", {
+    eventCode: "device_sync.prepared_payload_rebound",
+    payloadCount: rebound.rows.length,
+  });
+  return rebound;
+}
+
 function requirePreparedDirtyConnectionUpsert(
   prepared: PreparedHostedDeviceSyncDirtyConnectionUpsert,
 ): PreparedHostedDeviceSyncDirtyConnectionUpsertDetails {
@@ -1503,11 +1404,6 @@ function requirePreparedDirtyConnectionUpsert(
     );
   }
   return details;
-}
-
-function isPayloadOnlyDirtyAppend(resourceBatch: DirtyResourceBatch): boolean {
-  return Object.keys(resourceBatch.compactResources).length === 0
-    && resourceBatch.payloadResources.length > 0;
 }
 
 function createDirtyPayloadId(input: {
@@ -1526,13 +1422,28 @@ function createDirtyPayloadId(input: {
     ].join("\0")).slice(0, 40)}`;
   }
 
+  const payloadIdentity = serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
+    input.resource.payload,
+  );
+  if (
+    input.resource.resource === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE
+    && payloadIdentity !== null
+  ) {
+    return `dsp_${sha256Hex([
+      input.connectionId,
+      JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+      String(input.index),
+      payloadIdentity,
+    ].join("\0")).slice(0, 40)}`;
+  }
+
   const identity = [
     input.connectionId,
     input.dirtyRevision.toString(),
     normalizeNullableString(input.traceId) ?? "trace",
     String(input.index),
     buildDirtyResourceKey(input.resource),
-    serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(input.resource.payload),
+    payloadIdentity,
   ].join("\0");
 
   return `dsp_${sha256Hex(identity).slice(0, 40)}`;
@@ -1817,6 +1728,14 @@ async function hydrateDirtyConnectionRecords(input: {
   stagedOverlay?: StagedDirtyAckOverlay;
   userId: string;
 }): Promise<DirtyConnectionHydrationResult> {
+  // Payloads commonly share a root. Reuse its envelope/KMS unwrap only for
+  // this hydration operation; each payload still authenticates its own AAD.
+  return runWithHostedDomainRootUnwrapCache(() => hydrateDirtyConnectionRecordsWithCachedRoots(input));
+}
+
+async function hydrateDirtyConnectionRecordsWithCachedRoots(
+  input: Parameters<typeof hydrateDirtyConnectionRecords>[0],
+): Promise<DirtyConnectionHydrationResult> {
   if (input.records.length === 0) {
     return {
       hasMorePayloads: false,
@@ -2149,6 +2068,9 @@ function mergeDirtyResourceInto(
   const previous = merged[key] ?? null;
   merged[key] = withDirtyResourceWindowPayload(previous
       ? {
+        ...(previous.providerDedupeKey === undefined
+          ? {}
+          : { providerDedupeKey: previous.providerDedupeKey }),
         ...normalized,
         count: previous.count + normalized.count,
         ...mergeDirtyResourceTiming(previous, normalized),
@@ -2178,6 +2100,9 @@ function normalizeDirtyResource(
       : {}),
     jobKind: truncateDirtyKey(normalizeNullableString(resource.jobKind) ?? "reconcile") ?? "reconcile",
     payload: readDirtyResourcePayload(resource.payload),
+    ...(normalizeNullableString(resource.providerDedupeKey)
+      ? { providerDedupeKey: normalizeNullableString(resource.providerDedupeKey) ?? undefined }
+      : {}),
     resource: truncateDirtyKey(normalizeNullableString(resource.resource)),
     resourceCategory: truncateDirtyKey(normalizeNullableString(resource.resourceCategory)),
     sourceProviderSlug: truncateDirtyKey(normalizeNullableString(resource.sourceProviderSlug)),
@@ -2300,6 +2225,14 @@ function incrementCounter(
   counters[key] = (counters[key] ?? 0) + increment;
 }
 
+function readDirtyResourceProviderDedupeKeyField(
+  record: Record<string, unknown>,
+): Pick<HostedDeviceSyncDirtyResource, "providerDedupeKey"> | Record<string, never> {
+  return typeof record.providerDedupeKey === "string"
+    ? { providerDedupeKey: record.providerDedupeKey }
+    : {};
+}
+
 function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedDeviceSyncDirtyResource> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -2325,6 +2258,7 @@ function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedD
       providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
       jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
       payload: readDirtyResourcePayload(record.payload),
+      ...readDirtyResourceProviderDedupeKeyField(record),
       resource: typeof record.resource === "string" ? record.resource : null,
       resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
       sourceProviderSlug: typeof record.sourceProviderSlug === "string" ? record.sourceProviderSlug : null,
@@ -2377,6 +2311,7 @@ async function readDirtyPayloadResourceJson(input: {
     providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
     jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
     payload: readDirtyResourcePayload(record.payload),
+    ...readDirtyResourceProviderDedupeKeyField(record),
     resource: typeof record.resource === "string" ? record.resource : null,
     resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
     sourceProviderSlug: typeof record.sourceProviderSlug === "string" ? record.sourceProviderSlug : null,

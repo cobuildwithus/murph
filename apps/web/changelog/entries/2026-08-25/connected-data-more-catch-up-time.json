@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "connected-data-more-catch-up-time",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Connected data gets more time to catch up",
+    "summary": "Murph now gives each background connected-data pass up to two minutes to finish unusually slow sync jobs.",
+    "details": "Foreground replies still take priority. Longer-running syncs stay recoverable, and Murph can now pinpoint slow background phases without putting account identifiers or health values in operational logs.",
+    "relevanceTags": ["connected-health", "devices", "reliability"],
+    "sourcePullRequests": [2267]
+  }
+}

@@ -1,5 +1,6 @@
 import {
   nutritionCardGoalStatusLabels,
+  isTotalsOnlyDailyNutritionResponseCard,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
   type NutritionCardGoalSnapshot,
@@ -57,6 +58,7 @@ export function NutritionCardImage({
   logoSrc?: string;
 }) {
   const v2 = isNutritionCardV2(card) ? card : null;
+  const totalsOnly = isTotalsOnlyDailyNutritionResponseCard(card);
   const metrics: NutritionMetricPresentation[] = [
     {
       goal: v2?.goals.proteinGrams,
@@ -150,11 +152,13 @@ export function NutritionCardImage({
         </div>
       </div>
 
-      <CalorieRing
-        cardMealCount={card.mealCount}
-        metric={calorieMetric}
-        goal={calorieGoal}
-      />
+      {!totalsOnly && (
+        <CalorieRing
+          cardMealCount={card.mealCount}
+          metric={calorieMetric}
+          goal={calorieGoal}
+        />
+      )}
 
       <div
         style={{

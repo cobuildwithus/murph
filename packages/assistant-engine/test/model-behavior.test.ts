@@ -11,6 +11,7 @@ import {
 import {
   buildAssistantSystemPrompt,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
+  buildAssistantOperatorMessagePromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
   buildAssistantSystemPromptLayers,
   buildAssistantSystemPromptWithCacheMetadata,
@@ -69,6 +70,21 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('Treat the user prompt as the execution instructions for this scheduled run')
   })
 
+  it('gives operator messages one private direct JSON delivery contract', () => {
+    const prompt = buildAssistantOperatorMessagePromptWithCacheMetadata({
+      channel: 'linq',
+    }).prompt
+
+    expect(prompt).toContain('a private direct Murph conversation')
+    expect(prompt).toContain('This is an output-only turn. Do not call tools')
+    expect(prompt).toContain('bounded committed private conversation history')
+    expect(prompt).toContain('The platform owns delivery')
+    expect(prompt).toContain('"kind":"send_message"')
+    expect(prompt).not.toContain('bound group')
+    expect(prompt).not.toContain('private-Murph handoff')
+    expect(prompt).not.toContain('Return only that final group message')
+  })
+
   it('adds Murph-specific execution behavior without changing the calmer Murph voice', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
@@ -98,6 +114,9 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('Lead the final reply with the result')
     expect(prompt).toContain(
       'Complete cards replace text.',
+    )
+    expect(prompt).toContain(
+      "After attachment, do not call `murph.finish_without_reply`; end an attended turn without final text, or use the scheduled turn's required terminal decision.",
     )
     expect(prompt).toContain(
       'Response media comes with concise text for order, dose, timing, cues, safety, and fallback',
@@ -131,55 +150,44 @@ describe('assistant execution prompt contract', () => {
       'You are Murph, a durable personal health assistant.'
     const sharedStyleOwner =
       'Current-conversation style settings override these defaults.'
+    const scopedSafety =
+      'A diagnosis, medication, disability, age, pregnancy status, allergy, dietary restriction, or other health-context fact can change or block the specific advice it affects, but it is not a blanket veto on benign calculations, summaries, logging, education, or unrelated low-risk actions.'
 
+    expect(groupPrompt).toContain('If an attended request expands into several record edits or repeated repairs')
+    expect(groupPrompt).toContain('Send at most one short, natural group progress update')
+    const unavailable = buildAssistantExecutionBehaviorText({
+      profile: 'gpt5-agentic', progressUpdatesAvailable: false,
+    })
+    expect(unavailable).toContain('Member-visible interim progress is unavailable on this route')
+    expect(unavailable).not.toContain('send one update before starting')
     expect(groupPrompt).toContain(sharedIdentity)
     expect(directPrompt).toContain(sharedIdentity)
     expect(groupPrompt).toContain(sharedStyleOwner)
     expect(directPrompt).toContain(sharedStyleOwner)
+    const completeGroupReplyRule =
+      'Answer all still-relevant, unanswered requests that these rules assign to Murph across the accepted messages in one reply.'
+    expect(groupPrompt.split(completeGroupReplyRule)).toHaveLength(2)
     expect(groupPrompt).toContain(
-      'It does not withdraw an answer already completed in that turn; that answer still sends.',
+      'A clear correction or replacement supersedes only what it changes',
     )
-    expect(groupPrompt).toContain(
-      'Messages accepted before the first completed assistant response may join this turn.',
-    )
-    expect(groupPrompt).toContain(
-      'never replace, retract, or suppress completed text or media',
-    )
-    expect(groupPrompt).toContain(
-      'Messages accepted after the first completed response stay pending for the next ordinary turn.',
-    )
+    expect(groupPrompt).not.toContain('Treat a request as resolved only when')
+    expect(groupPrompt).toContain('do not repeat completed effects')
+    expect(groupPrompt).toContain(scopedSafety)
+    expect(directPrompt).toContain(scopedSafety)
     expect(groupPrompt).not.toContain('replaces the earlier answer')
     expect(groupPrompt).not.toContain('carry forward anything still worth saying')
+    expect(groupPrompt).not.toContain('answer only that new ask')
     expect(groupPrompt).not.toContain('Use light humor when it fits')
     expect(groupPrompt).not.toContain('plainspoken, and casual')
     expect(groupPrompt).toContain(
-      'Group reply cadence applies before the first text reply in an ordinary interactive Linq/iMessage or Telegram group turn.',
+      'Take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
     )
-    expect(groupPrompt).toContain(
-      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 8`.',
-    )
-    expect(groupPrompt).toContain(
-      'If new human input arrives during that pause, re-evaluate safety, time sensitivity, and floor ownership as soon as the sleep finishes',
-    )
-    expect(groupPrompt).toContain(
-      'answer newly urgent or time-sensitive input without another sleep',
-    )
-    expect(groupPrompt).toContain(
-      'Only when the refreshed beat still warrants an ordinary text reply, run one final `sleep 6`',
-    )
-    expect(groupPrompt).toContain(
-      'take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
-    )
-    expect(groupPrompt).toContain(
-      'Never sleep more than 14 seconds total.',
-    )
-    expect(groupPrompt).toContain(
-      'Do not answer each accepted message separately, recap the burst point by point, or mention waiting, sleeping, or commands.',
-    )
-    expect(directPrompt).not.toContain('run shell `sleep 8`')
+    expect(groupPrompt).not.toContain('Do not answer each accepted message separately')
+    expect(groupPrompt).not.toContain('sleep 8')
+    expect(groupPrompt).not.toContain('sleep 6')
     expect(directPrompt).not.toContain('Group texting rhythm:')
     expect(groupPrompt).toContain(
-      'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and the bounded shell `sleep` required by group reply cadence',
+      'use the CLI only for public reference reads and group-owned state other than the `group-room-model` page',
     )
     expect(groupPrompt).toContain(
       'Send an ordinary group reply as one text bubble.',
@@ -198,10 +206,13 @@ describe('assistant execution prompt contract', () => {
     )
 
     expect(prompt).toContain(
-      'use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room',
+      'The room-scoped `murph.assistant_configuration` tool reads or changes the future room model only',
     )
     expect(prompt).toContain(
-      'a saved model starts on the next turn',
+      'A saved Luna, Terra, or Sol model starts next turn',
+    )
+    expect(prompt).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(prompt).toContain(
       'Provider and reasoning controls remain unavailable in a group',
@@ -223,10 +234,10 @@ describe('assistant execution prompt contract', () => {
 
     expect(groupPrompt).toContain('`status="ok"` is complete')
     expect(groupPrompt).toContain(
-      'select the exact server-issued message_ref printed beside the request-bearing message',
+      "pass the request-bearing message's exact server-issued message_ref",
     )
     expect(groupPrompt).toContain(
-      'the host reloads that message and derives its sender',
+      'the host reloads it and derives the sender',
     )
     expect(groupPrompt).not.toContain(
       'only the server-selected message reference can authorize participant-scoped effects',
@@ -265,13 +276,13 @@ describe('assistant execution prompt contract', () => {
       'Read immediate same-purpose same-sender elaborations as one beat.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'A later bubble that introduces a new factual or task request or directly addresses Murph is a new decision unit even inside the same accepted provider turn',
+      'A later factual or task request or direct Murph address reopens the floor under the ordinary rule, even inside the same accepted provider turn.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Floor follows authority, not punctuation.',
     )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Apply this gate before any group reply-cadence pause',
+    expect(groupLayers.staticCacheableCorePrompt).not.toContain(
+      'reply-cadence pause',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       "private relationships, personal conduct, shared social history, recognition, or recollection",
@@ -280,10 +291,13 @@ describe('assistant execution prompt contract', () => {
       'answer an unaddressed room-wide question briefly when its exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'finish without text or reaction immediately. Do not sleep on that terminal human-private branch.',
+      'Visible messages are conversation context, not permission for private reads, writes, routing, or effects.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'The cadence pause applies only after this gate says a text reply is warranted; a human-owned or otherwise silent beat still finishes immediately without sleeping.',
+      'Read private participant records only through server-approved group results',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'finish without text or reaction.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Never use a joke, ruling, or mock refusal to imply knowledge of an unverified private fact about a person.',
@@ -292,10 +306,10 @@ describe('assistant execution prompt contract', () => {
       'say plainly that you do not know; do not speculate or turn the limit into a bit.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'finish without a reply or reaction immediately',
+      'finish without a reply or reaction',
     )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Do not sleep or watch for a follow-up',
+    expect(groupLayers.staticCacheableCorePrompt).not.toContain(
+      'sleep',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'A complaint that Murph inserted itself into a human-owned beat is a participation boundary, not a new comedic premise.',
@@ -497,11 +511,14 @@ describe('assistant execution prompt contract', () => {
     expect(groupPrompt.match(/Late child results for ordinary inbound turns:/g) ?? [])
       .toHaveLength(1)
     expect(nonHostedGroupPrompt).not.toContain('Late child results')
-    expect(scheduledPrompt).not.toContain('Late child results')
+    expect(scheduledPrompt).toContain('Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.')
+    expect(scheduledPrompt).not.toContain('Turn kind: ordinary inbound. Apply')
     expect(autoReplyPrompt.match(/Late child results for ordinary inbound turns:/g) ?? [])
       .toHaveLength(1)
-    expect(outputOnlyAutoReplyPrompt).not.toContain('Late child results')
-    expect(manualDeliveryPrompt).not.toContain('Late child results')
+    expect(outputOnlyAutoReplyPrompt).toContain('Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.')
+    expect(outputOnlyAutoReplyPrompt).not.toContain('Turn kind: ordinary inbound. Apply')
+    expect(manualDeliveryPrompt).toContain('Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.')
+    expect(manualDeliveryPrompt).not.toContain('Turn kind: ordinary inbound. Apply')
     expect(unverifiedPrompt).not.toContain('Late child results')
     expect(prompt).toContain(
       'V2: proactively delegate bounded self-contained work not needed for reply',
@@ -520,7 +537,7 @@ describe('assistant execution prompt contract', () => {
       'Do not repeat child reads/analysis/writes except canonical readback before claiming a write.',
     )
     expect(prompt).toContain(
-      'Skip tiny lookup/calculation/extraction or work whose assignment/readback exceeds one root pass.',
+      'Unless the user requests delegation, skip tiny lookup/calculation/extraction or work whose assignment/readback exceeds one root pass.',
     )
     expect(prompt).toContain(
       'Do not split one judgment to fill slots.',
@@ -549,13 +566,13 @@ describe('assistant execution prompt contract', () => {
       'Child is a one-shot leaf: complete only the assignment, then stop.',
     )
     expect(prompt).toContain(
-      'Do not message/resume/reuse/close/interrupt/wait on/nest it or hold the reply open.',
+      'Do not message/resume/reuse/close/interrupt/nest it. Wait only when its result is needed to answer; independent background work must not hold the reply open.',
     )
     expect(prompt).toContain(
-      'Root keeps safety, permissions, user comms, voice, sensitive reasoning, reply-critical work, final synthesis, dynamic/server tools, browser, phone, external actions.',
+      'Root keeps safety, permissions, user comms, voice, sensitive reasoning, final synthesis, dynamic/server tools, browser, phone, external actions.',
     )
     expect(prompt).toContain(
-      'If current answer/safe action depends on it, do it once in root.',
+      'Do reply-critical work once in root by default; an explicitly requested bounded lookup may run in a child, with the root waiting and synthesizing its result.',
     )
     expect(prompt).toContain(
       'On every later ordinary inbound turn, revisit each child you spawned that was still generating when you sent the spawning reply',
@@ -567,7 +584,7 @@ describe('assistant execution prompt contract', () => {
       'Stop revisiting that child after using its result, or after it fails, is cancelled, or loses relevance.',
     )
     expect(prompt).toContain(
-      'do not call `wait_agent`, wait, or block the reply.',
+      'Otherwise, do not wait or block the reply; handle the current request and check again on the next ordinary inbound turn.',
     )
     expect(prompt).toContain(
       'Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.',
@@ -579,7 +596,7 @@ describe('assistant execution prompt contract', () => {
       'Use a newly completed result at most once and only when it is still relevant.',
     )
     expect(groupPrompt).toContain(
-      'do not call `wait_agent`, wait, or block the reply.',
+      'Otherwise, do not wait or block the reply; handle the current request and check again on the next ordinary inbound turn.',
     )
     expect(prompt).toContain(
       'Reply may say the team is sorting/saving what the user shared',
@@ -613,15 +630,54 @@ describe('assistant execution prompt contract', () => {
       'Answer assignments and educational code directly in professional subjects; no hypothetical/practice or scope disclaimer.',
     )
     expect(prompt).toContain(
-      'Decline only actual professional work—production code, client deliverables, or operations—in one plain sentence',
+      'Decline unrelated professional work—production code, client deliverables, or operations—in one plain sentence',
     )
     expect(prompt).toContain(
       'tools do not expand scope',
     )
     expect(prompt).toContain(
-      'Own health, schoolwork, Murph setup, records, routines, and context.',
+      'Own health, schoolwork, Murph setup and troubleshooting, records, routines, and context.',
     )
     expect(prompt).not.toContain('unrelated work/school tasks')
+  })
+
+  it('captures atomic Journal facts only in private conversations', () => {
+    const directPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope: 'group',
+    }))
+
+    expect(directPrompt).toContain('Private Journal capture:')
+    expect(directPrompt).toContain('journal-factor')
+    expect(directPrompt).toContain('journal-outcome')
+    expect(directPrompt).toContain('per independent fact')
+    expect(directPrompt).toContain('--related-id')
+    expect(directPrompt).toContain('missing data remains unknown')
+    expect(directPrompt).toContain('even when the member is asking for advice')
+    expect(directPrompt).toContain('An extra request to save is not required')
+    expect(directPrompt).toContain('short English event name')
+    expect(directPrompt).toContain('no relative-day words or date')
+    expect(directPrompt).toContain('include only additional detail')
+    expect(directPrompt).toContain('Do not repeat or paraphrase the event name')
+    expect(directPrompt).toContain('Use `all_day` for a symptom that continues from morning')
+    expect(directPrompt).toContain('Never invent a clock time')
+    expect(directPrompt).toContain('update the exact existing event')
+    expect(directPrompt).toContain('explicit no-retention request')
+    expect(directPrompt).toContain('hypothetical questions are not events')
+    expect(directPrompt).toContain('use `note` when none fits')
+    expect(directPrompt).toContain('start one workout')
+    expect(directPrompt).toContain("member's assigned local schedule")
+    expect(directPrompt).not.toContain('Check at 13:00 local')
+    expect(directPrompt).toContain(
+      'vault-cli wearables patterns --date <local-date> --format json',
+    )
+    expect(directPrompt).toContain('exactly once')
+    expect(directPrompt).toContain('stop proactive questions when asked')
+    expect(directPrompt).toContain('read the relevant canonical records with a bounded query')
+    expect(directPrompt).toContain(
+      'tell users to ask Murph; never claim web controls',
+    )
+    expect(groupPrompt).not.toContain('Private Journal capture:')
   })
 
   it('uses formal by default and applies a saved tone as a strict writing contract', () => {
@@ -1034,10 +1090,13 @@ describe('assistant execution prompt contract', () => {
       'Voice memos keep the running-turn voice unless this user names another',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'explicit user-requested model, core-reply provider, or reasoning changes',
+      'changes future conversation model, provider, or reasoning only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'a saved change starts on the next turn',
+      'one-task child models use `spawn_agent.model` and are never saved',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Never switch them automatically',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
@@ -1070,17 +1129,25 @@ describe('assistant execution prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Vault file sends:')
+    expect(prompt).toContain('Export requested vault files.')
+    expect(prompt).toContain('ZIPs may read originals in place')
+    expect(prompt).toContain("archive all files under that member's workspace root as-is")
+    expect(prompt).toContain('any credential-bearing records present')
+    expect(prompt).toContain('without content-based exclusion, redaction, or sanitization')
+    expect(prompt).not.toContain('Exclude credentials, tokens, environment secrets')
+    expect(prompt).not.toContain('include a non-sensitive omission notice')
+    expect(prompt).toContain("submit only the new ZIP's generated-delivery ref")
     expect(prompt).toContain(
-      'Only after this turn establishes an obligation to send a newly generated file now',
+      'For a newly generated file requested for sending now',
     )
     expect(prompt).toContain(
       '.runtime/operations/assistant/generated-deliveries/<flat-filename>',
     )
     expect(prompt).toContain(
-      'Do not use runtime staging for "prepare now, maybe send later,"',
+      'Never stage possible later sends',
     )
     expect(prompt).toContain(
-      'never move or copy existing, user-owned, canonical, or durable files there.',
+      'or move or copy existing files there.',
     )
     expect(prompt).toContain(
       'say approval is required and the file is not attached',
@@ -1117,7 +1184,7 @@ describe('assistant execution prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'For recurring behavior, experiments, reminders, friction, or adherence repair, read the matching domain skill and `behavior-followthrough` before setup or scheduling.',
+      'For recurring support, experiments, reminder repair, or adherence problems, read the matching domain skill and `behavior-followthrough` before setup or scheduling.',
     )
     expect(prompt).toContain(
       'Keep the first setup small, reversible, and easy to stop.',
@@ -1196,15 +1263,18 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain('Still help with the immediate request or best fallback')
     expect(prompt).toContain(
-      'Otherwise, when the problem is clear or Murph observed the friction, capture it silently',
+      'capture the single most material gap; at most one candidate may be accepted',
     )
+    expect(prompt).toContain('Ordinary feedback stays silent for every result')
+    expect(prompt).toContain('Persistence is best-effort after the reply')
+    expect(prompt).toContain('Reserved support follows Support and skips discovery')
     expect(prompt).toContain(
-      'select the single most material gap and call the tool at most once for the accepted request',
+      'On the first input-schema rejection, correct only the returned issues and retry once',
     )
-    expect(prompt).toContain('Do not mention ordinary acceptance')
-    expect(prompt).toContain('persistence is best-effort after the reply')
-    expect(prompt).toContain('Reserved support bypasses discovery/classification; follow Support')
-    expect(prompt).toContain('Never retry after any tool result')
+    expect(prompt).toContain('A second rejection is terminal')
+    expect(prompt).toContain(
+      'Accepted, already accepted, unavailable, and callback-failure results are terminal',
+    )
     expect(prompt).toContain('external/transient failures')
     expect(prompt).toContain('Use `feature_request` for missing paths')
     expect(prompt).toContain(
@@ -1220,6 +1290,30 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('feedback tags')
     expect(prompt).not.toContain('feedbackTags')
     expect(prompt).not.toContain('flagged for the product team')
+    expect(prompt).not.toContain('one-candidate, no-retry')
+    const composedPrompt = `${MURPH_CODEX_BASE_INSTRUCTIONS}\n${prompt}`
+    expect(
+      composedPrompt.split(
+        'On the first input-schema rejection, correct only the returned issues and retry once',
+      ),
+    ).toHaveLength(2)
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'For support, follow the Product feedback contract',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'ordinary results stay silent',
+    )
+  })
+
+  it('preserves native Murph tool results in the composed code-mode instructions', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const composedPrompt = `${MURPH_CODEX_BASE_INSTRUCTIONS}\n${prompt}`
+
+    expect(composedPrompt.split('Murph dynamic tools return text through code mode'))
+      .toHaveLength(2)
+    expect(composedPrompt).toContain('Pass the returned value directly to `text(result)`')
+    expect(composedPrompt).toContain('read it before deciding the tool failed')
+    expect(composedPrompt).toContain('do not assume an MCP `.content` envelope')
   })
 
   it('keeps only Murph-specific behavior outside the Codex base kernel', () => {
@@ -1231,7 +1325,7 @@ describe('assistant execution prompt contract', () => {
       'Murph progress-delivery, browser-action, and appointment-reminder rules:',
     )
     expect(text).toContain('murph.send_progress_update')
-    expect(text).toContain('For browser-backed real-world action requests')
+    expect(text).toContain('For requested real-world browser actions')
     expect(text).not.toContain('GPT-5 execution bias:')
     expect(text).not.toContain('Execution and stop rules:')
     expect(text).not.toContain("Complete the user's in-scope request end to end")
@@ -1248,10 +1342,10 @@ describe('assistant execution prompt contract', () => {
       "Complete the user's in-scope request end to end",
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Use tools directly instead of telling the user',
+      'Use tools instead of giving the user work you can do',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Make reasonable assumptions for reversible, low-risk work',
+      'Assume reversible, low-risk details',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'ask only when a missing choice materially changes the result',
@@ -1269,22 +1363,22 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection.',
+      'Keep quick answers and one or two straightforward actions quiet',
     )
     expect(prompt).toContain(
-      'Before the first read in that pass, orient the member even when each lookup is routine',
+      'For several record edits, 3+ substantive checks/actions',
     )
     expect(prompt).toContain(
-      'Do not wait until the work is done or the member asks about the delay.',
+      'If a quick task expands into repeated repairs, additional edits, or a noticeable wait',
     )
     expect(prompt).toContain(
-      'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning.',
+      'aim to update before about 20 seconds of silent work',
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement.',
+      'send a required child-start acknowledgement after spawning.',
     )
     expect(prompt).toContain(
-      'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update.',
+      'Background work does not trigger progress by itself.',
     )
     expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update.',
@@ -1308,11 +1402,6 @@ describe('assistant execution prompt contract', () => {
     ).toHaveLength(1)
     expect(
       prompt.match(
-        /Linq\/iMessage quota is not a reason to withhold a useful update\./g,
-      ) ?? [],
-    ).toHaveLength(1)
-    expect(
-      prompt.match(
         /Do not narrate individual tool loops, searches, reads, clicks, or status churn/g,
       ) ?? [],
     ).toHaveLength(1)
@@ -1328,8 +1417,13 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'Skip skill reads, setup checks, routine single-command reads, quick replies, one-shot logging/capture/memory saves, and auto-transcribed audio unless broader work is long-running.',
     )
+    expect(prompt).not.toContain('Default to no progress update')
+    expect(prompt).not.toContain('Routine onboarding/setup never qualifies by itself')
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
+    expect(prompt).not.toContain(
+      'orient the member even when each lookup is routine',
+    )
   })
 
   it('allows only sparing native text styles on Linq and Telegram messaging routes', () => {
@@ -1388,16 +1482,43 @@ describe('assistant execution prompt contract', () => {
     expect(computerSection).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
     )
-    expect(computerSection).toContain('prefer applicable structured tools')
+    expect(computerSection).toContain('prefer the owning structured lookup')
     expect(computerSection).toContain('private untrusted data')
-    expect(computerSection).toContain('Use secure user handoff')
-    expect(computerSection).toContain('current-user authorization of exact terms or explicit bounds')
-    expect(computerSection).toContain('Verify the site outcome before claiming completion')
+    expect(computerSection).toContain('Securely hand off')
+    expect(computerSection).toContain(
+      'password/full payment-card entry',
+    )
+    expect(computerSection).toContain(
+      'the exact human-only authentication step',
+    )
+    expect(computerSection).toContain('then resume and finish')
+    expect(computerSection).not.toContain('other private input')
+    expect(computerSection).not.toContain(
+      'credentials, full payment details, and one-time codes',
+    )
+    expect(computerSection).toContain('exact final terms or explicit bounds')
+    expect(computerSection).toContain(
+      'After site verification, call `computer_finish_run` before the final reply',
+    )
     expect(computerSection).not.toContain(
       'The returned `handoffUrl` is bound to a single pause/checkpoint.',
     )
     expect(computerSection).not.toContain('vault-cli memory upsert')
     expect(computerSection).not.toContain('book another dentist appointment')
+  })
+
+  it('keeps workout capture route duration out of typed duration', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'recover route distance/elevation, never route duration',
+    )
+    expect(prompt).toContain(
+      'call `vault-cli workout add` before asking for an omitted duration',
+    )
+    expect(prompt).not.toContain(
+      'estimated distance, duration, or elevation are often useful fields to recover',
+    )
   })
 
   it('guides automation continuity policy by task size', () => {
@@ -1427,40 +1548,61 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('23:00 through 04:59')
   })
 
-  it('offers a weather check before saving outdoor reminder automations', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+  it('buffers model-chosen completed wearable summaries without moving action-timed cues', () => {
+    const prompts = [
+      buildAssistantSystemPrompt(createCommonCodexPromptInput()),
+      buildAssistantSystemPrompt(createCommonCodexPromptInput({
+        assistantHostedAutomationAvailable: true,
+        conversationScope: 'group',
+        hostedRuntime: true,
+      })),
+    ]
 
-    expect(prompt).toContain('Outdoor-conditions reminder guard')
-    expect(prompt).toContain(
-      'reuse a city or region already known from this conversation, saved context, or the plan',
-    )
-    expect(prompt).toContain(
-      'offer once, as an option, to take one; ask for city or region, never an exact address',
-    )
-    expect(prompt).toContain(
-      'let a decline save the automation unchanged without raising it again',
-    )
-    expect(prompt).toContain(
-      'read weather for it before composing the message: call `murph.connected_apps_execute` with no account selector and `toolSlug: OPENWEATHER_API_GET_CURRENT_WEATHER`',
-    )
-    expect(prompt).toContain(
-      'or `OPENWEATHER_API_GET5_DAY_FORECAST` when the activity window is still hours away',
-    )
-    expect(prompt).toContain(
-      'Both slugs are server-allowlisted accountless reads, so search first only when their argument schema is unclear',
-    )
-    expect(prompt).toContain(
-      'name the conditions, then offer the nearest workable time in the same window or an indoor equivalent',
-    )
-    expect(prompt).toContain(
-      "Weather changes a run's wording, never whether it happens",
-    )
-    expect(prompt).toContain(
-      'with no stored location or a failed read, send the ordinary reminder without mentioning the check',
-    )
-    expect(prompt).toContain(
-      'save that coarse location once with `vault-cli memory upsert` so later automations reuse it instead of asking again',
-    )
+    for (const prompt of prompts) {
+      expect(prompt).toContain(
+        'Wearable freshness for scheduled summaries: imports can lag events by three to six hours.',
+      )
+      expect(prompt).toContain(
+        'prefer the next day after a several-hour buffer',
+      )
+      expect(prompt).toContain('use late morning local time')
+      expect(prompt).toContain('Honor an exact time')
+      expect(prompt).toContain(
+        'Do not shift action-timed cues such as bedtime reminders.',
+      )
+      expect(prompt).toContain(
+        'Stored instructions must name the completed period, check coverage and freshness each run',
+      )
+      expect(prompt).toContain(
+        'delayed, stale, or missing data as unknown or incomplete—not zero or failure',
+      )
+      expect([
+        ...prompt.matchAll(/Wearable freshness for scheduled summaries:/gu),
+      ]).toHaveLength(1)
+    }
+  })
+
+  it('routes outdoor authoring and execution to current location policy without freezing a city', () => {
+    for (const turnTrigger of [null, 'automation-cron'] as const) {
+      const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({ turnTrigger }))
+      expect(prompt).toContain("before authoring or running an outdoor reminder, read the `connected-apps` skill's reminder-location policy")
+      expect(prompt).toContain('never freeze an incidental current city into recurring instructions')
+      expect(prompt).toContain('Preserve explicitly fixed destinations and reminder timing')
+      expect(prompt).toContain('Newer member statements and Journal travel override incidental legacy cities')
+      expect(prompt).toContain('Planned arrival is not proof of presence')
+      expect(prompt).toContain('cross-check an inherited incidental city against bounded ongoing/recent canonical travel')
+      expect(prompt).toContain('with its date and any known validity window')
+      expect(prompt).not.toContain('With a location, store it in the instructions')
+      expect(prompt).not.toContain('so later automations reuse it instead of asking again')
+    }
+    const executionOnly = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      turnTrigger: 'automation-cron', hostedRuntime: true, assistantHostedAutomationAvailable: false,
+    }))
+    expect(executionOnly).toContain('Scheduled automation changes are unavailable in this turn')
+    expect(executionOnly).toContain('Private reminder location:')
+    expect(executionOnly).toContain('cross-check an inherited incidental city')
+    const group = buildAssistantSystemPrompt(createCommonCodexPromptInput({ conversationScope: 'group' }))
+    expect(group).not.toContain('Private reminder location:')
   })
 
   it('keeps outdoor reminder locations out of personal records in group rooms', () => {
@@ -1569,7 +1711,25 @@ describe('assistant local PDF evidence guidance', () => {
       'When several bounded `vault-cli` commands are needed for the same vault, prefer one `vault-cli batch --compact --format json` call',
     )
     expect(prompt).toContain(
-      'vault-cli batch --compact --format json --command \'["memory","show"]\' --command \'["goal","list"]\'',
+      'vault-cli batch --compact --format json --command \'["memory","show","--compact"]\' --command \'["goal","list"]\'',
+    )
+    expect(prompt).toContain(
+      'When a bounded saved-memory context is injected, use it directly when it is sufficient',
+    )
+    expect(prompt).toContain(
+      'Do not read memory solely because that block is absent',
+    )
+    expect(prompt).toContain('memory show <id> --record-only --format json')
+    expect(prompt).toContain('keep the complete memory read above when resolving context or conflicts')
+    expect(prompt).toContain('Use `--compact` on memory upsert, update, forget, and set-name')
+    expect(prompt).toContain('`--include-workout-summaries` for individual workout facts')
+    expect(prompt).toContain('`--include-workout-details` for lap/split rows')
+    expect(prompt).toContain('Never probe with a smaller level and retry; omitted splits are not absent splits')
+    expect(prompt).toContain(
+      'only when exact saved context could materially change the current answer',
+    )
+    expect(prompt).not.toContain(
+      '--command \'["memory","show"]\'',
     )
     expect(prompt).toContain(
       'do not use batch for interactive, server, or long-running assistant commands',
@@ -1662,6 +1822,34 @@ describe('assistant local PDF evidence guidance', () => {
     },
   )
 
+  it('keeps stale Apple Health troubleshooting app-mediated', () => {
+    const directPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput(),
+    )
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+
+    expect(directPrompt).toContain(
+      'ask the member to open Murph on their iPhone so its app-mediated import can run',
+    )
+    expect(directPrompt).toContain(
+      'then re-check the metric and date',
+    )
+    expect(directPrompt).toContain(
+      "Opening Apple's Health app does not refresh Murph.",
+    )
+    expect(directPrompt).toContain(
+      'Do not promise immediate sync or suggest reconnecting unless authentication or permission failed.',
+    )
+    expect(groupPrompt).not.toContain(
+      'If connected Apple Health data is stale or missing',
+    )
+  })
+
   it('teaches Codex to inspect local PDF artifacts with Poppler tools', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -1703,7 +1891,10 @@ describe('assistant local PDF evidence guidance', () => {
       'For voice memos and audio/video, use transcript fragments directly when ingestion provides them',
     )
     expect(prompt).toContain(
-      'When transcripts are missing and the task truly needs the media content, call `send_progress_update` before bounded local media tools',
+      'When transcripts are missing and the task truly needs the media content, use bounded local media tools',
+    )
+    expect(prompt).not.toContain(
+      'call `send_progress_update` before bounded local media tools',
     )
     expect(prompt).not.toContain(
       'This applies even when the platform has already extracted the text',
@@ -1800,13 +1991,10 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity owns wearable facts; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
+      'Training/movement: daily-activity owns wearable facts, walking breaks, and everyday movement targets; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
     )
     expect(prompt).toContain(
-      'Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.',
-    )
-    expect(prompt).toContain(
-      'Live workout/card: read strength-training and tracked-table, including on a short follow-up in a conversation about a live workout.',
+      'Strength sets: strength-training chooses one owner. Exact activity-session stays live; exact regimen or experiment owns occurrences even with a workout-format template; only a standalone workout-format reminder starts a workout. Terse wording never switches owners. In groups, hand off privately without reads or writes.',
     )
     expect(prompt).toContain(
       'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',
@@ -1815,7 +2003,10 @@ describe('assistant consumption lookup guidance', () => {
       'Read it before recommending exercises, rest, activity restriction, or load changes for pain',
     )
     expect(prompt).toContain(
-      'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
+      'Private `start a live workout` is consent: read `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md`, then execute before replying.',
+    )
+    expect(prompt).toContain(
+      'Other movement selection/instruction: domain owner plus `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`.',
     )
     expect(prompt).toContain(
       'follow the owning skill\'s label or exercise-catalog workflow instead of estimating from memory or inventing details.',
@@ -1996,6 +2187,17 @@ describe('assistant user-facing wording guidance', () => {
 })
 
 describe('assistant system prompt cache stability', () => {
+  it.each(['direct', 'group', 'unverified-external'] as const)('keeps %s workout access in chat without a Training destination', (conversationScope) => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope,
+      murphProductBaseUrl: 'https://www.withmurph.ai',
+    }))
+    expect(prompt).toContain('never recommend or link to it')
+    expect(prompt).toContain('even when older messages or changelog entries mention it')
+    expect(prompt).not.toContain('/training')
+    expect(prompt).not.toContain('the signed-in Training page is available')
+  })
+
   it('keeps the always-on kernel and non-CLI route guidance bounded', () => {
     const layers = buildAssistantSystemPromptLayers(
       // Pin the product base URL to the production origin so this size bound is
@@ -2007,15 +2209,60 @@ describe('assistant system prompt cache stability', () => {
       }),
     )
 
-    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_050)
-    // This layer is resident on every turn for every member, so it is a ratchet,
-    // not a budget: raise it only for cross-route guidance that cannot live in
-    // an owning skill. Capability-specific browser, connected-app, phone-call,
-    // and Family mechanics are intentionally excluded from this resident layer.
+    // Private language selection and canonical memory policy add 1412 characters.
+    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(9_827)
+    // This layer is resident on every turn for every member. Its ceiling is the
+    // prior 66,780-character ratchet plus the reviewed 890-character wearable
+    // freshness addition, for cross-route guidance that cannot live in an owning
+    // skill. Capability-specific browser, connected-app, phone-call, and Family
+    // mechanics remain excluded.
     // The local automation delivery limitation, the established Apple
-    // Health/WHOOP relay and cross-route repeated-set boundary, plus the private
-    // longitudinal recommendation policy set this ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(58_910)
+    // Health/WHOOP relay, cross-route repeated-set boundary, private
+    // longitudinal recommendation, direct and group Journal capture policies,
+    // narrowest-relevant-safety rule, response-card dietary/burn
+    // target-authority boundary, explicit group-family tool routing, and the
+    // cross-route CLI error-recovery contract, and shared exact-versus-vague
+    // one-shot reminder timing policy, Apple Health stale-data recovery, and
+    // wearable-summary freshness contract plus the public goal workflow owner
+    // set the prior ceiling. Exact-memory and workout-output hints add 684
+    // characters; existing-file attachment guidance adds 212, retaining the
+    // prior 4-character margin (68,574 characters plus 4).
+    // Journal capture adds 1,933 characters above the prior ceiling. Focused
+    // live journeys showed that shorter guidance omitted saves or repeated
+    // event names in descriptions. Keep the explicit rules within this cap.
+    // Automation control-copy authoring adds 227 characters; reviewed Terra and
+    // Luna journeys cover clean saved instructions and retained user controls.
+    // Journal recovery adds 1,456 characters for verified saves, honest page
+    // visibility, and workspace-safe launch recovery; focused Terra proof owns it.
+    // Private group-consent recovery adds 609 characters; focused Terra journeys
+    // verify the actionable next step and prevent ineffective context handoffs.
+    // Nutrition guidance adds 287 characters; six focused Terra journeys cover
+    // first-card invitation, suppression, routine logging and scheduled closeout.
+    // Selected-date meal recovery adds 164 characters; five focused Terra
+    // journeys cover manual estimation, clarification, and nonnumeric tracking.
+    // Upcoming Journal context adds 29 characters to the skill routing hint;
+    // complete direct/group provider-input measurements cover its composed cost.
+    // Complete private workspace archives replace the former content filtering;
+    // composed input measurement and focused Terra archive inspection cover it.
+    // Meal skill routing adds 300 characters to prevent preflight discovery.
+    // Complete direct/group input measurements and five focused Terra journeys
+    // cover the cost and behavior; retain the existing 41-character margin.
+    // Pattern-ready Journal tags add 1,178 characters. Complete native-provider
+    // direct/group captures and live Sol capture/query proof cover this cost;
+    // retain the previous margin without changing the unchanged group surface.
+    // Saved-duration and support-privacy clarifications use the reviewed margin;
+    // focused Sol journeys retain no-reconfirmation and de-identification checks.
+    // Goal setup distinguishes proposal from execution and reuses completed research.
+    // Complete-input byte measurement covers this increase; conditional support
+    // execution removes about 26 KB from fresh quiet-plan skill reads.
+    // Shared lasting-correction routing adds 1,022 characters. Complete private
+    // and group request measurements plus live task/preference/one-off proof
+    // cover this resident rule; retain the existing base margin.
+    // Direct tool-recovery progress guidance adds 659 characters. Complete
+    // native-provider captures measure +660 serialized bytes for direct turns
+    // and no group growth; live Sol success/failure journeys verify behavior.
+    // Preserve the existing 2-character margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_381)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2077,13 +2324,13 @@ describe('assistant system prompt cache stability', () => {
     expect(layers.threadContextPrompt).toContain(
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
-    expect(layers.threadContextPrompt).toContain('Private Training page:')
+    expect(layers.threadContextPrompt).toContain('Workout access:')
+    expect(layers.threadContextPrompt).toContain('Label unsaved plans as drafts')
     expect(layers.threadContextPrompt).toContain(
-      'the signed-in Training page is available at http://localhost:3000/training',
+      'never recommend or link to it',
     )
-    expect(layers.threadContextPrompt).toContain(
-      'read-only and intentionally absent from the Home sidebar',
-    )
+    expect(layers.prompt).not.toContain('/training')
+    expect(layers.prompt).not.toContain('the signed-in Training page is available')
     expect(layers.threadContextPrompt).not.toContain(
       'Layer partition assistant context snapshot.',
     )
@@ -2153,6 +2400,33 @@ describe('assistant system prompt cache stability', () => {
       'Delivery adapter contract:',
     )
   })
+
+  it.each(['direct', 'group'] as const)(
+    'puts context before questions in every %s scheduled turn, outside saved automation eligibility',
+    (conversationScope) => {
+      const input = createCommonNotificationPromptInput({ conversationScope })
+      const layers = buildAssistantSystemPromptLayers(input)
+      const policy = layers.dynamicTurnContextPrompt
+      expect(policy).toContain('Context before questions applies to every automation')
+      expect(policy).toContain('one-shots, recurring reminders, check-ins, and managed jobs')
+      expect(policy).toContain('takes precedence over saved wording such as "only say" or "ask exactly"')
+      expect(policy).toContain('over instructions to send a cue normally')
+      expect(policy).toContain('make a bounded, targeted read before asking the member to repeat it')
+      expect(policy).toContain('ask only for a still-useful missing detail within the agreed purpose')
+      expect(policy).toContain('return `skip` for this occurrence after completing any independently required work')
+      expect(policy).toContain('distinguish a plan from a completed action')
+      expect(policy).toContain('unavailable history, or mere topic overlap as proof of completion')
+      expect(policy).toContain('Preserve still-needed reminders, including treatment and safety cues')
+      expect(policy).not.toContain('Do not read conversation history')
+      expect(policy).not.toContain('Always send')
+      const foreground = buildAssistantSystemPromptLayers({
+        ...input, scheduledOccurrenceAt: null, turnTrigger: null,
+      })
+      expect(foreground.prompt).not.toContain('Context before questions applies to every automation')
+      expect(layers.staticCacheableCorePrompt).toBe(foreground.staticCacheableCorePrompt)
+      expect(layers.threadContextPrompt).toBe(foreground.threadContextPrompt)
+    },
+  )
 
   it('applies assistant tone preference to ordinary scheduled turns', () => {
     const prompt =
@@ -2248,8 +2522,11 @@ describe('assistant system prompt cache stability', () => {
         assistantContextSnapshotPrompt:
           'Vault overview for user A.\n\nActive experiment context for user A.',
         channel: 'telegram',
-        currentLocalDate: '2026-04-15',
-        currentTimeZone: 'Asia/Kuala_Lumpur',
+        currentInstant: '2027-02-14T07:17:05.678Z',
+        currentLocalDate: '2027-02-13',
+        currentTimeZone: 'America/Los_Angeles',
+        conversationScope: 'direct',
+        hostedRuntime: true,
         murphProductBaseUrl: 'http://localhost:3000',
       }),
       cacheInput,
@@ -2259,8 +2536,11 @@ describe('assistant system prompt cache stability', () => {
         assistantContextSnapshotPrompt:
           'Vault overview for user B.\n\nActive experiment context for user B.',
         channel: 'sms',
-        currentLocalDate: '2026-04-16',
+        currentInstant: '2027-07-02T03:04:05.678Z',
+        currentLocalDate: '2027-07-01',
         currentTimeZone: 'America/Los_Angeles',
+        conversationScope: 'direct',
+        hostedRuntime: true,
         murphProductBaseUrl: 'https://withmurph.ai',
       }),
       cacheInput,
@@ -2291,13 +2571,20 @@ describe('assistant system prompt cache stability', () => {
       promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
     )
 
-    expect(stablePrefix).not.toContain('Asia/Kuala_Lumpur')
-    expect(stablePrefix).not.toContain('2026-04-15')
+    expect(stablePrefix).not.toContain('America/Los_Angeles')
+    expect(stablePrefix).not.toContain('2027-02-13')
+    expect(stablePrefix).not.toContain('2027-02-14T07:17:05.678Z')
     expect(stablePrefix).not.toContain('http://localhost:3000')
     expect(stablePrefix).not.toContain('Vault overview for user A.')
     expect(stablePrefix).not.toContain('Active experiment context for user A.')
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
-    expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
+    expect(dynamicSuffix).toContain('America/Los_Angeles')
+    expect(dynamicSuffix).toContain(
+      'Current local clock for the user (America/Los_Angeles): 2027-02-13 23:17:05 [UTC 2027-02-14T07:17:05.678Z].',
+    )
+    expect(promptB.layers.dynamicTurnContextPrompt).toContain(
+      'Current local clock for the user (America/Los_Angeles): 2027-07-01 20:04:05 [UTC 2027-07-02T03:04:05.678Z].',
+    )
     expect(dynamicSuffix).toContain('Vault overview for user A.')
     expect(promptB.prompt).toContain('Vault overview for user B.')
     expect(promptB.prompt).toContain('Active experiment context for user B.')
@@ -2305,7 +2592,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '59bdee189b368b6c91df9f4cc828caf9919b7839063747c58b5d6c7281309fd1',
+      '6324f7e80517c979431bbd53f6527197e815f43af6629c0793abff4668fb498b',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2366,7 +2653,10 @@ describe('assistant system prompt cache stability', () => {
     expect(openStablePrefix).toEqual(closedStablePrefix)
     expect(openStablePrefix).toContain('Murph skill router:')
     expect(openStablePrefix).toContain(
-      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
+      'explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge;',
+    )
+    expect(openStablePrefix).toContain(
+      'facts -> domain.',
     )
     expect(openStablePrefix).toContain(
       'When the private longitudinal default in turn priority applies, read self-management-experiments.',
@@ -2459,6 +2749,15 @@ describe('assistant experiment onboarding guidance', () => {
       '`vault-cli commons knowledge search "<full health question in concise English>" --format json`',
     )
     expect(prompt).toContain('run one `vault-cli commons knowledge search')
+    expect(prompt).toContain(
+      'Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state.',
+    )
+    expect(prompt).toContain(
+      "For deterministic exact food-label nutrition facts, use food-journal's label database directly.",
+    )
+    expect(prompt).toContain(
+      'Health reasoning or advice beyond the returned label facts still requires Commons.',
+    )
     expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
     expect(prompt).toContain('If unavailable or empty, continue honestly.')
     expect(prompt).toContain('Skip jokes, thanks, logs, logistics, and non-health turns.')
@@ -2513,7 +2812,7 @@ describe('assistant experiment onboarding guidance', () => {
 
     expect(prompt).toContain('Follow-through and authorization:')
     expect(prompt).toContain(
-      'For recurring behavior, experiments, reminders, friction, or adherence repair, read the matching domain skill and `behavior-followthrough` before setup or scheduling.',
+      'For recurring support, experiments, reminder repair, or adherence problems, read the matching domain skill and `behavior-followthrough` before setup or scheduling.',
     )
     expect(prompt).toContain(
       'Keep the first setup small, reversible, and easy to stop.',
@@ -2531,7 +2830,7 @@ describe('assistant experiment onboarding guidance', () => {
       'Do not apply this default to factual questions, logging or record updates, requests to be heard without problem-solving, acute or unstable situations',
     )
     expect(prompt).toContain(
-      'cases primarily owned by urgent or clinician-led evaluation, decisions the existing record already resolves, or cases where one clearly indicated direct action makes comparison unnecessary',
+      'cases primarily owned by urgent or clinician-led evaluation, decisions the existing record already resolves, or ordinary plans with a chosen or clearly indicated action',
     )
     expect(prompt).toContain(
       'give a working assessment plus one context-grounded bounded trial without waiting for experiment vocabulary or an explicit action verb',
@@ -2548,6 +2847,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'For any multi-day or repeated comparison, also read experiment-onboarding',
     )
+    expect(prompt).toContain('For repeated plans, use behavior-followthrough to offer reminders and a check-in proactively.')
+    expect(prompt).not.toContain('add behavior-followthrough only when recurring support matters')
+    expect(groupPrompt).not.toContain('offer reminders and a check-in proactively')
     expect(prompt.match(/Private longitudinal default:/gu) ?? []).toHaveLength(1)
     expect(
       prompt.match(/A reminder, calendar event, check-in, recurring workflow, or tracking plan is a separate action\./gu) ?? [],
@@ -2686,7 +2988,10 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(groupPrompt).toContain('Understand before recommending:')
     expect(groupPrompt).toContain(
-      'Use only the visible conversation, public sources, group-owned state, and server-approved shared projections.',
+      'Read private participant records only through server-approved group results',
+    )
+    expect(groupPrompt).toContain(
+      'call `record_current_sender_journal_fact` once per fact, with the exact ref and a different index.',
     )
     expect(groupPrompt).toContain(
       'Missing context is not evidence for the most restrictive option.',
@@ -2717,7 +3022,7 @@ describe('assistant experiment onboarding guidance', () => {
       'Stress-regulation owns the immediate downshift when acute stress or overload blocks action;',
     )
     expect(prompt).toContain(
-      'Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`.',
+      'Skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`.',
     )
   })
 
@@ -2728,21 +3033,22 @@ describe('assistant experiment onboarding guidance', () => {
 
     expect(prompt).toContain('Murph skill router:')
     expect(prompt).toContain(
-      'Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`.',
+      'Skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`.',
     )
     expect(prompt).toContain(
-      'Route by the user\'s visible outcome and read the primary owner.',
+      'Read the primary owner for the user\'s visible outcome.',
     )
     expect(prompt).toContain(
-      'If routing is ambiguous, inspect at most two candidates; this cap is discovery-only.',
+      'If ambiguous, inspect at most two for discovery;',
     )
     expect(prompt).toContain(
-      'Then follow explicit handoffs and load every distinct safety or execution owner.',
+      'then follow handoffs and load each safety/execution owner.',
     )
     expect(prompt).toContain(
-      'Do not preload skills or call a discovery CLI just to route.',
+      'Do not preload or use a discovery CLI.',
     )
-    expect(prompt).toContain('Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.')
+    expect(prompt).toContain('explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge;')
+    expect(prompt).toContain('facts -> domain.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
     expect(prompt).toContain(
@@ -2831,10 +3137,26 @@ describe('assistant Murph onboarding guidance', () => {
       "The user's immediate health or safety need still comes first.",
     )
     expect(prompt).toContain(
-      'before advancing, declining, or completing onboarding',
+      'When the canonical Murph welcome is visible in this direct conversation, treat it as authoritative evidence that onboarding just began.',
     )
     expect(prompt).toContain(
-      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion.',
+      'For that first-reply fast path, do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
+    )
+    expect(prompt).toContain('Do not schedule a check-in during this opening exchange.')
+    expect(prompt).not.toContain('onboarding-early-stall-check-in')
+    expect(prompt).not.toContain('Early-stall check-in:')
+
+    expect(prompt).toContain(
+      'hey — what should i call you?',
+    )
+    expect(prompt).toContain(
+      "What should I call you?",
+    )
+    expect(prompt).toContain(
+      'Outside these visible opening exchanges—missing or ambiguous history, established later stages, an immediate request, or an overall pause or decline—read and follow',
+    )
+    expect(prompt).toContain(
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, later-stage persistence, generic defer and skip meaning, and completion.',
     )
     expect(prompt).toContain(
       'During discovery, a stated health goal is context, not an action request.',
@@ -2851,12 +3173,15 @@ describe('assistant Murph onboarding guidance', () => {
     expect(prompt).toContain(
       'On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.',
     )
-    expect(prompt).toContain('Honor pause, defer, skip, and decline.')
     expect(prompt).toContain(
+      'Once a data source is identified, postponing only its optional connection does not pause onboarding. Do not issue or reissue a link; acknowledge the choice, continue to the next unresolved foundation beat unless the user explicitly pauses onboarding itself, and never imply the connection exists until visible evidence proves it.',
+    )
+    expect(prompt).not.toContain('Honor pause, defer, skip, and decline.')
+    expect(prompt).not.toContain(
       'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
     )
     expect(prompt).toContain(
-      'Do not reproduce or substitute a second onboarding flow from this overlay.',
+      'Keep later-stage rules in that skill.',
     )
     expect(prompt).toContain(
       "When the skill's completion criteria are satisfied, run `vault-cli assistant onboarding complete` with the correct reason and verify the output reports completed.",
@@ -2865,13 +3190,16 @@ describe('assistant Murph onboarding guidance', () => {
       'Until then, leave onboarding open.',
     )
     expect(prompt).toContain(
-      'Ask at most one onboarding question or checkpoint in a reply; the skill\'s bundled minimal-identity prompt counts as one checkpoint.',
+      'Ask at most one onboarding question or checkpoint in a reply; the opening instructions\' bundled minimal-identity prompt counts as one checkpoint.',
     )
     expect(prompt).toContain(
       "Use the current prompt's date, timezone, channel, delivery route, and available tool guidance as runtime context whenever the onboarding skill is used",
     )
+    expect(prompt.match(
+      /vault-cli assistant onboarding resume-context --format json/gu,
+    )).toHaveLength(1)
     expect(prompt).not.toContain(
-      'vault-cli assistant onboarding resume-context --format json',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md` before interpreting or acting on any onboarding answer',
     )
     expect(prompt).not.toContain('all six foundation checkpoints')
     expect(prompt).not.toContain('first-value proof')
@@ -2900,7 +3228,10 @@ describe('assistant Murph onboarding guidance', () => {
     }))
 
     expect(prompt).toContain(
-      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
+      'explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge;',
+    )
+    expect(prompt).toContain(
+      'facts -> domain.',
     )
     expect(prompt).toContain('Murph skill router:')
     expect(prompt).not.toContain('Murph onboarding:')
@@ -2911,6 +3242,91 @@ describe('assistant Murph onboarding guidance', () => {
 })
 
 describe('assistant conversation scope', () => {
+  it('discovers explicit current-sender personal Murph consultation without broadening group authority', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'families',
+        channel: 'linq',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+    const directPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const groupEmailPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'families',
+        channel: 'email',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+
+    const restrictedGroupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'shared_read',
+        channel: 'linq',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+    const noToolGroupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantHostedGroupToolSurface: 'none',
+        channel: 'linq',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+
+    expect(groupPrompt).toContain(
+      'search/load deferred `murph.group_consult` via `tool_search` or `ALL_TOOLS` before redirecting or denying',
+    )
+    expect(groupPrompt).toContain(
+      "Current-sender actions are the authorized host-mediated bridge to that sender's personal Murph",
+    )
+    expect(groupPrompt).toContain(
+      'they do not grant direct room-vault access or private-state inspection',
+    )
+    expect(groupPrompt).toContain(
+      "Use only the exact accepted `message_ref` printed beside that sender's complete request or destination answer",
+    )
+    expect(groupPrompt).toContain(
+      'Infer only the requested answer audience from ordinary conversation',
+    )
+    expect(groupPrompt).toContain(
+      '`ask_current_sender` for an explicit answer in the group',
+    )
+    expect(groupPrompt).toContain(
+      '`ask_current_sender_privately` for an explicit private answer',
+    )
+    expect(groupPrompt).toContain(
+      '`clarify_current_sender` only when the answer destination is genuinely ambiguous',
+    )
+    expect(groupPrompt).toContain(
+      'After `clarify_current_sender` returns `clarification_required`, ask one concise natural question in that same turn about whether the answer should be shared in this group or sent privately, without prescribing a reply format. Do not finish that turn silently.',
+    )
+    expect(groupPrompt).toContain(
+      "Use the matching continuation action only when the same sender's next reply solely selects the group or private destination",
+    )
+    expect(groupPrompt).toContain('If that reply adds or changes substance')
+    expect(groupPrompt).toContain(
+      'the host reloads the Message and remains authoritative for identity, route existence, authorization, required notice, replay safety, and the fixed destination',
+    )
+    expect(groupPrompt).toContain(
+      'This lane is only for current-sender consultation, not account/settings actions, other participants, or unsolicited disclosure',
+    )
+    expect(directPrompt).toContain(
+      'From this private conversation, joined-group consultation is available only for groups Murph has already joined',
+    )
+    expect(groupEmailPrompt).not.toContain('search/load deferred `murph.group_consult`')
+    expect(restrictedGroupPrompt).not.toContain(
+      'search/load deferred `murph.group_consult`',
+    )
+    expect(noToolGroupPrompt).not.toContain(
+      'search/load deferred `murph.group_consult`',
+    )
+  })
+
   it('takes explicitly delegated initiative across direct and group scopes without expanding authority', () => {
     const groupPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({
@@ -2929,19 +3345,19 @@ describe('assistant conversation scope', () => {
     for (const prompt of [directPrompt, groupPrompt]) {
       expect(prompt).toContain('Delegated initiative:')
       expect(prompt).toContain(
-        'When the requester clearly delegates judgment or an outcome—asking Murph to handle something, choose, decide, figure it out, take the lead, use its judgment, or make it happen—take the mandate instead of handing the work back as a checklist.',
+        'when asked to choose, make reasonable reversible choices and state material assumptions.',
       )
       expect(prompt).toContain(
-        'Do not ask for preferences merely to avoid choosing; mention only assumptions that materially affect the result.',
+        'Finish authorized work with verified results or explain the blocker.',
       )
       expect(prompt).toContain(
-        'Ask only for facts that materially change safety, authorization, correctness, or the next useful step.',
+        'Ask only what changes safety, authority, correctness, or the next step.',
       )
       expect(prompt).toContain(
-        'Complete everything useful that is independent of a blocker first.',
+        'Complete independent work first; make required approval concrete.',
       )
       expect(prompt).toContain(
-        'If a texting-route reply still needs user input, ask exactly one highest-value blocker as the final question.',
+        'If input is needed, ask one highest-value blocker last on texting routes.',
       )
       expect(prompt).toContain(
         'Delegation authorizes judgment among already permitted options; it does not create consent or effect authority beyond the request and owning rule.',
@@ -2967,7 +3383,7 @@ describe('assistant conversation scope', () => {
     }))
 
     expect(prompt).toContain('Conversation scope: hosted group chat.')
-    expect(prompt).toContain('synthetic room container, not the human speaker')
+    expect(prompt).toContain('The room runtime is not a participant.')
     expect(prompt).toContain(
       'Group messages stay phone-screen short by default, and the ceiling covers the whole reply.',
     )
@@ -3032,7 +3448,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('Preserve medication state correctly')
     expect(prompt).not.toContain("the user's compiled wiki")
     expect(prompt).not.toContain('vault-cli memory set-name')
-    expect(prompt).toContain('The room container is not a person')
+    expect(prompt).toContain('The room runtime is not a participant.')
     expect(prompt).toContain('Group audience and scope:')
     expect(prompt).toContain(
       'make shared decisions, plan ordinary life and leisure',
@@ -3059,7 +3475,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
     expect(prompt).toContain(
-      'a same-turn first-party group funding URL returned by `murph.group action="read_usage"` after someone directly asks to fund, sponsor, contribute, pay to add usage, or receive its funding link',
+      'a same-turn first-party group funding URL returned by `murph.group_usage action="read_usage"` after someone directly asks to fund, sponsor, contribute, pay to add usage, or receive its funding link',
     )
     expect(prompt).toContain(
       'or after they ask generically how to get or add more usage, keep the room going, or accept an explanation of the group\'s usage options',
@@ -3136,7 +3552,7 @@ describe('assistant conversation scope', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(prompt).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'A saved Luna, Terra, or Sol model starts next turn',
     )
     expect(prompt).toContain(
       'Provider and reasoning controls remain unavailable in a group',
@@ -3220,7 +3636,7 @@ describe('assistant conversation scope', () => {
       'the spoofable email sender cannot authorize filesystem or room-model access',
     )
     expect(prompt).toContain(
-      'Participant labels are hypotheses, not findings, and cannot establish an acute-injury route.',
+      'A participant\'s self-described symptom, injury, or interpretation is context, not a diagnosis, and cannot establish an acute-injury route.',
     )
     expect(prompt).toContain(
       'Rest, activity restriction, and fixed recovery windows require positive authorized evidence',
@@ -3229,13 +3645,13 @@ describe('assistant conversation scope', () => {
       'preserve tolerated movement while clarifying a decision-changing fact.',
     )
     expect(prompt).toContain(
-      'In group email, where filesystem reads are forbidden, do not attempt the read; apply the resident group Understand before recommending rules instead.',
+      'Group-email health guidance: apply the resident Understand before recommending rules.',
     )
     expect(prompt).toContain(
       'Group email has no filesystem access. Do not try to read a usage skill.',
     )
     expect(prompt).toContain(
-      'call `murph.group action="read_usage"` exactly once',
+      'call `murph.group_usage action="read_usage"` exactly once',
     )
     expect(prompt).toContain(
       'At least all of this room\'s included usage for the current period has been used.',
@@ -3247,7 +3663,7 @@ describe('assistant conversation scope', () => {
       'Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md`',
     )
     expect(prompt).not.toContain(
-      'Use `murph.automation` with `action: save`',
+      'For automation creation, inspection, changes, or reconciliation',
     )
     expect(prompt).not.toContain('vault-cli automation')
     expect(prompt).not.toContain('Create the newsletter cron through `murph.automation`')
@@ -3267,98 +3683,19 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'Scheduled automation changes for this conversation are available through `murph.automation`.',
     )
-    expect(prompt).toContain(
-      'Use `murph.automation` with `action: save` to create an ordinary automation, `action: inspect` to read one without mutation, and `action: patch` to change one.',
-    )
-    expect(prompt).toContain(
-      'Only save `contextReferences` by copying ids from successful current canonical reads or create results that identify exactly one record.',
-    )
-    expect(prompt).toContain(
-      'does not prove that a referenced record exists or is the correct mutation target',
-    )
-    expect(prompt).toContain(
-      'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
-    )
-    expect(prompt).toContain(
-      'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
-    )
-    expect(prompt).toContain(
-      'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
-    )
-    expect(prompt).toContain(
-      'state the explicit host-resolved date returned by the tool while asking for another time',
-    )
-    expect(prompt).toContain(
-      'state the explicit host-resolved date returned by the tool while asking whether the earlier or later occurrence is intended',
-    )
-    expect(prompt).toContain(
-      'Before making any relative-date claim about an existing automation, call `action: inspect` and answer from its authoritative schedule and verified next occurrence without mutating it',
-    )
-    expect(prompt).toContain(
-      'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
-    )
-    expect(prompt).toContain(
-      'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `timingVerified`, `timingVerificationIssues`, `effectiveTimeZone`, and `nextOccurrenceAt`.',
-    )
-    for (const scheduleExample of [
-      '`{"kind":"every","everyMs":3600000}`',
-      '`{"kind":"cron","expression":"0 9 * * 1-5","timeZone":"America/Chicago"}`',
-      '`{"kind":"dailyLocal","localTime":"09:00","timeZone":"America/Chicago"}`',
-    ]) {
-      expect(prompt).toContain(scheduleExample)
-    }
-    expect(prompt).toContain(
-      'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` identifying the existing automation.',
-    )
-    expect(prompt).toContain(
-      'Never invent schedule, update, or timezone fields outside the schema.',
-    )
-    expect(prompt).toContain(
-      'The exact camel-case field `schedule.timeZone` is valid only for recurring `cron` and `dailyLocal` wall-clock schedules',
-    )
-    expect(prompt).toContain(
-      'never use `timezone`, `schedule.timezone`, top-level `timeZone`, or any other invented timezone field',
-    )
-    expect(prompt).toContain(
-      'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
-    )
-    expect(prompt).toContain(
-      'On patch, a replacement recurring wall-clock schedule that omits `schedule.timeZone` preserves the stored explicit timezone',
-    )
-    expect(prompt).toContain(
-      'do not ask the user to repeat it or guess it from current conversation context',
-    )
-    expect(prompt).toContain(
-      'For an active `deviceActivity` schedule, confirm the persisted event trigger directly',
-    )
-    expect(prompt).toContain(
-      'a null `nextOccurrenceAt` means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
-    )
-    expect(prompt).toContain(
-      'do not invent a time or offer timing recovery',
-    )
-    expect(prompt).toContain(
-      'For time-based schedules, confirm timing only from a result with `timingVerified: true`',
-    )
-    expect(prompt).toContain(
-      'a verified null `nextOccurrenceAt` means no later deliverable occurrence is scheduled, never a retry or cutoff wake',
-    )
-    expect(prompt).toContain(
-      'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
-    )
-    expect(prompt).toContain(
-      'A save or patch result already includes its host-owned read-only timing readback',
-    )
-    expect(prompt).toContain(
-      'follow the tool contract and never issue a second inspection or recovery write.',
-    )
+    expect(prompt).toContain('discover `murph.automation` through native `tool_search` or code-mode `ALL_TOOLS`')
+    expect(prompt).toContain('read its full current description and schema before calling it')
+    expect(prompt).toContain('omit `slug` unless a loaded skill supplies its exact stable recipe key')
+    expect(prompt).toContain('`updatedAt` as `expectedUpdatedAt`')
+    expect(prompt).toContain('`schedule.localAt`, never raw `schedule.at`')
+    expect(prompt).toContain('keep today/tonight/tomorrow as `relativeDay`')
+    expect(prompt).toContain('do not issue another inspect or write merely to verify the returned result')
+    expect(prompt).toContain('distinguish resolved, pending, and unavailable timing using the tool\'s rules')
+    expect(prompt).toContain('they never prove facts or authorize writes')
+    expect(prompt).not.toContain('DST gap/fold:')
+    expect(prompt).not.toContain('Automation schedules execute while')
     expect(prompt).not.toContain('Interpret `runtime_state_pending`')
-    expect(prompt).not.toContain('save or update succeeded')
     expect(prompt).not.toContain('inspect-or-update recovery action')
-    expect(prompt).toContain(
-      'Patch `status` to pause, reactivate, or archive an existing automation.',
-    )
-    expect(prompt).toContain('Ordinary patches preserve its stored route.')
     expect(prompt).toContain('A save always binds to the trusted current conversation.')
     expect(prompt).toContain(
       'A patch retargets only when `retargetToCurrentConversation: true` is explicit.',
@@ -3386,29 +3723,107 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
-    expect(prompt).toContain(
-      'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
-    )
-    expect(prompt).toContain(
-      'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
-    )
-    expect(prompt).toContain(
-      'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
-    )
-    expect(prompt).toContain(
-      'state the explicit host-resolved date returned by the tool while asking for another time',
-    )
-    expect(prompt).toContain(
-      'Before making any relative-date claim about an existing automation, call `action: inspect` and answer from its authoritative schedule and verified next occurrence without mutating it',
-    )
-    expect(prompt).toContain(
-      'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
-    )
+    expect(prompt).toContain('discover `murph.automation` through native `tool_search` or code-mode `ALL_TOOLS`')
+    expect(prompt).toContain('`schedule.localAt`, never raw `schedule.at`')
+    expect(prompt).toContain('keep today/tonight/tomorrow as `relativeDay`')
+    expect(prompt).toContain('`updatedAt` as `expectedUpdatedAt`')
     expect(prompt).toContain(
       'A save always binds to the trusted current group room.',
     )
     expect(prompt).toContain(
       'Never use saved personal/self targets in this group vault.',
+    )
+  })
+
+  it('separates exact and vague one-shot reminder timing in direct and group prompts', () => {
+    const directPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantHostedAutomationAvailable: true,
+      channel: 'linq',
+      conversationScope: 'direct',
+      hostedRuntime: true,
+    }))
+    const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantHostedAutomationAvailable: true,
+      channel: 'linq',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    }))
+
+    expect(directPrompt).toContain('One-shot reminder time selection:')
+    expect(directPrompt).toContain(
+      'Classify timing before optional reads.',
+    )
+    expect(directPrompt).toContain(
+      'An exact clock time is final: preserve its day or date and time',
+    )
+    expect(directPrompt).toContain(
+      'perform no pattern, routine, wearable, or calendar read to choose or alter it',
+    )
+    expect(directPrompt).toContain(
+      'delegates the clock time',
+    )
+    expect(directPrompt).toContain(
+      '`vault-cli wearables sleep pattern --format json`',
+    )
+    expect(directPrompt).toContain(
+      'Before choosing or saving, when connected-app tools are available, call `murph.connected_apps_manage` once with unfiltered `action: list`',
+    )
+    expect(directPrompt).toContain(
+      'do not skip this because other context seems sufficient',
+    )
+    expect(directPrompt).toContain(
+      'The connection authorizes this narrow read; do not ask permission.',
+    )
+    expect(directPrompt).toContain(
+      'Never guess or fan out.',
+    )
+    expect(directPrompt).toContain(
+      'continue without a timing question',
+    )
+    expect(directPrompt).toContain(
+      'Save exactly one fixed `at` reminder inside the window',
+    )
+    expect(directPrompt).toContain(
+      'Never add `skip-when-busy`, availability or account bindings, runtime calendar reads, or dynamic rescheduling',
+    )
+    expect(directPrompt).toContain(
+      'begin with the reminder subject, date, and time—never just `Reminder saved`',
+    )
+    expect(directPrompt).toContain(
+      'Calendar connection offer for reminder timing — last offered: YYYY-MM-DD; do not re-offer before: YYYY-MM-DD.',
+    )
+    expect(directPrompt).toContain(
+      'update that Context record by id; use `vault-cli memory upsert` only to create it once when absent',
+    )
+    expect(directPrompt).toContain('with today and 14 calendar days later')
+    expect(directPrompt).toContain(
+      'on read or write failure, omit the offer and leave the reminder unchanged',
+    )
+    expect(directPrompt).toContain(
+      'Explicit calendar setup bypasses suppression.',
+    )
+    expect(directPrompt).toContain(
+      '`Never proactively offer calendar connection for reminder timing.`',
+    )
+
+    expect(groupPrompt).toContain('One-shot reminder time selection:')
+    expect(groupPrompt).toContain(
+      'Preserve a member-supplied exact clock time and day or date exactly',
+    )
+    expect(groupPrompt).toContain(
+      'choose one reasonable concrete time inside the window from current room or message context',
+    )
+    expect(groupPrompt).toContain(
+      "Never read or write a participant's personal memory, routines, wearables, or connected calendars",
+    )
+    expect(groupPrompt).toContain(
+      'never offer personal calendar connection in the group',
+    )
+    expect(groupPrompt).not.toContain(
+      'Calendar connection offer for reminder timing —',
+    )
+    expect(groupPrompt).not.toContain(
+      '`vault-cli wearables sleep pattern --format json`',
     )
   })
 
@@ -3422,7 +3837,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain(
       'Scheduled automation changes for this conversation are available through `murph.automation`.',
     )
-    expect(prompt).not.toContain('Use `murph.automation` with `action: save`')
+    expect(prompt).not.toContain('For automation creation, inspection, changes, or reconciliation')
     expect(prompt).not.toContain('vault-cli automation')
   })
 

@@ -480,223 +480,14 @@ export function validateReleaseContext(context, options = {}) {
     assertSupportedReleaseVersion(expectVersion, 'Expected release version');
   }
 
-  if (typeof manifest.repositoryUrl !== 'string' || manifest.repositoryUrl.length === 0) {
-    errors.push('scripts/release-manifest.json must declare repositoryUrl.');
-  }
-
-  if (
-    !manifest.releaseArtifacts ||
-    typeof manifest.releaseArtifacts.changelogPath !== 'string' ||
-    typeof manifest.releaseArtifacts.releaseNotesDir !== 'string'
-  ) {
-    errors.push(
-      'scripts/release-manifest.json must declare releaseArtifacts.changelogPath and releaseArtifacts.releaseNotesDir.',
-    );
-  }
-
-  if (!primaryPackage) {
-    errors.push(
-      `Primary package ${manifest.primaryPackage} is missing from scripts/release-manifest.json.`,
-    );
-  }
-
-  if (context.rootPackageJson?.name === manifest.primaryPackage) {
-    errors.push(
-      `Root package name ${manifest.primaryPackage} conflicts with the published primary package name.`,
-    );
-  }
+  validateReleaseManifest(context, manifest, primaryPackage, errors);
 
   const versions = new Set();
 
-  for (const entry of context.workspacePackages) {
-    if (context.releasePackageNames.has(entry.name)) {
-      continue;
-    }
-
-    if (entry.packageJson?.private !== true) {
-      errors.push(
-        `${path.relative(context.repoRoot, entry.packageJsonPath)} must be private: true because it is outside the public release manifest.`,
-      );
-    }
-  }
+  validateUnpublishedWorkspacePackages(context, errors);
 
   for (const entry of packages) {
-    const packageName = entry.packageJson?.name;
-    const packageVersion = entry.packageJson?.version;
-    const repositoryUrl = repositoryUrlFrom(entry.packageJson?.repository);
-    const exportEntry = entry.packageJson?.exports?.['.'];
-    const bundledWorkspaceDependencies = resolveBundledWorkspaceDependencies(
-      entry.packageJson,
-      context.workspacePackageByName,
-      context.releasePackageNames,
-    );
-    const bundledExternalDependencies = resolveBundledExternalDependencies(
-      entry.packageJson,
-      context.workspacePackageByName,
-    );
-    const bundledDependencyRequirements = collectBundledDependencyRequirements(
-      entry.name,
-      context.workspacePackageByName,
-      context.releasePackageNames,
-    );
-    const bundledWorkspaceDependencySet = new Set(bundledWorkspaceDependencies);
-    const directRuntimeDependencyNames = new Set(
-      Object.keys(entry.packageJson?.dependencies ?? {}).concat(
-        Object.keys(entry.packageJson?.optionalDependencies ?? {}),
-        Object.keys(entry.packageJson?.peerDependencies ?? {}),
-      ),
-    );
-    const directWorkspaceDependencyNames = new Set(
-      entry.workspaceDependencies.map((dependency) => dependency.name),
-    );
-    const requiredBundledWorkspaceDependencies =
-      bundledDependencyRequirements.privateWorkspaceDependencies;
-
-    if (packageName !== entry.name) {
-      errors.push(
-        `${path.relative(context.repoRoot, entry.packageJsonPath)} name must be ${entry.name}, found ${packageName ?? '<missing>'}.`,
-      );
-    }
-
-    if (entry.packageJson?.private !== false) {
-      errors.push(
-        `${path.relative(context.repoRoot, entry.packageJsonPath)} must be publishable (private: false).`,
-      );
-    }
-
-    if (typeof packageVersion !== 'string' || packageVersion.length === 0) {
-      errors.push(
-        `${path.relative(context.repoRoot, entry.packageJsonPath)} must declare a version string.`,
-      );
-    } else if (!isSupportedReleaseVersion(packageVersion)) {
-      errors.push(
-        `${path.relative(context.repoRoot, entry.packageJsonPath)} version ${packageVersion} is not supported by the release flow.`,
-      );
-    } else {
-      versions.add(packageVersion);
-    }
-
-    if (repositoryUrl !== manifest.repositoryUrl) {
-      errors.push(
-        `${path.relative(context.repoRoot, entry.packageJsonPath)} repository must be ${manifest.repositoryUrl}.`,
-      );
-    }
-
-    if (
-      typeof entry.packageJson?.main !== 'string' ||
-      typeof entry.packageJson?.types !== 'string'
-    ) {
-      errors.push(
-        `${path.relative(context.repoRoot, entry.packageJsonPath)} must declare main and types entrypoints.`,
-      );
-    }
-
-    if (
-      !exportEntry ||
-      typeof exportEntry.types !== 'string' ||
-      (typeof exportEntry.default !== 'string' &&
-        typeof exportEntry.import !== 'string')
-    ) {
-      errors.push(
-        `${path.relative(context.repoRoot, entry.packageJsonPath)} must expose a typed default export for '.'.`,
-      );
-    }
-
-    if (entry.isScoped && entry.packageJson?.publishConfig?.access !== 'public') {
-      errors.push(
-        `${path.relative(context.repoRoot, entry.packageJsonPath)} must set publishConfig.access to public.`,
-      );
-    }
-
-    for (const dependency of entry.workspaceDependencies) {
-      if (packageByName.has(dependency.name)) {
-        continue;
-      }
-
-      if (!context.workspacePackageByName.has(dependency.name)) {
-        errors.push(
-          `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on workspace package ${dependency.name}, but no matching workspace package.json was found.`,
-        );
-      }
-    }
-
-    for (const dependencyName of requiredBundledWorkspaceDependencies) {
-      const dependencyEntry = context.workspacePackageByName.get(dependencyName);
-
-      if (!dependencyEntry) {
-        errors.push(
-          `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on internal workspace package ${dependencyName}, but no matching workspace package.json was found.`,
-        );
-        continue;
-      }
-
-      if (dependencyEntry.packageJson?.private !== true) {
-        errors.push(
-          `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on internal workspace package ${dependencyName}, but ${path.relative(context.repoRoot, dependencyEntry.packageJsonPath)} must be private: true when it stays out of the public release manifest.`,
-        );
-      }
-
-      if (!bundledWorkspaceDependencySet.has(dependencyName)) {
-        errors.push(
-          `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on internal workspace package ${dependencyName}, but bundleDependencies must include it so the packed tarball stays installable.`,
-        );
-      }
-    }
-
-    for (const dependencyName of bundledWorkspaceDependencies) {
-      const dependencyEntry = context.workspacePackageByName.get(dependencyName);
-
-      if (!directWorkspaceDependencyNames.has(dependencyName)) {
-        errors.push(
-          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes ${dependencyName}, but it must also be declared in dependencies, optionalDependencies, or peerDependencies so the packed tarball exposes a coherent dependency graph.`,
-        );
-      }
-
-      if (!dependencyEntry) {
-        if (dependencyName.startsWith('@murphai/')) {
-          errors.push(
-            `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes ${dependencyName}, but no matching workspace package.json was found.`,
-          );
-        }
-        continue;
-      }
-
-      if (packageByName.has(dependencyName)) {
-        errors.push(
-          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies should not include published workspace package ${dependencyName}; keep public packages as normal dependencies instead.`,
-        );
-      }
-
-      if (dependencyEntry.packageJson?.private !== true) {
-        errors.push(
-          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes ${dependencyName}, but ${path.relative(context.repoRoot, dependencyEntry.packageJsonPath)} must be private: true when it is bundled instead of published.`,
-        );
-      }
-    }
-
-    for (const dependencyName of bundledExternalDependencies) {
-      if (!directRuntimeDependencyNames.has(dependencyName)) {
-        errors.push(
-          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes external package ${dependencyName}, but it must also be declared in dependencies, optionalDependencies, or peerDependencies so the packed tarball exposes a coherent dependency graph.`,
-        );
-      }
-    }
-
-    for (const dependencyName of bundledDependencyRequirements.publicWorkspaceDependencies) {
-      if (!directRuntimeDependencyNames.has(dependencyName)) {
-        errors.push(
-          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundles internal workspace packages that depend on published workspace package ${dependencyName}, but ${dependencyName} must also be declared in dependencies, optionalDependencies, or peerDependencies so npm installs it.`,
-        );
-      }
-    }
-
-    for (const dependencyName of bundledDependencyRequirements.externalDependencies) {
-      if (!directRuntimeDependencyNames.has(dependencyName)) {
-        errors.push(
-          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundles internal workspace packages that depend on external package ${dependencyName}, but ${dependencyName} must also be declared in dependencies, optionalDependencies, or peerDependencies so npm installs it.`,
-        );
-      }
-    }
+    validateReleasePackage(context, manifest, packageByName, entry, versions, errors);
   }
 
   if (versions.size !== 1) {
@@ -713,31 +504,7 @@ export function validateReleaseContext(context, options = {}) {
     );
   }
 
-  if (primaryPackage) {
-    if (primaryPackage.packageJson?.name !== manifest.primaryPackage) {
-      errors.push(
-        `${path.relative(context.repoRoot, primaryPackage.packageJsonPath)} must publish the primary package name ${manifest.primaryPackage}.`,
-      );
-    }
-
-    if (primaryPackage.packageJson?.bin?.murph !== 'dist/bin.js') {
-      errors.push(
-        `${path.relative(context.repoRoot, primaryPackage.packageJsonPath)} must expose the murph bin from dist/bin.js.`,
-      );
-    }
-
-    if (primaryPackage.packageJson?.bin?.['vault-cli'] !== 'dist/bin.js') {
-      errors.push(
-        `${path.relative(context.repoRoot, primaryPackage.packageJsonPath)} must expose the vault-cli bin from dist/bin.js.`,
-      );
-    }
-
-    if (!primaryPackage.packageJson?.files?.includes('CHANGELOG.md')) {
-      errors.push(
-        `${path.relative(context.repoRoot, primaryPackage.packageJsonPath)} files must include CHANGELOG.md.`,
-      );
-    }
-  }
+  validatePrimaryReleasePackage(context, manifest, primaryPackage, errors);
 
   if (errors.length > 0) {
     throw new Error(errors.join('\n'));
@@ -785,6 +552,275 @@ export function validateReleaseContext(context, options = {}) {
     releaseNotesPath,
     version,
   };
+}
+
+function validateReleaseManifest(context, manifest, primaryPackage, errors) {
+  if (typeof manifest.repositoryUrl !== 'string' || manifest.repositoryUrl.length === 0) {
+    errors.push('scripts/release-manifest.json must declare repositoryUrl.');
+  }
+
+  if (
+    !manifest.releaseArtifacts ||
+    typeof manifest.releaseArtifacts.changelogPath !== 'string' ||
+    typeof manifest.releaseArtifacts.releaseNotesDir !== 'string'
+  ) {
+    errors.push(
+      'scripts/release-manifest.json must declare releaseArtifacts.changelogPath and releaseArtifacts.releaseNotesDir.',
+    );
+  }
+
+  if (!primaryPackage) {
+    errors.push(
+      `Primary package ${manifest.primaryPackage} is missing from scripts/release-manifest.json.`,
+    );
+  }
+
+  if (context.rootPackageJson?.name === manifest.primaryPackage) {
+    errors.push(
+      `Root package name ${manifest.primaryPackage} conflicts with the published primary package name.`,
+    );
+  }
+}
+
+function validateUnpublishedWorkspacePackages(context, errors) {
+  for (const entry of context.workspacePackages) {
+    if (context.releasePackageNames.has(entry.name)) {
+      continue;
+    }
+
+    if (entry.packageJson?.private !== true) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} must be private: true because it is outside the public release manifest.`,
+      );
+    }
+  }
+}
+
+function validateReleasePackage(context, manifest, packageByName, entry, versions, errors) {
+  const packageName = entry.packageJson?.name;
+  const packageVersion = entry.packageJson?.version;
+  const repositoryUrl = repositoryUrlFrom(entry.packageJson?.repository);
+  const exportEntry = entry.packageJson?.exports?.['.'];
+  const bundledWorkspaceDependencies = resolveBundledWorkspaceDependencies(
+    entry.packageJson,
+    context.workspacePackageByName,
+    context.releasePackageNames,
+  );
+  const bundledExternalDependencies = resolveBundledExternalDependencies(
+    entry.packageJson,
+    context.workspacePackageByName,
+  );
+  const bundledDependencyRequirements = collectBundledDependencyRequirements(
+    entry.name,
+    context.workspacePackageByName,
+    context.releasePackageNames,
+  );
+  const bundledWorkspaceDependencySet = new Set(bundledWorkspaceDependencies);
+  const directRuntimeDependencyNames = new Set(
+    Object.keys(entry.packageJson?.dependencies ?? {}).concat(
+      Object.keys(entry.packageJson?.optionalDependencies ?? {}),
+      Object.keys(entry.packageJson?.peerDependencies ?? {}),
+    ),
+  );
+  const directWorkspaceDependencyNames = new Set(
+    entry.workspaceDependencies.map((dependency) => dependency.name),
+  );
+  const requiredBundledWorkspaceDependencies =
+    bundledDependencyRequirements.privateWorkspaceDependencies;
+
+  validateReleasePackageIdentity(context, manifest, entry, packageName, packageVersion, repositoryUrl, versions, errors);
+
+  validateReleasePackageEntrypoints(context, entry, exportEntry, errors);
+
+  validateRequiredWorkspaceBundles(context, entry, packageByName, requiredBundledWorkspaceDependencies, bundledWorkspaceDependencySet, errors);
+
+  validateDeclaredWorkspaceBundles(context, entry, packageByName, bundledWorkspaceDependencies, directWorkspaceDependencyNames, errors);
+
+  validateRuntimeDependencyDeclarations(context, entry, bundledExternalDependencies, bundledDependencyRequirements, directRuntimeDependencyNames, errors);
+}
+
+function validateReleasePackageIdentity(context, manifest, entry, packageName, packageVersion, repositoryUrl, versions, errors) {
+  if (packageName !== entry.name) {
+    errors.push(
+      `${path.relative(context.repoRoot, entry.packageJsonPath)} name must be ${entry.name}, found ${packageName ?? '<missing>'}.`,
+    );
+  }
+
+  if (entry.packageJson?.private !== false) {
+    errors.push(
+      `${path.relative(context.repoRoot, entry.packageJsonPath)} must be publishable (private: false).`,
+    );
+  }
+
+  if (typeof packageVersion !== 'string' || packageVersion.length === 0) {
+    errors.push(
+      `${path.relative(context.repoRoot, entry.packageJsonPath)} must declare a version string.`,
+    );
+  } else if (!isSupportedReleaseVersion(packageVersion)) {
+    errors.push(
+      `${path.relative(context.repoRoot, entry.packageJsonPath)} version ${packageVersion} is not supported by the release flow.`,
+    );
+  } else {
+    versions.add(packageVersion);
+  }
+
+  if (repositoryUrl !== manifest.repositoryUrl) {
+    errors.push(
+      `${path.relative(context.repoRoot, entry.packageJsonPath)} repository must be ${manifest.repositoryUrl}.`,
+    );
+  }
+}
+
+function validateReleasePackageEntrypoints(context, entry, exportEntry, errors) {
+  if (
+    typeof entry.packageJson?.main !== 'string' ||
+    typeof entry.packageJson?.types !== 'string'
+  ) {
+    errors.push(
+      `${path.relative(context.repoRoot, entry.packageJsonPath)} must declare main and types entrypoints.`,
+    );
+  }
+
+  if (
+    !exportEntry ||
+    typeof exportEntry.types !== 'string' ||
+    (typeof exportEntry.default !== 'string' &&
+      typeof exportEntry.import !== 'string')
+  ) {
+    errors.push(
+      `${path.relative(context.repoRoot, entry.packageJsonPath)} must expose a typed default export for '.'.`,
+    );
+  }
+
+  if (entry.isScoped && entry.packageJson?.publishConfig?.access !== 'public') {
+    errors.push(
+      `${path.relative(context.repoRoot, entry.packageJsonPath)} must set publishConfig.access to public.`,
+    );
+  }
+}
+
+function validateRequiredWorkspaceBundles(context, entry, packageByName, requiredBundledWorkspaceDependencies, bundledWorkspaceDependencySet, errors) {
+  for (const dependency of entry.workspaceDependencies) {
+    if (packageByName.has(dependency.name)) {
+      continue;
+    }
+
+    if (!context.workspacePackageByName.has(dependency.name)) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on workspace package ${dependency.name}, but no matching workspace package.json was found.`,
+      );
+    }
+  }
+
+  for (const dependencyName of requiredBundledWorkspaceDependencies) {
+    const dependencyEntry = context.workspacePackageByName.get(dependencyName);
+
+    if (!dependencyEntry) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on internal workspace package ${dependencyName}, but no matching workspace package.json was found.`,
+      );
+      continue;
+    }
+
+    if (dependencyEntry.packageJson?.private !== true) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on internal workspace package ${dependencyName}, but ${path.relative(context.repoRoot, dependencyEntry.packageJsonPath)} must be private: true when it stays out of the public release manifest.`,
+      );
+    }
+
+    if (!bundledWorkspaceDependencySet.has(dependencyName)) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on internal workspace package ${dependencyName}, but bundleDependencies must include it so the packed tarball stays installable.`,
+      );
+    }
+  }
+}
+
+function validateDeclaredWorkspaceBundles(context, entry, packageByName, bundledWorkspaceDependencies, directWorkspaceDependencyNames, errors) {
+  for (const dependencyName of bundledWorkspaceDependencies) {
+    const dependencyEntry = context.workspacePackageByName.get(dependencyName);
+
+    if (!directWorkspaceDependencyNames.has(dependencyName)) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes ${dependencyName}, but it must also be declared in dependencies, optionalDependencies, or peerDependencies so the packed tarball exposes a coherent dependency graph.`,
+      );
+    }
+
+    if (!dependencyEntry) {
+      if (dependencyName.startsWith('@murphai/')) {
+        errors.push(
+          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes ${dependencyName}, but no matching workspace package.json was found.`,
+        );
+      }
+      continue;
+    }
+
+    if (packageByName.has(dependencyName)) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies should not include published workspace package ${dependencyName}; keep public packages as normal dependencies instead.`,
+      );
+    }
+
+    if (dependencyEntry.packageJson?.private !== true) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes ${dependencyName}, but ${path.relative(context.repoRoot, dependencyEntry.packageJsonPath)} must be private: true when it is bundled instead of published.`,
+      );
+    }
+  }
+}
+
+function validateRuntimeDependencyDeclarations(context, entry, bundledExternalDependencies, bundledDependencyRequirements, directRuntimeDependencyNames, errors) {
+  for (const dependencyName of bundledExternalDependencies) {
+    if (!directRuntimeDependencyNames.has(dependencyName)) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes external package ${dependencyName}, but it must also be declared in dependencies, optionalDependencies, or peerDependencies so the packed tarball exposes a coherent dependency graph.`,
+      );
+    }
+  }
+
+  for (const dependencyName of bundledDependencyRequirements.publicWorkspaceDependencies) {
+    if (!directRuntimeDependencyNames.has(dependencyName)) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} bundles internal workspace packages that depend on published workspace package ${dependencyName}, but ${dependencyName} must also be declared in dependencies, optionalDependencies, or peerDependencies so npm installs it.`,
+      );
+    }
+  }
+
+  for (const dependencyName of bundledDependencyRequirements.externalDependencies) {
+    if (!directRuntimeDependencyNames.has(dependencyName)) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} bundles internal workspace packages that depend on external package ${dependencyName}, but ${dependencyName} must also be declared in dependencies, optionalDependencies, or peerDependencies so npm installs it.`,
+      );
+    }
+  }
+}
+
+function validatePrimaryReleasePackage(context, manifest, primaryPackage, errors) {
+  if (primaryPackage) {
+    if (primaryPackage.packageJson?.name !== manifest.primaryPackage) {
+      errors.push(
+        `${path.relative(context.repoRoot, primaryPackage.packageJsonPath)} must publish the primary package name ${manifest.primaryPackage}.`,
+      );
+    }
+
+    if (primaryPackage.packageJson?.bin?.murph !== 'dist/bin.js') {
+      errors.push(
+        `${path.relative(context.repoRoot, primaryPackage.packageJsonPath)} must expose the murph bin from dist/bin.js.`,
+      );
+    }
+
+    if (primaryPackage.packageJson?.bin?.['vault-cli'] !== 'dist/bin.js') {
+      errors.push(
+        `${path.relative(context.repoRoot, primaryPackage.packageJsonPath)} must expose the vault-cli bin from dist/bin.js.`,
+      );
+    }
+
+    if (!primaryPackage.packageJson?.files?.includes('CHANGELOG.md')) {
+      errors.push(
+        `${path.relative(context.repoRoot, primaryPackage.packageJsonPath)} files must include CHANGELOG.md.`,
+      );
+    }
+  }
 }
 
 export async function updateReleasePackageVersions(context, version) {

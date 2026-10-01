@@ -24,21 +24,33 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Data First
 
+- For a simple time-based walking plan, use the person's stated current activity, available window, and
+  chosen duration plus relevant saved context. Do not collect step counts, labs, body measurements, or
+  unrelated event history unless symptoms, a known condition, or the requested target makes them
+  decision-changing. Missing wearable coverage alone does not require more data reads or a step target.
 - When the user specifically asks for basal calories, go directly to
   `vault-cli measurement entry list --metric calories_basal --from <date> --to <date> --limit 50 --format json`.
   Do not run `wearables day` first; basal calories are query-only and absent
   from that summary.
-- For date-specific facts, first run
-  `vault-cli wearables day <date> --format json`; for all workouts, types,
-  count, duration, or normalized detail, next run
-  `vault-cli wearables activity list --date <date> --format json`. Its canonical
-  workout-day rollup owns the answer. When available, `workoutFeatures`
-  associates bounded heart-rate, cadence, power, speed, and split details with
-  each workout by provider and start time. Use that association for multiple
-  workouts on the same date; do not stop at one selected activity or rebuild
-  the rollup from provider records. Power fields ending in `Watts` are watts,
-  and speed fields ending in `Mps` are meters per second; include those units
-  when answering.
+- For workout activity questions, choose the required output from the user's
+  question before the first and only activity-list data read; never probe with
+  smaller output and retry. Do not run `wearables day` first.
+  For day-level `sessionCount`, `sessionMinutes`, and distinct `activityTypes`,
+  use `vault-cli wearables activity list --date <date> --format json`.
+  For selecting, comparing, grouping, ordering, or attributing individual
+  workouts, use `--include-workout-summaries`: it preserves each workout's
+  type, duration, distance, start time, provider, heart rate, cadence, power,
+  and speed without lap/split rows. `splitsOmitted: true` means omitted evidence,
+  never proof there were no splits. Only when the question needs lap/split rows,
+  use `--include-workout-details` instead; full detail wins if both flags are set.
+  Its canonical workout-day rollup owns the answer, and
+  `workoutFeatures` associates the bounded detail with each workout by provider
+  and start time. Use that association for multiple workouts on the same date;
+  do not stop at one selected activity or rebuild the rollup from provider
+  records. Power fields ending in `Watts` are watts, and speed fields ending in
+  `Mps` are meters per second; include those units when answering.
+- For other date-specific wearable facts, first run
+  `vault-cli wearables day <date> --format json`.
 - When the day or activity summary omits the specific signal the user asked
   about, use the lossless global observation read
   `vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json`.

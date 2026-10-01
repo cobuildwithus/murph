@@ -35,7 +35,7 @@ export interface AssistantUsageProviderResult {
   usageAttribution?: AssistantUsageAttribution | null
 }
 
-export async function recordAssistantUsageEvent(input: {
+interface AssistantUsageEventInput {
   effectiveEnv?: Readonly<Record<string, string | undefined>>
   executionContext: AssistantExecutionContext
   occurredAt?: string
@@ -44,7 +44,18 @@ export async function recordAssistantUsageEvent(input: {
   providerRequestOrdinal?: number
   providerResult: AssistantUsageProviderResult
   turnId: string
-}): Promise<void> {
+}
+
+export function recordAssistantUsageEvent(
+  input: AssistantUsageEventInput,
+): Promise<void> {
+  void recordAssistantUsageEventToCompletion(input)
+  return Promise.resolve()
+}
+
+async function recordAssistantUsageEventToCompletion(
+  input: AssistantUsageEventInput,
+): Promise<void> {
   const usage = input.providerResult.usage
   const hostedMemberId = normalizeNullableString(input.executionContext.hosted?.memberId)
   const usageRecorder = input.executionContext.hosted?.usageRecorder ?? null
@@ -113,12 +124,9 @@ export async function recordAssistantUsageEvent(input: {
       turnProfileJson: usage.turnProfileJson ?? null,
     }
 
-    const recording = input.providerRequestAcceptedInputIds === undefined
+    await (input.providerRequestAcceptedInputIds === undefined
       ? usageRecorder.recordUsage(record)
-      : usageRecorder.recordUsage(record, input.providerRequestAcceptedInputIds)
-    void recording.catch((error: unknown) => {
-      warnAssistantUsageRecordingFailure(error)
-    })
+      : usageRecorder.recordUsage(record, input.providerRequestAcceptedInputIds))
   } catch (error) {
     warnAssistantUsageRecordingFailure(error)
   }
@@ -151,7 +159,7 @@ export async function recordAdditionalAssistantUsageEvents(input: {
           }),
         }
       : null
-    await recordAssistantUsageEvent({
+    await recordAssistantUsageEventToCompletion({
       executionContext: input.executionContext,
       occurredAt: usageDraft.occurredAt,
       ...(input.providerRequestAcceptedInputIds === undefined

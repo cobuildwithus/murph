@@ -20,9 +20,12 @@ import {
 import type {
   AssistantVaultImageResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import { toVaultCliFilesystemError } from "@murphai/vault-usecases/helpers";
 import sharp from "sharp";
 
 import { MURPH_LOGO_SVG } from "./murph-logo-svg.js";
+import { publicValidationIssue } from "./public-validation-issue.js";
 
 const CARD_WIDTH = 1200;
 const CARD_HEIGHT = 780;
@@ -53,10 +56,31 @@ const COLOR = {
   negative: "#B0651F",
 };
 
+const PROGRESS_CARD_PUBLIC_FIELDS = new Set([
+  "asOf",
+  "confounders",
+  "movers",
+  "moverSentimentContext",
+  "phase",
+  "sessions",
+  "title",
+  "v",
+  "weeks",
+]);
+
 interface RenderedProgressCard {
   bytes: Uint8Array;
   filename: string;
   sha256: string;
+}
+
+function progressCardFailure(
+  code: string,
+  message: string,
+  stage: string,
+  retryable: boolean,
+): VaultCliError {
+  return new VaultCliError(code, message, { retryable, stage });
 }
 
 export async function renderAndSaveExperimentProgressCard(input: {
@@ -66,15 +90,60 @@ export async function renderAndSaveExperimentProgressCard(input: {
 }): Promise<
   AssistantVaultImageResponseMedia & { contentType: "image/png" }
 > {
-  const card = experimentProgressCardSchema.parse(input.card);
-  const rendered = await renderExperimentProgressCard(card);
+  const parsedCard = experimentProgressCardSchema.safeParse(input.card);
+  if (!parsedCard.success) {
+    throw new VaultCliError(
+      "progress_card_validation_failed",
+      "Experiment progress-card data failed validation.",
+      {
+        issues: parsedCard.error.issues.map((issue) => publicValidationIssue(
+          issue,
+          progressCardPublicPath(issue.path),
+        )),
+        retryable: false,
+        stage: "validation",
+      },
+    );
+  }
+  const card = parsedCard.data;
+  let rendered: RenderedProgressCard;
+  try {
+    rendered = await renderExperimentProgressCard(card);
+  } catch {
+    throw progressCardFailure(
+      "progress_card_render_failed",
+      "The experiment progress card could not be rendered.",
+      "render",
+      true,
+    );
+  }
   const lookupKey =
     `murph.experiment-progress-card.capture.v1:${input.experimentId}:${card.asOf}:${rendered.sha256}`;
-  const saved = await resolveSavedProgressCard({
-    lookupKey,
-    rendered,
-    vaultRoot: input.vaultRoot,
-  });
+  let saved: { ref: string };
+  try {
+    saved = await resolveSavedProgressCard({
+      lookupKey,
+      rendered,
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    if (error instanceof VaultCliError) {
+      throw error;
+    }
+    const mapped = toVaultCliFilesystemError(error, {
+      fieldPath: "vault",
+      message: "The experiment progress card could not be saved.",
+    });
+    if (mapped !== error) {
+      throw mapped;
+    }
+    throw progressCardFailure(
+      "progress_card_persist_failed",
+      "The experiment progress card could not be saved.",
+      "persistence",
+      true,
+    );
+  }
 
   return {
     alt: card.moverSentimentContext === "direction_unavailable"
@@ -88,6 +157,15 @@ export async function renderAndSaveExperimentProgressCard(input: {
     sizeBytes: rendered.bytes.byteLength,
     source: CARD_SOURCE,
   };
+}
+
+function progressCardPublicPath(
+  path: readonly PropertyKey[],
+): readonly string[] {
+  const [field] = path;
+  return typeof field === "string" && PROGRESS_CARD_PUBLIC_FIELDS.has(field)
+    ? [field]
+    : [];
 }
 
 async function renderExperimentProgressCard(
@@ -118,7 +196,12 @@ async function resolveSavedProgressCard(input: {
     vaultRoot: input.vaultRoot,
   });
   if (existing.status === "deleted") {
-    throw new Error("Saved experiment progress card was deleted.");
+    throw progressCardFailure(
+      "progress_card_capture_conflict",
+      "The deterministic progress-card capture was previously deleted.",
+      "conflict",
+      false,
+    );
   }
   if (existing.status === "live") {
     await assertSavedProgressCardMatches({
@@ -131,6 +214,7 @@ async function resolveSavedProgressCard(input: {
   }
 
   const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-progress-card-"));
+  let persisted = false;
   try {
     const sourcePath = path.join(tempRoot, input.rendered.filename);
     await writeFile(sourcePath, Buffer.from(input.rendered.bytes));
@@ -165,8 +249,14 @@ async function resolveSavedProgressCard(input: {
         (attachment) => attachment.role === CARD_LOOKUP_ROLE,
       )?.relativePath ?? null;
       if (!ref) {
-        throw new Error("Experiment progress card capture has no image attachment.");
+        throw progressCardFailure(
+          "progress_card_persist_failed",
+          "The progress-card capture did not contain an image attachment.",
+          "persistence",
+          false,
+        );
       }
+      persisted = true;
       return { ref };
     } catch (error) {
       if (!isVaultError(error) || error.code !== "CAPTURE_LOOKUP_EXISTS") {
@@ -177,7 +267,12 @@ async function resolveSavedProgressCard(input: {
         vaultRoot: input.vaultRoot,
       });
       if (winner.status !== "live") {
-        throw new Error("Experiment progress card capture race did not produce a live image.");
+        throw progressCardFailure(
+          "progress_card_capture_conflict",
+          "A concurrent progress-card capture did not produce a live image.",
+          "conflict",
+          false,
+        );
       }
       await assertSavedProgressCardMatches({
         bytes: input.rendered.bytes,
@@ -185,10 +280,24 @@ async function resolveSavedProgressCard(input: {
         sha256: input.rendered.sha256,
         vaultRoot: input.vaultRoot,
       });
+      persisted = true;
       return { ref: winner.attachmentRef };
     }
   } finally {
-    await rm(tempRoot, { force: true, recursive: true });
+    try {
+      await rm(tempRoot, { force: true, recursive: true });
+    } catch {
+      if (persisted) {
+        const message =
+          "The experiment progress card was saved, but temporary files could not be cleaned up. Run the same command again to retrieve the saved card.";
+        throw progressCardFailure(
+          "progress_card_cleanup_failed",
+          message,
+          "filesystem",
+          true,
+        );
+      }
+    }
   }
 }
 
@@ -198,16 +307,47 @@ async function assertSavedProgressCardMatches(input: {
   sha256: string;
   vaultRoot: string;
 }): Promise<void> {
-  const savedBytes = new Uint8Array(
-    await readFile(path.join(input.vaultRoot, input.ref)),
-  );
+  let savedBytes: Uint8Array;
+  try {
+    savedBytes = new Uint8Array(
+      await readFile(path.join(input.vaultRoot, input.ref)),
+    );
+  } catch (error) {
+    if (readNodeErrorCode(error) !== "ENOENT") {
+      const mapped = toVaultCliFilesystemError(error, {
+        fieldPath: "vault",
+        message: "The saved progress-card image could not be read.",
+      });
+      if (mapped !== error) {
+        throw mapped;
+      }
+    }
+    throw progressCardFailure(
+      "progress_card_integrity_failed",
+      "The saved progress-card image could not be verified.",
+      "integrity",
+      false,
+    );
+  }
   const savedSha256 = createHash("sha256").update(savedBytes).digest("hex");
   if (
     savedBytes.byteLength !== input.bytes.byteLength ||
     savedSha256 !== input.sha256
   ) {
-    throw new Error("Saved experiment progress card bytes do not match the rendered card.");
+    throw progressCardFailure(
+      "progress_card_integrity_failed",
+      "The saved progress-card image does not match the deterministic render.",
+      "integrity",
+      false,
+    );
   }
+}
+
+function readNodeErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return null;
+  }
+  return typeof error.code === "string" ? error.code : null;
 }
 
 export function buildExperimentProgressCardSvg(

@@ -10,30 +10,23 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@murphai/assistant-runtime", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-runtime")>(
+    "@murphai/assistant-runtime",
+  );
   return {
     clearHostedBrowserVaultWarmSourceStateHash:
       mocks.clearHostedBrowserVaultWarmSourceStateHash,
-    createCoalescingRuntimeWakeSignal: () => {
-      let pending = false;
-      return {
-        consumePending: () => {
-          if (!pending) {
-            return null;
-          }
-          pending = false;
-          return { notifiedAtEpochMs: Date.now() };
-        },
-        notify: () => {
-          pending = true;
-        },
-        wait: async () => ({ notifiedAtEpochMs: Date.now() }),
-      };
-    },
+    createCoalescingRuntimeWakeSignal: actual.createCoalescingRuntimeWakeSignal,
   };
 });
 
 vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-runtime/hosted-invocation")>(
+    "@murphai/assistant-runtime/hosted-invocation",
+  );
   return {
+    createHostedRuntimeVoice: actual.createHostedRuntimeVoice,
+    createHostedRuntimeVoiceCall: actual.createHostedRuntimeVoiceCall,
     createHostedWorkspaceInvocationLease: (input: HostedExecutionWorkspaceInvocationJobInput) => ({
       attemptId: input.request.attemptId,
       leaseGeneration: input.request.leaseGeneration,
@@ -79,6 +72,59 @@ import type {
 const waitForBackgroundAssistantWork = async (_signal: AbortSignal | null): Promise<void> => {};
 
 describe("runHostedWorkspaceInvocation", () => {
+  it.each(["cold", "warm"] as const)("composes a %s call with the invocation's signed mailbox port", async (mode) => {
+    type InvocationInput = Parameters<typeof import("@murphai/assistant-runtime/hosted-invocation").runHostedWorkspaceInvocation>[0];
+    type Voice = NonNullable<InvocationInput["voice"]>;
+    type NativeOptions = Parameters<Parameters<Voice["bindStart"]>[0]>[0];
+    const job = createWorkspaceJob({
+      forwardedEnv: { HOSTED_ASSISTANT_MODEL: "gpt-job", HOSTED_ASSISTANT_PROVIDER: "openai", NODE_ENV: "production" },
+    });
+    if (mode === "cold") job.request.voiceCallId = "call-synthetic";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe("/api/internal/hosted-mailbox/voice-input");
+      expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(job.request.userId);
+      expect(request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(job.request.attemptId);
+      expect(request.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe(job.request.leaseGeneration);
+      expect(await request.json()).toEqual({
+        callId: "call-synthetic", inputId: "input-synthetic", text: "Read my calendar.",
+        occurredAt: expect.any(String),
+      });
+      return Response.json({ mailboxItemId: "mailbox-synthetic" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onRuntimeWakeReady = vi.fn();
+    const onVoiceReady = vi.fn();
+    const close = vi.fn(async () => ({ providerConfirmed: true, providerSessionId: "provider-synthetic", seconds: 0 }));
+    mocks.runPackageHostedWorkspaceInvocation.mockImplementation(async (input: InvocationInput) => {
+      const voice = input.voice!;
+      const sendWake = onRuntimeWakeReady.mock.calls[0]![0];
+      expect(onVoiceReady).toHaveBeenCalledWith(voice);
+      expect(voice.isHoldingRuntime()).toBe(mode === "cold");
+      expect(sendWake({ voiceCallId: "call-synthetic" })).toBe(true);
+      expect(sendWake({ voiceCallId: "call-conflict" })).toBe(false);
+      let nativeOptions!: NativeOptions;
+      voice.bindStart(async (options) => {
+        nativeOptions = options;
+        return { sdp: "answer", speak: vi.fn(), close, closed: new Promise(() => {}) };
+      });
+      expect(await voice.connect("call-synthetic", "offer")).toBe("answer");
+      nativeOptions.onInput({ inputId: "input-synthetic", text: "Read my calendar." });
+      // Final cleanup joins the actual mailbox port's admission before release.
+      await voice.closeCall("call-synthetic");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(voice.isHoldingRuntime()).toBe(false);
+      return { nextWakeAt: null, status: "idle" };
+    });
+    await runHostedWorkspaceInvocation(job, {
+      onRuntimeWakeReady, onVoiceReady,
+      supervisorEnv: { NODE_ENV: "production", HOSTED_ASSISTANT_PROVIDER: "openai", HOSTED_ASSISTANT_MODEL: "gpt-job" },
+      waitForBackgroundAssistantWork,
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(onRuntimeWakeReady.mock.calls[0]![0]({ voiceCallId: "call-after-release" })).toBe(false);
+  });
+
   afterEach(async () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
@@ -238,6 +284,7 @@ describe("runHostedWorkspaceInvocation", () => {
       onConversationActivityObserved,
       onRuntimeWakeReady,
       runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
+      releaseSha: "0123456789abcdef0123456789abcdef01234567",
       signal: abortController.signal,
       supervisorEnv: {
         HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
@@ -246,7 +293,10 @@ describe("runHostedWorkspaceInvocation", () => {
         TELEGRAM_API_BASE_URL: "https://telegram.example.test",
       },
       waitForBackgroundAssistantWork,
-    })).resolves.toEqual(runtimeResult);
+    })).resolves.toEqual({
+      ...runtimeResult,
+      immediateRecheckRequested: true,
+    });
 
     const expectedVaultRoot = resolveHostedRunnerWarmWorkspaceVaultRoot(job.request.userId);
     const capturedInput = capturedInvocationInputs[0];
@@ -262,10 +312,16 @@ describe("runHostedWorkspaceInvocation", () => {
     if (typeof capturedConversationActivity !== "function") {
       throw new Error("Expected direct invocation to forward conversation activity.");
     }
-    capturedConversationActivity();
-    expect(onConversationActivityObserved).toHaveBeenCalledOnce();
+    capturedConversationActivity(Date.parse("2026-04-26T00:00:00.000Z"));
+    expect(onConversationActivityObserved).toHaveBeenCalledExactlyOnceWith(
+      Date.parse("2026-04-26T00:00:00.000Z"),
+    );
     expect(capturedInput.latencyMilestones).toEqual({
       runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
+    });
+    expect(capturedInput.runtimeIssueProvenance).toEqual({
+      releaseSha: "0123456789abcdef0123456789abcdef01234567",
+      runtimeName: "cloudflare-hosted-runner",
     });
     expect(capturedInput.platform).toBeTruthy();
     expect(typeof capturedInput.readCurrentLease).toBe("function");
@@ -374,11 +430,73 @@ describe("runHostedWorkspaceInvocation", () => {
     );
   });
 
+  it("does not lose a runtime wake accepted after the package's final drain", async () => {
+    let reachFinalDrain!: () => void;
+    const finalDrainReached = new Promise<void>((resolve) => {
+      reachFinalDrain = resolve;
+    });
+    let releasePackage!: () => void;
+    const packageReleased = new Promise<void>((resolve) => {
+      releasePackage = resolve;
+    });
+    let resolveRuntimeWakeReady!: (sendWake: () => boolean) => void;
+    const runtimeWakeReady = new Promise<() => boolean>((resolve) => {
+      resolveRuntimeWakeReady = resolve;
+    });
+    mocks.runPackageHostedWorkspaceInvocation.mockImplementation(
+      async (input: Record<string, unknown>) => {
+        const runtimeWakeSignal = requireObjectRecord(
+          input.runtimeWakeSignal,
+          "captured runtimeWakeSignal",
+        );
+        const consumePending = requireCallable(
+          runtimeWakeSignal.consumePending,
+          "captured runtimeWakeSignal.consumePending",
+        );
+        expect(consumePending()).toBeNull();
+        reachFinalDrain();
+        await packageReleased;
+        return {
+          nextWakeAt: null,
+          redactedStatus: { importedCount: 0 },
+          status: "idle" as const,
+        };
+      },
+    );
+
+    const invocation = runHostedWorkspaceInvocation(createWorkspaceJob({
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-job",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+    }), {
+      onRuntimeWakeReady(sendWake) {
+        resolveRuntimeWakeReady(sendWake);
+      },
+      supervisorEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+      waitForBackgroundAssistantWork,
+    });
+
+    await finalDrainReached;
+    const sendRuntimeWake = await runtimeWakeReady;
+    const wakeAccepted = sendRuntimeWake();
+    releasePackage();
+    const result = await invocation;
+
+    expect(wakeAccepted).toBe(true);
+    expect(result.immediateRecheckRequested).toBe(true);
+  });
+
   it("validates preview private-image publication from the per-job platform origin", async () => {
     const previewOrigin = "https://preview-worker.example.test";
     const expiresAt = "2026-07-28T00:00:00.000Z";
     const capabilityUrl = new URL(
-      `/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}`,
+      `/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png`,
       previewOrigin,
     );
     capabilityUrl.searchParams.set(

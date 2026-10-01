@@ -27,13 +27,14 @@ export function toBrowserVaultMetricRows(input: {
   points: readonly MetricPoint[];
   to?: string;
 }): BrowserVaultMetricRow[] {
-  const metricKeys = [...new Set(input.points.map((point) => point.metricKey))].sort();
+  const pointsByMetricKey = groupMetricPointsByMetricKey(input.points);
+  const metricKeys = [...pointsByMetricKey.keys()].sort();
   return dedupeEquivalentMetricRows(metricKeys.flatMap((metricKey) =>
     selectMetricSeries({
       duplicatePolicy: "keep-all",
       from: input.from,
       metricKey,
-      points: input.points,
+      points: pointsByMetricKey.get(metricKey) ?? [],
       to: input.to,
     }).rows.flatMap(toBrowserVaultMetricRow)
   ));
@@ -48,15 +49,31 @@ export function createBrowserVaultMetricSelectionRows(input: {
 }): BrowserVaultMetricSelectionRow[] {
   const requestedMetrics = normalizeRequestedMetrics(input.requestedMetrics, input.metricPoints);
   const selectionPoints = input.selectionPoints ?? input.metricPoints;
+  const selectionPointsByMetricKey = groupMetricPointsByMetricKey(selectionPoints);
   return requestedMetrics.map((request) => {
     const selection = selectMetricValue({
       biomarkerKey: request.biomarkerKey ?? undefined,
       metricKey: request.metricKey,
       now: input.generatedAt,
-      points: selectionPoints,
+      points: selectionPointsByMetricKey.get(request.metricKey) ?? [],
     });
     return toBrowserVaultMetricSelectionRow(selection, request, input.metricRowPointIds);
   });
+}
+
+function groupMetricPointsByMetricKey(
+  points: readonly MetricPoint[],
+): ReadonlyMap<string, readonly MetricPoint[]> {
+  const pointsByMetricKey = new Map<string, MetricPoint[]>();
+  for (const point of points) {
+    const metricPoints = pointsByMetricKey.get(point.metricKey);
+    if (metricPoints) {
+      metricPoints.push(point);
+    } else {
+      pointsByMetricKey.set(point.metricKey, [point]);
+    }
+  }
+  return pointsByMetricKey;
 }
 
 export function metricRowMatchesFilters(row: BrowserVaultMetricRow, filters: BrowserVaultMetricFilters): boolean {

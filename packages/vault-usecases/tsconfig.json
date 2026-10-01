@@ -27,6 +27,9 @@
     },
     {
       "path": "../runtime-state"
+    },
+    {
+      "path": "../parsers"
     }
   ],
   "include": [

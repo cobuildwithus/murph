@@ -31,6 +31,8 @@ vi.mock("@murphai/runtime-state", async () => {
 });
 
 import {
+  createBrowserVaultRouteQueryClient,
+  decodeReadyBrowserVaultSession,
   isBrowserVaultAbortError,
   isBrowserVaultUnauthorizedError,
   loadBrowserVaultReplica,
@@ -47,6 +49,44 @@ beforeEach(() => {
   });
   runtimeMocks.unwrapHostedBrowserSessionKey.mockReset();
   runtimeMocks.unwrapHostedBrowserSessionKey.mockResolvedValue(new Uint8Array([1, 2, 3]));
+});
+
+test("companion decode rejects another member before private key unwrap", async () => {
+  const fixture = createShardedReadyFixture(["core"]);
+  const session = parseBrowserVaultSessionResponse(await fixture.response.json());
+  assert.equal(session.state, "ready");
+  if (session.state !== "ready") return;
+  const keys = await import("@murphai/runtime-state").then((runtime) => runtime.generateHostedUserRecipientKeyPair());
+  await assert.rejects(decodeReadyBrowserVaultSession({
+    session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: "different_member",
+  }), /did not match the authorized member/u);
+  assert.equal(runtimeMocks.unwrapHostedBrowserSessionKey.mock.calls.length, 0);
+});
+
+test("route query construction ignores loaded capabilities outside the route demand", async () => {
+  const fixture = createShardedReadyFixture(["core", "metricsIndex"]);
+  runtimeMocks.decryptHostedStoragePayload.mockImplementation(async ({ envelope }) =>
+    readFixtureEncodedPayload(fixture, envelope.ciphertext),
+  );
+  const result = await loadBrowserVaultReplica({
+    fetchImpl: async () => fixture.response,
+    knownReplicaRef: null,
+    requestedShards: ["core", "metricsIndex"],
+  });
+  assert.equal(result.state, "ready");
+  if (result.state !== "ready") return;
+  const coreOnly = createBrowserVaultRouteQueryClient({
+    core: result.shards.core,
+    get metrics(): never { throw new Error("Unused metrics must not be initialized."); },
+    get labs(): never { throw new Error("Unused labs must not be initialized."); },
+  }, ["core"]);
+  assert.equal(coreOnly.capability, "core");
+  const metricsOnly = createBrowserVaultRouteQueryClient({
+    core: result.shards.core,
+    metrics: result.shards.metrics,
+    get labs(): never { throw new Error("Unused labs must not be initialized."); },
+  }, ["core", "metricsIndex"]);
+  assert.equal(metricsOnly.capability, "core+metrics-partial");
 });
 
 test("browser vault session parser rejects encrypted payloads on not_modified responses", () => {

@@ -7,6 +7,7 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+  HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
   isMurphAndroidAppEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
@@ -36,6 +37,7 @@ import {
   sanitizeHostedAssistantRuntimePlatformEnv,
   sanitizeHostedAssistantRuntimeUserEnv,
 } from "./environment.ts";
+import { createDefaultHostedManagedAutoReplyChannels } from "./managed-auto-reply.ts";
 import type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeParserToolchainConfig,
@@ -78,6 +80,7 @@ export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
     HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
     HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
     HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
+    HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
     "NODE_ENV",
     ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
   ],
@@ -377,23 +380,10 @@ export function buildHostedRuntimeResolvedConfig(
       telegramBotConfigured,
     },
     deviceSync,
-    managedAutoReplyChannels: [
-      {
-        capabilityReady: emailCapabilities.sendReady,
-        channel: "email",
-        memberChannel: "email",
-      },
-      {
-        capabilityReady: true,
-        channel: "linq",
-        memberChannel: "linq",
-      },
-      {
-        capabilityReady: telegramBotConfigured,
-        channel: "telegram",
-        memberChannel: "telegram",
-      },
-    ],
+    managedAutoReplyChannels: createDefaultHostedManagedAutoReplyChannels({
+      emailSendReady: emailCapabilities.sendReady,
+      telegramBotConfigured,
+    }),
   };
 }
 

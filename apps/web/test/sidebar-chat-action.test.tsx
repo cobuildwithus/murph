@@ -118,7 +118,9 @@ test("SidebarChatWithMurphAction opens a contact picker when multiple channels a
   );
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
-  assert.match(markup, /data-slot="sidebar-menu-button"[^>]*aria-label="Chat with Murph"/);
+  assert.match(markup, /data-slot="dialog-trigger"/);
+  assert.match(markup, /data-sidebar="menu-button"/);
+  assert.match(markup, /aria-label="Chat with Murph"/);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /href="mailto:/);
   assert.doesNotMatch(markup, /\+14045550123/);
@@ -281,6 +283,7 @@ test("SidebarChatWithMurphAction discloses Telegram new-tab behavior", async () 
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
   assert.match(markup, /href="https:\/\/t\.me\/withmurph_bot"/);
+  assert.match(markup, />Chat with Murph<\/a>/);
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
   assert.match(markup, /aria-label="Chat with Murph in Telegram \(opens in a new tab\)"/);

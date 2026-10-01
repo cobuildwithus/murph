@@ -5,13 +5,12 @@ import { ArrowRight, MessageCircleIcon } from "lucide-react";
 
 import { AuthButton } from "@/src/components/ui/auth-button";
 import {
-  FlaskSparkleIcon,
   LabReportIcon,
   WatchHeartIcon,
 } from "@/src/components/icons/home-icons";
 
 const steps: {
-  id: "devices" | "experiments" | "labs" | "message";
+  id: "devices" | "labs" | "message";
   title: string;
   description: string;
   cta: string;
@@ -42,18 +41,11 @@ const steps: {
     href: "/settings",
     icon: LabReportIcon,
   },
-  {
-    id: "experiments",
-    title: "Start an experiment",
-    description: "Try protocols like sauna or creatine and see what works.",
-    cta: "View experiments",
-    href: "/experiments",
-    icon: FlaskSparkleIcon,
-  },
 ];
 
 export interface OnboardingStepsProps {
-  hideExperimentStep?: boolean;
+  showEmptyState?: boolean;
+  emptyStateAction?: ReactNode;
   hideLabsStep?: boolean;
   /**
    * Rendered as the "Message Murph" step's action. Supplying it is what shows
@@ -73,7 +65,8 @@ export function getOnboardingStepActionClass(isPrimary: boolean): string {
 
 export function OnboardingSteps({
   showDeviceStep = true,
-  hideExperimentStep = false,
+  showEmptyState = true,
+  emptyStateAction = null,
   hideLabsStep = false,
   messageMurphAction = null,
   uploadLabsAction = null,
@@ -81,12 +74,18 @@ export function OnboardingSteps({
   const visibleSteps = steps.filter((step) => {
     if (step.id === "message" && !messageMurphAction) return false;
     if (step.id === "devices" && !showDeviceStep) return false;
-    if (step.id === "experiments" && hideExperimentStep) return false;
     if (step.id === "labs" && hideLabsStep) return false;
     return true;
   });
   if (visibleSteps.length === 0) {
-    return null;
+    return showEmptyState ? (
+      <section className="py-16 text-center sm:py-24" data-home-empty-state>
+        {emptyStateAction}
+        <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
+          Ask a question, share an update, or talk through what’s on your mind.
+        </p>
+      </section>
+    ) : null;
   }
 
   // Reaching Murph outranks connecting data, and it is the one step Murph

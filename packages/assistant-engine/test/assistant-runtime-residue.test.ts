@@ -43,6 +43,7 @@ import {
 } from '../src/assistant/automation/evidence.ts'
 import {
   recordHostedMailboxAssistantInputItem,
+  readHostedMailboxAssistantInputItemDetails,
 } from '../src/assistant/hosted-mailbox-input-items.ts'
 import {
   createAssistantOutboxIntent,
@@ -52,6 +53,7 @@ import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../src/assistant/generated-delivery-files.ts'
 import {
+  AssistantGeneratedDeliveryResiduePruneError,
   maintainAssistantAutoReplyRouteState,
   pruneAssistantGeneratedDeliveryResidue,
   pruneAssistantRuntimeResidue,
@@ -209,7 +211,7 @@ describe('assistant runtime residue pruning', () => {
     }
   })
 
-  it('fails closed when an active generated delivery gains another hard link', async () => {
+  it('reports a closed diagnostic code when an active generated delivery gains another hard link', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-generated-active-hardlink-',
     )
@@ -234,11 +236,15 @@ describe('assistant runtime residue pruning', () => {
       vaultRoot,
     })
 
-    await expect(pruneAssistantGeneratedDeliveryResidue({
+    const cleanup = pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
-    })).rejects.toThrow(
-      'An active assistant generated delivery must have exactly one hard link.',
+    })
+    await expect(cleanup).rejects.toBeInstanceOf(
+      AssistantGeneratedDeliveryResiduePruneError,
     )
+    await expect(cleanup).rejects.toMatchObject({
+      code: 'active_file_multiple_hard_links',
+    })
 
     await expectPathExists(active.filePath)
     await expectPathExists(linkedPath)
@@ -315,7 +321,7 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(orphan.filePath)
   })
 
-  it('fails closed when an active generated delivery is missing', async () => {
+  it('reclaims unrelated residue when an active generated delivery is missing', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-generated-missing-active-',
     )
@@ -337,12 +343,44 @@ describe('assistant runtime residue pruning', () => {
       vaultRoot,
     })
 
-    await expect(pruneAssistantGeneratedDeliveryResidue({
+    const result = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
-    })).rejects.toThrow(
-      'An active assistant generated delivery is missing from runtime staging.',
+    })
+
+    expect(result.generatedDeliveryActiveFilesMissing).toBe(1)
+    expect(result.generatedDeliveryFilesPruned).toBe(1)
+    expect(result.generatedDeliveryBytesPruned).toBe(
+      Buffer.byteLength('must remain'),
     )
-    await expectPathExists(orphan.filePath)
+    await expectPathMissing(orphan.filePath)
+  })
+
+  it('reports missing active deliveries when runtime staging is absent', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-missing-root-',
+    )
+    const active = await writeGeneratedDeliveryFile({
+      contents: 'active delivery',
+      refSuffix: 'missing.pdf',
+      vaultRoot,
+    })
+    await createGeneratedDeliveryIntent({
+      media: active.media,
+      seed: 'j',
+      status: 'pending',
+      vaultRoot,
+    })
+    await rm(path.dirname(active.filePath), { recursive: true })
+
+    const result = await pruneAssistantGeneratedDeliveryResidue({
+      vault: vaultRoot,
+    })
+
+    expect(result).toMatchObject({
+      generatedDeliveryActiveFilesMissing: 1,
+      generatedDeliveryBytesPruned: 0,
+      generatedDeliveryFilesPruned: 0,
+    })
   })
 
   it('retains the entire generated-delivery prefix when outbox inventory is untrusted', async () => {
@@ -459,13 +497,24 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(targetPath)
   })
 
-  it('rejects nested generated-delivery entries before deleting regular files', async () => {
+  it('retains nested generated-delivery entries while pruning independent direct files', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-generated-nested-',
     )
     const regular = await writeGeneratedDeliveryFile({
-      contents: 'must remain',
+      contents: 'direct orphan',
       refSuffix: 'regular.pdf',
+      vaultRoot,
+    })
+    const active = await writeGeneratedDeliveryFile({
+      contents: 'active delivery',
+      refSuffix: 'active.pdf',
+      vaultRoot,
+    })
+    await createGeneratedDeliveryIntent({
+      media: active.media,
+      seed: 'nested-active',
+      status: 'pending',
       vaultRoot,
     })
     const nestedPath = path.join(
@@ -477,12 +526,18 @@ describe('assistant runtime residue pruning', () => {
     await mkdir(path.dirname(nestedPath), { recursive: true })
     await writeFile(nestedPath, 'invalid nested delivery', 'utf8')
 
-    await expect(pruneAssistantGeneratedDeliveryResidue({
+    const result = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
-    })).rejects.toThrow(
-      'Assistant generated-delivery staging must remain flat.',
-    )
-    await expectPathExists(regular.filePath)
+    })
+
+    expect(result).toMatchObject({
+      generatedDeliveryActiveFilesRetained: 1,
+      generatedDeliveryFilesPruned: 1,
+      generatedDeliveryFilesScanned: 2,
+      generatedDeliveryNestedEntriesRetained: 1,
+    })
+    await expectPathMissing(regular.filePath)
+    await expectPathExists(active.filePath)
     await expectPathExists(nestedPath)
   })
 
@@ -547,9 +602,9 @@ describe('assistant runtime residue pruning', () => {
       paths,
     }))
     await expectPathExists(resolveEvidencePath(paths, event.inputId))
-    await expectPathExists(
-      resolveHostedMailboxInputItemPath(paths, event.inputId),
-    )
+    expect((await readHostedMailboxAssistantInputItemDetails({
+      inputIds: [event.inputId], vault: vaultRoot,
+    })).get(event.inputId)?.mailboxItemId).toBe('mailbox-item-pending')
   })
 
   it('deletes old settled input events before deleting complete evidence groups', async () => {
@@ -633,10 +688,6 @@ describe('assistant runtime residue pruning', () => {
       inputId: event.inputId,
       paths,
     })
-    const laterDeletionPath = resolveHostedMailboxInputItemPath(
-      paths,
-      event.inputId,
-    )
     const controller = new AbortController()
     const reason = new Error('stop residue deletion')
     const signal = controller.signal
@@ -644,8 +695,7 @@ describe('assistant runtime residue pruning', () => {
     signal.throwIfAborted = () => {
       if (
         !signal.aborted &&
-        !existsSync(firstDeletionPath) &&
-        existsSync(laterDeletionPath)
+        !existsSync(firstDeletionPath)
       ) {
         controller.abort(reason)
       }
@@ -659,7 +709,9 @@ describe('assistant runtime residue pruning', () => {
       vault: vaultRoot,
     })).rejects.toBe(reason)
     await expectPathMissing(firstDeletionPath)
-    await expectPathExists(laterDeletionPath)
+    expect((await readHostedMailboxAssistantInputItemDetails({
+      inputIds: [event.inputId], vault: vaultRoot,
+    })).has(event.inputId)).toBe(true)
   })
 
   it('does not start residue pruning with an already-aborted signal', async () => {
@@ -682,7 +734,9 @@ describe('assistant runtime residue pruning', () => {
       signal: controller.signal,
       vault: vaultRoot,
     })).rejects.toBe(reason)
-    await expectPathExists(resolveHostedMailboxInputItemPath(paths, inputId))
+    expect((await readHostedMailboxAssistantInputItemDetails({
+      inputIds: [inputId], vault: vaultRoot,
+    })).has(inputId)).toBe(true)
   })
 
   it('retains orphaned mailbox mappings when any mapping file is malformed', async () => {
@@ -691,12 +745,12 @@ describe('assistant runtime residue pruning', () => {
     )
     const validInputId = createInputId('b')
     const malformedInputId = createInputId('c')
-    await recordHostedMailboxAssistantInputItem({
+    await writeLegacyHostedMailboxInputItem({
       inputId: validInputId,
       mailboxItemId: 'mailbox-item-valid',
       vault: vaultRoot,
     })
-    await recordHostedMailboxAssistantInputItem({
+    await writeLegacyHostedMailboxInputItem({
       inputId: malformedInputId,
       mailboxItemId: 'mailbox-item-malformed',
       vault: vaultRoot,
@@ -727,7 +781,7 @@ describe('assistant runtime residue pruning', () => {
       'assistant-runtime-residue-malformed-input-event-',
     )
     const inputId = createInputId('f')
-    await recordHostedMailboxAssistantInputItem({
+    await writeLegacyHostedMailboxInputItem({
       inputId,
       mailboxItemId: 'mailbox-item-untrusted-input-inventory',
       vault: vaultRoot,
@@ -749,7 +803,9 @@ describe('assistant runtime residue pruning', () => {
     })
 
     expect(result.hostedMailboxInputItemMappingsPruned).toBe(0)
-    await expectPathExists(resolveHostedMailboxInputItemPath(paths, inputId))
+    expect((await readHostedMailboxAssistantInputItemDetails({
+      inputIds: [inputId], vault: vaultRoot,
+    })).get(inputId)?.mailboxItemId).toBe('mailbox-item-untrusted-input-inventory')
   })
 
   it('retains orphaned mailbox mappings when the mapping inventory contains a symlink', async () => {
@@ -758,7 +814,7 @@ describe('assistant runtime residue pruning', () => {
     )
     const validInputId = createInputId('d')
     const symlinkInputId = createInputId('e')
-    await recordHostedMailboxAssistantInputItem({
+    await writeLegacyHostedMailboxInputItem({
       inputId: validInputId,
       mailboxItemId: 'mailbox-item-valid',
       vault: vaultRoot,
@@ -1736,4 +1792,19 @@ async function pathExists(filePath: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+async function writeLegacyHostedMailboxInputItem(input: {
+  inputId: string
+  mailboxItemId: string
+  vault: string
+}): Promise<void> {
+  const paths = resolveAssistantStatePaths(input.vault)
+  const filePath = resolveHostedMailboxInputItemPath(paths, input.inputId)
+  await mkdir(path.dirname(filePath), { recursive: true })
+  await writeFile(filePath, JSON.stringify({
+    schema: 'murph.assistant-hosted-mailbox-input-item.v1',
+    schemaVersion: 1,
+    value: { inputId: input.inputId, mailboxItemId: input.mailboxItemId },
+  }))
 }

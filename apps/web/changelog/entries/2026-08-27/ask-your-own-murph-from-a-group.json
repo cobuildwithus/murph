@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 100,
+  "item": {
+    "id": "ask-your-own-murph-from-a-group",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Ask your own Murph from a group",
+    "summary": "When you explicitly ask Murph in a supported group chat to consult your own private Murph, it now follows whether you want the answer in the group or privately and asks when that is unclear.",
+    "details": "The request stays tied to you and that group. Choosing group delivery keeps the existing advance notice; choosing private delivery does not post that notice. Existing permission and privacy checks remain, and the group never gets direct access to your private Murph or personal vault.",
+    "relevanceTags": ["assistant", "groups", "privacy"],
+    "sourcePullRequests": [2456]
+  }
+}

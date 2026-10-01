@@ -227,7 +227,7 @@ describe("hosted Assistant Ask completion production", () => {
         memberId: "member-telegram-group-runtime",
         occurredAt: "2026-07-15T12:05:00.000Z",
       });
-      await executeHostedAssistantAskCompletedWake({
+      const outcome = await executeHostedAssistantAskCompletedWake({
         executionContext: {
           hosted: {
             defaultTarget: createDefaultLocalAssistantModelTarget(),
@@ -240,7 +240,8 @@ describe("hosted Assistant Ask completion production", () => {
         wake,
       });
 
-      expect(await listAssistantOutboxIntents(vault)).toEqual([
+      const intents = await listAssistantOutboxIntents(vault);
+      expect(intents).toEqual([
         expect.objectContaining({
           answeredMailboxItemIds: [eventId],
           bindingDelivery: {
@@ -262,6 +263,16 @@ describe("hosted Assistant Ask completion production", () => {
           threadIsDirect: false,
         }),
       ]);
+      expect(outcome.deliveryIntentIds).toEqual([intents[0]?.intentId]);
+      expect(HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE).toBe(
+        "I couldn't get an answer for the earlier question.",
+      );
+
+      await expect(collectHostedAssistantDeliverySideEffects({
+        includeBackgroundDueIntents: false,
+        preferredIntentIds: outcome.deliveryIntentIds ?? [],
+        vaultRoot: vault,
+      })).resolves.toHaveLength(1);
     } finally {
       await rm(vault, { force: true, recursive: true });
     }

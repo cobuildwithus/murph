@@ -1,6 +1,6 @@
 import {
   parseHostedRuntimeAssistantConfigurationControlRequest,
-} from "@murphai/hosted-execution/parsers";
+} from "@murphai/hosted-execution/assistant-model";
 
 import {
   handleHostedRuntimeAssistantConfigurationTool,

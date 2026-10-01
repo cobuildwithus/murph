@@ -307,7 +307,10 @@ export function parseCompactTableAppCardEnvelope(
     return presentation;
   }
 
-  if (value.schemaVersion === 4 || value.schemaVersion === 6) {
+  if (
+    value.schemaVersion === 4
+    || value.schemaVersion === 6
+  ) {
     const parsed = parseWorkoutSessionAppCardEnvelopeV4(value);
     return parsed === null
       ? null

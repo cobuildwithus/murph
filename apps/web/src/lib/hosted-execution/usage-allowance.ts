@@ -1,6 +1,7 @@
 import {
   HostedBillingStatus,
   Prisma,
+  type HostedAiUsagePeriod,
   type PrismaClient,
 } from "@prisma/client";
 import {
@@ -17,7 +18,8 @@ import {
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_BASE_URL,
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
-  HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS,
+  type HostedGeminiVideoAnalysisRolloutModel,
 } from "@murphai/hosted-execution/assistant-capabilities";
 import {
   isHostedAiUsageOpenAiTokenPricingProviderName,
@@ -37,6 +39,7 @@ import {
 } from "@murphai/hosted-execution/assistant-model";
 
 import {
+  HOSTED_FAMILY_BILLING_PLAN_CODE,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedDefaultBillingPlanCode,
   getHostedFamilyAiUsageMonthlyAllowanceForPlan,
@@ -53,12 +56,9 @@ import {
   buildHostedStarterUsageLifetimePeriod,
 } from "../hosted-onboarding/starter-usage";
 import {
-  HOSTED_FAMILY_BILLING_PLAN_CODE,
-  readHostedFamilyAccessForMember,
-} from "../hosted-onboarding/family-plan";
-import {
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
+  hasActiveHostedThreadContainerAccessWithParticipants,
   readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
@@ -69,7 +69,12 @@ import {
   classifyHostedGroupUsageCapacity,
 } from "../hosted-groups/group-usage-capacity";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
-import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
+import { settleHostedUsageCreditForUsageTx } from "./usage-credit-usage-settlement";
+import {
+  HOSTED_LIVE_PRICING_SOURCE,
+  HOSTED_LIVE_PRICING_VERSION,
+  priceHostedLiveUsage,
+} from "./usage-live";
 import {
   HOSTED_LOB_USAGE_PRICING_SOURCE,
   HOSTED_LOB_USAGE_PRICING_VERSION,
@@ -188,6 +193,11 @@ export interface HostedAiUsageLimitNoticeCandidate {
   sourceUsageId: string;
   usageCreditLedgerVersion: bigint;
   userNotice: HostedAiUsageLimitNotice;
+}
+
+export interface HostedAiUsageAllowanceSettlement {
+  limitNoticeCandidate: HostedAiUsageLimitNoticeCandidate | null;
+  platformAiUsageAllowedAfter: boolean;
 }
 
 type HostedAiUsageAllowancePricingModelSource =
@@ -362,9 +372,33 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowanceBillingRef | null> {
-  const familyAccess = await readHostedFamilyAccessForMember({
-    memberId: input.memberId,
-    prisma: input.tx,
+  const familyAccess = await input.tx.hostedAccountGroupMembership.findFirst({
+    relationLoadStrategy: "join",
+    orderBy: { createdAt: "asc" },
+    where: {
+      memberId: input.memberId,
+      status: "active",
+      group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+    },
+    select: {
+      planCode: true,
+      usagePlanTransitionAt: true,
+      usagePlanTransitionFromCode: true,
+      usagePlanTransitionKind: true,
+      usagePlanTransitionToCode: true,
+      group: {
+        select: {
+          billingRef: {
+            select: {
+              currentBillingPlanCode: true,
+              currentBillingPhase: true,
+              currentPeriodEnd: true,
+              currentPeriodStart: true,
+            },
+          },
+        },
+      },
+    },
   });
   if (!familyAccess) {
     return null;
@@ -374,17 +408,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
     return null;
   }
 
-  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
-    select: {
-      currentBillingPlanCode: true,
-      currentBillingPhase: true,
-      currentPeriodEnd: true,
-      currentPeriodStart: true,
-    },
-    where: {
-      groupId: familyAccess.groupId,
-    },
-  });
+  const billingRef = familyAccess.group.billingRef;
   const periodBillingRef =
     billingRef?.currentBillingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE &&
     billingRef.currentBillingPhase === "paid"
@@ -447,8 +471,10 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION =
   "openai-api-pricing-2026-08-21-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex";
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_PRIORITY_PRICING_VERSION =
+  "openai-api-pricing-2026-08-27-gpt-5.6-openai-priority";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_VERSION =
-  "venice-api-pricing-2026-08-04-gpt-5.6-standard";
+  "venice-api-pricing-2026-08-30-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE =
@@ -493,10 +519,10 @@ const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE = 510n;
 const MS_PER_PRICING_MINUTE = 60_000n;
 
 // ElevenLabs TTS is character-priced rather than token-priced.
-// Rates are the public ElevenAPI pay-as-you-go rates for Text to Speech:
-// Flash/Turbo: $0.05 per 1K characters; Multilingual v2/v3: $0.10 per 1K.
+// Preserve the existing legacy-model accounting rates from June 18.
+// Eleven v4 uses its September 28 regular public API rate, without promotions.
 const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_VERSION =
-  "elevenlabs-tts-pricing-2026-06-18";
+  "elevenlabs-tts-pricing-2026-09-28";
 const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_SOURCE =
   "https://elevenlabs.io/pricing/api";
 const CHARACTERS_PER_TTS_PRICING_UNIT = 1_000n;
@@ -507,6 +533,8 @@ const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES = {
   eleven_turbo_v2: 50_000n,
   eleven_turbo_v2_5: 50_000n,
   eleven_v3: 100_000n,
+  // Regular v4 rate; exclude the launch discount that expires October 12.
+  eleven_v4: 80_000n,
 } as const satisfies Record<HostedAiUsageAllowanceElevenLabsTtsPricedModel, bigint>;
 
 // ElevenLabs Music is priced by generated duration.
@@ -540,16 +568,13 @@ const HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_RAW_USAGE_KEYS: ReadonlySet<string> =
   ]);
 const HOSTED_AI_USAGE_ALLOWANCE_XAI_USD_TICKS_PER_USD_MICRO = 10_000n;
 
-// Gemini 3.7 Flash video analysis is token-priced independently from Murph's
-// primary assistant-model catalog. Google publishes one introductory rate
-// through 2026-12-31 and a higher rate beginning 2027-01-01. Output pricing
-// includes thinking tokens, so candidates and thoughts share one output bucket.
+// Gemini 3.8 Flash video analysis and its deployed 3.7 rollout reader are
+// token-priced independently from Murph's primary assistant-model catalog.
+// Google publishes the same introductory and standard rates for both models.
+// Output pricing includes thinking tokens, so candidates and thoughts share
+// one output bucket.
 const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_PRICING_SOURCE =
   "https://ai.google.dev/gemini-api/docs/pricing";
-const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_PRICING_VERSION =
-  "gemini-3.7-flash-video-pricing-through-2026-12-31";
-const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_PRICING_VERSION =
-  "gemini-3.7-flash-video-pricing-from-2027-01-01";
 const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_START_MS =
   Date.parse("2027-01-01T00:00:00.000Z");
 const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_INPUT_USD_MICROS_PER_MILLION_TOKENS =
@@ -572,6 +597,9 @@ const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_RAW_USAGE_KEYS: ReadonlySet<string>
     "thoughtsTokenCount",
     "totalTokenCount",
   ]);
+const hostedGeminiVideoAnalysisRolloutModels = new Set<string>(
+  HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS,
+);
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 400_000n,
@@ -598,15 +626,39 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
 > = {
+  "gpt-6.1-sol": {
+    cachedInputUsdMicrosPerMillionTokens: 100_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
+    inputUsdMicrosPerMillionTokens: 2_000_000n,
+    outputUsdMicrosPerMillionTokens: 10_000_000n,
+  },
+  "gpt-6-sol": {
+    cachedInputUsdMicrosPerMillionTokens: 200_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
+    inputUsdMicrosPerMillionTokens: 2_000_000n,
+    outputUsdMicrosPerMillionTokens: 10_000_000n,
+  },
+  "gpt-6-luna": {
+    cachedInputUsdMicrosPerMillionTokens: 10_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 125_000n,
+    inputUsdMicrosPerMillionTokens: 100_000n,
+    outputUsdMicrosPerMillionTokens: 500_000n,
+  },
+  "gpt-6-astra": {
+    cachedInputUsdMicrosPerMillionTokens: 1_000_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 12_500_000n,
+    inputUsdMicrosPerMillionTokens: 10_000_000n,
+    outputUsdMicrosPerMillionTokens: 50_000_000n,
+  },
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
 };
 
-const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Record<
+const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Partial<Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
-> = {
+>> = {
   "gpt-5.6-sol": {
     cachedInputUsdMicrosPerMillionTokens: 630_000n,
     cacheWriteUsdMicrosPerMillionTokens: 7_810_000n,
@@ -619,11 +671,12 @@ const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Record<
     inputUsdMicrosPerMillionTokens: 3_130_000n,
     outputUsdMicrosPerMillionTokens: 18_750_000n,
   },
+  // The hosted provider maps Luna to regular openai-gpt-56-luna, not Luna Pro.
   "gpt-5.6-luna": {
-    cachedInputUsdMicrosPerMillionTokens: 130_000n,
-    cacheWriteUsdMicrosPerMillionTokens: 1_560_000n,
-    inputUsdMicrosPerMillionTokens: 1_250_000n,
-    outputUsdMicrosPerMillionTokens: 7_500_000n,
+    cachedInputUsdMicrosPerMillionTokens: 30_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 330_000n,
+    inputUsdMicrosPerMillionTokens: 270_000n,
+    outputUsdMicrosPerMillionTokens: 1_600_000n,
   },
 };
 
@@ -643,6 +696,14 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
     pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION,
     requiredProviderKind: "openai",
   },
+  "openai-priority": {
+    multiplierDenominator: 1n,
+    multiplierNumerator: 2n,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE,
+    pricingVersion:
+      HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_PRIORITY_PRICING_VERSION,
+    requiredProviderKind: "openai",
+  },
   standard: {
     multiplierDenominator: 1n,
     multiplierNumerator: 1n,
@@ -652,7 +713,54 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
   },
 } as const;
 
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES = {
+  standard: {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES.standard,
+    requiredProviderKind: "openai",
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-standard",
+  },
+  "openai-flex": {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-flex"],
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-openai-flex",
+  },
+  "openai-priority": {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-priority"],
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-openai-priority",
+  },
+} as const;
+
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
+  "gpt-6.1-sol": {
+    standard: {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES.standard,
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-standard",
+    },
+    "openai-flex": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES["openai-flex"],
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-openai-flex",
+    },
+    "openai-priority": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES["openai-priority"],
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-openai-priority",
+    },
+  },
+  "gpt-6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
+  "gpt-6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
+  "gpt-6-astra": {
+    "openai-flex": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-flex"],
+      pricingSource: "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      pricingVersion: "openai-api-pricing-2026-09-04-gpt-6-astra-openai-flex",
+    },
+    standard: {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES.standard,
+      pricingSource: "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      pricingVersion: "openai-api-pricing-2026-09-04-gpt-6-astra-standard",
+    },
+  },
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
@@ -678,6 +786,11 @@ function resolveHostedAiUsageAllowancePricingDecision(
   const counted = credentialSource !== "member";
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
+
+  const audioPricing = resolveHostedAiUsageAudioPricingDecision({
+    record, counted, credentialSource, tokenPricingBasis,
+  });
+  if (audioPricing) return audioPricing;
 
   const lobPhysicalNote = matchHostedLobPhysicalNoteUsageRecord(record);
   if (lobPhysicalNote !== null) {
@@ -765,18 +878,6 @@ function resolveHostedAiUsageAllowancePricingDecision(
     };
   }
 
-  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
-    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageAudioForAllowance({
-        counted,
-        credentialSource,
-        record,
-      }),
-    };
-  }
-
   const imageMatch = matchHostedAiUsageOpenAiImageRecord(record);
   if (imageMatch !== null) {
     assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(tokenPricingBasis);
@@ -797,34 +898,6 @@ function resolveHostedAiUsageAllowancePricingDecision(
         counted,
         credentialSource,
         match: imageMatch,
-        record,
-      }),
-    };
-  }
-
-  const ttsMatch = matchHostedAiUsageElevenLabsTtsRecord(record);
-  if (ttsMatch !== null) {
-    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageElevenLabsTtsForAllowance({
-        counted,
-        credentialSource,
-        match: ttsMatch,
-        record,
-      }),
-    };
-  }
-
-  const musicMatch = matchHostedAiUsageElevenLabsMusicRecord(record);
-  if (musicMatch !== null) {
-    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageElevenLabsMusicForAllowance({
-        counted,
-        credentialSource,
-        match: musicMatch,
         record,
       }),
     };
@@ -999,8 +1072,19 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageLimitNoticeCandidate | null> {
+  const settlement = await settleHostedAiUsageForAllowanceTx(input);
+  return settlement.limitNoticeCandidate;
+}
+
+export async function settleHostedAiUsageForAllowanceTx(input: {
+  memberId: string;
+  now?: Date;
+  record: AssistantUsageRecord;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageAllowanceSettlement> {
   const now = input.now ?? new Date();
   const at = normalizeHostedAiUsageAllowanceDate(input.record.occurredAt);
+  const operatorFunded = await isVerifiedOperatorTaskUsage(input);
   await lockHostedAiUsageAllowanceBeneficiaryTx({
     memberId: input.memberId,
     tx: input.tx,
@@ -1078,7 +1162,10 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
-    return null;
+    return {
+      limitNoticeCandidate: null,
+      platformAiUsageAllowedAfter: false,
+    };
   }
 
   const pricingDecision = resolveHostedAiUsageAllowancePricingDecision(input.record);
@@ -1093,7 +1180,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
-    return null;
+    return buildHostedAiUsageAllowanceSettlementFromPeriod(period);
   }
   if (pricingDecision.kind === "unpriceable_openai_image") {
     return accountHostedAiUsageOpenAiImageMalformedForAllowanceTx({
@@ -1105,7 +1192,18 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       tx: input.tx,
     });
   }
-  const priced = pricingDecision.priced;
+  const priced = operatorFunded
+    ? {
+        ...pricingDecision.priced,
+        costUsdMicros: 0n,
+        counted: false,
+        pricingSnapshot: {
+          ...pricingDecision.priced.pricingSnapshot,
+          fundingSource: "operator_task",
+          providerCostUsdMicros: pricingDecision.priced.costUsdMicros.toString(),
+        },
+      }
+    : pricingDecision.priced;
 
   const accounted = await input.tx.hostedAiUsage.updateMany({
     where: {
@@ -1124,7 +1222,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   });
 
   if (accounted.count !== 1 || !priced.counted) {
-    return null;
+    return buildHostedAiUsageAllowanceSettlementFromPeriod(period);
   }
 
   return accountHostedAiUsageAllowancePeriodSpendTx({
@@ -1198,7 +1296,7 @@ async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
   period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageLimitNoticeCandidate | null> {
+}): Promise<HostedAiUsageAllowanceSettlement> {
   const blockCostUsdMicros = input.decision.counted
     ? resolveHostedAiUsageAllowanceRemainingUsdMicros(input.period)
     : 0n;
@@ -1234,7 +1332,7 @@ async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
   });
 
   if (accounted.count !== 1 || !input.decision.counted) {
-    return null;
+    return buildHostedAiUsageAllowanceSettlementFromPeriod(input.period);
   }
 
   return accountHostedAiUsageAllowancePeriodSpendTx({
@@ -1449,113 +1547,122 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
   });
 }
 
+export const hostedAiUsageMemberSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
+  billingRef: {
+    select: {
+      currentBillingPhase: true,
+      currentBillingPlanCode: true,
+      currentCheckoutOffer: true,
+      currentPeriodEnd: true,
+      currentPeriodStart: true,
+      stripeSubscriptionLookupKey: true,
+      usagePlanTransitionAt: true,
+      usagePlanTransitionFromCode: true,
+      usagePlanTransitionKind: true,
+      usagePlanTransitionToCode: true,
+    },
+  },
+  threadContainer: {
+    select: {
+      monthlyUsageLimitUsdMicros: true,
+      owner: {
+        select: hostedMemberPersonAccessSelect,
+      },
+    },
+  },
+  billingStatus: true,
+  suspendedAt: true,
+  usageCreditBalanceUsdMicros: true,
+  usageCreditLedgerVersion: true,
+});
+
+export type HostedAiUsageMemberState = Prisma.HostedMemberGetPayload<{
+  select: typeof hostedAiUsageMemberSelect;
+}>;
+
 export async function readHostedAiUsageGate(input: {
   memberId: string;
+  memberState?: HostedAiUsageMemberState;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
 }): Promise<HostedAiUsageGateDecisionWithSource> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
-  return runHostedAiUsageAllowanceTransaction(prisma, async (tx) => {
-    const memberState = await tx.hostedMember.findUnique({
-      where: {
-        id: input.memberId,
-      },
-      select: {
-        billingRef: {
-          select: {
-            currentBillingPhase: true,
-            currentBillingPlanCode: true,
-            currentCheckoutOffer: true,
-            currentPeriodEnd: true,
-            currentPeriodStart: true,
-            stripeSubscriptionLookupKey: true,
-            usagePlanTransitionAt: true,
-            usagePlanTransitionFromCode: true,
-            usagePlanTransitionKind: true,
-            usagePlanTransitionToCode: true,
-          },
-        },
-        threadContainer: {
-          select: {
-            monthlyUsageLimitUsdMicros: true,
-            owner: {
-              select: hostedMemberPersonAccessSelect,
-            },
-          },
-        },
-        billingStatus: true,
-        suspendedAt: true,
-        usageCreditBalanceUsdMicros: true,
-        usageCreditLedgerVersion: true,
-      },
-    });
+  // A read-committed wrapper adds no shared snapshot or lock to these reads.
+  // Caller-owned transactions remain intact; denial confirmation owns writes.
+  const memberState = input.memberState ?? await prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: hostedAiUsageMemberSelect,
+  });
 
-    if (!memberState) {
-      throw new TypeError("Hosted AI usage allowance member does not exist.");
-    }
-    const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
+  if (!memberState) {
+    throw new TypeError("Hosted AI usage allowance member does not exist.");
+  }
+  const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
-    const allowanceAccess = memberState.suspendedAt === null
-      ? await resolveHostedAiUsageAllowanceBillingRefForMember({
-          billingRef: memberState.billingRef,
-          billingStatus: memberState.billingStatus,
-          memberId: input.memberId,
-          tx,
-        })
-      : {
-          billingRef: memberState.billingRef,
-          familyAccessActive: false,
-        };
-    const allowanceBillingRef = allowanceAccess.billingRef;
-    const familyAccessActive = allowanceAccess.familyAccessActive;
-    const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
-      container: memberState,
-      containerMemberId: input.memberId,
-      now,
-      threadContainer: memberState.threadContainer,
-      tx,
-    });
-
-    // Thread-container members are synthetic (`not_started` own billing):
-    // their access is decided by the container branch of the allowance-period
-    // resolver below. Only non-container members are denied on their own
-    // billing here; suspension always fails closed.
-    if (
-      memberState.suspendedAt !== null ||
-      (
-        !memberState.threadContainer &&
-        memberState.billingStatus !== HostedBillingStatus.active &&
-        !familyAccessActive
-      )
-    ) {
-      return resolveHostedAiUsageInactiveGateDecision({
-        at: now,
-        billingRef: allowanceBillingRef,
+  const allowanceAccess = memberState.suspendedAt === null
+    ? await resolveHostedAiUsageAllowanceBillingRefForMember({
+        billingRef: memberState.billingRef,
         billingStatus: memberState.billingStatus,
         memberId: input.memberId,
-        suspendedAt: memberState.suspendedAt,
-        threadContainer: memberState.threadContainer,
-        threadContainerAccessActive,
-        ...usageCreditProjection,
-      });
-    }
+        tx: prisma,
+      })
+    : {
+        billingRef: memberState.billingRef,
+        familyAccessActive: false,
+      };
+  const allowanceBillingRef = allowanceAccess.billingRef;
+  const familyAccessActive = allowanceAccess.familyAccessActive;
+  const threadContainerAccessActive = memberState.threadContainer
+    ? await hasActiveHostedThreadContainerAccessWithParticipants({
+        container: memberState,
+        containerMemberId: input.memberId,
+        now,
+        owner: memberState.threadContainer.owner,
+        prisma,
+      })
+    : null;
 
-    const period = await readHostedAiUsageAllowancePeriodTx({
+  // Thread-container members are synthetic (`not_started` own billing):
+  // their access is decided by the container branch of the allowance-period
+  // resolver below. Only non-container members are denied on their own
+  // billing here; suspension always fails closed.
+  if (
+    memberState.suspendedAt !== null ||
+    (
+      !memberState.threadContainer &&
+      memberState.billingStatus !== HostedBillingStatus.active &&
+      !familyAccessActive
+    )
+  ) {
+    return resolveHostedAiUsageInactiveGateDecision({
       at: now,
       billingRef: allowanceBillingRef,
+      billingStatus: memberState.billingStatus,
       memberId: input.memberId,
+      suspendedAt: memberState.suspendedAt,
       threadContainer: memberState.threadContainer,
       threadContainerAccessActive,
-      tx,
       ...usageCreditProjection,
     });
+  }
 
-    return buildHostedAiUsageGateDecision({
-      memberId: input.memberId,
-      period,
-    });
+  const period = await readHostedAiUsageAllowancePeriodTx({
+    at: now,
+    billingRef: allowanceBillingRef,
+    memberId: input.memberId,
+    threadContainer: memberState.threadContainer,
+    threadContainerAccessActive,
+    tx: prisma,
+    ...usageCreditProjection,
+  });
+
+  return buildHostedAiUsageGateDecision({
+    memberId: input.memberId,
+    period,
   });
 }
 
@@ -1617,6 +1724,7 @@ export async function readHostedAiUsageGateSnapshots(input: {
 // ensure-creates the period inside the spend transaction as the backstop.
 export async function checkHostedAiUsageGate(input: {
   memberId: string;
+  memberState?: HostedAiUsageMemberState;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
 }): Promise<HostedAiUsageGateDecisionWithSource> {
@@ -1625,7 +1733,11 @@ export async function checkHostedAiUsageGate(input: {
     return decision;
   }
 
-  return resolveHostedAiUsageGate(input);
+  return resolveHostedAiUsageGate({
+    memberId: input.memberId,
+    now: input.now,
+    prisma: input.prisma,
+  });
 }
 
 function resolveHostedAiUsageInactiveGateDecision(input: {
@@ -1849,31 +1961,32 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     },
     skipDuplicates: true,
   });
-  await lockHostedAiUsageAllowancePeriodTx({
-    memberId: input.memberId,
-    periodStart: resolved.periodStart,
-    tx: input.tx,
-  });
-
-  const current = await input.tx.hostedAiUsagePeriod.findUniqueOrThrow({
-    where: {
-      memberId_periodStart: {
-        memberId: input.memberId,
-        periodStart: resolved.periodStart,
-      },
-    },
-    select: {
-      billingPlanCode: true,
-      blockedAt: true,
-      highestBillingPlanCode: true,
-      lastUsageAt: true,
-      limitUsdMicros: true,
-      periodEnd: true,
-      periodStart: true,
-      planResetAt: true,
-      spentUsdMicros: true,
-    },
-  });
+  // Creation above and the enclosing member lock guarantee one period row.
+  const [current] = await input.tx.$queryRaw<[Pick<
+    HostedAiUsagePeriod,
+    | "billingPlanCode"
+    | "blockedAt"
+    | "highestBillingPlanCode"
+    | "limitUsdMicros"
+    | "periodEnd"
+    | "periodStart"
+    | "planResetAt"
+    | "spentUsdMicros"
+  >]>`
+    SELECT
+      "billing_plan_code" AS "billingPlanCode",
+      "blocked_at" AS "blockedAt",
+      "highest_billing_plan_code" AS "highestBillingPlanCode",
+      "limit_usd_micros" AS "limitUsdMicros",
+      "period_end" AS "periodEnd",
+      "period_start" AS "periodStart",
+      "plan_reset_at" AS "planResetAt",
+      "spent_usd_micros" AS "spentUsdMicros"
+    FROM "hosted_ai_usage_period"
+    WHERE "member_id" = ${input.memberId}
+      AND "period_start" = ${resolved.periodStart}
+    FOR UPDATE
+  `;
 
   const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
     ?? resolved.billingPlanCode;
@@ -2259,7 +2372,7 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
   recordOccurredAt: Date;
   sourceUsageId: string;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageLimitNoticeCandidate | null> {
+}): Promise<HostedAiUsageAllowanceSettlement> {
   const baseRemainingUsdMicros = input.period.limitUsdMicros > input.period.spentUsdMicros
     ? input.period.limitUsdMicros - input.period.spentUsdMicros
     : 0n;
@@ -2309,13 +2422,14 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     throw new TypeError("Hosted AI usage allowance period spend lost its locked row.");
   }
 
+  const spentAfterUsdMicros = input.period.spentUsdMicros + input.costUsdMicros;
+  const baseRemainingAfterUsdMicros = input.period.limitUsdMicros > spentAfterUsdMicros
+    ? input.period.limitUsdMicros - spentAfterUsdMicros
+    : 0n;
+  const platformAiUsageAllowedAfter =
+    baseRemainingAfterUsdMicros + usageCreditBalanceUsdMicros > 0n;
+
   if (input.period.allowanceSource === "thread_container") {
-    const spentAfterUsdMicros =
-      input.period.spentUsdMicros + input.costUsdMicros;
-    const baseRemainingAfterUsdMicros =
-      input.period.limitUsdMicros > spentAfterUsdMicros
-        ? input.period.limitUsdMicros - spentAfterUsdMicros
-        : 0n;
     await admitHostedGroupSponsorshipRefillTx({
       beneficiaryMemberId: input.memberId,
       capacityState: classifyHostedGroupUsageCapacity({
@@ -2329,23 +2443,39 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
   }
 
   if (!noticeEligible) {
-    return null;
+    return {
+      limitNoticeCandidate: null,
+      platformAiUsageAllowedAfter,
+    };
   }
 
   return {
-    crossedAt: input.period.blockedAt ?? input.now,
-    memberId: input.memberId,
-    periodEnd: input.period.periodEnd,
-    periodStart: input.period.periodStart,
-    planResetAt: input.period.planResetAt,
-    sourceUsageId: input.sourceUsageId,
-    usageCreditLedgerVersion,
-    userNotice: buildHostedAiUsageGateLimitNotice({
-      allowanceSource: input.period.allowanceSource,
-      billingPlanCode: input.period.billingPlanCode,
+    limitNoticeCandidate: {
+      crossedAt: input.period.blockedAt ?? input.now,
       memberId: input.memberId,
+      periodEnd: input.period.periodEnd,
       periodStart: input.period.periodStart,
-    }),
+      planResetAt: input.period.planResetAt,
+      sourceUsageId: input.sourceUsageId,
+      usageCreditLedgerVersion,
+      userNotice: buildHostedAiUsageGateLimitNotice({
+        allowanceSource: input.period.allowanceSource,
+        billingPlanCode: input.period.billingPlanCode,
+        memberId: input.memberId,
+        periodStart: input.period.periodStart,
+      }),
+    },
+    platformAiUsageAllowedAfter,
+  };
+}
+
+function buildHostedAiUsageAllowanceSettlementFromPeriod(
+  period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>,
+): HostedAiUsageAllowanceSettlement {
+  return {
+    limitNoticeCandidate: null,
+    platformAiUsageAllowedAfter:
+      resolveHostedAiUsageAllowanceRemainingUsdMicros(period) > 0n,
   };
 }
 
@@ -2519,20 +2649,6 @@ function normalizeHostedAiUsageCreditProjection(input: {
   };
 }
 
-async function lockHostedAiUsageAllowancePeriodTx(input: {
-  memberId: string;
-  periodStart: Date;
-  tx: Prisma.TransactionClient;
-}): Promise<void> {
-  await input.tx.$queryRaw`
-    SELECT 1
-    FROM "hosted_ai_usage_period"
-    WHERE "member_id" = ${input.memberId}
-      AND "period_start" = ${input.periodStart}
-    FOR UPDATE
-  `;
-}
-
 async function lockHostedAiUsageAllowanceBeneficiaryTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
@@ -2606,12 +2722,14 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
     throw new TypeError("Hosted AI usage allowance pricing is missing for the model.");
   }
 
+  const modelPricingBases: Partial<Record<
+    AssistantUsageTokenPricingBasis,
+    HostedAiUsageAllowanceTokenPricingBasisConfig
+  >> = HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES[input.model];
   const config = basis === "standard"
       && isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
     ? HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_TOKEN_PRICING_BASIS
-    : HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES[
-      input.model
-    ][basis];
+    : modelPricingBases[basis];
 
   if (!config) {
     throw new TypeError(
@@ -2622,7 +2740,7 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
   if (config.requiredProviderKind === "openai") {
     if (!isHostedAiUsageOpenAiTokenPricingProviderName(input.record.providerName)) {
       throw new TypeError(
-        "OpenAI flex token pricing requires OpenAI provider evidence.",
+        "OpenAI token pricing adjustments require OpenAI provider evidence.",
       );
     }
   }
@@ -2993,6 +3111,7 @@ function divideXaiUsdTicksToMicrosCeil(costInUsdTicks: bigint): bigint {
 interface HostedAiUsageAllowanceGeminiVideoMatch {
   cachedInputTokens: bigint;
   inputTokens: bigint;
+  model: HostedGeminiVideoAnalysisRolloutModel;
   outputTokens: bigint;
   reasoningTokens: bigint;
   totalTokens: bigint;
@@ -3018,7 +3137,7 @@ function matchHostedAiUsageGeminiVideoAnalysisRecord(
       !== HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_SOURCE_PATH
     || record.usageExtractionVersion
       !== HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_VERSION
-    || record.requestedModel !== HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL
+    || !isHostedGeminiVideoAnalysisRolloutModel(record.requestedModel)
     || record.servedModel !== null
     || record.cacheWriteTokens !== null
     || rawUsageJson === null
@@ -3069,10 +3188,17 @@ function matchHostedAiUsageGeminiVideoAnalysisRecord(
   return {
     cachedInputTokens: cachedInput.value,
     inputTokens,
+    model: record.requestedModel,
     outputTokens: output.value,
     reasoningTokens: reasoning.value,
     totalTokens,
   };
+}
+
+function isHostedGeminiVideoAnalysisRolloutModel(
+  value: string | null,
+): value is HostedGeminiVideoAnalysisRolloutModel {
+  return value !== null && hostedGeminiVideoAnalysisRolloutModels.has(value);
 }
 
 function readHostedAiUsageOptionalNonNegativeInteger(
@@ -3102,7 +3228,10 @@ function priceHostedAiUsageGeminiVideoForAllowance(input: {
   match: HostedAiUsageAllowanceGeminiVideoMatch;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowancePricingResult {
-  const pricing = resolveHostedAiUsageGeminiVideoPricing(input.record.occurredAt);
+  const pricing = resolveHostedAiUsageGeminiVideoPricing(
+    input.record.occurredAt,
+    input.match.model,
+  );
   const billableNonCachedInputTokens =
     input.match.inputTokens - input.match.cachedInputTokens;
   const billableOutputTokens =
@@ -3126,7 +3255,7 @@ function priceHostedAiUsageGeminiVideoForAllowance(input: {
     counted: input.counted,
     pricingSnapshot: {
       credentialSource: input.credentialSource,
-      model: HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+      model: input.match.model,
       modelSource: "requested",
       pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_PRICING_SOURCE,
       pricingWindow: {
@@ -3160,6 +3289,7 @@ function priceHostedAiUsageGeminiVideoForAllowance(input: {
 
 function resolveHostedAiUsageGeminiVideoPricing(
   occurredAt: Date | string,
+  model: HostedGeminiVideoAnalysisRolloutModel,
 ): {
   cachedInputUsdMicrosPerMillionTokens: bigint;
   effectiveFrom: string | null;
@@ -3179,8 +3309,7 @@ function resolveHostedAiUsageGeminiVideoPricing(
         HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_INPUT_USD_MICROS_PER_MILLION_TOKENS,
       outputUsdMicrosPerMillionTokens:
         HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_OUTPUT_USD_MICROS_PER_MILLION_TOKENS,
-      pricingVersion:
-        HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_PRICING_VERSION,
+      pricingVersion: `${model}-video-pricing-from-2027-01-01`,
     };
   }
 
@@ -3193,8 +3322,7 @@ function resolveHostedAiUsageGeminiVideoPricing(
       HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_INPUT_USD_MICROS_PER_MILLION_TOKENS,
     outputUsdMicrosPerMillionTokens:
       HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_OUTPUT_USD_MICROS_PER_MILLION_TOKENS,
-    pricingVersion:
-      HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_PRICING_VERSION,
+    pricingVersion: `${model}-video-pricing-through-2026-12-31`,
   };
 }
 
@@ -3204,6 +3332,79 @@ function readHostedAiUsageNonNegativeInteger(value: unknown): bigint | null {
       && value >= 0
     ? BigInt(value)
     : null;
+}
+
+function resolveHostedAiUsageAudioPricingDecision(input: {
+  record: AssistantUsageRecord;
+  counted: boolean;
+  credentialSource: AssistantUsageCredentialSource;
+  tokenPricingBasis: AssistantUsageTokenPricingBasis;
+}): HostedAiUsageAllowancePricingDecision | null {
+  const { record, counted, credentialSource, tokenPricingBasis } = input;
+  const liveCost = priceHostedLiveUsage(record);
+  if (liveCost !== null) {
+    return {
+      kind: "priced",
+      priced: {
+        costUsdMicros: counted ? liveCost : 0n,
+        counted,
+        pricingSnapshot: {
+          credentialSource,
+          audio: {
+            startDurationMs: String(record.rawUsageJson?.startDurationMs),
+            endDurationMs: String(record.rawUsageJson?.endDurationMs),
+            usdMicrosPerAudioMinute: "50000",
+          },
+          pricingSource: HOSTED_LIVE_PRICING_SOURCE,
+          schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+          tokenPricingBasis,
+        },
+        pricingVersion: HOSTED_LIVE_PRICING_VERSION,
+      },
+    };
+  }
+
+  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
+    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageAudioForAllowance({
+        counted,
+        credentialSource,
+        record,
+      }),
+    };
+  }
+
+  const ttsMatch = matchHostedAiUsageElevenLabsTtsRecord(record);
+  if (ttsMatch !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageElevenLabsTtsForAllowance({
+        counted,
+        credentialSource,
+        match: ttsMatch,
+        record,
+      }),
+    };
+  }
+
+  const musicMatch = matchHostedAiUsageElevenLabsMusicRecord(record);
+  if (musicMatch !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageElevenLabsMusicForAllowance({
+        counted,
+        credentialSource,
+        match: musicMatch,
+        record,
+      }),
+    };
+  }
+
+  return null;
 }
 
 // Only Worker-recorded Workers AI transcription rows take the audio-priced
@@ -3599,7 +3800,7 @@ function buildHostedAiUsageAllowanceModelSnapshot(
         && isHostedAiUsageVeniceTokenPricingProviderName(record.providerName)
       ? {
         providerModel:
-          HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[resolution.model],
+          HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[resolution.model] ?? null,
       }
       : {}),
     requestedModel: resolution.requestedModel,
@@ -3611,9 +3812,27 @@ function resolveHostedAiUsageAllowanceModelPrices(input: {
   model: HostedAiUsageAllowancePricedModel;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowanceModelPrice {
-  return isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
+  const prices = isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
     ? HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES[input.model]
     : HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[input.model];
+  if (!prices) {
+    throw new TypeError("Hosted AI usage allowance pricing is missing for the provider model.");
+  }
+  // Hosted Codex caps GPT-6 context at 272K (validated in the runner catalog).
+  // Its turn deltas sum multiple requests; cumulative input is not context size.
+  const cumulativeCodexUsage = input.record.usageExtractionSourcePath
+    ?.endsWith("tokenUsage.total.delta") === true;
+  // Exact individual requests above 272K pay long-context rates in every bucket.
+  if ((input.model.startsWith("gpt-6-") || input.model === "gpt-6.1-sol") && !cumulativeCodexUsage
+      && normalizeTokenCount(input.record.inputTokens) > 272_000n) {
+    return {
+      cachedInputUsdMicrosPerMillionTokens: prices.cachedInputUsdMicrosPerMillionTokens * 2n,
+      cacheWriteUsdMicrosPerMillionTokens: (prices.cacheWriteUsdMicrosPerMillionTokens ?? 0n) * 2n,
+      inputUsdMicrosPerMillionTokens: prices.inputUsdMicrosPerMillionTokens * 2n,
+      outputUsdMicrosPerMillionTokens: prices.outputUsdMicrosPerMillionTokens * 3n / 2n,
+    };
+  }
+  return prices;
 }
 
 function isHostedAiUsageVeniceTokenPricingProviderName(
@@ -3793,4 +4012,25 @@ function buildUtcCalendarMonthPeriod(at: Date): {
     periodEnd,
     periodStart,
   };
+}
+
+/** The runtime's label alone cannot exempt member usage. */
+export async function isVerifiedOperatorTaskUsage(input: {
+  memberId: string;
+  record: AssistantUsageRecord;
+  tx: Pick<Prisma.TransactionClient, "hostedOperatorTask">;
+}): Promise<boolean> {
+  if (!input.record.operatorTaskId) return false;
+  const task = await input.tx.hostedOperatorTask.findUnique({
+    where: { id: input.record.operatorTaskId },
+    select: { memberId: true, createdAt: true, expiresAt: true, status: true, kind: true },
+  });
+  const occurredAt = new Date(input.record.occurredAt);
+  if (!task || task.memberId !== input.memberId
+    || !["diagnostic", "member_message"].includes(task.kind)
+    || !["running", "completed", "failed"].includes(task.status)
+    || occurredAt < task.createdAt || occurredAt > task.expiresAt) {
+    throw new TypeError("Operator-funded usage does not match an authorized task.");
+  }
+  return true;
 }

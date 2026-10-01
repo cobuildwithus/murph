@@ -12,6 +12,7 @@ import type {
 import { formatTimeZoneDateTimeParts } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  assistantCronScheduleHasSingleDailyTime,
   buildAssistantCronSchedule,
   computeAssistantCronNextRunAt,
   findNextAssistantCronOccurrence,
@@ -52,6 +53,25 @@ afterEach(async () => {
 })
 
 describe('assistant cron schedule helpers', () => {
+  it('identifies schedules with one configured local time per eligible day', () => {
+    expect(assistantCronScheduleHasSingleDailyTime({
+      kind: 'dailyLocal',
+      localTime: '22:00',
+    })).toBe(true)
+    expect(assistantCronScheduleHasSingleDailyTime({
+      expression: '0 22 * * *',
+      kind: 'cron',
+    })).toBe(true)
+    expect(assistantCronScheduleHasSingleDailyTime({
+      expression: '0 8,20 * * *',
+      kind: 'cron',
+    })).toBe(false)
+    expect(assistantCronScheduleHasSingleDailyTime({
+      everyMs: 24 * 60 * 60 * 1000,
+      kind: 'every',
+    })).toBe(false)
+  })
+
   it('requires exactly one schedule flag and normalizes valid --at and --cron inputs', () => {
     expectVaultCliError(
       () => buildAssistantCronSchedule({}),

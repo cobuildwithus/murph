@@ -380,12 +380,18 @@ function buildLinqMessageWebhookBody(input: {
 }
 
 function buildPrewarmPrisma() {
+  const cleanupTx = {
+    $executeRaw: vi.fn(async () => 1),
+    hostedLinqDelivery: {
+      findUnique: vi.fn(async () => null),
+    },
+  };
   return {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
       calls.push("begin");
       rootKeyAtTransactionOpen = issuedRootKeys[0] ? [...issuedRootKeys[0]] : null;
       rootKeysAtTransactionOpen.push(rootKeyAtTransactionOpen);
-      const result = await callback({});
+      const result = await callback(cleanupTx);
       calls.push("commit");
       return result;
     }),
@@ -532,6 +538,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       retainFailureInScopedCache: true,
       userId: "member_prewarm_1",
     });
+    expect(calls[0]).toBe("unwrap");
     // The scoped cache hands out a private copy and expects it wiped; warming
     // needs the unwrap, not the plaintext.
     expect(issuedRootKeys).toHaveLength(1);
@@ -1179,6 +1186,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           .mockImplementationOnce(async (input) => {
             calls.push("plan-conflict");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
+              unchangedHomeRoute: null,
               identityRecord: null,
               identityState: null,
               memberId: "member_direct_a",
@@ -1212,6 +1220,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           .mockImplementationOnce(async (input) => {
             calls.push("plan");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
+              unchangedHomeRoute: null,
               identityRecord: null,
               identityState: null,
               memberId: "member_direct_b",
@@ -1877,6 +1886,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
               partTypes: ["text"],
               service: "sms",
               text: "hello",
+              textWasTruncated: false,
             },
             response: {
               ignored: true,
@@ -1971,6 +1981,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
               partTypes: [],
               service: "sms",
               text: null,
+              textWasTruncated: false,
             },
             response: {
               ignored: true,

@@ -1,3 +1,4 @@
+import { isRetiredDeviceFeature } from "../retired-device-features.ts";
 import { HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER } from "@murphai/contracts";
 import {
   METRIC_POINT_SCHEMA_VERSION,
@@ -245,6 +246,8 @@ function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
 }
 
 function metricPointsFromCanonicalEntity(entity: CanonicalEntity): MetricPoint[] {
+  if (isRetiredDeviceFeature(entity)) return [];
+
   if (entity.family === "sample" && entity.kind === "metric_sample") {
     return metricSampleMetricPoints(entity);
   }
@@ -417,9 +420,10 @@ function resolveObservationMetric(entity: CanonicalEntity): string | null {
   return sourceProviderSlug === "apple-health-kit" ? "hrv-sdnn" : metric;
 }
 
-function resolveObservationEffectiveDate(
+export function resolveObservationEffectiveDate(
   entity: CanonicalEntity,
-  observationGrain: string | null,
+  observationGrain: string | null = readString(entity.attributes.observationGrain)
+    ?? inferWearableObservationGrain(entity),
 ): string | null {
   const dayKey = readString(entity.attributes.dayKey);
   if (!isDayGrainObservation(observationGrain)) {

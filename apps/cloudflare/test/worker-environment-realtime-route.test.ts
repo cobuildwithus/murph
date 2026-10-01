@@ -122,19 +122,7 @@ function createContext(
     BUNDLES: new MemoryEncryptedR2Bucket(),
     RUNNER_CONTAINER: createUnusedContainerNamespace(),
     RUNNER_CONTAINER_SMOKE: createUnusedContainerNamespace(),
-    USER_RUNNER: {
-      getByName() {
-        return {
-          async bindUser(userId) {
-            return { userId };
-          },
-          deleteHostedUserData: failUnused,
-          ensureRuntimeProcessingForUser: failUnused,
-          publishHostedPrivateMedia: failUnused,
-          runnerStatus: failUnused,
-        };
-      },
-    },
+
     ...(includeProviderKey ? { OPENAI_API_KEY: "test-openai-key" } : {}),
   };
   return {

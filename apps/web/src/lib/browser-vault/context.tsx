@@ -18,7 +18,9 @@ import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboard
 
 import {
   getBrowserVaultMetricBucketId,
+  createBrowserVaultQueryClient,
   selectBrowserVaultExperimentMetricKeys,
+  type BrowserVaultReplica,
   type BrowserVaultExperimentRunCardLookup,
   type BrowserVaultLabsCapableQueryClient,
   type BrowserVaultMetricBucketId,
@@ -53,6 +55,8 @@ const BROWSER_VAULT_STALE_POLL_WINDOW_MS = 20_000;
 const BROWSER_VAULT_STALE_POLL_SLOW_INTERVAL_MS = 15_000;
 const BROWSER_VAULT_RUNTIME_REFRESH_TIMEOUT_MS = 60_000;
 const BROWSER_VAULT_POST_REQUEST_POLL_WINDOW_MS = 5 * 60 * 1_000;
+const BROWSER_VAULT_UNAVAILABLE_MESSAGE =
+  "Your dashboard data is not available right now.";
 const EMPTY_BROWSER_VAULT_SESSION_METADATA: BrowserVaultSessionMetadata = {
   deviceSyncImportPending: false,
   freshness: "stale",
@@ -106,15 +110,16 @@ export interface BrowserVaultContextValue {
   workspaceVersion: string | null;
 }
 
-const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(null);
+const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(
+  null,
+);
 type RegisterBrowserVaultMetricBucketDemand = (
   owner: symbol,
   pathname: string,
   bucketIds: readonly BrowserVaultMetricBucketId[],
 ) => () => void;
-const BrowserVaultMetricDemandContext = createContext<
-  RegisterBrowserVaultMetricBucketDemand
->(() => () => {});
+const BrowserVaultMetricDemandContext =
+  createContext<RegisterBrowserVaultMetricBucketDemand>(() => () => {});
 const DISABLED_BROWSER_VAULT_CONTEXT: BrowserVaultContextValue = {
   client: null,
   dataVersion: null,
@@ -134,27 +139,42 @@ function browserVaultSnapshotCoversDemand(
   requestedShards: readonly ("core" | "labs" | "metricsIndex")[],
   requestedMetricBuckets: readonly BrowserVaultMetricBucketId[],
 ): boolean {
-  return snapshot !== null
-    && requestedShards.every((shard) => snapshot.loadedShards.includes(shard))
-    && requestedMetricBuckets.every((bucketId) =>
-      snapshot.loadedMetricBuckets.includes(bucketId)
-    );
+  return (
+    snapshot !== null &&
+    requestedShards.every((shard) => snapshot.loadedShards.includes(shard)) &&
+    requestedMetricBuckets.every((bucketId) =>
+      snapshot.loadedMetricBuckets.includes(bucketId),
+    )
+  );
 }
 
 export function BrowserVaultProvider({
   children,
+  developmentReplica = null,
   initialMemberId,
   loadEnabled = true,
 }: {
   children: ReactNode;
+  developmentReplica?: BrowserVaultReplica | null;
   initialMemberId: string | null;
   loadEnabled?: boolean;
 }) {
-  if (!loadEnabled) {
+  const pathname = usePathname();
+  // Account-management pages have no health-data consumers. Reuse the disabled
+  // owner so returning to data pages still requires fresh session authority.
+  const accountPage = /^\/(?:settings|connect|records)(?:\/|$)/u.test(pathname);
+
+  if (developmentReplica) {
     return (
-      <DisabledBrowserVaultProvider>
+      <DevelopmentBrowserVaultProvider replica={developmentReplica}>
         {children}
-      </DisabledBrowserVaultProvider>
+      </DevelopmentBrowserVaultProvider>
+    );
+  }
+
+  if (!loadEnabled || accountPage) {
+    return (
+      <DisabledBrowserVaultProvider>{children}</DisabledBrowserVaultProvider>
     );
   }
 
@@ -162,6 +182,47 @@ export function BrowserVaultProvider({
     <ActiveBrowserVaultProvider initialMemberId={initialMemberId}>
       {children}
     </ActiveBrowserVaultProvider>
+  );
+}
+
+function DevelopmentBrowserVaultProvider({
+  children,
+  replica,
+}: {
+  children: ReactNode;
+  replica: BrowserVaultReplica;
+}) {
+  const client = useMemo(
+    () => createBrowserVaultQueryClient(replica),
+    [replica],
+  );
+  const value = useMemo<BrowserVaultContextValue>(
+    () => ({
+      client,
+      dataVersion: replica.source.dataVersion,
+      deviceSyncImportPending: false,
+      error: null,
+      freshness: "fresh",
+      ref: null,
+      refresh: () => Promise.resolve(),
+      refreshPending: false,
+      runtimeRefreshPending: false,
+      status: "ready",
+      workspaceVersion: null,
+    }),
+    [client, replica.source.dataVersion],
+  );
+
+  useLayoutEffect(() => {
+    clearBrowserVaultWarmState();
+  }, []);
+
+  return (
+    <BrowserVaultMetricDemandContext.Provider value={() => () => {}}>
+      <BrowserVaultContext.Provider value={value}>
+        {children}
+      </BrowserVaultContext.Provider>
+    </BrowserVaultMetricDemandContext.Provider>
   );
 }
 
@@ -181,7 +242,10 @@ function DisabledBrowserVaultProvider({ children }: { children: ReactNode }) {
   );
 }
 
-function ActiveBrowserVaultProvider({ children, initialMemberId }: {
+function ActiveBrowserVaultProvider({
+  children,
+  initialMemberId,
+}: {
   children: ReactNode;
   initialMemberId: string | null;
 }) {
@@ -200,10 +264,12 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const [deviceSyncImportPending, setDeviceSyncImportPending] = useState(false);
   const [ref, setRef] = useState<HostedBrowserVaultReplicaRef | null>(null);
   const [admittedPathname, setAdmittedPathname] = useState<string | null>(null);
-  const [metricBucketDemands, setMetricBucketDemands] = useState(new Map<
-    symbol,
-    { bucketIds: readonly BrowserVaultMetricBucketId[]; pathname: string }
-  >());
+  const [metricBucketDemands, setMetricBucketDemands] = useState(
+    new Map<
+      symbol,
+      { bucketIds: readonly BrowserVaultMetricBucketId[]; pathname: string }
+    >(),
+  );
   const clientRef = useRef<BrowserVaultAnyQueryClient | null>(null);
   const authorityGenerationRef = useRef(0);
   const mountedRef = useRef(false);
@@ -217,26 +283,29 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     null,
   );
 
-  const registerMetricBucketDemand = useCallback((
-    owner: symbol,
-    demandPathname: string,
-    bucketIds: readonly BrowserVaultMetricBucketId[],
-  ) => {
-    const normalized = normalizeBrowserVaultMetricBucketDemand(bucketIds);
-    setMetricBucketDemands((current) => {
-      const next = new Map(current);
-      next.set(owner, { bucketIds: normalized, pathname: demandPathname });
-      return next;
-    });
-    return () => {
+  const registerMetricBucketDemand = useCallback(
+    (
+      owner: symbol,
+      demandPathname: string,
+      bucketIds: readonly BrowserVaultMetricBucketId[],
+    ) => {
+      const normalized = normalizeBrowserVaultMetricBucketDemand(bucketIds);
       setMetricBucketDemands((current) => {
-        if (!current.has(owner)) return current;
         const next = new Map(current);
-        next.delete(owner);
+        next.set(owner, { bucketIds: normalized, pathname: demandPathname });
         return next;
       });
-    };
-  }, []);
+      return () => {
+        setMetricBucketDemands((current) => {
+          if (!current.has(owner)) return current;
+          const next = new Map(current);
+          next.delete(owner);
+          return next;
+        });
+      };
+    },
+    [],
+  );
 
   const activeMetricBucketDemand = useMemo(() => {
     const bucketIds: BrowserVaultMetricBucketId[] = [];
@@ -330,39 +399,38 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     [armPostRequestPollingWindow],
   );
 
-  const commitReady = useCallback((snapshot: BrowserVaultReadySnapshot) => {
-    const isRuntimeRefreshComplete = runtimeRefreshCompletionRef.current;
-    const admission = runtimeRefreshAdmissionRef.current;
-    const crossedRequiredAdmission = admission === null
-      || (
-        admission.status === "admitted"
-        && (
-          admission.ref === null
-          || !browserVaultReplicaRefsMatch(admission.ref, snapshot.ref)
-        )
-      );
-    const awaitingRequestedReplacement = isRuntimeRefreshComplete !== null
-      && (
-        !crossedRequiredAdmission
-        || !isRuntimeRefreshComplete(snapshot.client, snapshot.ref)
-      );
-    if (isRuntimeRefreshComplete && !awaitingRequestedReplacement) {
-      // A stronger refresh may be queued behind the load that delivered this
-      // matching snapshot. Fence that now-redundant continuation before it can
-      // claim the shared slot without a remaining predicate or deadline.
-      abortBrowserVaultInFlightLoad();
-      clearRuntimeRefreshWait();
-    }
-    clientRef.current = snapshot.client;
-    setClient(snapshot.client);
-    setRef(snapshot.ref);
-    setStatus("ready");
-    setError(null);
-    setDeviceSyncImportPending(snapshot.metadata.deviceSyncImportPending);
-    setFreshness(snapshot.metadata.freshness);
-    setSessionRefreshPending(snapshot.metadata.refreshPending);
-    setWorkspaceVersion(snapshot.metadata.workspaceVersion);
-  }, [clearRuntimeRefreshWait]);
+  const commitReady = useCallback(
+    (snapshot: BrowserVaultReadySnapshot) => {
+      const isRuntimeRefreshComplete = runtimeRefreshCompletionRef.current;
+      const admission = runtimeRefreshAdmissionRef.current;
+      const crossedRequiredAdmission =
+        admission === null ||
+        (admission.status === "admitted" &&
+          (admission.ref === null ||
+            !browserVaultReplicaRefsMatch(admission.ref, snapshot.ref)));
+      const awaitingRequestedReplacement =
+        isRuntimeRefreshComplete !== null &&
+        (!crossedRequiredAdmission ||
+          !isRuntimeRefreshComplete(snapshot.client, snapshot.ref));
+      if (isRuntimeRefreshComplete && !awaitingRequestedReplacement) {
+        // A stronger refresh may be queued behind the load that delivered this
+        // matching snapshot. Fence that now-redundant continuation before it can
+        // claim the shared slot without a remaining predicate or deadline.
+        abortBrowserVaultInFlightLoad();
+        clearRuntimeRefreshWait();
+      }
+      clientRef.current = snapshot.client;
+      setClient(snapshot.client);
+      setRef(snapshot.ref);
+      setStatus("ready");
+      setError(null);
+      setDeviceSyncImportPending(snapshot.metadata.deviceSyncImportPending);
+      setFreshness(snapshot.metadata.freshness);
+      setSessionRefreshPending(snapshot.metadata.refreshPending);
+      setWorkspaceVersion(snapshot.metadata.workspaceVersion);
+    },
+    [clearRuntimeRefreshWait],
+  );
 
   const commitEmpty = useCallback((metadata: BrowserVaultSessionMetadata) => {
     clientRef.current = null;
@@ -386,12 +454,21 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   }, [clearRuntimeRefreshWait, commitEmpty]);
 
   const applyOutcome = useCallback(
-    (outcome: BrowserVaultWarmLoadOutcome, options: {
-      authorityPathname?: string;
-      background: boolean;
-      requiredDemand: boolean;
-    }) => {
-      const { authorityPathname, background, requiredDemand } = options;
+    (
+      outcome: BrowserVaultWarmLoadOutcome,
+      options: {
+        authorityPathname?: string;
+        background: boolean;
+        refreshObservationOnly: boolean;
+        requiredDemand: boolean;
+      },
+    ) => {
+      const {
+        authorityPathname,
+        background,
+        refreshObservationOnly,
+        requiredDemand,
+      } = options;
       if (outcome.status === "superseded") {
         return;
       }
@@ -428,6 +505,12 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         return;
       }
       if (outcome.status === "empty") {
+        // Passive checks may discover a later publication, but an empty
+        // observation is not authorized to replace the provider's stable
+        // ready or error state.
+        if (refreshObservationOnly && authorityPathname === undefined) {
+          return;
+        }
         commitEmpty(outcome.metadata);
         if (authorityPathname !== undefined) {
           setAdmittedPathname(authorityPathname);
@@ -453,30 +536,37 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   );
 
   const runProviderLoad = useCallback(
-    async (options: BrowserVaultRefreshOptions & {
-      authorityPathname?: string;
-      retryPostRequestRefresh?: boolean;
-    } = {}) => {
+    async (
+      options: BrowserVaultRefreshOptions & {
+        authorityPathname?: string;
+        refreshObservationOnly?: boolean;
+        retryPostRequestRefresh?: boolean;
+      } = {},
+    ) => {
       const background = options.background ?? false;
       const { authorityPathname } = options;
       if (
-        options.requestRuntimeRefreshUntil
-        && options.requestRuntimeRefreshUntilAfterRequest
+        options.requestRuntimeRefreshUntil &&
+        options.requestRuntimeRefreshUntilAfterRequest
       ) {
         throw new TypeError(
           "Choose one Browser Vault runtime refresh completion mode.",
         );
       }
-      const runtimeRefreshCompletion = options.requestRuntimeRefreshUntil
-        ?? options.requestRuntimeRefreshUntilAfterRequest;
+      const runtimeRefreshCompletion =
+        options.requestRuntimeRefreshUntil ??
+        options.requestRuntimeRefreshUntilAfterRequest;
       const requirePostRequestReplica =
         options.requestRuntimeRefreshUntilAfterRequest !== undefined;
-      const requestRuntimeRefresh = runtimeRefreshCompletion !== undefined
-        || options.retryPostRequestRefresh === true;
+      const requestRuntimeRefresh =
+        runtimeRefreshCompletion !== undefined ||
+        options.retryPostRequestRefresh === true;
+      const refreshObservationOnly = options.refreshObservationOnly === true;
       const targetPathname = authorityPathname ?? pathname;
-      const authorityGeneration = authorityPathname === undefined
-        ? authorityGenerationRef.current
-        : authorityGenerationRef.current + 1;
+      const authorityGeneration =
+        authorityPathname === undefined
+          ? authorityGenerationRef.current
+          : authorityGenerationRef.current + 1;
       if (authorityPathname !== undefined) {
         // The provider persists across dashboard routes. Retire page-owned
         // runtime work before the destination authority request starts so an
@@ -494,10 +584,10 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
 
       let existing = peekBrowserVaultInFlightLoad();
       if (
-        authorityPathname !== undefined
-        && existing
-        && providerStartedLoadRef.current !== null
-        && providerStartedLoadRef.current !== targetPathname
+        authorityPathname !== undefined &&
+        existing &&
+        providerStartedLoadRef.current !== null &&
+        providerStartedLoadRef.current !== targetPathname
       ) {
         // A route-owned load cannot hold the persistent provider on its old
         // pathname. External warm work has no provider owner and same-route
@@ -512,8 +602,8 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         // using the resulting known replica ref.
         await existing;
         if (
-          !mountedRef.current
-          || authorityGeneration !== authorityGenerationRef.current
+          !mountedRef.current ||
+          authorityGeneration !== authorityGenerationRef.current
         ) {
           return null;
         }
@@ -538,47 +628,52 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       }
 
       const routeShards = planBrowserVaultRouteShards(targetPathname);
-      const requestedMetricBuckets = targetPathname === pathname
-        ? activeMetricBucketDemandRef.current
-        : [];
-      const requestedShards = requestedMetricBuckets.length > 0
-        && !routeShards.includes("metricsIndex")
-        ? [...routeShards, "metricsIndex" as const]
-        : routeShards;
+      const requestedMetricBuckets =
+        targetPathname === pathname ? activeMetricBucketDemandRef.current : [];
+      const requestedShards =
+        requestedMetricBuckets.length > 0 &&
+        !routeShards.includes("metricsIndex")
+          ? [...routeShards, "metricsIndex" as const]
+          : routeShards;
       const outcome = await startBrowserVaultWarmLoad({
         expectedMemberId: initialMemberId,
         requestedMetricBuckets,
         requestedShards,
+        refreshObservationOnly,
         requestRefresh: requestRuntimeRefresh,
       });
       if (
-        startedLoad
-        && providerStartedLoadRef.current === targetPathname
-        && !peekBrowserVaultInFlightLoad()
+        startedLoad &&
+        providerStartedLoadRef.current === targetPathname &&
+        !peekBrowserVaultInFlightLoad()
       ) {
         providerStartedLoadRef.current = null;
       }
       if (
-        !mountedRef.current
-        || authorityGeneration !== authorityGenerationRef.current
+        !mountedRef.current ||
+        authorityGeneration !== authorityGenerationRef.current
       ) {
         return null;
       }
 
       const currentRouteShards = planBrowserVaultRouteShards(pathname);
       const currentMetricBuckets = activeMetricBucketDemandRef.current;
-      const currentRequestedShards = currentMetricBuckets.length > 0
-        && !currentRouteShards.includes("metricsIndex")
-        ? [...currentRouteShards, "metricsIndex" as const]
-        : currentRouteShards;
+      const currentRequestedShards =
+        currentMetricBuckets.length > 0 &&
+        !currentRouteShards.includes("metricsIndex")
+          ? [...currentRouteShards, "metricsIndex" as const]
+          : currentRouteShards;
       const currentSnapshot = getBrowserVaultReadySnapshot();
-      const requiredDemand = background
-        && targetPathname === pathname
-        && currentRequestedShards.every((shard) => requestedShards.includes(shard))
-        && currentMetricBuckets.every((bucketId) =>
-          requestedMetricBuckets.includes(bucketId)
-        )
-        && !browserVaultSnapshotCoversDemand(
+      const requiredDemand =
+        background &&
+        targetPathname === pathname &&
+        currentRequestedShards.every((shard) =>
+          requestedShards.includes(shard),
+        ) &&
+        currentMetricBuckets.every((bucketId) =>
+          requestedMetricBuckets.includes(bucketId),
+        ) &&
+        !browserVaultSnapshotCoversDemand(
           currentSnapshot,
           currentRequestedShards,
           currentMetricBuckets,
@@ -606,9 +701,9 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       }
 
       if (
-        options.retryPostRequestRefresh
-        && outcome.status !== "ready"
-        && outcome.status !== "empty"
+        options.retryPostRequestRefresh &&
+        outcome.status !== "ready" &&
+        outcome.status !== "empty"
       ) {
         // Preserve the original causal boundary, but stop this failed recovery
         // window so another explicit check can retry it.
@@ -618,6 +713,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       applyOutcome(outcome, {
         authorityPathname,
         background,
+        refreshObservationOnly,
         requiredDemand,
       });
       return outcome;
@@ -633,22 +729,21 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   );
 
   const retryRuntimeRefreshAfterRequest = useCallback(async () => {
-    const observed = await runProviderLoad({ background: true });
+    const observed = await runProviderLoad({
+      background: true,
+      refreshObservationOnly: true,
+    });
     const admission = runtimeRefreshAdmissionRef.current;
-    const stillAtAdmission = admission?.status === "admitted"
-      && (
-        admission.ref === null
-          ? observed?.status === "empty"
-          : observed?.status === "ready"
-            && browserVaultReplicaRefsMatch(
-              admission.ref,
-              observed.snapshot.ref,
-            )
-      );
+    const stillAtAdmission =
+      admission?.status === "admitted" &&
+      (admission.ref === null
+        ? observed?.status === "empty"
+        : observed?.status === "ready" &&
+          browserVaultReplicaRefsMatch(admission.ref, observed.snapshot.ref));
     if (
-      runtimeRefreshCompletionRef.current === null
-      || !stillAtAdmission
-      || runtimeRefreshSignalSentRef.current
+      runtimeRefreshCompletionRef.current === null ||
+      !stillAtAdmission ||
+      runtimeRefreshSignalSentRef.current
     ) {
       return;
     }
@@ -666,8 +761,8 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     async (options: BrowserVaultRefreshOptions = {}) => {
       if (options.retryRuntimeRefreshAfterRequest) {
         if (
-          options.requestRuntimeRefreshUntil
-          || options.requestRuntimeRefreshUntilAfterRequest
+          options.requestRuntimeRefreshUntil ||
+          options.requestRuntimeRefreshUntilAfterRequest
         ) {
           throw new TypeError(
             "A Browser Vault runtime refresh retry cannot start a new completion wait.",
@@ -696,26 +791,28 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   );
 
   const pollStaleReplica = useCallback(async () => {
-    await runProviderLoad({ background: true });
+    await runProviderLoad({
+      background: true,
+      refreshObservationOnly: true,
+    });
   }, [runProviderLoad]);
 
-  const revalidateAuthority = useCallback(async (authorityPathname: string) => {
-    await runProviderLoad({ authorityPathname });
-  }, [runProviderLoad]);
+  const revalidateAuthority = useCallback(
+    async (authorityPathname: string) => {
+      await runProviderLoad({ authorityPathname });
+    },
+    [runProviderLoad],
+  );
 
   useLayoutEffect(() => {
-    const unsubscribe = subscribeBrowserVaultSessionInvalidation(clearDecryptedClient);
+    const unsubscribe =
+      subscribeBrowserVaultSessionInvalidation(clearDecryptedClient);
     const currentSnapshot = getBrowserVaultReadySnapshot();
 
     // Subscribing before the recheck closes both sides of the render-to-effect
     // gap: an earlier invalidation already cleared the store, while a later one
     // reaches this listener. A different client is a different decrypted owner.
-    if (
-      clientRef.current
-      && (
-        currentSnapshot?.client !== clientRef.current
-      )
-    ) {
+    if (clientRef.current && currentSnapshot?.client !== clientRef.current) {
       clearDecryptedClient();
     }
 
@@ -762,17 +859,19 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       return;
     }
     const routeShards = planBrowserVaultRouteShards(pathname);
-    const requestedShards = activeMetricBucketDemand.length > 0
-      && !routeShards.includes("metricsIndex")
-      ? [...routeShards, "metricsIndex" as const]
-      : routeShards;
-    const demandAlreadyLoaded = browserVaultSnapshotCoversDemand(
-      snapshot,
-      requestedShards,
-      activeMetricBucketDemand,
-    )
-      && snapshot.loadedShards.length === requestedShards.length
-      && snapshot.loadedMetricBuckets.length === activeMetricBucketDemand.length;
+    const requestedShards =
+      activeMetricBucketDemand.length > 0 &&
+      !routeShards.includes("metricsIndex")
+        ? [...routeShards, "metricsIndex" as const]
+        : routeShards;
+    const demandAlreadyLoaded =
+      browserVaultSnapshotCoversDemand(
+        snapshot,
+        requestedShards,
+        activeMetricBucketDemand,
+      ) &&
+      snapshot.loadedShards.length === requestedShards.length &&
+      snapshot.loadedMetricBuckets.length === activeMetricBucketDemand.length;
     if (demandAlreadyLoaded) {
       return;
     }
@@ -790,8 +889,11 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   ]);
 
   useEffect(() => {
-    const refreshPending = sessionRefreshPending || runtimeRefreshPolling;
-    if (status === "error" || !refreshPending) {
+    const shouldPoll =
+      runtimeRefreshPolling ||
+      (sessionRefreshPending &&
+        (status !== "empty" || !deviceSyncImportPending));
+    if (status === "error" || !shouldPoll) {
       return;
     }
 
@@ -806,7 +908,17 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
 
       void pollStaleReplica().finally(() => {
         if (!cancelled) {
-          const interval = Date.now() - startedAt <= BROWSER_VAULT_STALE_POLL_WINDOW_MS
+          const elapsedMs = Date.now() - startedAt;
+          const inFastWindow = elapsedMs <= BROWSER_VAULT_STALE_POLL_WINDOW_MS;
+          if (!runtimeRefreshPolling && !inFastWindow) {
+            setSessionRefreshPending(false);
+            if (clientRef.current === null) {
+              setStatus("error");
+              setError(BROWSER_VAULT_UNAVAILABLE_MESSAGE);
+            }
+            return;
+          }
+          const interval = inFastWindow
             ? BROWSER_VAULT_STALE_POLL_INTERVAL_MS
             : BROWSER_VAULT_STALE_POLL_SLOW_INTERVAL_MS;
           timeoutId = setTimeout(poll, interval);
@@ -822,7 +934,14 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         clearTimeout(timeoutId);
       }
     };
-  }, [freshness, pollStaleReplica, runtimeRefreshPolling, sessionRefreshPending, status]);
+  }, [
+    freshness,
+    deviceSyncImportPending,
+    pollStaleReplica,
+    runtimeRefreshPolling,
+    sessionRefreshPending,
+    status,
+  ]);
 
   useEffect(() => {
     const onFocus = () => {
@@ -839,26 +958,44 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
 
   const authorityAdmitted = admittedPathname === pathname;
   const refreshPending = sessionRefreshPending || runtimeRefreshPending;
-  const value = useMemo<BrowserVaultContextValue>(() => ({
-    client: authorityAdmitted ? client : null,
-    dataVersion: authorityAdmitted ? ref?.dataVersion ?? null : null,
-    deviceSyncImportPending: authorityAdmitted
-      ? deviceSyncImportPending
-      : false,
-    error: authorityAdmitted || status === "error" ? error : null,
-    freshness: authorityAdmitted ? freshness : "stale",
-    ref: authorityAdmitted ? ref : null,
-    refreshPending: authorityAdmitted ? refreshPending : false,
-    refresh,
-    runtimeRefreshPending: authorityAdmitted ? runtimeRefreshPending : false,
-    status: authorityAdmitted || status === "empty" || status === "error"
-      ? status
-      : "loading",
-    workspaceVersion: authorityAdmitted ? workspaceVersion : null,
-  }), [authorityAdmitted, client, deviceSyncImportPending, error, freshness, ref, refresh, refreshPending, runtimeRefreshPending, status, workspaceVersion]);
+  const value = useMemo<BrowserVaultContextValue>(
+    () => ({
+      client: authorityAdmitted ? client : null,
+      dataVersion: authorityAdmitted ? ref?.dataVersion ?? null : null,
+      deviceSyncImportPending: authorityAdmitted
+        ? deviceSyncImportPending
+        : false,
+      error: authorityAdmitted || status === "error" ? error : null,
+      freshness: authorityAdmitted ? freshness : "stale",
+      ref: authorityAdmitted ? ref : null,
+      refreshPending: authorityAdmitted ? refreshPending : false,
+      refresh,
+      runtimeRefreshPending: authorityAdmitted ? runtimeRefreshPending : false,
+      status:
+        authorityAdmitted || status === "empty" || status === "error"
+          ? status
+          : "loading",
+      workspaceVersion: authorityAdmitted ? workspaceVersion : null,
+    }),
+    [
+      authorityAdmitted,
+      client,
+      deviceSyncImportPending,
+      error,
+      freshness,
+      ref,
+      refresh,
+      refreshPending,
+      runtimeRefreshPending,
+      status,
+      workspaceVersion,
+    ],
+  );
 
   return (
-    <BrowserVaultMetricDemandContext.Provider value={registerMetricBucketDemand}>
+    <BrowserVaultMetricDemandContext.Provider
+      value={registerMetricBucketDemand}
+    >
       <BrowserVaultContext.Provider value={value}>
         {children}
       </BrowserVaultContext.Provider>
@@ -870,16 +1007,20 @@ export function useBrowserVault(): BrowserVaultContextValue {
   const value = useContext(BrowserVaultContext);
 
   if (!value) {
-    throw new Error("useBrowserVault must be used inside a BrowserVaultProvider.");
+    throw new Error(
+      "useBrowserVault must be used inside a BrowserVaultProvider.",
+    );
   }
 
   return value;
 }
 
-export function useBrowserVaultSelector<T>(selector: (client: BrowserVaultAnyQueryClient) => T): T | null {
+export function useBrowserVaultSelector<T>(
+  selector: (client: BrowserVaultAnyQueryClient) => T,
+): T | null {
   const { client } = useBrowserVault();
 
-  return useMemo(() => client ? selector(client) : null, [client, selector]);
+  return useMemo(() => (client ? selector(client) : null), [client, selector]);
 }
 
 export function useBrowserVaultMetricsSelector<T>(
@@ -888,7 +1029,7 @@ export function useBrowserVaultMetricsSelector<T>(
   const { client } = useBrowserVault();
   const metricsClient = isBrowserVaultMetricsCapable(client) ? client : null;
   return useMemo(
-    () => metricsClient ? selector(metricsClient) : null,
+    () => (metricsClient ? selector(metricsClient) : null),
     [metricsClient, selector],
   );
 }
@@ -899,7 +1040,7 @@ export function useBrowserVaultLabsSelector<T>(
   const { client } = useBrowserVault();
   const labsClient = isBrowserVaultLabsCapable(client) ? client : null;
   return useMemo(
-    () => labsClient ? selector(labsClient) : null,
+    () => (labsClient ? selector(labsClient) : null),
     [labsClient, selector],
   );
 }
@@ -910,7 +1051,7 @@ export function useBrowserVaultFullSelector<T>(
   const { client } = useBrowserVault();
   const fullClient = client?.capability === "core+metrics+labs" ? client : null;
   return useMemo(
-    () => fullClient ? selector(fullClient) : null,
+    () => (fullClient ? selector(fullClient) : null),
     [fullClient, selector],
   );
 }
@@ -918,55 +1059,66 @@ export function useBrowserVaultFullSelector<T>(
 export function isBrowserVaultMetricsCapable(
   client: BrowserVaultAnyQueryClient | null,
 ): client is BrowserVaultMetricSeriesCapableQueryClient {
-  return client?.capability === "core+metrics-partial"
-    || client?.capability === "core+metrics-partial+labs"
-    || client?.capability === "core+metrics"
-    || client?.capability === "core+metrics+labs";
+  return (
+    client?.capability === "core+metrics-partial" ||
+    client?.capability === "core+metrics-partial+labs" ||
+    client?.capability === "core+metrics" ||
+    client?.capability === "core+metrics+labs"
+  );
 }
 
 export function isBrowserVaultLabsCapable(
   client: BrowserVaultAnyQueryClient | null,
 ): client is BrowserVaultLabsCapableQueryClient {
-  return client?.capability === "core+labs"
-    || client?.capability === "core+metrics-partial+labs"
-    || client?.capability === "core+metrics+labs";
+  return (
+    client?.capability === "core+labs" ||
+    client?.capability === "core+metrics-partial+labs" ||
+    client?.capability === "core+metrics+labs"
+  );
 }
 
 export function useBrowserVaultMetricBucketDemand(
   bucketIds: readonly BrowserVaultMetricBucketId[],
 ): boolean {
   const { client } = useBrowserVault();
-  const registerMetricBucketDemand = useContext(BrowserVaultMetricDemandContext);
+  const registerMetricBucketDemand = useContext(
+    BrowserVaultMetricDemandContext,
+  );
   const pathname = usePathname();
   const ownerRef = useRef(Symbol("browser-vault-metric-bucket-demand"));
   const demandKey = [...new Set(bucketIds)].sort().join(",");
   const normalized = useMemo(
-    () => normalizeBrowserVaultMetricBucketDemand(
-      demandKey.length === 0
-        ? []
-        : demandKey.split(",") as BrowserVaultMetricBucketId[],
-    ),
+    () =>
+      normalizeBrowserVaultMetricBucketDemand(
+        demandKey.length === 0
+          ? []
+          : (demandKey.split(",") as BrowserVaultMetricBucketId[]),
+      ),
     [demandKey],
   );
-  useEffect(() => registerMetricBucketDemand(
-    ownerRef.current,
-    pathname,
-    normalized,
-  ), [normalized, pathname, registerMetricBucketDemand]);
+  useEffect(
+    () => registerMetricBucketDemand(ownerRef.current, pathname, normalized),
+    [normalized, pathname, registerMetricBucketDemand],
+  );
   if (normalized.length === 0) return true;
   if (
-    client?.capability === "core+metrics"
-    || client?.capability === "core+metrics+labs"
-  ) return true;
+    client?.capability === "core+metrics" ||
+    client?.capability === "core+metrics+labs"
+  )
+    return true;
   if (!client || !("loadedMetricBuckets" in client)) return false;
-  return normalized.every((bucketId) => client.loadedMetricBuckets.includes(bucketId));
+  return normalized.every((bucketId) =>
+    client.loadedMetricBuckets.includes(bucketId),
+  );
 }
 
 export function useBrowserVaultMetricKeyDemand(
   metricKeys: readonly string[],
 ): boolean {
   const [bucketIds, setBucketIds] = useState<BrowserVaultMetricBucketId[]>([]);
-  const metricKeyDemand = [...new Set(metricKeys.filter((key) => key.length > 0))]
+  const metricKeyDemand = [
+    ...new Set(metricKeys.filter((key) => key.length > 0)),
+  ]
     .sort()
     .join("\n");
   useEffect(() => {
@@ -976,14 +1128,17 @@ export function useBrowserVaultMetricKeyDemand(
         ? []
         : metricKeyDemand.split("\n").map(getBrowserVaultMetricBucketId),
     ).then((resolved) => {
-      if (!cancelled) setBucketIds(normalizeBrowserVaultMetricBucketDemand(resolved));
+      if (!cancelled)
+        setBucketIds(normalizeBrowserVaultMetricBucketDemand(resolved));
     });
     return () => {
       cancelled = true;
     };
   }, [metricKeyDemand]);
   const bucketsLoaded = useBrowserVaultMetricBucketDemand(bucketIds);
-  return metricKeyDemand.length === 0 || (bucketIds.length > 0 && bucketsLoaded);
+  return (
+    metricKeyDemand.length === 0 || (bucketIds.length > 0 && bucketsLoaded)
+  );
 }
 
 export function useBrowserVaultExperimentMetricBucketDemand(input: {
@@ -1003,8 +1158,11 @@ export function useBrowserVaultExperimentMetricBucketDemand(input: {
       const exact = client.experimentRunCards.get(input.experimentId);
       if (exact) return exact;
     }
-    return stableLookups.map((lookup) => client.experimentRunCards.find(lookup))
-      .find((candidate) => candidate !== null) ?? null;
+    return (
+      stableLookups
+        .map((lookup) => client.experimentRunCards.find(lookup))
+        .find((candidate) => candidate !== null) ?? null
+    );
   }, [client, input.experimentId, stableLookups]);
   const entityMetricKeys = useMemo(() => {
     if (!client || card) return null;
@@ -1023,11 +1181,14 @@ export function useBrowserVaultExperimentMetricBucketDemand(input: {
   const cardBucketsLoaded = useBrowserVaultMetricBucketDemand(
     card?.requiredMetricBuckets ?? [],
   );
-  const entityMetricKeysLoaded = useBrowserVaultMetricKeyDemand(entityMetricKeys ?? []);
-  return client !== null && (
-    card
+  const entityMetricKeysLoaded = useBrowserVaultMetricKeyDemand(
+    entityMetricKeys ?? [],
+  );
+  return (
+    client !== null &&
+    (card
       ? cardBucketsLoaded
-      : entityMetricKeys === null
-        || (entityMetricKeys !== undefined && entityMetricKeysLoaded)
+      : entityMetricKeys === null ||
+        (entityMetricKeys !== undefined && entityMetricKeysLoaded))
   );
 }

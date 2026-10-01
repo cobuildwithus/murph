@@ -1,6 +1,3 @@
-import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
@@ -11,8 +8,14 @@ import {
 } from "@murphai/assistant-runtime";
 import {
   createHostedWorkspaceInvocationLease,
+  createHostedRuntimeVoice,
+  createHostedRuntimeVoiceCall,
+  type HostedRuntimeVoice,
   runHostedWorkspaceInvocation as runPackageHostedWorkspaceInvocation,
 } from "@murphai/assistant-runtime/hosted-invocation";
+import type {
+  HostedWorkspaceRestorePreparation,
+} from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
 import {
   readHostedRunnerCommitTimeoutMs,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -23,6 +26,7 @@ import type {
   HostedRuntimeLatencyPhaseBreakdown,
   HostedRuntimeOrchestrationLatencyDiagnostics,
   HostedRuntimeLatencyTraceStagedMilestones,
+  HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -57,38 +61,55 @@ import {
   isHostedRunnerNativeParserToolchain,
   isHostedRunnerLocalE2eParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
-const HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY = "hosted-runner-workspaces";
-const HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH = 32;
-const HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES = [
-  "home",
-  "cache",
-  "tmp",
-  "hf-home",
-] as const;
+import {
+  prepareHostedRunnerWarmWorkspaceVaultRoot,
+} from "./hosted-runner-warm-workspace.ts";
+export {
+  clearHostedRunnerWarmLauncherRootsForTests,
+  resolveHostedRunnerWarmWorkspaceVaultRoot,
+} from "./hosted-runner-warm-workspace.ts";
+
+const HOSTED_ASSISTANT_RUNTIME_NAME = "cloudflare-hosted-runner";
 
 type HostedWorkspaceInvocationRuntimeWakeInput =
   | number
   | {
+      mailboxWakeHighWater?: import("@murphai/hosted-execution/runtime-control").HostedMailboxWakeHighWater | null;
       notifiedAtEpochMs?: number | null;
       orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+      requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
+      voiceCallId?: string;
     };
 
 export interface HostedWorkspaceInvocationOptions {
+  onVoiceReady?: (voice: Pick<HostedRuntimeVoice, "connect" | "closeCall">) => void;
   dispatch?: {
     invokeReceivedAtEpochMs?: number;
     containerEnsureReadyStartedAtEpochMs?: number;
   } | null;
   nodeStartupMs?: number | null;
-  onConversationActivityObserved?: () => void;
+  onConversationActivityObserved?: (receivedAtEpochMs: number) => void;
   onRuntimeWakeReady?: (
     sendWake: (input?: HostedWorkspaceInvocationRuntimeWakeInput) => boolean
   ) => void;
   orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
+  preparedWorkspaceRestore?: HostedWorkspaceRestorePreparation | null;
   runnerJobAcceptedAt?: string | null;
+  releaseSha?: string | null;
   shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal;
   supervisorEnv: Readonly<Record<string, string | undefined>>;
   waitForBackgroundAssistantWork(signal: AbortSignal | null): Promise<void>;
+}
+
+function preserveAcceptedRuntimeWake(
+  result: HostedAssistantWorkspaceRuntimeJobResult,
+  acceptedRuntimeWake: boolean,
+): HostedAssistantWorkspaceRuntimeJobResult {
+  if (!acceptedRuntimeWake) {
+    return result;
+  }
+  return { ...result, immediateRecheckRequested: true };
 }
 
 export function buildHostedExecutionJobRuntime(input: {
@@ -131,9 +152,10 @@ export async function runHostedWorkspaceInvocation(
     throw options.signal.reason ?? new Error("Hosted runner job aborted before direct invocation.");
   }
 
-  const warmRoot = await resolveHostedRunnerWarmLauncherRoot(input);
+  const vaultRoot = options.preparedWorkspaceRestore?.vaultRoot
+    ?? await prepareHostedRunnerWarmWorkspaceVaultRoot(input.request.userId);
   await clearHostedBrowserVaultWarmSourceStateHash({
-    vaultRoot: resolveHostedRunnerWarmWorkspaceVaultRoot(input.request.userId),
+    vaultRoot,
   });
 
   assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv(input.runtime?.forwardedEnv ?? {});
@@ -149,13 +171,7 @@ export async function runHostedWorkspaceInvocation(
   };
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
   let acceptingRuntimeWakes = true;
-  options.onRuntimeWakeReady?.((wakeInput?: HostedWorkspaceInvocationRuntimeWakeInput) => {
-    if (!acceptingRuntimeWakes) {
-      return false;
-    }
-    runtimeWakeSignal.notify(wakeInput);
-    return true;
-  });
+  let voice: HostedRuntimeVoice | null = null;
 
   try {
     emitHostedExecutionStructuredLog({
@@ -199,6 +215,42 @@ export async function runHostedWorkspaceInvocation(
         },
       },
     });
+    voice = createHostedRuntimeVoice({
+      notifyRuntime: () => runtimeWakeSignal.notify(),
+      createCall(callId) {
+        const usagePort = platform.usageRecordPort;
+        const admitVoiceInput = platform.mailboxPort?.admitVoiceInput;
+        if (!usagePort || !admitVoiceInput) throw new Error("Hosted voice ports are unavailable.");
+        return createHostedRuntimeVoiceCall({
+          callId,
+          memberId: boundUserId,
+          signal: AbortSignal.any([
+            ...(options.signal ? [options.signal] : []),
+            ...(options.shutdownSignal ? [options.shutdownSignal] : []),
+          ]),
+          usagePort,
+          admitInput: (value) => admitVoiceInput({ ...value, occurredAt: new Date().toISOString() }),
+          notifyRuntime: () => runtimeWakeSignal.notify(),
+          onError: () => emitHostedExecutionStructuredLog({
+            component: "container",
+            level: "error",
+            message: "Hosted voice closure or settlement failed.",
+            phase: "failed",
+            userId: boundUserId,
+          }),
+        });
+      },
+    });
+    const invocationVoice = voice;
+    if (job.request.voiceCallId) invocationVoice.reserve(job.request.voiceCallId);
+    options.onVoiceReady?.(invocationVoice);
+    options.onRuntimeWakeReady?.((wakeInput?: HostedWorkspaceInvocationRuntimeWakeInput) => {
+      if (!acceptingRuntimeWakes) return false;
+      const callId = typeof wakeInput === "object" ? wakeInput.voiceCallId : undefined;
+      if (callId && !invocationVoice.reserve(callId)) return false;
+      runtimeWakeSignal.notify(wakeInput);
+      return true;
+    });
     const webControlFetch = createCloudflareHostedTrustedInternalFetch(
       boundUserId,
       normalizeCloudflareWorkerFetch(),
@@ -213,12 +265,10 @@ export async function runHostedWorkspaceInvocation(
     });
 
     const nodeStartupMs = options.nodeStartupMs;
-    const hasNodeStartup = nodeStartupMs !== null && nodeStartupMs !== undefined;
-    const hasDispatch = options.dispatch !== null
-      && options.dispatch !== undefined
+    const hasNodeStartup = nodeStartupMs != null;
+    const hasDispatch = options.dispatch != null
       && Object.keys(options.dispatch).length > 0;
-    const hasOrchestration = options.orchestration !== null
-      && options.orchestration !== undefined
+    const hasOrchestration = options.orchestration != null
       && Object.keys(options.orchestration).length > 0;
     const latencyMilestones: HostedRuntimeLatencyTraceStagedMilestones = {
       ...(options.runnerJobAcceptedAt
@@ -230,7 +280,7 @@ export async function runHostedWorkspaceInvocation(
               schemaVersion: 1,
               ...(hasOrchestration ? { orchestration: { ...options.orchestration } } : {}),
               ...(hasDispatch ? { dispatch: { ...options.dispatch } } : {}),
-              ...(nodeStartupMs === null || nodeStartupMs === undefined
+              ...(nodeStartupMs == null
                 ? {}
                 : { boot: { nodeStartupMs } }),
             },
@@ -243,120 +293,34 @@ export async function runHostedWorkspaceInvocation(
       mailboxPayloadDecoder: decodeMailboxPayload,
       onConversationActivityObserved: options.onConversationActivityObserved,
       platform,
+      voice: invocationVoice,
+      preparedWorkspaceRestore: options.preparedWorkspaceRestore ?? null,
       readCurrentLease: () => currentLease,
+      runtimeIssueProvenance: {
+        releaseSha: options.releaseSha ?? null,
+        runtimeName: HOSTED_ASSISTANT_RUNTIME_NAME,
+      },
       runtimeWakeSignal,
       shutdownSignal: options.shutdownSignal ?? null,
       snapshotArchiveBuilder: createCloudflareHostedWorkspaceSnapshotArchiveBuilder(),
       snapshotDiagnosticsHashSecret:
         job.diagnostics?.workspaceSnapshotPathHashSecret ?? null,
       signal: options.signal ?? null,
-      vaultRoot: path.join(warmRoot, "durable", "vault"),
+      vaultRoot,
       waitForBackgroundAssistantWork: options.waitForBackgroundAssistantWork,
     });
-    return assertHostedExecutionRunnerJobResult(result, job);
+    acceptingRuntimeWakes = false;
+    return assertHostedExecutionRunnerJobResult(
+      preserveAcceptedRuntimeWake(
+        result,
+        runtimeWakeSignal.consumePending() !== null,
+      ),
+      job,
+    );
   } finally {
     acceptingRuntimeWakes = false;
+    await voice?.close();
   }
-}
-
-export async function clearHostedRunnerWarmLauncherRootsForTests(): Promise<void> {
-  const roots = [...new Set(hostedRunnerWarmLauncherRoots.values())];
-  hostedRunnerWarmLauncherRoots.clear();
-  await Promise.all(
-    roots.map((root) => rm(root, { force: true, recursive: true })),
-  );
-}
-
-export function resolveHostedRunnerWarmWorkspaceVaultRoot(userId: string): string {
-  return path.join(resolveHostedRunnerWarmLauncherRootPath(userId), "durable", "vault");
-}
-
-const hostedRunnerWarmLauncherRoots = new Map<string, string>();
-
-async function resolveHostedRunnerWarmLauncherRoot(
-  job: HostedExecutionWorkspaceInvocationJobInput,
-): Promise<string> {
-  const root = resolveHostedRunnerWarmLauncherRootPath(job.request.userId);
-  const workspaceId = path.basename(root);
-  const cached = hostedRunnerWarmLauncherRoots.get(workspaceId);
-  if (cached) {
-    await ensureHostedRunnerWarmLauncherDirectories(cached);
-    return cached;
-  }
-
-  await ensureHostedRunnerWarmLauncherDirectories(root);
-  hostedRunnerWarmLauncherRoots.set(workspaceId, root);
-  return root;
-}
-
-async function ensureHostedRunnerWarmLauncherDirectories(root: string): Promise<void> {
-  await ensureHostedRunnerWarmLauncherDirectory(path.dirname(root));
-  await ensureHostedRunnerWarmLauncherDirectory(root);
-
-  await Promise.all(
-    HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES.map((name) =>
-      ensureHostedRunnerWarmLauncherDirectory(path.join(root, name))
-    ),
-  );
-}
-
-async function ensureHostedRunnerWarmLauncherDirectory(directory: string): Promise<void> {
-  const existing = await readHostedRunnerWarmLauncherDirectoryEntry(directory);
-  if (existing && (!existing.isDirectory() || existing.isSymbolicLink())) {
-    await rm(directory, { force: true, recursive: true });
-  }
-
-  const repaired = existing && existing.isDirectory() && !existing.isSymbolicLink()
-    ? existing
-    : null;
-  if (!repaired) {
-    try {
-      await mkdir(directory, { mode: 0o700 });
-    } catch (error) {
-      if (!isNodeErrorWithCode(error, "EEXIST")) {
-        throw error;
-      }
-    }
-  }
-
-  const verified = await lstat(directory);
-  if (!verified.isDirectory() || verified.isSymbolicLink()) {
-    throw new Error("Hosted runner warm launcher path is not a real directory.");
-  }
-  await chmod(directory, 0o700);
-}
-
-async function readHostedRunnerWarmLauncherDirectoryEntry(directory: string) {
-  try {
-    return await lstat(directory);
-  } catch (error) {
-    if (isNodeErrorWithCode(error, "ENOENT")) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-function isNodeErrorWithCode(error: unknown, code: string): boolean {
-  if (!error || typeof error !== "object" || !("code" in error)) {
-    return false;
-  }
-  return Reflect.get(error, "code") === code;
-}
-
-function resolveHostedRunnerWarmLauncherRootPath(userId: string): string {
-  return path.join(
-    tmpdir(),
-    HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY,
-    createHostedRunnerWarmWorkspaceId(userId),
-  );
-}
-
-function createHostedRunnerWarmWorkspaceId(userId: string): string {
-  return createHash("sha256")
-    .update(userId)
-    .digest("hex")
-    .slice(0, HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH);
 }
 
 function bindHostedExecutionJobParserToolchain(

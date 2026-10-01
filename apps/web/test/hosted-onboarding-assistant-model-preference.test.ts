@@ -20,6 +20,7 @@ import {
   isHostedMemberSolModelEligible,
   readHostedMemberAssistantModelPreference,
   resolveAvailableHostedAssistantProvider,
+  resolveHostedMemberAssistantProvider,
   updateHostedMemberAssistantConfigurationTx,
   updateHostedMemberAssistantModelPreferenceTx,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
@@ -46,6 +47,158 @@ describe("hosted member assistant model preference", () => {
     expect(resolveAvailableHostedAssistantProvider(null, {
       HOSTED_VENICE_ENABLED: "1",
     })).toBe("openai");
+  });
+
+  const activePersonalMember = {
+    accountGroupMemberships: [],
+    assistantProviderPreference: "venice",
+    billingStatus: HostedBillingStatus.active,
+    suspendedAt: null,
+    threadContainer: null,
+  };
+  const activeFamilyMembership = {
+    group: {
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    },
+    status: "active",
+  };
+  const familySponsoredMember = {
+    ...activePersonalMember,
+    accountGroupMemberships: [activeFamilyMembership],
+    billingStatus: HostedBillingStatus.not_started,
+  };
+
+  it.each([
+    { name: "active personal access", member: activePersonalMember, enabledProvider: "venice" },
+    {
+      name: "inactive personal access",
+      member: { ...activePersonalMember, billingStatus: HostedBillingStatus.unpaid },
+      enabledProvider: "openai",
+    },
+    {
+      name: "suspended personal access",
+      member: { ...activePersonalMember, suspendedAt: new Date("2026-09-01T00:00:00Z") },
+      enabledProvider: "openai",
+    },
+    { name: "active Family sponsorship", member: familySponsoredMember, enabledProvider: "venice" },
+    {
+      name: "removed Family membership",
+      member: {
+        ...familySponsoredMember,
+        accountGroupMemberships: [{ ...activeFamilyMembership, status: "removed" }],
+      },
+      enabledProvider: "openai",
+    },
+    {
+      name: "inactive Family sponsorship",
+      member: {
+        ...familySponsoredMember,
+        accountGroupMemberships: [{
+          ...activeFamilyMembership,
+          group: { billingStatus: HostedBillingStatus.unpaid, suspendedAt: null },
+        }],
+      },
+      enabledProvider: "openai",
+    },
+    {
+      name: "suspended Family sponsorship",
+      member: {
+        ...familySponsoredMember,
+        accountGroupMemberships: [{
+          ...activeFamilyMembership,
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: new Date("2026-09-01T00:00:00Z"),
+          },
+        }],
+      },
+      enabledProvider: "openai",
+    },
+    {
+      name: "group room with an active owner",
+      member: { ...activePersonalMember, threadContainer: { owner: activePersonalMember } },
+      enabledProvider: "openai",
+    },
+    {
+      name: "default provider preference",
+      member: { ...activePersonalMember, assistantProviderPreference: null },
+      enabledProvider: "openai",
+    },
+    {
+      name: "explicit OpenAI preference",
+      member: { ...activePersonalMember, assistantProviderPreference: "openai" },
+      enabledProvider: "openai",
+    },
+    {
+      name: "retired provider preference",
+      member: { ...activePersonalMember, assistantProviderPreference: "retired-provider" },
+      enabledProvider: "openai",
+    },
+  ])("resolves the provider for $name with Venice enabled or disabled", ({ member, enabledProvider }) => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    expect(resolveHostedMemberAssistantProvider(member)).toBe(enabledProvider);
+
+    process.env.HOSTED_VENICE_ENABLED = "0";
+    expect(resolveHostedMemberAssistantProvider(member)).toBe("openai");
+  });
+
+  it.each([false, true])("derives the first-day expiry only for personal signup (group=%s)", async (group) => {
+    mocks.findUniqueHostedMember.mockResolvedValue({
+      ...buildMemberState({ assistantModelPreference: null,
+        ...(group ? { threadContainerMemberId: "group_test" } : {}) }),
+      createdAt: new Date("2026-09-23T23:30:00Z"),
+    });
+    const result = await readHostedMemberAssistantModelPreference({
+      memberId: "member_test", prisma: createReadClient(),
+    });
+    expect(result.hostedAssistantPriorityUntil).toBe(group ? undefined : "2026-09-24T23:30:00.000Z");
+    expect(mocks.findUniqueHostedMember).toHaveBeenCalledTimes(1);
+    expect(mocks.findUniqueHostedMember).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({ createdAt: true }),
+    }));
+  });
+
+  it.each([false, true])("retires stored Terra selections for personal and group conversations (group=%s)", async (group) => {
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+      assistantModelPreference: "gpt-5.6-terra",
+      ...(group ? { threadContainerMemberId: "member_group_chat" } : {}),
+    }));
+    const result = await readHostedMemberAssistantModelPreference({ memberId: "member_migration", prisma: createReadClient() });
+    expect(result).toMatchObject({ model: "gpt-6.1-sol", hostedAssistantModelOverride: "gpt-6.1-sol" });
+    expect(result.availableModels).not.toContain("gpt-5.6-terra");
+    expect(mocks.updateHostedMember).not.toHaveBeenCalled();
+  });
+
+  it.each(["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"] as const)("saves and reads back %s on Pulse without premium access", async (model) => {
+    let member = buildMemberState({
+      assistantModelPreference: "gpt-6.1-sol",
+      currentBillingPlanCode: "launch_monthly",
+    });
+    mocks.findUniqueHostedMember.mockImplementation(async () => member);
+    mocks.updateHostedMember.mockImplementation(async ({ data }) => {
+      member = { ...member, ...data };
+      return member;
+    });
+    const updated = await updateHostedMemberAssistantModelPreferenceTx({
+      memberId: "member_pulse",
+      model,
+      prisma: createTransactionClient(),
+    });
+    expect(updated).toMatchObject({ model, hostedAssistantModelOverride: model, effectiveModelUpdated: model !== "gpt-6.1-sol" });
+    expect(member.assistantModelPreference).toBe(model === "gpt-6.1-sol" ? null : model);
+    const readback = await readHostedMemberAssistantModelPreference({ memberId: "member_pulse", prisma: createReadClient() });
+    expect(readback.model).toBe(model);
+    expect(readback.availableModels).toEqual(expect.arrayContaining(["gpt-6.1-sol", "gpt-6-luna"]));
+  });
+
+  it.each(["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"] as const)("rejects explicit %s selection through Venice without writing", async (model) => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({ assistantModelPreference: null }));
+    await expect(updateHostedMemberAssistantConfigurationTx({
+      memberId: "member_pulse", model, provider: "venice", prisma: createTransactionClient(),
+    })).rejects.toMatchObject({ code: "ASSISTANT_MODEL_REQUIRES_OPENAI" });
+    expect(mocks.updateHostedMember).not.toHaveBeenCalled();
   });
 
   it("limits Sol eligibility to direct premium or active Family premium members", () => {
@@ -139,6 +292,74 @@ describe("hosted member assistant model preference", () => {
     })).toBe(false);
   });
 
+  it.each([
+    { currentBillingPlanCode: "launch_edge_monthly" },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "edge", familyBillingStatus: HostedBillingStatus.active },
+    { currentBillingPlanCode: "launch_max_monthly" },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "max", familyBillingStatus: HostedBillingStatus.active },
+  ])("allows individual and Family Edge/Max to save Astra for the next query: %j", async (plan) => {
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+      assistantModelPreference: null,
+      ...plan,
+    }));
+    const result = await updateHostedMemberAssistantModelPreferenceTx({
+      memberId: "member_max",
+      model: "gpt-6-astra",
+      prisma: createTransactionClient(),
+    });
+    expect(result).toMatchObject({ model: "gpt-6-astra", hostedAssistantModelOverride: "gpt-6-astra", updated: true });
+    expect(result.availableModels).toContain("gpt-6-astra");
+    expect(mocks.updateHostedMember).toHaveBeenCalledWith(expect.objectContaining({
+      data: { assistantModelPreference: "gpt-6-astra" },
+    }));
+  });
+
+  it.each([
+    { currentBillingPlanCode: "launch_monthly" },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "pulse", familyBillingStatus: HostedBillingStatus.active },
+    { currentBillingPlanCode: "launch_edge_monthly", currentBillingPhase: "trial" },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "edge", familyBillingStatus: HostedBillingStatus.unpaid },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "edge", familyBillingStatus: HostedBillingStatus.active, familyMembershipStatus: "inactive" },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "edge", familyBillingStatus: HostedBillingStatus.active, familySuspendedAt: new Date("2026-09-01T00:00:00Z") },
+    { currentBillingPlanCode: "launch_max_monthly", currentBillingPhase: "trial" },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "max", familyBillingStatus: HostedBillingStatus.active, familyMembershipStatus: "inactive" },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "max", familyBillingStatus: HostedBillingStatus.active, familySuspendedAt: new Date("2026-09-01T00:00:00Z") },
+  ])("denies Astra outside active paid Edge/Max and retains a dormant preference: %j", async (plan) => {
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({ assistantModelPreference: "gpt-6-astra", ...plan }));
+    const result = await readHostedMemberAssistantModelPreference({ memberId: "member_other", prisma: createReadClient() });
+    expect(result.model).toBe("gpt-6.1-sol");
+    expect(result.availableModels).not.toContain("gpt-6-astra");
+    await expect(updateHostedMemberAssistantModelPreferenceTx({ memberId: "member_other", model: "gpt-6-astra", prisma: createTransactionClient() }))
+      .rejects.toMatchObject({ code: "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE" });
+    expect(mocks.updateHostedMember).not.toHaveBeenCalled();
+  });
+
+  it("reactivates stored Astra after Max access returns and excludes group rooms", async () => {
+    const member = buildMemberState({ assistantModelPreference: "gpt-6-astra", currentBillingPlanCode: "launch_max_monthly" });
+    mocks.findUniqueHostedMember.mockResolvedValue(member);
+    expect((await readHostedMemberAssistantModelPreference({ memberId: "member_max", prisma: createReadClient() })).model).toBe("gpt-6-astra");
+    mocks.findUniqueHostedMember.mockResolvedValue({ ...member, threadContainer: { memberId: "room" } });
+    const room = await readHostedMemberAssistantModelPreference({ memberId: "room", prisma: createReadClient() });
+    expect(room.availableModels).not.toContain("gpt-6-astra");
+    expect(room.model).not.toBe("gpt-6-astra");
+  });
+
+  it("keeps Astra from Max to Edge, falls back on Pulse, and restores it on Edge", async () => {
+    for (const [plan, model] of [
+      ["launch_max_monthly", "gpt-6-astra"],
+      ["launch_edge_monthly", "gpt-6-astra"],
+      ["launch_monthly", "gpt-6.1-sol"],
+      ["launch_edge_monthly", "gpt-6-astra"],
+    ]) {
+      mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+        assistantModelPreference: "gpt-6-astra", currentBillingPlanCode: plan,
+      }));
+      const result = await readHostedMemberAssistantModelPreference({ memberId: "member_premium", prisma: createReadClient() });
+      expect(result.model).toBe(model);
+    }
+    expect(mocks.updateHostedMember).not.toHaveBeenCalled();
+  });
+
   it("resolves an eligible stored Sol preference to the runtime override", async () => {
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: "gpt-5.6-sol",
@@ -176,7 +397,7 @@ describe("hosted member assistant model preference", () => {
     });
   });
 
-  it("keeps Terra while resolving Venice as an independent provider override", async () => {
+  it("keeps GPT-6 Sol while resolving Venice as an independent provider override", async () => {
     process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: null,
@@ -189,7 +410,7 @@ describe("hosted member assistant model preference", () => {
     })).resolves.toMatchObject({
       availableProviders: ["openai", "venice"],
       hostedAssistantProviderOverride: "venice",
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       provider: "venice",
       reasoningEffort: "low",
     });
@@ -206,9 +427,12 @@ describe("hosted member assistant model preference", () => {
       prisma: createReadClient(),
     })).resolves.toEqual({
       availableModels: [
+        "gpt-6.1-sol",
+        "gpt-6-sol",
+        "gpt-6-luna",
         "gpt-5.6-luna",
-        "gpt-5.6-terra",
         "gpt-5.6-sol",
+        "gpt-6-astra",
       ],
       availableProviders: ["openai"],
       availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
@@ -239,8 +463,10 @@ describe("hosted member assistant model preference", () => {
       prisma: createReadClient(),
     })).resolves.toEqual({
       availableModels: [
+        "gpt-6.1-sol",
+        "gpt-6-sol",
+        "gpt-6-luna",
         "gpt-5.6-luna",
-        "gpt-5.6-terra",
         "gpt-5.6-sol",
       ],
       availableProviders: ["openai"],
@@ -249,15 +475,15 @@ describe("hosted member assistant model preference", () => {
       customInferenceReverificationRequired: false,
       customInferenceSelected: false,
       dormantSolPreference: false,
-      hostedAssistantModelOverride: "gpt-5.6-sol",
-      model: "gpt-5.6-sol",
+      hostedAssistantModelOverride: "gpt-6.1-sol",
+      model: "gpt-6.1-sol",
       provider: "openai",
       reasoningEffort: "low",
       solAvailable: true,
     });
   });
 
-  it("stores an explicit Terra override for a synthetic thread-container", async () => {
+  it("stores an explicit GPT-6 Luna override for a synthetic thread-container", async () => {
     const tx = createTransactionClient();
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: null,
@@ -269,20 +495,20 @@ describe("hosted member assistant model preference", () => {
 
     const result = await updateHostedMemberAssistantConfigurationTx({
       memberId: "member_group_chat",
-      model: "gpt-5.6-terra",
+      model: "gpt-6-luna",
       prisma: tx,
     });
 
     expect(result).toMatchObject({
       effectiveModelUpdated: true,
-      model: "gpt-5.6-terra",
+      model: "gpt-6-luna",
       solAvailable: true,
       updated: true,
     });
-    expect(result).not.toHaveProperty("hostedAssistantModelOverride");
+    expect(result.hostedAssistantModelOverride).toBe("gpt-6-luna");
     expect(mocks.updateHostedMember).toHaveBeenCalledWith({
       data: {
-        assistantModelPreference: "gpt-5.6-terra",
+        assistantModelPreference: "gpt-6-luna",
       },
       where: {
         id: "member_group_chat",
@@ -293,7 +519,7 @@ describe("hosted member assistant model preference", () => {
   it("restores the derived Sol default by clearing the group room override", async () => {
     const tx = createTransactionClient();
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
-      assistantModelPreference: "gpt-5.6-terra",
+      assistantModelPreference: "gpt-6-luna",
       billingStatus: HostedBillingStatus.not_started,
       currentBillingPhase: null,
       currentBillingPlanCode: null,
@@ -302,12 +528,12 @@ describe("hosted member assistant model preference", () => {
 
     await expect(updateHostedMemberAssistantConfigurationTx({
       memberId: "member_group_chat",
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       prisma: tx,
     })).resolves.toMatchObject({
       effectiveModelUpdated: true,
-      hostedAssistantModelOverride: "gpt-5.6-sol",
-      model: "gpt-5.6-sol",
+      hostedAssistantModelOverride: "gpt-6.1-sol",
+      model: "gpt-6.1-sol",
       updated: true,
     });
     expect(mocks.updateHostedMember).toHaveBeenCalledWith({
@@ -347,7 +573,7 @@ describe("hosted member assistant model preference", () => {
     expect(mocks.updateHostedMember).not.toHaveBeenCalled();
   });
 
-  it("falls back to Terra for stale, missing, and ineligible preferences", async () => {
+  it("falls back to GPT-6 Sol for stale, missing, and ineligible preferences", async () => {
     const prisma = createReadClient();
     mocks.findUniqueHostedMember
       .mockResolvedValueOnce(buildMemberState({
@@ -368,7 +594,7 @@ describe("hosted member assistant model preference", () => {
       prisma,
     })).resolves.toMatchObject({
       dormantSolPreference: false,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       reasoningEffort: "low",
       solAvailable: true,
     });
@@ -377,7 +603,7 @@ describe("hosted member assistant model preference", () => {
       prisma,
     })).resolves.toMatchObject({
       dormantSolPreference: true,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       reasoningEffort: "low",
       solAvailable: false,
     });
@@ -387,7 +613,7 @@ describe("hosted member assistant model preference", () => {
     })).resolves.toMatchObject({
       configurationAvailable: false,
       dormantSolPreference: false,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       reasoningEffort: "low",
       solAvailable: false,
     });
@@ -408,7 +634,7 @@ describe("hosted member assistant model preference", () => {
       prisma,
     })).resolves.toMatchObject({
       dormantSolPreference: true,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       reasoningEffort: "low",
       solAvailable: false,
     });
@@ -443,7 +669,7 @@ describe("hosted member assistant model preference", () => {
     })).resolves.toMatchObject({
       dormantSolPreference: true,
       hostedAssistantReasoningEffortOverride: "high",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       reasoningEffort: "high",
       solAvailable: false,
       updated: true,
@@ -473,7 +699,7 @@ describe("hosted member assistant model preference", () => {
     })).resolves.toMatchObject({
       effectiveProviderUpdated: true,
       hostedAssistantProviderOverride: "venice",
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       updated: true,
     });
     expect(mocks.updateHostedMember).toHaveBeenCalledWith({
@@ -520,7 +746,7 @@ describe("hosted member assistant model preference", () => {
 
     expect(result).toMatchObject({
       effectiveProviderUpdated: true,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       updated: true,
     });
     expect(result).not.toHaveProperty("hostedAssistantProviderOverride");
@@ -555,7 +781,7 @@ describe("hosted member assistant model preference", () => {
     })).resolves.toMatchObject({
       dormantSolPreference: true,
       hostedAssistantProviderOverride: "venice",
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       updated: true,
     });
     expect(mocks.updateHostedMember).toHaveBeenCalledWith({
@@ -657,7 +883,7 @@ describe("hosted member assistant model preference", () => {
     });
   });
 
-  it("stores Luna and reasoning together while keeping Terra and low as defaults", async () => {
+  it("stores Luna and reasoning together while keeping low as the reasoning default", async () => {
     const tx = createTransactionClient();
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: null,
@@ -709,7 +935,7 @@ describe("hosted member assistant model preference", () => {
     expect(mocks.updateHostedMember).not.toHaveBeenCalled();
   });
 
-  it("clears stale preferences when Terra is selected on an active Pulse plan", async () => {
+  it("stores an explicit preference when GPT-6 Sol is selected on an active Pulse plan", async () => {
     const tx = createTransactionClient();
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: "retired-model",
@@ -718,12 +944,12 @@ describe("hosted member assistant model preference", () => {
 
     await expect(updateHostedMemberAssistantModelPreferenceTx({
       memberId: "member_stale",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       prisma: tx,
     })).resolves.toMatchObject({
       effectiveProviderUpdated: false,
       dormantSolPreference: false,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       reasoningEffort: "low",
       solAvailable: false,
       effectiveModelUpdated: false,
@@ -758,11 +984,11 @@ describe("hosted member assistant model preference", () => {
       updated: false,
     });
     await expect(updateHostedMemberAssistantModelPreferenceTx({
-      memberId: "member_terra",
-      model: "gpt-5.6-terra",
+      memberId: "member_sol",
+      model: "gpt-6.1-sol",
       prisma: tx,
     })).resolves.toMatchObject({
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       updated: false,
     });
     expect(mocks.updateHostedMember).not.toHaveBeenCalled();

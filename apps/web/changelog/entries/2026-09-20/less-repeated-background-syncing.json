@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "less-repeated-background-syncing",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less repeated background syncing",
+    "summary": "Connected-device sync combines nearby background checks and avoids repeating empty weight-history scans.",
+    "details": "History still checks for late readings, and regular reconciliation remains available to catch updates missed by incoming notifications.",
+    "relevanceTags": [
+      "devices",
+      "sync"
+    ],
+    "sourcePullRequests": [
+      3621
+    ]
+  }
+}

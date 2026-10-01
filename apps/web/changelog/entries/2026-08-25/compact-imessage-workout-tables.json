@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "compact-imessage-workout-tables",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More compact iMessage workout tables",
+    "summary": "Short workout comparisons now fit into one shared-header table instead of repeating every field vertically.",
+    "details": "Wider content still uses the full-width layout, and the complete text version remains available when an image cannot be delivered.",
+    "relevanceTags": ["imessage", "workouts"],
+    "sourcePullRequests": [2285]
+  }
+}

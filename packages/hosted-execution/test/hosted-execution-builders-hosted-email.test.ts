@@ -94,6 +94,7 @@ describe("hosted execution wake builders", () => {
         "  ## Explicit setup\n\nKeep this room low-key.  ",
       memberChannels: defaultMemberChannels,
       memberId: "user_123",
+      onboardingFollowupRoute: signupWelcome.route,
       occurredAt,
       signupWelcome,
     });
@@ -107,6 +108,22 @@ describe("hosted execution wake builders", () => {
       initialGroupRoomModelMarkdown:
         "## Explicit setup\n\nKeep this room low-key.",
       kind: "member.activated",
+      onboardingFollowupEnrollment: true,
+      onboardingFollowupRoute: {
+        actorId: "+15551234567",
+        channel: "linq",
+        delivery: {
+          kind: "participant",
+          source: {
+            fromPhoneNumber: "+15550001111",
+            kind: "linq",
+          },
+          target: "+15551234567",
+        },
+        identityId: "hbidx:phone:v1:test",
+        threadId: null,
+        threadIsDirect: true,
+      },
       signupWelcome: {
         route: {
           actorId: "+15551234567",

@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 100,
+  "item": {
+    "id": "phone-number-account-conflict",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer phone-number guidance",
+    "summary": "Settings explains when a phone number is already connected to another Murph account.",
+    "details": "You can use another number or contact support for help with the existing account.",
+    "relevanceTags": [
+      "account",
+      "settings"
+    ],
+    "sourcePullRequests": [
+      3128
+    ]
+  }
+}

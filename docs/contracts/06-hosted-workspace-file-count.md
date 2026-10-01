@@ -144,12 +144,24 @@ landing; record the chosen posture here so the decision is reviewable.
   directories after canonical import, or documenting an explicit indefinite raw
   evidence retention envelope with file-count tests.
 
-- `assistant-state/hosted-mailbox-input-items/*.json` is runtime coupling state:
-  each mapping exists only to relate one hosted mailbox row to its persisted
-  assistant input event. Runtime-residue pruning inventories both owner trees,
-  fails closed on malformed or symlinked entries, removes eligible input events
-  first, then removes every mapping whose input no longer survives. Mappings do
-  not have an independent retention window.
+- `.runtime/operations/assistant/state/hosted-mailbox-inputs.sqlite` is the
+  durable hosted mailbox metadata owner: actual acknowledgement IDs and private
+  group context remain separate from sanitized input events and their blinded
+  source IDs. Each accepted input adds a row, not a file. The store reuses the
+  runtime SQLite migrations and assistant write lock, uses DELETE journaling,
+  secure deletion and private file permissions, and closes each handle before
+  checkpointing. Its one file is portable operational state, not a rebuildable
+  projection. Runtime-residue maintenance removes rows only after their input
+  events no longer survive; metadata has no independent retention window.
+  Exact-ID legacy reads remain available for old `hosted-mailbox-input-items`
+  files. Maintenance validates the legacy inventory, commits missing rows without
+  overwriting current rows, validates the stored rows, and then removes legacy
+  files. An interrupted migration leaves readable duplicates. Malformed or
+  symlinked legacy entries block migration and pruning; a damaged database fails
+  closed rather than falling back to obsolete metadata. Remove legacy support
+  once all retained checkpoints and workspaces have drained those files. The
+  SQLite-capable runner is the rollback floor after its first metadata write;
+  an older runner must not reopen a converted workspace.
 
 - `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` is the sole committed inbox
   metadata owner. Current v2 writes can add attachment bytes but add no
@@ -204,11 +216,23 @@ landing; record the chosen posture here so the decision is reviewable.
   outbox or committed checkpoint can contain the runtime ref.
 
 - `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl`
-  (`murph.inbox-attachment-retention.v1`) is append-only and monthly-sharded,
+  (`murph.inbox-attachment-retention.v1` for media and v2 for promoted document
+  duplicates) is append-only and monthly-sharded,
   with no compaction. Each record is a small tombstone (~200 bytes) describing
   the deleted raw inbox attachment path, sha256, purge time, reason, and
-  retained parser derivative. A heavy user adding roughly ten attachments per
-  day produces about 3,650 records per year, well under one megabyte
+  retained parser derivative when applicable. Promoted document cleanup reuses
+  this owner and the existing bounded pass: after 14 days it deletes only the
+  duplicate `raw/inbox/**` bytes whose stable capture/attachment correlation,
+  source hash, live import audit/event identity, canonical manifest, and
+  canonical raw artifact all agree. The content-free correlation is written to
+  the existing audit stream when default promotion succeeds; historical or
+  override promotions without it stay fail-closed. Lazy restore materializes
+  the source and canonical proof paths before the locked recheck; missing or
+  damaged proof fails closed. Promoted documents
+  use the existing media admission bounds, and all admitted receipts reuse one
+  transient audit/event ledger snapshot per pass. No new sidecar, cursor, queue,
+  index, or file family is introduced. A heavy user adding
+  roughly ten attachments per day produces about 3,650 records per year, well under one megabyte
   (~730 KB/year). This puts the family firmly in the "accepted unbounded-tiny"
   bucket: the monthly shard count is also bounded by elapsed wall-clock
   months. Snapshot/restore cost remains negligible at the projected steady
@@ -234,7 +258,7 @@ landing; record the chosen posture here so the decision is reviewable.
   replay, while a write without one receives a unique retention-only identity.
   The generated-image owner materializes this shared file before every lookup
   read; hosted private generation requires the workspace runner's existing
-  persistence boundary, so a lazy legacy index cannot be replaced as empty and
+  persistence boundary, so an existing lookup cannot be replaced as empty and
   the capture cannot commit without its deadline checkpoint.
   Retries of a stable identity update no file count and either reuse the saved
   capture or return the deleted outcome.
@@ -261,7 +285,7 @@ landing; record the chosen posture here so the decision is reviewable.
   their exact 14-day cutoff into that wake in the same canonical receipt
   checkpoint, preserving the earliest cutoff through shutdown. Retirement uses
   that boundary too: guarded raw text-replacement receipts carry the inspected
-  preimage, and legacy lazy restore materializes receipt targets before replay.
+  preimage, and current receipt recovery resolves required media references before replay.
 
 - `assistant-state/hosted-provider-cleanup.json`
   (`murph.hosted-provider-cleanup.v1`) is compact durable operational-continuity
@@ -282,6 +306,20 @@ landing; record the chosen posture here so the decision is reviewable.
   snapshot-bridge pruning guard once production vaults have all written the
   marker. The steady-state file bound for the provider-cleanup family is
   asserted by the provider-cleanup unit tests.
+
+- `.runtime/operations/assistant/state/input-media.json` is one portable,
+  rebuildable input-store index per workspace, independent of conversation or
+  message count. It maps hashed conversation identities to input ids and media
+  expiry bounds; it contains no message text or attachment paths. Missing or
+  malformed state rebuilds from canonical input events under the existing
+  runtime write lock. Media evidence updates publish a candidate superset
+  before canonical evidence and prune expired entries; reads open only the
+  current conversations' unexpired candidates and validate canonical evidence.
+  The existing assistant `state` snapshot inclusion carries this file. A first
+  lookup creates at most one file; subsequent turns reuse it. Deploy with
+  `container_rollout=immediate` and drain old input-store writers before first
+  publication. After publication, the index-aware runner is the rollback floor;
+  an older writer would not maintain its candidate set.
 
 - `.runtime/operations/assistant/state/session-routing.sqlite` is one portable,
   rebuildable projection per workspace. It stores hashed exact alias and

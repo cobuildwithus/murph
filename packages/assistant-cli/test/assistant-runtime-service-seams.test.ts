@@ -1,662 +1,116 @@
 import assert from 'node:assert/strict'
+import { beforeEach, test, vi } from 'vitest'
 
-import { beforeEach, test as baseTest, vi } from 'vitest'
-
-const test = baseTest.sequential
-
-const daemonMocks = vi.hoisted(() => ({
-  maybeDrainAssistantOutboxViaDaemon: vi.fn(),
-  maybeGetAssistantCronJobViaDaemon: vi.fn(),
-  maybeGetAssistantCronStatusViaDaemon: vi.fn(),
-  maybeGetAssistantCronTargetViaDaemon: vi.fn(),
-  maybeGetAssistantOutboxIntentViaDaemon: vi.fn(),
-  maybeGetAssistantSessionViaDaemon: vi.fn(),
-  maybeGetAssistantStatusViaDaemon: vi.fn(),
-  maybeListAssistantCronJobsViaDaemon: vi.fn(),
-  maybeListAssistantCronRunsViaDaemon: vi.fn(),
-  maybeListAssistantOutboxIntentsViaDaemon: vi.fn(),
-  maybeListAssistantSessionsViaDaemon: vi.fn(),
-  maybeOpenAssistantConversationViaDaemon: vi.fn(),
-  maybeProcessDueAssistantCronViaDaemon: vi.fn(),
-  maybeRunAssistantAutomationViaDaemon: vi.fn(),
-  maybeSendAssistantMessageViaDaemon: vi.fn(),
-  maybeSetAssistantCronTargetViaDaemon: vi.fn(),
-  maybeUpdateAssistantSessionOptionsViaDaemon: vi.fn(),
+const mocks = vi.hoisted(() => ({
+  open: vi.fn(),
+  send: vi.fn(),
+  update: vi.fn(),
+  session: vi.fn(),
+  readAutomation: vi.fn(),
+  saveAutomation: vi.fn(),
+  run: vi.fn(),
 }))
-
-const serviceLocalMocks = vi.hoisted(() => ({
-  openAssistantConversationLocal: vi.fn(),
-  sendAssistantMessageLocal: vi.fn(),
-  updateAssistantSessionOptionsLocal: vi.fn(),
-}))
-
-const storeLocalMocks = vi.hoisted(() => ({
-  getAssistantSessionLocal: vi.fn(),
-  listAssistantSessionsLocal: vi.fn(),
-  readAssistantAutomationStateLocal: vi.fn(),
-  saveAssistantAutomationStateLocal: vi.fn(),
-}))
-
-const outboxLocalMocks = vi.hoisted(() => ({
-  drainAssistantOutboxLocal: vi.fn(),
-  listAssistantOutboxIntentsLocal: vi.fn(),
-  readAssistantOutboxIntentLocal: vi.fn(),
-}))
-
-const statusLocalMocks = vi.hoisted(() => ({
-  getAssistantStatusLocal: vi.fn(),
-}))
-
-const cronLocalMocks = vi.hoisted(() => ({
-  getAssistantCronJobLocal: vi.fn(),
-  getAssistantCronJobTargetLocal: vi.fn(),
-  getAssistantCronStatusLocal: vi.fn(),
-  listAssistantCronJobsLocal: vi.fn(),
-  listAssistantCronRunsLocal: vi.fn(),
-  processDueAssistantCronJobsLocal: vi.fn(),
-  setAssistantCronJobTargetLocal: vi.fn(),
-}))
-
-const automationEngineMocks = vi.hoisted(() => ({
-  runAssistantAutomationLocal: vi.fn(),
-  scanAssistantAutomationOnce: vi.fn(),
-}))
-
-const runtimeModuleMocks = vi.hoisted(() => ({
-  runAssistantChat: vi.fn(),
-}))
-
-vi.mock('../src/assistant-daemon-client.js', () => daemonMocks)
 
 vi.mock('@murphai/assistant-engine/assistant-service', () => ({
-  openAssistantConversationLocal: serviceLocalMocks.openAssistantConversationLocal,
-  sendAssistantMessageLocal: serviceLocalMocks.sendAssistantMessageLocal,
-  updateAssistantSessionOptionsLocal: serviceLocalMocks.updateAssistantSessionOptionsLocal,
+  openAssistantConversationLocal: mocks.open,
+  sendAssistantMessageLocal: mocks.send,
+  updateAssistantSessionOptionsLocal: mocks.update,
 }))
-
 vi.mock('@murphai/assistant-engine/assistant-store', () => ({
-  getAssistantSessionLocal: storeLocalMocks.getAssistantSessionLocal,
-  listAssistantSessionsLocal: storeLocalMocks.listAssistantSessionsLocal,
-  readAssistantAutomationState: storeLocalMocks.readAssistantAutomationStateLocal,
-  saveAssistantAutomationState: storeLocalMocks.saveAssistantAutomationStateLocal,
+  getAssistantSessionLocal: mocks.session,
+  readAssistantAutomationState: mocks.readAutomation,
+  saveAssistantAutomationState: mocks.saveAutomation,
 }))
-
-vi.mock('@murphai/assistant-engine/assistant-outbox', () => ({
-  drainAssistantOutboxLocal: outboxLocalMocks.drainAssistantOutboxLocal,
-  listAssistantOutboxIntentsLocal: outboxLocalMocks.listAssistantOutboxIntentsLocal,
-  readAssistantOutboxIntent: outboxLocalMocks.readAssistantOutboxIntentLocal,
-}))
-
-vi.mock('@murphai/assistant-engine/assistant-status', () => ({
-  getAssistantStatusLocal: statusLocalMocks.getAssistantStatusLocal,
-}))
-
-vi.mock('@murphai/assistant-engine/assistant-cron', () => ({
-  getAssistantCronJob: cronLocalMocks.getAssistantCronJobLocal,
-  getAssistantCronJobTarget: cronLocalMocks.getAssistantCronJobTargetLocal,
-  getAssistantCronStatus: cronLocalMocks.getAssistantCronStatusLocal,
-  listAssistantCronJobs: cronLocalMocks.listAssistantCronJobsLocal,
-  listAssistantCronRuns: cronLocalMocks.listAssistantCronRunsLocal,
-  processDueAssistantCronJobsLocal: cronLocalMocks.processDueAssistantCronJobsLocal,
-  setAssistantCronJobTarget: cronLocalMocks.setAssistantCronJobTargetLocal,
-}))
-
 vi.mock('@murphai/assistant-engine/assistant-automation', () => ({
-  runAssistantAutomation: automationEngineMocks.runAssistantAutomationLocal,
-  scanAssistantAutomationOnce: automationEngineMocks.scanAssistantAutomationOnce,
+  runAssistantAutomation: mocks.run,
 }))
 
-vi.mock('../src/assistant-runtime.js', () => runtimeModuleMocks)
-
-import * as assistantAutomationFacade from '../src/assistant/automation.ts'
-import { runAssistantAutomation } from '../src/assistant/automation/run-loop.ts'
-import {
-  getAssistantCronJob,
-  getAssistantCronJobTarget,
-  getAssistantCronStatus,
-  listAssistantCronJobs,
-  listAssistantCronRuns,
-  processDueAssistantCronJobs,
-  setAssistantCronJobTarget,
-} from '../src/assistant/cron.ts'
-import {
-  drainAssistantOutbox,
-  listAssistantOutboxIntents,
-  readAssistantOutboxIntent,
-} from '../src/assistant/outbox.ts'
-import * as assistantRuntimeRootFacade from '../src/assistant-runtime.ts'
 import {
   openAssistantConversation,
   sendAssistantMessage,
   updateAssistantSessionOptions,
 } from '../src/assistant/service.ts'
-import { getAssistantStatus } from '../src/assistant/status.ts'
-import {
-  getAssistantSession,
-  listAssistantSessions,
-} from '../src/assistant/store.ts'
+import { runAssistantAutomation } from '../src/assistant/automation/run-loop.ts'
 
-const TEST_VAULT = '/tmp/assistant-runtime-service-seams'
+const vault = '/tmp/assistant-direct-fixture'
 
 beforeEach(() => {
-  for (const mock of [
-    ...Object.values(daemonMocks),
-    ...Object.values(serviceLocalMocks),
-    ...Object.values(storeLocalMocks),
-    ...Object.values(outboxLocalMocks),
-    ...Object.values(statusLocalMocks),
-    ...Object.values(cronLocalMocks),
-    ...Object.values(automationEngineMocks),
-    ...Object.values(runtimeModuleMocks),
-  ]) {
-    mock.mockReset()
+  vi.resetAllMocks()
+})
+
+test('direct local commands preserve inputs and assign explicit operator authority', async () => {
+  const opened = { source: 'local-open' }
+  const sent = { source: 'local-send' }
+  mocks.open.mockResolvedValue(opened)
+  mocks.send.mockResolvedValue(sent)
+  const openInput = { alias: 'local-fixture', vault }
+  const messageInput = { prompt: 'Review the saved note', vault }
+  assert.equal(await openAssistantConversation(openInput), opened)
+  assert.equal(await sendAssistantMessage(messageInput), sent)
+  assert.deepEqual(mocks.open.mock.calls, [[openInput]])
+  assert.deepEqual(mocks.send.mock.calls, [[{
+    ...messageInput,
+    operatorAuthority: 'direct-operator',
+  }]])
+  const updateInput = {
+    providerOptions: { provider: 'codex-cli' as const, model: 'fixture-model' },
+    sessionId: 'session_fixture',
+    vault,
   }
+  await updateAssistantSessionOptions(updateInput)
+  assert.deepEqual(mocks.update.mock.calls, [[updateInput]])
 })
 
-test('service wrappers prefer daemon responses and fall back to local implementations', async () => {
-  daemonMocks.maybeOpenAssistantConversationViaDaemon.mockResolvedValueOnce({
-    source: 'remote-open',
-  })
-  daemonMocks.maybeSendAssistantMessageViaDaemon.mockResolvedValueOnce(null)
-  serviceLocalMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
-    source: 'local-send',
-  })
-  daemonMocks.maybeUpdateAssistantSessionOptionsViaDaemon.mockResolvedValueOnce(undefined)
-  serviceLocalMocks.updateAssistantSessionOptionsLocal.mockResolvedValueOnce({
-    source: 'local-update',
-  })
-
-  assert.deepEqual(
-    await openAssistantConversation({
-      alias: 'chat:demo',
-      vault: TEST_VAULT,
-    }),
-    { source: 'remote-open' },
-  )
-  assert.deepEqual(
-    await sendAssistantMessage({
-      prompt: 'hello',
-      vault: TEST_VAULT,
-    }),
-    { source: 'local-send' },
-  )
-  assert.deepEqual(
-    await updateAssistantSessionOptions({
-      providerOptions: {
-        provider: 'codex-cli',
-        model: 'gpt-5.4',
-      },
-      sessionId: 'session_demo',
-      vault: TEST_VAULT,
-    }),
-    { source: 'local-update' },
-  )
-
-  assert.deepEqual(
-    daemonMocks.maybeOpenAssistantConversationViaDaemon.mock.calls[0]?.[0],
-    {
-      alias: 'chat:demo',
-      vault: TEST_VAULT,
-    },
-  )
-  assert.equal(serviceLocalMocks.openAssistantConversationLocal.mock.calls.length, 0)
-  assert.equal(serviceLocalMocks.sendAssistantMessageLocal.mock.calls.length, 1)
-  assert.equal(serviceLocalMocks.updateAssistantSessionOptionsLocal.mock.calls.length, 1)
-
-  daemonMocks.maybeOpenAssistantConversationViaDaemon.mockResolvedValueOnce(null)
-  serviceLocalMocks.openAssistantConversationLocal.mockResolvedValueOnce({
-    source: 'local-open',
-  })
-  daemonMocks.maybeSendAssistantMessageViaDaemon.mockResolvedValueOnce({
-    source: 'remote-send',
-  })
-  daemonMocks.maybeUpdateAssistantSessionOptionsViaDaemon.mockResolvedValueOnce({
-    source: 'remote-update',
-  })
-
-  assert.deepEqual(
-    await openAssistantConversation({
-      alias: 'chat:local',
-      vault: TEST_VAULT,
-    }),
-    { source: 'local-open' },
-  )
-  assert.deepEqual(
-    await sendAssistantMessage({
-      prompt: 'daemon send',
-      vault: TEST_VAULT,
-    }),
-    { source: 'remote-send' },
-  )
-  assert.deepEqual(
-    await updateAssistantSessionOptions({
-      providerOptions: {
-        provider: 'codex-cli',
-        model: 'remote',
-      },
-      sessionId: 'session_remote',
-      vault: TEST_VAULT,
-    }),
-    { source: 'remote-update' },
-  )
-})
-
-test('service wrappers reject local Linq routes before daemon or local delivery work starts', async () => {
-  storeLocalMocks.getAssistantSessionLocal.mockResolvedValueOnce({
-    binding: {
-      channel: 'iMessage',
-    },
-  })
-
+test('explicit and saved local Linq routes fail before delivery', async () => {
+  mocks.session.mockResolvedValue({ binding: { channel: 'iMessage' } })
   await assert.rejects(
-    () =>
-      openAssistantConversation({
-        channel: 'linq',
-        vault: TEST_VAULT,
-      }),
+    openAssistantConversation({ channel: 'linq', vault }),
     /Linq\/iMessage routes are no longer supported/u,
   )
   await assert.rejects(
-    () =>
-      sendAssistantMessage({
-        prompt: 'hello',
-        sessionId: 'session_linq',
-        vault: TEST_VAULT,
-      }),
+    sendAssistantMessage({ prompt: 'hello', sessionId: 'session_fixture', vault }),
     /Linq\/iMessage routes are no longer supported/u,
   )
   await assert.rejects(
-    () =>
-      sendAssistantMessage({
-        conversation: {
-          channel: 'i-message',
-        },
-        prompt: 'hello',
-        vault: TEST_VAULT,
-      }),
+    sendAssistantMessage({ prompt: 'hello', conversation: { channel: 'i-message' }, vault }),
     /Linq\/iMessage routes are no longer supported/u,
   )
-
-  assert.equal(daemonMocks.maybeOpenAssistantConversationViaDaemon.mock.calls.length, 0)
-  assert.equal(daemonMocks.maybeSendAssistantMessageViaDaemon.mock.calls.length, 0)
-  assert.equal(serviceLocalMocks.openAssistantConversationLocal.mock.calls.length, 0)
-  assert.equal(serviceLocalMocks.sendAssistantMessageLocal.mock.calls.length, 0)
+  assert.equal(mocks.open.mock.calls.length, 0)
+  assert.equal(mocks.send.mock.calls.length, 0)
 })
 
-test('status wrapper normalizes string input for the daemon and preserves fallback input for local status', async () => {
-  daemonMocks.maybeGetAssistantStatusViaDaemon.mockResolvedValueOnce(null)
-  statusLocalMocks.getAssistantStatusLocal.mockResolvedValueOnce({
-    source: 'local-status',
-  })
-
-  assert.deepEqual(await getAssistantStatus(TEST_VAULT), {
-    source: 'local-status',
-  })
-  assert.deepEqual(
-    daemonMocks.maybeGetAssistantStatusViaDaemon.mock.calls[0]?.[0],
-    {
-      limit: undefined,
-      sessionId: null,
-      vault: TEST_VAULT,
-    },
+test('local session read failures cannot bypass delivery preflight', async () => {
+  const failure = new Error('fixture read failed')
+  mocks.session.mockRejectedValue(failure)
+  await assert.rejects(
+    sendAssistantMessage({ prompt: 'hello', sessionId: 'session_fixture', vault }),
+    (error) => error === failure,
   )
-  assert.equal(statusLocalMocks.getAssistantStatusLocal.mock.calls[0]?.[0], TEST_VAULT)
-
-  daemonMocks.maybeGetAssistantStatusViaDaemon.mockResolvedValueOnce({
-    source: 'remote-status',
-  })
-  assert.deepEqual(
-    await getAssistantStatus({
-      limit: 3,
-      sessionId: 'session_demo',
-      vault: TEST_VAULT,
-    }),
-    { source: 'remote-status' },
-  )
+  assert.equal(mocks.send.mock.calls.length, 0)
 })
 
-test('store and outbox wrappers distinguish null from undefined daemon responses', async () => {
-  daemonMocks.maybeListAssistantSessionsViaDaemon.mockResolvedValueOnce([])
-  daemonMocks.maybeGetAssistantSessionViaDaemon.mockResolvedValueOnce(null)
-  storeLocalMocks.getAssistantSessionLocal.mockResolvedValueOnce({
-    source: 'local-session',
-  })
-  daemonMocks.maybeGetAssistantOutboxIntentViaDaemon.mockResolvedValueOnce(null)
-  daemonMocks.maybeListAssistantOutboxIntentsViaDaemon.mockResolvedValueOnce(null)
-  outboxLocalMocks.listAssistantOutboxIntentsLocal.mockResolvedValueOnce([
-    { source: 'local-list' },
-  ])
-  daemonMocks.maybeDrainAssistantOutboxViaDaemon.mockResolvedValueOnce({
-    attempted: 1,
-    failed: 0,
-    queued: 0,
-    sent: 1,
-  })
-
-  assert.deepEqual(await listAssistantSessions(TEST_VAULT), [])
-  assert.equal(storeLocalMocks.listAssistantSessionsLocal.mock.calls.length, 0)
-  assert.deepEqual(await getAssistantSession(TEST_VAULT, 'session_demo'), {
-    source: 'local-session',
-  })
-  assert.equal(await readAssistantOutboxIntent(TEST_VAULT, 'intent_demo'), null)
-  assert.equal(outboxLocalMocks.readAssistantOutboxIntentLocal.mock.calls.length, 0)
-  assert.deepEqual(await listAssistantOutboxIntents(TEST_VAULT), [
-    { source: 'local-list' },
-  ])
-  assert.deepEqual(
-    await drainAssistantOutbox({
-      limit: 1,
-      vault: TEST_VAULT,
-    }),
-    {
-      attempted: 1,
-      failed: 0,
-      queued: 0,
-      sent: 1,
-    },
-  )
-
-  daemonMocks.maybeListAssistantSessionsViaDaemon.mockResolvedValueOnce(null)
-  storeLocalMocks.listAssistantSessionsLocal.mockResolvedValueOnce([
-    { source: 'local-sessions' },
-  ])
-  daemonMocks.maybeGetAssistantSessionViaDaemon.mockResolvedValueOnce({
-    source: 'remote-session',
-  })
-  daemonMocks.maybeGetAssistantOutboxIntentViaDaemon.mockResolvedValueOnce(undefined)
-  outboxLocalMocks.readAssistantOutboxIntentLocal.mockResolvedValueOnce({
-    source: 'local-intent',
-  })
-  daemonMocks.maybeListAssistantOutboxIntentsViaDaemon.mockResolvedValueOnce([
-    { source: 'remote-intents' },
-  ])
-  daemonMocks.maybeDrainAssistantOutboxViaDaemon.mockResolvedValueOnce(null)
-  outboxLocalMocks.drainAssistantOutboxLocal.mockResolvedValueOnce({
-    attempted: 0,
-    failed: 0,
-    queued: 1,
-    sent: 0,
-  })
-
-  assert.deepEqual(await listAssistantSessions(TEST_VAULT), [
-    { source: 'local-sessions' },
-  ])
-  assert.deepEqual(await getAssistantSession(TEST_VAULT, 'session_remote'), {
-    source: 'remote-session',
-  })
-  assert.deepEqual(await readAssistantOutboxIntent(TEST_VAULT, 'intent_local'), {
-    source: 'local-intent',
-  })
-  assert.deepEqual(await listAssistantOutboxIntents(TEST_VAULT), [
-    { source: 'remote-intents' },
-  ])
-  assert.deepEqual(
-    await drainAssistantOutbox({
-      limit: 2,
-      vault: TEST_VAULT,
-    }),
-    {
-      attempted: 0,
-      failed: 0,
-      queued: 1,
-      sent: 0,
-    },
-  )
-})
-
-test('cron wrappers preserve daemon semantics and local fallbacks', async () => {
-  daemonMocks.maybeListAssistantCronJobsViaDaemon.mockResolvedValueOnce([])
-  daemonMocks.maybeGetAssistantCronJobViaDaemon.mockResolvedValueOnce(null)
-  cronLocalMocks.getAssistantCronJobLocal.mockResolvedValueOnce({ source: 'local-job' })
-  daemonMocks.maybeGetAssistantCronTargetViaDaemon.mockResolvedValueOnce({
-    source: 'remote-target',
-  })
-  daemonMocks.maybeSetAssistantCronTargetViaDaemon.mockResolvedValueOnce(null)
-  cronLocalMocks.setAssistantCronJobTargetLocal.mockResolvedValueOnce({
-    source: 'local-target-update',
-  })
-  daemonMocks.maybeGetAssistantCronStatusViaDaemon.mockResolvedValueOnce(null)
-  cronLocalMocks.getAssistantCronStatusLocal.mockResolvedValueOnce({
-    source: 'local-status',
-  })
-  daemonMocks.maybeListAssistantCronRunsViaDaemon.mockResolvedValueOnce(null)
-  cronLocalMocks.listAssistantCronRunsLocal.mockResolvedValueOnce({
-    jobId: 'job_demo',
-    runs: [],
-  })
-  daemonMocks.maybeProcessDueAssistantCronViaDaemon.mockResolvedValueOnce({
-    source: 'remote-process',
-  })
-
-  assert.deepEqual(await listAssistantCronJobs(TEST_VAULT), [])
-  assert.equal(cronLocalMocks.listAssistantCronJobsLocal.mock.calls.length, 0)
-  assert.deepEqual(await getAssistantCronJob(TEST_VAULT, 'job_demo'), {
-    source: 'local-job',
-  })
-  assert.deepEqual(await getAssistantCronJobTarget(TEST_VAULT, 'job_demo'), {
-    source: 'remote-target',
-  })
-  assert.deepEqual(
-    await setAssistantCronJobTarget({
-      deliveryTarget: '@murph',
-      job: 'job_demo',
-      vault: TEST_VAULT,
-    }),
-    { source: 'local-target-update' },
-  )
-  assert.deepEqual(await getAssistantCronStatus(TEST_VAULT), {
-    source: 'local-status',
-  })
-  assert.deepEqual(
-    await listAssistantCronRuns({
-      job: 'job_demo',
-      limit: 2,
-      vault: TEST_VAULT,
-    }),
-    {
-      jobId: 'job_demo',
-      runs: [],
-    },
-  )
-  assert.deepEqual(
-    await processDueAssistantCronJobs({
-      limit: 1,
-      vault: TEST_VAULT,
-    }),
-    { source: 'remote-process' },
-  )
-
-  daemonMocks.maybeListAssistantCronJobsViaDaemon.mockResolvedValueOnce(null)
-  cronLocalMocks.listAssistantCronJobsLocal.mockResolvedValueOnce([
-    { source: 'local-jobs' },
-  ])
-  daemonMocks.maybeGetAssistantCronJobViaDaemon.mockResolvedValueOnce({
-    source: 'remote-job',
-  })
-  daemonMocks.maybeGetAssistantCronTargetViaDaemon.mockResolvedValueOnce(null)
-  cronLocalMocks.getAssistantCronJobTargetLocal.mockResolvedValueOnce({
-    source: 'local-target',
-  })
-  daemonMocks.maybeSetAssistantCronTargetViaDaemon.mockResolvedValueOnce({
-    source: 'remote-target-update',
-  })
-  daemonMocks.maybeGetAssistantCronStatusViaDaemon.mockResolvedValueOnce({
-    source: 'remote-status',
-  })
-  daemonMocks.maybeListAssistantCronRunsViaDaemon.mockResolvedValueOnce({
-    jobId: 'job_remote',
-    runs: [{ source: 'remote-run' }],
-  })
-  daemonMocks.maybeProcessDueAssistantCronViaDaemon.mockResolvedValueOnce(null)
-  cronLocalMocks.processDueAssistantCronJobsLocal.mockResolvedValueOnce({
-    source: 'local-process',
-  })
-
-  assert.deepEqual(await listAssistantCronJobs(TEST_VAULT), [
-    { source: 'local-jobs' },
-  ])
-  assert.deepEqual(await getAssistantCronJob(TEST_VAULT, 'job_remote'), {
-    source: 'remote-job',
-  })
-  assert.deepEqual(await getAssistantCronJobTarget(TEST_VAULT, 'job_local'), {
-    source: 'local-target',
-  })
-  assert.deepEqual(
-    await setAssistantCronJobTarget({
-      deliveryTarget: '@remote',
-      job: 'job_remote',
-      vault: TEST_VAULT,
-    }),
-    { source: 'remote-target-update' },
-  )
-  assert.deepEqual(await getAssistantCronStatus(TEST_VAULT), {
-    source: 'remote-status',
-  })
-  assert.deepEqual(
-    await listAssistantCronRuns({
-      job: 'job_remote',
-      vault: TEST_VAULT,
-    }),
-    {
-      jobId: 'job_remote',
-      runs: [{ source: 'remote-run' }],
-    },
-  )
-  assert.deepEqual(
-    await processDueAssistantCronJobs({
-      limit: 2,
-      vault: TEST_VAULT,
-    }),
-    { source: 'local-process' },
-  )
-})
-
-test('assistant automation run loop only uses the daemon for remote-safe inputs', async () => {
-  daemonMocks.maybeRunAssistantAutomationViaDaemon.mockResolvedValueOnce({
-    source: 'remote-run',
-  })
-  storeLocalMocks.readAssistantAutomationStateLocal.mockResolvedValue({
-    autoReply: [
-      {
-        channel: 'linq',
-        enabledAt: '2026-04-23T00:00:00.000Z',
-        eligibleAfter: null,
-      },
-      {
-        channel: 'telegram',
-        enabledAt: '2026-04-23T00:00:00.000Z',
-        eligibleAfter: null,
-      },
-    ],
+test('direct automation removes legacy local Linq state before running and preserves runtime inputs', async () => {
+  const telegram = { channel: 'telegram', enabledAt: '2026-04-23T00:00:00.000Z', eligibleAfter: null }
+  mocks.readAutomation.mockResolvedValue({
+    autoReply: [{ ...telegram, channel: 'linq' }, telegram],
     updatedAt: '2026-04-23T00:00:00.000Z',
   })
-  storeLocalMocks.saveAssistantAutomationStateLocal.mockImplementation(
-    async (_vault, next) => next,
-  )
-  automationEngineMocks.runAssistantAutomationLocal.mockResolvedValueOnce({
-    source: 'local-run',
+  mocks.saveAutomation.mockImplementation(async (_vault, next) => {
+    assert.equal(mocks.run.mock.calls.length, 0)
+    return next
   })
-  automationEngineMocks.runAssistantAutomationLocal.mockResolvedValueOnce({
-    source: 'local-run',
-  })
-
-  assert.deepEqual(
-    await runAssistantAutomation({
-      once: true,
-      requestId: undefined,
-      vault: TEST_VAULT,
-    }),
-    { source: 'remote-run' },
-  )
-  assert.deepEqual(
-    daemonMocks.maybeRunAssistantAutomationViaDaemon.mock.calls[0]?.[0],
-    {
-      allowSelfAuthored: undefined,
-      deliveryDispatchMode: undefined,
-      drainOutbox: undefined,
-      maxPerScan: undefined,
-      once: true,
-      requestId: null,
-      sessionMaxAgeMs: null,
-      startDaemon: undefined,
-      vault: TEST_VAULT,
-    },
-  )
-
-  assert.deepEqual(
-    await runAssistantAutomation({
-      once: true,
-      onEvent: () => undefined,
-      vault: TEST_VAULT,
-    }),
-    { source: 'local-run' },
-  )
-  assert.equal(daemonMocks.maybeRunAssistantAutomationViaDaemon.mock.calls.length, 1)
-  assert.equal(automationEngineMocks.runAssistantAutomationLocal.mock.calls.length, 1)
-  assert.equal(storeLocalMocks.readAssistantAutomationStateLocal.mock.calls.length, 1)
-  assert.deepEqual(storeLocalMocks.saveAssistantAutomationStateLocal.mock.calls[0]?.[0], TEST_VAULT)
-  assert.deepEqual(storeLocalMocks.saveAssistantAutomationStateLocal.mock.calls[0]?.[1], {
-    autoReply: [
-      {
-        channel: 'telegram',
-        enabledAt: '2026-04-23T00:00:00.000Z',
-        eligibleAfter: null,
-      },
-    ],
-    updatedAt: storeLocalMocks.saveAssistantAutomationStateLocal.mock.calls[0]?.[1]?.updatedAt,
-  })
-
-  assert.deepEqual(
-    await runAssistantAutomation({
-      once: true,
-      inputSource: {
-        async listInputCandidates(input) {
-          return {
-            inputs: [],
-            nextCursor: input.afterCursor ?? null,
-          }
-        },
-        async listNewConversationInputs(input) {
-          return {
-            inputs: [],
-            nextCursor: input.afterCursor ?? null,
-          }
-        },
-        async refresh() {
-          return {
-            progressed: false,
-            reason: 'no_new_input',
-          }
-        },
-      },
-      vault: TEST_VAULT,
-    }),
-    { source: 'local-run' },
-  )
-  assert.equal(daemonMocks.maybeRunAssistantAutomationViaDaemon.mock.calls.length, 1)
-  assert.equal(automationEngineMocks.runAssistantAutomationLocal.mock.calls.length, 2)
+  const result = { source: 'local-run' }
+  mocks.run.mockResolvedValue(result)
+  const signal = new AbortController().signal
+  const input = { once: true, onEvent: () => undefined, signal, vault }
+  assert.equal(await runAssistantAutomation(input), result)
+  assert.deepEqual(mocks.saveAutomation.mock.calls[0]?.[1].autoReply, [telegram])
+  assert.deepEqual(mocks.run.mock.calls, [[input]])
 })
 
-test('assistant facade modules expose the package runtime and daemon-aware seams', () => {
-  assert.equal(assistantRuntimeRootFacade.runAssistantChat, runtimeModuleMocks.runAssistantChat)
-  assert.equal(
-    assistantAutomationFacade.runAssistantAutomation,
-    runAssistantAutomation,
-  )
-  assert.equal(
-    assistantAutomationFacade.scanAssistantAutomationOnce,
-    automationEngineMocks.scanAssistantAutomationOnce,
-  )
-  assert.equal(
-    Reflect.has(assistantAutomationFacade, 'scanAssistantAutoReplyOnce'),
-    false,
-  )
-  assert.equal(
-    Reflect.has(assistantAutomationFacade, 'scanAssistantInboxOnce'),
-    false,
-  )
-  assert.equal(
-    Reflect.has(assistantRuntimeRootFacade, 'scanAssistantInboxOnce'),
-    false,
-  )
+test('automation with no legacy local route does not rewrite state', async () => {
+  mocks.readAutomation.mockResolvedValue({ autoReply: [] })
+  await runAssistantAutomation({ once: true, vault })
+  assert.equal(mocks.saveAutomation.mock.calls.length, 0)
+  assert.equal(mocks.run.mock.calls.length, 1)
 })

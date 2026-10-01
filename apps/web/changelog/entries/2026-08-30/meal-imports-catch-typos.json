@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "meal-imports-catch-typos",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Meal imports catch typos before saving",
+    "summary": "When Murph imports a structured meal, unsupported fields now stop the save instead of being silently ignored.",
+    "details": "The recovery result names the supported meal shape without repeating submitted private values. Existing photo and audio field aliases continue to work.",
+    "relevanceTags": ["assistant", "meals", "nutrition", "reliability"],
+    "sourcePullRequests": [2591]
+  }
+}

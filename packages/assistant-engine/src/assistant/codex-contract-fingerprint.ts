@@ -1,18 +1,23 @@
 import { createHash } from 'node:crypto'
 
+import type { AssistantProviderDynamicTool } from './providers/types.js'
+import { withCodexToolInputContract } from '../assistant-codex/tool-input-contract.js'
+
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from './codex-base-instructions.js'
 import { normalizeNullableString } from './shared.js'
 
 export function buildAssistantCodexContractFingerprint(input: {
   developerInstructions: string | null
-  dynamicTools: readonly unknown[]
+  dynamicTools: readonly AssistantProviderDynamicTool[]
   routeFingerprint: string
 }): string {
   return createHash('sha256')
     .update(stableJsonStringify({
       baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
       developerInstructions: normalizeNullableString(input.developerInstructions),
-      dynamicTools: input.dynamicTools,
+      // thread/resume cannot replace tools. Hash exactly the declarations sent at
+      // thread/start so an old unsupplemented thread bootstraps once, then resumes.
+      dynamicTools: input.dynamicTools.map(withCodexToolInputContract),
       routeFingerprint: input.routeFingerprint,
     }))
     .digest('hex')

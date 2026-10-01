@@ -21,6 +21,7 @@ import {
   collectSummaryProviders,
   inferDaySummaryConfidence,
   summarizeMetricsConfidence,
+  qualifySleepSummaryConfidence,
 } from "./wearables/confidence.ts";
 import {
   formatMetricLabel,
@@ -851,7 +852,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
     const spo2 = resolveMetric("spo2", selectSleepMetricCandidates(dateCandidates, "spo2", selectedWindow, sleepWindows), {
       metricFamily: "sleep",
     });
-    const summaryConfidence = summarizeMetricsConfidence([
+    const summaryConfidence = qualifySleepSummaryConfidence(summarizeMetricsConfidence([
       ["sessionMinutes", sessionMinutes],
       ["totalSleepMinutes", totalSleepMinutes],
       ["timeInBedMinutes", timeInBedMinutes],
@@ -869,7 +870,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
     ], {
       missingSummaryNote: "No sleep metrics were available for this date.",
       extraNotes: buildPublicSleepWindowConflictNotes(sleepWindows, selectedWindow),
-    });
+    }), selectedWindow);
     const notes = summarizeSleepNotes({
       summaryConfidence,
       timeInBedMinutes,
@@ -899,6 +900,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
       sleepScore,
       sleepStartAt: windowSelection.selection?.startAt ?? null,
       sleepType: windowSelection.selection?.sleepType ?? (windowSelection.selection?.nap ? "nap" : "unknown"),
+      sleepState: selectedWindow?.sleepState,
       sleepWindowEvidence: sleepWindowEvidence.windows,
       sleepWindowEvidenceOmittedCount: sleepWindowEvidence.omittedCount,
       sleepWindowEvidenceOmittedExactDuplicateCount: sleepWindowEvidence.omittedExactDuplicateCount,
@@ -949,6 +951,7 @@ function buildBoundedSleepWindowEvidence(
       provider: resolveSleepWindowPublicProvider(window),
       recordedAt: window.recordedAt,
       sleepType: window.sleepType ?? (window.nap ? "nap" : "unknown"),
+      sleepState: window.sleepState,
       startAt: window.startAt,
       timeZone: window.timeZone ?? null,
     })),
@@ -1316,7 +1319,10 @@ export interface ProjectedWearableSummaryBundle {
   sourceHealth: ProjectedWearableSourceHealthSummary[];
 }
 
-export function buildWearableSummaryBundleFromDataset(dataset: WearableDataset): WearableSummaryBundle {
+export function buildWearableSummaryBundleFromDataset(
+  dataset: WearableDataset,
+  options: { includeSourceHealth?: boolean } = {},
+): WearableSummaryBundle {
   const activityDays = listWearableActivityDaysFromDataset(dataset);
   const sleepNights = listWearableSleepNightsFromDataset(dataset);
   const recoveryDays = listWearableRecoveryDaysFromDataset(dataset);
@@ -1331,7 +1337,7 @@ export function buildWearableSummaryBundleFromDataset(dataset: WearableDataset):
     bodyStateDays: publicBodyStateDays,
     recoveryDays: publicRecoveryDays,
     sleepNights: publicSleepNights,
-    sourceHealth: buildWearableSourceHealth({
+    sourceHealth: options.includeSourceHealth === false ? [] : buildWearableSourceHealth({
       activityDays: publicActivityDays,
       bodyStateDays: publicBodyStateDays,
       dataset,
@@ -1374,15 +1380,6 @@ const DEFAULT_WEARABLE_DRIFT_SIGNALS: ReadonlyArray<{
   { metric: "leanBodyMassKg", summaryKind: "bodyState" },
   { metric: "waistCircumference", summaryKind: "bodyState" },
 ];
-const WEARABLE_METRIC_ALIAS_FALLBACKS: Readonly<Record<string, WearableMetricKey>> = {
-  "activity-average-heart-rate": "activityAverageHeartRate",
-  "activity-lowest-heart-rate": "minimumHeartRate",
-  "skin-temp": "temperatureDeviation",
-  "skin-temperature": "temperatureDeviation",
-  "session-count": "sessionCount",
-  "session-minutes": "sessionMinutes",
-  "workout-minutes": "sessionMinutes",
-};
 const ACTIVITY_OWNED_WEARABLE_METRIC_ALIASES = new Set([
   "activity-average-heart-rate",
   "activity-lowest-heart-rate",
@@ -1480,7 +1477,6 @@ function resolveWearableMetricRequest(
   const metric =
     resolveWearableCanonicalMetricKey(requestedMetric)
     ?? resolveWearableCanonicalMetricKey(normalized)
-    ?? WEARABLE_METRIC_ALIAS_FALLBACKS[normalized]
     ?? null;
 
   if (!metric) {

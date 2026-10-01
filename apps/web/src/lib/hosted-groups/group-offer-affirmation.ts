@@ -16,11 +16,10 @@ import {
   signalHostedGroupJoinConfirmationRuntimeBestEffort,
 } from "./group-join-confirmation";
 import { acceptHostedGroupDisclosurePermissionReactionTx } from "./group-disclosure-store";
-import { acceptHostedGroupJoinOfferTx } from "./group-store";
+import { acceptHostedGroupJoinOfferTx, type HostedGroupJoinOfferAcceptanceTxResult } from "./group-store";
 import type { HostedGroupOfferChannel } from "./offer-message-binding";
 
 export type HostedGroupOfferAffirmationSkipReason =
-  | "disclosure_grant_limit_reached"
   | "launch_consent_missing"
   | "no_offer_match"
   | "not_a_member"
@@ -56,18 +55,20 @@ export async function acceptHostedGroupOfferAffirmation(input: {
    */
   deferPostCommit?: (run: () => Promise<void>) => void;
   /**
-   * Revalidates, inside the grant transaction, that the provider identity that
-   * tapped still maps to the member being granted. Resolving the binding before
-   * the transaction is not enough: a concurrent relink can move that identity to
-   * another member while this callback waits on the member-row lock, exactly the
-   * race the inbound Telegram message path already guards.
+   * Revalidates, inside the grant transaction and after the canonical
+   * acceptance owner locks group then member, that the provider identity that
+   * tapped still maps to the member being granted. It runs before accepted side
+   * effects or commit, so a concurrent relink rolls back the whole grant.
    */
   assertActorStillBound?: (tx: Prisma.TransactionClient) => Promise<void>;
   /**
    * Lets a provider adapter record terminal handling atomically with the grant
    * it owns. Linq uses this for exact provider-event replay protection.
    */
-  onAcceptedTx?: (tx: Prisma.TransactionClient) => Promise<void>;
+  onAcceptedTx?: (
+    tx: Prisma.TransactionClient,
+    acceptedJoin?: HostedGroupJoinOfferAcceptanceTxResult,
+  ) => Promise<void>;
   channel: HostedGroupOfferChannel;
   kinds: readonly HostedGroupOfferAffirmationKind[];
   memberId: string;
@@ -83,7 +84,6 @@ export async function acceptHostedGroupOfferAffirmation(input: {
     >;
     try {
       disclosureResult = await input.prisma.$transaction(async (tx) => {
-        await input.assertActorStillBound?.(tx);
         const accepted =
           await acceptHostedGroupDisclosurePermissionReactionTx({
             channel: input.channel,
@@ -97,6 +97,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
             tx,
           });
         if (accepted.kind === "accepted") {
+          await input.assertActorStillBound?.(tx);
           await input.onAcceptedTx?.(tx);
         }
         return accepted;
@@ -120,9 +121,6 @@ export async function acceptHostedGroupOfferAffirmation(input: {
     if (disclosureResult.kind === "wrong_thread") {
       return { status: "ignored", reason: "no_offer_match" };
     }
-    if (disclosureResult.kind === "limit_reached") {
-      return { status: "ignored", reason: "disclosure_grant_limit_reached" };
-    }
     if (!input.kinds.includes("join")) {
       return { status: "ignored", reason: "no_offer_match" };
     }
@@ -134,7 +132,6 @@ export async function acceptHostedGroupOfferAffirmation(input: {
   let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
   try {
     result = await input.prisma.$transaction(async (tx) => {
-      await input.assertActorStillBound?.(tx);
       const accepted = await acceptHostedGroupJoinOfferTx({
         channel: input.channel,
         confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
@@ -145,7 +142,8 @@ export async function acceptHostedGroupOfferAffirmation(input: {
           input.threadIdentityLookupKeyReadCandidates,
         tx,
       });
-      await input.onAcceptedTx?.(tx);
+      await input.assertActorStillBound?.(tx);
+      await input.onAcceptedTx?.(tx, accepted);
       return accepted;
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch (error) {

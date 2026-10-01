@@ -480,6 +480,200 @@ function pushDeletionObservation(
   });
 }
 
+function ouraUserId(personalInfo: PlainObject | undefined): string | undefined {
+  return stringId(personalInfo?.id ?? personalInfo?.user_id ?? personalInfo?.userId);
+}
+
+function emitOuraSleep(
+  events: DeviceEventPayload[],
+  evidenceParts: DeviceEvidencePartPayload[],
+  importedAt: string,
+  sleep: PlainObject,
+): void {
+  const sleepId = stringId(sleep.id) ?? `sleep-${events.length + 1}`;
+  const startAt = firstIso(sleep.bedtime_start, sleep.start_datetime, sleep.start_time, sleep.start);
+  const endAt = firstIso(sleep.bedtime_end, sleep.end_datetime, sleep.end_time, sleep.end);
+  const recordedAt =
+    firstIso(sleep.timestamp, sleep.updated_at, sleep.updatedAt, endAt, startAt) ?? importedAt;
+  const occurredAt = startAt ?? recordedAt;
+  const dayKey = firstDayKey(
+    stringId(sleep.day),
+    stringId(sleep.date),
+    stringId(sleep.sleep_date),
+    endAt,
+    recordedAt,
+    occurredAt,
+  );
+  const durationMinutes =
+    minutesBetween(startAt, endAt) ??
+    secondsToMinutes(sleep.time_in_bed) ??
+    secondsToMinutes(sleep.total_sleep_duration);
+  const sleepType = slugify(sleep.type, "sleep");
+  const canonicalSleepType = resolveOuraSleepType(sleep.type);
+  const role = `sleep:${sleepId}`;
+  const version = firstIso(sleep.timestamp, sleep.updated_at, sleep.updatedAt);
+
+  if (sleepType === "deleted") {
+    pushDeletionObservation(events, evidenceParts, importedAt, {
+      resource_type: "sleep",
+      resource_id: sleepId,
+      occurred_at: recordedAt,
+      source_event_type: "sleep.deleted",
+    });
+    return;
+  }
+
+  pushEvidencePart(evidenceParts, createEvidencePart(role, `sleep-${sleepId}.json`, sleep));
+
+  if (sleepType !== "rest" && occurredAt && startAt && endAt && durationMinutes) {
+    events.push(
+      stripUndefined({
+        kind: "sleep_session",
+        occurredAt,
+        recordedAt,
+        dayKey,
+        source: "device",
+        title: sleepType.includes("nap") ? "Oura nap" : "Oura sleep",
+        evidenceRoles: [role],
+        externalRef: makeExternalRef("sleep", sleepId, version),
+        fields: stripUndefined({
+          startAt,
+          endAt,
+          durationMinutes,
+          sleepType: canonicalSleepType,
+        }),
+      }),
+    );
+  }
+
+  emitObservationMetrics(
+    events,
+    {
+      source: sleep,
+      occurredAt,
+      recordedAt,
+      dayKey,
+      observationGrain: "summary",
+      evidenceRoles: [role],
+      externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
+    },
+    OURA_SLEEP_OBSERVATION_METRICS,
+  );
+}
+
+function emitOuraSession(
+  events: DeviceEventPayload[],
+  evidenceParts: DeviceEvidencePartPayload[],
+  importedAt: string,
+  session: PlainObject,
+): void {
+  const sessionId = stringId(session.id) ?? `session-${events.length + 1}`;
+  const startAt = firstIso(session.start_datetime, session.start_time, session.start);
+  const endAt = firstIso(session.end_datetime, session.end_time, session.end);
+  const recordedAt = firstIso(session.timestamp, endAt, startAt) ?? importedAt;
+  const occurredAt = startAt ?? recordedAt;
+  const dayKey = firstDayKey(
+    stringId(session.day),
+    stringId(session.date),
+    occurredAt,
+    recordedAt,
+  );
+  const durationMinutes = minutesBetween(startAt, endAt);
+  const sessionType = slugify(session.type, "session");
+  const role = `session:${sessionId}`;
+  const version = firstIso(session.timestamp, session.updated_at, session.updatedAt);
+
+  pushEvidencePart(evidenceParts, createEvidencePart(role, `session-${sessionId}.json`, session));
+
+  if (occurredAt && startAt && endAt && durationMinutes) {
+    events.push(
+      stripUndefined({
+        kind: "activity_session",
+        occurredAt,
+        recordedAt,
+        dayKey,
+        source: "device",
+        title: trimToLength(`Oura ${sessionType} session`, 160),
+        evidenceRoles: [role],
+        externalRef: makeExternalRef("session", sessionId, version),
+        fields: stripUndefined({
+          activityType: sessionType,
+          durationMinutes,
+          workout: {
+            sourceApp: "oura",
+            sourceWorkoutId: sessionId,
+            startedAt: startAt,
+            endedAt: endAt,
+            sessionNote: `Oura ${sessionType} session`,
+            metrics: buildOuraSessionMetrics(session),
+            exercises: [],
+          },
+        }),
+      }),
+    );
+  }
+}
+
+function emitOuraWorkout(
+  events: DeviceEventPayload[],
+  evidenceParts: DeviceEvidencePartPayload[],
+  importedAt: string,
+  workout: PlainObject,
+): void {
+  const workoutId = stringId(workout.id) ?? `workout-${events.length + 1}`;
+  const startAt = firstIso(workout.start_datetime, workout.start_time, workout.start);
+  const endAt = firstIso(workout.end_datetime, workout.end_time, workout.end);
+  const recordedAt =
+    firstIso(workout.timestamp, workout.updated_at, workout.updatedAt, endAt, startAt) ?? importedAt;
+  const occurredAt = startAt ?? recordedAt;
+  const dayKey = firstDayKey(
+    stringId(workout.day),
+    stringId(workout.date),
+    occurredAt,
+    recordedAt,
+  );
+  const durationMinutes = minutesBetween(startAt, endAt);
+  const activityType = slugify(
+    workout.activity ?? workout.activity_type ?? workout.sport_name ?? workout.sport ?? workout.type,
+    "workout",
+  );
+  const role = `workout:${workoutId}`;
+  const version = firstIso(workout.timestamp, workout.updated_at, workout.updatedAt);
+  const distanceMeters = firstNumber(workout.distance, workout.distance_meter, workout.distance_meters);
+  const distanceKm = distanceMeters !== undefined ? distanceMeters / 1000 : undefined;
+
+  pushEvidencePart(evidenceParts, createEvidencePart(role, `workout-${workoutId}.json`, workout));
+
+  if (occurredAt && startAt && endAt && durationMinutes) {
+    events.push(
+      stripUndefined({
+        kind: "activity_session",
+        occurredAt,
+        recordedAt,
+        dayKey,
+        source: "device",
+        title: trimToLength(`Oura ${activityType}`, 160),
+        evidenceRoles: [role],
+        externalRef: makeExternalRef("workout", workoutId, version),
+        fields: stripUndefined({
+          activityType,
+          durationMinutes,
+          distanceKm,
+          workout: {
+            sourceApp: "oura",
+            sourceWorkoutId: workoutId,
+            startedAt: startAt,
+            endedAt: endAt,
+            sessionNote: `Oura ${activityType}`,
+            metrics: buildOuraWorkoutMetrics(workout),
+            exercises: [],
+          },
+        }),
+      }),
+    );
+  }
+}
+
 export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDeviceBatch {
   const request = asPlainObject(snapshot) ?? {};
   const importedAt = toIso(request.importedAt) ?? new Date().toISOString();
@@ -510,285 +704,54 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     .filter(Boolean) as PlainObject[];
   const events: DeviceEventPayload[] = [];
   const evidenceParts: DeviceEvidencePartPayload[] = [];
-  const accountId =
-    stringId(request.accountId) ?? stringId(personalInfo?.id ?? personalInfo?.user_id ?? personalInfo?.userId);
+  const accountId = stringId(request.accountId) ?? ouraUserId(personalInfo);
 
   pushEvidencePart(evidenceParts, createEvidencePart("personal-info", "personal-info.json", personalInfo));
 
-  for (const activity of dailyActivity) {
-    const activityId = stringId(activity.id) ?? stringId(activity.day) ?? `daily-activity-${events.length + 1}`;
-    const recordedAt = firstIso(activity.timestamp, activity.day) ?? importedAt;
-    const occurredAt = recordedAt;
-    const dayKey = firstDayKey(stringId(activity.day), recordedAt);
-    const role = `daily-activity:${activityId}`;
-    const version = firstIso(activity.timestamp);
+  const dailyResources = [
+    { resourceType: "daily-activity", records: dailyActivity, metrics: OURA_DAILY_ACTIVITY_METRICS },
+    { resourceType: "daily-sleep", records: dailySleep, metrics: OURA_DAILY_SLEEP_METRICS },
+    { resourceType: "daily-readiness", records: dailyReadiness, metrics: OURA_DAILY_READINESS_METRICS },
+    { resourceType: "daily-spo2", records: dailySpO2, metrics: OURA_DAILY_SPO2_METRICS },
+  ];
 
-    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-activity-${activityId}.json`, activity));
+  // Resource order also determines event-count fallback identities.
+  for (const { resourceType, records, metrics } of dailyResources) {
+    for (const record of records) {
+      const resourceId = stringId(record.id) ?? stringId(record.day) ?? `${resourceType}-${events.length + 1}`;
+      const recordedAt = firstIso(record.timestamp, record.day) ?? importedAt;
+      const dayKey = firstDayKey(stringId(record.day), recordedAt);
+      const role = `${resourceType}:${resourceId}`;
+      const version = firstIso(record.timestamp);
 
-    emitObservationMetrics(
-      events,
-      {
-        source: activity,
-        occurredAt,
-        recordedAt,
-        dayKey,
-        observationGrain: "summary",
-        evidenceRoles: [role],
-        externalRef: (facet) => makeExternalRef("daily-activity", activityId, version, facet),
-      },
-      OURA_DAILY_ACTIVITY_METRICS,
-    );
-  }
+      pushEvidencePart(evidenceParts, createEvidencePart(role, `${resourceType}-${resourceId}.json`, record));
 
-  for (const summary of dailySleep) {
-    const summaryId = stringId(summary.id) ?? stringId(summary.day) ?? `daily-sleep-${events.length + 1}`;
-    const recordedAt = firstIso(summary.timestamp, summary.day) ?? importedAt;
-    const occurredAt = recordedAt;
-    const dayKey = firstDayKey(stringId(summary.day), recordedAt);
-    const role = `daily-sleep:${summaryId}`;
-    const version = firstIso(summary.timestamp);
-
-    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-sleep-${summaryId}.json`, summary));
-
-    emitObservationMetrics(
-      events,
-      {
-        source: summary,
-        occurredAt,
-        recordedAt,
-        dayKey,
-        observationGrain: "summary",
-        evidenceRoles: [role],
-        externalRef: (facet) => makeExternalRef("daily-sleep", summaryId, version, facet),
-      },
-      OURA_DAILY_SLEEP_METRICS,
-    );
-  }
-
-  for (const readiness of dailyReadiness) {
-    const readinessId =
-      stringId(readiness.id) ?? stringId(readiness.day) ?? `daily-readiness-${events.length + 1}`;
-    const recordedAt = firstIso(readiness.timestamp, readiness.day) ?? importedAt;
-    const occurredAt = recordedAt;
-    const dayKey = firstDayKey(stringId(readiness.day), recordedAt);
-    const role = `daily-readiness:${readinessId}`;
-    const version = firstIso(readiness.timestamp);
-
-    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-readiness-${readinessId}.json`, readiness));
-
-    emitObservationMetrics(
-      events,
-      {
-        source: readiness,
-        occurredAt,
-        recordedAt,
-        dayKey,
-        observationGrain: "summary",
-        evidenceRoles: [role],
-        externalRef: (facet) => makeExternalRef("daily-readiness", readinessId, version, facet),
-      },
-      OURA_DAILY_READINESS_METRICS,
-    );
-  }
-
-  for (const spo2 of dailySpO2) {
-    const spo2Id = stringId(spo2.id) ?? stringId(spo2.day) ?? `daily-spo2-${events.length + 1}`;
-    const recordedAt = firstIso(spo2.timestamp, spo2.day) ?? importedAt;
-    const occurredAt = recordedAt;
-    const dayKey = firstDayKey(stringId(spo2.day), recordedAt);
-    const role = `daily-spo2:${spo2Id}`;
-    const version = firstIso(spo2.timestamp);
-
-    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-spo2-${spo2Id}.json`, spo2));
-
-    emitObservationMetrics(
-      events,
-      {
-        source: spo2,
-        occurredAt,
-        recordedAt,
-        dayKey,
-        observationGrain: "summary",
-        evidenceRoles: [role],
-        externalRef: (facet) => makeExternalRef("daily-spo2", spo2Id, version, facet),
-      },
-      OURA_DAILY_SPO2_METRICS,
-    );
+      emitObservationMetrics(
+        events,
+        {
+          source: record,
+          occurredAt: recordedAt,
+          recordedAt,
+          dayKey,
+          observationGrain: "summary",
+          evidenceRoles: [role],
+          externalRef: (facet) => makeExternalRef(resourceType, resourceId, version, facet),
+        },
+        metrics,
+      );
+    }
   }
 
   for (const sleep of sleeps) {
-    const sleepId = stringId(sleep.id) ?? `sleep-${events.length + 1}`;
-    const startAt = firstIso(sleep.bedtime_start, sleep.start_datetime, sleep.start_time, sleep.start);
-    const endAt = firstIso(sleep.bedtime_end, sleep.end_datetime, sleep.end_time, sleep.end);
-    const recordedAt =
-      firstIso(sleep.timestamp, sleep.updated_at, sleep.updatedAt, endAt, startAt) ?? importedAt;
-    const occurredAt = startAt ?? recordedAt;
-    const dayKey = firstDayKey(
-      stringId(sleep.day),
-      stringId(sleep.date),
-      stringId(sleep.sleep_date),
-      endAt,
-      recordedAt,
-      occurredAt,
-    );
-    const durationMinutes =
-      minutesBetween(startAt, endAt) ??
-      secondsToMinutes(sleep.time_in_bed) ??
-      secondsToMinutes(sleep.total_sleep_duration);
-    const sleepType = slugify(sleep.type, "sleep");
-    const canonicalSleepType = resolveOuraSleepType(sleep.type);
-    const role = `sleep:${sleepId}`;
-    const version = firstIso(sleep.timestamp, sleep.updated_at, sleep.updatedAt);
-
-    if (sleepType === "deleted") {
-      pushDeletionObservation(events, evidenceParts, importedAt, {
-        resource_type: "sleep",
-        resource_id: sleepId,
-        occurred_at: recordedAt,
-        source_event_type: "sleep.deleted",
-      });
-      continue;
-    }
-
-    pushEvidencePart(evidenceParts, createEvidencePart(role, `sleep-${sleepId}.json`, sleep));
-
-    if (sleepType !== "rest" && occurredAt && startAt && endAt && durationMinutes) {
-      events.push(
-        stripUndefined({
-          kind: "sleep_session",
-          occurredAt,
-          recordedAt,
-          dayKey,
-          source: "device",
-          title: sleepType.includes("nap") ? "Oura nap" : "Oura sleep",
-          evidenceRoles: [role],
-          externalRef: makeExternalRef("sleep", sleepId, version),
-          fields: stripUndefined({
-            startAt,
-            endAt,
-            durationMinutes,
-            sleepType: canonicalSleepType,
-          }),
-        }),
-      );
-    }
-
-    emitObservationMetrics(
-      events,
-      {
-        source: sleep,
-        occurredAt,
-        recordedAt,
-        dayKey,
-        observationGrain: "summary",
-        evidenceRoles: [role],
-        externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
-      },
-      OURA_SLEEP_OBSERVATION_METRICS,
-    );
+    emitOuraSleep(events, evidenceParts, importedAt, sleep);
   }
 
   for (const session of sessions) {
-    const sessionId = stringId(session.id) ?? `session-${events.length + 1}`;
-    const startAt = firstIso(session.start_datetime, session.start_time, session.start);
-    const endAt = firstIso(session.end_datetime, session.end_time, session.end);
-    const recordedAt = firstIso(session.timestamp, endAt, startAt) ?? importedAt;
-    const occurredAt = startAt ?? recordedAt;
-    const dayKey = firstDayKey(
-      stringId(session.day),
-      stringId(session.date),
-      occurredAt,
-      recordedAt,
-    );
-    const durationMinutes = minutesBetween(startAt, endAt);
-    const sessionType = slugify(session.type, "session");
-    const role = `session:${sessionId}`;
-    const version = firstIso(session.timestamp, session.updated_at, session.updatedAt);
-
-    pushEvidencePart(evidenceParts, createEvidencePart(role, `session-${sessionId}.json`, session));
-
-    if (occurredAt && startAt && endAt && durationMinutes) {
-      events.push(
-        stripUndefined({
-          kind: "activity_session",
-          occurredAt,
-          recordedAt,
-          dayKey,
-          source: "device",
-          title: trimToLength(`Oura ${sessionType} session`, 160),
-          evidenceRoles: [role],
-          externalRef: makeExternalRef("session", sessionId, version),
-          fields: stripUndefined({
-            activityType: sessionType,
-            durationMinutes,
-            workout: {
-              sourceApp: "oura",
-              sourceWorkoutId: sessionId,
-              startedAt: startAt,
-              endedAt: endAt,
-              sessionNote: `Oura ${sessionType} session`,
-              metrics: buildOuraSessionMetrics(session),
-              exercises: [],
-            },
-          }),
-        }),
-      );
-    }
+    emitOuraSession(events, evidenceParts, importedAt, session);
   }
 
   for (const workout of workouts) {
-    const workoutId = stringId(workout.id) ?? `workout-${events.length + 1}`;
-    const startAt = firstIso(workout.start_datetime, workout.start_time, workout.start);
-    const endAt = firstIso(workout.end_datetime, workout.end_time, workout.end);
-    const recordedAt =
-      firstIso(workout.timestamp, workout.updated_at, workout.updatedAt, endAt, startAt) ?? importedAt;
-    const occurredAt = startAt ?? recordedAt;
-    const dayKey = firstDayKey(
-      stringId(workout.day),
-      stringId(workout.date),
-      occurredAt,
-      recordedAt,
-    );
-    const durationMinutes = minutesBetween(startAt, endAt);
-    const activityType = slugify(
-      workout.activity ?? workout.activity_type ?? workout.sport_name ?? workout.sport ?? workout.type,
-      "workout",
-    );
-    const role = `workout:${workoutId}`;
-    const version = firstIso(workout.timestamp, workout.updated_at, workout.updatedAt);
-    const distanceMeters = firstNumber(workout.distance, workout.distance_meter, workout.distance_meters);
-    const distanceKm = distanceMeters !== undefined ? distanceMeters / 1000 : undefined;
-
-    pushEvidencePart(evidenceParts, createEvidencePart(role, `workout-${workoutId}.json`, workout));
-
-    if (occurredAt && startAt && endAt && durationMinutes) {
-      events.push(
-        stripUndefined({
-          kind: "activity_session",
-          occurredAt,
-          recordedAt,
-          dayKey,
-          source: "device",
-          title: trimToLength(`Oura ${activityType}`, 160),
-          evidenceRoles: [role],
-          externalRef: makeExternalRef("workout", workoutId, version),
-          fields: stripUndefined({
-            activityType,
-            durationMinutes,
-            distanceKm,
-            workout: {
-              sourceApp: "oura",
-              sourceWorkoutId: workoutId,
-              startedAt: startAt,
-              endedAt: endAt,
-              sessionNote: `Oura ${activityType}`,
-              metrics: buildOuraWorkoutMetrics(workout),
-              exercises: [],
-            },
-          }),
-        }),
-      );
-    }
+    emitOuraWorkout(events, evidenceParts, importedAt, workout);
   }
 
   for (const deletion of deletions) {
@@ -796,7 +759,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
   }
 
   const provenance = stripEmptyObject({
-    ouraUserId: stringId(personalInfo?.id ?? personalInfo?.user_id ?? personalInfo?.userId),
+    ouraUserId: ouraUserId(personalInfo),
     importedSections: {
       personalInfo: Boolean(personalInfo),
       dailyActivity: dailyActivity.length,

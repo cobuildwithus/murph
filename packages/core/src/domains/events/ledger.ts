@@ -14,7 +14,10 @@ import {
   normalizeCanonicalEventLinks,
 } from "../../event-links.ts";
 import { VaultError } from "../../errors.ts";
-import { walkVaultFiles } from "../../fs.ts";
+import {
+  listEventLedgerShardPaths,
+  readEventLedgerShardRecords,
+} from "../../event-ledger-storage.ts";
 import {
   buildEventSpineEnvelope,
   buildEventSpineLifecycle,
@@ -25,7 +28,7 @@ import {
   parseEventSpineEvidence,
   selectLatestEventSpineEntry,
 } from "../../history/event-spine.ts";
-import { readJsonlRecords, toMonthlyShardRelativePath } from "../../jsonl.ts";
+import { toMonthlyShardRelativePath } from "../../jsonl.ts";
 import { withCanonicalWriteLock } from "../../operations/canonical-write-lock.ts";
 import { loadVault } from "../../vault.ts";
 import {
@@ -99,7 +102,9 @@ export interface FindEventByExternalRefInput {
   resourceType: string;
   resourceId: string;
   version?: string;
-  facet?: string;
+  /** null selects the facet-free parent; undefined keeps the existing wildcard lookup. */
+  facet?: string | null;
+  includeDeleted?: boolean;
 }
 
 export interface FindEventsByRawRefsInput {
@@ -182,9 +187,21 @@ function formatZodIssuePath(path: readonly (string | number | symbol)[]): string
 const SUPPORTED_EVENT_KINDS = new Set<string>(EVENT_KINDS);
 
 function normalizeEventId(payload: JsonObject): string | undefined {
-  return normalizeOptionalText(
-    typeof payload.id === "string" ? payload.id : valueAsString(payload.eventId),
-  ) ?? undefined;
+  const value = payload.id !== undefined ? payload.id : payload.eventId;
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) {
+    throw new VaultError(
+      "EVENT_CONTRACT_INVALID",
+      "Event payload requires a valid canonical id when identity is supplied.",
+      { errors: ["$.id: Expected a non-empty canonical event id."] },
+    );
+  }
+
+  return normalized;
 }
 
 function eventSpecificFields(payload: JsonObject): Record<string, unknown> {
@@ -342,84 +359,82 @@ function validateStoredEventRecord(record: JsonObject): EventRecord {
     record,
     "EVENT_CONTRACT_INVALID",
     "Stored event record is invalid.",
+    { stage: "read" },
   );
 }
 
-function externalRefMatches(record: EventRecord, input: FindEventByExternalRefInput): boolean {
-  const externalRef = record.externalRef;
-  if (!externalRef) {
+function externalRefMatches(record: { externalRef?: unknown }, input: FindEventByExternalRefInput): boolean {
+  if (!record.externalRef || typeof record.externalRef !== "object" || Array.isArray(record.externalRef)) {
     return false;
   }
+  const externalRef = record.externalRef as Record<string, unknown>;
 
   return externalRef.system === input.system &&
     externalRef.resourceType === input.resourceType &&
     externalRef.resourceId === input.resourceId &&
     (input.version === undefined || externalRef.version === input.version) &&
-    (input.facet === undefined || externalRef.facet === input.facet);
+    (input.facet === undefined || (input.facet === null ? externalRef.facet === undefined : externalRef.facet === input.facet));
 }
 
 export async function findEventByExternalRef(
   input: FindEventByExternalRefInput,
 ): Promise<EventRecord | null> {
-  const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  return (await findEventsByExternalRefs({ vaultRoot: input.vaultRoot, refs: [input] }))[0] ?? null;
+}
+
+/** Resolve a bounded caller batch with two ledger scans, rather than two per identity. */
+export async function findEventsByExternalRefs(input: {
+  vaultRoot: string;
+  refs: readonly Omit<FindEventByExternalRefInput, "vaultRoot">[];
+}): Promise<Array<EventRecord | null>> {
+  if (input.refs.length === 0) return [];
+  const key = (ref: unknown): string => {
+    if (!ref || typeof ref !== "object" || Array.isArray(ref)) return "";
+    const value = ref as Record<string, unknown>;
+    return JSON.stringify([value.system, value.resourceType, value.resourceId]);
+  };
+  const requests = new Map<string, FindEventByExternalRefInput[]>();
+  for (const ref of input.refs) {
+    const request = { ...ref, vaultRoot: input.vaultRoot };
+    const bucket = requests.get(key(ref)) ?? [];
+    bucket.push(request);
+    requests.set(key(ref), bucket);
+  }
+  const relativePaths = await listEventLedgerShardPaths(input.vaultRoot);
   const candidateIds = new Set<string>();
-
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({
-      vaultRoot: input.vaultRoot,
-      relativePath,
-    });
-
-    for (const rawRecord of records) {
-      const record = validateStoredEventRecord(rawRecord as JsonObject);
-
-      if (externalRefMatches(record, input)) {
-        candidateIds.add(record.id);
+    for (const rawRecord of await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath })) {
+      const candidates = requests.get(key(rawRecord.externalRef)) ?? [];
+      if (candidates.some((request) => externalRefMatches(rawRecord, request))) {
+        candidateIds.add(validateStoredEventRecord(rawRecord as JsonObject).id);
       }
     }
   }
-
-  if (candidateIds.size === 0) {
-    return null;
-  }
-
+  if (candidateIds.size === 0) return input.refs.map(() => null);
   const latestByCandidateId = new Map<string, MatchedEventRecord>();
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({
-      vaultRoot: input.vaultRoot,
-      relativePath,
-    });
-
-    for (const rawRecord of records) {
-      const record = validateStoredEventRecord(rawRecord as JsonObject);
-      if (!candidateIds.has(record.id)) {
-        continue;
-      }
-
-      const entry = { relativePath, record };
-      const latest = latestByCandidateId.get(record.id);
-      if (!latest || compareEventSpineEntries(latest, entry) < 0) {
-        latestByCandidateId.set(record.id, entry);
-      }
+    for (const rawRecord of await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath })) {
+      if (typeof rawRecord.id !== "string" || !candidateIds.has(rawRecord.id)) continue;
+      const entry = { relativePath, record: validateStoredEventRecord(rawRecord as JsonObject) };
+      const latest = latestByCandidateId.get(entry.record.id);
+      if (!latest || compareEventSpineEntries(latest, entry) < 0) latestByCandidateId.set(entry.record.id, entry);
     }
   }
-
-  const matchingLatestEntries = [...latestByCandidateId.values()].filter((entry) =>
-    externalRefMatches(entry.record, input)
-  );
-  const liveMatchingLatestEntries = matchingLatestEntries.filter((entry) =>
-    !isDeletedEventSpineRecord(entry.record)
-  );
-  const latest = selectLatestEventSpineEntry(
-    liveMatchingLatestEntries.length > 0 ? liveMatchingLatestEntries : matchingLatestEntries,
-  );
-  if (!latest || isDeletedEventSpineRecord(latest.record)) {
-    return null;
+  const latestByIdentity = new Map<string, MatchedEventRecord[]>();
+  for (const entry of latestByCandidateId.values()) {
+    const ref = entry.record.externalRef;
+    if (!ref) continue;
+    const bucket = latestByIdentity.get(key(ref)) ?? [];
+    bucket.push(entry);
+    latestByIdentity.set(key(ref), bucket);
   }
-
-  return latest.record;
+  return input.refs.map((ref) => {
+    const matching = (latestByIdentity.get(key(ref)) ?? []).filter((entry) =>
+      externalRefMatches(entry.record, { ...ref, vaultRoot: input.vaultRoot }));
+    const live = matching.filter((entry) => !isDeletedEventSpineRecord(entry.record));
+    const latest = selectLatestEventSpineEntry(live.length > 0 ? live : matching);
+    return !latest || (!ref.includeDeleted && isDeletedEventSpineRecord(latest.record)) ? null : latest.record;
+  });
 }
 
 function rawRefMatches(record: EventRecord, rawRef: string, input: FindEventsByRawRefsInput): boolean {
@@ -438,9 +453,7 @@ export async function findEventsByRawRefs(
     return [];
   }
 
-  const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const relativePaths = await listEventLedgerShardPaths(input.vaultRoot);
   const refIndexesByRawRef = new Map<string, number[]>();
   const attachmentsByRefIndex = input.rawRefs.map(
     () => new Map<string, MatchedEventRecord>(),
@@ -452,7 +465,7 @@ export async function findEventsByRawRefs(
   });
 
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
     for (const rawRecord of records) {
       const record = validateStoredEventRecord(rawRecord as JsonObject);
       for (const rawRef of collectEventRawReferencePaths(record)) {
@@ -479,7 +492,7 @@ export async function findEventsByRawRefs(
 
   const latestByCandidateId = new Map<string, MatchedEventRecord>();
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
     for (const rawRecord of records) {
       const record = validateStoredEventRecord(rawRecord as JsonObject);
       if (!candidateIds.has(record.id)) {
@@ -526,13 +539,11 @@ export async function loadEventLedgerShardsById(
   vaultRoot: string,
   eventId: string,
 ): Promise<LoadedEventLedgerShard[]> {
-  const relativePaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const relativePaths = await listEventLedgerShardPaths(vaultRoot);
   const matches: LoadedEventLedgerShard[] = [];
 
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({
+    const records = await readEventLedgerShardRecords({
       vaultRoot,
       relativePath,
     });
@@ -599,24 +610,19 @@ export async function readEvent(input: ReadEventInput): Promise<ReadEventResult>
 export async function readOwnedEvent(
   input: ReadOwnedEventInput,
 ): Promise<ReadEventResult> {
-  const relativePaths = await walkVaultFiles(
-    input.vaultRoot,
-    VAULT_LAYOUT.eventLedgerDirectory,
-    { extension: ".jsonl" },
-  );
+  const relativePaths = await listEventLedgerShardPaths(input.vaultRoot);
   const candidateIds = new Set<string>();
   const ownerField = input.kind === "document" ? "documentId" : "mealId";
 
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
     for (const rawRecord of records) {
       const candidate = rawRecord as JsonObject;
       if (
         candidate.kind === input.kind
         && candidate[ownerField] === input.ownerId
-        && typeof candidate.id === "string"
       ) {
-        candidateIds.add(candidate.id);
+        candidateIds.add(validateStoredEventRecord(candidate).id);
       }
     }
   }
@@ -629,7 +635,7 @@ export async function readOwnedEvent(
 
   const matchesById = new Map<string, MatchedEventRecord[]>();
   for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
     for (const rawRecord of records) {
       const rawId = (rawRecord as JsonObject).id;
       if (typeof rawId !== "string" || !candidateIds.has(rawId)) {
@@ -770,6 +776,9 @@ async function upsertEventLocked(
     ? buildTypedEventRecord(input.draft, vault.metadata.timezone, lifecycle)
     : buildEventRecord(input.payload, vault.metadata.timezone, lifecycle);
 
+  const existingPlan = await findExistingPlanCreation(input.vaultRoot, eventRecord, suppliedEventId);
+  if (existingPlan) return existingPlan;
+
   const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
 
   return runLoadedCanonicalWrite<UpsertEventResult>({
@@ -798,6 +807,33 @@ async function upsertEventLocked(
       };
     },
   });
+}
+
+async function findExistingPlanCreation(
+  vaultRoot: string,
+  eventRecord: EventRecord,
+  suppliedEventId: string | undefined,
+): Promise<UpsertEventResult | null> {
+  // A retry recovers the canonical write even when source mapping persistence
+  // failed. Updates must target the existing id explicitly.
+  if (suppliedEventId || eventRecord.kind !== "note"
+    || eventRecord.noteType !== "journal-plan" || !eventRecord.externalRef) return null;
+  const existing = await findEventByExternalRef({
+    vaultRoot, ...eventRecord.externalRef, includeDeleted: true,
+  });
+  if (!existing) return null;
+  if (existing.kind !== "note" || existing.noteType !== "journal-plan") {
+    throw new VaultError("EVENT_KIND_MISMATCH", "This source identity already belongs to another event kind.");
+  }
+  if (isDeletedEventSpineRecord(existing)) {
+    throw new VaultError("EVENT_PLAN_DELETED", "This source plan was deleted; do not recreate it without confirming the member's intent.");
+  }
+  return {
+    eventId: existing.id,
+    ledgerFile: toEventLedgerFile(existing.occurredAt),
+    created: false,
+    event: existing,
+  };
 }
 
 export async function deleteEvent(

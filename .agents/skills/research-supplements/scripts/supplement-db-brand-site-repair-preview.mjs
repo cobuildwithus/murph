@@ -776,124 +776,115 @@ function hasLikelyMissingProductActive(row, ingredientRows) {
     return true;
   }
 
-  if (/\b(?:multi[-\s]?vitamins?|multivitamins?|multi[-\s]?minerals?|prenatal|basic\s+nutrients?|one\s+daily)\b/u.test(product) && ingredientRows.length < 6) {
-    return true;
+  for (const [productPattern, requiredIngredients] of PRODUCT_ACTIVE_CHECKS) {
+    if (!productPattern.test(product)) continue;
+    const missingActive = typeof requiredIngredients === "function"
+      ? requiredIngredients(hasAny, ingredientRows, ingredientAmounts, electrolyteMatches)
+      : !hasAny(requiredIngredients);
+    if (missingActive !== undefined) return missingActive;
   }
-  if (/\bb[-\s]?complex\s*#?\d+\b/u.test(product) && ingredientRows.length < 5) {
-    return true;
-  }
-  if (/\bbcaas?\b/u.test(product)) {
-    if (hasAny([/\bbcaas?\b/u, /\bbranched\s+chain\s+amino\s+acids?\b/u])) return false;
-    return !hasAny([/\bleucine\b/u]) || !hasAny([/\bisoleucine\b/u]) || !hasAny([/\bvaline\b/u]);
-  }
-  if (/\bbhbs?\b|\bbeta[-\s]?hydroxy[-\s]?butyrate\b/u.test(product)) {
-    return !hasAny([/\bbhbs?\b/u, /\bbeta[-\s]?hydroxy[-\s]?butyrate\b/u]);
-  }
-  if (/\beaas?\b|\bessential\s+amino/u.test(product)) {
-    if (ingredientRows.length < 5 && !hasAny([/\beaas?\b/u, /\bessential\s+amino/u, /\bamino\s+acid\s+blend\b/u])) return true;
-    return !hasAny([/\beaas?\b/u, /\bessential\s+amino/u, /\bleucine\b/u, /\bisoleucine\b/u, /\bvaline\b/u, /\blysine\b/u, /\bthreonine\b/u, /\btryptophan\b/u, /\bmethionine\b/u, /\bphenylalanine\b/u, /\bhistidine\b/u]);
-  }
-  if (/\b(?:amino|amin\.?o)(?:\s+acid|\s+complex)?\b|\bamino[aá]cido/u.test(product)) {
-    return !hasAny([/\bamino/u, /\bleucine\b/u, /\bisoleucine\b/u, /\bvaline\b/u, /\blysine\b/u, /\bthreonine\b/u, /\btryptophan\b/u, /\btript[oó]fano\b/u, /\bmethionine\b/u, /\bphenylalanine\b/u, /\bhistidine\b/u, /\barginine\b/u, /\bcitrulline\b/u, /\bcitrulina\b/u, /\btaurine\b/u, /\btaurina\b/u, /\bcarnitine\b/u, /\bcarnitina\b/u, /\btyrosine\b/u, /\btirosina\b/u]);
-  }
-  if (/\bprotein\b|\bwhey\b/u.test(product)) {
-    return !hasAny([/\bprotein\b/u, /\bwhey\b/u, /\bcasein\b/u, /\bcollagen\b/u, /\bgelatin\b/u, /\bpea\s+protein\b/u, /\brice\s+protein\b/u, /\bhemp\s+protein\b/u]);
-  }
-  if (/\b(?:mct|medium[-\s]+chain\s+triglycerides?)\b/u.test(product)) {
-    return !hasAny([/\bmct\b/u, /\bmedium[-\s]+chain\s+triglycerides?\b/u]);
-  }
-  if (/\bd-?mannose\b/u.test(product)) {
-    return !hasAny([/\bd-?mannose\b/u]);
-  }
-  if (/\b(?:phosphatidylserine|ps)\b/u.test(product)) {
-    return !hasAny([/\bphosphatidylserine\b/u]);
-  }
-  if (/\bpre[-\s]?workout\b/u.test(product)) {
-    return !hasAny([/\bcaffeine\b/u, /\bcitrulline\b/u, /\bbeta[-\s]?alanine\b/u, /\bcreatine\b/u, /\btyrosine\b/u, /\btaurine\b/u, /\bbetaine\b/u, /\barginine\b/u]);
-  }
-  if (/\belectrolytes?\b|\bhydration\b|\bhydrate\s+electrolytes?\b|\belectrolyte\s+powder\b/u.test(product)) {
-    return new Set(electrolyteMatches).size < 2;
-  }
-  if (/\bcfu\b/u.test(product) && !/\bcfu\b/u.test(ingredientAmounts)) {
-    return true;
-  }
-  if (/\bprobiotics?\b/u.test(product)) {
-    return !hasAny([/\bprobiotics?\b/u, /\blactobacillus\b/u, /\bbifidobacterium\b/u, /\bsaccharomyces\b/u, /\bbacillus\b/u, /\bstreptococcus\b/u]);
-  }
-  if (/\b(?:theanine|l\s+theanine)\b/u.test(product)) return !hasAny([/\btheanine\b/u]);
-  if (/\blactoferrin\b/u.test(product)) return !hasAny([/\blactoferrin\b/u]);
-  if (/\blycopene\b/u.test(product)) return !hasAny([/\blycopene\b/u]);
-  if (/\bpyruvate\b/u.test(product)) return !hasAny([/\bpyruvate\b/u]);
-  if (/\b(?:zeaxanthin|lutein)\b/u.test(product)) return !hasAny([/\bzeaxanthin\b/u, /\blutein\b/u]);
-  if (/\bhyaluronic\b|\bhyaluronate\b/u.test(product)) return !hasAny([/\bhyaluronic\b/u, /\bhyaluronate\b/u]);
-  if (/\b(?:herbs?|urter)\b/u.test(product)) {
-    return !hasAny([/\b(?:herbs?|herbal|root|leaf|flower|fruit|seed|bark|extract|powder|rosemary|rosmarin|paprika|capsicum|curcuma|turmeric|ashwagandh?a|ginseng|echinacea|thistle|garlic)\b/u]);
-  }
-  if (/\boregano\b/u.test(product)) return !hasAny([/\boregano\b/u, /\boriganum\b/u]);
-  if (/\bblack\s+seed\b|\bnigella\b/u.test(product)) return !hasAny([/\bblack\s+seed\b/u, /\bnigella\b/u]);
-  if (/\bsea\s+moss\b/u.test(product)) return !hasAny([/\bsea\s+moss\b/u, /\bchondrus\b/u, /\bgracilaria\b/u]);
-  if (/\bcuramed\b/u.test(product)) return !hasAny([/\bcurcumin\b/u, /\bturmeric\b/u, /\bcurcuma\b/u]);
-  if (/\bmelatonin\b/u.test(product)) return !hasAny([/\bmelatonin\b/u]);
-  if (/\b(?:b-?12|methyl-b-?12)\b/u.test(product)) {
-    return !hasAny([/\b(?:b-?12|cobalamin|methylcobalamin|cyanocobalamin|adenosylcobalamin|hydroxocobalamin)\b/u]);
-  }
-  if (/\bepa\b/u.test(product) && !hasAny([/\bepa\b/u, /\beicosapentaenoic\b/u])) return true;
-  if (/\bdha\b/u.test(product) && !hasAny([/\bdha\b/u, /\bdocosahexaenoic\b/u])) return true;
-  if (/\b(?:omega-?3|dha|epa|fish\s+oil|algae\s+oil)\b/u.test(product)) {
-    return !hasAny([/\b(?:omega-?3|dha|epa|fish\s+oil|algae\s+oil|algal\s+oil|flax(?:seed)?\s+oil|linseed\s+oil)\b/u]);
-  }
-  if (/\bpapaya\s+enzymes?\b|\benzymes?\b/u.test(product)) {
-    return !hasAny([/\b(?:papaya|papain|enzyme|amylase|protease|bromelain|lipase|cellulase|lactase|pepsin)\b/u]);
-  }
-  if (/\b(?:coq10|coq-?10|coenzyme\s+q10|ubiquinol|ubiquinone)\b/u.test(product)) {
-    return !hasAny([/\b(?:coq10|coq-?10|coenzyme\s+q10|ubiquinol|ubiquinone)\b/u]);
-  }
-  if (/\bvitamin\s+c\b/u.test(product)) return !hasAny([/\bvitamin\s+c\b/u, /\bascorb/u]);
-  if (/\bvitamin\s+d3?\b|\bd3\b/u.test(product)) return !hasAny([/\bvitamin\s+d3?\b/u, /\bcholecalciferol\b/u, /\bergocalciferol\b/u]);
-  if (/\bvitamin\s+e\b|\bcomplete\s+e\b/u.test(product)) return !hasAny([/\bvitamin\s+e\b/u, /\btocopherol\b/u, /\btocotrienol\b/u]);
-  if (/\bvitamin\s+k2?\b|\bk2\b/u.test(product)) return !hasAny([/\bvitamin\s+k2?\b/u, /\bmenaquinone\b/u, /\bphytonadione\b/u]);
-  if (/\bpantothenic\s+acid\b|\bvitamin\s+b-?5\b|\bb-?5\b/u.test(product)) return !hasAny([/\bpantothen(?:ic|ate)\b/u, /\bvitamin\s+b-?5\b/u]);
-  if (/\bglucosamine\b/u.test(product)) return !hasAny([/\bglucosamine\b/u]);
-  if (/\bchondroitin\b/u.test(product)) return !hasAny([/\bchondroitin\b/u]);
-  if (/\bcranberry\b/u.test(product)) return !hasAny([/\bcranberry\b/u, /\bvaccinium\s+macrocarpon\b/u]);
-  if (/\bgoldenseal\b/u.test(product)) return !hasAny([/\bgoldenseal\b/u, /\bhydrastis\b/u]);
-  if (/\btriphala\b/u.test(product)) return !hasAny([/\btriphala\b/u, /\bamla\b/u, /\bmyrobalan\b/u]);
-  if (/\b(?:apple\s+cider\s+vinegar|acv)\b/u.test(product)) return !hasAny([/\bapple\s+cider\b/u, /\bvinegar\b/u, /\bacetic\b/u]);
-  if (/\bmilk\s+thistle\b/u.test(product)) return !hasAny([/\bmilk\s+thistle\b/u, /\bsilybum\b/u]);
-  if (/\bturmeric\b|\bcurcumin\b/u.test(product)) return !hasAny([/\bturmeric\b/u, /\bcurcumin\b/u, /\bcurcuma\b/u]);
-  if (/\b(?:saw\s+palmetto|pygeum)\b/u.test(product)) return !hasAny([/\bsaw\s+palmetto\b/u, /\bserenoa\b/u, /\bpygeum\b/u]);
-  if (/\bpower\s*pak\b/u.test(product) && ingredientRows.length < 3) return true;
-  if (/\breacta-?c\b/u.test(product)) return !hasAny([/\bvitamin\s+c\b/u, /\bascorb/u]);
-  if (/\bbiotin\b/u.test(product)) return !hasAny([/\bbiotin\b/u]);
-  if (/\biodine\b/u.test(product)) return !hasAny([/\biodine\b/u, /\biodide\b/u, /\bkelp\b/u]);
-  if (/\bmagnesium\b/u.test(product)) return !hasAny([/\bmagnesium\b/u]);
-  if (/\bzinc\b/u.test(product)) return !hasAny([/\bzinc\b/u]);
-  if (/\biron\b/u.test(product)) return !hasAny([/\biron\b/u, /\bferrous\b/u, /\bferric\b/u]);
-  if (/\bcalcium\b/u.test(product)) return !hasAny([/\bcalcium\b/u]);
-  if (/\bashwagandh?a\b/u.test(product)) return !hasAny([/\bashwagandh?a\b/u, /\bwithania\b/u]);
-  if (/\bgarlic\b/u.test(product)) return !hasAny([/\bgarlic\b/u, /\ballium\b/u]);
-  if (/\belderberry\b/u.test(product)) return !hasAny([/\belderberry\b/u, /\bsambucus\b/u]);
-  if (/\bberberine\b/u.test(product)) return !hasAny([/\bberberine\b/u]);
-  if (/\b(?:alpha[-\s]?lipoic|lipoic\s+acid)\b/u.test(product)) return !hasAny([/\blipoic\b/u]);
-  if (/\brelora\b/u.test(product)) return !hasAny([/\brelora\b/u, /\bmagnolia\b/u, /\bphellodendron\b/u]);
-  if (/\bpsyllium\b/u.test(product)) return !hasAny([/\bpsyllium\b/u, /\bplantago\b/u]);
-  if (/\b(?:lion'?s\s+mane|reishi|chaga|cordyceps|turkey\s+tail|maitake|shiitake)\b/u.test(product)) {
-    return !hasAny([/\bmushroom\b/u, /\breishi\b/u, /\blion'?s\s+mane\b/u, /\bchaga\b/u, /\bcordyceps\b/u, /\bturkey\s+tail\b/u, /\bmaitake\b/u, /\bshiitake\b/u]);
-  }
-  if (/\bmushroom\b/u.test(product)) return !hasAny([/\bmushroom\b/u, /\breishi\b/u, /\blion'?s\s+mane\b/u, /\bchaga\b/u, /\bcordyceps\b/u, /\bturkey\s+tail\b/u, /\bmaitake\b/u, /\bshiitake\b/u]);
-  if (/\bcreatine\b/u.test(product)) return !hasAny([/\bcreatine\b/u]);
-  if (/\bcollagen\b/u.test(product)) return !hasAny([/\bcollagen\b/u, /\bcartilage\b/u, /\bgelatin\b/u, /\beggshell\s+membrane\b/u, /\bprotein\b/u]);
-  if (/\bcarnitine\b|\bcarnitina\b/u.test(product)) return !hasAny([/\bcarnitine\b/u, /\bcarnitina\b/u]);
-  if (/\brhodiola\b/u.test(product)) return !hasAny([/\brhodiola\b/u, /\brosavins?\b/u, /\bsalidroside\b/u]);
-  if (/\bbacopa\b/u.test(product)) return !hasAny([/\bbacopa\b/u, /\bbrahmi\b/u]);
-  if (/\bschi[sz]andra\b/u.test(product)) return !hasAny([/\bschi[sz]andra\b/u]);
-  if (/\bmoducare\b/u.test(product)) return !hasAny([/\b(?:phytosterols?|sterolins?|sterols?)\b/u]);
-  if (/\bturmeric\b|\bcurcumin\b/u.test(product)) return !hasAny([/\bturmeric\b/u, /\bcurcumin\b/u, /\bcurcuma\b/u]);
   if (/\bceylon\s+cinnamon\b/u.test(product) || /^cinnamon\b|\bcinnamon\s+(?:\d|bark|extract|capsules?|tablets?|supplement)\b/u.test(product)) {
     return !hasAny([/\bcinnamon\b/u, /\bcinnamomum\b/u]);
   }
   return false;
 }
+
+// Ordered first-match decisions: false is conclusive; undefined continues to the next rule.
+// Arrays require any matching ingredient; functions handle row-count or combined-active evidence.
+/** @type {Array<[RegExp, RegExp[] | ((hasAny: (patterns: RegExp[]) => boolean, ingredientRows: unknown[], ingredientAmounts: string, electrolyteMatches: string[]) => boolean | undefined)]>} */
+const PRODUCT_ACTIVE_CHECKS = [
+  [/\b(?:multi[-\s]?vitamins?|multivitamins?|multi[-\s]?minerals?|prenatal|basic\s+nutrients?|one\s+daily)\b/u, (_hasAny, ingredientRows) => {
+    return ingredientRows.length < 6 ? true : undefined;
+  }],
+  [/\bb[-\s]?complex\s*#?\d+\b/u, (_hasAny, ingredientRows) => {
+    return ingredientRows.length < 5 ? true : undefined;
+  }],
+  [/\bbcaas?\b/u, (hasAny) => {
+    if (hasAny([/\bbcaas?\b/u, /\bbranched\s+chain\s+amino\s+acids?\b/u])) return false;
+    return !hasAny([/\bleucine\b/u]) || !hasAny([/\bisoleucine\b/u]) || !hasAny([/\bvaline\b/u]);
+  }],
+  [/\bbhbs?\b|\bbeta[-\s]?hydroxy[-\s]?butyrate\b/u, [/\bbhbs?\b/u, /\bbeta[-\s]?hydroxy[-\s]?butyrate\b/u]],
+  [/\beaas?\b|\bessential\s+amino/u, (hasAny, ingredientRows) => {
+    if (ingredientRows.length < 5 && !hasAny([/\beaas?\b/u, /\bessential\s+amino/u, /\bamino\s+acid\s+blend\b/u])) return true;
+    return !hasAny([/\beaas?\b/u, /\bessential\s+amino/u, /\bleucine\b/u, /\bisoleucine\b/u, /\bvaline\b/u, /\blysine\b/u, /\bthreonine\b/u, /\btryptophan\b/u, /\bmethionine\b/u, /\bphenylalanine\b/u, /\bhistidine\b/u]);
+  }],
+  [/\b(?:amino|amin\.?o)(?:\s+acid|\s+complex)?\b|\bamino[aá]cido/u, [/\bamino/u, /\bleucine\b/u, /\bisoleucine\b/u, /\bvaline\b/u, /\blysine\b/u, /\bthreonine\b/u, /\btryptophan\b/u, /\btript[oó]fano\b/u, /\bmethionine\b/u, /\bphenylalanine\b/u, /\bhistidine\b/u, /\barginine\b/u, /\bcitrulline\b/u, /\bcitrulina\b/u, /\btaurine\b/u, /\btaurina\b/u, /\bcarnitine\b/u, /\bcarnitina\b/u, /\btyrosine\b/u, /\btirosina\b/u]],
+  [/\bprotein\b|\bwhey\b/u, [/\bprotein\b/u, /\bwhey\b/u, /\bcasein\b/u, /\bcollagen\b/u, /\bgelatin\b/u, /\bpea\s+protein\b/u, /\brice\s+protein\b/u, /\bhemp\s+protein\b/u]],
+  [/\b(?:mct|medium[-\s]+chain\s+triglycerides?)\b/u, [/\bmct\b/u, /\bmedium[-\s]+chain\s+triglycerides?\b/u]],
+  [/\bd-?mannose\b/u, [/\bd-?mannose\b/u]],
+  [/\b(?:phosphatidylserine|ps)\b/u, [/\bphosphatidylserine\b/u]],
+  [/\bpre[-\s]?workout\b/u, [/\bcaffeine\b/u, /\bcitrulline\b/u, /\bbeta[-\s]?alanine\b/u, /\bcreatine\b/u, /\btyrosine\b/u, /\btaurine\b/u, /\bbetaine\b/u, /\barginine\b/u]],
+  [/\belectrolytes?\b|\bhydration\b|\bhydrate\s+electrolytes?\b|\belectrolyte\s+powder\b/u, (_hasAny, _ingredientRows, _ingredientAmounts, electrolyteMatches) => {
+    return new Set(electrolyteMatches).size < 2;
+  }],
+  [/\bcfu\b/u, (_hasAny, _ingredientRows, ingredientAmounts) => {
+    return !/\bcfu\b/u.test(ingredientAmounts) ? true : undefined;
+  }],
+  [/\bprobiotics?\b/u, [/\bprobiotics?\b/u, /\blactobacillus\b/u, /\bbifidobacterium\b/u, /\bsaccharomyces\b/u, /\bbacillus\b/u, /\bstreptococcus\b/u]],
+  [/\b(?:theanine|l\s+theanine)\b/u, [/\btheanine\b/u]],
+  [/\blactoferrin\b/u, [/\blactoferrin\b/u]],
+  [/\blycopene\b/u, [/\blycopene\b/u]],
+  [/\bpyruvate\b/u, [/\bpyruvate\b/u]],
+  [/\b(?:zeaxanthin|lutein)\b/u, [/\bzeaxanthin\b/u, /\blutein\b/u]],
+  [/\bhyaluronic\b|\bhyaluronate\b/u, [/\bhyaluronic\b/u, /\bhyaluronate\b/u]],
+  [/\b(?:herbs?|urter)\b/u, [/\b(?:herbs?|herbal|root|leaf|flower|fruit|seed|bark|extract|powder|rosemary|rosmarin|paprika|capsicum|curcuma|turmeric|ashwagandh?a|ginseng|echinacea|thistle|garlic)\b/u]],
+  [/\boregano\b/u, [/\boregano\b/u, /\boriganum\b/u]],
+  [/\bblack\s+seed\b|\bnigella\b/u, [/\bblack\s+seed\b/u, /\bnigella\b/u]],
+  [/\bsea\s+moss\b/u, [/\bsea\s+moss\b/u, /\bchondrus\b/u, /\bgracilaria\b/u]],
+  [/\bcuramed\b/u, [/\bcurcumin\b/u, /\bturmeric\b/u, /\bcurcuma\b/u]],
+  [/\bmelatonin\b/u, [/\bmelatonin\b/u]],
+  [/\b(?:b-?12|methyl-b-?12)\b/u, [/\b(?:b-?12|cobalamin|methylcobalamin|cyanocobalamin|adenosylcobalamin|hydroxocobalamin)\b/u]],
+  [/\bepa\b/u, (hasAny) => {
+    return !hasAny([/\bepa\b/u, /\beicosapentaenoic\b/u]) ? true : undefined;
+  }],
+  [/\bdha\b/u, (hasAny) => {
+    return !hasAny([/\bdha\b/u, /\bdocosahexaenoic\b/u]) ? true : undefined;
+  }],
+  [/\b(?:omega-?3|dha|epa|fish\s+oil|algae\s+oil)\b/u, [/\b(?:omega-?3|dha|epa|fish\s+oil|algae\s+oil|algal\s+oil|flax(?:seed)?\s+oil|linseed\s+oil)\b/u]],
+  [/\bpapaya\s+enzymes?\b|\benzymes?\b/u, [/\b(?:papaya|papain|enzyme|amylase|protease|bromelain|lipase|cellulase|lactase|pepsin)\b/u]],
+  [/\b(?:coq10|coq-?10|coenzyme\s+q10|ubiquinol|ubiquinone)\b/u, [/\b(?:coq10|coq-?10|coenzyme\s+q10|ubiquinol|ubiquinone)\b/u]],
+  [/\bvitamin\s+c\b/u, [/\bvitamin\s+c\b/u, /\bascorb/u]],
+  [/\bvitamin\s+d3?\b|\bd3\b/u, [/\bvitamin\s+d3?\b/u, /\bcholecalciferol\b/u, /\bergocalciferol\b/u]],
+  [/\bvitamin\s+e\b|\bcomplete\s+e\b/u, [/\bvitamin\s+e\b/u, /\btocopherol\b/u, /\btocotrienol\b/u]],
+  [/\bvitamin\s+k2?\b|\bk2\b/u, [/\bvitamin\s+k2?\b/u, /\bmenaquinone\b/u, /\bphytonadione\b/u]],
+  [/\bpantothenic\s+acid\b|\bvitamin\s+b-?5\b|\bb-?5\b/u, [/\bpantothen(?:ic|ate)\b/u, /\bvitamin\s+b-?5\b/u]],
+  [/\bglucosamine\b/u, [/\bglucosamine\b/u]],
+  [/\bchondroitin\b/u, [/\bchondroitin\b/u]],
+  [/\bcranberry\b/u, [/\bcranberry\b/u, /\bvaccinium\s+macrocarpon\b/u]],
+  [/\bgoldenseal\b/u, [/\bgoldenseal\b/u, /\bhydrastis\b/u]],
+  [/\btriphala\b/u, [/\btriphala\b/u, /\bamla\b/u, /\bmyrobalan\b/u]],
+  [/\b(?:apple\s+cider\s+vinegar|acv)\b/u, [/\bapple\s+cider\b/u, /\bvinegar\b/u, /\bacetic\b/u]],
+  [/\bmilk\s+thistle\b/u, [/\bmilk\s+thistle\b/u, /\bsilybum\b/u]],
+  [/\bturmeric\b|\bcurcumin\b/u, [/\bturmeric\b/u, /\bcurcumin\b/u, /\bcurcuma\b/u]],
+  [/\b(?:saw\s+palmetto|pygeum)\b/u, [/\bsaw\s+palmetto\b/u, /\bserenoa\b/u, /\bpygeum\b/u]],
+  [/\bpower\s*pak\b/u, (_hasAny, ingredientRows) => {
+    return ingredientRows.length < 3 ? true : undefined;
+  }],
+  [/\breacta-?c\b/u, [/\bvitamin\s+c\b/u, /\bascorb/u]],
+  [/\bbiotin\b/u, [/\bbiotin\b/u]],
+  [/\biodine\b/u, [/\biodine\b/u, /\biodide\b/u, /\bkelp\b/u]],
+  [/\bmagnesium\b/u, [/\bmagnesium\b/u]],
+  [/\bzinc\b/u, [/\bzinc\b/u]],
+  [/\biron\b/u, [/\biron\b/u, /\bferrous\b/u, /\bferric\b/u]],
+  [/\bcalcium\b/u, [/\bcalcium\b/u]],
+  [/\bashwagandh?a\b/u, [/\bashwagandh?a\b/u, /\bwithania\b/u]],
+  [/\bgarlic\b/u, [/\bgarlic\b/u, /\ballium\b/u]],
+  [/\belderberry\b/u, [/\belderberry\b/u, /\bsambucus\b/u]],
+  [/\bberberine\b/u, [/\bberberine\b/u]],
+  [/\b(?:alpha[-\s]?lipoic|lipoic\s+acid)\b/u, [/\blipoic\b/u]],
+  [/\brelora\b/u, [/\brelora\b/u, /\bmagnolia\b/u, /\bphellodendron\b/u]],
+  [/\bpsyllium\b/u, [/\bpsyllium\b/u, /\bplantago\b/u]],
+  [/\b(?:lion'?s\s+mane|reishi|chaga|cordyceps|turkey\s+tail|maitake|shiitake)\b/u, [/\bmushroom\b/u, /\breishi\b/u, /\blion'?s\s+mane\b/u, /\bchaga\b/u, /\bcordyceps\b/u, /\bturkey\s+tail\b/u, /\bmaitake\b/u, /\bshiitake\b/u]],
+  [/\bmushroom\b/u, [/\bmushroom\b/u, /\breishi\b/u, /\blion'?s\s+mane\b/u, /\bchaga\b/u, /\bcordyceps\b/u, /\bturkey\s+tail\b/u, /\bmaitake\b/u, /\bshiitake\b/u]],
+  [/\bcreatine\b/u, [/\bcreatine\b/u]],
+  [/\bcollagen\b/u, [/\bcollagen\b/u, /\bcartilage\b/u, /\bgelatin\b/u, /\beggshell\s+membrane\b/u, /\bprotein\b/u]],
+  [/\bcarnitine\b|\bcarnitina\b/u, [/\bcarnitine\b/u, /\bcarnitina\b/u]],
+  [/\brhodiola\b/u, [/\brhodiola\b/u, /\brosavins?\b/u, /\bsalidroside\b/u]],
+  [/\bbacopa\b/u, [/\bbacopa\b/u, /\bbrahmi\b/u]],
+  [/\bschi[sz]andra\b/u, [/\bschi[sz]andra\b/u]],
+  [/\bmoducare\b/u, [/\b(?:phytosterols?|sterolins?|sterols?)\b/u]],
+  [/\bturmeric\b|\bcurcumin\b/u, [/\bturmeric\b/u, /\bcurcumin\b/u, /\bcurcuma\b/u]],
+];
 
 function hasImplausibleParsedIngredientAmount(row) {
   const name = activeSearchText(row?.name);

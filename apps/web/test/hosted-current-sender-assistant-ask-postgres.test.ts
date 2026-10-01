@@ -25,8 +25,11 @@ import {
   requestHostedGroupCurrentSenderAssistantAsk,
 } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
 import {
+  HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION,
   readHostedMailboxWakeByItemId,
 } from "@/src/lib/hosted-mailbox/store";
+import { runHostedControlPlaneRetentionCleanup } from "@/src/lib/hosted-retention/cleanup";
+import { checkpointHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 import {
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -49,6 +52,139 @@ if (runPostgresProof && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl)
 describe.skipIf(!runPostgresProof)(
   "current-sender Assistant Ask privacy with PostgreSQL",
   () => {
+    it("retains only unresolved current-sender content until settlement or the privacy deadline", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const now = new Date();
+      const fixtures: HostedCurrentSenderAssistantAskFixture[] = [];
+
+      try {
+        const recoverable = await seedHostedCurrentSenderAssistantAskFixture({
+          now,
+          prisma,
+          question: "Murph, ask my Murph about my synthetic recovery?",
+        });
+        const abandoned = await seedHostedCurrentSenderAssistantAskFixture({
+          now,
+          prisma,
+          question: "Murph, ask my Murph about my synthetic sleep?",
+        });
+        fixtures.push(recoverable, abandoned);
+
+        const recoverableRequestId =
+          createHostedGroupCurrentSenderAssistantAskRequestId({
+            groupRuntimeMemberId: recoverable.groupRuntimeMemberId,
+            originAssistantInputId: recoverable.assistantInputId,
+          });
+        const abandonedRequestId =
+          createHostedGroupCurrentSenderAssistantAskRequestId({
+            groupRuntimeMemberId: abandoned.groupRuntimeMemberId,
+            originAssistantInputId: abandoned.assistantInputId,
+          });
+        for (const [fixture, requestId] of [
+          [recoverable, recoverableRequestId],
+          [abandoned, abandonedRequestId],
+        ] as const) {
+          await expect(requestHostedGroupCurrentSenderAssistantAsk({
+            audience: "group",
+            groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+            mode: "new",
+            now,
+            origin: fixture.origin,
+            prisma,
+          })).resolves.toMatchObject({
+            mailboxWake: { mailboxItemId: requestId },
+            result: { status: "accepted" },
+          });
+        }
+
+        const recoverableRequest = await prisma.hostedMailboxItem
+          .findUniqueOrThrow({ where: { id: recoverableRequestId } });
+        const abandonedRequest = await prisma.hostedMailboxItem
+          .findUniqueOrThrow({ where: { id: abandonedRequestId } });
+        expect(recoverableRequest.retentionDisposition).toBe(
+          HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION,
+        );
+        expect(abandonedRequest.retentionDisposition).toBe(
+          HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION,
+        );
+
+        const expiredAt = new Date(now.getTime() + 11 * 60 * 1_000);
+        await runHostedControlPlaneRetentionCleanup({
+          now: expiredAt,
+          prisma,
+        });
+        await expect(prisma.hostedMailboxItem.findMany({
+          orderBy: { id: "asc" },
+          select: { contentRetiredAt: true, id: true },
+          where: { id: { in: [recoverableRequestId, abandonedRequestId] } },
+        })).resolves.toEqual([
+          expect.objectContaining({ contentRetiredAt: null }),
+          expect.objectContaining({ contentRetiredAt: null }),
+        ]);
+
+        await expect(handleHostedRuntimeAssistantAskControl({
+          boundRuntimeMemberId: recoverable.senderMemberId,
+          now: expiredAt,
+          prisma,
+          request: { action: "prepare", requestId: recoverableRequestId },
+        })).resolves.toMatchObject({
+          response: { action: "prepare", status: "already_completed" },
+        });
+        const recoverableWorkspace = await prisma.hostedWorkspace
+          .findUniqueOrThrow({ where: { userId: recoverable.senderMemberId } });
+        await checkpointHostedWorkspace({
+          checkpointedAt: expiredAt,
+          expectedVersion: recoverableWorkspace.version,
+          prisma,
+          reason: "idle_shutdown",
+          redactedStatusJson: {
+            hostedMailboxSystemHandledThroughSeq:
+              recoverableRequest.laneSeq.toString(),
+          },
+          snapshotRef: null,
+          userId: recoverable.senderMemberId,
+        });
+        const settledCleanupAt = new Date(expiredAt.getTime() + 1_000);
+        await runHostedControlPlaneRetentionCleanup({
+          now: settledCleanupAt,
+          prisma,
+        });
+        await expect(prisma.hostedMailboxItem.findUniqueOrThrow({
+          select: { contentRetiredAt: true, retentionDisposition: true },
+          where: { id: recoverableRequestId },
+        })).resolves.toEqual({
+          contentRetiredAt: settledCleanupAt,
+          retentionDisposition: null,
+        });
+
+        const privacyDeadline = new Date(
+          abandonedRequest.createdAt.getTime() + 14 * 24 * 60 * 60 * 1_000,
+        );
+        await runHostedControlPlaneRetentionCleanup({
+          now: privacyDeadline,
+          prisma,
+        });
+        await expect(handleHostedRuntimeAssistantAskControl({
+          boundRuntimeMemberId: abandoned.senderMemberId,
+          now: privacyDeadline,
+          prisma,
+          request: { action: "prepare", requestId: abandonedRequestId },
+        })).resolves.toEqual({
+          mailboxWake: null,
+          response: {
+            action: "prepare",
+            status: "terminal",
+            terminalReason: "content_expired",
+          },
+        });
+      } finally {
+        for (const fixture of fixtures) {
+          await deleteHostedCurrentSenderAssistantAskFixture({ fixture, prisma });
+        }
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
     it("binds a mixed-sender batch and preserves its group terminal across personal access loss", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
       const now = new Date();

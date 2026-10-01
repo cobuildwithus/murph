@@ -131,6 +131,20 @@ const NARROW_FOUR_COLUMN_CARD: CompactTablePresentationCardV1 = {
   footer: null,
 };
 
+const WORKOUT_COMPARISON_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Workout set comparison",
+  subtitle: null,
+  rowHeader: "Workout",
+  columns: ["Set 1", "Set 2", "Set 3"],
+  rows: [
+    { label: "Previous Workout", values: ["–", "20 lb × 8", "–"] },
+    { label: "Current Workout", values: ["25 lb × 8", "25 lb × 8", "–"] },
+  ],
+  footer: null,
+};
+
 function getMaximumStackedCard(
   columnCount: number,
 ): CompactTablePresentationCardV1 {
@@ -221,6 +235,20 @@ test("real-font route keeps a fitting four-column eight-row table compact", asyn
     card: NARROW_FOUR_COLUMN_CARD,
   });
   assert.deepEqual([image.width, image.height], [1_200, 1_046]);
+
+  const bounds = findNonBackgroundBounds(image);
+  assert.ok(bounds !== null);
+  assert.ok(bounds.left >= 20);
+  assert.ok(bounds.right <= 1_155);
+  assert.ok(bounds.bottom <= image.height - 40);
+});
+
+test("real-font route keeps a short workout comparison compact", async () => {
+  const image = await renderCard({
+    schemaVersion: 3,
+    card: WORKOUT_COMPARISON_CARD,
+  });
+  assert.deepEqual([image.width, image.height], [1_200, 488]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);

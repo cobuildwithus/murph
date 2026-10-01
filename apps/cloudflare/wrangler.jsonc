@@ -3,7 +3,7 @@
   "name": "murph-hosted",
   "main": "src/index.ts",
   "compatibility_date": "2026-03-27",
-  "compatibility_flags": ["nodejs_compat", "containers_pid_namespace"],
+  "compatibility_flags": ["nodejs_compat", "containers_pid_namespace", "enable_request_signal"],
   "placement": {
     "mode": "smart"
   },
@@ -18,8 +18,21 @@
         "disk_mb": 6000
       },
       "max_instances": 1000,
-      "rollout_active_grace_period": 300,
+      "rollout_active_grace_period": 0,
       "rollout_step_percentage": [10, 25, 50, 100],
+      "ssh": { "enabled": false }
+    },
+    {
+      "class_name": "NextRunnerContainer",
+      "image": "../../Dockerfile.cloudflare-hosted-runner",
+      "image_build_context": ".",
+      "instance_type": {
+        "vcpu": 2,
+        "memory_mib": 6144,
+        "disk_mb": 6000
+      },
+      "max_instances": 0,
+      "rollout_active_grace_period": 0,
       "ssh": { "enabled": false }
     },
     {
@@ -35,14 +48,37 @@
       "rollout_active_grace_period": 0,
       "rollout_step_percentage": [100],
       "ssh": { "enabled": false }
+    },
+    {
+      "class_name": "StandbyRunnerContainer",
+      "image": "../../Dockerfile.cloudflare-hosted-runner",
+      "image_build_context": ".",
+      "instance_type": {
+        "vcpu": 2,
+        "memory_mib": 6144,
+        "disk_mb": 6000
+      },
+      // Fresh-install default. Existing fleets must reserve legacy capacity
+      // until both persisted legacy references and running instances drain.
+      "max_instances": 0,
+      "constraints": {
+        "regions": ["ENAM"]
+      },
+      "rollout_active_grace_period": 0,
+      "ssh": { "enabled": false }
+    },
+    {
+      "class_name": "SmallRunnerContainer",
+      "image": "../../Dockerfile.cloudflare-hosted-runner",
+      "image_build_context": ".",
+      "instance_type": { "vcpu": 2, "memory_mib": 6144, "disk_mb": 6000 },
+      "max_instances": 0,
+      "rollout_active_grace_period": 0,
+      "ssh": { "enabled": false }
     }
   ],
   "durable_objects": {
     "bindings": [
-      {
-        "name": "USER_RUNNER",
-        "class_name": "UserRunnerDurableObject"
-      },
       {
         "name": "DATABASE_HEALTH_MONITOR",
         "class_name": "DatabaseHealthDurableObject"
@@ -52,13 +88,30 @@
         "class_name": "DeviceWebhookQueueHealthDurableObject"
       },
       {
+        "name": "OPENAI_AUTHORIZATION_ALERT_MONITOR",
+        "class_name": "OpenAiAuthorizationAlertDurableObject"
+      },
+      {
         "name": "RUNNER_CONTAINER",
         "class_name": "RunnerContainer"
       },
       {
+        "name": "NEXT_RUNNER_CONTAINER",
+        "class_name": "NextRunnerContainer"
+      },
+      {
         "name": "RUNNER_CONTAINER_SMOKE",
         "class_name": "DeploySmokeRunnerContainer"
-      }
+      },
+      {
+        "name": "STANDBY_COORDINATOR",
+        "class_name": "StandbyRunnerCoordinatorDurableObject"
+      },
+      {
+        "name": "STANDBY_RUNNER_CONTAINER",
+        "class_name": "StandbyRunnerContainer"
+      },
+      { "name": "SMALL_RUNNER_CONTAINER", "class_name": "SmallRunnerContainer" }
     ]
   },
   "version_metadata": {
@@ -84,6 +137,29 @@
     {
       "tag": "v5",
       "new_sqlite_classes": ["DeviceWebhookQueueHealthDurableObject"]
+    },
+    {
+      "tag": "v6",
+      "new_sqlite_classes": ["OpenAiAuthorizationAlertDurableObject"]
+    },
+    {
+      "tag": "v7",
+      "new_sqlite_classes": [
+        "StandbyRunnerCoordinatorDurableObject",
+        "StandbyRunnerContainer"
+      ]
+    },
+    {
+      "tag": "v8",
+      "new_sqlite_classes": ["NextRunnerContainer"]
+    },
+    {
+      "tag": "v9",
+      "new_sqlite_classes": ["SmallRunnerContainer"]
+    },
+    {
+      "tag": "v10",
+      "deleted_classes": ["UserRunnerDurableObject"]
     }
   ],
   "triggers": {
@@ -159,6 +235,8 @@
   // overrides live in GitHub `production` environment variables — check
   // `gh variable list --env production` before assuming a value here is live.
   "vars": {
+    "HOSTED_EXECUTION_STANDBY_MODE": "off",
+    "HOSTED_EXECUTION_STANDBY_TARGET": "2",
     "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION": "projects/.../cryptoKeyVersions/1",
     "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
     "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID": "cloudflare-automation:v1",

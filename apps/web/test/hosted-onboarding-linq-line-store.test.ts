@@ -19,6 +19,7 @@ import {
   readHostedLinqReceiptCorrelatedRecoveryLineTx,
   syncHostedLinqConfiguredLinesTx,
   upsertHostedLinqLineForPhoneTx,
+  HOSTED_LINQ_INVENTORY_FRESHNESS_MAX_AGE_MS,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
   readHostedLinqLinePhoneNumberByLookupKey,
@@ -189,6 +190,8 @@ describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
     }
     const findUnique = vi.fn().mockResolvedValue({
       phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
+      providerInventoryConfirmedAt: new Date(),
+      providerPhoneNumberId: "provider-line-1",
     });
 
     await expect(readHostedLinqLinePhoneNumberByLookupKey({
@@ -199,9 +202,54 @@ describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
     })).resolves.toBe(phoneNumber);
 
     expect(findUnique).toHaveBeenCalledWith({
-      select: { phoneNumberEncrypted: true },
+      select: {
+        phoneNumberEncrypted: true,
+        providerInventoryConfirmedAt: true,
+        providerPhoneNumberId: true,
+      },
       where: { phoneNumberLookupKey },
     });
+  });
+
+  it("fails closed when provider inventory no longer confirms ownership", async () => {
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
+    });
+    const phoneNumber = "+15550100001";
+    const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
+    if (!phoneNumberLookupKey) {
+      throw new Error("Expected a hosted phone lookup key for the test line.");
+    }
+    const phoneNumberEncrypted = encryptHostedLinqLinePhoneNumber(phoneNumber);
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce({
+        phoneNumberEncrypted,
+        providerInventoryConfirmedAt: new Date(),
+        providerPhoneNumberId: null,
+      })
+      .mockResolvedValueOnce({
+        phoneNumberEncrypted,
+        providerInventoryConfirmedAt: null,
+        providerPhoneNumberId: "provider-line-1",
+      })
+      .mockResolvedValueOnce({
+        phoneNumberEncrypted,
+        providerInventoryConfirmedAt: new Date(
+          Date.now() - HOSTED_LINQ_INVENTORY_FRESHNESS_MAX_AGE_MS - 60_000,
+        ),
+        providerPhoneNumberId: "provider-line-1",
+      });
+    const prisma = {
+      hostedLinqLine: { findUnique },
+    } as never;
+
+    for (let index = 0; index < 3; index += 1) {
+      await expect(readHostedLinqLinePhoneNumberByLookupKey({
+        phoneNumberLookupKey,
+        prisma,
+      })).resolves.toBeNull();
+    }
   });
 
   it("fails closed for absent keys, missing rows, and mismatched lines", async () => {
@@ -213,6 +261,8 @@ describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValue({
         phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber("+15550100001"),
+        providerInventoryConfirmedAt: new Date(),
+        providerPhoneNumberId: "provider-line-1",
       });
     const prisma = {
       hostedLinqLine: { findUnique },
@@ -247,6 +297,8 @@ describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
         hostedLinqLine: {
           findUnique: vi.fn().mockResolvedValue({
             phoneNumberEncrypted: "malformed-envelope",
+            providerInventoryConfirmedAt: new Date(),
+            providerPhoneNumberId: "provider-line-1",
           }),
         },
       } as never,
@@ -797,7 +849,6 @@ describe("syncHostedLinqConfiguredLinesTx", () => {
     const phoneNumbers = ["+15550100002", "+1 (555) 010-0001"];
 
     await syncHostedLinqConfiguredLinesTx({
-      activeMemberLimit: 250,
       observedAt: new Date("2026-06-30T12:00:00.000Z"),
       phoneNumbers,
       prisma: { $transaction: transaction } as never,
@@ -821,7 +872,6 @@ describe("syncHostedLinqConfiguredLinesTx", () => {
     expect(query.values).toEqual(expect.arrayContaining([
       "*** 0001",
       "*** 0002",
-      250,
     ]));
     expect(JSON.stringify(query.values)).not.toContain("+1555010000");
   });
@@ -834,7 +884,6 @@ describe("syncHostedLinqConfiguredLinesTx", () => {
     const transaction = vi.fn();
 
     await expect(syncHostedLinqConfiguredLinesTx({
-      activeMemberLimit: null,
       phoneNumbers: ["not-a-phone"],
       prisma: { $transaction: transaction } as never,
     })).rejects.toThrow(/valid phone number/u);
@@ -897,7 +946,7 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
     expect(transactionClient.hostedLinqLine.upsert).toHaveBeenCalledTimes(1);
   });
 
-  it("updates an existing legacy lookup-key row and bootstraps missing configured caps", async () => {
+  it("updates an existing legacy lookup-key row without a second configured-line write", async () => {
     restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
       entries: { v1: TEST_KEYRING_ENTRIES.v1 },
@@ -943,7 +992,6 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
 
     await expect(
       upsertHostedLinqLineForPhoneTx({
-        activeMemberLimit: 250,
         observedAt,
         phoneNumber,
         prisma,
@@ -971,16 +1019,7 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
         source: "configured",
       }),
     }));
-    expect(update.mock.calls[0]?.[0].data).not.toHaveProperty("activeMemberLimit");
-    expect(updateMany).toHaveBeenCalledWith({
-      where: {
-        activeMemberLimit: null,
-        phoneNumberLookupKey: legacyLookupKey,
-      },
-      data: {
-        activeMemberLimit: 250,
-      },
-    });
+    expect(updateMany).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
   });
 });
@@ -1013,7 +1052,6 @@ function buildAssignableLineRow(
   }> = {},
 ) {
   return {
-    activeMemberLimit: null,
     assignmentWeight: 100,
     maxNewConversationsPerDay: null,
     phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),

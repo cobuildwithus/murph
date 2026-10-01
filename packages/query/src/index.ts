@@ -36,6 +36,7 @@ export {
   listExperiments,
   listJournalEntries,
   listProtocols,
+  lookupCanonicalEntityById,
   lookupEntityById,
 } from "./model.ts";
 export {
@@ -47,6 +48,9 @@ export {
   hashCanonicalQuerySources,
   isCanonicalQuerySourcePath,
   listCanonicalSourceManifest,
+  readCanonicalEntityFamilySource,
+  readVaultMetadataSource,
+  resolveCanonicalEntityInFamily,
 } from "./vault-source.ts";
 export {
   listCanonicalObservationMetricEntries,
@@ -57,6 +61,12 @@ export type {
   CanonicalQuerySourceHash,
   QuerySourceManifestEntry,
 } from "./vault-source.ts";
+export {
+  QUERY_SOURCE_INVALID_CODE,
+  QueryVaultSourceError,
+  type QuerySourceIssue,
+  type QueryVaultSourceErrorDetails,
+} from "./source-errors.ts";
 export type {
   EntityFilter,
   ExperimentFilter,
@@ -65,6 +75,7 @@ export type {
   VaultEntitiesByFamily,
   VaultReadModel,
 } from "./model.ts";
+export { compareCanonicalEntities } from "./canonical-entities.ts";
 export type {
   CanonicalEntity,
   CanonicalEntityFamily,
@@ -98,11 +109,18 @@ export type {
   AutomationQueryRecord,
 } from "./automation.ts";
 export {
+  deriveVaultRecordIdentity,
   describeLookupConstraint,
   ID_FAMILY_REGISTRY,
   inferIdEntityKind,
   isQueryableLookupId,
 } from "./id-families.ts";
+export {
+  isDefaultProjectedEventRecord,
+  isDefaultProjectedQueryEntity,
+  isDisplayGradeObservation,
+  isSearchIndexedQueryEntity,
+} from "./query-visibility.ts";
 export {
   buildOverviewMetrics,
   isActiveOverviewExperimentStatus,
@@ -122,13 +140,27 @@ export {
   buildPersonalPatternReport,
   buildPersonalPatternReportFromWearableBundle,
   emptyPersonalPatternReport,
+  parsePersonalPatternVocabulary,
+  PERSONAL_PATTERN_VOCABULARY_SLUG,
 } from "./personal-patterns.ts";
+export { buildJournalView, emptyJournalView } from "./journal-view.ts";
+export type {
+  JournalDay,
+  JournalEvent,
+  JournalRecord,
+  JournalView,
+} from "./journal-view.ts";
 export type {
   PersonalPatternCell,
+  PersonalPatternClassification,
   PersonalPatternFactor,
+  PersonalPatternGrade,
+  PersonalPatternIcon,
   PersonalPatternOutcome,
   PersonalPatternReport,
   PersonalPatternStage,
+  PersonalPatternVocabulary,
+  PersonalPatternVocabularyConcept,
 } from "./personal-patterns.ts";
 export {
   buildSharedGroupWeeklyMembers,
@@ -412,6 +444,7 @@ export {
   summarizeKnowledgeBody,
 } from "./knowledge-model.ts";
 export {
+  KNOWLEDGE_READ_RECOVERY_ACTION,
   knowledgeGetResultSchema,
   knowledgeGraphSearchHitSchema,
   knowledgeGraphSearchResultSchema,
@@ -424,6 +457,8 @@ export {
   knowledgePageMetadataSchema,
   knowledgePageReferenceSchema,
   knowledgePageSchema,
+  knowledgeReadDegradationSchema,
+  knowledgeReadIssueCodeSchema,
   knowledgeSearchHitSchema,
   knowledgeSearchResultSchema,
   knowledgeUpsertResultSchema,
@@ -441,6 +476,8 @@ export type {
   KnowledgePage,
   KnowledgePageMetadata,
   KnowledgePageReference,
+  KnowledgeReadDegradation,
+  KnowledgeReadIssueCode,
   KnowledgeSearchHit,
   KnowledgeSearchResult,
   KnowledgeUpsertResult,
@@ -468,6 +505,15 @@ export async function listCanonicalEntities(
 ): Promise<CanonicalEntity[]> {
   const mod = await import("./query-projection.ts");
   return mod.listCanonicalEntitiesRuntime(vaultRoot, filters);
+}
+
+/** Event-only listing: reuse a fresh index, otherwise read the locked family. */
+export async function listCanonicalEventEntities(
+  vaultRoot: string,
+  filters: Pick<QueryCanonicalEntityFilters, "kinds" | "from" | "to"> = {},
+): Promise<CanonicalEntity[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.listCanonicalEventEntitiesRuntime(vaultRoot, filters);
 }
 
 export async function listMetricPointsBatch(
@@ -644,3 +690,10 @@ export async function summarizeWearableSourceHealthRuntime(
 }
 
 export * from "./scheduled-logs.ts";
+
+export { resolveMealNutritionGoals, type MealNutritionGoalContext, type NutritionTargetResolution } from "./meal-nutrition-goals.ts";
+
+export async function readExperimentQuerySource(vaultRoot: string) {
+  const mod = await import("./experiment-query-source.ts");
+  return mod.readExperimentQuerySource(vaultRoot);
+}

@@ -1,4 +1,5 @@
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   MAPBOX_GEOCODING_API_VERSION,
   MAPBOX_SEARCH_BOX_API_VERSION,
@@ -14,7 +15,10 @@ import {
   type MapboxSearchBoxResponse,
   type ResolvedRoutePoint,
 } from './mapbox-route-contracts.js'
-import { fetchMapboxJson } from './mapbox-route-client.js'
+import {
+  createMapboxResponseInvalidError,
+  fetchMapboxJson,
+} from './mapbox-route-client.js'
 
 const coordinateLiteralPattern =
   /^\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*,\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*$/u
@@ -120,7 +124,15 @@ async function resolveTextRoutePoint(
     }
   }
 
-  throw firstMiss ?? new Error(`Mapbox could not resolve the ${input.role}.`)
+  if (firstMiss) {
+    throw new VaultCliError(
+      'route_point_unresolved',
+      `Mapbox could not resolve the ${input.role}.`,
+      { retryable: false },
+    )
+  }
+
+  throw createMapboxResponseInvalidError()
 }
 
 function buildCoordinatePoint(
@@ -175,9 +187,8 @@ async function geocodeRoutePoint(
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs,
     url,
-    requestLabel: `${input.role} geocoding`,
   })
-  const feature = payload.features?.[0]
+  const feature = readFirstMapboxFeature(payload)
 
   if (!feature) {
     throw new MapboxRoutePointLookupMissError(`Mapbox could not geocode the ${input.role}.`)
@@ -216,9 +227,8 @@ async function searchBoxRoutePoint(
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs,
     url,
-    requestLabel: `${input.role} search box`,
   })
-  const feature = payload.features?.[0]
+  const feature = readFirstMapboxFeature(payload)
 
   if (!feature) {
     throw new MapboxRoutePointLookupMissError(
@@ -229,6 +239,25 @@ async function searchBoxRoutePoint(
   return buildResolvedFeaturePoint(feature, input, 'search-box-query')
 }
 
+function readFirstMapboxFeature(
+  payload: MapboxGeocodingResponse | MapboxSearchBoxResponse,
+): MapboxLocationFeature | null {
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    (payload.features !== undefined && !Array.isArray(payload.features))
+  ) {
+    throw createMapboxResponseInvalidError()
+  }
+
+  const feature = payload.features?.[0]
+  if (feature !== undefined && (!feature || typeof feature !== 'object')) {
+    throw createMapboxResponseInvalidError()
+  }
+
+  return feature ?? null
+}
+
 function buildResolvedFeaturePoint(
   feature: MapboxLocationFeature,
   input: RoutePointLookupOptions,
@@ -236,7 +265,7 @@ function buildResolvedFeaturePoint(
 ): ResolvedRoutePoint {
   const featureCoordinates = readFeatureCoordinates(feature)
   if (!featureCoordinates) {
-    throw new Error(`Mapbox returned an unusable coordinate for the ${input.role}.`)
+    throw createMapboxResponseInvalidError()
   }
 
   const routablePoint = selectRoutablePoint(feature, input.profile)

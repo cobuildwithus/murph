@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "less-repeated-reply-preparation",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less work before your reply",
+    "summary": "Murph skips repeated preparation work before responding in individual and group chats.",
+    "details": "Reply preparation and runtime startup reuse information already read while checking current permissions.",
+    "relevanceTags": ["conversations", "reliability"],
+    "sourcePullRequests": [3601]
+  }
+}

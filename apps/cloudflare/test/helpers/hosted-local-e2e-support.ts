@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createServer as createNetServer } from "node:net";
 import { expect } from "vitest";
 import {
-  listMurphDynamicToolNames,
+  resolveMurphDynamicTools,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -141,7 +141,7 @@ export function scopeHostedLocalAssistantProviderResponse(
 
 /**
  * Scripts a sandboxed shell execution through the real Codex app-server.
- * Codex 0.147.0 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
+ * Codex 0.158.0 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
  * advertises the unified `exec_command` tool on Linux; bump the tool name here
  * if a Codex upgrade changes the advertised exec tool.
  */
@@ -234,13 +234,16 @@ export function expectAdvertisedMurphDynamicTools(
   requests: readonly HostedLocalAssistantProviderStubRequest[],
   options: {
     analyzeVideoAvailable?: boolean;
+    calendarLinkAvailable?: boolean;
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     exerciseRoutineResponseCardAvailable?: boolean;
+    groupAvailable?: boolean;
     groupRoomModelAvailable?: boolean;
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
     pendingVaultFilesAvailable?: boolean;
+    physicalNoteRecoveryAvailable?: boolean;
     physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
@@ -253,127 +256,36 @@ export function expectAdvertisedMurphDynamicTools(
   const lastResponsesRequest = [...requests]
     .reverse()
     .find((request) => request.url === "/v1/responses");
-  const expectedToolNames = listMurphDynamicToolNames()
-    .filter((name) => {
-      if (
-        options.analyzeVideoAvailable !== true
-        && name === "murph.analyze_video"
-      ) {
-        return false;
-      }
-
-      if (
-        options.computerToolsAvailable !== true
-        && name.startsWith("murph.computer_")
-      ) {
-        return false;
-      }
-
-      if (
-        options.connectedAppsAvailable !== true
-        && name.startsWith("murph.connected_apps_")
-      ) {
-        return false;
-      }
-
-      if (
-        options.messageTargetingAvailable !== true
-        && (
-          name === "murph.react_to_message"
-          || name === "murph.select_reply_target"
-        )
-      ) {
-        return false;
-      }
-
-      if (
-        options.groupRoomModelAvailable !== true
-        && name === "murph.group_room_model"
-      ) {
-        return false;
-      }
-
-      if (
-        options.imessageContactAvailable !== true
-        && name === "murph.imessage_contact"
-      ) {
-        return false;
-      }
-
-      if (
-        options.physicalNotesAvailable !== true
-        && name === "murph.send_physical_note"
-      ) {
-        return false;
-      }
-
-      if (
-        options.progressUpdatesAvailable === false
-        && name === "murph.send_progress_update"
-      ) {
-        return false;
-      }
-
-      if (
-        options.responseCardAvailable !== true
-        && name === "murph.attach_response_card"
-      ) {
-        return false;
-      }
-
-      if (
-        options.exerciseRoutineResponseCardAvailable !== true
-        && name === "murph.attach_exercise_routine_card"
-      ) {
-        return false;
-      }
-
-      if (
-        options.telegramRichContentResponseCardAvailable !== true
-        && name === "murph.attach_telegram_rich_content"
-      ) {
-        return false;
-      }
-
-      if (
-        options.pendingVaultFilesAvailable !== true
-        && name === "murph.pending_vault_files"
-      ) {
-        return false;
-      }
-
-      if (
-        options.vaultFileSendAvailable !== true
-        && name === "murph.send_vault_file"
-      ) {
-        return false;
-      }
-
-      if (
-        options.phoneCallsAvailable !== true
-        && name === "murph.create_phone_call"
-      ) {
-        return false;
-      }
-
-      if (
-        options.askGrokAvailable !== true
-        && name === "murph.ask_grok"
-      ) {
-        return false;
-      }
-
-      return true;
-    })
-    .map((name) => name.replace(/^murph\./u, ""))
-    .sort();
+  const expectedTools = resolveMurphDynamicTools({
+    ...options,
+    assistantStyleSettingsAvailable: true,
+    assistantConfigurationAvailable: true,
+    automationAvailable: true,
+    deviceAvailable: true,
+    clinicalRecordsConnectLinkAvailable: true,
+    familyPlanAvailable: true,
+    labsAvailable: true,
+    planUsageAvailable: true,
+    pollsAvailable: true,
+    subscriptionAvailable: true,
+    personalizationAvailable: true,
+    productFeedbackAvailable: true,
+    voiceMemoGenerationAvailable: true,
+    phoneCallStatusAvailable: true,
+    phoneCallStopAvailable: true,
+    conversationAttachmentsAvailable: true,
+    responseCardsAvailable: options.responseCardAvailable,
+    exerciseRoutineResponseCardsAvailable: options.exerciseRoutineResponseCardAvailable,
+    telegramRichContentResponseCardsAvailable: options.telegramRichContentResponseCardAvailable,
+  });
   expect(lastResponsesRequest).toBeDefined();
   const advertisement = readMurphDynamicToolAdvertisement(
     lastResponsesRequest!.body,
   );
-  const expectedAdvertisedToolNames = advertisement.codeMode
-    ? expectedToolNames.filter((name) => name !== "automation" && name !== "group")
-    : expectedToolNames;
+  const expectedAdvertisedToolNames = expectedTools
+    .filter((tool) => !advertisement.codeMode || !("deferLoading" in tool && tool.deferLoading))
+    .map((tool) => tool.name)
+    .sort();
   expect(advertisement.toolNames.sort()).toEqual(expectedAdvertisedToolNames);
   if (advertisement.codeMode) {
     expect(advertisement.deferredDiscoveryAvailable).toBe(true);
@@ -489,8 +401,12 @@ export interface HostedLocalAssistantProviderStubState {
 
 export interface HostedLocalAssistantProviderStubRequest {
   body: string;
+  fixtureMatch?: "scoped" | "unscoped" | "none" | "compaction" | "not_applicable";
   method: string;
   observedAtEpochMs?: number;
+  queuedResponseCount?: number;
+  requestKind?: "turn" | "prewarm" | "compaction" | "memory" | "unknown";
+  responseStatus?: number | null;
   url: string;
 }
 
@@ -515,6 +431,23 @@ export function readHostedLocalAssistantProviderToolOutputs(
     )
     .map((item) => readAssistantProviderToolOutputText(item?.output))
     .filter((output): output is string => output !== null);
+}
+
+export function hostedLocalAssistantProviderLatestUserInputContains(
+  request: HostedLocalAssistantProviderStubRequest,
+  text: string,
+): boolean {
+  const input = parseJsonObject(request.body)?.input;
+  if (!Array.isArray(input)) {
+    return false;
+  }
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    const item = input[index];
+    if (isRecord(item) && item.role === "user") {
+      return readAssistantProviderToolOutputText(item.content)?.includes(text) ?? false;
+    }
+  }
+  return false;
 }
 
 export type HostedLocalAssistantProviderStubUsageMode =
@@ -557,9 +490,11 @@ export function buildHostedAssistantNotificationDecisionResponse(input: {
 function dequeueAssistantProviderResponse(input: {
   requestBody?: string;
   requestBodyJson?: unknown;
+  requestRecord: HostedLocalAssistantProviderStubRequest;
   fallbackResponseText?: string | null;
   responseState?: HostedLocalAssistantProviderStubState;
 }): HostedLocalAssistantProviderScriptedResponsePayload | null {
+  input.requestRecord.fixtureMatch = "none";
   const queuedResponses = input.responseState?.queuedResponses;
   if (!queuedResponses || queuedResponses.length === 0) {
     return input.fallbackResponseText ?? null;
@@ -587,6 +522,9 @@ function dequeueAssistantProviderResponse(input: {
     return input.fallbackResponseText ?? null;
   }
 
+  input.requestRecord.fixtureMatch = isScopedAssistantProviderScriptedResponse(scriptedResponse)
+    ? "scoped"
+    : "unscoped";
   return readHostedLocalAssistantProviderResponsePayload(scriptedResponse);
 }
 
@@ -1043,12 +981,19 @@ export async function startAssistantProviderStubServer(input: {
     }
 
     const body = await readRequestBody(request);
-    const requestRecord = {
+    const requestRecord: HostedLocalAssistantProviderStubRequest = {
       body,
+      fixtureMatch: "not_applicable",
       method: requestMethod,
       observedAtEpochMs,
+      queuedResponseCount: input.responseState?.queuedResponses.length ?? 0,
+      requestKind: readAssistantProviderRequestKind(body, request.headers["x-codex-turn-metadata"]),
+      responseStatus: null,
       url: requestUrl,
-    } satisfies HostedLocalAssistantProviderStubRequest;
+    };
+    response.once("finish", () => {
+      requestRecord.responseStatus = response.statusCode;
+    });
     input.onRequest?.(requestRecord);
     if (process.env.MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB === "1") {
       console.log(
@@ -1076,6 +1021,7 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
+      requestRecord.fixtureMatch = "compaction";
       writeJsonResponse(response, 200, {
         output: [
           {
@@ -1100,6 +1046,7 @@ export async function startAssistantProviderStubServer(input: {
       responseSequence += 1;
       const responseId = `resp_stub_hosted_local_e2e_${responseSequence}`;
       if (isContextCompactionResponsesRequest(bodyJson)) {
+        requestRecord.fixtureMatch = "compaction";
         const usage = buildAssistantProviderStubUsage({
           body,
           responseText: hostedLocalContextCompactionSummary,
@@ -1136,6 +1083,7 @@ export async function startAssistantProviderStubServer(input: {
         fallbackResponseText: input.fallbackResponseText,
         requestBody: body,
         requestBodyJson: bodyJson,
+        requestRecord,
         responseState: input.responseState,
       });
       if (!scriptedResponse) {
@@ -1249,6 +1197,7 @@ export async function startAssistantProviderStubServer(input: {
         fallbackResponseText: input.fallbackResponseText,
         requestBody: body,
         requestBodyJson: bodyJson,
+        requestRecord,
         responseState: input.responseState,
       });
       if (!scriptedResponse) {
@@ -1621,6 +1570,21 @@ function readAssistantProviderToolOutputText(value: unknown): string | null {
     .map((item) => isRecord(item) ? item.text : null)
     .filter((text): text is string => typeof text === "string");
   return textItems.length > 0 ? textItems.join("\n") : null;
+}
+
+function readAssistantProviderRequestKind(
+  body: string,
+  header: string | string[] | undefined,
+): NonNullable<HostedLocalAssistantProviderStubRequest["requestKind"]> {
+  const metadata = parseJsonObject(body)?.client_metadata;
+  const turnMetadata = isRecord(metadata) ? metadata["x-codex-turn-metadata"] : null;
+  for (const value of [turnMetadata, header]) {
+    const kind = typeof value === "string" ? parseJsonObject(value)?.request_kind : null;
+    if (kind === "turn" || kind === "prewarm" || kind === "compaction" || kind === "memory") {
+      return kind;
+    }
+  }
+  return "unknown";
 }
 
 function isContextCompactionResponsesRequest(value: Record<string, unknown>): boolean {

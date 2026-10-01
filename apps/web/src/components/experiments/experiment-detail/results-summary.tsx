@@ -1,5 +1,6 @@
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { Skeleton } from "@/src/components/ui/skeleton";
+import { formatExperimentStatisticLabel } from "@/src/lib/experiments/experiment-detail";
 import type {
   ExperimentRunProjection,
   ExperimentSchedule,
@@ -38,7 +39,7 @@ export function ResultsSummary({
             Before and during the experiment
           </h3>
           <p className="text-sm/6 text-muted-foreground">
-            Daily measurements and declared window summaries, where available.
+            Dated results may summarize multiple measurements. Comparisons use each outcome’s declared statistic.
           </p>
         </div>
         {outcomeConfidence ? (
@@ -76,6 +77,8 @@ export function ResultsSummary({
                   label={signal.label}
                   value={signal.value}
                   unit={signal.unit}
+                  valueLabel={signal.statistic ? `Window ${formatExperimentStatisticLabel(signal.statistic)}` : undefined}
+                  latestResult={signal.latestResult}
                   delta={signal.delta}
                   direction={signal.direction}
                   sentiment={signal.sentiment}

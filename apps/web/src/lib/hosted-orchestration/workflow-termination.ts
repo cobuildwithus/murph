@@ -42,6 +42,7 @@ export interface HostedRuntimeWorkflowTerminationBestEffortResult {
 
 export async function terminateHostedUserRuntimeWorkflowBestEffort(input: {
   reason: string;
+  timeoutMs?: number;
   userId: string;
 }): Promise<HostedRuntimeWorkflowTerminationBestEffortResult> {
   try {
@@ -64,9 +65,16 @@ export async function terminateHostedUserRuntimeWorkflowBestEffort(input: {
 
 async function terminateHostedUserRuntimeWorkflow(input: {
   reason: string;
+  timeoutMs?: number;
   userId: string;
 }): Promise<HostedRuntimeWorkflowTerminationBestEffortResult> {
-  const temporal = await createHostedRuntimeTemporalTerminationConnection();
+  const timeoutMs = normalizeHostedRuntimeWorkflowTerminationTimeoutMs(
+    input.timeoutMs,
+  );
+  const deadlineEpochMs = Date.now() + timeoutMs;
+  const temporal = await createHostedRuntimeTemporalTerminationConnection(
+    deadlineEpochMs,
+  );
   if (!temporal) {
     return {
       configured: false,
@@ -79,10 +87,15 @@ async function terminateHostedUserRuntimeWorkflow(input: {
   try {
     const workflowId = hostedUserRuntimeWorkflowId(input.userId);
     try {
+      const timeoutMs = remainingHostedRuntimeWorkflowTerminationMs(
+        deadlineEpochMs,
+      );
+      const termination = temporal.client.workflow
+        .getHandle(workflowId)
+        .terminate(input.reason.trim() || undefined);
       await withHostedRuntimeWorkflowTerminationTimeout(
-        temporal.client.workflow
-          .getHandle(workflowId)
-          .terminate(input.reason.trim() || undefined),
+        termination,
+        timeoutMs,
       );
     } catch (error) {
       if (error instanceof WorkflowNotFoundError) {
@@ -107,17 +120,22 @@ async function terminateHostedUserRuntimeWorkflow(input: {
   }
 }
 
-async function createHostedRuntimeTemporalTerminationConnection(): Promise<
-  HostedRuntimeTemporalTerminationConnection | null
-> {
+async function createHostedRuntimeTemporalTerminationConnection(
+  deadlineEpochMs: number,
+): Promise<HostedRuntimeTemporalTerminationConnection | null> {
   const environment = readHostedRuntimeTemporalEnvironment();
   if (!environment.address) {
     return null;
   }
 
-  const connectionPromise = Connection.connect(buildConnectionOptions(environment));
+  const timeoutMs = remainingHostedRuntimeWorkflowTerminationMs(deadlineEpochMs);
+  const connectionPromise = Connection.connect(buildConnectionOptions(
+    environment,
+    timeoutMs,
+  ));
   const connection = await withHostedRuntimeWorkflowTerminationTimeout(
     connectionPromise,
+    timeoutMs,
     {
       onLateResolve: (lateConnection) => {
         void lateConnection.close().catch(() => undefined);
@@ -136,6 +154,7 @@ async function createHostedRuntimeTemporalTerminationConnection(): Promise<
 
 function buildConnectionOptions(
   environment: HostedRuntimeTemporalEnvironment,
+  timeoutMs: number,
 ): ConnectionOptions {
   if (!environment.address) {
     throw new TypeError("HOSTED_TEMPORAL_ADDRESS must be configured.");
@@ -143,7 +162,7 @@ function buildConnectionOptions(
 
   const options: ConnectionOptions = {
     address: environment.address,
-    connectTimeout: HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS,
+    connectTimeout: timeoutMs,
     tls: environment.tls,
   };
   if (environment.apiKey) {
@@ -163,6 +182,7 @@ function safeHostedRuntimeWorkflowTerminationErrorCode(error: unknown): string {
 
 function withHostedRuntimeWorkflowTerminationTimeout<T>(
   operation: Promise<T>,
+  timeoutMs: number,
   options: {
     onLateResolve?: (value: T) => void;
   } = {},
@@ -172,7 +192,7 @@ function withHostedRuntimeWorkflowTerminationTimeout<T>(
     const timeout = setTimeout(() => {
       timedOut = true;
       reject(new HostedRuntimeWorkflowTerminationTimeoutError());
-    }, HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS);
+    }, timeoutMs);
 
     operation.then(
       (value) => {
@@ -192,6 +212,28 @@ function withHostedRuntimeWorkflowTerminationTimeout<T>(
       },
     );
   });
+}
+
+function normalizeHostedRuntimeWorkflowTerminationTimeoutMs(
+  timeoutMs: number | undefined,
+): number {
+  if (timeoutMs === undefined) {
+    return HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS;
+  }
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new TypeError("Hosted runtime workflow termination timeout is invalid.");
+  }
+  return timeoutMs;
+}
+
+function remainingHostedRuntimeWorkflowTerminationMs(
+  deadlineEpochMs: number,
+): number {
+  const remainingMs = deadlineEpochMs - Date.now();
+  if (remainingMs <= 0) {
+    throw new HostedRuntimeWorkflowTerminationTimeoutError();
+  }
+  return remainingMs;
 }
 
 class HostedRuntimeWorkflowTerminationTimeoutError extends Error {

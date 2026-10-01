@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import {
   beforeEach,
   describe,
@@ -8,7 +9,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   ensureRuntimeProcessing: vi.fn(),
-  prewarmRuntimeShell: vi.fn(),
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(async () => ({ matchedCount: 1, recorded: true })),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   recordHostedIngressAcceptedFromMailboxItem: vi.fn(async () => undefined),
   recordHostedIngressDirectEnsureTiming: vi.fn(async () => ({
@@ -30,6 +31,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery: mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
   recordHostedIngressAcceptedFromMailboxItem:
     mocks.recordHostedIngressAcceptedFromMailboxItem,
   recordHostedIngressDirectEnsureTiming:
@@ -41,9 +43,6 @@ vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
 import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "@/src/lib/hosted-onboarding/webhook-service-wake";
-import {
-  startHostedRuntimeShellPrewarmBestEffort,
-} from "@/src/lib/hosted-execution/direct-runtime-wake";
 
 const response = {
   ignored: false,
@@ -57,6 +56,8 @@ type DirectEnsureInput = {
     & {
       directEnsureRequestStartedAtEpochMs: number;
       directEnsureResponseReceivedAtEpochMs: number;
+      directEnsureAuthDurationMs?: number;
+      directEnsureHandlerDurationMs?: number;
       orchestrationAttemptId: string;
       tokenAcquiredAtEpochMs: number;
       tokenAcquireStartedAtEpochMs: number;
@@ -97,9 +98,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       recorded: true,
       unmatchedCount: 0,
     });
-    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
-      signalAccepted: true,
-      workflowId: "hosted-user-runtime:member_123",
+    mocks.signalHostedMailboxAppendRuntime.mockImplementation(async (input: { onSignalStarted?: () => void }) => {
+      input.onSignalStarted?.();
+      return { signalAccepted: true, workflowId: "hosted-user-runtime:member_123" };
     });
     mocks.ensureRuntimeProcessing.mockResolvedValue({
       action: "woken",
@@ -109,19 +110,62 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing: mocks.ensureRuntimeProcessing,
-      prewarmRuntimeShell: mocks.prewarmRuntimeShell,
     });
   });
 
-  it("starts the direct ensure only after Temporal accepts the durable signal", async () => {
+  it.each([false, true])("links accepted instant replies after response even when the wake fails: %s", async (wakeFails) => {
+    const tasks: Array<() => Promise<void>> = [];
+    if (wakeFails) mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("synthetic signal failure"));
+    const result = maybeHandoffHostedExecutionWebhookWake({
+      response,
+      webhookReceivedAt: new Date("2026-09-01T12:00:00Z"),
+      scheduleAfterResponse: (task) => { tasks.push(task); },
+      wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant" }),
+    });
+    if (wakeFails) await expect(result).rejects.toThrow("synthetic signal failure");
+    else await result;
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+    for (const task of tasks) await task();
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).toHaveBeenCalledExactlyOnceWith({
+      authenticatedUserId: "member_123",
+      answeredMailboxItemIds: ["mailbox_123"],
+      linqDeliveryId: "delivery_instant",
+      replyRuntimeAttemptId: null,
+    });
+  });
+
+  it("retains ingress timing when optional instant-reply linking fails", async () => {
+    const tasks: Array<() => Promise<void>> = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery.mockRejectedValueOnce(new Error("synthetic telemetry failure"));
+    await maybeHandoffHostedExecutionWebhookWake({
+      response,
+      scheduleAfterResponse: (task) => { tasks.push(task); },
+      wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant" }),
+    });
+    for (const task of tasks) await expect(task()).resolves.toBeUndefined();
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith("Hosted instant reply latency delivery link failed.", { errorName: "Error", source: "linq" });
+    warn.mockRestore();
+  });
+
+  it("does not link ordinary inbound wakes as answered", async () => {
+    const tasks: Array<() => Promise<void>> = [];
+    await maybeHandoffHostedExecutionWebhookWake({ response, scheduleAfterResponse: (task) => { tasks.push(task); }, wakeHandoff: buildWakeHandoff() });
+    for (const task of tasks) await task();
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+  });
+
+  it.each(["linq", "telegram"] as const)("starts the authorized %s direct ensure while Temporal acknowledgement is pending", async (source) => {
     const afterResponseTasks: Array<() => Promise<void>> = [];
     const wakeOrder: string[] = [];
     let resolveTemporalSignal!: (value: {
       signalAccepted: true;
       workflowId: string;
     }) => void;
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(() => {
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce((input: { onSignalStarted?: () => void }) => {
       wakeOrder.push("temporal");
+      input.onSignalStarted?.();
       return new Promise((resolve) => {
         resolveTemporalSignal = resolve;
       });
@@ -129,6 +173,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
       wakeOrder.push("direct");
       input.onTiming({
+        directEnsureAuthDurationMs: 0,
+        directEnsureHandlerDurationMs: 42,
         directEnsureAction: "woken",
         tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
@@ -152,7 +198,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       scheduleAfterResponse: (task) => {
         afterResponseTasks.push(task);
       },
-      wakeHandoff: buildWakeHandoff(),
+      wakeHandoff: buildWakeHandoff({ source }),
     });
     void handoff.then(
       () => {
@@ -166,8 +212,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     await vi.waitFor(() => {
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     });
-    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+    expect(mocks.readHostedExecutionControlClientIfConfigured).toHaveBeenCalledTimes(1);
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(afterResponseTasks).toHaveLength(0);
     expect(handoffSettled).toBe(false);
 
@@ -195,6 +241,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
+      onSignalStarted: expect.any(Function),
       knownCheckpoint: {
         lane: "conversation",
         laneSeq: "42",
@@ -209,10 +256,15 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       phaseBreakdown: {
         schemaVersion: 1,
         orchestration: {
+          directWakeStartedAtEpochMs: expect.any(Number),
+          directWakeAttemptCount: 1,
+          directWakeRetryWaitMs: 0,
           tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
           directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+          directEnsureAuthDurationMs: 0,
+          directEnsureHandlerDurationMs: 42,
           directEnsureOrchestrationAttemptId: expect.stringMatching(
             /^web-ingress-[0-9a-f-]{36}$/u,
           ),
@@ -221,7 +273,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
           directEnsureRuntimeAttemptId: "runtime-attempt-test",
         },
       },
-      source: "linq",
+      source,
     });
   });
 
@@ -271,6 +323,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       phaseBreakdown: {
         schemaVersion: 1,
         orchestration: {
+          directWakeStartedAtEpochMs: expect.any(Number),
+          directWakeAttemptCount: 1,
+          directWakeRetryWaitMs: 0,
           tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -286,14 +341,20 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     consoleInfo.mockRestore();
   });
 
-  it("logs only aggregate metadata when direct timing no longer matches", async () => {
+  it.each(["unmatched", "prisma", "unknown"])("keeps direct timing failure diagnostics private: %s", async (failure) => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const afterResponseTasks: Array<() => Promise<void>> = [];
-    mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValueOnce({
-      matchedCount: 0,
-      recorded: false,
-      unmatchedCount: 1,
-    });
+    if (failure === "unmatched") {
+      mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValueOnce({
+        matchedCount: 0, recorded: false, unmatchedCount: 1,
+      });
+    } else {
+      mocks.recordHostedIngressDirectEnsureTiming.mockRejectedValueOnce(failure === "prisma"
+        ? new Prisma.PrismaClientKnownRequestError("synthetic private SQL detail", {
+          clientVersion: "test", code: "P2028", meta: { privateField: "synthetic private value" },
+        })
+        : new Error("synthetic private detail"));
+    }
     mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
       input.onTiming({
         directEnsureAction: "woken",
@@ -327,13 +388,18 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       await Promise.all(afterResponseTasks.map((task) => task()));
 
       expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted direct ensure wake timing record did not match.",
-        {
+        failure === "unmatched" ? "Hosted direct ensure wake timing record did not match." : "Hosted direct ensure wake timing record failed.",
+        failure === "unmatched" ? {
           matchedCount: 0,
           source: "linq",
           unmatchedCount: 1,
+        } : {
+          errorName: failure === "prisma" ? "PrismaClientKnownRequestError" : "Error",
+          ...(failure === "prisma" ? { prismaCode: "P2028" } : {}),
+          source: "linq",
         },
       );
+      expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("synthetic private");
     } finally {
       consoleWarn.mockRestore();
     }
@@ -416,6 +482,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
           schemaVersion: 1,
           orchestration: expect.objectContaining({
             directEnsureAction: "woken",
+            directWakeStartedAtEpochMs: Date.parse("2026-07-02T00:00:00.000Z"),
+            directWakeAttemptCount: 2,
+            directWakeRetryWaitMs: 3000,
             directEnsureRequestStartedAtEpochMs: 1_777_000_003_012,
             directEnsureResponseReceivedAtEpochMs: 1_777_000_003_120,
             directEnsureResultKind: "runtime_processing_accepted",
@@ -630,7 +699,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     }
   });
 
-  it("skips the direct ensure for non-Linq sources even with checkpoint facts", async () => {
+  it("notifies Telegram conversations through the same authorized direct path", async () => {
     mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
@@ -641,21 +710,24 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       signalAccepted: true,
     });
 
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
   });
 
-  it("does not start the direct ensure when the Temporal signal fails", async () => {
-    mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
-    mocks.signalHostedMailboxAppendRuntime.mockRejectedValue(new Error("temporal down"));
-
+  it("preserves a started hint but fails the webhook when Temporal rejects acknowledgement", async () => {
+    const tasks: Array<() => Promise<void>> = [];
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async (input: { onSignalStarted?: () => void }) => {
+      input.onSignalStarted?.();
+      throw new Error("temporal down");
+    });
     await expect(maybeHandoffHostedExecutionWebhookWake({
       response,
+      scheduleAfterResponse: (task) => { tasks.push(task); },
       wakeHandoff: buildWakeHandoff(),
     })).rejects.toThrow("temporal down");
-
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    await Promise.all(tasks.map((task) => task()));
   });
 
   it("starts no direct wake when participant-aware signaling denies access", async () => {
@@ -692,7 +764,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     consoleWarn.mockRestore();
   });
 
-  it("skips the direct ensure and lane facts when the planner checkpoint is absent", async () => {
+  it("starts the authorized hint after the signal owner rereads an absent planner checkpoint", async () => {
     await maybeHandoffHostedExecutionWebhookWake({
       response,
       wakeHandoff: {
@@ -703,12 +775,13 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       },
     });
 
-    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+    expect(mocks.readHostedExecutionControlClientIfConfigured).toHaveBeenCalledTimes(1);
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
+      onSignalStarted: expect.any(Function),
     });
   });
 
@@ -723,11 +796,12 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       }),
     });
 
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
+      onSignalStarted: expect.any(Function),
     });
   });
 
@@ -798,67 +872,28 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     }
   });
 
-});
 
-describe("startHostedRuntimeShellPrewarmBestEffort", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.prewarmRuntimeShell.mockResolvedValue({ accepted: true });
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      ensureRuntimeProcessing: mocks.ensureRuntimeProcessing,
-      prewarmRuntimeShell: mocks.prewarmRuntimeShell,
+  it("persists route receipt and early typing only after response without waiting for typing on handoff", async () => {
+    const tasks: Array<() => Promise<void>> = [];
+    const webhookReceivedAt = new Date("2026-09-10T12:00:00.000Z");
+    const typingAt = new Date("2026-09-10T12:00:00.800Z");
+    let finishTyping!: (at: Date) => void;
+    const ingressTypingAcceptedAt = new Promise<Date>((resolve) => { finishTyping = resolve; });
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({ workflowId: "synthetic-workflow" });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
+    mocks.recordHostedIngressTemporalSignalAccepted.mockClear();
+    await maybeHandoffHostedExecutionWebhookWake({
+      response,
+      webhookReceivedAt,
+      ingressTypingAcceptedAt,
+      wakeHandoff: buildWakeHandoff(),
+      scheduleAfterResponse: (task) => { tasks.push(task); },
     });
-  });
-
-  it("issues only the shell-prewarm command for the instant-start member", async () => {
-    await expect(startHostedRuntimeShellPrewarmBestEffort({
-      source: "linq-instant-start",
-      userId: "member_123",
-    })).resolves.toBeUndefined();
-
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith({
-      source: "linq-instant-start",
-      userId: "member_123",
-    });
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
-  });
-
-  it("issues only the shell-prewarm command for a typing-start hint", async () => {
-    await expect(startHostedRuntimeShellPrewarmBestEffort({
-      source: "linq-typing-started",
-      userId: "member_123",
-    })).resolves.toBeUndefined();
-
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith({
-      source: "linq-typing-started",
-      userId: "member_123",
-    });
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
-  });
-
-  it("settles when client setup or the best-effort request fails", async () => {
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mocks.readHostedExecutionControlClientIfConfigured.mockImplementationOnce(() => {
-      throw new TypeError("Hosted execution baseUrl must be configured.");
-    });
-
-    await expect(startHostedRuntimeShellPrewarmBestEffort({
-      source: "linq-instant-start",
-      userId: "member_123",
-    })).resolves.toBeUndefined();
-
-    mocks.prewarmRuntimeShell.mockRejectedValueOnce(
-      new Error("cloudflare unavailable"),
-    );
-    await expect(startHostedRuntimeShellPrewarmBestEffort({
-      source: "linq-instant-start",
-      userId: "member_123",
-    })).resolves.toBeUndefined();
-
-    expect(consoleWarn).toHaveBeenCalledTimes(2);
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
-    consoleWarn.mockRestore();
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).not.toHaveBeenCalled();
+    finishTyping(typingAt);
+    for (const task of tasks) await task();
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(expect.objectContaining({
+      webhookReceivedAt, ingressTypingAcceptedAt: typingAt, mailboxItemId: "mailbox_123",
+    }));
   });
 });

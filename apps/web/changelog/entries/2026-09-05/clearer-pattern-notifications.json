@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "clearer-pattern-notifications",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer Pattern updates",
+    "summary": "Personal Pattern messages explain what Murph noticed and how much support it has in everyday language.",
+    "details": "Updates sound more like a conversation, leave letter grades out, and link directly to Patterns when more findings remain.",
+    "relevanceTags": ["patterns", "messaging"],
+    "sourcePullRequests": [2967]
+  }
+}

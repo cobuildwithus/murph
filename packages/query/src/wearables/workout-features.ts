@@ -1,4 +1,4 @@
-import { canonicalizeWearableProviderSlug } from "@murphai/health-metrics";
+import { normalizeWearableQueryProviderSlug } from "@murphai/health-metrics";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import type {
@@ -27,7 +27,11 @@ export function collectJunctionWorkoutFeatures(
   filters: WearableFilters,
 ): WearableWorkoutFeatureCandidate[] {
   const providerSet = filters.providers
-    ? new Set(filters.providers.map((provider) => canonicalizeWearableProviderSlug(provider)))
+    ? new Set(
+        filters.providers
+          .map((provider) => normalizeWearableQueryProviderSlug(provider))
+          .filter((provider): provider is string => provider !== null),
+      )
     : null;
   const groups = new Map<string, WorkoutFeatureGroup>();
 
@@ -130,7 +134,7 @@ function junctionWorkoutFeatureRef(entity: CanonicalEntity): {
 function workoutFeatureProvider(entity: CanonicalEntity): string | null {
   const dataOrigin = plainRecord(entity.attributes.dataOrigin);
   const provider = stringValue(dataOrigin?.sourceProviderSlug);
-  return provider ? canonicalizeWearableProviderSlug(provider) : null;
+  return provider ? normalizeWearableQueryProviderSlug(provider) : null;
 }
 
 function projectWorkoutFeature(group: WorkoutFeatureGroup): WearableWorkoutFeature | null {

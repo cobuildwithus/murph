@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES,
+  HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
@@ -35,6 +36,7 @@ type HostedIngressLatencyDashboardReadRow = {
   linqDelivery: {
     acceptedAt: Date | null;
     attemptedAt: Date;
+    deliveredAt: Date | null;
     lastReceiptAt: Date | null;
     sourceRef: string | null;
     status: string;
@@ -94,6 +96,10 @@ const HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON = JSON.stringify(
 );
 
 export interface HostedIngressLatencyWriteResult {
+  // Subset of unmatchedCount that passed ownership/eligibility but could not
+  // claim a trace row because another latency callback held its lock. The
+  // existing runtime retry owns convergence for these rows.
+  contendedCount?: number;
   matchedCount: number;
   recorded: boolean;
   /** True when a best-effort collection milestone deliberately bounded its write. */
@@ -199,6 +205,8 @@ export interface HostedIngressLatencyDashboard {
 }
 
 export async function recordHostedIngressAcceptedFromMailboxItem(input: {
+  webhookReceivedAt?: Date;
+  ingressTypingAcceptedAt?: Date;
   mailboxItemId: string;
   prisma?: HostedIngressLatencyPrismaClient;
   source: HostedIngressLatencySource | string;
@@ -215,6 +223,8 @@ export async function recordHostedIngressAcceptedFromMailboxItem(input: {
 
   await upsertHostedIngressLatencyTraceFromMailboxItem(prisma, {
     mailboxItem,
+    webhookReceivedAt: input.webhookReceivedAt,
+    ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
     source,
   });
 
@@ -222,6 +232,8 @@ export async function recordHostedIngressAcceptedFromMailboxItem(input: {
 }
 
 export async function recordHostedIngressTemporalSignalAccepted(input: {
+  webhookReceivedAt?: Date;
+  ingressTypingAcceptedAt?: Date;
   at?: Date | string | null;
   expectedUserId?: string | null;
   mailboxItemId: string;
@@ -242,6 +254,8 @@ export async function recordHostedIngressTemporalSignalAccepted(input: {
 
   const trace = await upsertHostedIngressLatencyTraceFromMailboxItem(prisma, {
     mailboxItem,
+    webhookReceivedAt: input.webhookReceivedAt,
+    ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
     source,
   });
   await updateHostedIngressLatencyTraceEarliestMilestone(prisma, {
@@ -385,9 +399,6 @@ export async function recordHostedIngressProviderStarted(input: {
   if (assistantInputIds.length === 0) {
     return { matchedCount: 0, recorded: false, unmatchedCount: 0 };
   }
-  if (isLegacyLinqEgressGuardOnlyProviderStart(input.phaseBreakdown)) {
-    return { matchedCount: 0, recorded: false, unmatchedCount: 0 };
-  }
 
   const phasePatch = readHostedIngressLatencyProviderPhasePatch(input.phaseBreakdown);
   const requestedIds = buildHostedIngressLatencyRequestedIdsSql(assistantInputIds);
@@ -433,8 +444,15 @@ export async function recordHostedIngressProviderStarted(input: {
     requested(assistant_input_id) AS (
       VALUES ${requestedIds}
     ),
-    scoped AS (
-      SELECT DISTINCT requested.assistant_input_id
+    scoped AS MATERIALIZED (
+      SELECT DISTINCT
+        requested.assistant_input_id,
+        trace.id AS trace_id,
+        (
+          trace.runtime_attempt_id IS NULL
+          OR input.runtime_attempt_id IS NULL
+          OR trace.runtime_attempt_id = input.runtime_attempt_id
+        ) AS eligible
       FROM requested
       CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
@@ -442,19 +460,20 @@ export async function recordHostedIngressProviderStarted(input: {
        AND trace.user_id = input.user_id
        AND trace.source = input.source
     ),
-    eligible AS (
-      SELECT DISTINCT requested.assistant_input_id
-      FROM requested
+    locked AS MATERIALIZED (
+      SELECT scoped.assistant_input_id, trace.id
+      FROM scoped
       CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
-        ON trace.assistant_input_id = requested.assistant_input_id
-       AND trace.user_id = input.user_id
-       AND trace.source = input.source
-       AND (
-         trace.runtime_attempt_id IS NULL
-         OR input.runtime_attempt_id IS NULL
-         OR trace.runtime_attempt_id = input.runtime_attempt_id
-       )
+        ON trace.id = scoped.trace_id
+      WHERE scoped.eligible
+        AND (
+          trace.runtime_attempt_id IS NULL
+          OR input.runtime_attempt_id IS NULL
+          OR trace.runtime_attempt_id = input.runtime_attempt_id
+        )
+      ORDER BY trace.id
+      FOR UPDATE OF trace SKIP LOCKED
     ),
     updated AS (
       UPDATE hosted_ingress_latency_trace AS trace
@@ -479,15 +498,8 @@ export async function recordHostedIngressProviderStarted(input: {
             ${nextPhaseBreakdown} AS phase_breakdown_json
         ) AS next
       )
-      FROM requested, input
-      WHERE trace.assistant_input_id = requested.assistant_input_id
-        AND trace.user_id = input.user_id
-        AND trace.source = input.source
-        AND (
-          trace.runtime_attempt_id IS NULL
-          OR input.runtime_attempt_id IS NULL
-          OR trace.runtime_attempt_id = input.runtime_attempt_id
-        )
+      FROM locked, input
+      WHERE trace.id = locked.id
         AND (
           trace.provider_start_at IS DISTINCT FROM ${nextProviderStartAt}
           OR trace.provider_request_ordinal
@@ -506,8 +518,14 @@ export async function recordHostedIngressProviderStarted(input: {
       ) AS traced,
       EXISTS (
         SELECT 1
-        FROM eligible
-        WHERE eligible.assistant_input_id = requested.assistant_input_id
+        FROM scoped
+        WHERE scoped.assistant_input_id = requested.assistant_input_id
+          AND scoped.eligible
+      ) AS eligible,
+      EXISTS (
+        SELECT 1
+        FROM locked
+        WHERE locked.assistant_input_id = requested.assistant_input_id
       ) AS matched
     FROM requested
   `);
@@ -516,6 +534,44 @@ export async function recordHostedIngressProviderStarted(input: {
     assistantInputIds,
     rows,
   });
+}
+
+export async function recordHostedIngressDeliveryCommitted(input: {
+  authenticatedUserId: string;
+  mailboxItemIds: readonly string[];
+  source: HostedIngressLatencySource;
+  at: string;
+  checkpointPublicationExpectedBy: string;
+  runtimeAttemptId: string;
+  runtimeLeaseGeneration: string;
+  prisma?: HostedIngressLatencyPrismaClient;
+}): Promise<HostedIngressLatencyWriteResult> {
+  const prisma = input.prisma ?? getPrisma();
+  if (input.mailboxItemIds.length > HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
+    throw new TypeError("Hosted ingress delivery exceeds the mailbox item bound.");
+  }
+  const ids = [...new Set(input.mailboxItemIds.map((id) =>
+    requireSafeLatencyIdentifier(id, "Hosted ingress delivery mailboxItemId")
+  ))];
+  if (ids.length === 0) return { matchedCount: 0, recorded: false, unmatchedCount: 0 };
+  const traces = await prisma.hostedIngressLatencyTrace.findMany({
+    where: {
+      userId: input.authenticatedUserId,
+      source: input.source,
+      mailboxItemId: { in: ids },
+      assistantInputId: { not: null },
+    },
+    select: { assistantInputId: true },
+    take: ids.length,
+  });
+  const assistantInputIds = traces.flatMap((row) => row.assistantInputId ? [row.assistantInputId] : []);
+  const result = await recordHostedIngressAssistantMilestone({
+    ...input,
+    prisma,
+    assistantInputIds,
+    milestone: "terminal_reply_committed",
+  });
+  return { ...result, unmatchedCount: result.unmatchedCount + ids.length - traces.length };
 }
 
 export async function recordHostedIngressAssistantMilestone(input: {
@@ -545,12 +601,13 @@ export async function recordHostedIngressAssistantMilestone(input: {
     input.checkpointPublicationExpectedBy,
     "Hosted ingress latency checkpoint publication expected by",
   );
+  const terminalLeaf = readHostedIngressTerminalCompletionLeaf(input.milestone);
   if (
     checkpointPublicationExpectedBy
-    && input.milestone !== "terminal_non_reply_committed"
+    && terminalLeaf === null
   ) {
     throw new TypeError(
-      "Hosted ingress latency checkpoint publication expectation requires terminal_non_reply_committed.",
+      "Hosted ingress latency checkpoint publication expectation requires a terminal completion milestone.",
     );
   }
 
@@ -559,16 +616,27 @@ export async function recordHostedIngressAssistantMilestone(input: {
   }
 
   const requestedIds = buildHostedIngressLatencyRequestedIdsSql(assistantInputIds);
-  const terminalNonReplyProjection = input.milestone === "terminal_non_reply_committed";
-  const nextPhaseBreakdown = terminalNonReplyProjection
-    ? buildHostedIngressTerminalNonReplyPhaseBreakdownSql({
+  const terminalCompletionProjection = terminalLeaf !== null;
+  const lifecycleProjection = isHostedIngressLifecycleAssistantMilestone(
+    input.milestone,
+  );
+  const nextPhaseBreakdown = terminalCompletionProjection
+    ? buildHostedIngressTerminalCompletionPhaseBreakdownSql({
         hasCheckpointPublicationExpectedBy: checkpointPublicationExpectedBy !== null,
+        terminalLeaf,
       })
-    : buildHostedIngressOrdinaryAssistantMilestonePhaseBreakdownSql();
-  const nextRuntimeAttemptId = terminalNonReplyProjection
-    ? buildHostedIngressTerminalNonReplyRuntimeAttemptSql()
-    : Prisma.sql`trace.runtime_attempt_id`;
-  const ordinaryMilestoneLeaf = terminalNonReplyProjection
+    : lifecycleProjection
+      ? buildHostedIngressLifecycleAssistantMilestonePhaseBreakdownSql()
+      : buildHostedIngressOrdinaryAssistantMilestonePhaseBreakdownSql();
+  const nextRuntimeAttemptId = terminalCompletionProjection
+    ? buildHostedIngressTerminalCompletionRuntimeAttemptSql()
+    : lifecycleProjection
+      ? Prisma.sql`input.runtime_attempt_id`
+      : Prisma.sql`trace.runtime_attempt_id`;
+  // Accepted typing is alert evidence. Wait for competing short trace writes
+  // instead of losing the final retry to SKIP LOCKED. This callback is detached
+  // from provider execution and delivery; other diagnostic writes still skip.
+  const ordinaryMilestoneLeaf = terminalCompletionProjection
     ? null
     : readHostedIngressAssistantMilestoneLeaf(input.milestone);
   const rows = await prisma.$queryRaw<HostedIngressLatencySetWriteProjectionRow[]>(Prisma.sql`
@@ -584,15 +652,29 @@ export async function recordHostedIngressAssistantMilestone(input: {
           AS checkpoint_publication_expected_by_epoch_ms,
         ${ordinaryMilestoneLeaf?.leafKey ?? null}::text AS milestone_leaf,
         ${ordinaryMilestoneLeaf?.keepEarliest ?? false}::boolean AS keep_earliest,
-        ${terminalNonReplyProjection}::boolean AS terminal_non_reply_projection,
+        ${lifecycleProjection}::boolean AS lifecycle_projection,
+        ${terminalCompletionProjection}::boolean AS terminal_completion_projection,
         1::integer AS phase_schema_version,
         ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
     ),
     requested(assistant_input_id) AS (
       VALUES ${requestedIds}
     ),
-    scoped AS (
-      SELECT DISTINCT requested.assistant_input_id
+    scoped AS MATERIALIZED (
+      SELECT DISTINCT
+        requested.assistant_input_id,
+        trace.id AS trace_id,
+        (
+          input.terminal_completion_projection
+          OR (
+            input.lifecycle_projection
+            AND ${buildHostedIngressLifecycleAssistantMilestoneEligibilitySql()}
+          )
+          OR (
+            NOT input.lifecycle_projection
+            AND trace.runtime_attempt_id = input.runtime_attempt_id
+          )
+        ) AS eligible
       FROM requested
       CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
@@ -600,18 +682,27 @@ export async function recordHostedIngressAssistantMilestone(input: {
        AND trace.user_id = input.user_id
        AND trace.source = input.source
     ),
-    eligible AS (
-      SELECT DISTINCT requested.assistant_input_id
-      FROM requested
+    locked AS MATERIALIZED (
+      SELECT scoped.assistant_input_id, trace.id
+      FROM scoped
       CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
-        ON trace.assistant_input_id = requested.assistant_input_id
-       AND trace.user_id = input.user_id
-       AND trace.source = input.source
-       AND (
-         input.terminal_non_reply_projection
-         OR trace.runtime_attempt_id = input.runtime_attempt_id
-       )
+        ON trace.id = scoped.trace_id
+      WHERE scoped.eligible
+        AND (
+          input.terminal_completion_projection
+          OR (
+            input.lifecycle_projection
+            AND ${buildHostedIngressLifecycleAssistantMilestoneEligibilitySql()}
+          )
+          OR (
+            NOT input.lifecycle_projection
+            AND trace.runtime_attempt_id = input.runtime_attempt_id
+          )
+        )
+      ORDER BY trace.id
+      FOR UPDATE OF trace ${input.milestone === "linq_typing_accepted"
+        || input.milestone === "telegram_typing_accepted" ? Prisma.empty : Prisma.sql`SKIP LOCKED`}
     ),
     updated AS (
       UPDATE hosted_ingress_latency_trace AS trace
@@ -630,14 +721,8 @@ export async function recordHostedIngressAssistantMilestone(input: {
             ${nextPhaseBreakdown} AS phase_breakdown_json
         ) AS next
       )
-      FROM requested, input
-      WHERE trace.assistant_input_id = requested.assistant_input_id
-        AND trace.user_id = input.user_id
-        AND trace.source = input.source
-        AND (
-          input.terminal_non_reply_projection
-          OR trace.runtime_attempt_id = input.runtime_attempt_id
-        )
+      FROM locked, input
+      WHERE trace.id = locked.id
         AND (
           trace.runtime_attempt_id IS DISTINCT FROM ${nextRuntimeAttemptId}
           OR trace.phase_breakdown_json IS DISTINCT FROM ${nextPhaseBreakdown}
@@ -653,8 +738,14 @@ export async function recordHostedIngressAssistantMilestone(input: {
       ) AS traced,
       EXISTS (
         SELECT 1
-        FROM eligible
-        WHERE eligible.assistant_input_id = requested.assistant_input_id
+        FROM scoped
+        WHERE scoped.assistant_input_id = requested.assistant_input_id
+          AND scoped.eligible
+      ) AS eligible,
+      EXISTS (
+        SELECT 1
+        FROM locked
+        WHERE locked.assistant_input_id = requested.assistant_input_id
       ) AS matched
     FROM requested
   `);
@@ -667,6 +758,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
 
 type HostedIngressLatencySetWriteProjectionRow = {
   assistantInputId: string;
+  eligible: boolean;
   matched: boolean;
   traced: boolean;
 };
@@ -687,10 +779,15 @@ function buildHostedIngressLatencySetWriteResult(input: {
   const tracedIds = new Set(input.rows
     .filter((row) => row.traced)
     .map((row) => row.assistantInputId));
+  const eligibleIds = new Set(input.rows
+    .filter((row) => row.eligible)
+    .map((row) => row.assistantInputId));
   const unmatchedIds = input.assistantInputIds.filter((id) => !matchedIds.has(id));
   const untracedCount = unmatchedIds.filter((id) => !tracedIds.has(id)).length;
+  const contendedCount = unmatchedIds.filter((id) => eligibleIds.has(id)).length;
 
   return {
+    ...(contendedCount > 0 ? { contendedCount } : {}),
     matchedCount: matchedIds.size,
     recorded: matchedIds.size > 0,
     unmatchedCount: unmatchedIds.length,
@@ -773,10 +870,46 @@ function buildHostedIngressOrdinaryAssistantMilestonePhaseBreakdownSql(): Prisma
   const assistant = buildHostedIngressLatencyJsonObjectSql(
     Prisma.sql`${object} -> 'assistant'`,
   );
+  const leafPatch = buildHostedIngressAssistantMilestoneLeafPatchSql(assistant);
+  return Prisma.sql`(
+    SELECT ${object}
+      || ${buildHostedIngressLatencySchemaPatchSql(object)}
+      || jsonb_build_object('assistant', ${assistant} || ${leafPatch})
+    FROM (SELECT ${sanitizedObject} AS object) AS sanitized
+  )`;
+}
+
+function buildHostedIngressLifecycleAssistantMilestonePhaseBreakdownSql(): Prisma.Sql {
+  const stored = Prisma.sql`trace.phase_breakdown_json`;
+  const sanitizedObject = buildHostedIngressLatencySanitizedJsonObjectSql(stored);
+  const object = Prisma.sql`sanitized.object`;
+  const assistant = buildHostedIngressLatencyJsonObjectSql(
+    Prisma.sql`${object} -> 'assistant'`,
+  );
+  const leafPatch = buildHostedIngressAssistantMilestoneLeafPatchSql(assistant);
+  return Prisma.sql`(
+    SELECT ${object}
+      || ${buildHostedIngressLatencySchemaPatchSql(object)}
+      || jsonb_build_object(
+        'assistant',
+        ${assistant}
+          || ${leafPatch}
+          || jsonb_build_object(
+            'runtimeLeaseGeneration',
+            input.runtime_lease_generation
+          )
+      )
+    FROM (SELECT ${sanitizedObject} AS object) AS sanitized
+  )`;
+}
+
+function buildHostedIngressAssistantMilestoneLeafPatchSql(
+  assistant: Prisma.Sql,
+): Prisma.Sql {
   const leaf = Prisma.sql`${assistant} -> input.milestone_leaf`;
   const safeLeaf = buildHostedIngressLatencySafeJsonIntegerPredicateSql(leaf);
   const leafText = Prisma.sql`(${leaf}) #>> '{}'`;
-  const leafPatch = Prisma.sql`CASE
+  return Prisma.sql`CASE
     WHEN ${safeLeaf} AND NOT input.keep_earliest THEN '{}'::jsonb
     ELSE jsonb_build_object(
       input.milestone_leaf,
@@ -787,16 +920,55 @@ function buildHostedIngressOrdinaryAssistantMilestonePhaseBreakdownSql(): Prisma
       END
     )
   END`;
+}
+
+function buildHostedIngressLifecycleAssistantMilestoneEligibilitySql(): Prisma.Sql {
+  const stored = Prisma.sql`trace.phase_breakdown_json`;
+  const object = buildHostedIngressLatencyJsonObjectSql(stored);
+  const assistant = buildHostedIngressLatencyJsonObjectSql(
+    Prisma.sql`${object} -> 'assistant'`,
+  );
+  const storedGeneration = buildHostedIngressLatencyStoredLeaseGenerationSql(assistant);
+  const incomingGeneration = Prisma.sql`input.runtime_lease_generation::numeric`;
+  const exactAttempt = Prisma.sql`trace.runtime_attempt_id = input.runtime_attempt_id`;
+  const incomingNotOlder = Prisma.sql`(
+    ${storedGeneration} IS NULL
+    OR ${storedGeneration} <= ${incomingGeneration}
+  )`;
+  const newerLease = Prisma.sql`(
+    ${storedGeneration} IS NULL
+    OR ${storedGeneration} < ${incomingGeneration}
+  )`;
+  const unresolved = Prisma.sql`(
+    trace.provider_start_at IS NULL
+    AND trace.reply_runtime_attempt_id IS NULL
+    AND trace.linq_delivery_id IS NULL
+    AND NOT ${hasHostedIngressTerminalCompletionSql(assistant)}
+  )`;
   return Prisma.sql`(
-    SELECT ${object}
-      || ${buildHostedIngressLatencySchemaPatchSql(object)}
-      || jsonb_build_object('assistant', ${assistant} || ${leafPatch})
-    FROM (SELECT ${sanitizedObject} AS object) AS sanitized
+    (${exactAttempt} AND ${incomingNotOlder})
+    OR (${unresolved} AND ${newerLease})
   )`;
 }
 
-function buildHostedIngressTerminalNonReplyPhaseBreakdownSql(input: {
+function readHostedIngressTerminalCompletionLeaf(milestone: HostedRuntimeAssistantMilestone) {
+  switch (milestone) {
+    case "terminal_reply_committed": return "terminalReplyCommittedAtEpochMs";
+    case "terminal_non_reply_committed": return "terminalNonReplyCommittedAtEpochMs";
+    default: return null;
+  }
+}
+
+function hasHostedIngressTerminalCompletionSql(assistant: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`(
+    ${buildHostedIngressLatencySafeJsonIntegerPredicateSql(Prisma.sql`${assistant} -> 'terminalNonReplyCommittedAtEpochMs'`)}
+    OR ${buildHostedIngressLatencySafeJsonIntegerPredicateSql(Prisma.sql`${assistant} -> 'terminalReplyCommittedAtEpochMs'`)}
+  )`;
+}
+
+function buildHostedIngressTerminalCompletionPhaseBreakdownSql(input: {
   hasCheckpointPublicationExpectedBy: boolean;
+  terminalLeaf: "terminalReplyCommittedAtEpochMs" | "terminalNonReplyCommittedAtEpochMs";
 }): Prisma.Sql {
   const stored = Prisma.sql`trace.phase_breakdown_json`;
   const sanitizedObject = buildHostedIngressLatencySanitizedJsonObjectSql(stored);
@@ -818,11 +990,11 @@ function buildHostedIngressTerminalNonReplyPhaseBreakdownSql(input: {
     )
   )`;
   let assistantPatch = Prisma.sql`jsonb_build_object(
-    'terminalNonReplyCommittedAtEpochMs',
+    ${input.terminalLeaf}::text,
     ${buildHostedIngressLatencyMaxEpochMsValueSql({
       assistant,
       incomingEpochMs: Prisma.sql`input.at_epoch_ms`,
-      leafKey: "terminalNonReplyCommittedAtEpochMs",
+      leafKey: input.terminalLeaf,
     })},
     'runtimeLeaseGeneration',
     input.runtime_lease_generation
@@ -878,7 +1050,7 @@ function buildHostedIngressCheckpointPublicationPhaseBreakdownSql(): Prisma.Sql 
   )`;
 }
 
-function buildHostedIngressTerminalNonReplyRuntimeAttemptSql(): Prisma.Sql {
+function buildHostedIngressTerminalCompletionRuntimeAttemptSql(): Prisma.Sql {
   const stored = Prisma.sql`trace.phase_breakdown_json`;
   const object = buildHostedIngressLatencyJsonObjectSql(stored);
   const assistant = buildHostedIngressLatencyJsonObjectSql(
@@ -898,11 +1070,10 @@ function buildHostedIngressLatencyMaxEpochMsValueSql(input: {
   incomingEpochMs: Prisma.Sql;
   leafKey:
     | "checkpointPublicationExpectedByEpochMs"
-    | "terminalNonReplyCommittedAtEpochMs";
+    | "terminalNonReplyCommittedAtEpochMs"
+    | "terminalReplyCommittedAtEpochMs";
 }): Prisma.Sql {
-  const leaf = input.leafKey === "terminalNonReplyCommittedAtEpochMs"
-    ? Prisma.sql`${input.assistant} -> 'terminalNonReplyCommittedAtEpochMs'`
-    : Prisma.sql`${input.assistant} -> 'checkpointPublicationExpectedByEpochMs'`;
+  const leaf = Prisma.sql`${input.assistant} -> ${input.leafKey}::text`;
   const safeLeaf = buildHostedIngressLatencySafeJsonIntegerPredicateSql(leaf);
   const leafText = Prisma.sql`(${leaf}) #>> '{}'`;
   return Prisma.sql`CASE
@@ -966,6 +1137,10 @@ function buildHostedIngressLatencySanitizedJsonObjectSql(
             THEN jsonb_typeof(leaf.value) = 'string'
               AND (leaf.value #>> '{}')
                 ~ '^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+            WHEN 'shell_prewarm_attempt_id'
+            THEN jsonb_typeof(leaf.value) = 'string'
+              AND (leaf.value #>> '{}')
+                ~ '^web-prewarm-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
             WHEN 'opaque_identifier'
             THEN jsonb_typeof(leaf.value) = 'string'
               AND length(leaf.value #>> '{}') <= 192
@@ -1029,19 +1204,38 @@ function readHostedIngressAssistantMilestoneLeaf(
   milestone: HostedRuntimeAssistantMilestone,
 ): { keepEarliest: boolean; leafKey: string } {
   switch (milestone) {
+    case "pending_reply_admitted":
+      return { keepEarliest: true, leafKey: "pendingReplyAdmittedAtEpochMs" };
+    case "foreground_input_selected":
+      return { keepEarliest: true, leafKey: "foregroundInputSelectedAtEpochMs" };
+    case "assistant_input_accepted_for_execution":
+      return {
+        keepEarliest: true,
+        leafKey: "assistantInputAcceptedForExecutionAtEpochMs",
+      };
     case "linq_typing_request_started":
-      return { keepEarliest: false, leafKey: "linqTypingRequestStartedAtEpochMs" };
+      return { keepEarliest: true, leafKey: "linqTypingRequestStartedAtEpochMs" };
+    case "telegram_typing_accepted":
+      return { keepEarliest: true, leafKey: "telegramTypingAcceptedAtEpochMs" };
     case "linq_typing_accepted":
-      return { keepEarliest: false, leafKey: "linqTypingAcceptedAtEpochMs" };
+      return { keepEarliest: true, leafKey: "linqTypingAcceptedAtEpochMs" };
     case "progress_update_accepted":
       return { keepEarliest: true, leafKey: "progressUpdateAcceptedAtEpochMs" };
     case "first_codex_output_observed":
       return { keepEarliest: false, leafKey: "firstCodexOutputObservedAtEpochMs" };
     case "first_codex_text_observed":
       return { keepEarliest: false, leafKey: "firstCodexTextObservedAtEpochMs" };
+    case "terminal_reply_committed":
     case "terminal_non_reply_committed":
-      throw new TypeError("Terminal non-reply milestones do not use an ordinary assistant leaf.");
+      throw new TypeError("Terminal completion milestones do not use an ordinary assistant leaf.");
   }
+}
+
+function isHostedIngressLifecycleAssistantMilestone(
+  milestone: HostedRuntimeAssistantMilestone,
+): boolean {
+  return milestone === "pending_reply_admitted"
+    || milestone === "assistant_input_accepted_for_execution";
 }
 
 export async function recordHostedIngressRuntimeMilestone(input: {
@@ -1094,8 +1288,8 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
   authenticatedUserId: string;
   answeredMailboxItemIds: readonly string[];
   linqDeliveryId: string;
-  prisma?: HostedIngressLatencyPrismaClient;
-  replyRuntimeAttemptId: string;
+  prisma?: Pick<HostedIngressLatencyPrismaClient, "$queryRaw">;
+  replyRuntimeAttemptId: string | null;
 }): Promise<HostedIngressLatencyDeliveryLinkResult> {
   const authenticatedUserId = requireSafeLatencyIdentifier(
     input.authenticatedUserId,
@@ -1105,10 +1299,12 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
     input.linqDeliveryId,
     "Hosted ingress latency Linq delivery id",
   );
-  const replyRuntimeAttemptId = requireSafeLatencyIdentifier(
-    input.replyRuntimeAttemptId,
-    "Hosted ingress latency reply runtime attempt id",
-  );
+  const replyRuntimeAttemptId = input.replyRuntimeAttemptId === null
+    ? null
+    : requireSafeLatencyIdentifier(
+        input.replyRuntimeAttemptId,
+        "Hosted ingress latency reply runtime attempt id",
+      );
   const answeredMailboxItemIds = [
     ...new Set(input.answeredMailboxItemIds.map((mailboxItemId) =>
       requireSafeLatencyIdentifier(
@@ -1128,6 +1324,8 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
       Prisma.sql`(CAST(${randomUUID()} AS text), CAST(${mailboxItemId} AS text))`
     ),
   );
+  // The shared member lock drains trace creation before account suspension
+  // commits, preserving deletion safety without a mailbox cascade.
   const linkedRows = await prisma.$queryRaw<Array<{ mailboxItemId: string }>>(Prisma.sql`
     INSERT INTO hosted_ingress_latency_trace (
       id,
@@ -1159,9 +1357,13 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
     FROM (VALUES ${candidates}) AS candidate(trace_id, mailbox_item_id)
     INNER JOIN hosted_mailbox_item AS mailbox
       ON mailbox.id = candidate.mailbox_item_id
+    INNER JOIN hosted_member AS member
+      ON member.id = mailbox.user_id
     WHERE mailbox.user_id = ${authenticatedUserId}
+      AND member.suspended_at IS NULL
       AND mailbox.lane = 'conversation'
       AND mailbox.kind = 'conversation.message'
+    FOR SHARE OF member
     ON CONFLICT (mailbox_item_id) DO UPDATE SET
       reply_runtime_attempt_id = EXCLUDED.reply_runtime_attempt_id,
       linq_delivery_id = EXCLUDED.linq_delivery_id,
@@ -1177,6 +1379,20 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
     matchedCount: linkedRows.length,
     recorded: linkedRows.length > 0,
   };
+}
+
+function hasNegativeLatencyInterval(startMs: number | null, endMs: number | null): boolean {
+  return startMs !== null && endMs !== null && endMs < startMs;
+}
+
+function collectNonnegativeObservedLatency(
+  durations: number[],
+  startMs: number | null,
+  endMs: number | null,
+): void {
+  if (startMs !== null && endMs !== null && endMs >= startMs) {
+    durations.push(endMs - startMs);
+  }
 }
 
 export async function readHostedIngressLatencyDashboard(
@@ -1201,6 +1417,7 @@ export async function readHostedIngressLatencyDashboard(
         select: {
           acceptedAt: true,
           attemptedAt: true,
+          deliveredAt: true,
           lastReceiptAt: true,
           sourceRef: true,
           status: true,
@@ -1303,27 +1520,14 @@ export async function readHostedIngressLatencyDashboard(
       providerRowsWithoutAcceptedDeliveryLinkCount += 1;
     }
     const missingStaged = stagedAtMs === null;
-    const hasNegativeSignal = signalAtMs !== null && signalAtMs < acceptedAtMs;
-    const hasNegativeStaged = stagedAtMs !== null && stagedAtMs < acceptedAtMs;
-    const hasNegativeProviderWait =
-      stagedAtMs !== null && providerStartMs !== null && providerStartMs < stagedAtMs;
+    const hasNegativeSignal = hasNegativeLatencyInterval(acceptedAtMs, signalAtMs);
+    const hasNegativeStaged = hasNegativeLatencyInterval(acceptedAtMs, stagedAtMs);
+    const hasNegativeProviderWait = hasNegativeLatencyInterval(stagedAtMs, providerStartMs);
     const hasNegativeObservedMilestone =
-      (typingRequestAtMs !== null && typingRequestAtMs < acceptedAtMs)
-      || (
-        typingRequestAtMs !== null
-        && typingAcceptedAtMs !== null
-        && typingAcceptedAtMs < typingRequestAtMs
-      )
-      || (
-        providerStartMs !== null
-        && firstCodexOutputAtMs !== null
-        && firstCodexOutputAtMs < providerStartMs
-      )
-      || (
-        providerStartMs !== null
-        && firstCodexTextAtMs !== null
-        && firstCodexTextAtMs < providerStartMs
-      );
+      hasNegativeLatencyInterval(acceptedAtMs, typingRequestAtMs)
+      || hasNegativeLatencyInterval(typingRequestAtMs, typingAcceptedAtMs)
+      || hasNegativeLatencyInterval(providerStartMs, firstCodexOutputAtMs)
+      || hasNegativeLatencyInterval(providerStartMs, firstCodexTextAtMs);
 
     if (missingStaged && (mature || providerStartMs !== null)) {
       missingStagedCount += 1;
@@ -1343,30 +1547,26 @@ export async function readHostedIngressLatencyDashboard(
     ) {
       stagedToProviderDurations.push(providerStartMs - stagedAtMs);
     }
-    if (typingRequestAtMs !== null && typingRequestAtMs >= acceptedAtMs) {
-      acceptedToTypingRequestDurations.push(typingRequestAtMs - acceptedAtMs);
-    }
-    if (
-      typingRequestAtMs !== null
-      && typingAcceptedAtMs !== null
-      && typingAcceptedAtMs >= typingRequestAtMs
-    ) {
-      typingRequestToAcceptedDurations.push(typingAcceptedAtMs - typingRequestAtMs);
-    }
-    if (
-      providerStartMs !== null
-      && firstCodexOutputAtMs !== null
-      && firstCodexOutputAtMs >= providerStartMs
-    ) {
-      codexStartToFirstOutputDurations.push(firstCodexOutputAtMs - providerStartMs);
-    }
-    if (
-      providerStartMs !== null
-      && firstCodexTextAtMs !== null
-      && firstCodexTextAtMs >= providerStartMs
-    ) {
-      codexStartToFirstTextDurations.push(firstCodexTextAtMs - providerStartMs);
-    }
+    collectNonnegativeObservedLatency(
+      acceptedToTypingRequestDurations,
+      acceptedAtMs,
+      typingRequestAtMs,
+    );
+    collectNonnegativeObservedLatency(
+      typingRequestToAcceptedDurations,
+      typingRequestAtMs,
+      typingAcceptedAtMs,
+    );
+    collectNonnegativeObservedLatency(
+      codexStartToFirstOutputDurations,
+      providerStartMs,
+      firstCodexOutputAtMs,
+    );
+    collectNonnegativeObservedLatency(
+      codexStartToFirstTextDurations,
+      providerStartMs,
+      firstCodexTextAtMs,
+    );
 
     if (providerStartMs === null) {
       if (hasNegativeSignal || hasNegativeStaged || hasNegativeObservedMilestone) {
@@ -1497,12 +1697,12 @@ export async function readHostedIngressLatencyDashboard(
 
     const deliveryAcceptedAtMs = row.linqDelivery.acceptedAt?.getTime() ?? null;
     const deliveryAttemptedAtMs = row.linqDelivery.attemptedAt.getTime();
-    const deliveryReceiptAtMs = (
-      row.linqDelivery.status === "delivered"
-      || row.linqDelivery.status === "failed"
-    )
-      ? row.linqDelivery.lastReceiptAt?.getTime() ?? null
-      : null;
+    const deliveryReceiptAt = row.linqDelivery.status === "delivered"
+      ? row.linqDelivery.deliveredAt
+      : row.linqDelivery.status === "failed"
+        ? row.linqDelivery.lastReceiptAt
+        : null;
+    const deliveryReceiptAtMs = deliveryReceiptAt?.getTime() ?? null;
     const ingressAcceptedAtMs = row.acceptedAt.getTime();
     const providerStartAtMs = providerRow?.providerStartAt?.getTime() ?? null;
 
@@ -1994,8 +2194,11 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
   input: {
     mailboxItem: NonNullable<Awaited<ReturnType<typeof readTraceMailboxItem>>>;
     source: HostedIngressLatencySource;
+    webhookReceivedAt?: Date;
+    ingressTypingAcceptedAt?: Date;
   },
 ) {
+  // Share the existing account-deletion suspension fence for the whole insert.
   await prisma.$executeRaw`
     INSERT INTO hosted_ingress_latency_trace (
       id,
@@ -2004,22 +2207,42 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
       mailbox_item_id,
       mailbox_lane,
       mailbox_lane_seq,
+      ingress_typing_accepted_at,
+      webhook_received_at,
       accepted_at,
       created_at,
       updated_at
     )
-    VALUES (
+    SELECT
       ${randomUUID()},
       ${input.mailboxItem.userId},
       ${input.source},
       ${input.mailboxItem.id},
       ${input.mailboxItem.lane},
       ${input.mailboxItem.laneSeq},
+      ${input.ingressTypingAcceptedAt ?? null},
+      ${input.webhookReceivedAt ?? null},
       ${input.mailboxItem.acceptedAt},
       CURRENT_TIMESTAMP,
       CURRENT_TIMESTAMP
+    FROM hosted_member AS member
+    WHERE member.id = ${input.mailboxItem.userId}
+      AND member.suspended_at IS NULL
+    FOR SHARE OF member
+    ON CONFLICT (mailbox_item_id) DO UPDATE
+    SET ingress_typing_accepted_at = LEAST(
+      hosted_ingress_latency_trace.ingress_typing_accepted_at,
+      EXCLUDED.ingress_typing_accepted_at
+    ), webhook_received_at = LEAST(
+      hosted_ingress_latency_trace.webhook_received_at,
+      EXCLUDED.webhook_received_at
     )
-    ON CONFLICT (mailbox_item_id) DO NOTHING
+    WHERE (EXCLUDED.webhook_received_at IS NOT NULL
+      AND (hosted_ingress_latency_trace.webhook_received_at IS NULL
+        OR EXCLUDED.webhook_received_at < hosted_ingress_latency_trace.webhook_received_at))
+      OR (EXCLUDED.ingress_typing_accepted_at IS NOT NULL
+        AND (hosted_ingress_latency_trace.ingress_typing_accepted_at IS NULL
+          OR EXCLUDED.ingress_typing_accepted_at < hosted_ingress_latency_trace.ingress_typing_accepted_at))
   `;
 
   const trace = await prisma.hostedIngressLatencyTrace.findUnique({
@@ -2058,18 +2281,50 @@ async function updateHostedIngressLatencyRuntimeMilestone(
     userId: input.userId,
   };
   const field = readHostedIngressLatencyRuntimeMilestoneField(input.milestone);
-  const result = await prisma.hostedIngressLatencyTrace.updateMany({
-    data: {
-      [field]: input.at,
-    },
-    where: {
-      ...baseWhere,
-      AND: [
-        { OR: [{ [field]: null }, { [field]: { gt: input.at } }] },
-      ],
-    },
+  return await prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`
+      /* hosted_ingress_runtime_milestone_lock */
+      SELECT trace.id
+      FROM hosted_ingress_latency_trace AS trace
+      WHERE trace.runtime_attempt_id = ${input.runtimeAttemptId}
+        AND trace.source = ${input.source}
+        AND trace.user_id = ${input.userId}
+        AND CASE ${field}
+          WHEN 'runnerJobAcceptedAt' THEN
+            trace.runner_job_accepted_at IS NULL
+            OR trace.runner_job_accepted_at > ${input.at}
+          WHEN 'runtimePhaseStartedAt' THEN
+            trace.runtime_phase_started_at IS NULL
+            OR trace.runtime_phase_started_at > ${input.at}
+          WHEN 'workspaceRestoreDoneAt' THEN
+            trace.workspace_restore_done_at IS NULL
+            OR trace.workspace_restore_done_at > ${input.at}
+          WHEN 'mailboxImportDoneAt' THEN
+            trace.mailbox_import_done_at IS NULL
+            OR trace.mailbox_import_done_at > ${input.at}
+          ELSE FALSE
+        END
+      ORDER BY trace.id
+      FOR UPDATE OF trace
+    `;
+    if (locked.length === 0) {
+      return { matchedCount: 0, truncated: false };
+    }
+
+    const result = await tx.hostedIngressLatencyTrace.updateMany({
+      data: {
+        [field]: input.at,
+      },
+      where: {
+        ...baseWhere,
+        id: { in: locked.map((trace) => trace.id) },
+        AND: [
+          { OR: [{ [field]: null }, { [field]: { gt: input.at } }] },
+        ],
+      },
+    });
+    return { matchedCount: result.count, truncated: false };
   });
-  return { matchedCount: result.count, truncated: false };
 }
 
 async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
@@ -2091,101 +2346,150 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
   const storedLeaseGeneration = buildHostedIngressLatencyStoredLeaseGenerationSql(
     storedAssistant,
   );
-  const terminalNonReplyLeaf = Prisma.sql`
-    ${storedAssistant} -> 'terminalNonReplyCommittedAtEpochMs'
-  `;
-  const hasTerminalNonReplyEvidence =
-    buildHostedIngressLatencySafeJsonIntegerPredicateSql(terminalNonReplyLeaf);
+  const candidateStoredObject = buildHostedIngressLatencyJsonObjectSql(
+    Prisma.sql`candidate.phase_breakdown_json`,
+  );
+  const candidateStoredAssistant = buildHostedIngressLatencyJsonObjectSql(
+    Prisma.sql`${candidateStoredObject} -> 'assistant'`,
+  );
+  const candidateStoredLeaseGeneration =
+    buildHostedIngressLatencyStoredLeaseGenerationSql(candidateStoredAssistant);
   const nextPhaseBreakdown =
     buildHostedIngressCheckpointPublicationPhaseBreakdownSql();
 
-  const rows = await prisma.$queryRaw<Array<{
-    matchedCount: bigint;
-    truncated: boolean;
-  }>>(Prisma.sql`
-    /* hosted_ingress_checkpoint_publication_expected_by_set_based */
-    WITH input AS (
-      SELECT
-        ${input.userId}::text AS user_id,
-        ${input.source}::text AS source,
-        ${input.runtimeAttemptId}::text AS runtime_attempt_id,
-        ${input.runtimeLeaseGeneration}::text AS runtime_lease_generation,
-        ${input.expectedBy.getTime()}::bigint AS expected_by_epoch_ms,
-        1::integer AS phase_schema_version,
-        ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
-    ),
-    eligible_candidates AS MATERIALIZED (
-      SELECT
-        trace.accepted_at,
-        trace.id,
-        trace.phase_breakdown_json,
-        trace.runtime_attempt_id,
-        ${storedLeaseGeneration} AS stored_lease_generation
+  const rows = await prisma.$transaction(async (tx) => {
+    const lockedCandidates = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      /* hosted_ingress_checkpoint_publication_expected_by_lock */
+      SELECT trace.id
       FROM hosted_ingress_latency_trace AS trace
-      JOIN hosted_mailbox_item AS mailbox_item
-        ON mailbox_item.id = trace.mailbox_item_id
-       AND mailbox_item.consumed_at IS NULL
-      CROSS JOIN input
-      WHERE trace.assistant_input_id IS NOT NULL
-        AND trace.user_id = input.user_id
-        AND trace.source = input.source
-        AND (
-          ${hasTerminalNonReplyEvidence}
-          OR trace.runtime_attempt_id = input.runtime_attempt_id
-        )
-        AND (
-          ${storedLeaseGeneration} IS NULL
-          OR ${storedLeaseGeneration} < input.runtime_lease_generation::numeric
-          OR (
-            ${storedLeaseGeneration} = input.runtime_lease_generation::numeric
-            AND trace.runtime_attempt_id = input.runtime_attempt_id
+      WHERE trace.id = ANY(ARRAY(
+        SELECT candidate.id
+        FROM hosted_ingress_latency_trace AS candidate
+        JOIN hosted_mailbox_item AS mailbox_item
+          ON mailbox_item.id = candidate.mailbox_item_id
+         AND mailbox_item.consumed_at IS NULL
+        WHERE candidate.assistant_input_id IS NOT NULL
+          AND candidate.user_id = ${input.userId}
+          AND candidate.source = ${input.source}
+          AND (
+            ${hasHostedIngressTerminalCompletionSql(candidateStoredAssistant)}
+            OR candidate.runtime_attempt_id = ${input.runtimeAttemptId}
           )
-        )
-      ORDER BY trace.accepted_at DESC
-      LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT + 1}
+          AND (
+            ${candidateStoredLeaseGeneration} IS NULL
+            OR ${candidateStoredLeaseGeneration}
+              < ${input.runtimeLeaseGeneration}::numeric
+            OR (
+              ${candidateStoredLeaseGeneration}
+                = ${input.runtimeLeaseGeneration}::numeric
+              AND candidate.runtime_attempt_id = ${input.runtimeAttemptId}
+            )
+          )
+        ORDER BY candidate.accepted_at DESC
+        LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT + 1}
+      ))
+      ORDER BY trace.id
       FOR UPDATE OF trace
-    ),
-    eligible AS MATERIALIZED (
-      SELECT *
-      FROM eligible_candidates
-      ORDER BY accepted_at DESC
-      LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
-    ),
-    next_value AS MATERIALIZED (
-      SELECT
-        trace.id,
-        CASE
-          WHEN trace.stored_lease_generation IS NULL
-            OR trace.stored_lease_generation
-              < input.runtime_lease_generation::numeric
-          THEN input.runtime_attempt_id
-          ELSE trace.runtime_attempt_id
-        END AS runtime_attempt_id,
-        ${nextPhaseBreakdown} AS phase_breakdown_json
-      FROM eligible AS trace
-      CROSS JOIN input
-    ),
-    updated AS (
-      UPDATE hosted_ingress_latency_trace AS trace
-      SET
-        runtime_attempt_id = next_value.runtime_attempt_id,
-        phase_breakdown_json = next_value.phase_breakdown_json,
-        updated_at = statement_timestamp() AT TIME ZONE 'UTC'
-      FROM next_value
-      WHERE trace.id = next_value.id
-        AND (
-          trace.runtime_attempt_id IS DISTINCT FROM next_value.runtime_attempt_id
-          OR trace.phase_breakdown_json IS DISTINCT FROM next_value.phase_breakdown_json
-        )
-      RETURNING trace.id
-    )
-    SELECT
-      (SELECT COUNT(*)::bigint FROM eligible) AS "matchedCount",
-      (
-        SELECT COUNT(*) > ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
+    `);
+    if (lockedCandidates.length === 0) {
+      return [];
+    }
+
+    const lockedTraceIds = lockedCandidates.map((candidate) => candidate.id);
+    return await tx.$queryRaw<Array<{
+      matchedCount: bigint;
+      truncated: boolean;
+    }>>(Prisma.sql`
+      /* hosted_ingress_checkpoint_publication_expected_by_set_based */
+      WITH input AS (
+        SELECT
+          ${input.userId}::text AS user_id,
+          ${input.source}::text AS source,
+          ${input.runtimeAttemptId}::text AS runtime_attempt_id,
+          ${input.runtimeLeaseGeneration}::text AS runtime_lease_generation,
+          ${input.expectedBy.getTime()}::bigint AS expected_by_epoch_ms,
+          1::integer AS phase_schema_version,
+          ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
+      ),
+      eligible_candidates AS MATERIALIZED (
+        SELECT
+          trace.accepted_at,
+          trace.id,
+          trace.phase_breakdown_json,
+          trace.runtime_attempt_id,
+          ${storedLeaseGeneration} AS stored_lease_generation
+        FROM hosted_ingress_latency_trace AS trace
+        JOIN hosted_mailbox_item AS mailbox_item
+          ON mailbox_item.id = trace.mailbox_item_id
+         AND mailbox_item.consumed_at IS NULL
+        CROSS JOIN input
+        WHERE trace.id IN (${Prisma.join(lockedTraceIds)})
+          AND trace.assistant_input_id IS NOT NULL
+          AND trace.user_id = input.user_id
+          AND trace.source = input.source
+          AND (
+            ${hasHostedIngressTerminalCompletionSql(storedAssistant)}
+            OR trace.runtime_attempt_id = input.runtime_attempt_id
+          )
+          AND (
+            ${storedLeaseGeneration} IS NULL
+            OR ${storedLeaseGeneration} < input.runtime_lease_generation::numeric
+            OR (
+              ${storedLeaseGeneration} = input.runtime_lease_generation::numeric
+              AND trace.runtime_attempt_id = input.runtime_attempt_id
+            )
+          )
+        ORDER BY trace.accepted_at DESC
+        LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT + 1}
+      ),
+      eligible AS MATERIALIZED (
+        SELECT *
         FROM eligible_candidates
-      ) AS truncated
-  `);
+        ORDER BY accepted_at DESC
+        LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
+      ),
+      next_value AS MATERIALIZED (
+        SELECT
+          trace.id,
+          CASE
+            WHEN trace.stored_lease_generation IS NULL
+              OR trace.stored_lease_generation
+                < input.runtime_lease_generation::numeric
+            THEN input.runtime_attempt_id
+            ELSE trace.runtime_attempt_id
+          END AS runtime_attempt_id,
+          ${nextPhaseBreakdown} AS phase_breakdown_json
+        FROM eligible AS trace
+        CROSS JOIN input
+      ),
+      updated AS (
+        UPDATE hosted_ingress_latency_trace AS trace
+        SET
+          runtime_attempt_id = next_value.runtime_attempt_id,
+          phase_breakdown_json = next_value.phase_breakdown_json,
+          updated_at = statement_timestamp() AT TIME ZONE 'UTC'
+        FROM next_value
+        WHERE trace.id = next_value.id
+          AND (
+            trace.runtime_attempt_id IS DISTINCT FROM next_value.runtime_attempt_id
+            OR trace.phase_breakdown_json IS DISTINCT FROM next_value.phase_breakdown_json
+          )
+        RETURNING trace.id
+      )
+      SELECT
+        (
+          SELECT LEAST(
+            COUNT(*),
+            ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
+          )::bigint
+          FROM eligible_candidates
+        ) AS "matchedCount",
+        (
+          SELECT COUNT(*) > ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
+          FROM eligible_candidates
+        ) AS truncated
+    `);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 
   return {
     matchedCount: Number(rows[0]?.matchedCount ?? 0n),
@@ -2375,21 +2679,6 @@ async function updateHostedIngressAssistantInputStagedLocked(
 
     return true;
   });
-}
-
-function isLegacyLinqEgressGuardOnlyProviderStart(
-  phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown | null | undefined,
-): boolean {
-  // Rolling deploys can still deliver the old post-generation Linq guard
-  // event. Reject that guard-only shape so it cannot masquerade as turn start.
-  const provider = phaseBreakdown?.provider;
-  if (!provider || provider.linqEgressGuardMs === undefined) {
-    return false;
-  }
-
-  return Object.entries(provider).every(
-    ([key, value]) => key === "linqEgressGuardMs" || value === undefined,
-  );
 }
 
 function normalizeDate(value: Date | string | null | undefined, label: string): Date {

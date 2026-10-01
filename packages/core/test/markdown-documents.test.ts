@@ -350,6 +350,34 @@ describe("markdown document primitives", () => {
       });
   });
 
+  it("commits a migrated schedule and its not-before anchor together without moving audit time", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const now = new Date("2030-01-15T17:10:00.000Z");
+    const firstRun = new Date("2030-01-16T15:37:00.000Z");
+    const created = await upsertAutomation({ vaultRoot, now,
+      ...createAutomationPayload({ schedule: { kind: "cron", expression: "0 13 * * *" } }) });
+    const migrated = await patchAutomation({ vaultRoot, now,
+      lookup: created.record.automationId, expectedUpdatedAt: created.record.updatedAt,
+      schedule: { kind: "dailyLocal", localTime: "15:37", timeZone: "UTC" },
+      scheduleNotBefore: new Date(firstRun.getTime() - 1),
+    });
+    expect(migrated.record.updatedAt).toBe(now.toISOString());
+    expect(migrated.record.scheduleAnchorAt).toBe("2030-01-16T15:36:59.999Z");
+    const readback = await showAutomation({ vaultRoot, automationId: migrated.record.automationId });
+    expect(readback?.scheduleAnchorAt).toBe(migrated.record.scheduleAnchorAt);
+    expect(readback?.schedule).toEqual(migrated.record.schedule);
+    const edited = await patchAutomation({ vaultRoot, lookup: migrated.record.automationId,
+      now: new Date("2030-01-15T18:00:00.000Z"), schedule: { kind: "dailyLocal", localTime: "18:30" } });
+    expect(edited.record.scheduleAnchorAt).toBe("2030-01-15T18:00:00.000Z");
+    await expect(patchAutomation({ vaultRoot, lookup: edited.record.automationId,
+      expectedUpdatedAt: migrated.record.updatedAt,
+      schedule: { kind: "dailyLocal", localTime: "15:37" },
+      scheduleNotBefore: firstRun,
+    })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+    expect((await showAutomation({ vaultRoot, automationId: edited.record.automationId }))?.schedule)
+      .toEqual(edited.record.schedule);
+  });
+
   it("preserves an explicit recurring timezone across a partial schedule patch", async () => {
     const vaultRoot = await makeVaultRoot();
     const created = await upsertAutomation({
@@ -545,6 +573,63 @@ describe("markdown document primitives", () => {
       slug: "create-only-reminder",
       vaultRoot,
     })).resolves.toEqual(created.record);
+  });
+
+  it("uses generated ids for create-only automation paths so titles can repeat", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const archived = await upsertAutomation({
+      vaultRoot,
+      now: new Date("2031-02-14T12:00:00.000Z"),
+      ...createAutomationPayload({
+        slug: "mobility-reminder",
+        status: "archived",
+        title: "Mobility reminder",
+      }),
+    });
+    const {
+      slug: _firstSlug,
+      ...firstPayload
+    } = createAutomationPayload({
+      status: "active",
+      title: "Mobility reminder",
+    });
+    const first = await upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      now: new Date("2031-02-15T12:00:00.000Z"),
+      ...firstPayload,
+    });
+    const {
+      slug: _secondSlug,
+      ...secondPayload
+    } = createAutomationPayload({
+      status: "active",
+      title: "Mobility reminder",
+    });
+    const second = await upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      now: new Date("2031-02-15T12:01:00.000Z"),
+      ...secondPayload,
+    });
+
+    expect(first.record.automationId).not.toBe(second.record.automationId);
+    expect(first.record.slug).toBe(
+      first.record.automationId.toLowerCase().replace("_", "-"),
+    );
+    expect(second.record.slug).toBe(
+      second.record.automationId.toLowerCase().replace("_", "-"),
+    );
+    expect(first.record.relativePath).toBe(
+      `bank/automations/${first.record.slug}.md`,
+    );
+    expect(second.record.relativePath).toBe(
+      `bank/automations/${second.record.slug}.md`,
+    );
+    await expect(showAutomation({
+      automationId: archived.record.automationId,
+      vaultRoot,
+    })).resolves.toEqual(archived.record);
   });
 
   it("allows first support-series assignment but preserves ownership thereafter", async () => {

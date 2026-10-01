@@ -76,7 +76,7 @@ export function groupJoinPermissionsForDisplay(
       );
       groups.push({
         description:
-          `Shares your last 7 days of daily ${nutrientList} totals from meals in Murph, including meals imported from connected apps.`,
+          `Shares 90 days of daily ${nutrientList} totals from meals in Murph, including meals imported from connected apps. Includes today and the previous 89 days. Only available data is shared.`,
         key: MACROS_GROUP_KEY,
         label: "Daily macros",
         legacyScopeKeys: [],

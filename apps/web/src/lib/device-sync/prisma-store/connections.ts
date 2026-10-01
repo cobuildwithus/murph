@@ -29,6 +29,12 @@ import type {
   DeviceAccountCredentialKind,
 } from "@murphai/device-syncd/types";
 
+import {
+  HostedDomainRootPreparationMismatchError,
+  revalidatePreparedHostedDomainRootForWebTx,
+  type PreparedHostedDomainRootForWeb,
+} from "../../hosted-crypto/domain-root-store";
+import { runWithFreshHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import type { HostedSecureBoxPrismaClient } from "../../hosted-crypto/secure-box";
 import {
   HOSTED_HEALTH_DATA_CONSENT_SCOPE,
@@ -51,10 +57,6 @@ import {
   generateHostedRandomPrefixedId,
 } from "../shared";
 import type { HostedLocalHeartbeatStateUpdate } from "../local-heartbeat";
-import {
-  isMemberOwnedDeviceProviderApplicationProvider,
-  type DeviceProviderApplicationBinding,
-} from "../provider-applications/types";
 import type {
   HostedDeviceSyncDueReconcileConnectionRecord,
   HostedConnectionRefreshLeaseClaimResult,
@@ -80,6 +82,7 @@ export { sanitizeHostedDeviceSyncConnectionMetadata } from "./connection-records
 import {
   HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION,
   encryptHostedConnectionSecret,
+  prepareHostedConnectionSecretRoot,
   prepareHostedRuntimeApplyTokenWrites,
   readHostedRuntimeConnectionSecretMaterial,
   readHostedStoredExternalAccountId,
@@ -89,10 +92,7 @@ import {
   type HostedRuntimeApplyPreparedTokenWrite,
   type HostedRuntimeApplyTokenWritePreparation,
 } from "./connection-secrets";
-import {
-  isHostedDirtyPayloadClassificationPendingError,
-  supersedeHostedCredentialScopedDirtyStateForConnectionTx,
-} from "./dirty-connections";
+import { supersedeHostedCredentialScopedDirtyStateForConnectionTx } from "./dirty-connections";
 import { toPrismaJsonObject } from "./prisma-json";
 
 export {
@@ -161,6 +161,7 @@ async function requireExactOAuthClaimResolutionTx(
 
 export interface HostedMemberDeviceConnectionStatus {
   id: string;
+  setupPhase: HostedDeviceConnectionSetupPhase | null;
   status: HostedStaticDeviceSyncConnectionRecord["status"];
 }
 
@@ -189,30 +190,18 @@ export class PrismaHostedConnectionStore {
   async upsertConnectionWithPrevious(
     input: UpsertPublicDeviceSyncConnectionInput,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
-    return this.upsertConnectionWithOptionalProviderApplication(input, null);
-  }
-
-  async upsertConnectionWithProviderApplication(
-    input: UpsertPublicDeviceSyncConnectionInput,
-    binding: DeviceProviderApplicationBinding,
-  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
-    return this.upsertConnectionWithOptionalProviderApplication(input, binding);
-  }
-
-  private async upsertConnectionWithOptionalProviderApplication(
-    input: UpsertPublicDeviceSyncConnectionInput,
-    binding: DeviceProviderApplicationBinding | null,
-  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     for (
       let attempt = 0;
       attempt < HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS;
       attempt += 1
     ) {
       try {
-        return await this.upsertConnectionWithPreviousOnce(input, binding);
+        return await runWithFreshHostedDomainRootUnwrapCache(
+          () => this.upsertConnectionWithPreviousOnce(input),
+        );
       } catch (error) {
         if (
-          isHostedDirtyPayloadClassificationPendingError(error)
+          error instanceof HostedDomainRootPreparationMismatchError
           && attempt < HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS - 1
         ) {
           continue;
@@ -234,7 +223,6 @@ export class PrismaHostedConnectionStore {
 
   private async upsertConnectionWithPreviousOnce(
     input: UpsertPublicDeviceSyncConnectionInput,
-    binding: DeviceProviderApplicationBinding | null,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     const ownerId = normalizeNullableString(input.ownerId);
     const displayName = normalizeNullableString(input.displayName);
@@ -273,39 +261,26 @@ export class PrismaHostedConnectionStore {
       });
     }
 
+    // This read is admission for key preparation only; the transaction repeats it
+    // under the member lock before granting authority to persist credentials.
+    await assertHostedConnectionOwnerAdmission({
+      ownerId,
+      ownsFailedOauthProviderCleanup,
+      prisma: this.prisma,
+    });
+    const preparedRoot = await prepareHostedConnectionSecretRoot({
+      prisma: this.prisma,
+      testCodec: this.testCodec,
+      userId: ownerId,
+    });
+
     const result = await this.prisma.$transaction(async (tx) => {
       await lockHostedMemberRow(tx, ownerId);
-      const ownerStatus = await readHostedMemberSuspensionAfterLockTx(
-        tx,
+      await assertHostedConnectionOwnerAdmission({
         ownerId,
-      );
-      if (ownerStatus === "missing") {
-        throw deviceSyncError({
-          code: "CONNECTION_OWNER_REQUIRED",
-          message: "Hosted device-sync connection owner no longer exists.",
-          retryable: false,
-          httpStatus: 404,
-        });
-      }
-      if (ownerStatus === "suspended" && !ownsFailedOauthProviderCleanup) {
-        throw deviceSyncError({
-          code: "CONNECTION_OWNER_SUSPENDED",
-          message: "Device connections cannot be completed while account deletion is active.",
-          retryable: false,
-          httpStatus: 409,
-        });
-      }
-      if (!ownsFailedOauthProviderCleanup && await readHostedHealthDataConsentState({
-        memberId: ownerId,
+        ownsFailedOauthProviderCleanup,
         prisma: tx,
-      }) === "revoked") {
-        throw deviceSyncError({
-          code: "HEALTH_DATA_CONSENT_REQUIRED",
-          httpStatus: 403,
-          message: "Use Murph again before connecting a health source.",
-          retryable: false,
-        });
-      }
+      });
 
       let existing = await tx.deviceConnection.findUnique({
         where: {
@@ -333,7 +308,7 @@ export class PrismaHostedConnectionStore {
       if (existing) {
         assertHostedUpsertExistingConnectionGuard(existing, input.existingAccountGuard ?? null);
 
-        if (ownerId && existing.userId !== ownerId) {
+        if (existing.userId !== ownerId) {
           throw deviceSyncError({
             code: "CONNECTION_OWNERSHIP_CONFLICT",
             message: "This provider account is already connected to a different Murph user.",
@@ -341,14 +316,6 @@ export class PrismaHostedConnectionStore {
             httpStatus: 409,
           });
         }
-
-        await assertHostedProviderApplicationBindingForUpsert({
-          binding,
-          existing,
-          ownerId,
-          provider: input.provider,
-          tx,
-        });
 
         if (isDeviceSyncDisconnectInProgress(existing) && !ownsFailedOauthProviderCleanup) {
           throw deviceSyncError({
@@ -364,8 +331,6 @@ export class PrismaHostedConnectionStore {
             existing,
             input.existingAccountPolicy,
           )
-          && ownerId
-          && existing.userId === ownerId
         ) {
           await requireExactOAuthClaimResolutionTx(tx, input.oauthClaim);
           return {
@@ -385,7 +350,19 @@ export class PrismaHostedConnectionStore {
             )
           : replacementMetadata;
 
+        if (existing.connectedAt.getTime() !== connectedAt.getTime()) {
+          await supersedeHostedCredentialScopedDirtyStateForConnectionTx({
+            connectionId: existing.id,
+            tx,
+            userId: existing.userId,
+          });
+        }
+
+        if (preparedRoot) {
+          await revalidatePreparedHostedDomainRootForWebTx({ prepared: preparedRoot, tx });
+        }
         const credentialWrite = await buildHostedConnectionCredentialWrite({
+          preparedRoot,
           connectionId: existing.id,
           credential,
           prisma: tx,
@@ -406,9 +383,8 @@ export class PrismaHostedConnectionStore {
             ...buildHostedConnectionSetupWrite(input, connectedAt, "update"),
             connectedAt,
             displayName,
-            providerApplicationId: binding?.applicationId ?? null,
-            providerApplicationRevision: binding?.revision ?? null,
             externalAccountIdEncrypted: await encryptHostedConnectionSecret({
+              preparedRoot,
               connectionId: existing.id,
               provider: input.provider,
               prisma: tx,
@@ -430,13 +406,6 @@ export class PrismaHostedConnectionStore {
           },
           ...hostedConnectionRecordArgs,
         });
-        if (existing.connectedAt.getTime() !== connectedAt.getTime()) {
-          await supersedeHostedCredentialScopedDirtyStateForConnectionTx({
-            connectionId: existing.id,
-            tx,
-            userId: existing.userId,
-          });
-        }
         await requireExactOAuthClaimResolutionTx(tx, input.oauthClaim);
         return {
           record: updated,
@@ -446,16 +415,12 @@ export class PrismaHostedConnectionStore {
 
       assertHostedUpsertExistingConnectionGuard(null, input.existingAccountGuard ?? null);
 
-      await assertHostedProviderApplicationBindingForUpsert({
-        binding,
-        existing: null,
-        ownerId,
-        provider: input.provider,
-        tx,
-      });
-
       const connectionId = generateHostedRandomPrefixedId("dsc");
+      if (preparedRoot) {
+        await revalidatePreparedHostedDomainRootForWebTx({ prepared: preparedRoot, tx });
+      }
       const credentialWrite = await buildHostedConnectionCredentialWrite({
+        preparedRoot,
         connectionId,
         credential,
         prisma: tx,
@@ -472,6 +437,7 @@ export class PrismaHostedConnectionStore {
           connectedAt,
           displayName,
           externalAccountIdEncrypted: await encryptHostedConnectionSecret({
+            preparedRoot,
             connectionId,
             provider: input.provider,
             prisma: tx,
@@ -485,8 +451,6 @@ export class PrismaHostedConnectionStore {
           nextReconcileAt: maybeDate(input.nextReconcileAt),
           provider: input.provider,
           providerAccountBlindIndex,
-          providerApplicationId: binding?.applicationId ?? null,
-          providerApplicationRevision: binding?.revision ?? null,
           scopesJson: scopes,
           status: requestedStatus ?? "active",
           userId: ownerId,
@@ -876,7 +840,7 @@ export class PrismaHostedConnectionStore {
   async listMemberConnectionStatuses(input: {
     limit: number;
     provider: string;
-    status: "active" | "not_disconnected";
+    status: "active" | "all" | "not_disconnected";
     userId: string;
   }): Promise<HostedMemberDeviceConnectionStatus[]> {
     const provider = normalizeNullableString(input.provider);
@@ -891,15 +855,20 @@ export class PrismaHostedConnectionStore {
     const records = await this.prisma.deviceConnection.findMany({
       where: {
         provider,
-        status: input.status === "active"
-          ? "active"
-          : { not: "disconnected" },
+        ...(input.status === "all"
+          ? {}
+          : {
+              status: input.status === "active"
+                ? "active"
+                : { not: "disconnected" },
+            }),
         userId,
       },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
       take: input.limit + 1,
       select: {
         id: true,
+        setupPhase: true,
         status: true,
       },
     });
@@ -915,6 +884,7 @@ export class PrismaHostedConnectionStore {
 
     return records.map((record) => ({
       id: record.id,
+      setupPhase: normalizeHostedDeviceSyncSetupPhase(record.setupPhase),
       status: normalizeHostedDeviceSyncLifecycleStatus(record.status),
     }));
   }
@@ -1358,18 +1328,21 @@ export class PrismaHostedConnectionStore {
   }): Promise<HostedDeviceSyncDueReconcileConnectionRecord[]> {
     const limit = Math.max(1, Math.min(input.limit, 251));
     const rows = await this.prisma.$queryRaw<Array<{
+      orphaned_dirty_recovery_key: string | null;
       connected_at: Date;
       id: string;
       next_reconcile_at: Date;
       provider: string;
       user_id: string;
     }>>(Prisma.sql`
+      with due_connections as (
       select
         "connection"."connected_at",
         "connection"."id",
         "connection"."next_reconcile_at",
         "connection"."provider",
-        "connection"."user_id"
+        "connection"."user_id",
+        "connection"."updated_at" as sweep_updated_at
       from "device_connection" as "connection"
       join "hosted_member" as "member"
         on "member"."id" = "connection"."user_id"
@@ -1416,9 +1389,36 @@ export class PrismaHostedConnectionStore {
         "connection"."updated_at" asc,
         "connection"."id" asc
       limit ${limit}
+      )
+      select due.*,
+        case when
+          counters.consumed_seq = counters.next_seq - 1
+          and dirty.connection_id is not null
+          and workspace.redacted_status_json->>'hostedMailboxSystemHandledThroughSeq' = counters.consumed_seq::text
+          and workspace.redacted_status_json->'hostedMailboxSystemDeviceSyncContinuationSeqs' = '[]'::jsonb
+          and workspace.redacted_status_json->'hostedMailboxSystemFirstPendingSeq' = 'null'::jsonb
+          and (
+            dirty.dirty_revision > dirty.processed_revision
+            or exists (
+              select 1 from device_sync_dirty_payload payload
+              where payload.connection_id = due.id and payload.user_id = due.user_id
+            )
+          )
+        then counters.consumed_seq::text
+        else null end as orphaned_dirty_recovery_key
+      from due_connections due
+      left join device_sync_dirty_connection dirty
+        on dirty.connection_id = due.id and dirty.user_id = due.user_id
+      left join hosted_workspace workspace on workspace.user_id = due.user_id
+      left join hosted_mailbox_lane_counter counters
+        on counters.user_id = due.user_id and counters.lane = 'system'
+      order by due.next_reconcile_at, due.sweep_updated_at, due.id
     `);
 
     return rows.map((row) => ({
+      ...(row.orphaned_dirty_recovery_key
+        ? { orphanedDirtyRecoveryKey: row.orphaned_dirty_recovery_key }
+        : {}),
       connectionId: row.id,
       connectedAt: toIsoTimestamp(row.connected_at),
       nextReconcileAt: toIsoTimestamp(row.next_reconcile_at),
@@ -1547,127 +1547,6 @@ export class PrismaHostedConnectionStore {
           tokenVersion: null,
         } satisfies HostedStoredDeviceSyncAccount;
     }
-  }
-}
-
-async function assertHostedProviderApplicationBindingForUpsert(input: {
-  binding: DeviceProviderApplicationBinding | null;
-  existing: HostedConnectionRecord | null;
-  ownerId: string | null;
-  provider: string;
-  tx: HostedPrismaTransactionClient;
-}): Promise<void> {
-  const existingApplicationId = normalizeNullableString(
-    input.existing?.providerApplicationId,
-  );
-  const existingApplicationRevision =
-    input.existing?.providerApplicationRevision ?? null;
-
-  if (!input.binding) {
-    if (existingApplicationId || existingApplicationRevision !== null) {
-      throw deviceSyncError({
-        code: "PROVIDER_APPLICATION_REQUIRED",
-        message: "This connection must be reauthorized through its private provider application.",
-        retryable: false,
-        httpStatus: 409,
-      });
-    }
-
-    if (
-      input.ownerId
-      && isMemberOwnedDeviceProviderApplicationProvider(input.provider)
-    ) {
-      const application = await input.tx.deviceProviderApplication.findFirst({
-        select: { id: true },
-        where: {
-          memberId: input.ownerId,
-          provider: input.provider,
-        },
-      });
-      if (application) {
-        throw deviceSyncError({
-          code: "PROVIDER_APPLICATION_REQUIRED",
-          message: "This provider must be authorized through the member's private provider application.",
-          retryable: false,
-          httpStatus: 409,
-        });
-      }
-    }
-    return;
-  }
-
-  if (!input.ownerId) {
-    throw deviceSyncError({
-      code: "CONNECTION_OWNER_REQUIRED",
-      message: "Member-owned provider application connections require an authenticated owner.",
-      retryable: false,
-      httpStatus: 400,
-    });
-  }
-  if (input.binding.provider !== input.provider) {
-    throw deviceSyncError({
-      code: "PROVIDER_APPLICATION_PROVIDER_MISMATCH",
-      message: "Private provider application does not match the requested provider.",
-      retryable: false,
-      httpStatus: 409,
-    });
-  }
-
-  const application = await input.tx.deviceProviderApplication.findFirst({
-    select: {
-      id: true,
-      memberId: true,
-      provider: true,
-      revision: true,
-    },
-    where: {
-      id: input.binding.applicationId,
-      memberId: input.ownerId,
-      provider: input.provider,
-      revision: input.binding.revision,
-    },
-  });
-  if (!application) {
-    throw deviceSyncError({
-      code: "PROVIDER_APPLICATION_STALE",
-      message: "Private provider application changed and must be reauthorized.",
-      retryable: false,
-      httpStatus: 409,
-    });
-  }
-
-  if (
-    input.existing
-    && input.existing.status !== "disconnected"
-    && (
-      existingApplicationId !== application.id
-      || existingApplicationRevision !== application.revision
-    )
-  ) {
-    throw deviceSyncError({
-      code: "PROVIDER_APPLICATION_CONNECTION_CONFLICT",
-      message: "Disconnect the existing provider connection before switching to a private provider application.",
-      retryable: false,
-      httpStatus: 409,
-    });
-  }
-
-  const conflictingConnection = await input.tx.deviceConnection.findFirst({
-    select: { id: true },
-    where: {
-      ...(input.existing ? { id: { not: input.existing.id } } : {}),
-      provider: input.provider,
-      status: { not: "disconnected" },
-      userId: input.ownerId,
-    },
-  });
-  if (conflictingConnection) {
-    throw deviceSyncError({
-      code: "PROVIDER_APPLICATION_CONNECTION_CONFLICT",
-      message: "Only one active member-owned connection is supported for this provider.",
-      retryable: false,
-      httpStatus: 409,
-    });
   }
 }
 
@@ -1830,6 +1709,7 @@ function resolveHostedDeviceSyncSetupExpiresAt(input: {
 }
 
 async function buildHostedConnectionCredentialWrite(input: {
+  preparedRoot: PreparedHostedDomainRootForWeb | null;
   connectionId: string;
   credential: DeviceAccountCredential;
   prisma: HostedPrismaTransactionClient;
@@ -1843,6 +1723,7 @@ async function buildHostedConnectionCredentialWrite(input: {
   switch (input.credential.kind) {
     case "oauth_tokens":
       return await buildHostedOAuthCredentialWrite({
+        preparedRoot: input.preparedRoot,
         connectionId: input.connectionId,
         prisma: input.prisma,
         provider: input.provider,
@@ -1941,6 +1822,7 @@ function normalizeDefaultProviderProfileKey(provider: string): string | null {
 }
 
 async function buildHostedOAuthCredentialWrite(input: {
+  preparedRoot: PreparedHostedDomainRootForWeb | null;
   connectionId: string;
   prisma: HostedPrismaTransactionClient;
   provider: string;
@@ -1960,6 +1842,7 @@ async function buildHostedOAuthCredentialWrite(input: {
 
   return {
     accessTokenEncrypted: await encryptHostedConnectionSecret({
+        preparedRoot: input.preparedRoot,
       connectionId: input.connectionId,
       provider: input.provider,
       prisma: input.prisma,
@@ -1976,6 +1859,7 @@ async function buildHostedOAuthCredentialWrite(input: {
     providerConfigKey: null,
     refreshTokenEncrypted: input.tokens.refreshToken
       ? await encryptHostedConnectionSecret({
+        preparedRoot: input.preparedRoot,
         connectionId: input.connectionId,
         provider: input.provider,
         prisma: input.prisma,
@@ -2038,4 +1922,43 @@ function buildHostedLocalHeartbeatUpdateData(
       ? { lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(localState.lastErrorMessage ?? null) }
       : {}),
   };
+}
+
+// The preflight is advisory. Call again after the member lock before mutation.
+async function assertHostedConnectionOwnerAdmission(input: {
+  ownerId: string;
+  ownsFailedOauthProviderCleanup: boolean;
+  prisma: HostedPrismaTransactionClient;
+}): Promise<void> {
+  const ownerStatus = await readHostedMemberSuspensionAfterLockTx(
+    input.prisma,
+    input.ownerId,
+  );
+  if (ownerStatus === "missing") {
+    throw deviceSyncError({
+      code: "CONNECTION_OWNER_REQUIRED",
+      message: "Hosted device-sync connection owner no longer exists.",
+      retryable: false,
+      httpStatus: 404,
+    });
+  }
+  if (ownerStatus === "suspended" && !input.ownsFailedOauthProviderCleanup) {
+    throw deviceSyncError({
+      code: "CONNECTION_OWNER_SUSPENDED",
+      message: "Device connections cannot be completed while account deletion is active.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+  if (!input.ownsFailedOauthProviderCleanup && await readHostedHealthDataConsentState({
+    memberId: input.ownerId,
+    prisma: input.prisma,
+  }) === "revoked") {
+    throw deviceSyncError({
+      code: "HEALTH_DATA_CONSENT_REQUIRED",
+      httpStatus: 403,
+      message: "Use Murph again before connecting a health source.",
+      retryable: false,
+    });
+  }
 }

@@ -1,4 +1,7 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
+import {
+  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+} from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -11,10 +14,6 @@ import {
   createAssistantProductFeedbackRecorder,
   resolveAssistantProductFeedbackAcceptedInputIds,
 } from "../src/assistant/turn-progress.js";
-import {
-  MURPH_MANAGED_AUTOMATIONS,
-  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-} from "../src/assistant/managed-automations.js";
 import {
   buildAssistantSystemPrompt,
 } from "../src/assistant/system-prompt.js";
@@ -121,17 +120,19 @@ describe("assistant product feedback", () => {
     });
   });
 
-  it("advertises one structured attempt and optional changelog metadata", () => {
+  it("advertises value-free schema issues and optional changelog metadata", () => {
     const description = MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.description;
     const schema = JSON.stringify(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema);
     expect(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.required).toEqual(["kind", "summary"]);
     expect(
       MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.properties.summary.maxLength,
-    ).toBe(2_000);
+    ).toBe(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH);
     expect(description).toContain("one structured Murph product-feedback candidate");
     expect(description).toContain("current accepted request");
     expect(description).toContain("optional related changelog item ids");
-    expect(description).toContain("accepted, already accepted, or unavailable");
+    expect(description).toContain(
+      "input-schema rejection, accepted, already accepted, unavailable, or callback failure",
+    );
     expect(description).toContain("Provide the feedback kind, one concise product-only summary");
     expect(description).toContain(
       "append a privacy-safe reproduction recipe in the same summary field",
@@ -141,7 +142,13 @@ describe("assistant product feedback", () => {
     );
     expect(description).toContain('beginning exactly "Support escalation:"');
     expect(description).toContain("waits for the durable callback");
-    expect(description).toContain("do not retry after any result");
+    expect(description).toContain(
+      "An input-schema rejection includes value-free validation issues",
+    );
+    expect(description).toContain(
+      "Accepted, already accepted, unavailable, and callback-failure results are terminal",
+    );
+    expect(description).not.toContain("retry once");
     expect(schema).toContain('"minItems":0');
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');
@@ -201,11 +208,6 @@ describe("assistant product feedback", () => {
       onboardingGuidance: false,
       turnTrigger: null,
     });
-    const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
-      (automation) =>
-        automation.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-    );
-    expect(productNotes).toBeDefined();
     expect(systemPrompt).toContain(
       "append a privacy-safe `Reproduction:` section in that same summary field",
     );
@@ -214,11 +216,8 @@ describe("assistant product feedback", () => {
       MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema,
     );
     const ordinaryStack = `${systemPrompt}\n${toolSchema}`;
-    const managedStack =
-      `${systemPrompt}\n${productNotes?.instructions ?? ""}\n${toolSchema}`;
 
     expect(ordinaryStack.split(rubricMarker)).toHaveLength(2);
-    expect(managedStack.split(rubricMarker)).toHaveLength(2);
   });
 
   it("parses and collects one explicit feedback candidate without a pre-reply write", async () => {
@@ -373,18 +372,130 @@ describe("assistant product feedback", () => {
         request,
       });
 
-      expect(result.rpcResult).toEqual({
-        success: false,
-        contentItems: [{
-          type: "inputText",
-          text: "invalid product feedback arguments",
-        }],
+      expect(result.rpcResult.success).toBe(false);
+      const feedback = result.rpcResult.contentItems[0];
+      expect(feedback?.type).toBe("inputText");
+      expect(JSON.parse(feedback?.text ?? "")).toMatchObject({
+        error: "invalid_product_feedback_arguments",
+        validationIssues: expect.arrayContaining([
+          expect.objectContaining({ code: expect.any(String) }),
+        ]),
       });
     }
 
     expect(deliverProductSupportEscalation).not.toHaveBeenCalled();
     expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled();
     expect(productFeedbackRecorder.readProductFeedback()).toBeNull();
+  });
+
+  it("returns an actionable value-free length error and accepts the corrected retry", async () => {
+    const privateMarker = "synthetic-private-feedback-marker";
+    const summaryMaxLength = HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH;
+    const oversizedRequest = readTestMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "frustration",
+          relatedChangelogItemIds: [],
+          summary: `Support escalation: ${"x".repeat(summaryMaxLength)}${privateMarker}`,
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    });
+    expect(oversizedRequest?.kind).toBe("invalid-product-feedback-arguments");
+    if (!oversizedRequest) {
+      throw new Error("Expected an oversized product feedback request.");
+    }
+
+    const oversizedResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: oversizedRequest,
+    });
+    const feedbackText = oversizedResult.rpcResult.contentItems[0]?.text ?? "";
+
+    expect(oversizedResult.rpcResult.success).toBe(false);
+    const parsedFeedback = JSON.parse(feedbackText);
+    expect(parsedFeedback).toMatchObject({
+      error: "invalid_product_feedback_arguments",
+      validationIssues: expect.arrayContaining([
+        expect.objectContaining({
+          code: "too_big",
+          maximum: summaryMaxLength,
+          path: ["summary"],
+        }),
+      ]),
+    });
+    expect(parsedFeedback).not.toHaveProperty("recovery");
+    expect(feedbackText).not.toContain(privateMarker);
+    expect(feedbackText).not.toContain("xxxx");
+
+    const deliverProductSupportEscalation = vi
+      .fn()
+      .mockResolvedValue({ recorded: true });
+    const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate: vi.fn(),
+        deliverProductSupportEscalation,
+      },
+    });
+    const correctedRequest = readTestMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "frustration",
+          relatedChangelogItemIds: [],
+          summary: [
+            "Support escalation: a synthetic profile preference could not be applied for account-linked support.",
+            "Reproduction: in a private conversation, request support after a profile-setting action fails; expected the escalation to be recorded, but the first tool input exceeded its summary limit.",
+          ].join(" "),
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    });
+    if (!correctedRequest || !productFeedbackRecorder) {
+      throw new Error("Expected a corrected product feedback request and recorder.");
+    }
+
+    const correctedResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        currentUserActionScope: () => ({
+          acceptedInputIds: ["assistant_input_1"],
+          conversationId: null,
+          conversationScope: "direct",
+          inboundMailboxItemIds: [],
+          originSessionId: "session-schema-recovery",
+          recipientKey: null,
+        }),
+        sendVaultFile: async () => {
+          throw new Error("Vault-file sending is unavailable for this turn.");
+        },
+        vaultFileSendAvailable: false,
+      },
+      nextUsageOrdinal: () => 1,
+      productFeedbackRecorder,
+      progressDelivery: null,
+      request: correctedRequest,
+    });
+
+    expect(correctedResult.rpcResult).toEqual({
+      success: true,
+      contentItems: [{
+        type: "inputText",
+        text: "product feedback candidate accepted",
+      }],
+    });
+    expect(deliverProductSupportEscalation).toHaveBeenCalledOnce();
   });
 
   it("rejects a support escalation outside a verified direct conversation scope", async () => {

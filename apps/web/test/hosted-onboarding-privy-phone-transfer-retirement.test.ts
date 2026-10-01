@@ -1,4 +1,8 @@
-import { HostedBillingStatus } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  type HostedMemberBillingRef,
+  type HostedMemberIdentity,
+} from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -10,9 +14,10 @@ const mocks = vi.hoisted(() => ({
   hostedPhoneLookupKeyMatchesValue: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
-  readHostedMemberBillingSnapshot: vi.fn(),
+  projectHostedMemberIdentityState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberIdentity: vi.fn(),
+  readHostedMemberIdentityRecord: vi.fn(),
   readHostedPrivyUserById: vi.fn(),
   readHostedPrivyUserByIdIfExists: vi.fn(),
   reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
@@ -41,13 +46,14 @@ vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  projectHostedMemberIdentityState: mocks.projectHostedMemberIdentityState,
   lookupHostedMemberIdentityByPhoneNumber:
     mocks.lookupHostedMemberIdentityByPhoneNumber,
   readHostedMemberIdentity: mocks.readHostedMemberIdentity,
+  readHostedMemberIdentityRecord: mocks.readHostedMemberIdentityRecord,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
-  readHostedMemberBillingSnapshot: mocks.readHostedMemberBillingSnapshot,
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
@@ -99,6 +105,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 import {
   acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
+  prepareHostedPrivyPhoneTransferSourceRetirement,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
   readHostedPrivyPhoneTransferProof,
 } from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
@@ -119,7 +126,6 @@ const SOURCE_MEMBER_ID = "member_source";
 const SOURCE_PRIVY_USER_ID = "did:privy:source";
 const TARGET_MEMBER_ID = "member_target";
 const TARGET_PRIVY_USER_ID = "did:privy:target";
-const STRIPE_CUSTOMER_ID = "cus_trial";
 const STRIPE_SUBSCRIPTION_ID = "sub_trial";
 const BROWSER_VAULT_REFRESH_CONTROL_EVENT_ID =
   buildHostedBrowserVaultRefreshRuntimeControlEvent({
@@ -133,6 +139,11 @@ describe("Privy phone-transfer source retirement", () => {
     mocks.acquireHostedLinqParticipantPhoneLockTx.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedPrivyUserByIdIfExists.mockResolvedValue(null);
+    mocks.projectHostedMemberIdentityState.mockImplementation(async (row) => row);
+    mocks.readHostedMemberIdentityRecord.mockImplementation(
+      async ({ memberId, prisma }) =>
+        prisma.hostedMemberIdentity.findUnique({ where: { memberId } }),
+    );
   });
 
   describe("surviving provider source accounts", () => {
@@ -217,7 +228,6 @@ describe("Privy phone-transfer source retirement", () => {
     const fixture = makeFixture();
 
     await expect(prepare(fixture)).resolves.toEqual({
-      autoTrialBilling: null,
       sourceMemberId: SOURCE_MEMBER_ID,
     });
     expect(fixture.prisma.hostedMember.updateMany).toHaveBeenCalledWith({
@@ -238,7 +248,6 @@ describe("Privy phone-transfer source retirement", () => {
     const fixture = makeFixture({ targetPhoneNumber });
 
     await expect(prepare(fixture, targetPhoneNumber)).resolves.toEqual({
-      autoTrialBilling: null,
       sourceMemberId: SOURCE_MEMBER_ID,
     });
 
@@ -289,23 +298,22 @@ describe("Privy phone-transfer source retirement", () => {
     });
   });
 
-  it("fences only the exact untouched automatic-trial scaffold", async () => {
-    const fixture = makeFixture({ autoTrial: true });
-
-    await expect(prepare(fixture)).resolves.toEqual({
-      autoTrialBilling: {
-        stripeCustomerId: STRIPE_CUSTOMER_ID,
-        stripeSubscriptionId: STRIPE_SUBSCRIPTION_ID,
-      },
-      sourceMemberId: SOURCE_MEMBER_ID,
+  it("requires support for a source retaining retired trial billing", async () => {
+    const fixture = makeFixture({
+      starterSource: "web_onboarding",
+      withBillingRef: true,
     });
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
   });
 
   it("fences the exact untouched Web Starter scaffold without Stripe cleanup", async () => {
     const fixture = makeFixture({ starterSource: "web_onboarding" });
 
     await expect(prepare(fixture)).resolves.toEqual({
-      autoTrialBilling: null,
       sourceMemberId: SOURCE_MEMBER_ID,
     });
     expect(fixture.prisma.hostedUsageCreditEntry.findUnique).toHaveBeenCalledWith({
@@ -327,7 +335,6 @@ describe("Privy phone-transfer source retirement", () => {
     const fixture = makeFixture({ starterSource: "companion_onboarding" });
 
     await expect(prepare(fixture)).resolves.toEqual({
-      autoTrialBilling: null,
       sourceMemberId: SOURCE_MEMBER_ID,
     });
   });
@@ -339,7 +346,6 @@ describe("Privy phone-transfer source retirement", () => {
     });
 
     await expect(prepare(fixture)).resolves.toEqual({
-      autoTrialBilling: null,
       sourceMemberId: SOURCE_MEMBER_ID,
     });
   });
@@ -352,7 +358,6 @@ describe("Privy phone-transfer source retirement", () => {
     });
 
     await expect(prepare(fixture)).resolves.toEqual({
-      autoTrialBilling: null,
       sourceMemberId: SOURCE_MEMBER_ID,
     });
   });
@@ -362,7 +367,6 @@ describe("Privy phone-transfer source retirement", () => {
     fixture.sourceShape.signupNotificationContextEncrypted = "encrypted-context";
 
     await expect(prepare(fixture)).resolves.toEqual({
-      autoTrialBilling: null,
       sourceMemberId: SOURCE_MEMBER_ID,
     });
 
@@ -425,7 +429,6 @@ describe("Privy phone-transfer source retirement", () => {
     ]);
 
     await expect(prepare(fixture)).resolves.toEqual({
-      autoTrialBilling: null,
       sourceMemberId: SOURCE_MEMBER_ID,
     });
   });
@@ -457,14 +460,10 @@ describe("Privy phone-transfer source retirement", () => {
   );
 
   it("ignores an expired hosted callback nonce on an otherwise disposable source", async () => {
-    const fixture = makeFixture({ autoTrial: true });
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     stubHostedCallbackNonce(fixture, new Date(NOW.getTime() - 1));
 
     await expect(prepare(fixture)).resolves.toEqual({
-      autoTrialBilling: {
-        stripeCustomerId: STRIPE_CUSTOMER_ID,
-        stripeSubscriptionId: STRIPE_SUBSCRIPTION_ID,
-      },
       sourceMemberId: SOURCE_MEMBER_ID,
     });
     expect(
@@ -485,7 +484,7 @@ describe("Privy phone-transfer source retirement", () => {
     _label,
     expiresAt,
   ) => {
-    const fixture = makeFixture({ autoTrial: true });
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     stubHostedCallbackNonce(fixture, expiresAt);
 
     await expect(prepare(fixture)).rejects.toMatchObject({
@@ -494,8 +493,8 @@ describe("Privy phone-transfer source retirement", () => {
     expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
   });
 
-  it("lets Settings phone sync retire a source with only an expired callback nonce", async () => {
-    const fixture = makeFixture({ autoTrial: true });
+  it("rejects cross-member phone sync without invoking source retirement", async () => {
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     stubHostedCallbackNonce(fixture, new Date(0));
     const prisma = Object.assign(fixture.prisma, {
       $transaction: vi.fn(
@@ -521,8 +520,10 @@ describe("Privy phone-transfer source retirement", () => {
           ? fixture.targetIdentity
           : fixture.sourceIdentity,
     );
-    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
-      fixture.billingSnapshot,
+    mocks.projectHostedMemberIdentityState.mockImplementation(
+      async (row) => row.memberId === TARGET_MEMBER_ID
+        ? fixture.targetIdentity
+        : fixture.sourceIdentity,
     );
     mocks.readHostedPrivyUserById.mockResolvedValue({
       id: TARGET_PRIVY_USER_ID,
@@ -580,92 +581,16 @@ describe("Privy phone-transfer source retirement", () => {
     );
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body).toMatchObject({
-      phoneNumber: PHONE_NUMBER,
-      status: "synced",
-    });
-    expect(JSON.stringify(body)).not.toContain(
-      "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
-    );
-    expect(JSON.stringify(body)).not.toContain("saved activity");
-    expect(
-      fixture.prisma.hostedWebInternalRequestNonce.findFirst,
-    ).toHaveBeenCalledWith({
-      where: {
-        expiresAt: { gte: expect.any(Date) },
-        userId: SOURCE_MEMBER_ID,
-      },
-      select: { nonceHash: true },
-    });
+    expect(response.status).toBe(409);
+    expect(body).toMatchObject({ error: { code: "PHONE_IDENTITY_CONFLICT" } });
+    expect(mocks.deleteHostedPrivyPhoneTransferSourceAccountData).not.toHaveBeenCalled();
+
   });
-
-  it("retries an exact automatic-trial scaffold after cleanup cancellation", async () => {
-    const fixture = makeFixture({ autoTrial: true });
-    if (!fixture.billingSnapshot) {
-      throw new TypeError("Expected automatic-trial billing fixture.");
-    }
-    fixture.sourceMember.billingStatus = HostedBillingStatus.canceled;
-    fixture.sourceMember.suspendedAt = NOW;
-    fixture.sourceShape.billingStatus = HostedBillingStatus.canceled;
-    fixture.billingSnapshot.billingRef.currentBillingPhase = null;
-
-    await expect(prepare(fixture)).resolves.toEqual({
-      autoTrialBilling: {
-        stripeCustomerId: STRIPE_CUSTOMER_ID,
-        stripeSubscriptionId: STRIPE_SUBSCRIPTION_ID,
-      },
-      sourceMemberId: SOURCE_MEMBER_ID,
-    });
-    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["active + trial", HostedBillingStatus.active, "trial", true],
-    ["canceled + null", HostedBillingStatus.canceled, null, true],
-    ["incomplete + null", HostedBillingStatus.incomplete, null, true],
-    ["canceled + trial", HostedBillingStatus.canceled, "trial", false],
-    ["active + null", HostedBillingStatus.active, null, false],
-  ] as const)(
-    "enforces the exact automatic-trial lifecycle pair for %s",
-    async (
-      _label,
-      billingStatus,
-      currentBillingPhase,
-      isAccepted,
-    ) => {
-      const fixture = makeFixture({ autoTrial: true });
-      if (!fixture.billingSnapshot) {
-        throw new TypeError("Expected automatic-trial billing fixture.");
-      }
-      fixture.sourceMember.billingStatus = billingStatus;
-      fixture.sourceMember.suspendedAt =
-        billingStatus === HostedBillingStatus.active ? null : NOW;
-      fixture.sourceShape.billingStatus = billingStatus;
-      fixture.billingSnapshot.billingRef.currentBillingPhase =
-        currentBillingPhase;
-
-      if (isAccepted) {
-        await expect(prepare(fixture)).resolves.toEqual({
-          autoTrialBilling: {
-            stripeCustomerId: STRIPE_CUSTOMER_ID,
-            stripeSubscriptionId: STRIPE_SUBSCRIPTION_ID,
-          },
-          sourceMemberId: SOURCE_MEMBER_ID,
-        });
-        return;
-      }
-
-      await expect(prepare(fixture)).rejects.toMatchObject({
-        code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
-      });
-    },
-  );
 
   it("rejects a non-canonical browser-vault refresh event", async () => {
-    const fixture = makeFixture({ autoTrial: true });
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     const activationEventId =
-      `member.activated:hosted.auto_pulse_trial.enrolled:${SOURCE_MEMBER_ID}:auto-pulse-trial:${STRIPE_SUBSCRIPTION_ID}`;
+      `member.activated:hosted.starter_usage.enrolled:${SOURCE_MEMBER_ID}:${buildHostedStarterUsageSemanticSourceKey(SOURCE_MEMBER_ID)}`;
     fixture.prisma.hostedMailboxItem.findMany.mockResolvedValue([
       mailboxItem(1, "member.activated", activationEventId),
       mailboxItem(
@@ -686,14 +611,14 @@ describe("Privy phone-transfer source retirement", () => {
     expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
   });
 
-  it("fences an automatic-trial scaffold the runtime already booted", async () => {
-    const fixture = makeFixture({ autoTrial: true });
+  it("fences a Starter scaffold the runtime already booted", async () => {
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     const activationEventId =
-      `member.activated:hosted.auto_pulse_trial.enrolled:${SOURCE_MEMBER_ID}:auto-pulse-trial:${STRIPE_SUBSCRIPTION_ID}`;
+      `member.activated:hosted.starter_usage.enrolled:${SOURCE_MEMBER_ID}:${buildHostedStarterUsageSemanticSourceKey(SOURCE_MEMBER_ID)}`;
     // The welcome delivery established the provider chat identity and
     // observed the phone participant handle within seconds of signup.
     fixture.prisma.hostedMemberRouting.findUnique.mockResolvedValue({
-      ...makeAutoTrialRouting(),
+      ...makeActivationRouting(),
       linqChatIdEncrypted: "chat-ciphertext",
       linqChatLookupKey: "chat:established",
       linqParticipantContactKind: "phone",
@@ -754,10 +679,6 @@ describe("Privy phone-transfer source retirement", () => {
     fixture.sourceShape._count.linqDailyStates = 1;
 
     await expect(prepare(fixture)).resolves.toEqual({
-      autoTrialBilling: {
-        stripeCustomerId: STRIPE_CUSTOMER_ID,
-        stripeSubscriptionId: STRIPE_SUBSCRIPTION_ID,
-      },
       sourceMemberId: SOURCE_MEMBER_ID,
     });
   });
@@ -784,9 +705,9 @@ describe("Privy phone-transfer source retirement", () => {
       },
     },
   ])("rejects a source routing with $label", async ({ routing }) => {
-    const fixture = makeFixture({ autoTrial: true });
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     fixture.prisma.hostedMemberRouting.findUnique.mockResolvedValue({
-      ...makeAutoTrialRouting(),
+      ...makeActivationRouting(),
       ...routing,
     });
 
@@ -797,7 +718,7 @@ describe("Privy phone-transfer source retirement", () => {
   });
 
   it("rejects a source routed through an unknown line", async () => {
-    const fixture = makeFixture({ autoTrial: true });
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     fixture.prisma.hostedLinqLine.findUnique.mockResolvedValue(null);
 
     await expect(prepare(fixture)).rejects.toMatchObject({
@@ -807,7 +728,7 @@ describe("Privy phone-transfer source retirement", () => {
   });
 
   it("rejects a source whose conversation counter recorded any input", async () => {
-    const fixture = makeFixture({ autoTrial: true });
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     fixture.prisma.hostedMailboxLaneCounter.findMany.mockResolvedValue([
       { consumedSeq: 0n, lane: "causal", nextSeq: 4n },
       { consumedSeq: 1n, lane: "conversation", nextSeq: 2n },
@@ -821,9 +742,9 @@ describe("Privy phone-transfer source retirement", () => {
   });
 
   it("rejects a source holding a conversation-lane mailbox item", async () => {
-    const fixture = makeFixture({ autoTrial: true });
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     const activationEventId =
-      `member.activated:hosted.auto_pulse_trial.enrolled:${SOURCE_MEMBER_ID}:auto-pulse-trial:${STRIPE_SUBSCRIPTION_ID}`;
+      `member.activated:hosted.starter_usage.enrolled:${SOURCE_MEMBER_ID}:${buildHostedStarterUsageSemanticSourceKey(SOURCE_MEMBER_ID)}`;
     fixture.prisma.hostedMailboxItem.findMany.mockResolvedValue([
       mailboxItem(1, "member.activated", activationEventId),
       mailboxItem(
@@ -845,9 +766,9 @@ describe("Privy phone-transfer source retirement", () => {
   });
 
   it("rejects a source with an unexpected system mailbox kind", async () => {
-    const fixture = makeFixture({ autoTrial: true });
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     const activationEventId =
-      `member.activated:hosted.auto_pulse_trial.enrolled:${SOURCE_MEMBER_ID}:auto-pulse-trial:${STRIPE_SUBSCRIPTION_ID}`;
+      `member.activated:hosted.starter_usage.enrolled:${SOURCE_MEMBER_ID}:${buildHostedStarterUsageSemanticSourceKey(SOURCE_MEMBER_ID)}`;
     fixture.prisma.hostedMailboxItem.findMany.mockResolvedValue([
       mailboxItem(1, "member.activated", activationEventId),
       mailboxItem(
@@ -869,6 +790,12 @@ describe("Privy phone-transfer source retirement", () => {
   });
 
   it.each([
+    {
+      label: "a migrated approval passkey",
+      mutate: (fixture: Fixture) => {
+        fixture.sourceShape.approvalCredentials = { memberId: SOURCE_MEMBER_ID };
+      },
+    },
     {
       label: "an address-book projection",
       mutate: (fixture: Fixture) => {
@@ -908,7 +835,7 @@ describe("Privy phone-transfer source retirement", () => {
       },
     },
   ])("rejects a source scaffold containing $label", async ({ mutate }) => {
-    const fixture = makeFixture({ autoTrial: true });
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     mutate(fixture);
 
     await expect(prepare(fixture)).rejects.toMatchObject({
@@ -923,7 +850,7 @@ describe("Privy phone-transfer source retirement", () => {
     ["a Clinical OAuth session", "clinicalRecordOauthSessions"],
     ["a sensitive-action challenge", "sensitiveActionChallenges"],
   ] as const)("rejects a source retaining $label", async (_, relation) => {
-    const fixture = makeFixture({ autoTrial: true });
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     fixture.sourceShape._count[relation] = 1;
 
     await expect(prepare(fixture)).rejects.toMatchObject({
@@ -936,7 +863,7 @@ describe("Privy phone-transfer source retirement", () => {
     ["a device-connect intent", "deviceConnectIntent", { claimHash: "claim" }],
     ["a device OAuth session", "deviceOauthSession", { state: "state" }],
   ] as const)("rejects a source retaining $label", async (_, model, blocker) => {
-    const fixture = makeFixture({ autoTrial: true });
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     fixture.prisma[model].findFirst.mockResolvedValue(blocker);
 
     await expect(prepare(fixture)).rejects.toMatchObject({
@@ -945,9 +872,93 @@ describe("Privy phone-transfer source retirement", () => {
     expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
   });
 
-  it("keeps the source fence valid after cleanup changes trial billing state", async () => {
-    const fixture = makeFixture({ autoTrial: true });
-    fixture.sourceMember.billingStatus = HostedBillingStatus.canceled;
+  it("projects identity snapshots before the locked transaction contract", async () => {
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
+    mocks.projectHostedMemberIdentityState.mockImplementation(
+      async (row) => row.memberId === TARGET_MEMBER_ID
+        ? fixture.targetIdentity
+        : fixture.sourceIdentity,
+    );
+
+    const prepared = await prepareHostedPrivyPhoneTransferSourceRetirement({
+      prisma: fixture.prisma as never,
+      sourceMemberId: SOURCE_MEMBER_ID,
+      targetMemberId: TARGET_MEMBER_ID,
+    });
+
+    expect(mocks.projectHostedMemberIdentityState).toHaveBeenCalledTimes(2);
+    expect(prepared).toEqual(buildPreparedRetirement(fixture));
+  });
+
+  it("keeps identity projection out of the locked classifier", async () => {
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
+
+    await expect(prepare(fixture)).resolves.toEqual({
+      sourceMemberId: SOURCE_MEMBER_ID,
+    });
+
+    expect(mocks.projectHostedMemberIdentityState).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["source", { sourceMemberId: "member_other_source" }],
+    ["target", { targetMemberId: "member_other_target" }],
+  ] as const)(
+    "rejects a prepared %s owner mismatch before acquiring locks",
+    async (_, ownerOverride) => {
+      const fixture = makeFixture();
+
+      await expect(
+        prepare(fixture, null, {
+          ...buildPreparedRetirement(fixture),
+          ...ownerOverride,
+        }),
+      ).rejects.toMatchObject({
+        code: "PRIVY_PHONE_NOT_READY",
+      });
+      expect(mocks.lockHostedMemberRow).not.toHaveBeenCalled();
+      expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["source", (fixture: Fixture) => {
+      fixture.sourceRawIdentity.phoneNumberEncrypted = "changed-ciphertext";
+    }],
+    ["target", (fixture: Fixture) => {
+      fixture.targetRawIdentity.privyUserIdEncrypted = "changed-ciphertext";
+    }],
+  ] as const)(
+    "rejects exact %s identity-row drift before suspending the source",
+    async (_, mutateIdentity) => {
+      const fixture = makeFixture();
+      const prepared = buildPreparedRetirement(fixture);
+      mutateIdentity(fixture);
+
+      await expect(prepare(fixture, null, prepared)).rejects.toMatchObject({
+        code: "PRIVY_PHONE_NOT_READY",
+      });
+      expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects exact billing-row drift before suspending the source", async () => {
+    const fixture = makeFixture({
+      starterSource: "web_onboarding",
+      withBillingRef: true,
+    });
+    const prepared = buildPreparedRetirement(fixture);
+    fixture.rawBillingRef!.stripeSubscriptionIdEncrypted =
+      "changed-subscription-ciphertext";
+
+    await expect(prepare(fixture, null, prepared)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_NOT_READY",
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps the source fence valid while deleting a suspended Starter scaffold", async () => {
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
     fixture.sourceMember.suspendedAt = NOW;
 
     await expect(assertFence(fixture)).resolves.toBeUndefined();
@@ -955,7 +966,7 @@ describe("Privy phone-transfer source retirement", () => {
 
   it("does not suspend the source after the target phone projection changes", async () => {
     const fixture = makeFixture({
-      autoTrial: true,
+      starterSource: "web_onboarding",
       targetPhoneNumber: "+15557654321",
     });
 
@@ -967,10 +978,9 @@ describe("Privy phone-transfer source retirement", () => {
 
   it("rejects the final fence after the target phone projection changes", async () => {
     const fixture = makeFixture({
-      autoTrial: true,
+      starterSource: "web_onboarding",
       targetPhoneNumber: "+15557654321",
     });
-    fixture.sourceMember.billingStatus = HostedBillingStatus.canceled;
     fixture.sourceMember.suspendedAt = NOW;
 
     await expect(assertFence(fixture)).rejects.toMatchObject({
@@ -1007,6 +1017,7 @@ function stubHostedCallbackNonce(fixture: Fixture, expiresAt: Date): void {
 function prepare(
   fixture: Fixture,
   targetPhoneNumberBeforeTransfer: string | null = null,
+  prepared = buildPreparedRetirement(fixture),
 ) {
   mocks.readHostedMemberCoreState.mockImplementation(
     async ({ memberId }: { memberId: string }) =>
@@ -1020,9 +1031,6 @@ function prepare(
         ? fixture.targetIdentity
         : fixture.sourceIdentity,
   );
-  mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
-    fixture.billingSnapshot,
-  );
 
   return prepareHostedPrivyPhoneTransferSourceRetirementTx({
     identity: {
@@ -1035,6 +1043,7 @@ function prepare(
     },
     member: fixture.targetMember,
     now: NOW,
+    prepared,
     prisma: fixture.prisma as never,
     targetPhoneNumberBeforeTransfer,
     transfer: {
@@ -1043,6 +1052,20 @@ function prepare(
       sourcePrivyUserId: SOURCE_PRIVY_USER_ID,
     },
   });
+}
+
+function buildPreparedRetirement(fixture: Fixture) {
+  return {
+    rawFingerprint: JSON.stringify([
+      fixture.rawBillingRef,
+      fixture.sourceRawIdentity,
+      fixture.targetRawIdentity,
+    ]),
+    sourceIdentity: fixture.sourceIdentity,
+    sourceMemberId: SOURCE_MEMBER_ID,
+    targetIdentity: fixture.targetIdentity,
+    targetMemberId: TARGET_MEMBER_ID,
+  };
 }
 
 function assertFence(fixture: Fixture) {
@@ -1080,7 +1103,7 @@ function assertFence(fixture: Fixture) {
 }
 
 function makeFixture(input: {
-  autoTrial?: boolean;
+  withBillingRef?: boolean;
   includeStarterWelcome?: boolean;
   starterSource?: Extract<
     HostedStarterUsageSource,
@@ -1088,12 +1111,10 @@ function makeFixture(input: {
   >;
   targetPhoneNumber?: string | null;
 } = {}) {
-  const autoTrial = input.autoTrial ?? false;
   const starterSource = input.starterSource ?? null;
   const includeStarterWelcome = starterSource !== null
     && (input.includeStarterWelcome ?? starterSource === "web_onboarding");
-  const includeActivationWelcome = autoTrial || includeStarterWelcome;
-  const activated = autoTrial || starterSource !== null;
+  const activated = starterSource !== null;
   const targetMember = makeMember({
     billingStatus: HostedBillingStatus.active,
     id: TARGET_MEMBER_ID,
@@ -1121,7 +1142,7 @@ function makeFixture(input: {
   };
   const sourceShape = {
     ...emptySourceShape(),
-    billingRef: autoTrial ? { memberId: SOURCE_MEMBER_ID } : null,
+    billingRef: input.withBillingRef ? { memberId: SOURCE_MEMBER_ID } : null,
     billingStatus: sourceMember.billingStatus,
     hostedWorkspace: activated ? { userId: SOURCE_MEMBER_ID } : null,
     routing: activated ? { memberId: SOURCE_MEMBER_ID } : null,
@@ -1132,12 +1153,15 @@ function makeFixture(input: {
     _count: makeRelationCounts({
       activated,
       mailboxItems: activated
-        ? includeActivationWelcome ? 3 : 2
+        ? includeStarterWelcome ? 3 : 2
         : 0,
       starter: Boolean(starterSource),
     }),
   };
-  const rawIdentity = {
+  const sourceRawIdentity = {
+    createdAt: NOW,
+    linqEmailHandleLookupKey: null,
+    linqEmailHandleEncrypted: null,
     maskedPhoneNumberHint: "*** 4567",
     memberId: SOURCE_MEMBER_ID,
     phoneLookupKey: `phone:${PHONE_NUMBER}`,
@@ -1149,37 +1173,63 @@ function makeFixture(input: {
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumberEncrypted: null,
+    updatedAt: NOW,
     walletAddressEncrypted: null,
     walletAddressLookupKey: null,
     walletChainType: null,
     walletCreatedAt: null,
     walletProvider: null,
-  };
-  const billingSnapshot = autoTrial
+  } satisfies HostedMemberIdentity;
+  const targetRawIdentity = {
+    ...sourceRawIdentity,
+    maskedPhoneNumberHint: null,
+    memberId: TARGET_MEMBER_ID,
+    phoneLookupKey: null,
+    phoneNumberEncrypted: null,
+    phoneNumberVerifiedAt: null,
+    privyUserIdEncrypted: "target-privy-ciphertext",
+    privyUserLookupKey: `privy:${TARGET_PRIVY_USER_ID}`,
+  } satisfies HostedMemberIdentity;
+  const rawBillingRef = input.withBillingRef
     ? {
-        billingRef: {
-          checkoutAttemptId: null,
-          checkoutCreatedAt: null,
-          checkoutIntentHash: null,
-          currentBillingPhase: "trial" as string | null,
-          currentBillingPlanCode: "launch_monthly",
-          currentCheckoutOffer: "pulse_trial_7d",
-          currentPeriodEnd: TRIAL_END,
-          currentPeriodStart: NOW,
-          currentTrialEndsAt: TRIAL_END,
-          currentTrialStartedAt: NOW,
-          lastStripeEventCreatedAt: NOW,
-          pulseTrialPolicyVersion: "pulse-trial-2026-07-15-v3",
-          pulseTrialRedeemedAt: NOW,
-          scheduledBillingEffectiveAt: null,
-          scheduledBillingPlanCode: null,
-          stripeCheckoutSessionId: null,
-          stripeCustomerId: STRIPE_CUSTOMER_ID,
-          stripeSubscriptionId: STRIPE_SUBSCRIPTION_ID,
-          stripeSubscriptionScheduleId: null,
-        },
-        core: sourceMember,
-      }
+        checkoutAttemptId: null,
+        checkoutCreatedAt: null,
+        checkoutIntentHash: null,
+        createdAt: NOW,
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentPeriodEnd: TRIAL_END,
+        currentPeriodStart: NOW,
+        currentTrialEndsAt: TRIAL_END,
+        currentTrialStartedAt: NOW,
+        lastStripeEventCreatedAt: NOW,
+        memberId: SOURCE_MEMBER_ID,
+        pulseTrialPolicyVersion: "pulse-trial-2026-07-15-v3",
+        pulseTrialRedeemedAt: NOW,
+        pulseTrialStartSource: null,
+        scheduledBillingEffectiveAt: null,
+        scheduledBillingPlanCode: null,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+        stripeCustomerIdEncrypted: "customer-ciphertext",
+        stripeCustomerLookupKey: "customer-lookup",
+        stripeEffectClaimedAt: null,
+        stripeEffectClaimId: null,
+        stripeEffectExecutionId: null,
+        stripeEffectExecutionStartedAt: null,
+        stripeEffectKind: null,
+        stripeEffectTargetPlanCode: null,
+        stripeSubscriptionIdEncrypted: "subscription-ciphertext",
+        stripeSubscriptionLookupKey: "subscription-lookup",
+        stripeSubscriptionScheduleIdEncrypted: null,
+        stripeSubscriptionScheduleLookupKey: null,
+        updatedAt: NOW,
+        usagePlanTransitionAt: null,
+        usagePlanTransitionFromCode: null,
+        usagePlanTransitionKind: null,
+        usagePlanTransitionToCode: null,
+      } satisfies HostedMemberBillingRef
     : null;
   const starterSemanticSourceKey = buildHostedStarterUsageSemanticSourceKey(
     SOURCE_MEMBER_ID,
@@ -1200,11 +1250,9 @@ function makeFixture(input: {
       : null,
     sourceUsageId: null,
   };
-  const activationEventId = autoTrial
-    ? `member.activated:hosted.auto_pulse_trial.enrolled:${SOURCE_MEMBER_ID}:auto-pulse-trial:${STRIPE_SUBSCRIPTION_ID}`
-    : starterSource
-      ? `member.activated:hosted.starter_usage.enrolled:${SOURCE_MEMBER_ID}:${starterSemanticSourceKey}`
-      : null;
+  const activationEventId = starterSource
+    ? `member.activated:hosted.starter_usage.enrolled:${SOURCE_MEMBER_ID}:${starterSemanticSourceKey}`
+    : null;
   const consentSource = starterSource === "companion_onboarding"
     ? "native-companion"
     : "homepage-auth-dialog";
@@ -1214,7 +1262,7 @@ function makeFixture(input: {
   const activationMailboxItems = activationEventId
     ? [
         mailboxItem(1, "member.activated", activationEventId),
-        ...(includeActivationWelcome
+        ...(includeStarterWelcome
           ? [
               mailboxItem(
                 2,
@@ -1224,7 +1272,7 @@ function makeFixture(input: {
             ]
           : []),
         mailboxItem(
-          includeActivationWelcome ? 3 : 2,
+          includeStarterWelcome ? 3 : 2,
           "runtime.browser-vault-refresh-requested",
           BROWSER_VAULT_REFRESH_CONTROL_EVENT_ID,
         ),
@@ -1318,12 +1366,20 @@ function makeFixture(input: {
       ),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    hostedMemberBillingRef: {
+      findUnique: vi.fn().mockResolvedValue(rawBillingRef),
+    },
     hostedMemberIdentity: {
-      findUnique: vi.fn().mockResolvedValue(rawIdentity),
+      findUnique: vi.fn().mockImplementation(
+        async ({ where }: { where: { memberId: string } }) =>
+          where.memberId === TARGET_MEMBER_ID
+            ? targetRawIdentity
+            : sourceRawIdentity,
+      ),
     },
     hostedMemberRouting: {
       findUnique: vi.fn().mockResolvedValue(activated
-        ? makeAutoTrialRouting()
+        ? makeActivationRouting()
         : null),
     },
     hostedUsageCreditEntry: {
@@ -1383,18 +1439,20 @@ function makeFixture(input: {
   };
 
   return {
-    billingSnapshot,
     prisma,
+    rawBillingRef,
     sourceIdentity,
+    sourceRawIdentity,
     sourceMember,
     sourceShape,
     starterGrant,
     targetIdentity,
     targetMember,
+    targetRawIdentity,
   };
 }
 
-function makeAutoTrialRouting() {
+function makeActivationRouting() {
   return {
     linqChatIdEncrypted: null,
     linqChatLookupKey: null,
@@ -1438,6 +1496,7 @@ function emptyIdentity() {
 function emptySourceShape() {
   return {
     addressBookProjection: null as { memberId: string } | null,
+    approvalCredentials: null as { memberId: string } | null,
     assistantDetail: null,
     assistantDetailCausalSeq: null,
     assistantHumor: null,

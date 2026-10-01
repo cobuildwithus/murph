@@ -1,4 +1,9 @@
-import { createHostedArtifactStore } from "./bundle-store.ts";
+import type { RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
+import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
+import { presignManagedSnapshot, completeManagedSnapshotForSession, ManagedSnapshotCompletionRejectedError } from "./managed-snapshot-control.ts";
+import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
+import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
+import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
 import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
 import { HostedBundleGarbageCollector } from "./bundle-gc.ts";
 import type {
@@ -59,7 +64,6 @@ import {
 } from "./browser-vault-limits.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import {
-  buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -67,19 +71,32 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
-import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
+import {
+  CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
+} from "./internal-hosts.ts";
 import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
+  HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER,
   readHostedRuntimeArtifactFetchTelemetry,
+  readHostedRuntimeMediaFetchTelemetry,
+  HOSTED_RUNTIME_MEDIA_BYTE_SIZE_HEADER,
+  HOSTED_RUNTIME_MEDIA_EXPIRES_AT_HEADER,
+  HOSTED_RUNTIME_MEDIA_KIND_HEADER,
+  HOSTED_RUNTIME_MEDIA_SHA256_HEADER,
 } from "./runner-outbound/headers.ts";
 import {
-  requireRunnerRuntimeWriteFenceHeaders,
-  requireRunnerRuntimeWriteFenceWrite,
+  requireRunnerRuntimeWriteFence,
   RunnerRuntimeWriteFenceError,
   requireRunnerRuntimeWriteFenceWorkspaceWrite,
+  type RunnerRuntimeWriteFenceHeaders,
   writeRunnerRuntimeWriteFenceHeaders,
+  readRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/write-fence.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
+import {
+  handleRunnerRuntimeCompletionRequest,
+} from "./runner-outbound/runtime-completion.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
 import {
   readHostedRunnerDiagnosticMethod,
@@ -87,10 +104,7 @@ import {
   readHostedRunnerInternalOperation,
 } from "./runner-outbound/diagnostics.ts";
 import {
-  resolveRunnerOutboundUserCryptoContext,
-  resolveRunnerOutboundUserRunnerStub,
-  requireRunnerOutboundUserStubMethod,
-  type RunnerOutboundEnvironmentSource,
+  resolveRunnerOutboundUserCryptoContext, type RunnerOutboundEnvironmentSource
 } from "./runner-outbound/shared.ts";
 import {
   encodeHostedWorkspaceSnapshotSha256Base64,
@@ -115,6 +129,9 @@ import {
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "./web-control-plane.ts";
+import {
+  matchesRequestedHostedSystemProgressProjection,
+} from "./runtime-platform/workspace-progress-projection.ts";
 
 export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
@@ -128,29 +145,38 @@ const HOSTED_WORKSPACE_SNAPSHOT_PRESIGN_MIN_REMAINING_SECONDS = 30;
 const HOSTED_RUNNER_DIAGNOSTIC_FINGERPRINT_BYTES = 12;
 const hostedRunnerDiagnosticTextEncoder = new TextEncoder();
 type HostedExecutionSnapshotRefValue = NonNullable<HostedExecutionSnapshotRef>;
+type RunnerMediaStore = ReturnType<typeof createHostedMediaStore>;
+type HostedRunnerMediaDescriptor =
+  NonNullable<ReturnType<typeof readHostedRunnerMediaDescriptor>>;
+type RunnerMediaRequestCompletedEmitter = (
+  details: Record<string, boolean | number | string | null>,
+  responseStatus: number,
+) => void;
 
 export async function handleRunnerOutboundRequest(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
   userId: string,
+  caller?: RuntimeProviderCaller,
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
 
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
-    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
-      return handleRunnerResultsRequest({
-        bucket: env.BUNDLES,
-        env,
-        environment,
-        request,
-        url,
-        userId,
-      });
+    const dedicatedPortResponse = await handleRunnerDedicatedPortRequest({
+      env,
+      environment,
+      request,
+      url,
+      userId,
+    });
+    if (dedicatedPortResponse) {
+      return dedicatedPortResponse;
     }
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane) {
       return handleRunnerWebControlRequest({
+        caller,
         env,
         environment,
         request,
@@ -159,22 +185,15 @@ export async function handleRunnerOutboundRequest(
       });
     }
 
-    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
-      if (url.pathname !== "/replicas") {
-        return notFound();
-      }
-
-      if (request.method !== "POST") {
-        return methodNotAllowed();
-      }
-
-      return handleRunnerBrowserVaultReplicaWriteRequest({
-        bucket: env.BUNDLES,
-        env,
-        environment,
-        request,
-        userId,
-      });
+    const storageHostResponse = handleRunnerStorageHostRequest({
+      env,
+      environment,
+      request,
+      url,
+      userId,
+    });
+    if (storageHostResponse) {
+      return await storageHostResponse;
     }
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore) {
@@ -182,7 +201,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotStartRequest({
+        return await handleRunnerWorkspaceSnapshotStartRequest({
           bucket: env.BUNDLES,
           env,
           environment,
@@ -202,7 +221,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotCompleteRequest({
+        return await handleRunnerWorkspaceSnapshotCompleteRequest({
           bucket: env.BUNDLES,
           env,
           environment,
@@ -216,7 +235,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotHeartbeatRequest({
+        return await handleRunnerWorkspaceSnapshotHeartbeatRequest({
           env,
           request,
           snapshotId: match.groups.snapshotId,
@@ -228,7 +247,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotPresignPutRequest({
+        return await handleRunnerWorkspaceSnapshotPresignPutRequest({
           env,
           request,
           snapshotId: match.groups.snapshotId,
@@ -240,7 +259,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotPresignGetRequest({
+        return await handleRunnerWorkspaceSnapshotPresignGetRequest({
           env,
           request,
           snapshotId: match.groups.snapshotId,
@@ -252,7 +271,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotDataKeyRequest({
+        return await handleRunnerWorkspaceSnapshotDataKeyRequest({
           bucket: env.BUNDLES,
           env,
           environment,
@@ -263,7 +282,7 @@ export async function handleRunnerOutboundRequest(
       }
 
       if (!match.groups.suffix && request.method === "DELETE") {
-        return handleRunnerWorkspaceSnapshotAbortRequest({
+        return await handleRunnerWorkspaceSnapshotAbortRequest({
           bucket: env.BUNDLES,
           env,
           request,
@@ -275,51 +294,183 @@ export async function handleRunnerOutboundRequest(
       return methodNotAllowed();
     }
 
-    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
-      const match = /^\/objects\/(?<sha256>[a-f0-9]{64})$/u.exec(url.pathname);
-      if (!match?.groups) {
-        return notFound();
-      }
-
-      if (request.method !== "GET" && request.method !== "PUT") {
-        return methodNotAllowed();
-      }
-
-      return handleRunnerArtifactRequest({
-        bucket: env.BUNDLES,
-        env,
-        environment,
-        request,
-        sha256: match.groups.sha256,
-        userId,
-      });
-    }
-
     return notFound();
   } catch (error) {
-    const safeUrl = safeRunnerOutboundRequestUrl(request.url);
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        hostKind: safeUrl ? readRunnerOutboundHostKind(safeUrl.hostname) : "invalid_url",
-        method: readHostedRunnerDiagnosticMethod(request.method),
-        operation: safeUrl ? readRunnerOutboundOperation(safeUrl, request.method) : "invalid_url",
-        userIdPresent: userId.length > 0,
-      },
-      error,
-      message: "Hosted runner outbound request failed.",
-      phase: "wake.running",
-    });
+    return runnerOutboundFailureResponse(request, userId, error);
+  }
+}
 
-    const details = buildHostedExecutionSafeErrorDetails(error);
-    const errorName = readHostedExecutionSafeErrorName(error);
-
-    return json({
-      code: deriveHostedExecutionErrorCode(error),
-      error: summarizeHostedExecutionError(error),
-      ...(details ? { details } : {}),
+function runnerOutboundFailureResponse(
+  request: Request,
+  userId: string,
+  error: unknown,
+): Response {
+  if (error instanceof HostedRuntimeResourceRejectedError) {
+    return json({ code: error.code, error: error.message }, error.status);
+  }
+  if (error instanceof ManagedSnapshotCompletionRejectedError) {
+    return jsonError(error.message, 409);
+  }
+  const safeUrl = safeRunnerOutboundRequestUrl(request.url);
+  const errorCode = deriveHostedExecutionErrorCode(error);
+  const errorName = readHostedExecutionSafeErrorName(error);
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      errorCode,
       ...(errorName ? { errorName } : {}),
-    }, 500);
+      hostKind: safeUrl ? readRunnerOutboundHostKind(safeUrl.hostname) : "invalid_url",
+      method: readHostedRunnerDiagnosticMethod(request.method),
+      operation: safeUrl ? readRunnerOutboundOperation(safeUrl, request.method) : "invalid_url",
+      userIdPresent: userId.length > 0,
+    },
+    level: "error",
+    message: "Hosted runner outbound request failed.",
+    phase: "wake.running",
+  });
+
+  return json({
+    code: errorCode,
+    error: summarizeHostedExecutionError(error),
+    ...(errorName ? { errorName } : {}),
+  }, 500);
+}
+
+async function handleRunnerDedicatedPortRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response | null> {
+  if (input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl) {
+    if (input.url.pathname !== CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH) {
+      return notFound();
+    }
+    if (input.request.method !== "POST") {
+      return methodNotAllowed();
+    }
+    return await handleRunnerRuntimeCompletionRequest(input);
+  }
+  if (input.url.hostname !== CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
+    return null;
+  }
+  return await handleRunnerResultsRequest({
+    bucket: input.env.BUNDLES,
+    env: input.env,
+    environment: input.environment,
+    request: input.request,
+    url: input.url,
+    userId: input.userId,
+  });
+}
+
+function handleRunnerStorageHostRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> | null {
+  if (input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
+    return handleRunnerBrowserVaultReplicaStoreRequest(input);
+  }
+  if (input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
+    return handleRunnerArtifactStoreRequest(input);
+  }
+  if (input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.mediaStore) {
+    return handleRunnerMediaStoreRequest({
+      bucket: input.env.BUNDLES,
+      env: input.env,
+      environment: input.environment,
+      request: input.request,
+      url: input.url,
+      userId: input.userId,
+    });
+  }
+  return null;
+}
+
+async function handleRunnerBrowserVaultReplicaStoreRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  if (input.url.pathname !== "/replicas") {
+    return notFound();
+  }
+  if (input.request.method !== "POST") {
+    return methodNotAllowed();
+  }
+  return await handleRunnerBrowserVaultReplicaWriteRequest({
+    bucket: input.env.BUNDLES,
+    env: input.env,
+    environment: input.environment,
+    request: input.request,
+    userId: input.userId,
+  });
+}
+
+async function handleRunnerArtifactStoreRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  const match = /^\/objects\/(?<sha256>[a-f0-9]{64})$/u.exec(input.url.pathname);
+  if (!match?.groups) {
+    return notFound();
+  }
+  if (input.request.method !== "GET" && input.request.method !== "PUT") {
+    return methodNotAllowed();
+  }
+  return await handleRunnerArtifactRequest({
+    bucket: input.env.BUNDLES,
+    env: input.env,
+    environment: input.environment,
+    request: input.request,
+    sha256: match.groups.sha256,
+    userId: input.userId,
+  });
+}
+
+async function handleRunnerMediaStoreRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  const match = /^\/media\/(?<mediaId>[a-f0-9]{64})$/u.exec(input.url.pathname);
+  if (!match?.groups) {
+    return notFound();
+  }
+  if (!isHostedRunnerMediaMethod(input.request.method)) {
+    return methodNotAllowed();
+  }
+  return await handleRunnerMediaRequest({
+    bucket: input.bucket,
+    env: input.env,
+    environment: input.environment,
+    mediaId: match.groups.mediaId,
+    request: input.request,
+    userId: input.userId,
+  });
+}
+
+function isHostedRunnerMediaMethod(method: string): boolean {
+  switch (method) {
+    case "DELETE":
+    case "GET":
+    case "POST":
+    case "PUT":
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -345,6 +496,443 @@ function readRunnerOutboundOperation(url: URL, method: string): string {
   return operation === "unknown_internal_operation" ? "unknown_operation" : operation;
 }
 
+async function handleRunnerMediaRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  mediaId: string;
+  request: Request;
+  userId: string;
+}): Promise<Response> {
+  const startedAt = Date.now();
+  const method = readHostedRunnerDiagnosticMethod(input.request.method);
+  const operation = readRunnerMediaRequestOperation(input.request.method);
+  const fetchTelemetry = input.request.method === "GET"
+    ? readHostedRuntimeMediaFetchTelemetry(input.request.headers)
+    : null;
+  const descriptor = readHostedRunnerMediaDescriptor(input.request.headers, input.mediaId);
+  if (!descriptor && input.request.method !== "DELETE") {
+    return jsonError("Media descriptor headers are invalid.", 400);
+  }
+  const logDetails = {
+    ...(fetchTelemetry
+      ? {
+          mediaFetchCorrelationId: fetchTelemetry.correlationId,
+          mediaReadPurpose: fetchTelemetry.purpose,
+        }
+      : {}),
+    mediaKind: descriptor?.mediaKind ?? null,
+    method,
+    operation,
+    userIdPresent: input.userId.length > 0,
+  };
+  const emitCompleted = (
+    details: Record<string, boolean | number | string | null>,
+    responseStatus: number,
+  ) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...logDetails,
+        durationMs: Date.now() - startedAt,
+        responseStatus,
+        ...details,
+      },
+      level: responseStatus >= 400 ? "warn" : "info",
+      message: "Hosted runner media request completed.",
+      phase: "wake.running",
+    });
+  };
+
+  const writeAuthority = await readRunnerMediaWriteAuthority({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeAuthority) {
+    emitCompleted({
+      mediaAuthorized: false,
+    }, 401);
+    return unauthorized();
+  }
+
+  try {
+    const crypto = await resolveRunnerOutboundUserCryptoContext({
+      bucket: input.bucket,
+      domain: "runtime",
+      env: input.env,
+      environment: input.environment,
+      userId: input.userId,
+    });
+    const mediaStore = createHostedMediaStore({
+      bucket: descriptor ? createRuntimeMediaWriteBucket({
+        source: input.env, userId: input.userId, attemptId: writeAuthority.attemptId,
+        generation: writeAuthority.generation, media: { descriptor },
+      }) : input.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+      resolveKeyById: crypto.resolveKeyById,
+      userId: input.userId,
+    });
+
+    if (input.request.method === "DELETE") {
+      return await handleRunnerMediaDeleteRequest({
+        env: input.env,
+        emitCompleted,
+        mediaId: input.mediaId,
+        mediaStore,
+        userId: input.userId,
+        writeAuthority,
+      });
+    }
+
+    if (!descriptor) {
+      throw new Error("Hosted media descriptor missing after validation.");
+    }
+
+    if (input.request.method === "GET") {
+      return await handleRunnerMediaGetRequest({
+        descriptor,
+        emitCompleted,
+        env: input.env,
+        mediaStore,
+        userId: input.userId,
+      });
+    }
+
+    if (input.request.method === "POST") {
+      return await handleRunnerMediaRecordRequest({
+        descriptor,
+        emitCompleted,
+        env: input.env,
+        writeAuthority,
+        userId: input.userId,
+      });
+    }
+
+    return await handleRunnerMediaPutRequest({
+      descriptor,
+      emitCompleted,
+      env: input.env,
+      mediaStore,
+      request: input.request,
+      writeAuthority,
+      userId: input.userId,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...logDetails,
+        durationMs: Date.now() - startedAt,
+        errorCode: deriveHostedExecutionErrorCode(error),
+        errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
+        ...(readHostedExecutionSafeErrorName(error)
+          ? { errorName: readHostedExecutionSafeErrorName(error) }
+          : {}),
+      },
+      level: "warn",
+      message: "Hosted runner media request failed.",
+      phase: "wake.running",
+    });
+    if (
+      input.request.method === "GET"
+      && error instanceof HostedEncryptedR2PayloadUnreadableError
+    ) {
+      emitCompleted({
+        mediaReadable: false,
+      }, 422);
+      return jsonError("Media is unreadable.", 422);
+    }
+    throw error;
+  }
+}
+
+function readRunnerMediaRequestOperation(method: string): string {
+  switch (method) {
+    case "DELETE":
+      return "media_delete";
+    case "POST":
+      return "media_record";
+    case "PUT":
+      return "media_upload";
+    default:
+      return "media_fetch";
+  }
+}
+
+async function handleRunnerMediaDeleteRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  emitCompleted: RunnerMediaRequestCompletedEmitter;
+  mediaId: string;
+  mediaStore: RunnerMediaStore;
+  userId: string;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
+}): Promise<Response> {
+  const forgotten = await forgetHostedMediaAsset({
+    env: input.env,
+    mediaId: input.mediaId,
+    userId: input.userId,
+    writeAuthority: input.writeAuthority,
+  });
+  if (!forgotten) {
+    input.emitCompleted({
+      mediaAuthorized: true,
+      mediaForgotten: false,
+    }, 409);
+    return jsonError("Media deletion was rejected.", 409);
+  }
+  input.emitCompleted({
+    mediaAuthorized: true,
+    mediaForgotten: true,
+  }, 200);
+  return json({
+    ok: true,
+  });
+}
+
+async function handleRunnerMediaGetRequest(input: {
+  descriptor: HostedRunnerMediaDescriptor;
+  emitCompleted: RunnerMediaRequestCompletedEmitter;
+  env: RunnerOutboundEnvironmentSource;
+  mediaStore: RunnerMediaStore;
+  userId: string;
+}): Promise<Response> {
+  const readAdmission = await admitHostedMediaRead({
+    descriptor: input.descriptor,
+    env: input.env,
+    userId: input.userId,
+  });
+  if (!readAdmission.ok) {
+    input.emitCompleted({
+      mediaReadable: false,
+      mediaReadAdmissionReason: readAdmission.reason,
+    }, 404);
+    return notFound();
+  }
+  const bytes = await input.mediaStore.readMedia(input.descriptor);
+  if (!bytes) {
+    input.emitCompleted({
+      mediaFound: false,
+    }, 404);
+    return notFound();
+  }
+  input.emitCompleted({
+    mediaByteLength: bytes.byteLength,
+    mediaFound: true,
+  }, 200);
+  return new Response(copyBytesToArrayBuffer(bytes), {
+    headers: {
+      "content-type": "application/octet-stream",
+    },
+    status: 200,
+  });
+}
+
+async function handleRunnerMediaRecordRequest(input: {
+  descriptor: HostedRunnerMediaDescriptor;
+  emitCompleted: RunnerMediaRequestCompletedEmitter;
+  env: RunnerOutboundEnvironmentSource;
+  userId: string;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
+}): Promise<Response> {
+  const recorded = await recordHostedMediaAsset({
+    descriptor: input.descriptor,
+    env: input.env,
+    userId: input.userId,
+    writeAuthority: input.writeAuthority,
+  });
+  input.emitCompleted({
+    mediaAuthorized: true,
+    mediaRecorded: recorded,
+  }, recorded ? 200 : 409);
+  return recorded
+    ? json({
+        mediaId: input.descriptor.mediaId,
+        ok: true,
+      })
+    : jsonError("Media lifetime registration was rejected.", 409);
+}
+
+async function handleRunnerMediaPutRequest(input: {
+  descriptor: HostedRunnerMediaDescriptor;
+  emitCompleted: RunnerMediaRequestCompletedEmitter;
+  env: RunnerOutboundEnvironmentSource;
+  mediaStore: RunnerMediaStore;
+  request: Request;
+  userId: string;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
+}): Promise<Response> {
+  const bytes = new Uint8Array(await input.request.arrayBuffer());
+  await input.mediaStore.writeMedia({ ...input.descriptor, plaintext: bytes });
+  const recorded = await recordHostedMediaAsset({
+    descriptor: input.descriptor,
+    env: input.env,
+    userId: input.userId,
+    writeAuthority: input.writeAuthority,
+  });
+  if (!recorded) {
+    input.emitCompleted({
+      mediaAuthorized: true,
+      mediaByteLength: bytes.byteLength,
+      mediaRecorded: false,
+    }, 409);
+    return jsonError("Media lifetime registration was rejected.", 409);
+  }
+  input.emitCompleted({
+    mediaAuthorized: true,
+    mediaByteLength: bytes.byteLength,
+    mediaRecorded: true,
+  }, 200);
+  return json({
+    mediaId: input.descriptor.mediaId,
+    ok: true,
+    size: bytes.byteLength,
+  });
+}
+
+function readHostedRunnerMediaDescriptor(
+  headers: Headers,
+  mediaId: string,
+): {
+  byteSize: number;
+  mediaId: string;
+  mediaKind: "image" | "video";
+  sha256: string;
+  expiresAt: string | null;
+} | null {
+  const mediaKind = headers.get(HOSTED_RUNTIME_MEDIA_KIND_HEADER);
+  const sha256 = headers.get(HOSTED_RUNTIME_MEDIA_SHA256_HEADER);
+  const rawByteSize = headers.get(HOSTED_RUNTIME_MEDIA_BYTE_SIZE_HEADER);
+  const expiresAt = readHostedRunnerMediaExpiresAt(headers);
+  const byteSize = rawByteSize ? Number(rawByteSize) : Number.NaN;
+  if (
+    (mediaKind !== "image" && mediaKind !== "video")
+    || !sha256
+    || !/^[a-f0-9]{64}$/u.test(sha256)
+    || !Number.isSafeInteger(byteSize)
+    || byteSize < 0
+    || expiresAt === false
+  ) {
+    return null;
+  }
+
+  return {
+    byteSize,
+    mediaId,
+    mediaKind,
+    sha256,
+    expiresAt,
+  };
+}
+
+function readHostedRunnerMediaExpiresAt(headers: Headers): string | null | false {
+  if (!headers.has(HOSTED_RUNTIME_MEDIA_EXPIRES_AT_HEADER)) {
+    return null;
+  }
+  const raw = headers.get(HOSTED_RUNTIME_MEDIA_EXPIRES_AT_HEADER);
+  if (raw === null || raw.trim() === "") {
+    return null;
+  }
+  const expiresAtMs = Date.parse(raw);
+  return Number.isFinite(expiresAtMs)
+    ? new Date(expiresAtMs).toISOString()
+    : false;
+}
+
+async function readRunnerMediaWriteAuthority(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}): Promise<RunnerRuntimeWriteFenceHeaders | null> {
+  try {
+    return await requireRunnerRuntimeWriteFence(input);
+  } catch (error) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function admitHostedMediaRead(input: {
+  descriptor: NonNullable<ReturnType<typeof readHostedRunnerMediaDescriptor>>;
+  env: RunnerOutboundEnvironmentSource;
+  userId: string;
+}) {
+  const result = await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
+    operation: "read", descriptor: { ...input.descriptor, expiresAt: input.descriptor.expiresAt ?? null },
+  } });
+  return { ok: result.applied, reason: result.reason ?? "expired" };
+}
+
+async function recordHostedMediaAsset(input: {
+  descriptor: NonNullable<ReturnType<typeof readHostedRunnerMediaDescriptor>>;
+  env: RunnerOutboundEnvironmentSource;
+  userId: string;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
+}): Promise<boolean> {
+  return (await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
+    operation: "register", attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation,
+    descriptor: { ...input.descriptor, expiresAt: input.descriptor.expiresAt ?? null },
+  } })).applied;
+}
+
+async function forgetHostedMediaAsset(input: {
+  env: RunnerOutboundEnvironmentSource;
+  mediaId: string;
+  userId: string;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
+}): Promise<boolean> {
+  return (await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
+    operation: "retire", attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation, mediaId: input.mediaId,
+  } })).applied;
+}
+
+// A short request-local recovery window, not a timeout for an in-flight binding PUT.
+const RUNNER_ARTIFACT_PUT_RECOVERY_WINDOW_MS = 1_000;
+const RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS = 100;
+
+function readRunnerArtifactPutServiceCode(error: unknown): 10001 | 10043 | null {
+  // Workers R2 binding errors end with a numeric code. Do not infer retryability
+  // from arbitrary prose, HTTP status, nested causes, or generic fetch/TypeError.
+  if (!(error instanceof Error) || error.name !== "Error" || !error.message.startsWith("put: ")) {
+    return null;
+  }
+  const match = /\((10001|10043)\)$/u.exec(error.message);
+  return match ? (match[1] === "10001" ? 10001 : 10043) : null;
+}
+
+function readRunnerArtifactPutRetryDeadline(request: Request, startedAt: number): number {
+  const localDeadline = startedAt + RUNNER_ARTIFACT_PUT_RECOVERY_WINDOW_MS;
+  const value = request.headers.get(HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER);
+  // Older callers still have their original fetch cancellation signal. Never
+  // grant more than the short local window; a malformed supplied budget opts out.
+  if (value === null) {
+    return localDeadline;
+  }
+  const deadline = Number(value);
+  return /^[0-9]{1,16}$/u.test(value) && Number.isSafeInteger(deadline)
+    ? Math.min(localDeadline, deadline)
+    : startedAt;
+}
+
+function waitForRunnerArtifactPutRetry(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function handleRunnerArtifactRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
@@ -354,6 +942,8 @@ async function handleRunnerArtifactRequest(input: {
   userId: string;
 }): Promise<Response> {
   const startedAt = Date.now();
+  const retryDeadline = readRunnerArtifactPutRetryDeadline(input.request, startedAt);
+  const recoveryDetails: Record<string, boolean | number | string | null> = {};
   const method = readHostedRunnerDiagnosticMethod(input.request.method);
   const operation = input.request.method === "PUT" ? "artifact_upload" : "artifact_fetch";
   const fetchTelemetry = input.request.method === "GET"
@@ -428,6 +1018,9 @@ async function handleRunnerArtifactRequest(input: {
   }
 
   try {
+    if (input.request.method === "PUT") {
+      input.request.signal.throwIfAborted();
+    }
     const cryptoStartedAt = Date.now();
     emitPhase("Hosted runner artifact crypto context started.");
     const crypto = await resolveRunnerOutboundUserCryptoContext({
@@ -486,8 +1079,49 @@ async function handleRunnerArtifactRequest(input: {
       artifactAuthorized: true,
       artifactByteLength: bytes.byteLength,
     });
-    await artifactStore.writeArtifact(input.sha256, bytes);
+    await artifactStore.writeArtifact(input.sha256, bytes, {
+      signal: input.request.signal,
+      beforeRetry: async (error) => {
+        const code = readRunnerArtifactPutServiceCode(error);
+        if (code === null) {
+          return false;
+        }
+        Object.assign(recoveryDetails, {
+          artifactR2Code: code,
+          artifactStorageStage: "r2_put",
+          artifactWriteAttempt: 1,
+          artifactWriteDisposition: "budget_exhausted",
+        });
+        input.request.signal.throwIfAborted();
+        // Leave at least one backoff-sized margin for the repeat effect. Include
+        // initial fence, crypto, body, encryption and first-PUT time in admission.
+        if (Date.now() + 2 * RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS >= retryDeadline) {
+          return false;
+        }
+        recoveryDetails.artifactWriteDisposition = "backoff";
+        emitPhase("Hosted runner artifact write recovery backoff.", recoveryDetails, "warn");
+        await waitForRunnerArtifactPutRetry(input.request.signal);
+        input.request.signal.throwIfAborted();
+        recoveryDetails.artifactWriteDisposition = "budget_exhausted";
+        if (Date.now() + RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS >= retryDeadline) {
+          return false;
+        }
+        await requireRunnerRuntimeWriteFence(input);
+        input.request.signal.throwIfAborted();
+        if (Date.now() + RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS >= retryDeadline) {
+          return false;
+        }
+        recoveryDetails.artifactWriteAttempt = 2;
+        recoveryDetails.artifactWriteDisposition = "exhausted";
+        return true;
+      },
+    });
+    input.request.signal.throwIfAborted();
+    if (recoveryDetails.artifactR2Code !== undefined) {
+      recoveryDetails.artifactWriteDisposition = "recovered";
+    }
     emitPhase("Hosted runner artifact write completed.", {
+      ...recoveryDetails,
       artifactAuthorized: true,
       artifactByteLength: bytes.byteLength,
       artifactWriteDurationMs: Date.now() - writeStartedAt,
@@ -502,10 +1136,18 @@ async function handleRunnerArtifactRequest(input: {
       size: bytes.byteLength,
     });
   } catch (error) {
+    if (recoveryDetails.artifactR2Code !== undefined) {
+      if (input.request.signal.aborted) {
+        recoveryDetails.artifactWriteDisposition = "cancelled";
+      } else if (error instanceof RunnerRuntimeWriteFenceError) {
+        recoveryDetails.artifactWriteDisposition = "unauthorized";
+      }
+    }
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
         ...logDetails,
+        ...recoveryDetails,
         durationMs: Date.now() - startedAt,
         errorCode: deriveHostedExecutionErrorCode(error),
         errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
@@ -517,6 +1159,10 @@ async function handleRunnerArtifactRequest(input: {
       message: "Hosted runner artifact request failed.",
       phase: "wake.running",
     });
+    if (recoveryDetails.artifactR2Code !== undefined && error instanceof RunnerRuntimeWriteFenceError) {
+      emitCompleted({ artifactAuthorized: false }, 401);
+      return unauthorized();
+    }
     if (
       input.request.method === "GET"
       && error instanceof HostedEncryptedR2PayloadUnreadableError
@@ -553,6 +1199,7 @@ interface HostedWorkspaceSnapshotStartRouteDiagnostics {
   durationsCapped: boolean;
   sessionCreateStorageDurationMs: number;
   startedAt: number;
+  workspaceAttemptId: string | null;
   writeFenceOwnerValidationDurationMs: number;
 }
 
@@ -594,6 +1241,7 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
             response: unauthorized(),
           };
         }
+        diagnostics.workspaceAttemptId = writeFence.attemptId;
 
         const body = await readJsonObject(input.request, {
           limitBytes: 16 * 1024,
@@ -623,9 +1271,25 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
             ),
           };
         }
+        const replacedSnapshotRef = body.replacedSnapshotRef === undefined
+          ? undefined
+          : body.replacedSnapshotRef === null
+            ? null
+            : parseHostedWorkspaceSnapshotV2Ref(body.replacedSnapshotRef);
+        if (replacedSnapshotRef && !await isHostedWorkspaceSnapshotV2RefOwnedByUser({
+          snapshotRef: replacedSnapshotRef,
+          userId: input.userId,
+        })) {
+          return {
+            kind: "rejected" as const,
+            outcome: "unauthorized" as const,
+            response: jsonError("Hosted workspace replaced snapshot is outside the bound user namespace.", 403),
+          };
+        }
         return {
           expectedWorkspaceVersion,
           kind: "valid" as const,
+          replacedSnapshotRef,
           writeFence,
         };
       },
@@ -697,6 +1361,9 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
           expiresAt,
           leaseGeneration: validation.writeFence.generation,
           objectKey: crypto.objectKey,
+          ...(validation.replacedSnapshotRef === undefined
+            ? {}
+            : { replacedSnapshotRef: validation.replacedSnapshotRef }),
           schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
           snapshotId: crypto.snapshotId,
           userId: input.userId,
@@ -752,6 +1419,7 @@ function createHostedWorkspaceSnapshotStartRouteDiagnostics(): HostedWorkspaceSn
     durationsCapped: false,
     sessionCreateStorageDurationMs: 0,
     startedAt: Date.now(),
+    workspaceAttemptId: null,
     writeFenceOwnerValidationDurationMs: 0,
   };
 }
@@ -825,6 +1493,9 @@ function emitHostedWorkspaceSnapshotStartRouteDiagnostics(input: {
       snapshotStartWriteFenceOwnerValidationDurationMs:
         input.diagnostics.writeFenceOwnerValidationDurationMs,
       userIdPresent: input.userIdPresent,
+      ...(input.diagnostics.workspaceAttemptId
+        ? { workspaceAttemptId: input.diagnostics.workspaceAttemptId }
+        : {}),
     },
     level: input.outcome === "failed" ? "warn" : "info",
     message: "Hosted runner workspace snapshot start diagnostic.",
@@ -856,6 +1527,7 @@ async function handleRunnerWorkspaceSnapshotHeartbeatRequest(input: {
   userId: string;
 }): Promise<Response> {
   const writeFence = await requireWorkspaceSnapshotWriteFence({
+    deferToResourceCommand: true,
     env: input.env,
     request: input.request,
     userId: input.userId,
@@ -890,6 +1562,7 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
   userId: string;
 }): Promise<Response> {
   const writeFence = await requireWorkspaceSnapshotWriteFence({
+    deferToResourceCommand: true,
     env: input.env,
     request: input.request,
     userId: input.userId,
@@ -911,6 +1584,7 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     body.encryptedObjectSha256,
     "encryptedObjectSha256",
   );
+  const encryptedMd5 = body.encryptedMd5 === undefined ? undefined : requireSnapshotMd5Hex(body.encryptedMd5, "encryptedMd5");
   if (requestedSnapshotId !== input.snapshotId) {
     return jsonError("Hosted workspace snapshot presign snapshotId does not match its route.", 400);
   }
@@ -919,6 +1593,7 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
   }
 
   const session = await readWorkspaceSnapshotUploadSession({
+    writeAuthority: writeFence,
     env: input.env,
     snapshotId: input.snapshotId,
     userId: input.userId,
@@ -932,9 +1607,8 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     !Number.isFinite(sessionExpiresAtMs)
     || sessionExpiresAtMs <= nowMs
   ) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: null,
-      deleteObject: false,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
       snapshotId: input.snapshotId,
       userId: input.userId,
@@ -943,9 +1617,8 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
   }
   const remainingSessionSeconds = Math.floor((sessionExpiresAtMs - nowMs) / 1000);
   if (remainingSessionSeconds < HOSTED_WORKSPACE_SNAPSHOT_PRESIGN_MIN_REMAINING_SECONDS) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: null,
-      deleteObject: false,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
       snapshotId: input.snapshotId,
       userId: input.userId,
@@ -957,9 +1630,8 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     || session.leaseGeneration !== writeFence.generation
     || session.workspaceVersion !== writeFence.workspaceVersion
   ) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: null,
-      deleteObject: false,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
       snapshotId: input.snapshotId,
       userId: input.userId,
@@ -973,9 +1645,8 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     || session.encryption.aad.objectKey !== requestedObjectKey
     || session.encryption.aad.snapshotId !== input.snapshotId
   ) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: null,
-      deleteObject: false,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
       snapshotId: input.snapshotId,
       userId: input.userId,
@@ -983,6 +1654,12 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     return jsonError("Hosted workspace snapshot presign target is outside the bound user namespace.", 403);
   }
 
+  if (body.supportsManagedUpload === true) {
+    return json(await presignManagedSnapshot({
+      source: input.env, session, encryptedByteSize, encryptedSha256: encryptedObjectSha256, encryptedMd5,
+      expiresSeconds: Math.min(HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS, remainingSessionSeconds),
+    }));
+  }
   const presigned = await createHostedR2PresignedPutUrl({
     checksumSha256Base64: encodeHostedWorkspaceSnapshotSha256Base64(encryptedObjectSha256),
     contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
@@ -1492,6 +2169,7 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
   userId: string;
 }): Promise<Response> {
   const writeFence = await requireWorkspaceSnapshotWriteFence({
+    deferToResourceCommand: true,
     env: input.env,
     request: input.request,
     userId: input.userId,
@@ -1510,6 +2188,7 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
   }
 
   const session = await readWorkspaceSnapshotUploadSession({
+    writeAuthority: writeFence,
     env: input.env,
     snapshotId: input.snapshotId,
     userId: input.userId,
@@ -1543,11 +2222,9 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
-  await retireWorkspaceSnapshotUploadSession({
-    bucket: input.bucket,
-    deleteObject: true,
+  await deleteWorkspaceSnapshotUploadSession({
+    session,
     env: input.env,
-    objectKey: session.objectKey,
     snapshotId: input.snapshotId,
     userId: input.userId,
   });
@@ -1567,6 +2244,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   userId: string;
 }): Promise<Response> {
   const writeFence = await requireWorkspaceSnapshotWriteFence({
+    deferToResourceCommand: true,
     env: input.env,
     request: input.request,
     userId: input.userId,
@@ -1582,11 +2260,19 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (requestedSnapshotId !== input.snapshotId) {
     return jsonError("Hosted workspace snapshot complete snapshotId does not match its route.", 400);
   }
-  const session = await readWorkspaceSnapshotUploadSession({
-    env: input.env,
-    snapshotId: input.snapshotId,
+  // Managed reads already return both the session and its exact upload receipt.
+  // Web fences this read; final checkpoint publication fences the owner again.
+  const resource = await commandHostedRuntimeSnapshot({
+    source: input.env,
     userId: input.userId,
+    command: {
+      operation: body.managedPart === undefined ? "snapshot_read" : "snapshot_managed_read",
+      snapshotId: input.snapshotId,
+      attemptId: writeFence.attemptId,
+      generation: writeFence.generation,
+    },
   });
+  const session = resource.applied ? resource.session : null;
   if (!session) {
     return notFound();
   }
@@ -1606,13 +2292,15 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   ) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
-  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
+  const checkpointRequestWithoutSnapshotRef = parseHostedWorkspaceCheckpointRequest({
+    ...readWorkspaceSnapshotCompleteCheckpointRequest(body.checkpointRequest),
+    snapshotRef: null,
+  });
 
   if (Date.parse(session.expiresAt) <= Date.now()) {
     const alreadyCurrentResponse = await completeExpiredCurrentWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
+      checkpointRequest: checkpointRequestWithoutSnapshotRef,
       env: input.env,
       environment: input.environment,
       request: input.request,
@@ -1632,6 +2320,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
         userId: input.userId,
       });
       await deleteWorkspaceSnapshotUploadSession({
+    session: session,
         env: input.env,
         snapshotId: input.snapshotId,
         userId: input.userId,
@@ -1651,27 +2340,27 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     "Hosted workspace snapshot complete snapshotRef",
   );
   if (snapshotRef.archive.encryptedByteSize >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot exceeds the single-part size limit.", 413);
   }
   if (snapshotRef.archive.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot exceeds the total plain size limit.", 413);
   }
+  const managedSha256 = body.managedPart === undefined ? null : await completeManagedSnapshotForSession({
+    source: input.env, session, part: body.managedPart, receipt: resource.managedUpload ?? null,
+    encryptedByteSize: snapshotRef.archive.encryptedByteSize, encryptedSha256: snapshotRef.archive.encryptedObjectSha256,
+  });
   const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
     bucket: input.bucket,
     env: input.env,
@@ -1680,24 +2369,18 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError(snapshotObjectStore.configurationError, 503);
   }
   if (!snapshotObjectStore.head) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot object metadata is unavailable.", 503);
   }
   const object = await snapshotObjectStore.head(snapshotRef.objectKey);
-  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
   if (!object) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: false,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
       snapshotId: input.snapshotId,
       userId: input.userId,
@@ -1705,60 +2388,40 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return notFound();
   }
   if (!Number.isSafeInteger(object.size)) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot object size is unavailable.", 503);
   }
   if (object.size !== snapshotRef.archive.encryptedByteSize) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot object size does not match its ref.", 409);
   }
-  const objectEncryptedSha256 = readWorkspaceSnapshotObjectMetadata(
-    object.customMetadata,
-    "encryptedsha256",
-  );
-  const headChecksumSha256 = readHostedWorkspaceSnapshotSha256ChecksumHex(object.checksums?.sha256);
-  if (
-    headChecksumSha256 !== snapshotRef.archive.encryptedObjectSha256
-    || objectEncryptedSha256 !== snapshotRef.archive.encryptedObjectSha256
-    || readWorkspaceSnapshotObjectMetadata(object.customMetadata, "schema")
-      !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA
-    || readWorkspaceSnapshotObjectMetadata(object.customMetadata, "snapshotid")
-      !== snapshotRef.snapshotId
-  ) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: true,
+  if (!workspaceSnapshotMetadataMatchesRef(object, snapshotRef, managedSha256)) {
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot object metadata does not match its ref.", 409);
   }
   const checkpointRequest = parseHostedWorkspaceCheckpointRequest({
-    ...readWorkspaceSnapshotCompleteCheckpointRequest(body.checkpointRequest),
+    ...checkpointRequestWithoutSnapshotRef,
     snapshotRef,
   });
   if (checkpointRequest.reason !== "idle_shutdown") {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
@@ -1772,11 +2435,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     || checkpointRequest.leaseGeneration !== writeFence.generation
     || checkpointRequest.expectedWorkspaceVersion !== writeFence.workspaceVersion
   ) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
@@ -1802,23 +2463,22 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   };
 
   let preCheckpointReplacedSnapshotRef: HostedExecutionSnapshotRefValue | null = null;
-  try {
-    const preCheckpointWorkspace = await readCurrentHostedWorkspace({
-      environment: input.environment,
-      fetchImpl: fetch,
-      userId: input.userId,
-    });
-    preCheckpointReplacedSnapshotRef = preCheckpointWorkspace?.snapshotRef ?? null;
-  } catch {
-    return jsonError("Hosted workspace snapshot current state is unavailable.", 502);
-  }
-  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  // Legacy snapshots and warm older producers omit this baseline.
+  if (session.replacedSnapshotRef === undefined) {
+    try {
+      const preCheckpointWorkspace = await readCurrentHostedWorkspace({
+        environment: input.environment,
+        fetchImpl: fetch,
+        userId: input.userId,
+      });
+      preCheckpointReplacedSnapshotRef = preCheckpointWorkspace?.snapshotRef ?? null;
+    } catch {
+      return jsonError("Hosted workspace snapshot current state is unavailable.", 502);
+    }
   }
   if (
     preCheckpointReplacedSnapshotRef
     && !isReplacementRefSameAsSnapshotRef(preCheckpointReplacedSnapshotRef, snapshotRef)
-    && !session.replacedSnapshotRef
   ) {
     try {
       const remembered = await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
@@ -1880,13 +2540,10 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   }
   if (!checkpoint.checkpointed) {
     const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotResponse({
-      attemptId: writeFence.attemptId,
+      checkpointRequest,
       checkpoint,
-      env: input.env,
-      leaseGeneration: writeFence.generation,
       session,
       snapshotRef,
-      userId: input.userId,
     });
     if (cleanupRetryResponse) {
       return cleanupRetryResponse;
@@ -1932,14 +2589,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot checkpoint ref mismatch.", 502);
   }
 
-  await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
-    attemptId: writeFence.attemptId,
-    env: input.env,
-    leaseGeneration: writeFence.generation,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
-
   return json({
     checkpoint,
     ok: true,
@@ -1973,6 +2622,7 @@ async function retireAmbiguousWorkspaceSnapshotUploadSession(input: {
   }
 
   await deleteWorkspaceSnapshotUploadSession({
+    session: input.session,
     env: input.env,
     snapshotId: input.snapshotId,
     userId: input.userId,
@@ -2007,8 +2657,7 @@ function isReplacementRefSameAsSnapshotRef(
     && hostedWorkspaceSnapshotV2RefsMatch(replacedSnapshotRef, snapshotRef);
 }
 
-async function deleteReplacedWorkspaceSnapshotRef(input: {
-  bucket: WorkspaceSnapshotR2BucketLike | null;
+async function retireReplacedWorkspaceSnapshotRef(input: {
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   replacedSnapshotRef: HostedExecutionSnapshotRefValue;
@@ -2025,14 +2674,8 @@ async function deleteReplacedWorkspaceSnapshotRef(input: {
     ) {
       return true;
     }
-    const deleted = await deleteWorkspaceSnapshotObjectBestEffort({
-      bucket: input.bucket,
-      env: input.env,
-      objectKey: replacedSnapshotRef.objectKey,
-    });
-    if (deleted) {
-      return true;
-    }
+    // Web records the complete accepted reference and owns its recovery
+    // retention. An adapter must never bypass that window with an R2 delete.
     const orphanRecorded = await recordWorkspaceSnapshotOrphanCandidate(input.env, {
       createdAt: new Date().toISOString(),
       objectKey: replacedSnapshotRef.objectKey,
@@ -2102,13 +2745,10 @@ async function recordReplacedWorkspaceSnapshotOrphanCandidate(input: {
 }
 
 async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
-  attemptId: string;
+  checkpointRequest: ReturnType<typeof parseHostedWorkspaceCheckpointRequest>;
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
   session: HostedWorkspaceSnapshotUploadSession;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
-  userId: string;
 }): Promise<Response | null> {
   const currentSnapshotRef = input.checkpoint.workspace.snapshotRef;
   if (
@@ -2117,15 +2757,13 @@ async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
   ) {
     return null;
   }
+  if (!matchesRequestedHostedSystemProgressProjection({
+    request: input.checkpointRequest,
+    workspace: input.checkpoint.workspace,
+  })) {
+    return jsonError("Hosted workspace snapshot checkpoint state mismatch.", 409);
+  }
   const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
-  await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
-    attemptId: input.attemptId,
-    env: input.env,
-    leaseGeneration: input.leaseGeneration,
-    snapshotId: input.session.snapshotId,
-    userId: input.userId,
-  });
-
   return json({
     checkpoint: {
       checkpointed: true,
@@ -2142,6 +2780,7 @@ async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
 
 async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
   bucket: WorkspaceSnapshotR2BucketLike | null;
+  checkpointRequest: ReturnType<typeof parseHostedWorkspaceCheckpointRequest>;
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
@@ -2172,6 +2811,12 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
   ) {
     return null;
   }
+  if (!matchesRequestedHostedSystemProgressProjection({
+    request: input.checkpointRequest,
+    workspace: currentWorkspace,
+  })) {
+    return jsonError("Hosted workspace snapshot checkpoint state mismatch.", 409);
+  }
 
   if (
     !/^[0-9]+$/u.test(currentWorkspace.version)
@@ -2187,8 +2832,7 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
 
   const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
   if (replacedSnapshotRef) {
-    const replacedSnapshotCleanupSucceeded = await deleteReplacedWorkspaceSnapshotRef({
-      bucket: input.bucket,
+    const replacedSnapshotCleanupSucceeded = await retireReplacedWorkspaceSnapshotRef({
       env: input.env,
       environment: input.environment,
       replacedSnapshotRef,
@@ -2203,11 +2847,9 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
-  await retireWorkspaceSnapshotUploadSession({
-    bucket: input.bucket,
-    deleteObject: false,
+  await deleteWorkspaceSnapshotUploadSession({
+    session: input.session,
     env: input.env,
-    objectKey: currentSnapshotRef.objectKey,
     snapshotId: currentSnapshotRef.snapshotId,
     userId: input.userId,
   }).catch(() => undefined);
@@ -2229,15 +2871,9 @@ async function rememberReplacedWorkspaceSnapshotCleanupInUploadSession(input: {
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
 }): Promise<boolean> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "rememberHostedWorkspaceSnapshotReplacedRef",
-  );
-  return await stub.rememberHostedWorkspaceSnapshotReplacedRef({
-    expectedSession: input.session,
-    replacedSnapshotRef: input.replacedSnapshotRef,
-  });
+  return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+    operation: "snapshot_record_replaced", expectedSession: input.session, replacedSnapshotRef: input.replacedSnapshotRef,
+  } })).applied;
 }
 
 async function rememberWorkspaceSnapshotPresignedPut(input: {
@@ -2247,16 +2883,10 @@ async function rememberWorkspaceSnapshotPresignedPut(input: {
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "rememberHostedWorkspaceSnapshotPresignedPut",
-  );
-  return await stub.rememberHostedWorkspaceSnapshotPresignedPut({
-    drainUntil: input.drainUntil,
-    expectedSession: input.session,
-    expiresAt: input.expiresAt,
-  });
+  const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+    operation: "snapshot_admit_put", expectedSession: input.session, expiresAt: input.expiresAt, drainUntil: input.drainUntil,
+  } });
+  return result.applied ? result.session : null;
 }
 
 async function deleteReplacedLegacyWorkspaceSnapshotBundles(input: {
@@ -2296,11 +2926,9 @@ async function recordWorkspaceSnapshotOrphanCandidate(
   env: RunnerOutboundEnvironmentSource,
   candidate: HostedWorkspaceSnapshotOrphanCandidate,
 ): Promise<boolean> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(env, candidate.userId);
-  if (typeof stub.recordHostedWorkspaceSnapshotOrphanCandidate !== "function") {
-    return false;
-  }
-  await stub.recordHostedWorkspaceSnapshotOrphanCandidate(candidate);
+  await recordHostedRuntimeOrphan({ source: env, userId: candidate.userId, resource: candidate.kind === "legacy_workspace_snapshot"
+    ? { kind: "legacy_snapshot", snapshotRef: candidate.snapshotRef }
+    : { kind: "snapshot", objectKey: candidate.objectKey } });
   return true;
 }
 
@@ -2308,12 +2936,8 @@ async function recordBrowserVaultReplicaOrphanCandidate(
   env: RunnerOutboundEnvironmentSource,
   candidate: HostedBrowserVaultReplicaOrphanCandidate,
 ): Promise<void> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(env, candidate.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "recordHostedBrowserVaultReplicaOrphanCandidate",
-  );
-  await stub.recordHostedBrowserVaultReplicaOrphanCandidate(candidate);
+  await recordHostedRuntimeOrphan({ source: env, userId: candidate.userId, resource: { kind: "replica", objectKey: candidate.objectKey } });
+  return;
 }
 
 function collectLegacyWorkspaceSnapshotBundleRefs(
@@ -2357,6 +2981,14 @@ async function isHostedWorkspaceSnapshotV2RefOwnedByUser(input: {
   return input.snapshotRef.objectKey === expectedObjectKey;
 }
 
+function workspaceSnapshotMetadataMatchesRef(object: WorkspaceSnapshotR2ObjectLike, ref: HostedWorkspaceSnapshotV2Ref, verifiedManagedSha256: string | null): boolean {
+  const checksum = verifiedManagedSha256 ?? readHostedWorkspaceSnapshotSha256ChecksumHex(object.checksums?.sha256);
+  return checksum === ref.archive.encryptedObjectSha256
+    && readWorkspaceSnapshotObjectMetadata(object.customMetadata, "encryptedsha256") === ref.archive.encryptedObjectSha256
+    && readWorkspaceSnapshotObjectMetadata(object.customMetadata, "schema") === HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA
+    && readWorkspaceSnapshotObjectMetadata(object.customMetadata, "snapshotid") === ref.snapshotId;
+}
+
 function hostedWorkspaceSnapshotV2RefsMatch(
   left: HostedWorkspaceSnapshotV2Ref,
   right: HostedWorkspaceSnapshotV2Ref,
@@ -2383,40 +3015,6 @@ function hostedWorkspaceSnapshotV2RefsMatch(
     && left.encryption.aad.userId === right.encryption.aad.userId
     && left.encryption.aad.snapshotId === right.encryption.aad.snapshotId
     && left.encryption.aad.objectKey === right.encryption.aad.objectKey;
-}
-
-async function retireWorkspaceSnapshotUploadSession(input: {
-  bucket: WorkspaceSnapshotR2BucketLike | null;
-  deleteObject: boolean;
-  env: RunnerOutboundEnvironmentSource;
-  objectKey?: string;
-  snapshotId: string;
-  userId: string;
-}): Promise<void> {
-  if (input.deleteObject && input.objectKey) {
-    const deleted = await deleteWorkspaceSnapshotObjectBestEffort({
-      bucket: input.bucket,
-      env: input.env,
-      objectKey: input.objectKey,
-    });
-    if (!deleted) {
-      const retained = await recordWorkspaceSnapshotOrphanCandidate(input.env, {
-        createdAt: new Date().toISOString(),
-        objectKey: input.objectKey,
-        schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-        snapshotId: input.snapshotId,
-        userId: input.userId,
-      }).catch(() => false);
-      if (!retained) {
-        throw new Error("Hosted workspace snapshot object cleanup could not be retained.");
-      }
-    }
-  }
-  await deleteWorkspaceSnapshotUploadSession({
-    env: input.env,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
 }
 
 async function deleteWorkspaceSnapshotObjectBestEffort(input: {
@@ -2687,6 +3285,13 @@ function requireSnapshotPositiveSafeInteger(value: unknown, label: string): numb
   return value;
 }
 
+function requireSnapshotMd5Hex(value: unknown, label: string): string {
+  const text = requireSnapshotDataKeyString(value, label).toLowerCase();
+  if (!/^[0-9a-f]{32}$/u.test(text)) {
+    throw new TypeError(`Hosted workspace snapshot ${label} must be a lowercase md5 hex digest.`);
+  }
+  return text;
+}
 function requireSnapshotSha256Hex(value: unknown, label: string): string {
   const text = requireSnapshotDataKeyString(value, label).toLowerCase();
   if (!/^[0-9a-f]{64}$/u.test(text)) {
@@ -2702,19 +3307,9 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   request: Request;
   userId: string;
 }): Promise<Response> {
-  let writeAuthority: Awaited<ReturnType<typeof requireRunnerRuntimeWriteFenceWrite>>;
-  try {
-    writeAuthority = await requireRunnerRuntimeWriteFenceWrite({
-      env: input.env,
-      request: input.request,
-      userId: input.userId,
-    });
-  } catch (error) {
-    if (!(error instanceof RunnerRuntimeWriteFenceError)) {
-      throw error;
-    }
-    return unauthorized();
-  }
+  // The batch admission below checks live ownership under the Web transaction.
+  const writeAuthority = readRunnerRuntimeWriteFenceHeaders(input.request);
+  if (!writeAuthority) return unauthorized();
 
   const body = await readJsonObject(input.request, {
     limitBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES + 1024 * 1024,
@@ -2734,8 +3329,10 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     environment: input.environment,
     userId: input.userId,
   });
+  const replicaWrites = createRuntimeReplicaWriteBucket({ source: input.env,
+    userId: input.userId, attemptId: writeAuthority.attemptId, generation: writeAuthority.generation });
   const replicaStore = createHostedBrowserVaultReplicaStore({
-    bucket: input.bucket,
+    bucket: replicaWrites.bucket,
     keysById: crypto.keysById,
     resolveRootKeyById: crypto.resolveKeyById,
     rootKey: crypto.rootKey,
@@ -2750,83 +3347,28 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
       userId: input.userId,
     });
   }
-  let activePutWriteId: string | null = null;
+  let writeFailed = false;
   try {
     return json({
       replicaRef: await replicaStore.writeBrowserVaultReplica({
-        beforeWrite: async (plannedReplicaRef) => {
-          const writeId = globalThis.crypto.randomUUID();
-          const admittedAtMs = Date.now();
-          const putAdmitted = await admitBrowserVaultReplicaDirectPut({
-            admittedAt: new Date(admittedAtMs).toISOString(),
-            attemptId: writeAuthority.attemptId,
-            env: input.env,
-            leaseGeneration: writeAuthority.generation,
-            userId: input.userId,
-            writeId,
-          });
-          if (!putAdmitted) {
-            throw new RunnerRuntimeWriteFenceError();
-          }
-          activePutWriteId = writeId;
-          await recordBrowserVaultReplicaOrphanCandidate(input.env, {
-            createdAt: new Date().toISOString(),
-            objectKey: plannedReplicaRef.objectKey,
-            schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
-            userId: input.userId,
-          });
-        },
+        beforeWrite: plannedReplicaRef => replicaWrites.admit(plannedReplicaRef.objectKey),
         replica: body.replica,
         userId: input.userId,
       }),
     });
+  } catch (error) {
+    writeFailed = true;
+    if (!(error instanceof HostedRuntimeResourceRejectedError)) throw error;
+    emitHostedExecutionStructuredLog({
+      component: "runner", phase: "wake.running", level: "warn",
+      message: "Hosted runtime replica write rejected.",
+      details: { errorCode: error.code, status: error.status },
+    });
+    return json({ code: error.code, error: "Hosted runtime replica write rejected." }, error.status);
   } finally {
-    if (activePutWriteId) {
-      await releaseBrowserVaultReplicaDirectPut({
-        env: input.env,
-        userId: input.userId,
-        writeId: activePutWriteId,
-      });
-    }
+    try { await replicaWrites.settle(); }
+    catch (error) { if (!writeFailed) throw error; }
   }
-}
-
-async function admitBrowserVaultReplicaDirectPut(input: {
-  admittedAt: string;
-  attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
-  userId: string;
-  writeId: string;
-}): Promise<boolean> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "admitHostedBrowserVaultReplicaDirectPut",
-  );
-  return await stub.admitHostedBrowserVaultReplicaDirectPut({
-    admittedAt: input.admittedAt,
-    attemptId: input.attemptId,
-    leaseGeneration: input.leaseGeneration,
-    userId: input.userId,
-    writeId: input.writeId,
-  });
-}
-
-async function releaseBrowserVaultReplicaDirectPut(input: {
-  env: RunnerOutboundEnvironmentSource;
-  userId: string;
-  writeId: string;
-}): Promise<void> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "releaseHostedBrowserVaultReplicaDirectPut",
-  );
-  await stub.releaseHostedBrowserVaultReplicaDirectPut({
-    userId: input.userId,
-    writeId: input.writeId,
-  });
 }
 
 async function writeRequestOwnsRuntimeWriteFence(input: {
@@ -2835,7 +3377,7 @@ async function writeRequestOwnsRuntimeWriteFence(input: {
   userId: string;
 }): Promise<boolean> {
   try {
-    await requireRunnerRuntimeWriteFenceWrite({
+    await requireRunnerRuntimeWriteFence({
       env: input.env,
       request: input.request,
       userId: input.userId,
@@ -2851,10 +3393,16 @@ async function writeRequestOwnsRuntimeWriteFence(input: {
 }
 
 async function requireWorkspaceSnapshotWriteFence(input: {
+  deferToResourceCommand?: boolean;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   userId: string;
 }) {
+  if (input.deferToResourceCommand) {
+    const headers = readRunnerRuntimeWriteFenceHeaders(input.request);
+    return headers?.workspaceVersion && /^[0-9]+$/u.test(headers.workspaceVersion)
+      ? { ...headers, workspaceVersion: headers.workspaceVersion } : null;
+  }
   try {
     return await requireRunnerRuntimeWriteFenceWorkspaceWrite(input);
   } catch (error) {
@@ -2886,12 +3434,8 @@ async function createWorkspaceSnapshotUploadSession(input: {
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "createHostedWorkspaceSnapshotUploadSession",
-  );
-  return await stub.createHostedWorkspaceSnapshotUploadSession(input.session);
+  const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: { operation: "snapshot_create", session: input.session } });
+  return result.applied ? result.session : null;
 }
 
 async function heartbeatWorkspaceSnapshotUploadSession(input: {
@@ -2901,101 +3445,34 @@ async function heartbeatWorkspaceSnapshotUploadSession(input: {
   snapshotId: string;
   userId: string;
 }): Promise<boolean> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "heartbeatHostedWorkspaceSnapshotUploadSession",
-  );
-  return await stub.heartbeatHostedWorkspaceSnapshotUploadSession({
-    attemptId: input.attemptId,
-    leaseGeneration: input.leaseGeneration,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
-}
-
-async function completeWorkspaceSnapshotUploadSessionHandoff(input: {
-  attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
-  snapshotId: string;
-  userId: string;
-}): Promise<boolean> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "completeHostedWorkspaceSnapshotUploadSession",
-  );
-  return await stub.completeHostedWorkspaceSnapshotUploadSession({
-    attemptId: input.attemptId,
-    leaseGeneration: input.leaseGeneration,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
-}
-
-async function completeWorkspaceSnapshotUploadSessionHandoffBestEffort(input: {
-  attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
-  snapshotId: string;
-  userId: string;
-}): Promise<void> {
-  try {
-    if (await completeWorkspaceSnapshotUploadSessionHandoff(input)) {
-      return;
-    }
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: { checkpointHandoffCompletionRecorded: false },
-      level: "warn",
-      message: "Hosted workspace snapshot handoff completion marker was stale.",
-      phase: "checkpoint",
-      userId: input.userId,
-    });
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: { checkpointHandoffCompletionRecorded: false },
-      error,
-      level: "warn",
-      message: "Hosted workspace snapshot handoff completion marker failed.",
-      phase: "checkpoint",
-      userId: input.userId,
-    });
-  }
+  return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+    operation: "snapshot_heartbeat", snapshotId: input.snapshotId, attemptId: input.attemptId, generation: input.leaseGeneration,
+  } })).applied;
 }
 
 async function readWorkspaceSnapshotUploadSession(input: {
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
   env: RunnerOutboundEnvironmentSource;
   snapshotId: string;
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "readHostedWorkspaceSnapshotUploadSession",
-  );
-  return await stub.readHostedWorkspaceSnapshotUploadSession({
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
+  const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+    operation: "snapshot_read", snapshotId: input.snapshotId, attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation,
+  } });
+  return result.applied ? result.session : null;
 }
 
+// Web retention owns canonical protection, capability drains, and ciphertext retirement.
 async function deleteWorkspaceSnapshotUploadSession(input: {
+  session: HostedWorkspaceSnapshotUploadSession;
   env: RunnerOutboundEnvironmentSource;
   snapshotId: string;
   userId: string;
 }): Promise<void> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "deleteHostedWorkspaceSnapshotUploadSession",
-  );
-  await stub.deleteHostedWorkspaceSnapshotUploadSession({
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
+  await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+    operation: "snapshot_delete", snapshotId: input.snapshotId, attemptId: input.session.attemptId, generation: input.session.leaseGeneration,
+  } });
+  return;
 }
 
 function createHostedWorkspaceSnapshotId(): string {

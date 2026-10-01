@@ -20,6 +20,12 @@ export const ASSISTANT_SKILLS = [
       'Use when direct first-run Murph onboarding is open and the assistant needs to establish the broad private relationship, capture and park one or two change/understand/handle/explore aspiration threads, resolve the six progressive foundation-context checkpoints, return with context, choose a first step together, mark completion, or record an overall decline. Immediate requests and safety needs come first; answering a discovery question is not permission for a plan.',
   },
   {
+    slug: 'goal-setup',
+    name: 'goal-setup',
+    triggerHint:
+      'Use when a person explicitly asks Murph to help start, resume, pause, or change a concrete health, fitness, behavior, biomarker, skill, or event outcome, including a public Murph Goals handoff such as "Hey Murph, help me improve my deep sleep." It resolves an exact public goal template when available, reuses an equivalent private Goal, previews the smallest useful plan, and composes existing domain and persistence owners. Do not use for a purely informational question, an onboarding aspiration answer without an action request, an acute train-or-rest decision, or a request specifically for an experiment.',
+  },
+  {
     slug: 'hosted-low-usage',
     name: 'hosted-low-usage',
     triggerHint:
@@ -161,13 +167,13 @@ export const ASSISTANT_SKILLS = [
     slug: 'automatic-meal-capture',
     name: 'automatic-meal-capture',
     triggerHint:
-      'Use for Murph iPhone automatic meal capture setup, App Store handoff, Full Photos permission, best-effort background behavior, the on-device Meals review page, missing or delayed photo imports, verifying what Murph received, the automatic 9pm closeout, retained-photo privacy cleanup, and calorie- or macro-aware enrichment of photo-backed device meals without duplicate logging. Always co-load with food-journal on eligible interactive meal turns.',
+      'Use in a private direct conversation when someone asks how to start recurring meal tracking or how Murph can track meals, even when they do not say automatic, and whenever someone explicitly asks about Murph iPhone automatic meal capture setup, App Store handoff, Full Photos permission, best-effort background behavior, the on-device Meals review page, missing or delayed photo imports, verifying what Murph received, the automatic 9pm closeout, retained-photo privacy cleanup, or calorie- and macro-aware enrichment of photo-backed device meals without duplicate logging. Co-load food-journal on eligible interactive automatic-capture turns.',
   },
   {
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:
-      'Use when the user logs meals, asks what connected carbohydrate data recorded, or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
+      'Use when the user asks how to track meals, starts or maintains recurring meal tracking, logs meals, asks what connected carbohydrate data recorded, or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal. For a private direct request about how to start recurring meal tracking or how Murph can track meals, co-load automatic-meal-capture even when the user does not say automatic.',
   },
   {
     slug: 'nutrition-strategy',
@@ -185,13 +191,19 @@ export const ASSISTANT_SKILLS = [
     slug: 'appointment-scheduling',
     name: 'appointment-scheduling',
     triggerHint:
-      'Use for booking, rescheduling, canceling, or joining a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns intake completeness, availability and fallback bounds, canonical-memory reuse, durable scheduling-preference persistence, and the ready-to-act gate; transport skills own execution.',
+      'Use for check-in, intake, booking, rescheduling, canceling, or joining a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns intake completeness, availability and fallback bounds, canonical-memory reuse, durable scheduling-preference persistence, and the ready-to-act gate; transport skills own execution.',
   },
   {
     slug: 'connected-apps',
     name: 'connected-apps',
     triggerHint:
       'Use when Murph needs connected email, calendar, documents, storage, notes, or tasks; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; connected-app context for another action; or a verified manual export or one-time import fallback for a health or fitness source without a proven direct Murph connection. Owns account selection, narrow discovery and reads, limited calendar writes, verified provider export handoffs, privacy, and untrusted provider content.',
+  },
+  {
+    slug: 'journal-connected-context',
+    name: 'journal-connected-context',
+    triggerHint:
+      'Use for private Journal plans and upcoming context from active calendars and relevant email confirmations, and when a member corrects or stops that capture. Owns silent capture regardless of account age or old notice state, category filters, normalized Journal plans, reconciliation, follow-ups, opt-outs, and canonical facts for derived upcoming context.',
   },
   {
     slug: 'computer-use',
@@ -233,7 +245,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'self-management-experiments',
     name: 'self-management-experiments',
     triggerHint:
-      'Use to design, run, and interpret low-burden personalized experiments involving habits, routines, pacing, activity timing, environment, sleep, coping, communication, or other reversible self-management changes.',
+      'Use to design, run, and interpret low-burden personalized experiments involving habits, routines, pacing, activity timing, environment, sleep, coping, communication, or other reversible self-management changes. Ordinary goal setup with a chosen action belongs to goal-setup.',
   },
   {
     slug: 'physical-therapy',
@@ -245,7 +257,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'running-cardio',
     name: 'running-cardio',
     triggerHint:
-      'Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development. For a named event, date, competition category, qualifying target, concrete benchmark, or event-specific performance goal, use competition-training when registered; otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression. Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance. Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
+      'Use for running, structured walking workouts, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development. Use daily-activity for ordinary walking breaks and everyday movement targets. For a named event, date, competition category, qualifying target, concrete benchmark, or event-specific performance goal, use competition-training when registered; otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression. Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance. Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
   },
   {
     slug: 'group-newsletter',
@@ -257,7 +269,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'group-chat',
     name: 'group-chat',
     triggerHint:
-      'Read before replying in any group chat, meaning any conversation with multiple human participants, such as when the murph.group tool is available or inbound messages carry sender handles. Owns room psychology, human-owned versus open-ensemble floor, beat-local handoff, adaptive participation, and the decision to reply, react, joke, or stay silent, plus shared challenge-data etiquette.',
+      'Read before replying in any group chat, meaning any conversation with multiple human participants, such as when group-family tools are available or inbound messages carry sender handles. Owns room psychology, human-owned versus open-ensemble floor, beat-local handoff, adaptive participation, and the decision to reply, react, joke, or stay silent, plus shared challenge-data etiquette.',
   },
   {
     slug: 'groupchat-comedy',

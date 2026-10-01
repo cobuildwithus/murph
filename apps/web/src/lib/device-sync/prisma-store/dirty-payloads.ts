@@ -16,6 +16,7 @@ import {
 import {
   isHostedSecureBoxStringTestCodecConfiguredForTests,
   openHostedUserSecureBoxString,
+  openHostedUserSecureBoxStringFromPreparedRoot,
   sealHostedUserSecureBoxString,
   sealHostedUserSecureBoxStringFromPreparedRoot,
   type HostedSecureBoxPrismaClient,
@@ -144,7 +145,7 @@ export async function sealHostedDeviceSyncDirtyPayloadJsonFromPreparedCrypto(inp
   userId: string;
   value: unknown;
 }): Promise<string> {
-  const details = requirePreparedHostedDeviceSyncDirtyPayloadCrypto(input.prepared);
+  requirePreparedHostedDeviceSyncDirtyPayloadCrypto(input.prepared);
   if (
     input.prepared.domain !== HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_DOMAIN
     || input.prepared.userId !== input.userId
@@ -163,12 +164,60 @@ export async function sealHostedDeviceSyncDirtyPayloadJsonFromPreparedCrypto(inp
     encoding: "base64url",
     schema: HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_SCHEMA,
   };
+  return sealPreparedDirtyPayloadEnvelope({ ...input, value: JSON.stringify(envelope) });
+}
+
+// The dirty store owns both the ciphertext and its exact request-local root.
+// Revision drift needs only local authenticated open/seal of the compressed
+// envelope: never another compression, classifier, database read, or KMS call.
+export async function rebindHostedDeviceSyncDirtyPayloadRevision(input: {
+  connectionId: string;
+  dirtyRevision: bigint;
+  nextDirtyRevision: bigint;
+  payloadId: string;
+  prepared: PreparedHostedDeviceSyncDirtyPayloadCrypto;
+  provider: string;
+  userId: string;
+  value: string;
+}): Promise<string> {
+  requirePreparedHostedDeviceSyncDirtyPayloadCrypto(input.prepared);
+  if (input.prepared.userId !== input.userId || input.nextDirtyRevision <= input.dirtyRevision) {
+    throw new TypeError("Dirty payload revision rebinding requires the same owner and a newer revision.");
+  }
+  const envelope = await openHostedUserSecureBoxStringFromPreparedRoot({
+    aad: buildHostedDeviceSyncDirtyPayloadAad(input),
+    lane: "device-sync-payload",
+    preparedRootKeyId: input.prepared.rootKeyId,
+    scope: buildHostedDeviceSyncDirtyPayloadScope(input.payloadId),
+    userId: input.userId,
+    value: input.value,
+  });
+  if (!envelope) {
+    throw new TypeError("Dirty payload revision rebinding returned an empty envelope.");
+  }
+  return sealPreparedDirtyPayloadEnvelope({
+    ...input,
+    dirtyRevision: input.nextDirtyRevision,
+    value: envelope,
+  });
+}
+
+async function sealPreparedDirtyPayloadEnvelope(input: {
+  connectionId: string;
+  dirtyRevision: bigint;
+  payloadId: string;
+  prepared: PreparedHostedDeviceSyncDirtyPayloadCrypto;
+  provider: string;
+  userId: string;
+  value: string;
+}): Promise<string> {
+  const details = requirePreparedHostedDeviceSyncDirtyPayloadCrypto(input.prepared);
   const sealInput = {
     aad: buildHostedDeviceSyncDirtyPayloadAad(input),
     lane: "device-sync-payload" as const,
     scope: buildHostedDeviceSyncDirtyPayloadScope(input.payloadId),
     userId: input.userId,
-    value: JSON.stringify(envelope),
+    value: input.value,
   };
   const encrypted = details.mode === "test-codec"
     ? await sealHostedUserSecureBoxString(sealInput)

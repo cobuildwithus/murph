@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   scheduleDeviceActivityTriggeredAutomations: vi.fn(),
   runHostedDeviceSyncWakeLane: vi.fn(),
   sendAssistantNotification: vi.fn(),
+  startAssistantOnboarding: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
@@ -45,6 +46,7 @@ vi.mock("@murphai/assistant-engine", async () => {
     executeCodexManagedAccountOperation: mocks.executeCodexManagedAccountOperation,
     scheduleDeviceActivityTriggeredAutomations: mocks.scheduleDeviceActivityTriggeredAutomations,
     sendAssistantNotification: mocks.sendAssistantNotification,
+    startAssistantOnboarding: mocks.startAssistantOnboarding,
   };
 });
 
@@ -143,6 +145,7 @@ describe("hosted runtime event coverage", () => {
       conversationMetrics: null,
       mailboxLane: "member-activated",
       nextWakeAt: null,
+      nextWakeReason: null,
       postCheckpointRecord: null,
       redactedLogEntries: [],
     });
@@ -193,7 +196,7 @@ describe("hosted runtime event coverage", () => {
       runtimeLogPlatform: runtime.platform,
       resolvedConfig: runtime.resolvedConfig,
       signal,
-      timeoutMs: 90_000,
+      timeoutMs: 300_000,
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
       wake: deviceSyncWake,
     });
@@ -222,7 +225,7 @@ describe("hosted runtime event coverage", () => {
       runtime,
       runtimeEnv: {},
       signal,
-      shouldYieldDeviceSync,
+      shouldYieldBackgroundMaintenance: shouldYieldDeviceSync,
       vaultRoot: "/tmp/assistant-runtime-events-coverage-yield",
     });
 

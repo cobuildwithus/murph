@@ -8,11 +8,13 @@ import {
   eventImportDecisionSchema,
   eventRecordSchema,
   healthEntityDefinitionByKind,
+  immunizationImportPayloadSchema,
   publicEventImportJsonlRowPayloadSchemasByKind,
 } from "../src/index.ts";
 import {
   bloodTestImportPayloadSchema as bloodTestImportPayloadJsonSchema,
   conditionImportPayloadSchema as conditionImportPayloadJsonSchema,
+  immunizationImportPayloadSchema as immunizationImportPayloadJsonSchema,
 } from "../src/schemas.ts";
 import { conditionImportPayloadSchema } from "../src/shares.ts";
 import { safeParseContract } from "../src/validate.ts";
@@ -35,7 +37,7 @@ function schemaHasFormat(schema: JsonSchemaObject | undefined, format: string): 
   return schema.format === format || (schema.anyOf?.some((branch) => schemaHasFormat(branch, format)) ?? false);
 }
 
-test("sleep session records accept only explicit canonical main-sleep and nap identities", () => {
+test("sleep session records preserve bounded sleep classification and provider state", () => {
   const base = {
     schemaVersion: "murph.event.v1",
     id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
@@ -54,6 +56,12 @@ test("sleep session records accept only explicit canonical main-sleep and nap id
   assert.equal(eventRecordSchema.safeParse(base).success, true);
   assert.equal(eventRecordSchema.safeParse({ ...base, sleepType: "main_sleep" }).success, true);
   assert.equal(eventRecordSchema.safeParse({ ...base, sleepType: "nap" }).success, true);
+  for (const sleepType of ["short_sleep", "unknown"] as const) {
+    for (const sleepState of ["tentative", "confirmed"] as const) {
+      assert.equal(eventRecordSchema.safeParse({ ...base, sleepType, sleepState }).success, true);
+    }
+  }
+  assert.equal(eventRecordSchema.safeParse({ ...base, sleepState: "final-ish" }).success, false);
   assert.equal(eventRecordSchema.safeParse({ ...base, sleepType: "rest" }).success, false);
 });
 
@@ -120,12 +128,14 @@ test("derived observation evidence accepts only bounded scalar qualifiers", () =
   }).success, false);
 });
 
-test("condition and blood-test scaffolds validate against import payload schemas", () => {
+test("condition, blood-test, and immunization scaffolds validate against import payload schemas", () => {
   const condition = healthEntityDefinitionByKind.get("condition");
   const bloodTest = healthEntityDefinitionByKind.get("blood_test");
+  const immunization = healthEntityDefinitionByKind.get("immunization");
 
   assert.ok(condition?.scaffoldTemplate);
   assert.ok(bloodTest?.scaffoldTemplate);
+  assert.ok(immunization?.scaffoldTemplate);
   assert.equal(
     safeParseContract(conditionImportPayloadSchema, condition.scaffoldTemplate).success,
     true,
@@ -133,6 +143,55 @@ test("condition and blood-test scaffolds validate against import payload schemas
   assert.equal(
     safeParseContract(bloodTestImportPayloadSchema, bloodTest.scaffoldTemplate).success,
     true,
+  );
+  assert.equal(
+    safeParseContract(immunizationImportPayloadSchema, immunization.scaffoldTemplate).success,
+    true,
+  );
+});
+
+test("immunization import payload schema rejects misspelled fields", () => {
+  const payload = {
+    occurredAt: "2026-03-12T11:15:00.000Z",
+    title: "Influenza vaccine",
+    vaccineName: "Influenza",
+    manufactuer: "Synthetic manufacturer",
+  };
+
+  const result = safeParseContract(immunizationImportPayloadSchema, payload);
+  assert.equal(result.success, false);
+  assert.match(result.success ? "" : result.errors.join("\n"), /unrecognized key/i);
+
+  const jsonSchema = immunizationImportPayloadJsonSchema as JsonSchemaObject;
+  assert.equal(
+    jsonSchema.$id,
+    "@murphai/contracts/immunization-import-payload.schema.json",
+  );
+  assert.equal(jsonSchema.title, "Murph Immunization Import Payload");
+  assert.equal(jsonSchema.properties?.vaccineName !== undefined, true);
+  assert.equal(jsonSchema.properties?.evidence !== undefined, true);
+
+  const evidence = {
+    sourceDocumentId: "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    page: 2,
+  };
+  assert.equal(
+    safeParseContract(immunizationImportPayloadSchema, {
+      occurredAt: "2026-03-12T11:15:00.000Z",
+      title: "Influenza vaccine",
+      vaccineName: "Influenza",
+      evidence: [evidence],
+    }).success,
+    true,
+  );
+  assert.equal(
+    safeParseContract(immunizationImportPayloadSchema, {
+      occurredAt: "2026-03-12T11:15:00.000Z",
+      title: "Influenza vaccine",
+      vaccineName: "Influenza",
+      evidence: Array.from({ length: 51 }, () => evidence),
+    }).success,
+    false,
   );
 });
 

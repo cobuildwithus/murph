@@ -8,8 +8,20 @@ export {
   VAULT_LAYOUT,
   VAULT_SCHEMA_VERSION,
 } from "./constants.ts";
-export { VaultError, isVaultError } from "./errors.ts";
+export {
+  VaultError,
+  isVaultError,
+  isActiveCanonicalWriteLockError,
+  type CanonicalWriteLockErrorDetails,
+} from "./errors.ts";
 export { deterministicContractId } from "./ids.ts";
+export {
+  createDeviceBatchImportSession,
+  type DeviceBatchImportSession,
+  type DeviceBatchImportTiming,
+  type ImportDeviceBatchExecutionOptions,
+  type ImportDeviceBatchInput,
+} from "./mutations.ts";
 export {
   reconcileAutomationSupportSeries,
   reconcileAutomationSupportSeriesNamespace,
@@ -26,6 +38,7 @@ export type {
   AssistantPersonalityPreferencesUpdate,
   AssistantPreferencesUpdate,
   PreferencesDocumentSnapshot,
+  WorkoutCapturePreferencesUpdate,
 } from "./preferences.ts";
 export {
   assertPathWithinVault,
@@ -137,11 +150,13 @@ export {
   importDocument,
   importEventBatch,
   importSamples,
+  validateSampleImport,
   initializeVault,
   linkJournalEventIds,
   linkJournalStreams,
   promoteInboxExperimentNote,
   promoteInboxJournal,
+  recordInboxDocumentDefaultPromotion,
   removeAutomaticMealPhoto,
   repairJunctionWorkoutHeartRateZones,
   repairExperimentMedia,
@@ -153,6 +168,7 @@ export {
   unlinkJournalEventIds,
   unlinkJournalStreams,
   updateAssistantPreferences,
+  updateWorkoutCapturePreferences,
   updateWorkoutUnitPreferences,
   updateWearablePreferences,
   updateExperiment,
@@ -332,19 +348,26 @@ export {
   GENERATED_IMAGE_CAPTURE_TAGS,
   findCaptureByLookup,
   findEventByExternalRef,
+  findEventsByExternalRefs,
   findEventsByRawRefs,
   readStoredCaptureLookupIndex,
+  isGeneratedImageCaptureEvent,
   runGeneratedImageCaptureRetention,
   buildSleepSessionEventDraft,
   buildSupplementIntakeEventDraft,
   buildSymptomEventDraft,
 } from "./domains/events.ts";
 export {
+  listInboxDocumentDefaultPromotionCorrelations,
+  listLiveExactDocumentImportEvidence,
   WORKOUT_SOURCE_IMPORT_STATUS_VALUES,
-} from "./mutations.ts";
+} from "./domains/documents/source-evidence.ts";
 export type {
+  InboxDocumentDefaultPromotionCorrelation,
+  LiveExactDocumentImportEvidence,
+  LiveExactDocumentImportEvidenceGroup,
   WorkoutSourceImportStatus,
-} from "./mutations.ts";
+} from "./domains/documents/source-evidence.ts";
 export type {
   AddActivitySessionInput,
   AddActivitySessionResult,
@@ -414,4 +437,25 @@ export type {
   RecoverInterruptedClosedIntegrationIngestArchivesResult,
   StoredIntegrationIngestEntry,
 } from "./integration-ingests.ts";
+export {
+  MAX_EVENT_LEDGER_ARCHIVE_BYTES,
+  MAX_EVENT_LEDGER_SHARD_BYTES,
+  archiveClosedEventLedgerShards,
+  isEventLedgerLogicalPath,
+  listEventLedgerShardPaths,
+  listEventLedgerShardPathsInterruptible,
+  listEventLedgerShardSources,
+  readEventLedgerShardRecords,
+  readEventLedgerShardRows,
+  readEventLedgerShardText,
+  resolveEventLedgerShardSource,
+  visitEventLedgerShardRecordsInterruptible,
+} from "./event-ledger-storage.ts";
+export type {
+  ArchiveClosedEventLedgerShardsResult,
+  EventLedgerShardContentReceipt,
+  EventLedgerShardSource,
+} from "./event-ledger-storage.ts";
 export * from "./integration-ingest-migration.ts";
+
+export { archiveClosedAuditShards, listAuditShardPaths, listAuditShardSources, readAuditShardRows } from "./audit-storage.ts";

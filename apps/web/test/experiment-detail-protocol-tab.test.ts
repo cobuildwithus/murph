@@ -1,21 +1,10 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import {
-  type HealthCommonsCatalog,
-  type HealthCommonsCatalogEntity,
-  type HealthCommonsMeasurementMethodModality,
-  type HealthCommonsMeasurementMethodTier,
-} from "@murphai/contracts";
-import { createHealthCommonsCatalogReader } from "@murphai/health-commons/runtime";
-
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
-import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
+import { resolveExperimentProjectionFixture } from "./health-commons-projection-fixtures";
 import { resolveHealthCommonsExperimentProtocolTab } from "@/src/lib/health-commons/experiment-projections";
 import type { ExperimentResearchGroup } from "@/src/types/experiments";
-import {
-  createHealthCommonsRouteBundleFixtureCatalog,
-} from "./health-commons-fixture-catalog";
 
 vi.mock("@/src/components/experiments/experiment-detail/expected-signal-card", () => ({
   ExpectedSignalCard({ label }: { label: string }) {
@@ -68,7 +57,7 @@ import { ResearchTab } from "@/src/components/experiments/experiment-detail/rese
 
 describe("ProtocolTab", () => {
   it("renders the protocol layout without generic step labels or duplicated summary copy", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("bryan-johnson-blueprint");
+    const protocol = resolveExperimentProjectionFixture("bryan-johnson-blueprint");
 
     expect(protocol).not.toBeNull();
 
@@ -98,7 +87,7 @@ describe("ProtocolTab", () => {
   });
 
   it("uses the page-authored Finnish focus signals and moves context signals into pills", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     const protocolTab = resolveHealthCommonsExperimentProtocolTab("finnish-sauna");
 
     expect(protocol).not.toBeNull();
@@ -155,7 +144,7 @@ describe("ProtocolTab", () => {
   });
 
   it("keeps the Bryan Johnson sauna hierarchy focused on tolerability and pressure signals", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("bryan-johnson-blueprint");
+    const protocol = resolveExperimentProjectionFixture("bryan-johnson-blueprint");
 
     expect(protocol).not.toBeNull();
 
@@ -177,7 +166,7 @@ describe("ProtocolTab", () => {
   });
 
   it("prioritizes aerobic adaptation signals for Norwegian 4x4 and leaves slower proxies in context", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+    const protocol = resolveExperimentProjectionFixture("norwegian-4x4");
 
     expect(protocol).not.toBeNull();
 
@@ -219,7 +208,7 @@ describe("ProtocolTab", () => {
   });
 
   it("renders grouped research inside native details cards with source-mix summaries", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+    const protocol = resolveExperimentProjectionFixture("norwegian-4x4");
 
     expect(protocol).not.toBeNull();
 
@@ -238,7 +227,7 @@ describe("ProtocolTab", () => {
   });
 
   it("shortens long Finnish research-group labels at display time only", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -294,7 +283,7 @@ describe("ProtocolTab", () => {
   });
 
   it("uses the page-authored tomorrow-list focus signal and moves the secondary signal into context pills", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("five-minute-tomorrow-list");
+    const protocol = resolveExperimentProjectionFixture("five-minute-tomorrow-list");
 
     expect(protocol).not.toBeNull();
 
@@ -320,9 +309,9 @@ describe("ProtocolTab", () => {
   });
 
   it("keeps expected signals outcome-only while rendering measurement paths separately", () => {
-    const catalog = createMeasurementPathFixtureCatalog();
-    const reader = createHealthCommonsCatalogReader(catalog);
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna", reader);
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
+    if (!protocol) throw new Error("Expected the Finnish sauna projection.");
+    protocol.measurementPaths = createMeasurementPaths();
 
     expect(protocol).not.toBeNull();
     expect(protocol?.expectedSignals.map((signal) => signal.label)).not.toEqual(
@@ -376,161 +365,21 @@ describe("ProtocolTab", () => {
 
 });
 
-function createMeasurementPathFixtureCatalog(): HealthCommonsCatalog {
-  const catalog = createHealthCommonsRouteBundleFixtureCatalog();
-  const protocolIndex = catalog.entities.findIndex(
-    (entity) => entity.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-  );
-  const protocol = catalog.entities[protocolIndex];
-  const template = catalog.entities.find(
-    (entity) => entity.key === "biomarker:resting-heart-rate",
-  );
-
-  if (protocolIndex < 0 || !protocol || protocol.entityType !== "protocol_variant") {
-    throw new Error("Expected the Finnish sauna protocol fixture.");
-  }
-
-  if (!template) {
-    throw new Error("Expected a measurement-method template entity.");
-  }
-
-  catalog.entities.push(
-    createMeasurementMethodEntity(template, {
-      key: "measurement_method:home-skin-score",
-      modalities: ["self_rating"],
-      routeId: "home-skin-score",
-      shortName: "Home skin score",
-      tier: "default_home",
-      title: "Home Skin Score",
-    }),
-    createMeasurementMethodEntity(template, {
-      key: "measurement_method:home-image-analysis",
-      modalities: ["standardized_photo", "image_analysis"],
-      routeId: "home-image-analysis",
-      shortName: "Home image analysis",
-      tier: "optional_home",
-      title: "Home Image Analysis",
-    }),
-    createMeasurementMethodEntity(template, {
-      key: "measurement_method:clinic-imaging",
-      modalities: ["instrumented_imaging"],
-      routeId: "clinic-imaging",
-      shortName: "Clinic imaging",
-      tier: "clinic",
-      title: "Clinic Imaging",
-    }),
-  );
-
-  catalog.entities[protocolIndex] = {
-    ...protocol,
-    measurementPlan: {
-      defaultPathId: "home-score",
-      paths: [
-        {
-          label: "Home image analysis",
-          methodKeys: ["measurement_method:home-image-analysis"],
-          notes: ["Optional image analysis only counts if the same lighting setup is reused."],
-          outcomeKeys: ["biomarker:skin-texture-roughness-score"],
-          pathId: "home-image-analysis",
-          required: false,
-          tier: "optional_home",
-        },
-        {
-          label: "Clinic imaging upgrade",
-          methodKeys: ["measurement_method:clinic-imaging"],
-          notes: ["Use this when clinic access is already practical."],
-          outcomeKeys: [
-            "biomarker:standardized-skin-photo-score",
-            "biomarker:periocular-wrinkle-score",
-            "biomarker:skin-texture-roughness-score",
-          ],
-          pathId: "clinic-imaging-upgrade",
-          required: false,
-          tier: "clinic",
-        },
-        {
-          label: "Home skin scoring",
-          methodKeys: ["measurement_method:home-skin-score"],
-          notes: ["Use the same scoring prompt at baseline and follow-up."],
-          outcomeKeys: ["biomarker:standardized-skin-photo-score"],
-          pathId: "home-score",
-          required: true,
-          tier: "default_home",
-        },
-      ],
-      schemaVersion: "murph.commons.measurement-plan.v1",
-    },
-  };
-
-  return catalog;
-}
-
-function createMeasurementMethodEntity(
-  template: HealthCommonsCatalogEntity,
-  input: {
-    key: string;
-    modalities: HealthCommonsMeasurementMethodModality[];
-    routeId: string;
-    shortName: string;
-    tier: HealthCommonsMeasurementMethodTier;
-    title: string;
-  },
-): HealthCommonsCatalogEntity {
-  const hasImageModality = input.modalities.some((modality) =>
-    ["standardized_photo", "calibrated_photo", "image_analysis", "instrumented_imaging"].includes(
-      modality,
-    )
-  );
-
-  return {
-    ...template,
-    aliases: [input.shortName],
-    biomarker: undefined,
-    categories: ["measurement", "skin"],
-    communityOutcomeSummary: undefined,
-    entityType: "measurement_method",
-    interpretationFrame: undefined,
-    key: input.key,
-    measurementContexts: undefined,
-    measurementMethod: {
-      burden: {
-        costTier: input.tier === "clinic" ? "clinic" : "free",
-        userBurden: input.tier === "clinic" ? "moderate" : "low",
-      },
-      interpretation: {
-        caveat: "Use this as a personal trend proxy, not a diagnosis.",
-        principle: "Compare the same method against itself.",
-      },
-      modalities: input.modalities,
-      outputs: [
-        {
-          label: `${input.shortName} score`,
-          outputId: "score",
-          valueType: "score",
-        },
-      ],
-      procedure: {
-        materials: ["Same camera or appointment type"],
-        schedule: ["Baseline and follow-up"],
-        steps: ["Capture the same region under the same conditions."],
-        summary: `Repeatable ${input.shortName.toLowerCase()} measurement.`,
-      },
-      ...(hasImageModality
-        ? {
-            privacy: {
-              containsIdentifiableImages: true,
-              localOnlyRecommended: true,
-              notes: ["Use private storage for identifiable fixture photos."],
-            },
-          }
-        : {}),
-      shortName: input.shortName,
-      tier: input.tier,
-    },
-    slug: `measurement-methods/${input.routeId}`,
-    summary: `${input.title} is a reusable measurement method fixture.`,
-    title: input.title,
-  };
+function createMeasurementPaths(): NonNullable<ReturnType<typeof resolveExperimentProjectionFixture>>["measurementPaths"] {
+  return ([
+    { label: "Home skin scoring", shortName: "Home skin score", routeId: "home-skin-score", tier: "default_home", required: true },
+    { label: "Home image analysis", shortName: "Home image analysis", routeId: "home-image-analysis", tier: "optional_home", required: false },
+    { label: "Clinic imaging upgrade", shortName: "Clinic imaging", routeId: "clinic-imaging", tier: "clinic", required: false },
+  ] as const).map(({ label, shortName, routeId, tier, required }) => ({
+    label, pathId: routeId, tier, required, isDefault: required,
+    methodKeys: [`measurement_method:${routeId}`],
+    notes: [], outcomeLabels: ["Skin texture"], safetyOutcomeLabels: [],
+    methods: [{
+      key: `measurement_method:${routeId}`, routeId, shortName, title: shortName,
+      href: `/measurement-methods/${routeId}`, tier, modalities: [],
+      privacy: { containsIdentifiableImages: true, localOnlyRecommended: true, notes: [] },
+    }],
+  }));
 }
 
 function countOccurrences(haystack: string, needle: string): number {

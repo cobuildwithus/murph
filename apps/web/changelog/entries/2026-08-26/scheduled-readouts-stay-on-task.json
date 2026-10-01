@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "scheduled-readouts-stay-on-task",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Scheduled readouts stay on task",
+    "summary": "Scheduled Murph readouts now follow the purpose saved for that automation, so a current-day update stays focused on the current day.",
+    "details": "Existing weekly summaries still run from their own saved instructions, while schedule timing, consent, and delivery safeguards remain unchanged.",
+    "relevanceTags": ["assistant", "automations", "reliability"],
+    "sourcePullRequests": [2359]
+  }
+}

@@ -88,6 +88,13 @@ export class PrismaHostedAgentSessionStore {
     }
 
     if (record.expiresAt.getTime() <= nowDate.getTime()) {
+      if (record.imessageRenewalTokenHash) {
+        return {
+          status: "expired",
+          session: mapHostedAgentSessionRecord(record),
+        };
+      }
+
       const expired = await this.revokeAgentSession({
         expectedTokenHash: tokenHash,
         sessionId: record.id,

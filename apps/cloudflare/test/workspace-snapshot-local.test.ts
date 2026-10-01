@@ -7,6 +7,12 @@ import { promisify } from "node:util";
 
 import { describe, expect, it, vi } from "vitest";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+import {
+  archiveClosedEventLedgerShards,
+  initializeVault,
+  readEvent,
+  upsertEvent,
+} from "@murphai/core";
 
 import {
   buildHostedWorkspaceSnapshotV2Aad,
@@ -32,12 +38,12 @@ import {
 } from "@murphai/runtime-state/node";
 import {
   createEncryptedWorkspaceSnapshotFile,
-  readHostedWorkspaceSnapshotProcessFailureDiagnostics,
   type EncryptedWorkspaceSnapshotFile,
   restoreEncryptedWorkspaceSnapshot,
   restoreEncryptedWorkspaceSnapshotFromEncryptedStream,
   waitForHostedWorkspaceSnapshotProcessPipe,
 } from "../src/workspace-snapshot-local.js";
+import { readHostedWorkspaceSnapshotProcessFailureDiagnostics } from "../src/workspace-snapshot-process-diagnostics.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -73,6 +79,182 @@ describe("workspace snapshot process pipes", () => {
 });
 
 describe("workspace snapshot local restore", () => {
+  it.each([
+    {
+      label: "stale",
+      contents: JSON.stringify({
+        schema: "murph.hosted-workspace-skipped-inline-files.v1",
+        files: [{ path: "missing.md", root: "vault", sha256: "0".repeat(64), size: 1 }],
+      }),
+    },
+    { label: "malformed", contents: "{invalid-json" },
+  ])("ignores $label skipped-inline cache manifests during archive planning", async ({ contents }) => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "hosted-workspace-skipped-inline-cache-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const manifestRelativePath = ".runtime/cache/hosted-skipped-inline-files.json";
+    const manifestPath = path.join(vaultRoot, manifestRelativePath);
+
+    try {
+      await mkdir(path.dirname(manifestPath), { recursive: true });
+      await writeFile(manifestPath, contents, "utf8");
+      await writeFile(path.join(vaultRoot, "note.md"), "keep me\n", "utf8");
+
+      const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot, vaultRoot });
+
+      expect(archivePlan.entries.some((entry) =>
+        entry.root === "vault" && entry.relativePath === manifestRelativePath
+      )).toBe(false);
+      expect(archivePlan.entries.some((entry) =>
+        entry.root === "vault" && entry.relativePath === "note.md"
+      )).toBe(true);
+      expect(await readFile(manifestPath, "utf8")).toBe(contents);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("omits explicitly excluded vault paths from encrypted archive planning", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "hosted-workspace-excluded-path-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const videoRelativePath =
+      "raw/inbox/linq/synthetic/attachments/01__clip.mp4";
+
+    try {
+      await mkdir(path.dirname(path.join(vaultRoot, videoRelativePath)), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(vaultRoot, videoRelativePath),
+        "synthetic-video-bytes",
+        "utf8",
+      );
+      await writeFile(path.join(vaultRoot, "note.md"), "keep me\n", "utf8");
+
+      const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
+        durableRoot,
+        excludedVaultPaths: [videoRelativePath],
+        vaultRoot,
+      });
+
+      expect(archivePlan.entries.some((entry) =>
+        entry.root === "vault" && entry.relativePath === videoRelativePath
+      )).toBe(false);
+      expect(archivePlan.entries.some((entry) =>
+        entry.root === "vault" && entry.relativePath === "note.md"
+      )).toBe(true);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("measures closed event archiving at the encrypted snapshot boundary", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-event-archive-"));
+    const sourceDurableRoot = path.join(tempRoot, "source", "durable");
+    const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
+    const restoredDurableRoot = path.join(tempRoot, "restored", "durable");
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const encodedDataKey = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
+
+    try {
+      await initializeVault({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        vaultRoot: sourceVaultRoot,
+      });
+      const historicalEvents = [];
+      for (let index = 0; index < 24; index += 1) {
+        historicalEvents.push(await upsertEvent({
+          payload: {
+            kind: "note",
+            note: `closed event history ${index} `.repeat(100),
+            occurredAt: `2026-01-12T09:${String(index).padStart(2, "0")}:00.000Z`,
+            title: `Historical event ${index}`,
+          },
+          vaultRoot: sourceVaultRoot,
+        }));
+      }
+
+      const baselineSnapshotId = "snapshot_event_archive_before";
+      const baselineObjectKey =
+        `users/member_test/workspace-snapshots/${baselineSnapshotId}.snapshot.enc`;
+      const baselineAad = buildHostedWorkspaceSnapshotV2Aad({
+        objectKey: baselineObjectKey,
+        snapshotId: baselineSnapshotId,
+        userId: "member_test",
+      });
+      const baselinePlan = await collectHostedWorkspaceSnapshotArchivePlan({
+        durableRoot: sourceDurableRoot,
+        vaultRoot: sourceVaultRoot,
+      });
+      const baseline = await createEncryptedWorkspaceSnapshotFile({
+        aad: baselineAad,
+        archiveEntries: baselinePlan.entries,
+        dataKey: encodedDataKey,
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(
+          Uint8Array.from({ length: 12 }, (_, index) => index + 10),
+        ).toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "baseline-scratch"),
+      });
+
+      await expect(archiveClosedEventLedgerShards({
+        now: new Date("2026-02-01T00:00:00.000Z"),
+        vaultRoot: sourceVaultRoot,
+      })).resolves.toMatchObject({ archivedShardCount: 1, blockedShardCount: 0 });
+
+      const archivedSnapshotId = "snapshot_event_archive_after_";
+      const archivedObjectKey =
+        `users/member_test/workspace-snapshots/${archivedSnapshotId}.snapshot.enc`;
+      const archivedAad = buildHostedWorkspaceSnapshotV2Aad({
+        objectKey: archivedObjectKey,
+        snapshotId: archivedSnapshotId,
+        userId: "member_test",
+      });
+      const archivedPlan = await collectHostedWorkspaceSnapshotArchivePlan({
+        durableRoot: sourceDurableRoot,
+        vaultRoot: sourceVaultRoot,
+      });
+      const archived = await createEncryptedWorkspaceSnapshotFile({
+        aad: archivedAad,
+        archiveEntries: archivedPlan.entries,
+        dataKey: encodedDataKey,
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(
+          Uint8Array.from({ length: 12 }, (_, index) => index + 30),
+        ).toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "archived-scratch"),
+      });
+
+      expect(archived.totalPlainBytes).toBeLessThan(baseline.totalPlainBytes);
+      expect(archived.encryptedByteSize).toBeLessThan(baseline.encryptedByteSize);
+
+      await restoreEncryptedWorkspaceSnapshot({
+        dataKey: encodedDataKey,
+        durableRoot: restoredDurableRoot,
+        encryptedFilePath: archived.encryptedFilePath,
+        ref: createHostedWorkspaceSnapshotTestRef({
+          aad: archivedAad,
+          encrypted: archived,
+          objectKey: archivedObjectKey,
+          snapshotId: archivedSnapshotId,
+          userId: "member_test",
+        }),
+      });
+      await expect(readEvent({
+        eventId: historicalEvents[0]!.eventId,
+        vaultRoot: path.join(restoredDurableRoot, "vault"),
+      })).resolves.toMatchObject({
+        event: { title: "Historical event 0" },
+      });
+    } finally {
+      dataKey.fill(0);
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("round-trips selected portable workspace state and Codex continuity", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
@@ -133,6 +315,9 @@ describe("workspace snapshot local restore", () => {
       await mkdir(path.join(sourceVaultRoot, ".runtime", "operations", "assistant", "sessions"), {
         recursive: true,
       });
+      await mkdir(path.join(sourceVaultRoot, ".runtime", "operations", "assistant", "state"), {
+        recursive: true,
+      });
       await mkdir(path.join(sourceVaultRoot, ".runtime", "operations", "device-sync"), {
         recursive: true,
       });
@@ -156,6 +341,18 @@ describe("workspace snapshot local restore", () => {
             resumeRouteId: "route-ready",
           },
         }) + "\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(
+          sourceVaultRoot,
+          ".runtime",
+          "operations",
+          "assistant",
+          "state",
+          "group-participant-display-names.json",
+        ),
+        "portable participant display-name cache\n",
         "utf8",
       );
       await writeFile(
@@ -219,6 +416,11 @@ describe("workspace snapshot local restore", () => {
       expect(archivePlan.entries).toEqual(expect.arrayContaining([
         expect.objectContaining({
           archivePath: "vault/.runtime/operations/assistant/hosted-system-mailbox.json",
+          kind: "file",
+        }),
+        expect.objectContaining({
+          archivePath:
+            "vault/.runtime/operations/assistant/state/group-participant-display-names.json",
           kind: "file",
         }),
         expect.objectContaining({
@@ -286,6 +488,17 @@ describe("workspace snapshot local restore", () => {
         ),
         "utf8",
       )).resolves.toBe(`${JSON.stringify(retainedDeviceSyncWakeState)}\n`);
+      await expect(readFile(
+        path.join(
+          restoredVaultRoot,
+          ".runtime",
+          "operations",
+          "assistant",
+          "state",
+          "group-participant-display-names.json",
+        ),
+        "utf8",
+      )).resolves.toBe("portable participant display-name cache\n");
       await expect(access(
         path.join(restoredVaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"),
       )).rejects.toThrow();
@@ -735,6 +948,106 @@ describe("workspace snapshot local restore", () => {
     }
   });
 
+  it.each([
+    ["tar", "missing"], ["zstd", "missing"],
+    ["tar", "early-exit"], ["zstd", "early-exit"],
+  ] as const)("cleans up snapshot creation when %s has a %s failure", async (label, failure) => {
+    const root = await mkdtemp(path.join(tmpdir(), "snapshot-create-process-failure-"));
+    const durableRoot = path.join(root, "source");
+    const outputDir = path.join(root, "scratch");
+    const bin = path.join(root, "bin");
+    const originalPath = process.env.PATH;
+    const peer = label === "tar" ? "zstd" : "tar";
+    const peerPath = (await execFileAsync("which", [peer])).stdout.trim();
+    try {
+      await mkdir(durableRoot);
+      await mkdir(bin);
+      const notePath = path.join(durableRoot, "note.bin");
+      // More than pipe capacity, so an early compressor exit also exercises
+      // the producer's blocked write and closure of every parent descriptor.
+      await writeFile(notePath, Buffer.alloc(4 * 1024 * 1024, 7));
+      if (failure === "missing") {
+        await symlink(peerPath, path.join(bin, peer));
+        process.env.PATH = bin;
+      } else {
+        await writeFile(path.join(bin, label), "#!/bin/sh\nprintf 'synthetic process failure\\n' >&2\nexit 17\n", { mode: 0o700 });
+        process.env.PATH = `${bin}${path.delimiter}${originalPath ?? ""}`;
+      }
+      const error = await createEncryptedWorkspaceSnapshotFile({
+        aad: buildHostedWorkspaceSnapshotV2Aad({
+          objectKey: "users/hsn_test/workspace-snapshots/snapshot_create_failure.snapshot.enc",
+          snapshotId: "snapshot_create_failure", userId: "member_synthetic",
+        }),
+        archiveEntries: [{ absolutePath: notePath, archivePath: "note.bin", kind: "file" }],
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(Buffer.alloc(32, 7)),
+        durableRoot, outputDir, ivBase64: "AQIDBAUGBwgJCgsM",
+        maxEncryptedBytes: 8 * 1024 * 1024,
+        signal: AbortSignal.timeout(5_000),
+      }).catch((cause: unknown) => cause);
+      // A broken pipe or cleanup signal may make the peer fail too. Retain
+      // useful process diagnostics instead of masking failure with a timeout.
+      expect(readHostedWorkspaceSnapshotProcessFailureDiagnostics(error)).not.toBeNull();
+      await expect(readdir(outputDir)).resolves.toEqual([]);
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("awaits both active archive children when snapshot creation is cancelled", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "snapshot-create-active-abort-"));
+    const durableRoot = path.join(root, "source");
+    const outputDir = path.join(root, "scratch");
+    const bin = path.join(root, "bin");
+    const originalPath = process.env.PATH;
+    const controller = new AbortController();
+    const reason = new Error("foreground wake interrupted active archive processes");
+    let construction: Promise<EncryptedWorkspaceSnapshotFile> | undefined;
+    try {
+      await mkdir(durableRoot);
+      await mkdir(bin);
+      const notePath = path.join(durableRoot, "note.md");
+      await writeFile(notePath, "synthetic note\n");
+      for (const label of ["tar", "zstd"]) {
+        await writeFile(path.join(bin, label), `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+process.on("SIGTERM", () => {
+  writeFileSync(__filename + ".stopped", "stopped");
+  process.exit(0);
+});
+writeFileSync(__filename + ".ready", "ready");
+setTimeout(() => process.exit(19), 10_000);
+`, { mode: 0o700 });
+      }
+      process.env.PATH = `${bin}${path.delimiter}${originalPath ?? ""}`;
+      construction = createEncryptedWorkspaceSnapshotFile({
+        aad: buildHostedWorkspaceSnapshotV2Aad({
+          objectKey: "users/hsn_test/workspace-snapshots/snapshot_active_abort.snapshot.enc",
+          snapshotId: "snapshot_active_abort", userId: "member_synthetic",
+        }),
+        archiveEntries: [{ absolutePath: notePath, archivePath: "note.md", kind: "file" }],
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(Buffer.alloc(32, 7)),
+        durableRoot, outputDir, ivBase64: "AQIDBAUGBwgJCgsM",
+        maxEncryptedBytes: 1024 * 1024, signal: controller.signal,
+      });
+      construction.catch(() => undefined);
+      await vi.waitFor(async () => {
+        await access(path.join(bin, "tar.ready"));
+        await access(path.join(bin, "zstd.ready"));
+      }, { timeout: 5_000 });
+      controller.abort(reason);
+      await expect(construction).rejects.toBe(reason);
+      await expect(access(path.join(bin, "tar.stopped"))).resolves.toBeUndefined();
+      await expect(access(path.join(bin, "zstd.stopped"))).resolves.toBeUndefined();
+      await expect(readdir(outputDir)).resolves.toEqual([]);
+    } finally {
+      controller.abort(reason);
+      await construction?.catch(() => undefined);
+      process.env.PATH = originalPath;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("preserves a child-process failure when a wake arrives during process cleanup", async () => {
     const tempRoot = await mkdtemp(path.join(
       tmpdir(),
@@ -823,7 +1136,8 @@ while :; do sleep 0.01; done
     }
   });
 
-  it("restores encrypted snapshots from an encrypted byte stream", async () => {
+  it.each(["split-tag", "single-chunk", "reused-views", "single-bytes"] as const)(
+    "restores encrypted snapshots from an encrypted byte stream (%s)", async (chunkMode) => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-stream-test-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
     const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
@@ -871,7 +1185,11 @@ while :; do sleep 0.01; done
       const restoreTimings = await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
         dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
         durableRoot: restoredDurableRoot,
-        encryptedStream: streamEncryptedChunks(splitEncryptedSnapshotAcrossAuthTagBoundary(encryptedBytes)),
+        encryptedStream: chunkMode === "reused-views" || chunkMode === "single-bytes"
+          ? streamReusedEncryptedViews(encryptedBytes, chunkMode === "single-bytes" ? 1 : 17)
+          : streamEncryptedChunks(chunkMode === "single-chunk"
+            ? [encryptedBytes]
+            : splitEncryptedSnapshotAcrossAuthTagBoundary(encryptedBytes)),
         ref,
       });
 
@@ -886,7 +1204,49 @@ while :; do sleep 0.01; done
     }
   });
 
-  it("rejects encrypted stream auth failures without replacing durable state", async () => {
+  it.each(["tar", "zstd"] as const)("preserves durable state when restore %s exits early", async (label) => {
+    const root = await mkdtemp(path.join(tmpdir(), "snapshot-restore-process-failure-"));
+    const source = path.join(root, "source");
+    const durableRoot = path.join(root, "restored", "durable");
+    const dataKey = encodeHostedWorkspaceSnapshotV2DataKey(Buffer.alloc(32, 7));
+    const originalPath = process.env.PATH;
+    try {
+      await mkdir(source, { recursive: true });
+      await mkdir(durableRoot, { recursive: true });
+      await writeFile(path.join(source, "note.md"), "synthetic replacement\n");
+      await writeFile(path.join(durableRoot, "existing.md"), "preserve this workspace\n");
+      const snapshotId = "snapshot_process_failure";
+      const objectKey = "users/hsn_test/workspace-snapshots/snapshot_process_failure.snapshot.enc";
+      const userId = "member_synthetic";
+      const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad, dataKey, durableRoot: source,
+        archiveEntries: [{ absolutePath: path.join(source, "note.md"), archivePath: "note.md", kind: "file" }],
+        ivBase64: "AQIDBAUGBwgJCgsM", maxEncryptedBytes: 1024 * 1024,
+        outputDir: path.join(root, "archive"),
+      });
+      const bin = path.join(root, "bin");
+      await mkdir(bin);
+      await writeFile(path.join(bin, label), "#!/bin/sh\nprintf 'synthetic process failure\\n' >&2\nexit 17\n", { mode: 0o700 });
+      process.env.PATH = `${bin}${path.delimiter}${originalPath ?? ""}`;
+      const error = await restoreEncryptedWorkspaceSnapshot({
+        dataKey, durableRoot, encryptedFilePath: encrypted.encryptedFilePath,
+        ref: createHostedWorkspaceSnapshotTestRef({ aad, encrypted, objectKey, snapshotId, userId }),
+      }).catch((failure: unknown) => failure);
+      // The peer can also fail with a broken pipe; either process diagnostic
+      // must accompany failure without replacing the durable workspace.
+      expect(readHostedWorkspaceSnapshotProcessFailureDiagnostics(error)).not.toBeNull();
+      await expect(readFile(path.join(durableRoot, "existing.md"), "utf8")).resolves.toBe("preserve this workspace\n");
+      await expect(access(path.join(durableRoot, "note.md"))).rejects.toThrow();
+      await expect(readdir(path.dirname(durableRoot))).resolves.toEqual(["durable"]);
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["auth-tag", "truncated", "oversized", "ciphertext"] as const)(
+    "rejects invalid encrypted streams without replacing durable state (%s)", async (failure) => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-stream-auth-test-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
     const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
@@ -926,8 +1286,14 @@ while :; do sleep 0.01; done
         outputDir: path.join(tempRoot, "scratch"),
       });
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
-      const tamperedEncryptedBytes = Buffer.from(encryptedBytes);
-      tamperedEncryptedBytes[tamperedEncryptedBytes.byteLength - 1] ^= 0xff;
+      const tamperedEncryptedBytes = failure === "truncated"
+        ? encryptedBytes.subarray(0, encryptedBytes.byteLength - 1)
+        : failure === "oversized"
+          ? Buffer.concat([encryptedBytes, Buffer.from([0])])
+          : Buffer.from(encryptedBytes);
+      if (failure === "auth-tag" || failure === "ciphertext") {
+        tamperedEncryptedBytes[failure === "auth-tag" ? tamperedEncryptedBytes.byteLength - 1 : 0] ^= 0xff;
+      }
       const ref = createHostedWorkspaceSnapshotTestRef({
         aad,
         encrypted,
@@ -951,6 +1317,66 @@ while :; do sleep 0.01; done
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
+    }
+  });
+
+  it.each([0, 127, 4095])(
+    "erases all received plaintext after an early stream failure (%i bytes)", async (receivedBytes) => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "snapshot-restore-partial-clear-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const archiveBytes = 65_537;
+    const dataKey = Buffer.alloc(32, 7);
+    const ivBase64 = "AQIDBAUGBwgJCgsM";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_partial.snapshot.enc";
+    const snapshotId = "snapshot_partial";
+    const userId = "member_synthetic";
+    const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
+    const ref = createHostedWorkspaceSnapshotTestRef({
+      aad, objectKey, snapshotId, userId,
+      encrypted: {
+        compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+        encryptedByteSize: archiveBytes + 16, encryptedFilePath: "unused.snapshot.enc",
+        encryptedObjectSha256: "0".repeat(64), fileCount: 1, ivBase64,
+        plaintextArchiveSha256: "0".repeat(64), temporaryDirectoryPath: "unused",
+        totalPlainBytes: archiveBytes,
+      },
+    });
+    const cipher = createCipheriv("aes-256-gcm", dataKey, Buffer.from(ivBase64, "base64url"));
+    cipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(aad)));
+    const plaintext = Buffer.alloc(receivedBytes, 0x3a);
+    const ciphertext = cipher.update(plaintext);
+    const streamFailure = new Error("synthetic object download interrupted");
+    const allocate = Buffer.allocUnsafe;
+    let archive: ReturnType<typeof Buffer.allocUnsafe> | undefined;
+    const allocation = vi.spyOn(Buffer, "allocUnsafe").mockImplementation((size) => {
+      if (size !== archiveBytes) return allocate(size);
+      // Observe plaintext erasure without reading uninitialized memory.
+      archive = Buffer.alloc(size, 0x7d);
+      return archive;
+    });
+    async function* interruptedStream() {
+      yield ciphertext;
+      expect(archive?.subarray(0, receivedBytes).equals(plaintext)).toBe(true);
+      throw streamFailure;
+    }
+    try {
+      await mkdir(durableRoot);
+      await writeFile(path.join(durableRoot, "existing.txt"), "existing workspace");
+      await expect(restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey), durableRoot,
+        encryptedStream: interruptedStream(), ref,
+      })).rejects.toBe(streamFailure);
+      expect(archive?.subarray(0, receivedBytes).equals(Buffer.alloc(receivedBytes))).toBe(true);
+      // The unwritten suffix never held snapshot plaintext. Failed downloads
+      // must not dirty pages proportional to the advertised full archive size.
+      expect(archive?.subarray(receivedBytes).every((byte) => byte === 0x7d)).toBe(true);
+      await expect(readFile(path.join(durableRoot, "existing.txt"), "utf8"))
+        .resolves.toBe("existing workspace");
+      await expect(readdir(tempRoot)).resolves.toEqual(["durable"]);
+    } finally {
+      allocation.mockRestore();
+      dataKey.fill(0);
+      await rm(tempRoot, { force: true, recursive: true });
     }
   });
 
@@ -1426,6 +1852,18 @@ async function* streamEncryptedChunks(chunks: readonly Uint8Array[]): AsyncItera
   for (const chunk of chunks) {
     yield chunk;
   }
+}
+
+async function* streamReusedEncryptedViews(bytes: Uint8Array, chunkSize: number): AsyncIterable<Uint8Array> {
+  const storage = new Uint8Array(chunkSize + 6);
+  for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+    storage.fill(0xff);
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    storage.set(chunk, 3);
+    yield storage.subarray(3, 3 + chunk.byteLength);
+    yield new Uint8Array(0);
+  }
+  storage.fill(0xff);
 }
 
 const TEST_HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;

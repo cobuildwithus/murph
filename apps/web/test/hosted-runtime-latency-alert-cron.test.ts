@@ -1,8 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  runHostedRuntimeTypingAlertMonitor: vi.fn(),
+  runHostedDeviceImportAlertMonitor: vi.fn(),
+  runHostedAiUsageOvershootAlertMonitor: vi.fn(),
+  runHostedStarterAbuseAlertMonitor: vi.fn(),
   runHostedRuntimeLatencyAlertMonitor: vi.fn(),
   runHostedRuntimeProgressAlertMonitor: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-runtime-progress/device-import-alert-monitor", () => ({
+  runHostedDeviceImportAlertMonitor: mocks.runHostedDeviceImportAlertMonitor,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-latency/typing-alert-monitor", () => ({
+  runHostedRuntimeTypingAlertMonitor: mocks.runHostedRuntimeTypingAlertMonitor,
+}));
+vi.mock("@/src/lib/hosted-execution/starter-abuse-alert-monitor", () => ({ runHostedStarterAbuseAlertMonitor: mocks.runHostedStarterAbuseAlertMonitor }));
+
+vi.mock("@/src/lib/hosted-execution/usage-overshoot-alert-monitor", () => ({
+  runHostedAiUsageOvershootAlertMonitor:
+    mocks.runHostedAiUsageOvershootAlertMonitor,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-latency/alert-monitor", () => ({
@@ -21,7 +39,21 @@ const originalCronSecret = process.env.CRON_SECRET;
 
 describe("hosted runtime latency alert cron", () => {
   beforeEach(() => {
+    mocks.runHostedDeviceImportAlertMonitor.mockReset();
+    mocks.runHostedDeviceImportAlertMonitor.mockResolvedValue({ configured: true, conditions: [] });
+    mocks.runHostedRuntimeTypingAlertMonitor.mockReset();
+    mocks.runHostedRuntimeTypingAlertMonitor.mockResolvedValue({ queuedCount: 0, scanTruncated: false });
     process.env.CRON_SECRET = "latency-cron-secret";
+    mocks.runHostedStarterAbuseAlertMonitor.mockReset();
+    mocks.runHostedStarterAbuseAlertMonitor.mockResolvedValue({ configured: true, health: { anomalous: false }, outcome: "healthy" });
+    mocks.runHostedAiUsageOvershootAlertMonitor.mockReset();
+    mocks.runHostedAiUsageOvershootAlertMonitor.mockResolvedValue({
+      configured: true,
+      health: {
+        anomalous: false,
+      },
+      outcome: "healthy",
+    });
     mocks.runHostedRuntimeLatencyAlertMonitor.mockReset();
     mocks.runHostedRuntimeLatencyAlertMonitor.mockResolvedValue({
       configured: true,
@@ -59,10 +91,15 @@ describe("hosted runtime latency alert cron", () => {
     ));
 
     expect(response.status).toBe(200);
+    expect(mocks.runHostedDeviceImportAlertMonitor).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
+    expect(mocks.runHostedRuntimeTypingAlertMonitor).toHaveBeenCalledOnce();
     expect(mocks.runHostedRuntimeLatencyAlertMonitor).toHaveBeenCalledWith({
       signal: expect.any(AbortSignal),
     });
     expect(mocks.runHostedRuntimeProgressAlertMonitor).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+    });
+    expect(mocks.runHostedAiUsageOvershootAlertMonitor).toHaveBeenCalledWith({
       signal: expect.any(AbortSignal),
     });
   });
@@ -73,16 +110,23 @@ describe("hosted runtime latency alert cron", () => {
     ));
 
     expect(response.status).toBe(401);
+    expect(mocks.runHostedDeviceImportAlertMonitor).not.toHaveBeenCalled();
+    expect(mocks.runHostedRuntimeTypingAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedRuntimeLatencyAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedRuntimeProgressAlertMonitor).not.toHaveBeenCalled();
+    expect(mocks.runHostedAiUsageOvershootAlertMonitor).not.toHaveBeenCalled();
   });
 
   it.each([
+    { failing: "device_import" },
     {
       failing: "progress",
     },
     {
       failing: "latency",
+    },
+    {
+      failing: "usage_overshoot",
     },
   ] as const)(
     "awaits the sibling monitor before reporting a $failing failure",
@@ -107,6 +151,13 @@ describe("hosted runtime latency alert cron", () => {
       mocks.runHostedRuntimeProgressAlertMonitor.mockReturnValue(
         failing === "progress" ? failedMonitor : heldMonitor,
       );
+      mocks.runHostedAiUsageOvershootAlertMonitor.mockReturnValue(
+        failing === "usage_overshoot" ? failedMonitor : heldMonitor,
+      );
+
+      mocks.runHostedDeviceImportAlertMonitor.mockReturnValue(
+        failing === "device_import" ? failedMonitor : heldMonitor,
+      );
 
       let routeSettled = false;
       const responsePromise = GET(new Request(
@@ -124,6 +175,7 @@ describe("hosted runtime latency alert cron", () => {
       await vi.waitFor(() => {
         expect(mocks.runHostedRuntimeLatencyAlertMonitor).toHaveBeenCalled();
         expect(mocks.runHostedRuntimeProgressAlertMonitor).toHaveBeenCalled();
+        expect(mocks.runHostedAiUsageOvershootAlertMonitor).toHaveBeenCalled();
       });
       await Promise.resolve();
       expect(routeSettled).toBe(false);

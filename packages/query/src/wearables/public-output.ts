@@ -3,7 +3,7 @@ import {
   summarizeBodyStateNotes,
   summarizeRecoveryNotes,
 } from "./summaries.ts";
-import { summarizeMetricsConfidence } from "./confidence.ts";
+import { qualifySleepSummaryConfidence, summarizeMetricsConfidence } from "./confidence.ts";
 import { resolveWearablePublicSourceProvider } from "./origin.ts";
 import {
   formatMetricLabel,
@@ -186,11 +186,11 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
     ["spo2", spo2],
   ];
   const projectedMetrics = metrics.map(([, metric]) => metric);
-  const rawSummaryConfidence = rebuildPublicSummaryConfidence(
+  const rawSummaryConfidence = qualifySleepSummaryConfidence(rebuildPublicSummaryConfidence(
     metrics,
     night.summaryConfidence,
     "No sleep metrics were available for this date.",
-  );
+  ), night);
   const sleepProviderTextEntries = buildMetricProviderTextProjectionEntries(sourceMetrics);
   const summaryConfidence = {
     ...rawSummaryConfidence,

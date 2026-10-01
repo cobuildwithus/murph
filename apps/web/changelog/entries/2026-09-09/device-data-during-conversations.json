@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 100,
+  "item": {
+    "id": "device-data-during-conversations",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Device data arrives while you chat",
+    "summary": "New data from connected devices can become available to Murph during your conversation.",
+    "details": "Your replies stay the priority. Murph can read arriving observations once they are safely saved, while additional history may continue importing afterward.",
+    "relevanceTags": [
+      "wearables",
+      "devices"
+    ],
+    "sourcePullRequests": [
+      3090
+    ]
+  }
+}

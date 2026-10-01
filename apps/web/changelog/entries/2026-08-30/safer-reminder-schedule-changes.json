@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "safer-reminder-schedule-changes",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Safer reminder schedule changes",
+    "summary": "Reminder saves and edits now stop when schedule details conflict, instead of silently choosing one value and risking the wrong time.",
+    "details": "The correction points to the exact schedule field without repeating its contents. Existing one-time, interval, recurring, local-time, time-zone, and device-activity schedules keep working when their fields agree.",
+    "relevanceTags": ["assistant", "reminders", "reliability"],
+    "sourcePullRequests": [2596]
+  }
+}

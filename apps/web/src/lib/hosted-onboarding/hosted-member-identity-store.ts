@@ -9,13 +9,18 @@ import {
 } from "@prisma/client";
 
 import {
+  createHostedEmailLookupKey,
+  createHostedEmailLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
   createHostedPrivyUserLookupKey,
   createHostedPrivyUserLookupKeyReadCandidates,
+  normalizeHostedEmailAddress,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import {
   buildHostedMemberIdentityPrivateColumns,
+  HOSTED_MEMBER_LINQ_PARTICIPANT_CONTACT_FIELD,
+  readHostedMemberIdentityPhoneNumbers,
   readHostedMemberIdentityPrivateState,
 } from "./member-private-codecs";
 import {
@@ -28,7 +33,10 @@ import {
   type PreparedHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
 import { readHostedUserSecureBoxStringRootReference } from "../hosted-crypto/secure-box";
-import type { PreparedHostedWebEncryptionRoot } from "../hosted-web/encryption";
+import {
+  encryptHostedWebNullableString,
+  type PreparedHostedWebEncryptionRoot,
+} from "../hosted-web/encryption";
 
 export interface HostedMemberIdentityState {
   maskedPhoneNumberHint: string | null;
@@ -50,6 +58,7 @@ export interface HostedMemberIdentityState {
 export type HostedMemberIdentityLookupState = Omit<HostedMemberIdentityState, "phoneLookupKey">;
 
 export type HostedMemberIdentityLookupMatch =
+  | "linqEmailHandle"
   | "phoneLookupKey"
   | "phoneNumber"
   | "privyUserId";
@@ -78,7 +87,7 @@ export interface HostedMemberIdentityCoreLookup {
   core: Prisma.HostedMemberIdentityGetPayload<{
     select: typeof hostedMemberIdentityCoreLookupSelect;
   }>["member"];
-  matchedBy: "phoneNumber" | "privyUserId";
+  matchedBy: "linqEmailHandle" | "phoneNumber" | "privyUserId";
 }
 
 type HostedMemberIdentityCoreLookupRecord =
@@ -96,6 +105,7 @@ export type HostedMemberIdentityRecord = HostedMemberIdentity;
 // and onboarding flows do not need to round-trip through readHostedMemberIdentity.
 
 export interface HostedMemberIdentityWriteInput {
+  linqEmailHandle?: string | null;
   maskedPhoneNumberHint: string | null;
   memberId: string;
   phoneLookupKey: string | null;
@@ -217,6 +227,50 @@ export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
     : null;
 }
 
+type HostedMemberIdentityByLinqEmailHandleInput = {
+  emailAddress: string;
+  prisma: HostedOnboardingReadClient;
+};
+
+export async function lookupHostedMemberIdentityByLinqEmailHandle(
+  input: HostedMemberIdentityByLinqEmailHandleInput & { projection: "core" },
+): Promise<HostedMemberIdentityCoreLookup | null>;
+export async function lookupHostedMemberIdentityByLinqEmailHandle(
+  input: HostedMemberIdentityByLinqEmailHandleInput,
+): Promise<HostedMemberIdentityLookup | null>;
+export async function lookupHostedMemberIdentityByLinqEmailHandle(
+  input: HostedMemberIdentityByLinqEmailHandleInput & { projection?: "core" },
+): Promise<HostedMemberIdentityCoreLookup | HostedMemberIdentityLookup | null> {
+  const lookupKeys = createHostedEmailLookupKeyReadCandidates(input.emailAddress);
+  if (lookupKeys.length === 0) {
+    return null;
+  }
+
+  if (input.projection === "core") {
+    const records = await input.prisma.hostedMemberIdentity.findMany({
+      where: {
+        linqEmailHandleLookupKey: { in: lookupKeys },
+      },
+      select: hostedMemberIdentityCoreLookupSelect,
+    });
+    return resolveHostedMemberIdentityCoreLookup(records, "linqEmailHandle");
+  }
+
+  const records = await input.prisma.hostedMemberIdentity.findMany({
+    where: {
+      linqEmailHandleLookupKey: { in: lookupKeys },
+    },
+    include: {
+      member: true,
+    },
+  });
+  return resolveHostedMemberIdentityLookup(
+    records,
+    "linqEmailHandle",
+    input.prisma,
+  );
+}
+
 type HostedMemberIdentityByPhoneNumberInput = {
   phoneNumber: string;
   prisma: HostedOnboardingReadClient;
@@ -322,7 +376,7 @@ export async function readHostedMemberIdentity(input: {
 
 /**
  * Reads the exact encrypted identity row without projecting private fields.
- * Prepared webhook paths use this to bind an outside-transaction projection
+ * Prepared transaction paths use this to bind an outside-transaction projection
  * to the row re-read while the member lock is held.
  */
 export async function readHostedMemberIdentityRecord(input: {
@@ -334,6 +388,50 @@ export async function readHostedMemberIdentityRecord(input: {
       memberId: input.memberId,
     },
   });
+}
+
+export async function prepareHostedMemberInvitePhoneIdentity(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}) {
+  const identityRecord = await readHostedMemberIdentityRecord(input);
+  if (!identityRecord) {
+    return null;
+  }
+  const phoneNumbers = await readHostedMemberIdentityPhoneNumbers(
+    identityRecord,
+    input.prisma,
+  );
+
+  return {
+    identityRecord,
+    identityState: {
+      maskedPhoneNumberHint: identityRecord.maskedPhoneNumberHint,
+      ...phoneNumbers,
+    },
+  } as const;
+}
+
+export async function readHostedMemberSignupPhoneCodeAttempt(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<{ signupPhoneCodeSendAttemptId: string | null } | null> {
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      signupPhoneCodeSendAttemptId: true,
+    },
+  });
+
+  return identity
+    ? {
+        signupPhoneCodeSendAttemptId: normalizeNullableString(
+          identity.signupPhoneCodeSendAttemptId,
+        ),
+      }
+    : null;
 }
 
 export async function lockHostedMemberIdentityStateTx(input: {
@@ -350,6 +448,8 @@ export async function lockHostedMemberIdentityStateTx(input: {
 
 const HOSTED_MEMBER_IDENTITY_RECORD_KEYS = [
   "createdAt",
+  "linqEmailHandleLookupKey",
+  "linqEmailHandleEncrypted",
   "maskedPhoneNumberHint",
   "memberId",
   "phoneLookupKey",
@@ -441,6 +541,81 @@ export async function tryCreateHostedMemberIdentity(
   });
 
   return result.count > 0;
+}
+
+export async function bindHostedMemberLinqEmailHandleTx(input: {
+  emailAddress: string;
+  lookupKey: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const lookupKeys = createHostedEmailLookupKeyReadCandidates(input.emailAddress);
+  if (!lookupKeys.includes(input.lookupKey)) {
+    throw new TypeError(
+      "Hosted Linq email handle lookup key must match the normalized address.",
+    );
+  }
+
+  const linqEmailHandleEncrypted = await encryptHostedWebNullableString({
+    field: HOSTED_MEMBER_LINQ_PARTICIPANT_CONTACT_FIELD,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    value: normalizeHostedEmailAddress(input.emailAddress),
+  });
+
+  try {
+    const result = await input.prisma.hostedMemberIdentity.updateMany({
+      data: {
+        linqEmailHandleLookupKey: input.lookupKey,
+        linqEmailHandleEncrypted,
+      },
+      where: {
+        memberId: input.memberId,
+        OR: [
+          { linqEmailHandleLookupKey: null },
+          { linqEmailHandleLookupKey: { in: lookupKeys } },
+        ],
+      },
+    });
+    if (result.count === 1) {
+      return;
+    }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError
+      && error.code === "P2002"
+    ) {
+      throw hostedLinqEmailHandleIdentityConflict();
+    }
+    throw error;
+  }
+
+  throw hostedLinqEmailHandleIdentityConflict();
+}
+
+// The caller holds the normalized email participant lock through its write.
+export async function assertHostedMemberLinqEmailHandleOwnerTx(input: {
+  emailAddress: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const owner = await lookupHostedMemberIdentityByLinqEmailHandle({
+    emailAddress: input.emailAddress,
+    prisma: input.prisma,
+    projection: "core",
+  });
+  if (owner && owner.core.id !== input.memberId) {
+    throw hostedLinqEmailHandleIdentityConflict();
+  }
+}
+
+function hostedLinqEmailHandleIdentityConflict() {
+  return hostedOnboardingError({
+    code: "HOSTED_LINQ_EMAIL_HANDLE_IDENTITY_CONFLICT",
+    httpStatus: 409,
+    message:
+      "This iMessage email handle conflicts with an existing Murph account. Contact support so we can resolve it safely.",
+  });
 }
 
 export async function writeHostedMemberSignupPhoneState(
@@ -630,6 +805,9 @@ async function buildHostedMemberIdentityMutationData(
   preparedRoot?: PreparedHostedWebEncryptionRoot,
 ) {
   const privateColumns = await buildHostedMemberIdentityPrivateColumns({
+    ...(input.linqEmailHandle === undefined
+      ? {}
+      : { linqEmailHandle: normalizeHostedEmailAddress(input.linqEmailHandle) }),
     memberId: input.memberId,
     phoneNumber: input.phoneNumber,
     preparedRoot,
@@ -642,6 +820,11 @@ async function buildHostedMemberIdentityMutationData(
   });
 
   return {
+    ...(input.linqEmailHandle === undefined
+      ? {}
+      : {
+          linqEmailHandleLookupKey: createHostedEmailLookupKey(input.linqEmailHandle),
+        }),
     maskedPhoneNumberHint: input.maskedPhoneNumberHint,
     phoneLookupKey: input.phoneLookupKey,
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,

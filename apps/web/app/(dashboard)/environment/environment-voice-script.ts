@@ -12,6 +12,7 @@ export type EnvironmentVoiceFlow = "walkthrough" | "fill-gaps" | "update";
 
 export type EnvironmentVoiceField = {
   aspectId: string;
+  extractionGuidance?: string;
   indicatorId: string;
   label: string;
   existingNote?: string;
@@ -23,7 +24,7 @@ export type EnvironmentVoiceTopic = {
   id: string;
   title: string;
   eyebrow: string;
-  prompt: string;
+  prompt?: string;
   fields?: readonly EnvironmentVoiceField[];
   focus?: readonly string[];
 };
@@ -32,13 +33,15 @@ export type EnvironmentVoiceScript = {
   flow: EnvironmentVoiceFlow;
   dialogTitle: string;
   idleTitle: string;
-  idleDescription: string;
   initialCoveredDetails?: number;
   totalDetails?: number;
   topics: readonly [EnvironmentVoiceTopic, ...EnvironmentVoiceTopic[]];
 };
 
 const MAX_TOPIC_FIELDS = 4;
+
+const SMOKE_SOURCES_EXTRACTION_GUIDANCE =
+  "If several sources are explicit, store smoking before fireplace before frequent_candles. Keep every additional source in the note.";
 
 const VOICE_FIELD_LABELS: Readonly<Record<string, string>> = {
   "allergens-home.pets_at_home": "Whether you have pets and what kind",
@@ -47,6 +50,8 @@ const VOICE_FIELD_LABELS: Readonly<Record<string, string>> = {
   "home-air.air_purifier": "Whether you use an air purifier and what kind",
   "home-air.air_quality_meter": "What indoor air quality you measure",
   "home-air.damp_or_mold": "Whether you have damp or mold at home",
+  "home-air.smoke_sources":
+    "Whether anyone smokes indoors or you often use a fireplace or candles",
   "home-air.stove": "What kind of stove you cook on",
   "home-air.ventilation": "How fresh air enters your home",
   "home-location.area_type":
@@ -74,6 +79,7 @@ const VOICE_FIELD_LABELS: Readonly<Record<string, string>> = {
     "How you block noise while sleeping",
   "sleep-environment.phone_by_bed": "Where your phone stays at night",
   "sleep-environment.temp_control": "How you control bedroom temperature",
+  "sleep-environment.tv_in_bedroom": "Whether there is a TV in your bedroom",
   "sleep-environment.window_at_night":
     "Whether your window is open or closed at night",
   "workspace.breaks": "How often you take breaks from sitting",
@@ -124,12 +130,10 @@ function buildUpdateScript(notes: HabitatIndicatorNotes): EnvironmentVoiceScript
   flow: "update",
   dialogTitle: "Update your environment",
   idleTitle: "Tell Murph what changed",
-  idleDescription:
-    "Speak naturally. Murph will save only the clear details that changed.",
   topics: [
     {
       fields: listEnvironmentInterviewFields("update")
-        .filter(({ indicator }) => indicator.priority !== "low")
+        .filter(isMainEnvironmentInterviewField)
         .map((field) => toVoiceField(field, notes)),
       id: "update",
       title: "What changed?",
@@ -177,8 +181,6 @@ export function buildEnvironmentVoiceScriptForIndicator(
     return {
       dialogTitle: "Add an Environment detail",
       flow: "update",
-      idleDescription:
-        "Answer one short prompt. Murph processes your answer as you speak.",
       idleTitle: "Ready when you are",
       topics: [
         {
@@ -186,7 +188,6 @@ export function buildEnvironmentVoiceScriptForIndicator(
           fields: [voiceField],
           focus: [voiceField.label],
           id: `${group.id}:0`,
-          prompt: topicPrompt(1),
           title: voiceTopicCopy?.title ?? group.title,
         },
       ],
@@ -210,7 +211,8 @@ export function buildEnvironmentVoiceScriptForGroup(
   const allFields = listEnvironmentInterviewFields(group.id);
   const missingFields = allFields.filter(
     ({ aspectId, indicator }) =>
-      values[aspectId]?.[indicator.id] === undefined,
+      values[aspectId]?.[indicator.id] === undefined ||
+      values[aspectId]?.[indicator.id] === null,
   );
   const selectedFields = missingFields.length > 0 ? missingFields : allFields;
   const topics = chunk(
@@ -223,7 +225,6 @@ export function buildEnvironmentVoiceScriptForGroup(
       fields,
       focus: fields.map((field) => field.label),
       id: buildEnvironmentInterviewTopicId(group.id, chunkIndex),
-      prompt: topicPrompt(fields.length),
       title: copy?.title ?? group.title,
     };
   });
@@ -238,8 +239,6 @@ export function buildEnvironmentVoiceScriptForGroup(
         ? `Complete ${group.title}`
         : `Update ${group.title}`,
     flow: missingFields.length > 0 ? "fill-gaps" : "update",
-    idleDescription:
-      "Speak naturally. Murph saves each clear detail as you cover this section.",
     idleTitle: `Talk through ${(
       VOICE_TOPIC_COPY[group.id]?.title ?? group.title
     ).toLowerCase()}`,
@@ -283,22 +282,27 @@ function buildMissingScript(
 ): EnvironmentVoiceScript {
   const interviewFields = ENVIRONMENT_INTERVIEW_TOPIC_GROUPS.flatMap((group) =>
     listEnvironmentInterviewFields(group.id).filter(
-      ({ indicator }) => indicator.priority !== "low",
+      isMainEnvironmentInterviewField,
     ),
   );
   const totalDetails = interviewFields.length;
   const initialCoveredDetails = interviewFields.filter(
     ({ aspectId, indicator }) => {
       const value = values[aspectId]?.[indicator.id];
-      return value !== undefined && value !== HABITAT_DECLINED_VALUE;
+      return (
+        value !== undefined &&
+        value !== null &&
+        value !== HABITAT_DECLINED_VALUE
+      );
     },
   ).length;
   const topics = ENVIRONMENT_INTERVIEW_TOPIC_GROUPS.flatMap((group) => {
     const missingFields = listEnvironmentInterviewFields(group.id)
       .filter(
-        ({ aspectId, indicator }) =>
-          indicator.priority !== "low" &&
-          values[aspectId]?.[indicator.id] === undefined,
+        (field) =>
+          isMainEnvironmentInterviewField(field) &&
+          (values[field.aspectId]?.[field.indicator.id] === undefined ||
+            values[field.aspectId]?.[field.indicator.id] === null),
       )
       .map((field) => toVoiceField(field, notes));
     return chunk(missingFields, MAX_TOPIC_FIELDS).map(
@@ -309,7 +313,6 @@ function buildMissingScript(
           fields,
           focus: fields.map((field) => field.label),
           id: buildEnvironmentInterviewTopicId(group.id, chunkIndex),
-          prompt: topicPrompt(fields.length),
           title: voiceTopicCopy?.title ?? group.title,
         };
       },
@@ -338,9 +341,6 @@ function buildMissingScript(
       ? "Continue your Environment report"
       : "Build your Environment report",
     flow: hasKnownOrDeclinedValue ? "fill-gaps" : "walkthrough",
-    idleDescription: `${typedTopics.length} focused ${
-      typedTopics.length === 1 ? "topic" : "topics"
-    }. Murph saves each topic before moving on.`,
     idleTitle: hasKnownOrDeclinedValue
       ? "Pick up where you left off"
       : "Ready when you are",
@@ -348,6 +348,12 @@ function buildMissingScript(
     totalDetails,
     topics: typedTopics,
   };
+}
+
+function isMainEnvironmentInterviewField({
+  indicator,
+}: ReturnType<typeof listEnvironmentInterviewFields>[number]): boolean {
+  return indicator.priority !== "low" || indicator.informational !== true;
 }
 
 function toVoiceField({
@@ -358,6 +364,9 @@ function toVoiceField({
 >[number], notes: HabitatIndicatorNotes): EnvironmentVoiceField {
   return {
     aspectId,
+    ...(aspectId === "home-air" && indicator.id === "smoke_sources"
+      ? { extractionGuidance: SMOKE_SOURCES_EXTRACTION_GUIDANCE }
+      : {}),
     indicatorId: indicator.id,
     label: VOICE_FIELD_LABELS[`${aspectId}.${indicator.id}`] ?? indicator.label,
     ...(notes[aspectId]?.[indicator.id]
@@ -366,13 +375,6 @@ function toVoiceField({
     ...(indicator.question ? { question: indicator.question } : {}),
     valueType: indicator.valueType,
   };
-}
-
-function topicPrompt(fieldCount: number): string {
-  if (fieldCount === 1) {
-    return "Describe the item below. Leave it for later if you do not know.";
-  }
-  return "Describe each item below. Leave anything unknown for later.";
 }
 
 function chunk<T>(values: readonly T[], size: number): T[][] {

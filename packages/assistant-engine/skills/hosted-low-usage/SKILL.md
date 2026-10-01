@@ -43,7 +43,7 @@ have we used?" qualify. A request about funding, sponsoring, contributing,
 adding usage, options, referrals, or earning more usage does not qualify by
 itself.
 
-For a qualifying question, call `murph.group action="read_usage"` once and use
+For a qualifying question, call `murph.group_usage action="read_usage"` once and use
 only that current result's `includedUsageUsedPercent`:
 
 - For an integer from 0 through 99, answer with exactly: "About X% of this
@@ -158,7 +158,7 @@ change happened.
   `members` row with `isOwner: true` and `status: "active"`. This read is not
   permission to send a link, choose an amount, or start Checkout.
 - In a group, do not call `murph.plan_usage`. On the first trusted low-usage
-  turn, call `murph.group action="read_usage"` once before writing the
+  turn, call `murph.group_usage action="read_usage"` once before writing the
   heads-up so the segment reflects the real state. A returned funding URL is
   authority for a later requested follow-up, not copy for the first heads-up.
   Ignore `includedUsageUsedPercent` for that heads-up. Read it again when the
@@ -177,7 +177,7 @@ change happened.
   `read_usage_referral`, then present all returned paths. A yes to the
   link-free first heads-up is also broad-options intent.
 - In a private conversation, call
-  `murph.group action="read_usage_referral"` once when the current sender asks
+  `murph.group_usage action="read_usage_referral"` once when the current sender asks
   how to get more usage, what options exist, how to earn usage, or about a
   group referral. In a hosted group, call it only for the broad-options intent above.
   Do this even when current usage is `healthy`; that state suppresses only an

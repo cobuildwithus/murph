@@ -23,7 +23,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 - every inbound source normalizes into a single `InboundCapture` envelope
 - canonical source and attachment evidence is persisted under `raw/inbox/<source>/...`; image attachment bytes are normalized to bounded static WebP before storage or left unstored, and canonical raw metadata drops size-like provider fields instead of retaining original byte sizes
 - append-only `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` records the authoritative structured inbox-capture trail; inbound message content is retired 14 days after receipt from inline and out-of-line text, provider raw fields, parser bundles, SQLite/FTS projections, and migrated legacy copies while structural capture metadata remains
-- append-only `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl` records 14-day raw inbox image/audio/video byte expiration, preserving descriptors, hashes, and message relationships while projecting expired bytes as `retention_expired`; parser derivatives survive an earlier media-byte pass only until the owning message-content deadline
+- append-only `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl` records raw inbox media byte expiration, preserving descriptors, hashes, and message relationships while projecting expired bytes as `retention_expired`; images use a 90-day media window, videos use 30 days, and audio keeps 14 days, encrypted hosted snapshots and receipt logs externalize image/video bytes through hosted media references for follow-up turns, explicit canonical durable raw references remain retained, and parser derivatives survive an earlier media-byte pass only until the owning message-content deadline
 - assistant admission must not depend on hidden local inbox projection rows; decoded assistant input belongs in the assistant input store, while inbox capture remains a canonical/searchable projection
 - inbox intake and runtime rebuild rely on canonical inbox-capture ledger evidence, but they will backfill a missing inbox-capture record from a deterministic current-format raw envelope only when an unresolved `inbox_capture_persist` write operation shows raw writes completed before the ledger append
 - crash recovery opens write-operation metadata only for operations whose staging directory still exists; clean terminal metadata without stage residue is skipped on a fresh-capture miss, while residue remains visible for validation and diagnostics
@@ -54,3 +54,10 @@ These methods mutate only inbox-local projection state such as `.runtime/project
 When combined with `@murphai/parsers`, runtime consumers can drain those queues without mixing parser state into canonical health records.
 
 `@murphai/inboxd` also owns the optional inbox-plus-parser composition helpers `createParsedInboxPipeline(...)` and `runInboxDaemonWithParsers(...)`, so the parser package stays focused on parser contracts, registry/toolchain discovery, and parse execution rather than on inbox runtime orchestration.
+
+Expired capture retention also drops a legacy v1 ledger row when an equivalent
+expired v2 row remains in the same shard. Equivalence preserves every identity,
+link, source field and attachment; only the schema, obsolete envelope path and
+retirement timestamp differ. Unknown, unmatched, unpaired and unexpired records
+remain untouched. Cleanup shares the retention capture budget, canonical lock and
+atomic shard rewrite; it introduces no format migration or deduplication store.

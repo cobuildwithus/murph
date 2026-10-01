@@ -24,6 +24,7 @@ import {
   runHostedWorkspaceRuntimeJobInProcess,
 } from "../src/hosted-runtime.ts";
 import type {
+  HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
@@ -53,6 +54,7 @@ describe("hosted runtime abort guard", () => {
       async fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
         return {
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [this.#mailboxItem],
           maxSeqByLane: request.lanes.map((lane) => ({
@@ -93,7 +95,7 @@ describe("hosted runtime abort guard", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_prototype_mailbox_guard",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
@@ -166,7 +168,7 @@ describe("hosted runtime abort guard", () => {
       await expect(runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_provider_abort_guard",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
@@ -202,6 +204,106 @@ describe("hosted runtime abort guard", () => {
       })).rejects.toBe(hostAbortReason);
 
       expect(providerFetch).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("forwards no-data outreach input through the abort guard and fences later calls", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-device-guard-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host aborted after device preference update");
+    const configureNoDataOutreach = vi.fn<
+      NonNullable<HostedRuntimeDeviceSyncPort["configureNoDataOutreach"]>
+    >(async (input) => ({
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: null,
+      setting: "off",
+      sourceProviderSlug: input.sourceProviderSlug,
+      status: "saved",
+    }));
+    const request = {
+      assistantInputId: "ain_00000000000000000000000000000001",
+      mode: "off" as const,
+      signal: null,
+      sourceProviderSlug: "garmin",
+    };
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      async ackDirtyStateProcessed() {
+        throw new Error("Device preference guard test should not acknowledge dirty state.");
+      },
+      async applyUpdates() {
+        throw new Error("Device preference guard test should not apply updates.");
+      },
+      configureNoDataOutreach,
+      async createConnectLink() {
+        throw new Error("Device preference guard test should not create a connect link.");
+      },
+      async fetchDirtyStates() {
+        throw new Error("Device preference guard test should not fetch dirty state.");
+      },
+      async fetchSnapshot() {
+        throw new Error("Device preference guard test should not fetch a snapshot.");
+      },
+    };
+
+    try {
+      await initializeVault({
+        createdAt: new Date(TEST_NOW),
+        timezone: "UTC",
+        title: "Hosted Runtime Device Guard Test Vault",
+        vaultRoot,
+      });
+
+      await expect(runHostedWorkspaceRuntimeJobInProcess({
+        request: {
+          attemptId: "attempt_synthetic_device_preference_abort_guard",
+          runnerIdleTtlMs: 1,
+          leaseGeneration: "1",
+          userId: TEST_USER_ID,
+          workspace: createWorkspaceState(),
+          workspaceVersion: "0",
+        },
+        runtime: {
+          forwardedEnv: {
+            HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
+            HOSTED_ASSISTANT_PROVIDER: "openai",
+            OPENAI_API_KEY: "test-api-key",
+          },
+        },
+      }, {
+        async createCheckpointSnapshot() {
+          throw new Error("Device preference guard test should not checkpoint.");
+        },
+        async importItem() {
+          throw new Error("Device preference guard test should not import mailbox items.");
+        },
+        platform: {
+          ...createPlatform(vi.fn<typeof fetch>()),
+          deviceSyncPort,
+        },
+        async runAssistantPhase(input) {
+          const configure = input.platform.deviceSyncPort?.configureNoDataOutreach;
+          expect(configure).toBeTypeOf("function");
+          await expect(configure!(request)).resolves.toMatchObject({
+            effectiveAfterDays: null,
+            setting: "off",
+            status: "saved",
+          });
+
+          hostAbortController.abort(hostAbortReason);
+          await configure!(request);
+          return { progressed: false };
+        },
+        signal: hostAbortController.signal,
+        vaultRoot,
+      })).rejects.toBe(hostAbortReason);
+
+      expect(configureNoDataOutreach).toHaveBeenCalledOnce();
+      expect(configureNoDataOutreach).toHaveBeenCalledWith(request);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -248,7 +350,7 @@ describe("hosted runtime abort guard", () => {
       await expect(runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_clinical_abort_guard",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
@@ -375,7 +477,7 @@ describe("hosted runtime abort guard", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_prototype_effects_guard",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
@@ -458,7 +560,7 @@ describe("hosted runtime abort guard", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_health_commons_env",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
@@ -571,6 +673,7 @@ function createDefaultMailboxPort(): HostedRuntimeMailboxPort {
   return {
     async fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse> {
       return {
+        assistantProvider: "openai",
         fetchedAt: TEST_NOW,
         items: [],
         maxSeqByLane: request.lanes.map((lane) => ({

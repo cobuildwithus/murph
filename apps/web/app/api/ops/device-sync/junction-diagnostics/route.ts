@@ -23,6 +23,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   return jsonOk(await runHostedOpsJunctionDiagnostic({
+    statusOnly: body.statusOnly === true,
     connectionId: readOptionalStringField(body, "connectionId"),
     lookbackDays: readOptionalNumberOrStringField(body, "lookbackDays"),
     memberId: readOptionalStringField(body, "memberId"),

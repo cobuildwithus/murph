@@ -55,7 +55,7 @@ describe('executeGenerateImageTool', () => {
       expect(init?.method).toBe('POST')
       expect(readHeader(init?.headers, 'authorization')).toBe('Bearer openai-test-key')
       expect(JSON.parse(String(init?.body))).toEqual({
-        model: 'gpt-image-2',
+        model: 'gpt-image-2.5-flare',
         output_format: 'png',
         prompt: 'Make a clean product image.',
         quality: 'medium',
@@ -123,7 +123,7 @@ describe('executeGenerateImageTool', () => {
         providerName: 'OpenAI Images',
         providerRequestId: 'req_image_local',
         reasoningTokens: 0,
-        requestedModel: 'gpt-image-2',
+        requestedModel: 'gpt-image-2.5-flare',
         totalTokens: 18,
       },
     })
@@ -181,7 +181,7 @@ describe('executeGenerateImageTool', () => {
         ref: result.savedImageRef,
         sha256: createHash('sha256').update(webpBytes).digest('hex'),
         sizeBytes: webpBytes.byteLength,
-        source: 'gpt-image-2',
+        source: 'gpt-image-2.5-flare',
       },
     ])
     await expect(readFile(path.join(vaultRoot, result.savedImageRef!)))
@@ -349,7 +349,7 @@ describe('executeGenerateImageTool', () => {
         alt: 'A retryable dynamic product photo',
         contentType: 'image/webp',
         kind: 'vault_image',
-        source: 'gpt-image-2',
+        source: 'gpt-image-2.5-flare',
       }),
     ])
     expect(second.usageDraft).toBeNull()
@@ -394,7 +394,7 @@ describe('executeGenerateImageTool', () => {
         providerRequestId: 'req_image_no_usage',
         rawUsageJson: null,
         rawUsageJsonHash: null,
-        requestedModel: 'gpt-image-2',
+        requestedModel: 'gpt-image-2.5-flare',
         totalTokens: null,
       },
     })
@@ -494,6 +494,7 @@ describe('executeGenerateImageTool', () => {
       rpcSuccess: false,
       rpcText:
         'image generation failed: ASSISTANT_IMAGE_GENERATION_FAILED (http 502, request req_image_unstructured)',
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'handler_exception', errorCategory: 'unavailable' },
     })
   })
 
@@ -656,6 +657,7 @@ describe('executeGenerateImageTool', () => {
     expect(result).toEqual({
       rpcSuccess: false,
       rpcText: 'hosted private image delivery requires the owning vault',
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
     })
   })
 
@@ -686,6 +688,7 @@ describe('executeGenerateImageTool', () => {
       rpcSuccess: false,
       rpcText:
         'hosted private image delivery requires generated capture persistence',
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
     })
   })
 })
@@ -1106,7 +1109,7 @@ describe('murph.generate_image dynamic tool execution', () => {
           ref: savedImageRef,
           sha256: createHash('sha256').update(webpBytes).digest('hex'),
           sizeBytes: webpBytes.byteLength,
-          source: 'gpt-image-2',
+          source: 'gpt-image-2.5-flare',
         },
       ],
       op: 'append',
@@ -1125,7 +1128,7 @@ describe('murph.generate_image dynamic tool execution', () => {
           output_tokens: 34,
           total_tokens: 46,
         },
-        requestedModel: 'gpt-image-2',
+        requestedModel: 'gpt-image-2.5-flare',
         totalTokens: 46,
       },
     })

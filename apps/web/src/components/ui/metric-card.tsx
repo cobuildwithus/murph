@@ -16,6 +16,8 @@ interface MetricCardProps {
   label: string;
   value: string;
   unit?: string;
+  valueLabel?: string;
+  latestResult?: { date: string; value: string; unit?: string };
   delta?: string;
   direction?: "up" | "down" | "neutral" | null;
   deltaTone?: "directional" | "neutral";
@@ -29,6 +31,8 @@ export function MetricCard({
   label,
   value,
   unit,
+  valueLabel,
+  latestResult,
   delta,
   direction = "neutral",
   deltaTone = "directional",
@@ -51,6 +55,7 @@ export function MetricCard({
       <span className="font-mono text-[10px] uppercase tracking-widest text-foreground/50">
         {label}
       </span>
+      {valueLabel ? <span className="text-xs text-muted-foreground">{valueLabel}</span> : null}
       <div className="flex items-baseline gap-1.5">
         <span className="font-serif text-3xl font-semibold tabular-nums text-foreground">
           {value}
@@ -70,6 +75,24 @@ export function MetricCard({
           {footer}
         </span>
       ) : null}
+      {latestResult ? <LatestMetricResult result={latestResult} /> : null}
+    </div>
+  );
+}
+
+export function LatestMetricResult({
+  result,
+}: {
+  result: NonNullable<MetricCardProps["latestResult"]>;
+}) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-border/70 pt-3 text-sm">
+      <span className="text-muted-foreground">
+        Latest dated result · <time dateTime={result.date}>{result.date}</time>
+      </span>
+      <span className="font-semibold tabular-nums text-foreground">
+        {result.value}{result.unit ? ` ${result.unit}` : ""}
+      </span>
     </div>
   );
 }

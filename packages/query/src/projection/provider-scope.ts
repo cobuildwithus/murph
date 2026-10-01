@@ -1,11 +1,10 @@
-import { canonicalizeWearableProviderSlug } from "@murphai/health-metrics";
+import { normalizeWearableQueryProviderSlug } from "@murphai/health-metrics";
 
 export function normalizeWearableProviders(providers: readonly string[] | undefined): string[] {
   return [...new Set(
     (providers ?? [])
-      .map((provider) => provider.trim().toLowerCase())
-      .filter((provider) => provider.length > 0)
-      .map((provider) => canonicalizeWearableProviderSlug(provider)),
+      .map((provider) => normalizeWearableQueryProviderSlug(provider))
+      .filter((provider): provider is string => provider !== null),
   )].sort();
 }
 

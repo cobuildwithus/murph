@@ -247,7 +247,10 @@ test.skipIf(
   const chunkSources = await Promise.all(
     chunkPaths.map(async (chunkPath) => await readFile(chunkPath, "utf8")),
   );
-  const temporalExternalName = chunkSources
+  // Webpack emits the external directly in the route; Turbopack puts its
+  // aliased external in a referenced chunk. Both must resolve to one client.
+  const temporalExternalName = routeSource.match(/\brequire\("(@temporalio\/client)"\)/u)?.[1]
+    ?? chunkSources
     .map((source) =>
       source.match(/\.x\("(@temporalio\/client-[^"]+)"/u)?.[1] ?? null
     )

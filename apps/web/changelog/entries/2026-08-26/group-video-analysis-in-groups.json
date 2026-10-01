@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 120,
+  "item": {
+    "id": "group-video-analysis-in-groups",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Video analysis in group chats",
+    "summary": "In an authenticated group chat, anyone can ask Murph to analyze a video included in the current group exchange, whether they or another participant shared it.",
+    "details": "Murph analyzes only when someone explicitly asks about a video in the current group exchange, then shares the answer with the group. If analysis does not run, Murph says so instead of claiming it reviewed the video.",
+    "relevanceTags": ["assistant", "groups", "messaging", "privacy", "video"],
+    "sourcePullRequests": [2371]
+  }
+}

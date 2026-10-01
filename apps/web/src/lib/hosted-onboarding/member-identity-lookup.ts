@@ -10,6 +10,7 @@ import {
 import { type HostedPrivyIdentity } from "./privy";
 import type { HostedPrivyAuthMethod } from "./types";
 import {
+  lookupHostedMemberIdentityByLinqEmailHandle,
   lookupHostedMemberIdentityByPhoneNumber,
   lookupHostedMemberIdentityByPrivyUserId,
   type HostedMemberIdentityLookup,
@@ -55,23 +56,22 @@ export async function lookupHostedMemberForPrivyAuthAttempt(input: {
 }): Promise<HostedMemberPrivyIdentityLookup | null> {
   const matches = new Map<string, HostedMemberPrivyIdentityLookup>();
 
-  const [memberByPrivyUserId, memberByAssertedCredential] = await Promise.all([
-    lookupHostedMemberIdentityByPrivyUserId({
-      privyUserId: input.identity.userId,
-      prisma: input.prisma,
-    }),
-    lookupHostedMemberForPrivyAssertedCredential({
+  const memberByPrivyUserId = await lookupHostedMemberIdentityByPrivyUserId({
+    privyUserId: input.identity.userId,
+    prisma: input.prisma,
+  });
+  const membersByAssertedCredential =
+    await lookupHostedMemberForPrivyAssertedCredential({
       authMethod: input.authMethod,
       identity: input.identity,
       prisma: input.prisma,
-    }),
-  ]);
+    });
 
   if (memberByPrivyUserId) {
     addHostedMemberPrivyIdentityMatch(matches, memberByPrivyUserId);
   }
 
-  if (memberByAssertedCredential) {
+  for (const memberByAssertedCredential of membersByAssertedCredential) {
     addHostedMemberPrivyIdentityMatch(matches, memberByAssertedCredential);
   }
 
@@ -95,14 +95,13 @@ async function lookupHostedMemberForPrivyAssertedCredential(input: {
   authMethod: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   prisma: HostedOnboardingReadClient;
-}): Promise<
+}): Promise<Array<
   | HostedMemberIdentityLookup
   | {
       core: HostedMemberCoreState;
       matchedBy: HostedMemberPrivyIdentityLookupMatch;
     }
-  | null
-> {
+>> {
   switch (input.authMethod) {
     case "phone":
       if (!input.identity.phone) {
@@ -113,10 +112,11 @@ async function lookupHostedMemberForPrivyAssertedCredential(input: {
         });
       }
 
-      return lookupHostedMemberIdentityByPhoneNumber({
+      const phoneMatch = await lookupHostedMemberIdentityByPhoneNumber({
         phoneNumber: input.identity.phone.number,
         prisma: input.prisma,
       });
+      return phoneMatch ? [phoneMatch] : [];
     case "email":
       if (!input.identity.email?.verifiedAt) {
         throw hostedOnboardingError({
@@ -126,10 +126,29 @@ async function lookupHostedMemberForPrivyAssertedCredential(input: {
         });
       }
 
-      return lookupHostedMemberByVerifiedEmailAddress({
+      const verifiedEmailMatch = await lookupHostedMemberByVerifiedEmailAddress({
         address: input.identity.email.address,
         prisma: input.prisma,
       });
+      const linqEmailHandleMatch =
+        await lookupHostedMemberIdentityByLinqEmailHandle({
+          emailAddress: input.identity.email.address,
+          prisma: input.prisma,
+        });
+      const matches: Array<
+        | HostedMemberIdentityLookup
+        | {
+            core: HostedMemberCoreState;
+            matchedBy: HostedMemberPrivyIdentityLookupMatch;
+          }
+      > = [];
+      if (verifiedEmailMatch) {
+        matches.push(verifiedEmailMatch);
+      }
+      if (linqEmailHandleMatch) {
+        matches.push(linqEmailHandleMatch);
+      }
+      return matches;
     case "telegram":
       if (!input.identity.telegram?.telegramUserId) {
         throw hostedOnboardingError({
@@ -139,10 +158,11 @@ async function lookupHostedMemberForPrivyAssertedCredential(input: {
         });
       }
 
-      return lookupHostedMemberRoutingByTelegramUserId({
+      const telegramMatch = await lookupHostedMemberRoutingByTelegramUserId({
         prisma: input.prisma,
         telegramUserId: input.identity.telegram.telegramUserId,
       });
+      return telegramMatch ? [telegramMatch] : [];
   }
 
   throw new TypeError("Unsupported hosted Privy auth method.");

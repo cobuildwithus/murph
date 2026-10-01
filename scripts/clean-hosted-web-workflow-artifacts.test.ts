@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   cleanHostedWebWorkflowGeneratedArtifacts,
-  HOSTED_WEB_WORKFLOW_GENERATED_CACHE_PATHS,
   HOSTED_WEB_WORKFLOW_GENERATED_ARTIFACT_DIR,
+  HOSTED_WEB_WORKFLOW_GENERATED_CACHE_PATHS,
 } from "./clean-hosted-web-workflow-artifacts.js";
 
 describe("cleanHostedWebWorkflowGeneratedArtifacts", () => {

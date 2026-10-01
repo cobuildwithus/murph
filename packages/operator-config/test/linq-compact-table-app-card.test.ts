@@ -48,13 +48,9 @@ describe('Linq compact-table app cards', () => {
         body: typeof init.body === 'string' ? JSON.parse(init.body) : null,
         url,
       })
-      return {
-        arrayBuffer: async () => new ArrayBuffer(0),
-        json: async () => ({ message: { id: 'msg_1' } }),
-        ok: true,
-        status: 200,
-        text: async () => '',
-      }
+      return new Response(JSON.stringify({ message: { id: 'msg_1' } }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
     await sendLinqIMessageAppCard({
@@ -76,7 +72,7 @@ describe('Linq compact-table app cards', () => {
         idempotency_key: 'compact-table-1',
         parts: [
           {
-            fallback_text: 'Your workout. Ask Murph for this card in text',
+            fallback_text: 'Your workout.',
             interactive: true,
             layout: expectedLayout,
             type: 'imessage_app',
@@ -93,12 +89,9 @@ describe('Linq compact-table app cards', () => {
       }
     ).message.parts[0]?.layout
     expect(layout).toBeDefined()
-    expect(layout?.subcaption).toContain(
-      'Exercise 8 movement pattern: Set 1:',
-    )
-    expect(layout?.trailing_caption).toBe(
-      'Assists and spotted reps remain on the exact set note.',
-    )
+    expect(layout).toEqual(expectedLayout)
+    expect(layout).not.toHaveProperty('subcaption')
+    expect(layout).not.toHaveProperty('trailing_caption')
   })
 
   it('sends a generic table with its exact descriptive recovery fallback', async () => {
@@ -107,13 +100,9 @@ describe('Linq compact-table app cards', () => {
       requests.push(
         typeof init.body === 'string' ? JSON.parse(init.body) : null,
       )
-      return {
-        arrayBuffer: async () => new ArrayBuffer(0),
-        json: async () => ({ message: { id: 'msg_2' } }),
-        ok: true,
-        status: 200,
-        text: async () => '',
-      }
+      return new Response(JSON.stringify({ message: { id: 'msg_2' } }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
     await sendLinqIMessageAppCard({
@@ -131,8 +120,7 @@ describe('Linq compact-table app cards', () => {
     expect(requests[0]).toMatchObject({
       message: {
         parts: [{
-          fallback_text:
-            'Your Murph summary. Ask Murph for this card in text',
+          fallback_text: 'Your Murph summary.',
         }],
       },
     })

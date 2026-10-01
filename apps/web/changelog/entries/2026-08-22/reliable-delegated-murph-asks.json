@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-22",
+  "order": 300,
+  "item": {
+    "id": "reliable-delegated-murph-asks",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Delegated Murph asks finish reliably",
+    "summary": "When you ask Murph to consult another Murph or carry context into a group, the request now reaches the right conversation instead of getting stuck behind background work.",
+    "details": "Private context stays within the permission and destination you chose. A handoff that has not started stops at its existing ten-minute deadline, while work already being delivered stays protected against duplicate sends.",
+    "relevanceTags": ["groups", "messaging", "privacy", "reliability"],
+    "sourcePullRequests": [2168]
+  }
+}

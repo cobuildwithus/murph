@@ -1,3 +1,4 @@
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,12 +7,15 @@ import path from "node:path";
 import type {
   AssistantProviderUsageDraft,
   ConsentedReadOnlyAssistantAskInput,
+  OperatorDiagnosticInput,
+  OperatorDiagnosticResult,
   ReadOnlyAssistantAskInput,
   ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
 import { initializeVault } from "@murphai/core";
 import { buildHostedExecutionAssistantAskCompletedWake } from "@murphai/hosted-execution";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import type { HostedRuntimeAssistantAskControlRequest } from "@murphai/hosted-execution/runtime-control";
 import { describe, test, vi } from "vitest";
 
 vi.mock("@murphai/assistant-engine", () => ({
@@ -19,6 +23,7 @@ vi.mock("@murphai/assistant-engine", () => ({
 }));
 vi.mock("@murphai/assistant-engine/assistant-ask", () => ({
   executeConsentedReadOnlyAssistantAsk: vi.fn(),
+  executeOperatorDiagnostic: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
 }));
 
@@ -37,6 +42,9 @@ import {
 import type {
   HostedWorkspaceDurableCheckpointEffect,
 } from "../src/hosted-runtime/workspace-runner.ts";
+
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
+import type { HostedRuntimeLogEntry } from "@murphai/hosted-execution/runtime-control";
 
 const TEST_NOW = "2026-07-15T12:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_detached_ask";
@@ -168,6 +176,369 @@ describe("hosted detached assistant ask controller", () => {
     } finally {
       firstAnswer.resolve();
       secondAnswer.resolve();
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("runs one exact ask without automatically draining across intervening work", async () => {
+    const vaultRoot = await createVaultRoot();
+    const preparedRequestIds: string[] = [];
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({ eventId: "ask_event_exact", itemId: "item_exact" }),
+        createPendingCompletion({
+          eventId: "ask_event_intervening",
+          itemId: "item_intervening",
+        }),
+        createPendingAsk({ eventId: "ask_event_later", itemId: "item_later" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              return { action: "complete", status: "completed" };
+            }
+            preparedRequestIds.push(request.requestId);
+            return {
+              action: "prepare",
+              status: "terminal",
+              terminalReason: "unavailable",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      await controller.kickExact("item_exact");
+      await Promise.resolve();
+      assert.deepEqual(preparedRequestIds, ["ask_event_exact"]);
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+          item.itemId,
+          item.status,
+        ]),
+        [
+          ["item_intervening", "pending"],
+          ["item_later", "pending"],
+        ],
+      );
+      await controller.closeAndRequeue();
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("serially exact-claims selected continuations without reopening ordinary work", async () => {
+    const vaultRoot = await createVaultRoot();
+    const firstPrepareStarted = createDeferred<void>();
+    const firstPrepareRelease = createDeferred<void>();
+    const preparedRequestIds: string[] = [];
+    const selectedContinuationItemIds = new Set([
+      "item_approved_later",
+      "item_approved_last",
+    ]);
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          consented: true,
+          eventId: "ask_event_exact_active",
+          itemId: "item_exact_active",
+        }),
+        createPendingAsk({
+          consented: true,
+          eventId: "ask_event_ordinary_later",
+          itemId: "item_ordinary_later",
+        }),
+        createPendingAsk({ eventId: "ask_event_approved_later", itemId: "item_approved_later" }),
+        createPendingAsk({ eventId: "ask_event_approved_last", itemId: "item_approved_last" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              return { action: "complete", status: "completed" };
+            }
+            preparedRequestIds.push(request.requestId);
+            if (request.requestId === "ask_event_exact_active") {
+              firstPrepareStarted.resolve();
+              await firstPrepareRelease.promise;
+            }
+            return {
+              action: "prepare",
+              status: "terminal",
+              terminalReason: "unavailable",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        async selectNextExactItemId() {
+          return (await readHostedSystemMailboxState(vaultRoot)).pending.find(
+            (item) => selectedContinuationItemIds.has(item.itemId),
+          )?.itemId ?? null;
+        },
+        vaultRoot,
+      });
+
+      const exactCompletion = controller.kickExact("item_exact_active");
+      await firstPrepareStarted.promise;
+      controller.kick();
+      assert.deepEqual(preparedRequestIds, ["ask_event_exact_active"]);
+
+      firstPrepareRelease.resolve();
+      await exactCompletion;
+      await waitUntil(async () => {
+        assert.deepEqual(preparedRequestIds, [
+          "ask_event_exact_active",
+          "ask_event_approved_later",
+          "ask_event_approved_last",
+        ]);
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+            item.itemId,
+            item.status,
+          ]),
+          [["item_ordinary_later", "pending"]],
+        );
+      });
+      await controller.closeAndRequeue();
+    } finally {
+      firstPrepareRelease.resolve();
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("coalesces competing continuation kicks behind an unstarted ordinary owner", async () => {
+    const vaultRoot = await createVaultRoot();
+    const preparedRequestIds: string[] = [];
+    const selectedContinuationItemIds = new Set([
+      "item_prestart_approved_first",
+      "item_prestart_approved_second",
+    ]);
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          consented: true,
+          eventId: "ask_event_prestart_ordinary",
+          itemId: "item_prestart_ordinary",
+        }),
+        createPendingAsk({
+          eventId: "ask_event_prestart_approved_first",
+          itemId: "item_prestart_approved_first",
+        }),
+        createPendingAsk({
+          eventId: "ask_event_prestart_approved_second",
+          itemId: "item_prestart_approved_second",
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              return { action: "complete", status: "completed" };
+            }
+            preparedRequestIds.push(request.requestId);
+            return {
+              action: "prepare",
+              status: "terminal",
+              terminalReason: "unavailable",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        async selectNextExactItemId() {
+          return (await readHostedSystemMailboxState(vaultRoot)).pending.find(
+            (item) => selectedContinuationItemIds.has(item.itemId),
+          )?.itemId ?? null;
+        },
+        vaultRoot,
+      });
+
+      controller.kick();
+      controller.kick();
+      await waitUntil(async () => {
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+            item.itemId,
+            item.status,
+          ]),
+          [["item_prestart_ordinary", "pending"]],
+        );
+      });
+      assert.deepEqual(preparedRequestIds, [
+        "ask_event_prestart_approved_first",
+        "ask_event_prestart_approved_second",
+      ]);
+      await controller.closeAndRequeue();
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("requeues a failed exact ask without immediately claiming the next ask", async () => {
+    const vaultRoot = await createVaultRoot();
+    const preparedRequestIds: string[] = [];
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({ eventId: "ask_event_retry_exact", itemId: "item_retry_exact" }),
+        createPendingAsk({ eventId: "ask_event_retry_later", itemId: "item_retry_later" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              throw new Error("A failed exact ask must not complete.");
+            }
+            preparedRequestIds.push(request.requestId);
+            return {
+              action: "prepare",
+              question: "retry question",
+              status: "ready",
+              targetLabel: "100 Club",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(async () => {
+          throw new Error("provider unavailable");
+        }),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      await controller.kickExact("item_retry_exact");
+      assert.deepEqual(preparedRequestIds, ["ask_event_retry_exact"]);
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+          item.itemId,
+          item.status,
+          item.nextAttemptAt,
+        ]),
+        [
+          ["item_retry_exact", "pending", "2026-07-15T12:01:00.000Z"],
+          ["item_retry_later", "pending", null],
+        ],
+      );
+      await controller.closeAndRequeue();
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("requeues the exact ask before resuming a selected continuation", async () => {
+    const vaultRoot = await createVaultRoot();
+    const executionStarted = createDeferred<void>();
+    const preparedRequestIds: string[] = [];
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          eventId: "ask_event_exact_preempt",
+          itemId: "item_exact_preempt",
+        }),
+        createPendingAsk({
+          eventId: "ask_event_approved_after_preempt",
+          itemId: "item_approved_after_preempt",
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              throw new Error("A preempted exact ask must not complete.");
+            }
+            preparedRequestIds.push(request.requestId);
+            if (request.requestId === "ask_event_approved_after_preempt") {
+              return {
+                action: "prepare",
+                status: "terminal",
+                terminalReason: "unavailable",
+              };
+            }
+            return {
+              action: "prepare",
+              question: "preemptible question",
+              status: "ready",
+              targetLabel: "100 Club",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        async executeAsk(input) {
+          executionStarted.resolve();
+          return await new Promise((_resolve, reject) => {
+            input.abortSignal?.addEventListener(
+              "abort",
+              () => reject(input.abortSignal?.reason),
+              { once: true },
+            );
+          });
+        },
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        async selectNextExactItemId() {
+          return (await readHostedSystemMailboxState(vaultRoot)).pending.some(
+            (item) => item.itemId === "item_approved_after_preempt",
+          )
+            ? "item_approved_after_preempt"
+            : null;
+        },
+        vaultRoot,
+      });
+
+      const completion = controller.kickExact("item_exact_preempt");
+      await executionStarted.promise;
+      controller.requestPauseAndRequeue();
+      controller.kick();
+      await completion;
+
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+          item.itemId,
+          item.status,
+          item.nextAttemptAt,
+        ]),
+        [
+          ["item_exact_preempt", "pending", null],
+          ["item_approved_after_preempt", "pending", null],
+        ],
+      );
+      assert.deepEqual(preparedRequestIds, ["ask_event_exact_preempt"]);
+
+      controller.resume();
+      await waitUntil(async () => {
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) =>
+            item.itemId
+          ),
+          ["item_exact_preempt"],
+        );
+      });
+      assert.deepEqual(preparedRequestIds, [
+        "ask_event_exact_preempt",
+        "ask_event_approved_after_preempt",
+      ]);
+      await controller.closeAndRequeue();
+    } finally {
       await removeVaultRoot(vaultRoot);
     }
   });
@@ -408,7 +779,7 @@ describe("hosted detached assistant ask controller", () => {
         usageRecordPort: {
           async recordUsage(record) {
             usageRecords.push(record);
-            return { recorded: true, usageId: record.usageId };
+            return { platformAiUsageAllowedAfter: true, recorded: true, usageId: record.usageId };
           },
         },
         userEnvKeys: ["OPENAI_API_KEY"],
@@ -469,6 +840,185 @@ describe("hosted detached assistant ask controller", () => {
       ]);
     } finally {
       await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("expires the owned diagnostic child and settles through existing prepare without a late answer", async () => {
+    const vaultRoot = await createVaultRoot();
+    const started = createDeferred<void>();
+    const logs: HostedRuntimeLogEntry[] = [];
+    let prepareCalls = 0;
+    let completeCalls = 0;
+    try {
+      await writePending(vaultRoot, [createPendingAsk({ eventId: "ask_deadline", itemId: "item_deadline", operator: true })]);
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      vi.setSystemTime(new Date(TEST_NOW));
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              completeCalls += 1;
+              return { action: "complete", status: "completed" };
+            }
+            prepareCalls += 1;
+            return prepareCalls === 1
+              ? { action: "prepare", status: "ready", question: "Synthetic deadline probe", targetLabel: null }
+              : { action: "prepare", status: "terminal", terminalReason: "expired" };
+          },
+        },
+        codexHome: null, env: {}, onStateMutation() {}, vaultRoot,
+        logPort: { async write(request) { logs.push(...parseHostedRuntimeLogRequest(request).entries); return { loggedCount: request.entries.length }; } },
+        async executeOperatorDiagnostic(input) {
+          started.resolve();
+          return await new Promise((_resolve, reject) => {
+            input.abortSignal?.addEventListener("abort", () => reject(input.abortSignal?.reason), { once: true });
+          });
+        },
+      });
+      const first = controller.kickExact("item_deadline");
+      await started.promise;
+      assert.equal(controller.activeDeadline(), Date.parse(TEST_NOW) + 600_000);
+      await vi.advanceTimersByTimeAsync(600_000);
+      await first;
+      assert.equal(controller.activeDeadline(), null);
+      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending[0]?.status, "pending");
+      await controller.kickExact("item_deadline");
+      await controller.closeAndRequeue();
+      await drainHostedRuntimeLogWritesBestEffort();
+      assert.equal(prepareCalls, 2);
+      assert.equal(completeCalls, 0);
+      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+      assert.deepEqual(logs.map((entry) => entry.redactedJson?.outcome), ["expired", "expired"]);
+      assert.equal(logs[0]?.redactedJson?.stage, "execute");
+      assert.equal(logs[0]?.redactedJson?.elapsedMs, 600_000);
+    } finally {
+      vi.useRealTimers();
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("logs a bounded diagnostic failure before retry clears local error state", async () => {
+    const vaultRoot = await createVaultRoot();
+    const logs: HostedRuntimeLogEntry[] = [];
+    try {
+      await writePending(vaultRoot, [createPendingAsk({ eventId: "ask_error", itemId: "item_error", operator: true })]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: { async request() {
+          return { action: "prepare", status: "ready", question: "private synthetic question marker", targetLabel: null };
+        } },
+        codexHome: null, env: {}, now: () => TEST_NOW, onStateMutation() {}, vaultRoot,
+        logPort: { async write(request) { logs.push(...parseHostedRuntimeLogRequest(request).entries); return { loggedCount: request.entries.length }; } },
+        async executeOperatorDiagnostic() { throw new Error("Synthetic timeout private-error-marker"); },
+      });
+      await controller.kickExact("item_error");
+      await controller.closeAndRequeue();
+      await drainHostedRuntimeLogWritesBestEffort();
+      const pending = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+      assert.equal(pending?.status, "pending");
+      assert.equal(pending?.nextAttemptAt, "2026-07-15T12:01:00.000Z");
+      assert.equal(logs.length, 1);
+      assert.equal(logs[0]?.eventCode, "assistant.pass_finished");
+      assert.equal(logs[0]?.redactedJson?.outcome, "failed");
+      assert.equal(logs[0]?.redactedJson?.stage, "execute");
+      assert.ok(logs[0]?.errorCode);
+      assert.doesNotMatch(JSON.stringify(logs), /private-error-marker|private synthetic question|ask_error|item_error/);
+      assert.equal(controller.activeDeadline(), null);
+    } finally { await removeVaultRoot(vaultRoot); }
+  });
+
+  test.each([
+    ["hosted-openai", "hosted-openai"],
+    ["venice", "hosted-openai"],
+    ["hosted-custom-inference", "hosted-openai"],
+    ["hosted-chatgpt-openai", "hosted-chatgpt-openai"],
+    ["openai-local-test", "openai-local-test"],
+    ["venice-local-test", "openai-local-test"],
+  ])("dispatches an operator diagnostic with hosted authentication from %s without consent review or delivery authority", async (memberProvider, operatorProvider) => {
+    const groupRuntimeRoot = await createVaultRoot();
+    const records: AssistantUsageRecord[] = [];
+    const deferred: HostedWorkspaceDurableCheckpointEffect[] = [];
+    const executeAsk = vi.fn();
+    const executeConsentedAsk = vi.fn();
+    const executeOperatorDiagnostic = vi.fn(async (
+      _input: OperatorDiagnosticInput,
+    ): Promise<OperatorDiagnosticResult> => {
+      _input.onProviderUsage?.({ stage: "answer", usage: createTestUsageDraft({ occurredAt: TEST_NOW, inputTokens: 20, outputTokens: 10, providerRequestOrdinal: 0 }) });
+      return {
+        answer: "Synthetic diagnostic answer.",
+        outcome: "answered",
+      };
+    });
+    const assistantAskRequest = vi.fn(async (
+      request: HostedRuntimeAssistantAskControlRequest,
+    ) => request.action === "prepare"
+      ? {
+          action: "prepare" as const,
+          feedbackDiagnostic: true as const,
+          question: "What is the synthetic status?",
+          status: "ready" as const,
+          targetLabel: null,
+        }
+      : { action: "complete" as const, status: "completed" as const });
+
+    try {
+      await writePending(groupRuntimeRoot, [
+        createPendingAsk({
+          eventId: "ask_event_operator_diagnostic",
+          itemId: "item_operator_diagnostic",
+          operator: true,
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          request: assistantAskRequest,
+        },
+        codexHome: "/hosted/codex-home",
+        env: {},
+        model: "gpt-5.6-luna",
+        modelProvider: memberProvider,
+        usageRecordPort: { async recordUsage(record) { records.push(record); return { recorded: true, usageId: record.usageId, platformAiUsageAllowedAfter: true }; } },
+        deferUsageUntilAfterDurableCheckpoint(effect) { deferred.push(effect); },
+        executeAsk,
+        executeConsentedAsk,
+        executeOperatorDiagnostic,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot: groupRuntimeRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        assert.equal(
+          (await readHostedSystemMailboxState(groupRuntimeRoot)).pending.length,
+          0,
+        );
+      });
+      await controller.closeAndRequeue();
+
+      for (const effect of deferred) await effect();
+      assert.equal(records.length, 1);
+      assert.equal(records[0]?.operatorTaskId, `opt_${"a".repeat(64)}`);
+      assert.equal(executeAsk.mock.calls.length, 0);
+      assert.equal(executeConsentedAsk.mock.calls.length, 0);
+      assert.equal(executeOperatorDiagnostic.mock.calls.length, 1);
+      const operatorInput = executeOperatorDiagnostic.mock.calls[0]?.[0];
+      assert.ok(operatorInput);
+      assert.equal(operatorInput.feedbackDiagnostic, true);
+      assert.equal(operatorInput.model, "gpt-5.6-sol");
+      assert.equal(operatorInput.modelProvider, operatorProvider);
+      assert.equal(operatorInput.codexHome, "/hosted/codex-home");
+      assert.equal(operatorInput.question, "What is the synthetic status?");
+      assert.equal(operatorInput.workspaceRoot, groupRuntimeRoot);
+      assert.deepEqual(assistantAskRequest.mock.calls[1]?.[0], {
+        action: "complete",
+        requestId: "ask_event_operator_diagnostic",
+        result: {
+          answer: "Synthetic diagnostic answer.",
+          outcome: "answered",
+        },
+      });
+    } finally {
+      await removeVaultRoot(groupRuntimeRoot);
     }
   });
 
@@ -548,7 +1098,7 @@ describe("hosted detached assistant ask controller", () => {
     const usageRecordPort = {
       async recordUsage(record: AssistantUsageRecord) {
         usageRecords.push(record);
-        return { recorded: true, usageId: record.usageId };
+        return { platformAiUsageAllowedAfter: true, recorded: true, usageId: record.usageId };
       },
     };
 
@@ -813,7 +1363,7 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
-  test("suppresses a sending wake and aborts, awaits, then requeues the exact ask", async () => {
+  test.each([false, true])("suppresses a sending wake and drains the exact ask on shutdown (operator=%s)", async (operator) => {
     const vaultRoot = await createVaultRoot();
     const askStarted = createDeferred<void>();
     const childExited = createDeferred<void>();
@@ -835,7 +1385,7 @@ describe("hosted detached assistant ask controller", () => {
 
     try {
       await writePending(vaultRoot, [
-        createPendingAsk({ eventId: "ask_event_abort", itemId: "item_abort" }),
+        createPendingAsk({ eventId: "ask_event_abort", itemId: "item_abort", operator }),
         createPendingAsk({ eventId: "ask_event_later", itemId: "item_later" }),
       ]);
       const controller = createHostedDetachedAssistantAskController({
@@ -853,6 +1403,7 @@ describe("hosted detached assistant ask controller", () => {
         codexHome: null,
         env: {},
         executeAsk,
+        executeOperatorDiagnostic: executeAsk,
         now: () => TEST_NOW,
         onStateMutation() {
           events.push("state.mutated");
@@ -868,7 +1419,7 @@ describe("hosted detached assistant ask controller", () => {
           now: () => TEST_NOW,
           vaultRoot,
         }),
-        { at: null, reason: null },
+        { at: null, executionClass: null, reason: null },
       );
 
       const stopped = controller.closeAndRequeue().then(() => {
@@ -1060,6 +1611,47 @@ describe("hosted detached assistant ask controller", () => {
       await removeVaultRoot(vaultRoot);
     }
   });
+
+  test("dequeues a content-expired current-sender request without starting Codex", async () => {
+    const vaultRoot = await createVaultRoot();
+    const executeAsk = vi.fn();
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          currentSender: true,
+          eventId: "ask_event_content_expired",
+          itemId: "item_content_expired",
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request() {
+            return {
+              action: "prepare",
+              status: "terminal",
+              terminalReason: "content_expired",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+      });
+      await controller.closeAndRequeue();
+      assert.equal(executeAsk.mock.calls.length, 0);
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
 });
 
 function createPendingAsk(input: {
@@ -1067,6 +1659,7 @@ function createPendingAsk(input: {
   currentSender?: boolean;
   eventId: string;
   itemId: string;
+  operator?: boolean;
 }): HostedSystemMailboxPendingItem {
   return {
     attemptCount: 0,
@@ -1083,7 +1676,16 @@ function createPendingAsk(input: {
     routeAction: "run-assistant-ask",
     status: "pending",
     wake: {
-      ask: input.currentSender
+      ask: input.operator
+        ? {
+            expiresAt: "2026-07-15T12:10:00.000Z",
+            question: "operator diagnostic question",
+            target: {
+              kind: "operator_task" as const,
+              taskId: `opt_${"a".repeat(64)}`,
+            },
+          }
+        : input.currentSender
         ? {
             expiresAt: "2026-07-15T12:10:00.000Z",
             origin: {

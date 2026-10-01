@@ -50,6 +50,16 @@ export async function runNpmCommand(
   await runProcess(resolveNpmCommand(), args, options);
 }
 
+export async function runNodeCommand(
+  args: string[],
+  options: {
+    cwd: string;
+    env?: NodeJS.ProcessEnv;
+  },
+): Promise<void> {
+  await runProcess(process.execPath, args, options);
+}
+
 async function runProcess(
   command: string,
   args: string[],

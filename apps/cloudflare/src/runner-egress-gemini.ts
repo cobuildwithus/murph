@@ -1,32 +1,63 @@
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_BASE_URL,
-  HOSTED_GEMINI_VIDEO_ANALYSIS_FPS,
-  HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_OUTPUT_TOKENS,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_FPS_BY_SAMPLING_MODE,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_REQUEST_BODY_BYTES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES as SHARED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_VIDEO_BYTES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS,
   HOSTED_GEMINI_VIDEO_ANALYSIS_SUPPORTED_MIME_TYPES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION,
   HOSTED_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL,
+  type HostedGeminiVideoAnalysisRolloutModel,
 } from "@murphai/hosted-execution/assistant-capabilities";
 
 export const DEFAULT_GEMINI_API_BASE_URL =
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_BASE_URL;
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_PATH =
   `/v1beta/models/${HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL}:generateContent`;
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL_PATH =
+  `/v1beta/models/${HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL}:generateContent`;
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_BODY_BYTES =
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_REQUEST_BODY_BYTES;
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES =
   SHARED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES;
 
 const MAX_QUESTION_CHARS = 1_000;
+// Rollout-only reader values for warm runners built before selectable sampling.
+// Remove after the runner rollback floor and every warm container have advanced.
+const LEGACY_GEMINI_VIDEO_ANALYSIS_FPS = 1;
+const LEGACY_GEMINI_VIDEO_ANALYSIS_MAX_OUTPUT_TOKENS = 1_800;
+const LEGACY_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL = "low";
 const MAX_BASE64_CHARS = Math.ceil(
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_VIDEO_BYTES / 3,
 ) * 4;
 const supportedMimeTypes = new Set<string>(
   HOSTED_GEMINI_VIDEO_ANALYSIS_SUPPORTED_MIME_TYPES,
 );
+const supportedFps = new Set<number>(
+  Object.values(HOSTED_GEMINI_VIDEO_ANALYSIS_FPS_BY_SAMPLING_MODE),
+);
+const modelByPath = new Map<string, HostedGeminiVideoAnalysisRolloutModel>(
+  HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS.map((model) => [
+    `/v1beta/models/${model}:generateContent`,
+    model,
+  ]),
+);
+
+type HostedGeminiVideoAnalysisGenerationConfig =
+  | {
+      thinkingConfig: {
+        thinkingLevel: typeof HOSTED_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL;
+      };
+    }
+  | {
+      maxOutputTokens: typeof LEGACY_GEMINI_VIDEO_ANALYSIS_MAX_OUTPUT_TOKENS;
+      thinkingConfig: {
+        thinkingLevel: typeof LEGACY_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL;
+      };
+    };
 
 type HostedGeminiVideoAnalysisRequestBody = {
   contents: [{
@@ -39,12 +70,7 @@ type HostedGeminiVideoAnalysisRequestBody = {
     ];
     role: "user";
   }];
-  generationConfig: {
-    maxOutputTokens: number;
-    thinkingConfig: {
-      thinkingLevel: typeof HOSTED_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL;
-    };
-  };
+  generationConfig: HostedGeminiVideoAnalysisGenerationConfig;
   systemInstruction: {
     parts: [{ text: string }];
   };
@@ -54,11 +80,20 @@ export function isAllowedHostedGeminiVideoAnalysisRequest(
   method: string,
   pathname: string,
 ): boolean {
-  return method === "POST" && pathname === HOSTED_GEMINI_VIDEO_ANALYSIS_PATH;
+  return readHostedGeminiVideoAnalysisRequestModel(method, pathname) !== null;
+}
+
+export function readHostedGeminiVideoAnalysisRequestModel(
+  method: string,
+  pathname: string,
+): HostedGeminiVideoAnalysisRolloutModel | null {
+  return method === "POST" ? modelByPath.get(pathname) ?? null : null;
 }
 
 export function parseHostedGeminiVideoAnalysisRequestBody(
   value: unknown,
+  model: HostedGeminiVideoAnalysisRolloutModel =
+    HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
 ): HostedGeminiVideoAnalysisRequestBody {
   const body = exactRecord(value, "Gemini video-analysis request", [
     "contents",
@@ -118,9 +153,13 @@ export function parseHostedGeminiVideoAnalysisRequestBody(
     "Gemini video-analysis video metadata",
     ["fps"],
   );
-  if (videoMetadata.fps !== HOSTED_GEMINI_VIDEO_ANALYSIS_FPS) {
+  if (
+    typeof videoMetadata.fps !== "number"
+    || !supportedFps.has(videoMetadata.fps)
+  ) {
     throw new TypeError("Gemini video-analysis FPS is not allowed.");
   }
+  const fps = videoMetadata.fps;
 
   const questionPart = exactRecord(
     parts[1],
@@ -133,47 +172,69 @@ export function parseHostedGeminiVideoAnalysisRequestBody(
     MAX_QUESTION_CHARS,
   );
 
-  const generationConfig = exactRecord(
-    body.generationConfig,
-    "Gemini video-analysis generation config",
-    ["maxOutputTokens", "thinkingConfig"],
-  );
-  if (
-    generationConfig.maxOutputTokens
-      !== HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_OUTPUT_TOKENS
-  ) {
-    throw new TypeError(
-      "Gemini video-analysis output-token limit is not allowed.",
-    );
+  const rawGenerationConfig = readRecord(body.generationConfig);
+  if (!rawGenerationConfig) {
+    throw new TypeError("Gemini video-analysis generation config must be an object.");
   }
+  const legacyProfile = Object.prototype.hasOwnProperty.call(
+    rawGenerationConfig,
+    "maxOutputTokens",
+  );
+  const generationConfig = exactRecord(
+    rawGenerationConfig,
+    "Gemini video-analysis generation config",
+    legacyProfile
+      ? ["maxOutputTokens", "thinkingConfig"]
+      : ["thinkingConfig"],
+  );
   const thinkingConfig = exactRecord(
     generationConfig.thinkingConfig,
     "Gemini video-analysis thinking config",
     ["thinkingLevel"],
   );
-  if (
+  if (legacyProfile) {
+    if (
+      model !== HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL
+      || fps !== LEGACY_GEMINI_VIDEO_ANALYSIS_FPS
+      || generationConfig.maxOutputTokens
+        !== LEGACY_GEMINI_VIDEO_ANALYSIS_MAX_OUTPUT_TOKENS
+      || thinkingConfig.thinkingLevel
+        !== LEGACY_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL
+    ) {
+      throw new TypeError("Gemini video-analysis legacy profile is not allowed.");
+    }
+  } else if (
     thinkingConfig.thinkingLevel !== HOSTED_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL
   ) {
     throw new TypeError("Gemini video-analysis thinking level is not allowed.");
   }
+
+  const normalizedGenerationConfig: HostedGeminiVideoAnalysisGenerationConfig =
+    legacyProfile
+      ? {
+          maxOutputTokens: LEGACY_GEMINI_VIDEO_ANALYSIS_MAX_OUTPUT_TOKENS,
+          thinkingConfig: {
+            thinkingLevel: LEGACY_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL,
+          },
+        }
+      : {
+          thinkingConfig: {
+            thinkingLevel: HOSTED_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL,
+          },
+        };
 
   return {
     contents: [{
       parts: [
         {
           inlineData: { data, mimeType },
-          videoMetadata: { fps: HOSTED_GEMINI_VIDEO_ANALYSIS_FPS },
+          videoMetadata: { fps },
         },
         { text: question },
       ],
       role: "user",
     }],
-    generationConfig: {
-      maxOutputTokens: HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_OUTPUT_TOKENS,
-      thinkingConfig: {
-        thinkingLevel: HOSTED_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL,
-      },
-    },
+    generationConfig: normalizedGenerationConfig,
     systemInstruction: {
       parts: [{ text: HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION }],
     },

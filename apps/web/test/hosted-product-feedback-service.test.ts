@@ -96,10 +96,7 @@ describe("recordHostedProductFeedback", () => {
     expect(first.feedbackId).toBe(second.feedbackId);
     expect(first.recorded).toBe(true);
     expect(second.recorded).toBe(false);
-    expect(prismaMocks.findThreadContainer).toHaveBeenCalledWith({
-      select: { memberId: true },
-      where: { memberId: "member_explicitly_linked" },
-    });
+    expect(prismaMocks.findThreadContainer).not.toHaveBeenCalled();
     expect(prismaMocks.createMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -118,7 +115,7 @@ describe("recordHostedProductFeedback", () => {
     );
   });
 
-  it("keeps synthetic group-runtime feedback anonymous", async () => {
+  it("links group-runtime feedback to the container member", async () => {
     prismaMocks.findThreadContainer.mockResolvedValue({
       memberId: "member_group_runtime",
     });
@@ -133,12 +130,9 @@ describe("recordHostedProductFeedback", () => {
       recorded: true,
     });
 
-    expect(prismaMocks.findThreadContainer).toHaveBeenCalledWith({
-      select: { memberId: true },
-      where: { memberId: "member_group_runtime" },
-    });
+    expect(prismaMocks.findThreadContainer).not.toHaveBeenCalled();
     expect(prismaMocks.createMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: [expect.objectContaining({ memberId: null })],
+      data: [expect.objectContaining({ memberId: "member_group_runtime" })],
       skipDuplicates: true,
     }));
   });

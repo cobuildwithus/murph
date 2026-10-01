@@ -259,9 +259,6 @@ async function ensureAssistantStateDirectoryPrivate(directoryPath: string): Prom
   }
 
   const parentSegments = relativeSegments.slice(0, assistantRuntimeRootIndex)
-  if (parentSegments.length > 0) {
-    await mkdir(path.join(root, ...parentSegments), { recursive: true })
-  }
 
   for (let index = 0; index < relativeSegments.length; index += 1) {
     const segment = relativeSegments[index]!
@@ -270,17 +267,15 @@ async function ensureAssistantStateDirectoryPrivate(directoryPath: string): Prom
       continue
     }
 
+    let entry
     try {
-      const entry = await lstat(currentPath)
-      if (entry.isSymbolicLink()) {
-        throw new Error(`Assistant state directory must not contain symlinks: ${directoryPath}`)
-      }
-      if (!entry.isDirectory()) {
-        throw new Error(`Assistant state path is not a directory: ${currentPath}`)
-      }
+      entry = await lstat(currentPath)
     } catch (error) {
       if (!isMissingPathError(error)) {
         throw error
+      }
+      if (index === assistantRuntimeRootIndex && parentSegments.length > 0) {
+        await mkdir(path.join(root, ...parentSegments), { recursive: true })
       }
       try {
         await mkdir(currentPath, { mode: ASSISTANT_STATE_DIRECTORY_MODE })
@@ -290,16 +285,18 @@ async function ensureAssistantStateDirectoryPrivate(directoryPath: string): Prom
         }
       }
 
-      const entry = await lstat(currentPath)
-      if (entry.isSymbolicLink()) {
-        throw new Error(`Assistant state directory must not contain symlinks: ${directoryPath}`)
-      }
-      if (!entry.isDirectory()) {
-        throw new Error(`Assistant state path is not a directory: ${currentPath}`)
-      }
+      entry = await lstat(currentPath)
     }
 
-    await chmod(currentPath, ASSISTANT_STATE_DIRECTORY_MODE)
+    if (entry.isSymbolicLink()) {
+      throw new Error(`Assistant state directory must not contain symlinks: ${directoryPath}`)
+    }
+    if (!entry.isDirectory()) {
+      throw new Error(`Assistant state path is not a directory: ${currentPath}`)
+    }
+    if ((entry.mode & 0o7777) !== ASSISTANT_STATE_DIRECTORY_MODE) {
+      await chmod(currentPath, ASSISTANT_STATE_DIRECTORY_MODE)
+    }
   }
 }
 

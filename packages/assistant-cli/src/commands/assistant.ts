@@ -2,9 +2,12 @@ import path from 'node:path'
 import { access } from 'node:fs/promises'
 import { Cli, z } from 'incur'
 import {
+  MemoryDocumentParseError,
+  memoryDocumentRelativePath,
+} from '@murphai/contracts'
+import {
   assistantAskResultSchema,
   assistantChannelNameSchema,
-  assistantChatResultSchema,
   assistantDeliverResultSchema,
   assistantDoctorResultSchema,
   assistantOnboardingCompletionReasonValues,
@@ -28,7 +31,6 @@ import {
 import { deliverAssistantMessage } from '@murphai/assistant-engine/outbound-channel'
 import {
   runAssistantAutomation,
-  runAssistantChat,
   sendAssistantMessage,
   stopAssistantAutomation,
 } from '../assistant-runtime.js'
@@ -68,6 +70,7 @@ import {
   resolveForegroundTerminalLogOptions,
 } from '../run-terminal-logging.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { requestIdSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
@@ -150,28 +153,28 @@ const assistantProviderOptionFields = {
     'Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.',
   ),
   codexHome: optionalNonEmptyStringOption(
-    'Optional Codex home directory used by local assistant chat.',
+    'Optional Codex home directory used by local assistant turns.',
   ),
   model: optionalNonEmptyStringOption(
-    'Optional Codex model override for local chat turns.',
+    'Optional Codex model override for local turns.',
   ),
   modelProvider: optionalNonEmptyStringOption(
-    'Optional Codex model provider id for local chat turns.',
+    'Optional Codex model provider id for local turns.',
   ),
   reasoningEffort: z
     .enum(assistantReasoningEffortValues)
     .optional()
     .describe(
-      'Optional Codex reasoning effort for local assistant chat turns.',
+      'Optional Codex reasoning effort for local assistant turns.',
     ),
   sandbox: z
     .enum(assistantSandboxValues)
     .optional()
     .describe(
-      'Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.',
+      'Codex sandbox mode for local assistant turns. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.',
     ),
   approvalPolicy: z.literal('never').optional().describe(
-    'Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.',
+    'Codex approval policy for local assistant turns. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.',
   ),
   profile: optionalNonEmptyStringOption('Optional Codex config profile name.'),
 }
@@ -280,22 +283,6 @@ function isMissingPathError(error: unknown): boolean {
   )
 }
 
-const assistantChatArgsSchema = z.object({
-  prompt: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional first prompt to send before the chat loop starts.'),
-})
-
-const assistantChatOptionsSchema = withBaseOptions({
-  ...assistantSessionOptionFields,
-  ...assistantProviderOptionFields,
-})
-
-type AssistantChatArgs = z.infer<typeof assistantChatArgsSchema>
-type AssistantChatOptions = z.infer<typeof assistantChatOptionsSchema>
-
 type AssistantConversationCliOptions = {
   alias?: string
   channel?: string
@@ -306,14 +293,14 @@ type AssistantConversationCliOptions = {
 }
 
 type AssistantProviderCliOptions = {
-  approvalPolicy?: AssistantChatOptions['approvalPolicy']
+  approvalPolicy?: z.infer<typeof assistantProviderOptionFields.approvalPolicy>
   codexCommand?: string
   codexHome?: string
   model?: string
   modelProvider?: string
   profile?: string
-  reasoningEffort?: AssistantChatOptions['reasoningEffort']
-  sandbox?: AssistantChatOptions['sandbox']
+  reasoningEffort?: z.infer<typeof assistantProviderOptionFields.reasoningEffort>
+  sandbox?: z.infer<typeof assistantProviderOptionFields.sandbox>
 }
 
 type AssistantDeliveryCliOptions = {
@@ -504,6 +491,11 @@ type AssistantOnboardingResumeContextSurface =
     | 'deviceAccounts'
   ]
 
+type AssistantOnboardingResumeContextFailureSurface = Exclude<
+  AssistantOnboardingResumeContextSurface,
+  { status: 'ok' }
+>
+
 type AssistantOnboardingDeviceAccountServices = {
   devices?: {
     listAccounts(input: {
@@ -539,12 +531,85 @@ function requireAssistantVaultServices(
   return services
 }
 
-function buildAssistantOnboardingResumeContextErrorSurface():
-  AssistantOnboardingResumeContextSurface {
+function buildAssistantOnboardingResumeContextErrorSurface(
+  error: unknown,
+): AssistantOnboardingResumeContextFailureSurface {
+  if (error instanceof VaultCliError) {
+    const projection = projectVaultCliError(error)
+    return {
+      status: 'error',
+      code: projection.code,
+      message: 'This onboarding context surface could not be read.',
+      retryable: projection.retryable,
+      ...(projection.hint ? { hint: projection.hint } : {}),
+    }
+  }
+
+  const nodeCode = readAssistantOnboardingErrorCode(error)
+  if (nodeCode === 'EACCES' || nodeCode === 'EPERM') {
+    return {
+      status: 'error',
+      code: 'permission_denied',
+      message: 'This onboarding context surface could not be read.',
+      retryable: false,
+      hint: 'Check the vault file permissions before retrying.',
+    }
+  }
+
   return {
     status: 'error',
-    message: 'Read failed.',
+    code: nodeCode === 'ENOENT' ? 'not_found' : 'read_failed',
+    message: 'This onboarding context surface could not be read.',
+    retryable: nodeCode !== 'ENOENT',
+    hint: nodeCode === 'ENOENT'
+      ? 'Check that the vault is initialized and the expected records exist.'
+      : 'Retry the context read; use the individual vault command if it continues to fail.',
   }
+}
+
+function buildAssistantOnboardingResumeContextMemoryErrorSurface(
+  error: unknown,
+): AssistantOnboardingResumeContextFailureSurface {
+  if (
+    !(error instanceof MemoryDocumentParseError)
+    || error.details.sourcePath !== memoryDocumentRelativePath
+  ) {
+    return buildAssistantOnboardingResumeContextErrorSurface(error)
+  }
+
+  const { field, lineNumber } = error.details
+  const location = lineNumber === undefined
+    ? memoryDocumentRelativePath
+    : `${memoryDocumentRelativePath}:${lineNumber}`
+  const hint = field === undefined
+    ? `Repair ${location} before continuing onboarding.`
+    : `Repair ${location} by fixing the invalid ${field} field before continuing onboarding.`
+
+  return {
+    status: 'error',
+    code: 'memory_document_invalid',
+    message: 'Canonical memory could not be read while resuming onboarding.',
+    retryable: false,
+    hint,
+  }
+}
+
+function buildAssistantOnboardingResumeContextUnavailableSurface():
+  AssistantOnboardingResumeContextFailureSurface {
+  return {
+    status: 'unavailable',
+    code: 'service_unavailable',
+    message: 'This onboarding context surface is not available in the current runtime.',
+    retryable: false,
+    hint: 'Use a runtime with the matching service enabled to inspect this surface.',
+  }
+}
+
+function readAssistantOnboardingErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return null
+  }
+  return typeof error.code === 'string' ? error.code : null
 }
 
 function buildAssistantOnboardingResumeContextListSurface(input: {
@@ -578,8 +643,8 @@ async function readAssistantOnboardingResumeContextListSurface(input: {
       items: result.items ?? [],
       limit: input.limit,
     })
-  } catch {
-    return buildAssistantOnboardingResumeContextErrorSurface()
+  } catch (error) {
+    return buildAssistantOnboardingResumeContextErrorSurface(error)
   }
 }
 
@@ -605,11 +670,8 @@ async function readAssistantOnboardingResumeContextMemory(input: {
       truncated: result.document.records.length > records.length,
       updatedAt: result.document.updatedAt,
     }
-  } catch {
-    return {
-      status: 'error',
-      message: 'Read failed.',
-    }
+  } catch (error) {
+    return buildAssistantOnboardingResumeContextMemoryErrorSurface(error)
   }
 }
 
@@ -628,7 +690,7 @@ async function readAssistantOnboardingResumeContextDeviceAccounts(input: {
     input.services,
   )
   if (!deviceServices) {
-    return buildAssistantOnboardingResumeContextErrorSurface()
+    return buildAssistantOnboardingResumeContextUnavailableSurface()
   }
 
   return readAssistantOnboardingResumeContextListSurface({
@@ -754,58 +816,6 @@ async function resolveAssistantDeliveryInvocationFromCli(
   }
 }
 
-async function runAssistantChatCommand(context: {
-  args: AssistantChatArgs
-  options: AssistantChatOptions
-  agent: boolean
-  formatExplicit: boolean
-}) {
-  // Lazy import: the ink chat surface drags ink/react/yoga-layout into the
-  // module graph, which must stay off the per-invocation CLI hot path.
-  const { assertAssistantInkInteractiveInputAvailable } = await import(
-    '../assistant-chat-ink.js'
-  )
-  assertAssistantInkInteractiveInputAvailable()
-
-  const result = await runAssistantChat({
-    vault: context.options.vault,
-    initialPrompt: context.args.prompt,
-    ...assistantConversationOptionsFromCli(context.options),
-    ...assistantProviderOverridesFromCli(context.options),
-  })
-
-  if (!context.agent && !context.formatExplicit) {
-    process.stderr.write(
-      `Resume chat by typing: ${formatAssistantChatResumeCommand(result.session.sessionId)}\n`,
-    )
-  }
-
-  return result
-}
-
-function formatAssistantChatResumeCommand(sessionId: string): string {
-  return `murph chat --session "${sessionId}"`
-}
-
-function createAssistantChatCommandDefinition(input?: {
-  description?: string
-  hint?: string
-}) {
-  return {
-    args: assistantChatArgsSchema,
-    description:
-      input?.description ??
-      'Open an Ink terminal chat UI backed by Codex App Server while Murph stores session metadata plus a local transcript outside the canonical vault. This command requires interactive terminal input.',
-    hint:
-      input?.hint ??
-      'Requires an interactive terminal. Type /exit to close the chat loop or /session to print the current Murph session id.',
-    options: assistantChatOptionsSchema,
-    output: assistantChatResultSchema,
-    outputPolicy: 'agent-only' as const,
-    run: runAssistantChatCommand,
-  }
-}
-
 const assistantRunOptionsSchema = withBaseOptions({
   maxPerScan: z
     .number()
@@ -916,7 +926,7 @@ export function registerAssistantCommands(
 ) {
   const assistant = Cli.create('assistant', {
     description:
-      'Murph assistant commands for canonical conversation style, Codex App Server-backed local chat sessions, Ink terminal chat, outbound delivery, and auto-routing inbox automation.',
+      'Murph assistant commands for canonical conversation style, Codex App Server-backed local turns, outbound delivery, and auto-routing inbox automation.',
   })
 
   const registerConversationCommands = () => {
@@ -983,8 +993,6 @@ export function registerAssistantCommands(
         })
       },
     })
-
-    assistant.command('chat', createAssistantChatCommandDefinition())
 
     assistant.command('deliver', {
       args: z.object({
@@ -1399,15 +1407,6 @@ export function registerAssistantCommands(
   }
 
   const registerRootAliases = () => {
-    cli.command(
-      'chat',
-      createAssistantChatCommandDefinition({
-        description:
-          'Open the same interactive assistant chat UI as `assistant chat` directly from the CLI root.',
-        hint:
-          'Shorthand for `assistant chat`. Requires an interactive terminal. Type /exit to close the chat loop or /session to print the current Murph session id.',
-      }),
-    )
     cli.command(
       'run',
       createAssistantRunCommandDefinition(inboxServices, vaultServices, {

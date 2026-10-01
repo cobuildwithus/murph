@@ -1,7 +1,5 @@
 import { cn } from "@/src/lib/utils";
 
-import { EmailIcon } from "./email-icon";
-
 export const GROUP_MEMBERS = [
   { id: "theo", name: "Theo", avatarSrc: "/personas/sleeper-avatar.avif" },
   { id: "maya", name: "Maya", avatarSrc: "/personas/athlete-avatar.avif" },
@@ -78,14 +76,11 @@ export function ChallengeCard({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-[18px] border border-[#c4a882]/25 bg-white/75 px-3 pb-3 pt-2.5",
+        "overflow-hidden rounded-[18px] border border-[#c4a882]/25 bg-white/75 p-3",
         className,
       )}
     >
-      <div className="font-mono text-[8px] font-medium tracking-[0.16em] text-[#5a6e32]">
-        Walk challenge · Day 5 of 7
-      </div>
-      <div className="mt-2.5 space-y-2.5">
+      <div className="space-y-2.5">
         {CHALLENGE_ROWS.map((row) => (
           <div key={row.name} className="flex items-center gap-2.5">
             <ChallengeRowAvatar name={row.name} src={row.avatarSrc} />
@@ -113,9 +108,6 @@ export function ChallengeCard({ className }: { className?: string }) {
           </div>
         ))}
       </div>
-      <p className="mt-3 border-t border-[#c4a882]/20 pt-2 font-mono text-[9px] tracking-[0.12em] text-[#736a58]">
-        Scored on adherence and change vs your own baseline
-      </p>
     </div>
   );
 }
@@ -124,15 +116,11 @@ export function NewsletterCard({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-[18px] border border-[#c4a882]/25 bg-white/75 px-3 pb-3 pt-2.5",
+        "overflow-hidden rounded-[18px] border border-[#c4a882]/25 bg-white/75 p-3",
         className,
       )}
     >
-      <div className="flex items-center gap-1.5 font-mono text-[8px] font-medium tracking-[0.16em] text-[#5a6e32]">
-        <EmailIcon className="size-3 shrink-0" />
-        <span>Weekly newsletter · Sunday 8:02 AM</span>
-      </div>
-      <p className="mt-2 font-serif text-[15px] font-semibold leading-tight text-[#2d3436]">
+      <p className="font-serif text-[15px] font-semibold leading-tight text-[#2d3436]">
         Your crew: week 3 in health
       </p>
       <div className="mt-2 divide-y divide-[#2d3436]/[0.06]">
@@ -145,9 +133,6 @@ export function NewsletterCard({ className }: { className?: string }) {
           </p>
         ))}
       </div>
-      <p className="mt-3 border-t border-[#c4a882]/20 pt-2 font-mono text-[9px] tracking-[0.12em] text-[#736a58]">
-        Emailed to everyone who opted in
-      </p>
     </div>
   );
 }

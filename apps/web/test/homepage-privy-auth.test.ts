@@ -154,24 +154,3 @@ test("completeHostedPrivyAuth passes phone completion to the server", async () =
     inviteCode: undefined,
   });
 });
-
-test("completeHostedPrivyAuth does not prefetch checkout sessions for checkout-stage users", async () => {
-  mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValue({
-    activationPending: false,
-    inviteCode: "invite-code",
-    joinUrl: "https://join.example.test/join/invite-code",
-    stage: "checkout",
-  });
-
-  const { completeHostedPrivyAuth } = await import(
-    "@/src/components/hosted-onboarding/hosted-auth-completion"
-  );
-
-  await expect(
-    completeHostedPrivyAuth({
-      authMethod: "email",
-    }),
-  ).resolves.toMatchObject({
-    redirectUrl: "https://join.example.test/join/invite-code",
-  });
-});

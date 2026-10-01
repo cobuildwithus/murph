@@ -30,6 +30,15 @@ export type HostedDashboardLayoutAuthSnapshot =
       status: "unavailable";
     };
 
+export type HostedPublicLayoutAuthSnapshot =
+  | {
+      sidebarAuth: HostedSidebarAuthSnapshot;
+      status: "ready";
+    }
+  | {
+      status: "unavailable";
+    };
+
 function buildAnonymousHostedPageAuthSnapshot(): HostedPageAuthSnapshot {
   return {
     authenticated: false,
@@ -53,13 +62,54 @@ const resolveHostedDashboardPageAuthSnapshot = cache(
   },
 );
 
-function buildHostedPageAuthSnapshot(
+const resolveHostedPublicLayoutAuthSnapshot = cache(
+  async (): Promise<HostedPublicLayoutAuthSnapshot> => {
+    try {
+      const { getHostedAppSession } = await import("./app-session");
+      const session = await getHostedAppSession();
+
+      return {
+        sidebarAuth: buildHostedSidebarAuthSnapshot(session),
+        status: "ready",
+      };
+    } catch (error) {
+      if (!isHostedSessionStoreUnavailableError(error)) {
+        throw error;
+      }
+
+      console.warn("Hosted app session store unavailable during public layout auth.", {
+        code: getErrorStringField(error, "code"),
+        name: getErrorStringField(error, "name"),
+      });
+      return {
+        status: "unavailable",
+      };
+    }
+  },
+);
+
+const recoverHostedPagePhoneContact = cache(async (memberId: string): Promise<void> => {
+  try {
+    const { ensureHostedMemberPhoneWelcome } = await import("./phone-welcome");
+    const { getPrisma } = await import("../prisma");
+    await ensureHostedMemberPhoneWelcome({ memberId, prisma: getPrisma() });
+  } catch {
+    // Optional contact recovery cannot invalidate an authenticated session.
+    // A later page load can retry through the same durable assignment owner.
+    console.warn("Hosted phone contact recovery is temporarily unavailable.");
+  }
+});
+
+async function buildHostedPageAuthSnapshot(
   session: HostedAppSession | null,
-): HostedPageAuthSnapshot {
+): Promise<HostedPageAuthSnapshot> {
   if (!session) {
     return buildAnonymousHostedPageAuthSnapshot();
   }
 
+  // Finish recovery before Home/Settings read their contact projections so a
+  // verified phone gains a usable Text Murph action in this response.
+  await recoverHostedPagePhoneContact(session.member.id);
   return {
     authenticated: true,
     authenticatedMember: session.member,
@@ -69,6 +119,10 @@ function buildHostedPageAuthSnapshot(
 
 export async function getHostedPageAuthSnapshot(): Promise<HostedPageAuthSnapshot> {
   return resolveHostedPageAuthSnapshot();
+}
+
+export async function getHostedPublicLayoutAuthSnapshot(): Promise<HostedPublicLayoutAuthSnapshot> {
+  return resolveHostedPublicLayoutAuthSnapshot();
 }
 
 export async function getHostedDashboardLayoutAuthSnapshot(): Promise<HostedDashboardLayoutAuthSnapshot> {
@@ -144,6 +198,16 @@ export async function readHostedDashboardCheckoutRequired(
 const resolveHostedSidebarAuthSnapshot = cache(async (): Promise<HostedSidebarAuthSnapshot> => {
   const session = await getHostedAppSessionForPublicPageAuth();
 
+  return buildHostedSidebarAuthSnapshot(session);
+});
+
+export async function getHostedSidebarAuthSnapshot(): Promise<HostedSidebarAuthSnapshot> {
+  return resolveHostedSidebarAuthSnapshot();
+}
+
+function buildHostedSidebarAuthSnapshot(
+  session: HostedAppSession | null,
+): HostedSidebarAuthSnapshot {
   if (!session) {
     return anonymousHostedSidebarAuthSnapshot;
   }
@@ -152,10 +216,6 @@ const resolveHostedSidebarAuthSnapshot = cache(async (): Promise<HostedSidebarAu
     authenticated: true,
     label: null,
   };
-});
-
-export async function getHostedSidebarAuthSnapshot(): Promise<HostedSidebarAuthSnapshot> {
-  return resolveHostedSidebarAuthSnapshot();
 }
 
 async function getHostedAppSessionForPublicPageAuth(): Promise<HostedAppSession | null> {

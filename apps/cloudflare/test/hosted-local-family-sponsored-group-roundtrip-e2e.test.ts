@@ -60,7 +60,7 @@ describe("hosted local family-sponsored group roundtrip e2e", () => {
     });
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           sponsoredMemberPhone,
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -134,7 +134,7 @@ describe("hosted local family-sponsored group roundtrip e2e", () => {
       throw new Error("Expected the family-sponsored group reply to be observed.");
     }
     expect(requireLinqStub().readObservedMessageText(reply)).toBe(replyText);
-    expect(reply.authorizationStatus).toBe("hosted-sentinel");
+    expect(reply.authorizationStatus).toBe("expected");
     expect(requireLinqStub().countObservedSends(requireLinqStub().createChatPath)).toBe(
       createChatBaseline,
     );

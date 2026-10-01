@@ -29,7 +29,9 @@ import {
   isAssistantOutboxRetryBudgetExhausted,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
+  resolveAssistantOutboxHistoricalDeliveryUncertaintyAtTerminal,
   resolveAssistantOutboxRetryDelayMs,
+  resolveAssistantOutboxRetryExhaustionDisposition,
 } from './retry-policy.js'
 import {
   persistAssistantOutboxIntentAtPath,
@@ -419,7 +421,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       sending: input.sending,
     })
   const abandonedDelivery = abandonedAmbiguousDelivery ||
-    isEmailGroupRecipientAuthoritySuperseded({
+    isAssistantOutboxAuthoritySuperseded({
       error: input.error,
       sending: input.sending,
     })
@@ -468,26 +470,67 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       carriesNonConfirmableLinqRichLinkCheckpoint(baseIntent)
     const retainLinqReactionConfirmation =
       hasConcreteLinqMessageReactionReceipt(baseIntent)
+    const deliveryConfirmationResolved =
+      recoverableLinqRichLinkPartial ||
+      preserveNonConfirmableLinqRichLinkCheckpoint
+    const historicalDeliveryConfirmationPending =
+      !deliveryConfirmationResolved &&
+      baseIntent.deliveryConfirmationPending
+    const accumulatedDeliveryConfirmationPending =
+      historicalDeliveryConfirmationPending ||
+      (
+        input.deliveryMayHaveSucceeded &&
+        (
+          input.deliveryTransportIdempotent ||
+          retainLinqReactionConfirmation
+        )
+      )
     const attemptCount = baseIntent.attemptCount
     const failedAt = input.failedAt.toISOString()
     const retryExhausted = retryRequested &&
       !input.deliveryMayHaveSucceeded &&
       isAssistantOutboxRetryBudgetExhausted(baseIntent)
+    const terminalFailureReached =
+      abandonedDelivery || retryExhausted || !retryRequested
     const terminalConfirmationPending =
       input.terminalConfirmationRequired === true &&
       (
-        abandonedDelivery ||
-        retryExhausted ||
-        !retryRequested ||
+        terminalFailureReached ||
         (input.deliveryMayHaveSucceeded && input.sending.delivery !== null)
       )
-    const retryable = (retryRequested && !retryExhausted) ||
-      terminalConfirmationPending
-    const deliveryError = retryExhausted
-      ? sanitizeAssistantDeliveryErrorForPersistence(
-          createAssistantDeliveryRetryExhaustedError(input.error),
-        )!
+    const failureError = retryExhausted
+      ? createAssistantDeliveryRetryExhaustedError(input.error)
       : classifiedDeliveryError
+    const failureDisposition = terminalFailureReached
+      ? resolveAssistantOutboxHistoricalDeliveryUncertaintyAtTerminal({
+          cause: input.error,
+          historicalDeliveryConfirmationPending,
+          otherwise: terminalConfirmationPending
+            ? {
+                deliveryConfirmationPending: true,
+                error: failureError,
+                status: 'retryable',
+              }
+            : {
+                deliveryConfirmationPending: false,
+                error: failureError,
+                status: abandonedDelivery ? 'abandoned' : 'failed',
+              },
+        })
+      : {
+          deliveryConfirmationPending:
+            terminalConfirmationPending ||
+            (
+              !deliveryConfirmationResolved &&
+              accumulatedDeliveryConfirmationPending
+            ),
+          error: failureError,
+          status: 'retryable' as const,
+        }
+    const deliveryError = sanitizeAssistantDeliveryErrorForPersistence(
+      failureDisposition.error,
+    )!
+    const retryable = failureDisposition.status === 'retryable'
     const nextAttemptAt = retryable
       ? buildAssistantOutboxRetryTimestamp(input.failedAt, attemptCount)
       : null
@@ -499,16 +542,8 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
           stableLinqPartialDelivery ??
           current?.delivery ??
           input.sending.delivery,
-        deliveryConfirmationPending: terminalConfirmationPending
-          ? true
-          : recoverableLinqRichLinkPartial ||
-              preserveNonConfirmableLinqRichLinkCheckpoint
-            ? false
-            : abandonedDelivery || retryExhausted
-              ? false
-              : input.deliveryMayHaveSucceeded
-                ? input.deliveryTransportIdempotent || retainLinqReactionConfirmation
-                : false,
+        deliveryConfirmationPending:
+          failureDisposition.deliveryConfirmationPending,
         deliveryTransportIdempotent: abandonedDelivery
           ? false
           : input.deliveryMayHaveSucceeded
@@ -517,13 +552,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
                 input.sending.deliveryTransportIdempotent),
         updatedAt: failedAt,
         nextAttemptAt,
-        status: terminalConfirmationPending
-          ? 'retryable'
-          : abandonedDelivery
-            ? 'abandoned'
-            : retryable
-              ? 'retryable'
-              : 'failed',
+        status: failureDisposition.status,
         lastError: deliveryError,
       }),
     )
@@ -619,10 +648,40 @@ function isAmbiguousDeliveryWithoutProviderIds(input: {
   sending: AssistantOutboxIntent
 }): boolean {
   return isLinqAttachmentReservationAmbiguity(input) ||
+    isLinqIMessageAppCardAmbiguityWithoutProviderIds(input) ||
     isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
     isLinqMessageReactionAmbiguityWithoutProviderIds(input) ||
     isLinqPartialDeliveryWithoutProviderIds(input) ||
     isEmailGroupFanoutAmbiguityWithoutProviderIds(input)
+}
+
+function isLinqIMessageAppCardAmbiguityWithoutProviderIds(input: {
+  deliveryMayHaveSucceeded: boolean
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  if (
+    !input.deliveryMayHaveSucceeded ||
+    input.sending.channel !== 'linq' ||
+    input.sending.card == null
+  ) {
+    return false
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  const code =
+    readNonEmptyString(errorRecord?.code) ??
+    readNonEmptyString(context?.code) ??
+    null
+
+  return code === 'LINQ_API_REQUEST_FAILED' &&
+    readNonEmptyString(context?.provider) === 'linq' &&
+    readNonEmptyString(context?.operation) === 'send_imessage_app_card' &&
+    readNonEmptyString(context?.failureStage) === 'http' &&
+    context?.status === undefined &&
+    context?.retryable === true &&
+    readProviderMessageIdsFromErrorRecord(errorRecord, context) === null
 }
 
 function isLinqAttachmentReservationAmbiguity(input: {
@@ -689,14 +748,10 @@ function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {
   return code === 'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE'
 }
 
-function isEmailGroupRecipientAuthoritySuperseded(input: {
+function isAssistantOutboxAuthoritySuperseded(input: {
   error: unknown
   sending: AssistantOutboxIntent
 }): boolean {
-  if (input.sending.channel !== 'email') {
-    return false
-  }
-
   const errorRecord = readRecord(input.error)
   const context = readRecord(errorRecord?.context)
   const code =
@@ -704,7 +759,13 @@ function isEmailGroupRecipientAuthoritySuperseded(input: {
     readNonEmptyString(context?.code) ??
     null
 
-  return code === 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED'
+  return (
+    input.sending.channel === 'email' &&
+    code === 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED'
+  ) || (
+    input.sending.channel === 'linq' &&
+    code === 'HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED'
+  )
 }
 
 function isTelegramAmbiguousDeliveryWithoutProviderIds(input: {
@@ -1326,32 +1387,35 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
       ) &&
       isAssistantOutboxRetryBudgetExhausted(baseIntent)
     ) {
+      const retryExhaustionDisposition =
+        resolveAssistantOutboxRetryExhaustionDisposition(baseIntent)
       const deliveryError = sanitizeAssistantDeliveryErrorForPersistence(
-        createAssistantDeliveryRetryExhaustedError(baseIntent.lastError),
+        retryExhaustionDisposition.error,
       )!
-      const failedIntent = assistantOutboxIntentSchema.parse(
+      const terminalIntent = assistantOutboxIntentSchema.parse(
         sanitizeAssistantOutboxIntentForPersistence({
           ...baseIntent,
+          deliveryConfirmationPending: false,
           updatedAt: input.startedAt,
           nextAttemptAt: null,
           preparedDispatchToken: null,
-          status: 'failed',
+          status: retryExhaustionDisposition.status,
           lastError: deliveryError,
         }),
       )
       await persistAssistantOutboxIntentAtPath({
-        intent: failedIntent,
+        intent: terminalIntent,
         intentPath: input.intentPath,
         paths,
       })
       await repairAssistantOutboxReceiptForIntent({
-        at: failedIntent.updatedAt,
-        intent: failedIntent,
+        at: terminalIntent.updatedAt,
+        intent: terminalIntent,
         vault: input.vault,
       })
       retryExhausted = true
       return {
-        intent: failedIntent,
+        intent: terminalIntent,
         ownsDispatch: false,
         preparedDispatchToken: null,
         previousDispatchState,
@@ -1636,6 +1700,7 @@ export async function markAssistantOutboxIntentMirrorTerminal(input: {
   intentPath: string
   onlyCurrentStatuses?: readonly AssistantOutboxIntent['status'][]
   status: 'abandoned' | 'failed'
+  terminalConfirmationCompleted?: boolean
   vault: string
 }): Promise<AssistantOutboxIntent> {
   return persistAssistantOutboxIntentMirrorFailure({
@@ -1652,6 +1717,7 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
   onlyCurrentStatuses?: readonly AssistantOutboxIntent['status'][]
   retryable: boolean
   status: 'abandoned' | 'failed' | 'retryable'
+  terminalConfirmationCompleted?: boolean
   vault: string
 }): Promise<AssistantOutboxIntent> {
   const classifiedDeliveryError = sanitizeAssistantDeliveryErrorForPersistence(
@@ -1695,21 +1761,42 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
     const retryExhausted = input.retryable &&
       isAssistantOutboxRetryBudgetExhausted(baseIntent)
     const retryable = input.retryable && !retryExhausted
-    const deliveryError = retryExhausted
-      ? sanitizeAssistantDeliveryErrorForPersistence(
-          createAssistantDeliveryRetryExhaustedError(input.error),
-        )!
+    const failureError = retryExhausted
+      ? createAssistantDeliveryRetryExhaustedError(input.error)
       : classifiedDeliveryError
+    const failureDisposition = retryable
+      ? {
+          deliveryConfirmationPending:
+            baseIntent.deliveryConfirmationPending,
+          error: failureError,
+          status: input.status,
+        }
+      : resolveAssistantOutboxHistoricalDeliveryUncertaintyAtTerminal({
+          cause: input.error,
+          historicalDeliveryConfirmationPending:
+            baseIntent.deliveryConfirmationPending &&
+            input.terminalConfirmationCompleted !== true,
+          otherwise: {
+            deliveryConfirmationPending: false,
+            error: failureError,
+            status: retryExhausted ? 'failed' : input.status,
+          },
+        })
+    const deliveryError = sanitizeAssistantDeliveryErrorForPersistence(
+      failureDisposition.error,
+    )!
     const nextAttemptAt = retryable
       ? buildAssistantOutboxRetryTimestamp(input.failedAt, baseIntent.attemptCount)
       : null
     const updatedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
-        deliveryConfirmationPending: false,
+        deliveryConfirmationPending:
+          failureDisposition.deliveryConfirmationPending,
         updatedAt: failedAt,
         nextAttemptAt,
-        status: retryExhausted ? 'failed' : input.status,
+        preparedDispatchToken: retryable ? baseIntent.preparedDispatchToken : null,
+        status: failureDisposition.status,
         lastError: deliveryError,
       }),
     )

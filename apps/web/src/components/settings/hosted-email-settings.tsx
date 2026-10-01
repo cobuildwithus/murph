@@ -17,6 +17,7 @@ export function HostedEmailSettings(props: {
   authenticated: boolean;
   changeFlow?: boolean;
   initialEmail?: HostedEmailSettingsInitialEmail | null;
+  recoverEmailSync?: boolean;
   murphEmailAddress?: string | null;
   onClientAuthRequired?: () => void;
   onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
@@ -26,6 +27,7 @@ export function HostedEmailSettings(props: {
   const controller = useHostedEmailSettingsController({
     authenticated: props.authenticated,
     initialEmail: props.initialEmail ?? null,
+    recoverEmailSync: props.recoverEmailSync,
     onClientAuthRequired: props.onClientAuthRequired ?? openAuthDialog,
     onSynced: props.onSynced,
   });

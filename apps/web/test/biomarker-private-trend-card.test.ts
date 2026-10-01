@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
@@ -9,7 +8,7 @@ import {
   type BrowserVaultMetricSelectionRow,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
-import { act, createElement, type ReactNode } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
@@ -36,7 +35,7 @@ beforeEach(() => {
   mocks.useBrowserVaultMetricKeyDemand.mockReturnValue(true);
 });
 
-test("renders and retries a required bucket error instead of leaving the trend loading", async () => {
+test("renders a stable required bucket error instead of leaving the trend loading", async () => {
   const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
   const refresh = vi.fn(async () => {});
@@ -59,14 +58,13 @@ test("renders and retries a required bucket error instead of leaving the trend l
   try {
     assert.match(rendered.container.textContent ?? "", /Browser vault failed/u);
     assert.doesNotMatch(rendered.container.innerHTML, /animate-pulse/u);
-    const retry = [...rendered.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Retry private trend",
+    assert.equal(
+      [...rendered.container.querySelectorAll("button")].some(
+        (button) => button.textContent === "Retry private trend",
+      ),
+      false,
     );
-    assert.ok(retry);
-    await act(async () => {
-      retry.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-    assert.equal(refresh.mock.calls.length, 1);
+    assert.equal(refresh.mock.calls.length, 0);
   } finally {
     await rendered.cleanup();
   }
@@ -94,32 +92,6 @@ test("does not render mocked private biomarker values when browser-vault is unav
   assert.match(markup, /Connect a device/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
   assert.doesNotMatch(markup, /Latest Demo/iu);
-});
-
-test("the biomarker overview mounts the browser-vault private card", () => {
-  const source = readFileSync(
-    new URL("../src/components/biomarkers/biomarker-detail/biomarker-overview.tsx", import.meta.url),
-    "utf8",
-  );
-  const layoutSource = readFileSync(
-    new URL(
-      "../app/(dashboard)/biomarkers/[biomarkerId]/biomarker-layout-client.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  const dashboardLayoutSource = readFileSync(
-    new URL("../app/(dashboard)/layout.tsx", import.meta.url),
-    "utf8",
-  );
-
-  assert.match(source, /BiomarkerPrivateTrendCard/u);
-  // The persistent dashboard layout provider owns the browser vault, so the
-  // overview mounts the consumer directly without a route-local provider.
-  assert.doesNotMatch(source, /BrowserVaultProvider/u);
-  assert.match(dashboardLayoutSource, /BrowserVaultProvider/u);
-  assert.doesNotMatch(layoutSource, /BrowserVaultProvider/u);
-  assert.doesNotMatch(source, /BiomarkerTrendDetail/u);
 });
 
 test("the biomarker overview uses a concise experiments section heading", () => {

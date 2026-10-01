@@ -5,8 +5,7 @@ import { HOSTED_ACCOUNT_DATA_DELETION_SCHEMA } from "@/src/lib/hosted-privacy/ac
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
-  buildHostedAppSessionClearCookie: vi.fn(),
-  buildSettingsSensitiveActionBinding: vi.fn(() => "a".repeat(64)),
+  buildHostedAppSessionClearCookies: vi.fn(),
   deleteHostedAccountData: vi.fn(),
   getPrisma: vi.fn(),
   parseHostedAccountDeletionRequest: vi.fn(),
@@ -14,7 +13,6 @@ const mocks = vi.hoisted(() => ({
     label: "test-prisma",
   },
   requireHostedAppSessionFromRequest: vi.fn(),
-  verifyAndConsumeSensitiveActionChallenge: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -26,18 +24,13 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
-  buildHostedAppSessionClearCookie: mocks.buildHostedAppSessionClearCookie,
+  buildHostedAppSessionClearCookies: mocks.buildHostedAppSessionClearCookies,
   requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-privacy/account-data-service", () => ({
   deleteHostedAccountData: mocks.deleteHostedAccountData,
   parseHostedAccountDeletionRequest: mocks.parseHostedAccountDeletionRequest,
-}));
-
-vi.mock("@/src/lib/sensitive-actions/server", () => ({
-  buildSettingsSensitiveActionBinding: mocks.buildSettingsSensitiveActionBinding,
-  verifyAndConsumeSensitiveActionChallenge: mocks.verifyAndConsumeSensitiveActionChallenge,
 }));
 
 type SettingsPrivacyDeleteRouteModule = typeof import("../app/api/settings/privacy/delete/route");
@@ -74,10 +67,10 @@ describe("settings privacy delete route", () => {
       privyUserId: "privy-user-123",
       sessionId: "session_123",
     });
-    mocks.verifyAndConsumeSensitiveActionChallenge.mockResolvedValue(undefined);
-    mocks.buildHostedAppSessionClearCookie.mockReturnValue(
+    mocks.buildHostedAppSessionClearCookies.mockReturnValue([
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
     mocks.deleteHostedAccountData.mockResolvedValue({
       cloudflare: {
         deleted: true,
@@ -100,6 +93,50 @@ describe("settings privacy delete route", () => {
 
     const request = new Request("https://join.example.test/api/settings/privacy/delete", {
       body: JSON.stringify({
+        confirmationPhrase: "DELETE MY ACCOUNT",
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    const response = await settingsPrivacyDeleteRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.parseHostedAccountDeletionRequest).toHaveBeenCalledWith({
+      confirmationPhrase: "DELETE MY ACCOUNT",
+    });
+    expect(mocks.deleteHostedAccountData).toHaveBeenCalledWith({
+      exitFeedback: null,
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      providerAccessRemovalConfirmationToken: null,
+      request: expect.any(Request),
+    });
+    expect(mocks.buildHostedAppSessionClearCookies).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedAccountData.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.buildHostedAppSessionClearCookies.mock.invocationCallOrder[0],
+    );
+    expect(response.headers.getSetCookie()).toEqual([
+      "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      result: {
+        memberId: "member_123",
+        schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
+      },
+    });
+  });
+
+  it("accepts the legacy authorization payload without making it deletion authority", async () => {
+    const request = new Request("https://join.example.test/api/settings/privacy/delete", {
+      body: JSON.stringify({
         authorization: {
           signature: `0x${"11".repeat(65)}`,
           token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
@@ -116,8 +153,6 @@ describe("settings privacy delete route", () => {
     const response = await settingsPrivacyDeleteRoute.POST(request);
 
     expect(response.status).toBe(200);
-    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.parseHostedAccountDeletionRequest).toHaveBeenCalledWith({
       authorization: {
         signature: `0x${"11".repeat(65)}`,
@@ -125,46 +160,7 @@ describe("settings privacy delete route", () => {
       },
       confirmationPhrase: "DELETE MY ACCOUNT",
     });
-    expect(mocks.buildSettingsSensitiveActionBinding).toHaveBeenCalledWith({
-      kind: "account.delete",
-      memberId: "member_123",
-      sessionId: "session_123",
-    });
-    expect(mocks.verifyAndConsumeSensitiveActionChallenge).toHaveBeenCalledWith({
-      authorization: {
-        signature: `0x${"11".repeat(65)}`,
-        token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
-      },
-      bindingHash: "a".repeat(64),
-      kind: "account.delete",
-      memberId: "member_123",
-      prisma: mocks.prismaClient,
-      privyUserId: "privy-user-123",
-    });
-    expect(mocks.verifyAndConsumeSensitiveActionChallenge.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.deleteHostedAccountData.mock.invocationCallOrder[0],
-    );
-    expect(mocks.deleteHostedAccountData).toHaveBeenCalledWith({
-      exitFeedback: null,
-      memberId: "member_123",
-      prisma: mocks.prismaClient,
-      providerAccessRemovalConfirmationToken: null,
-      request: expect.any(Request),
-    });
-    expect(mocks.buildHostedAppSessionClearCookie).toHaveBeenCalledTimes(1);
-    expect(mocks.deleteHostedAccountData.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.buildHostedAppSessionClearCookie.mock.invocationCallOrder[0],
-    );
-    expect(response.headers.get("Set-Cookie")).toBe(
-      "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
-    await expect(response.json()).resolves.toMatchObject({
-      ok: true,
-      result: {
-        memberId: "member_123",
-        schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
-      },
-    });
+    expect(mocks.deleteHostedAccountData).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a wrong typed phrase before deleting account data", async () => {
@@ -195,7 +191,6 @@ describe("settings privacy delete route", () => {
         code: "ACCOUNT_DELETION_CONFIRMATION_PHRASE_REQUIRED",
       },
     });
-    expect(mocks.verifyAndConsumeSensitiveActionChallenge).not.toHaveBeenCalled();
     expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
   });
 

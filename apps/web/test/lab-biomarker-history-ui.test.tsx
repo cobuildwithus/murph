@@ -389,6 +389,7 @@ test("the measured list keeps stale data visible without a refresh banner and ne
   browserVaultMock.value.status = "error";
   const failed = await renderClientComponent(
     <BiomarkersPageClient authenticated />,
+    { requireButton: false },
   );
   try {
     expect(failed.container.textContent).toContain("Could not load your biomarkers");
@@ -1053,19 +1054,17 @@ test("detail covers loading, stale, error, and signed-out states", async () => {
   browserVaultMock.value.status = "error";
   const error = await renderClientComponent(
     <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
+    { requireButton: false },
   );
   try {
     expect(error.container.textContent).toContain("Could not load this biomarker");
     expect(error.container.textContent).not.toContain("internal diagnostic");
-    const retryButton = [...error.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Retry",
-    );
-    expect(retryButton).not.toBeUndefined();
-    await act(async () => {
-      retryButton?.dispatchEvent(new error.window.Event("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(
+      [...error.container.querySelectorAll("button")].some(
+        (button) => button.textContent === "Retry",
+      ),
+    ).toBe(false);
+    expect(refresh).not.toHaveBeenCalled();
     expectPageIdentity(error.container);
   } finally {
     await error.cleanup();

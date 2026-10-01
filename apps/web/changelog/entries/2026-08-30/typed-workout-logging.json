@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "typed-workout-logging",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Workout details log cleanly",
+    "summary": "Workouts can now be logged from a title, activity type, and duration without requiring a duplicate note.",
+    "details": "When both a note and an explicit title are provided, Murph keeps them separate and preserves the chosen title. Existing duration checks still stop incomplete entries before saving.",
+    "relevanceTags": ["workouts", "activity", "assistant"],
+    "sourcePullRequests": [2595]
+  }
+}

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,11 +20,13 @@ import {
   getGeneratedHealthCommonsWebBiomarkerIndex,
   getGeneratedHealthCommonsWebExperimentIndex,
   getGeneratedHealthCommonsWebRouteIndex,
+  HealthCommonsProtocolArtifactError,
   HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
   isRunnableProtocolStatus,
+  isHealthCommonsProtocolArtifactError,
   loadGeneratedHealthCommonsBiomarkerDesiredDirections,
   loadGeneratedHealthCommonsProtocolFamilyGraph,
   loadGeneratedHealthCommonsProtocolIndex,
@@ -313,7 +315,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       .filter((entry) => entry.published)
       .map((entry) => entry.routeId);
 
-    expect(biomarkerIndex.schemaVersion).toBe("murph.commons.web.biomarker-index.v3");
+    expect(biomarkerIndex.schemaVersion).toBe("murph.commons.web.biomarker-index.v4");
     expect(publishedRouteIds).toEqual(expect.arrayContaining([
       "estimated-vo2max",
       "resting-heart-rate",
@@ -535,6 +537,63 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     }
   });
 
+  it("classifies generated protocol artifact failures without exposing paths or contents", async () => {
+    const generatedRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-health-commons-protocol-failures-"),
+    );
+    const privateArtifactValue = "private malformed artifact value";
+    const scenarios = [
+      {
+        artifact: "protocol_index",
+        fileName: "protocol-index.json",
+        load: (artifactPath: string) =>
+          loadGeneratedHealthCommonsProtocolIndex({ protocolIndexPath: artifactPath }),
+      },
+      {
+        artifact: "protocol_run_specs",
+        fileName: "protocol-run-specs.json",
+        load: (artifactPath: string) =>
+          loadGeneratedHealthCommonsProtocolRunSpecs({ protocolRunSpecsPath: artifactPath }),
+      },
+      {
+        artifact: "protocol_family_graph",
+        fileName: "protocol-family-graph.json",
+        load: (artifactPath: string) =>
+          loadGeneratedHealthCommonsProtocolFamilyGraph({ protocolFamilyGraphPath: artifactPath }),
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const artifactPath = path.join(generatedRoot, scenario.fileName);
+      for (const category of ["unavailable", "invalid"] as const) {
+        if (category === "invalid") {
+          await writeFile(artifactPath, `${privateArtifactValue} {not-json}`, "utf8");
+        }
+        let failure: unknown;
+        try {
+          scenario.load(artifactPath);
+        } catch (error) {
+          failure = error;
+        }
+
+        expect(isHealthCommonsProtocolArtifactError(failure)).toBe(true);
+        expect(failure).toBeInstanceOf(HealthCommonsProtocolArtifactError);
+        expect(failure).toMatchObject({
+          artifact: scenario.artifact,
+          category,
+          code: "HEALTH_COMMONS_PROTOCOL_ARTIFACT_FAILURE",
+        });
+        const serialized = JSON.stringify(failure, Object.getOwnPropertyNames(failure));
+        expect(serialized).not.toContain(generatedRoot);
+        expect(serialized).not.toContain(privateArtifactValue);
+
+        if (category === "invalid") {
+          await rm(artifactPath, { force: true });
+        }
+      }
+    }
+  });
+
   it("rejects malformed generated biomarker desired directions", async () => {
     const generatedRoot = await mkdtemp(
       path.join(os.tmpdir(), "murph-health-commons-directions-"),
@@ -600,6 +659,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       pageRevisionId: expect.stringMatching(/^sha256:/u),
       recipeHash: expect.stringMatching(/^sha256:/u),
       runSpecRevisionId: expect.stringMatching(/^sha256:/u),
+      workflowSpecRevisionId: null,
     });
     const reader = createHealthCommonsRouteBundleReader(bundle);
     expect(reader.route).toEqual(bundle.route);
@@ -992,25 +1052,40 @@ describe("@murphai/health-commons runtime catalog reader", () => {
 
     const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
     await mkdir(path.join(generatedWebRoot, "routes"), { recursive: true });
-    await writeFile(
-      path.join(generatedWebRoot, "routes/index.json"),
-      JSON.stringify({
-        ...routeIndex,
-        routes: [
-          {
-            ...finnishRoute,
-            projections: {
-              ...finnishRoute.projections,
-              "experiment.research": "../tabs/experiments/norwegian-4x4/research.json",
-            },
-          },
-        ],
-      }),
-      "utf8",
-    );
+    const unsafeProjectionPaths = [
+      "../tabs/experiments/norwegian-4x4/research.json",
+      "%2e%2e/tabs/experiments/norwegian-4x4/research.json",
+      "%252e%252e/tabs/experiments/norwegian-4x4/research.json",
+      "tabs%2fexperiments/finnish-sauna/research.json",
+      "tabs%252fexperiments/finnish-sauna/research.json",
+      "tabs%5cexperiments/finnish-sauna/research.json",
+      "tabs/experiments/finnish-sauna/research.json?outside",
+      "tabs/experiments/finnish-sauna/research.json#outside",
+    ];
 
-    expect(() => getGeneratedHealthCommonsWebRouteIndex({ generatedWebRoot }))
-      .toThrow("Health Commons generated web route index is invalid.");
+    for (const unsafeProjectionPath of unsafeProjectionPaths) {
+      await writeFile(
+        path.join(generatedWebRoot, "routes/index.json"),
+        JSON.stringify({
+          ...routeIndex,
+          routes: [
+            {
+              ...finnishRoute,
+              projections: {
+                ...finnishRoute.projections,
+                "experiment.research": unsafeProjectionPath,
+              },
+            },
+          ],
+        }),
+        "utf8",
+      );
+
+      expect(
+        () => getGeneratedHealthCommonsWebRouteIndex({ generatedWebRoot }),
+        unsafeProjectionPath,
+      ).toThrow("Health Commons generated web route index is invalid.");
+    }
   });
 
   it("rejects projection artifacts whose top-level id no longer matches the route index", async () => {

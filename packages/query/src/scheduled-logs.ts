@@ -1,10 +1,7 @@
 import {
   SCHEDULED_LOG_DOC_TYPE,
   SCHEDULED_LOG_SCHEMA_VERSION,
-  executableScheduleIntentSchema,
-  formatScheduleIntentIssues,
-  scheduledLogActionSchema,
-  scheduledLogStatusValues,
+  scheduledLogFrontmatterSchema,
   VAULT_LAYOUT,
   type ExecutableScheduleIntent,
   type ScheduledLogAction,
@@ -19,9 +16,36 @@ import {
   matchesStatus,
   matchesText,
 } from "./health/shared.ts";
-import { parseFrontmatterDocument, type FrontmatterObject } from "./health/shared.ts";
+import type { FrontmatterObject } from "./health/shared.ts";
 
 const SCHEDULED_LOGS_DIRECTORY = VAULT_LAYOUT.scheduledLogsDirectory;
+
+class ScheduledLogQueryError extends Error {
+  readonly code = "VAULT_INVALID_SCHEDULED_LOG";
+  readonly details: Record<string, unknown>;
+
+  constructor(
+    issues: readonly {
+      code: string;
+      path: readonly PropertyKey[];
+    }[] = [],
+  ) {
+    super("Scheduled log registry document is invalid.");
+    this.name = "VaultError";
+    this.details = issues.length > 0
+      ? {
+          issues: issues.map((issue) => ({
+            code: issue.code,
+            path: issue.path.map((segment) =>
+              typeof segment === "string" || typeof segment === "number"
+                ? segment
+                : "<field>"
+            ),
+          })),
+        }
+      : {};
+  }
+}
 
 export type {
   ExecutableScheduleIntent,
@@ -62,103 +86,33 @@ function normalizeNullableString(value: string | null | undefined): string | nul
   return normalized.length > 0 ? normalized : null;
 }
 
-function requireStringValue(value: unknown, fieldName: string): string {
-  const normalized = normalizeNullableString(typeof value === "string" ? value : null);
-  if (!normalized) {
-    throw new Error(`${fieldName} must be a non-empty string.`);
-  }
-
-  return normalized;
-}
-
-function normalizeScheduledLogStatus(value: unknown): ScheduledLogStatus {
-  if (value === undefined || value === null) {
-    return "active";
-  }
-  if (typeof value !== "string") {
-    throw new Error("status must be a string.");
-  }
-  const normalized = normalizeNullableString(value);
-  if (normalized === null) {
-    return "active";
-  }
-  if (normalized && scheduledLogStatusValues.includes(normalized as ScheduledLogStatus)) {
-    return normalized as ScheduledLogStatus;
-  }
-
-  throw new Error(`status must be one of ${scheduledLogStatusValues.join(", ")}.`);
-}
-
-function normalizeScheduleIntent(value: unknown): ExecutableScheduleIntent {
-  const parsed = executableScheduleIntentSchema.safeParse(value);
-  if (!parsed.success) {
-    const message = formatScheduleIntentIssues(parsed.error) ||
-      "schedule must match a supported scheduled-log schedule.";
-    throw new Error(message);
-  }
-
-  return parsed.data;
-}
-
-function normalizeScheduledLogAction(value: unknown): ScheduledLogAction {
-  const parsed = scheduledLogActionSchema.safeParse(value);
-  if (!parsed.success) {
-    const message = parsed.error.issues.map((issue) => issue.message).join("; ") ||
-      "action must match a supported scheduled-log action.";
-    throw new Error(message);
-  }
-
-  return parsed.data;
-}
-
-function normalizeTags(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return [...new Set(
-    value.flatMap((entry) => {
-      const tag = normalizeNullableString(typeof entry === "string" ? entry : null);
-      return tag ? [tag] : [];
-    }),
-  )].sort((left, right) => left.localeCompare(right));
-}
-
-function normalizeBody(body: string): string {
-  return body.replace(/\s+$/u, "");
-}
-
 function parseScheduledLogRecord(
   attributes: FrontmatterObject,
+  body: string,
   relativePath: string,
   markdown: string,
 ): ScheduledLogQueryRecord {
-  if (
-    attributes.schemaVersion !== SCHEDULED_LOG_SCHEMA_VERSION ||
-    attributes.docType !== SCHEDULED_LOG_DOC_TYPE
-  ) {
-    throw new Error("Scheduled log registry document has an unexpected shape.");
+  try {
+    const parsedFrontmatter = scheduledLogFrontmatterSchema.safeParse(attributes);
+    if (!parsedFrontmatter.success) {
+      throw new ScheduledLogQueryError(parsedFrontmatter.error.issues);
+    }
+    const frontmatter = parsedFrontmatter.data;
+
+    return {
+      ...frontmatter,
+      summary: frontmatter.summary ?? null,
+      tags: [...new Set(frontmatter.tags ?? [])].sort((left, right) => left.localeCompare(right)),
+      body: body.replace(/\s+$/u, ""),
+      relativePath,
+      markdown,
+    };
+  } catch (error) {
+    if (error instanceof ScheduledLogQueryError) {
+      throw error;
+    }
+    throw new ScheduledLogQueryError();
   }
-
-  const parsed = parseFrontmatterDocument(markdown);
-
-  return {
-    schemaVersion: SCHEDULED_LOG_SCHEMA_VERSION,
-    docType: SCHEDULED_LOG_DOC_TYPE,
-    scheduledLogId: requireStringValue(attributes.scheduledLogId, "scheduledLogId"),
-    slug: requireStringValue(attributes.slug, "slug"),
-    title: requireStringValue(attributes.title, "title"),
-    status: normalizeScheduledLogStatus(attributes.status),
-    summary: normalizeNullableString(typeof attributes.summary === "string" ? attributes.summary : null),
-    schedule: normalizeScheduleIntent(attributes.schedule),
-    action: normalizeScheduledLogAction(attributes.action),
-    tags: normalizeTags(attributes.tags),
-    createdAt: requireStringValue(attributes.createdAt, "createdAt"),
-    updatedAt: requireStringValue(attributes.updatedAt, "updatedAt"),
-    body: normalizeBody(parsed.body),
-    relativePath,
-    markdown,
-  };
 }
 
 async function loadScheduledLogRecords(vaultRoot: string): Promise<ScheduledLogQueryRecord[]> {
@@ -166,9 +120,28 @@ async function loadScheduledLogRecords(vaultRoot: string): Promise<ScheduledLogQ
   const records: ScheduledLogQueryRecord[] = [];
 
   for (const relativePath of relativePaths) {
-    const document = await readMarkdownDocument(vaultRoot, relativePath);
-    const record = parseScheduledLogRecord(document.attributes, relativePath, document.markdown);
-    records.push(record);
+    try {
+      const document = await readMarkdownDocument(vaultRoot, relativePath);
+      const record = parseScheduledLogRecord(
+        document.attributes,
+        document.body,
+        relativePath,
+        document.markdown,
+      );
+      records.push(record);
+    } catch (error) {
+      if (
+        error instanceof ScheduledLogQueryError ||
+        (error instanceof Error &&
+          "code" in error &&
+          typeof error.code === "string" &&
+          "syscall" in error &&
+          typeof error.syscall === "string")
+      ) {
+        throw error;
+      }
+      throw new ScheduledLogQueryError();
+    }
   }
 
   return records.sort((left, right) =>

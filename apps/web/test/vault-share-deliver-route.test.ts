@@ -1,6 +1,9 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PrismaClient } from "@prisma/client";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  isHostedRuntimeInactiveAccessError: vi.fn(),
+  requireHostedRuntimeMembersActiveAccessForUpdateTx: vi.fn(),
 	buildHostedVaultShareGenerationToken: vi.fn(),
 	replaceHostedVaultShareProjectionSnapshot: vi.fn(),
 	findActiveHostedVaultShares: vi.fn(),
@@ -15,18 +18,41 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 vi.mock("@/src/lib/hosted-vault-share/projection-store", () => ({
 	buildHostedVaultShareGenerationToken: mocks.buildHostedVaultShareGenerationToken,
 	replaceHostedVaultShareProjectionSnapshot: mocks.replaceHostedVaultShareProjectionSnapshot,
-	findActiveHostedVaultShares: mocks.findActiveHostedVaultShares,
+	findActiveHostedVaultSharePage: async (input: unknown) => {
+    const result = await mocks.findActiveHostedVaultShares(input);
+    if (!Array.isArray(result)) {
+      return result;
+    }
+    return {
+      continuation: null,
+      generationToken: mocks.buildHostedVaultShareGenerationToken(
+        result.map((share: { id: string }) => share.id),
+      ),
+      hasActiveShares: result.length > 0,
+      shares: result,
+    };
+  },
 	hasUnmaterializedHostedVaultShareProjectionGeneration:
 		mocks.hasUnmaterializedHostedVaultShareProjectionGeneration,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({}));
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
+  isHostedRuntimeInactiveAccessError: mocks.isHostedRuntimeInactiveAccessError,
+  requireHostedRuntimeMembersActiveAccessForUpdateTx:
+    mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx,
+}));
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccessIds: vi.fn(),
+}));
+import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import type { HostedVaultShareReplacementDeferralReason } from "@/src/lib/hosted-vault-share/projection-store";
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
-  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
@@ -45,11 +71,8 @@ import {
   type HostedVaultShareDeliveryRecord,
 } from "@murphai/hosted-execution/vault-share";
 import {
-  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
-} from "@murphai/hosted-execution/runtime-control";
-
-import {
   HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
+  HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
 } from "@/src/lib/hosted-vault-share/delivery-limits";
 import {
   HostedDomainRootEnvelopeUnavailableError,
@@ -189,8 +212,39 @@ function buildRawRequest(body: unknown, signal?: AbortSignal): Request {
 function deliveryEffectControls() {
   return {
     deadlineAtEpochMs: expect.any(Number),
+    onDeferral: expect.any(Function),
     signal: expect.any(AbortSignal),
   };
+}
+
+function createPrismaClientTestDouble(value: object): PrismaClient {
+  // The real store reaches only this transaction seam. The composed proof
+  // supplies and asserts every access, lock, and conditional-update operation.
+  return value as PrismaClient;
+}
+
+async function expectDeferredDelivery(
+  response: Response,
+  reason: string,
+  replacementDeferralReason?: HostedVaultShareReplacementDeferralReason,
+) {
+  expect(response.status).toBe(503);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.text()).toBe(JSON.stringify({
+    error: {
+      code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
+      message: "Hosted vault-share delivery has deferred approved work. Retry the request.",
+      retryable: true,
+    },
+  }));
+  expect(console.warn).toHaveBeenCalledExactlyOnceWith(
+    "Hosted vault-share delivery deferred.",
+    {
+      schema: "murph.hosted-vault-share-delivery-deferred.v1",
+      reason,
+      ...(replacementDeferralReason === undefined ? {} : { replacementDeferralReason }),
+    },
+  );
 }
 
 function workoutsDeliveryBody(
@@ -345,11 +399,19 @@ describe("vault-share deliver route", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.isHostedRuntimeInactiveAccessError.mockReturnValue(false);
+    mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockResolvedValue(undefined);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_grantor");
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
 		mocks.hasUnmaterializedHostedVaultShareProjectionGeneration.mockResolvedValue(false);
 		mocks.buildHostedVaultShareGenerationToken.mockReturnValue(CURRENT_GENERATION_TOKEN);
 		mocks.replaceHostedVaultShareProjectionSnapshot.mockResolvedValue("replaced");
+  });
+
+  afterEach(() => {
+    vi.mocked(console.warn).mockRestore();
+    setHostedSecureBoxStringTestCodecForTests(null);
   });
 
   it("keeps the maximum parser-valid workouts delivery body within the ingress limit", () => {
@@ -397,7 +459,7 @@ describe("vault-share deliver route", () => {
 
     expect(() => parseHostedVaultShareDeliverRequest(body)).not.toThrow();
     expect(() => parseHostedVaultShareDeliverRequest(nextBoundBody)).toThrow(
-      new RegExp(`at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS}`, "u"),
+      /at most 8 public sources/u,
     );
     expect(bodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
@@ -440,6 +502,7 @@ describe("vault-share deliver route", () => {
     const response = await deliverRoute.POST(request);
 
     expect(response.status).toBe(200);
+    expect(console.warn).not.toHaveBeenCalled();
     expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
       request,
@@ -448,6 +511,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
       grantorMemberId: "member_grantor",
       projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
 		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenNthCalledWith(1, {
 			...deliveryEffectControls(),
@@ -463,6 +527,32 @@ describe("vault-share deliver route", () => {
 		});
   });
 
+  it("passes a stable destination cursor through and returns the next page cursor", async () => {
+    mocks.findActiveHostedVaultShares.mockResolvedValue({
+      continuation: "member_destination_025",
+      generationToken: CURRENT_GENERATION_TOKEN,
+      shares: [ACTIVE_SHARE],
+    });
+
+    const response = await deliverRoute.POST(buildRequest({
+      ...VALID_BODY,
+      continuation: "member_destination_000",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual({
+      continuation: "member_destination_025",
+      status: "delivered",
+    });
+    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
+      continuation: "member_destination_000",
+      grantorMemberId: "member_grantor",
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
+    });
+  });
+
   it("limits first-materialization delivery to exact null-snapshot shares", async () => {
     const response = await deliverRoute.POST(buildRequest({
       ...VALID_BODY,
@@ -475,6 +565,7 @@ describe("vault-share deliver route", () => {
       grantorMemberId: "member_grantor",
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
       projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       ...deliveryEffectControls(),
@@ -505,6 +596,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
       grantorMemberId: "member_grantor",
       projectionScope: ACTIVITY_SCOPE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       ...deliveryEffectControls(),
@@ -543,6 +635,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
       grantorMemberId: "member_grantor",
       projectionScope: WORKOUT_SCOPE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       ...deliveryEffectControls(),
@@ -552,7 +645,10 @@ describe("vault-share deliver route", () => {
     });
   });
 
-  it("preserves source-recorded sleep times through the deliver route", async () => {
+  it("preserves source-recorded sleep times through the deliver route", async ({ onTestFinished }) => {
+    // Keep this fixed-date fixture inside the route's history window.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-25T12:00:00.000Z"));
+    onTestFinished(() => clock.mockRestore());
     const projectionScope = hostedVaultShareProjectionKindToScope(
       "deep-sleep-sources-days.v1",
     );
@@ -591,6 +687,7 @@ describe("vault-share deliver route", () => {
     const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
     expect(response.status).toBe(200);
+    expect(console.warn).not.toHaveBeenCalled();
     expect(await response.json()).toEqual({ status: "no-active-share" });
     expect(mocks.hasUnmaterializedHostedVaultShareProjectionGeneration)
       .toHaveBeenCalledWith({
@@ -600,19 +697,31 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
+  it("acknowledges an already completed source version without rewriting it", async () => {
+    mocks.findActiveHostedVaultShares.mockResolvedValue({
+      continuation: null,
+      generationToken: CURRENT_GENERATION_TOKEN,
+      hasActiveShares: true,
+      shares: [],
+    });
+
+    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(200);
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual({ status: "delivered" });
+    expect(mocks.hasUnmaterializedHostedVaultShareProjectionGeneration)
+      .not.toHaveBeenCalled();
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+  });
+
   it("returns retryable deferred when only inactive approved work remains", async () => {
     mocks.findActiveHostedVaultShares.mockResolvedValue([]);
     mocks.hasUnmaterializedHostedVaultShareProjectionGeneration.mockResolvedValue(true);
 
     const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: expect.objectContaining({
-        code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
-        retryable: true,
-      }),
-    });
+    await expectDeferredDelivery(response, "inactive_generation_unmaterialized");
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
@@ -635,10 +744,37 @@ describe("vault-share deliver route", () => {
     }));
 
     expect(response.status).toBe(200);
+    expect(console.warn).not.toHaveBeenCalled();
     expect(await response.json()).toEqual({ status: "no-active-share" });
     expect(mocks.buildHostedVaultShareGenerationToken).toHaveBeenCalledWith([
       ACTIVE_SHARE.id,
     ]);
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("defers when the active generation changes between delivery pages", async () => {
+    mocks.findActiveHostedVaultShares.mockResolvedValue({
+      continuation: null,
+      generationToken: CURRENT_GENERATION_TOKEN,
+      hasActiveShares: true,
+      shares: [],
+    });
+
+    const response = await deliverRoute.POST(buildRequest({
+      ...VALID_BODY,
+      continuation: "member_destination_025",
+      expectedGenerationToken: STALE_GENERATION_TOKEN,
+    }));
+
+    await expectDeferredDelivery(response, "pagination_generation_changed");
+    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
+      continuation: "member_destination_025",
+      grantorMemberId: "member_grantor",
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
+    });
+    expect(mocks.hasUnmaterializedHostedVaultShareProjectionGeneration)
+      .not.toHaveBeenCalled();
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
@@ -650,13 +786,7 @@ describe("vault-share deliver route", () => {
       expectedGenerationToken: STALE_GENERATION_TOKEN,
     }));
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: expect.objectContaining({
-        code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
-        retryable: true,
-      }),
-    });
+    await expectDeferredDelivery(response, "stale_generation_unmaterialized");
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
@@ -674,28 +804,186 @@ describe("vault-share deliver route", () => {
     }));
 
     expect(response.status).toBe(200);
+    expect(console.warn).not.toHaveBeenCalled();
     expect(await response.json()).toEqual({ status: "no-active-share" });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
-	it("retries when a destination becomes inactive during replacement", async () => {
-		mocks.replaceHostedVaultShareProjectionSnapshot.mockResolvedValue("no-active-share");
+	it.each([false, true])("retries when a destination becomes inactive during replacement (logger throws: %s)", async (loggerThrows) => {
+		if (loggerThrows) {
+			vi.mocked(console.warn).mockImplementation(() => {
+				throw new Error("synthetic private logger failure");
+			});
+		}
+
+		mocks.replaceHostedVaultShareProjectionSnapshot.mockImplementation(async (input) => {
+      input.onDeferral?.("inactive_access");
+      return "no-active-share";
+    });
 
 		const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
-		expect(response.status).toBe(503);
-		expect(await response.json()).toEqual({
-			error: expect.objectContaining({
-				code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
-				retryable: true,
-			}),
-		});
+		await expectDeferredDelivery(response, "replacement_no_active_share", "inactive_access");
 		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(1);
 	});
 
+  it("excludes malicious private fixture values from the deferred diagnostic", async () => {
+    const share = {
+      ...ACTIVE_SHARE,
+      destinationMemberId: "synthetic-private-destination",
+      grantorMemberId: "synthetic-private-grantor",
+      id: "synthetic-private-share",
+      projectionKind: "profile-name.v0",
+      projectionScope: PROFILE_SCOPE,
+      projectionScopeKey: PROFILE_SCOPE_KEY,
+    };
+    const body = {
+      ...VALID_BODY,
+      continuation: "synthetic-private-cursor",
+      expectedGenerationToken: "c".repeat(43),
+      projectionKind: share.projectionKind,
+      projectionScope: share.projectionScope,
+      records: [{
+        data: {
+          displayName: '<script>synthetic-private</script>{"schema":"forged","reason":"forged"}',
+        },
+        occurredAt: STALE_RECORD.occurredAt,
+        recordKey: "profile-name",
+      }],
+      sourceWorkspaceVersion: "987654321",
+    };
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(share.grantorMemberId);
+    mocks.findActiveHostedVaultShares.mockResolvedValue([share]);
+    mocks.buildHostedVaultShareGenerationToken.mockReturnValue(body.expectedGenerationToken);
+    mocks.replaceHostedVaultShareProjectionSnapshot.mockImplementation(async (input) => {
+      input.onDeferral?.("conditional_update_not_applied");
+      return "no-active-share";
+    });
+    const request = buildRequest(body);
+    request.headers.set("authorization", "Bearer synthetic-private-token");
+    request.headers.set("x-private-fixture", "synthetic-private-header");
+
+    const response = await deliverRoute.POST(request);
+
+    await expectDeferredDelivery(response, "replacement_no_active_share", "conditional_update_not_applied");
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledExactlyOnceWith({
+      ...deliveryEffectControls(),
+      records: body.records,
+      share,
+      sourceWorkspaceVersion: body.sourceWorkspaceVersion,
+    });
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+  });
+
+  it.each([
+    "inactive_access",
+    "source_workspace_changed",
+    "conditional_update_not_applied",
+  ] as const)("logs the first settled store deferral once: %s", async (firstReason) => {
+    const store = await vi.importActual<
+      typeof import("@/src/lib/hosted-vault-share/projection-store")
+    >("@/src/lib/hosted-vault-share/projection-store");
+    setHostedSecureBoxStringTestCodecForTests({
+      decrypt: ({ value }) => value,
+      encrypt: () => "sealed:synthetic",
+    });
+    const queryRaw = vi.fn().mockResolvedValue([{
+      version: BigInt(VALID_BODY.sourceWorkspaceVersion),
+    }]);
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = { $queryRaw: queryRaw, hostedVaultShare: { updateMany } };
+    const transaction = vi.fn(async (callback: (value: typeof tx) => Promise<unknown>) => callback(tx));
+    const prisma = createPrismaClientTestDouble({ $transaction: transaction });
+    const inactiveError = new Error("Synthetic private access failure.");
+    mocks.isHostedRuntimeInactiveAccessError.mockImplementation((error) => error === inactiveError);
+    mocks.findActiveHostedVaultShares.mockResolvedValue([
+      ACTIVE_SHARE,
+      SECOND_SHARE,
+      { ...SECOND_SHARE, id: "share_3", destinationMemberId: "member_third_referee" },
+    ]);
+    const laterReason = firstReason === "inactive_access" ? "source_workspace_changed" : "inactive_access";
+    const reasons = [firstReason, laterReason];
+    mocks.replaceHostedVaultShareProjectionSnapshot.mockImplementation(
+      async (input: Parameters<typeof store.replaceHostedVaultShareProjectionSnapshot>[0]) => {
+        const reason = reasons.shift();
+        if (reason === "inactive_access") {
+          mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockRejectedValueOnce(inactiveError);
+        } else if (reason === "source_workspace_changed") {
+          queryRaw.mockResolvedValueOnce([]);
+        } else if (reason === "conditional_update_not_applied") {
+          updateMany.mockResolvedValueOnce({ count: 0 });
+        }
+        return store.replaceHostedVaultShareProjectionSnapshot({ ...input, prisma });
+      },
+    );
+
+    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+    await expectDeferredDelivery(response, "replacement_no_active_share", firstReason);
+    expect(transaction).toHaveBeenCalledTimes(3);
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(3);
+    await expect(updateMany.mock.results.at(-1)?.value).resolves.toEqual({ count: 1 });
+  });
+
+  it.each(["scope", "delivery"] as const)(
+    "does not log a deferral when a later %s failure takes precedence",
+    async (failure) => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE, SECOND_SHARE]);
+      mocks.replaceHostedVaultShareProjectionSnapshot
+        .mockImplementationOnce(async (input) => {
+          input.onDeferral?.("source_workspace_changed");
+          return "no-active-share";
+        })
+        .mockRejectedValueOnce(failure === "scope"
+          ? new HostedDomainRootEnvelopeUnavailableError({ domain: "ingress" })
+          : new Error("Synthetic delivery failure."));
+
+      const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: {
+          code: failure === "scope"
+            ? HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE
+            : HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
+          message: "Hosted vault-share delivery failed. Retry the request.",
+          retryable: true,
+        },
+      });
+      expect(console.warn).not.toHaveBeenCalled();
+    },
+  );
+
+  it("emits no deferral diagnostic before callback authentication", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code: "SYNTHETIC_UNAUTHORIZED",
+      httpStatus: 401,
+      message: "Synthetic callback rejection.",
+    }));
+
+    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "SYNTHETIC_UNAUTHORIZED",
+        message: "Synthetic callback rejection.",
+        retryable: false,
+      },
+    });
+    expect(console.warn).not.toHaveBeenCalledWith(
+      "Hosted vault-share delivery deferred.",
+      expect.anything(),
+    );
+    expect(mocks.findActiveHostedVaultShares).not.toHaveBeenCalled();
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+  });
+
   it("serializes the maximum destination fanout through the replacement boundary", async () => {
     const shares = Array.from(
-      { length: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX },
+      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE },
       (_, index) => ({
         ...ACTIVE_SHARE,
         destinationMemberId: `member_destination_${index}`,
@@ -731,9 +1019,10 @@ describe("vault-share deliver route", () => {
     expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
       grantorMemberId: "member_grantor",
       projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(
-      HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+      HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
     );
     expect(replacementOrder).toEqual(shares.map(({ id }) => id));
     expect(peakActiveReplacements).toBe(1);
@@ -745,32 +1034,20 @@ describe("vault-share deliver route", () => {
 
 		const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
-		expect(response.status).toBe(503);
-		expect(await response.json()).toEqual({
-			error: expect.objectContaining({
-				code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
-				retryable: true,
-			}),
-		});
+		await expectDeferredDelivery(response, "replacement_no_active_share");
 		expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledTimes(1);
 		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(1);
 	});
 
-  it("retries after replacing active destinations when another becomes inactive", async () => {
+  it.each(["replaced", "no-active-share"])("retries once when a destination becomes inactive (other outcome: %s)", async (otherOutcome) => {
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE, SECOND_SHARE]);
     mocks.replaceHostedVaultShareProjectionSnapshot
       .mockResolvedValueOnce("no-active-share")
-      .mockResolvedValueOnce("replaced");
+      .mockResolvedValueOnce(otherOutcome);
 
     const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: expect.objectContaining({
-        code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
-        retryable: true,
-      }),
-    });
+    await expectDeferredDelivery(response, "replacement_no_active_share");
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(2);
   });
 
@@ -790,6 +1067,14 @@ describe("vault-share deliver route", () => {
         error: { code: HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE },
       });
       expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalledWith(
+        "Hosted vault-share delivery stopped before destination admission.",
+        {
+          errorCode: HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
+          deadlineElapsed: true,
+          requestAborted: false,
+        },
+      );
     } finally {
       consoleError.mockRestore();
     }
@@ -843,6 +1128,48 @@ describe("vault-share deliver route", () => {
     }
   });
 
+  it.each(["deadline", "cancellation"] as const)(
+    "preserves the underlying replacement failure after %s without exposing it in the response",
+    async (stopReason) => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      const nowMs = Date.now();
+      const now = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+      const controller = new AbortController();
+      mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE, SECOND_SHARE]);
+      mocks.replaceHostedVaultShareProjectionSnapshot.mockImplementationOnce(async () => {
+        if (stopReason === "deadline") {
+          now.mockReturnValue(nowMs + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS);
+        } else {
+          controller.abort();
+        }
+        throw new Error("Synthetic transaction failure for member_private_fixture.");
+      });
+
+      const response = await deliverRoute.POST(buildRequest(VALID_BODY, controller.signal));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: {
+          code: HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
+          message: "Hosted vault-share delivery failed. Retry the request.",
+          retryable: true,
+        },
+      });
+      expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(1);
+      expect(consoleError).toHaveBeenCalledWith(
+        "Hosted vault-share delivery to a destination share failed.",
+        {
+          errorCode: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
+          errorMessage: "Synthetic transaction failure for member_<redacted-id>",
+          errorType: "Error",
+          deadlineElapsed: stopReason === "deadline",
+          requestAborted: stopReason === "cancellation",
+        },
+      );
+      expect(JSON.stringify(consoleError.mock.calls)).not.toContain("member_private_fixture");
+    },
+  );
+
 	it("replaces an all-stale offer with an empty snapshot", async () => {
 		const response = await deliverRoute.POST(
 			buildRequest({
@@ -873,17 +1200,26 @@ describe("vault-share deliver route", () => {
       }),
     );
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: expect.objectContaining({
-        code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
-        retryable: true,
-      }),
-    });
+    await expectDeferredDelivery(response, "replacement_no_active_share");
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       ...deliveryEffectControls(),
       records: [],
       share: ACTIVE_SHARE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
+    });
+  });
+
+  it("publishes day 89 on an already-active plain grant without regrant and excludes day 90", async () => {
+    const projectionScope = SLEEP_SCOPE;
+    const share = ACTIVE_SHARE;
+    mocks.findActiveHostedVaultShares.mockResolvedValue([share]);
+    const retained = recentRecord(89);
+    const response = await deliverRoute.POST(buildRequest({
+      ...VALID_BODY, projectionScope, memberTimeZone: "UTC", records: [retained, recentRecord(90)],
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledExactlyOnceWith({
+      ...deliveryEffectControls(), memberTimeZone: "UTC", records: [retained], share,
       sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
   });
@@ -1001,6 +1337,8 @@ describe("vault-share deliver route", () => {
           errorCode: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
           errorMessage: "Hosted ingress domain root envelope is not available for decrypt.",
           errorType: "HostedDomainRootEnvelopeUnavailableError",
+          deadlineElapsed: false,
+          requestAborted: false,
         },
       );
       expect(consoleError).toHaveBeenCalledWith(
@@ -1021,7 +1359,7 @@ describe("vault-share deliver route", () => {
 
     try {
       mocks.findActiveHostedVaultShares.mockResolvedValue(Array.from(
-        { length: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX },
+        { length: HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE },
         (_, index) => ({
           ...ACTIVE_SHARE,
           destinationMemberId: `member_destination_${index}`,
@@ -1050,6 +1388,8 @@ describe("vault-share deliver route", () => {
           errorCode: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
           errorMessage: "synthetic shared KMS provider failure",
           errorType: "Error",
+          deadlineElapsed: false,
+          requestAborted: false,
         },
       );
     } finally {
@@ -1094,6 +1434,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
       grantorMemberId: "member_other",
       projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
     expect(await response.json()).toEqual({ status: "no-active-share" });
   });

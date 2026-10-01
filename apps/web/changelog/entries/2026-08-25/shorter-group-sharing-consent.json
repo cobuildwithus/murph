@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "shorter-group-sharing-consent",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Shorter group sharing consent",
+    "summary": "When a group requests many health permissions, Murph now summarizes them in seven clear categories instead of sending a long item-by-item list.",
+    "details": "The reaction still applies the exact permission set. Narrow offers remain specific, and the review link lets each person inspect or customize every permission before sharing.",
+    "relevanceTags": ["groups", "messaging", "privacy"],
+    "sourcePullRequests": [2298]
+  }
+}

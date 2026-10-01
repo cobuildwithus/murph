@@ -1,9 +1,7 @@
-import { readFileSync } from "node:fs";
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 import type { ProtocolTabExperiment } from "@/src/components/experiments/experiment-detail/protocol-tab";
 import type { ExperimentResultsPublicProjection } from "@/src/lib/health-commons/experiment-projections";
 
@@ -120,35 +118,6 @@ describe("experiment page projections", () => {
     mocks.resultsTabClient.mockClear();
   });
 
-  it("keeps experiment route entrypoints on generated projections instead of the full resolver", () => {
-    const pageSource = readFileSync(
-      new URL("../app/(dashboard)/experiments/[experimentId]/page.tsx", import.meta.url),
-      "utf8",
-    );
-    const layoutSource = readFileSync(
-      new URL("../app/(dashboard)/experiments/[experimentId]/layout.tsx", import.meta.url),
-      "utf8",
-    );
-    const layoutClientSource = readFileSync(
-      new URL("../app/(dashboard)/experiments/[experimentId]/experiment-layout-client.tsx", import.meta.url),
-      "utf8",
-    );
-    const resultsSource = readFileSync(
-      new URL("../app/(dashboard)/experiments/[experimentId]/results/page.tsx", import.meta.url),
-      "utf8",
-    );
-
-    expect(pageSource).toContain("resolveHealthCommonsExperimentProtocolTab");
-    expect(pageSource).not.toContain("resolveHealthCommonsExperimentProtocol(");
-    expect(pageSource).not.toContain("ExperimentDetailClient");
-    expect(layoutSource).toContain("resolveHealthCommonsExperimentShell");
-    expect(layoutSource).not.toContain("resolveHealthCommonsExperimentProtocol");
-    expect(resultsSource).toContain("resolveHealthCommonsExperimentResultsPublic");
-    expect(resultsSource).not.toContain("resolveHealthCommonsExperimentProtocol");
-    expect(layoutClientSource).not.toContain("BrowserVaultProvider");
-    expect(layoutClientSource).not.toContain("resolveBrowserVaultExperimentRun");
-  });
-
   it("renders the authenticated results route from the narrow public projection", async () => {
     await expect(generateResultsMetadata({
       params: Promise.resolve({
@@ -198,12 +167,6 @@ describe("experiment page projections", () => {
       experimentId: "exp:private-run",
     });
     expect(markup).toContain('data-private-run-id="exp:private-run"');
-
-    const privatePageSource = readFileSync(
-      new URL("../app/(dashboard)/experiments/runs/[experimentId]/page.tsx", import.meta.url),
-      "utf8",
-    );
-    expect(privatePageSource).not.toContain("HealthCommons");
   });
 
   it("uses the shell projection for metadata and shared layout props", async () => {
@@ -248,12 +211,7 @@ describe("experiment page projections", () => {
     expect(mocks.hostedStart).not.toHaveBeenCalled();
   });
 
-  it("renders the protocol tab projection with full-detail parity for protocol-only fields", async () => {
-    const fullProtocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
-    if (!fullProtocol) {
-      throw new Error("Expected the full Finnish sauna protocol.");
-    }
-
+  it("renders the protocol tab projection with explicit dose, safety, and signal content", async () => {
     const element = await ExperimentDetailPage({
       params: Promise.resolve({
         experimentId: "murph-finnish-standard-3x-week",
@@ -263,23 +221,26 @@ describe("experiment page projections", () => {
     const experiment = mocks.protocolTab.mock.calls.at(-1)?.[0]
       ?.experiment as ProtocolTabExperiment;
 
-    expect(experiment.baselineDays).toBe(fullProtocol.baselineDays);
-    expect(experiment.durationDays).toBe(fullProtocol.durationDays);
+    expect(experiment.baselineDays).toBe(14);
+    expect(experiment.durationDays).toBe(28);
     expect(experiment.id).toBe("finnish-sauna");
-    expect(experiment.mechanismChain).toEqual(fullProtocol.mechanismChain);
-    expect(experiment.protocol).toEqual(fullProtocol.protocol);
-    expect(experiment.protocolFacts).toEqual(fullProtocol.protocolFacts);
-    expect(experiment.protocolTips).toEqual(fullProtocol.protocolTips);
-    expect(experiment.sessionShape).toEqual(fullProtocol.sessionShape);
-    expect(experiment.whyItWorks).toBe(fullProtocol.whyItWorks);
-    expect(experiment.expectedSignals).toEqual(
-      fullProtocol.expectedSignals.map((signal) => expect.objectContaining({
-        description: signal.description,
-        direction: signal.direction,
-        label: signal.label,
-        protocolProminence: signal.protocolProminence,
-      })),
-    );
+    expect(experiment.mechanismChain).toContainEqual({
+      label: "Recovery",
+      content: "Cooldown restores pressure, temperature, fluid balance, and alertness",
+    });
+    expect(experiment.protocol).toContainEqual(expect.objectContaining({
+      number: 5,
+      detail: "Leave immediately for any stop condition; early exit counts as valid data, not failure.",
+    }));
+    expect(experiment.protocolFacts).toContainEqual({ label: "Frequency", value: "3 sessions per week" });
+    expect(experiment.protocolTips).toContain("No catch-up heat: never stack sessions, raise temperature, or extend duration to make up misses.");
+    expect(experiment.sessionShape?.segments.map((segment) => segment.label)).toEqual([
+      "settle", "sauna 80–100 °C", "cool-down",
+    ]);
+    expect(experiment.whyItWorks).toContain("Cooldown makes dose usable");
+    expect(experiment.expectedSignals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Resting Heart Rate", description: expect.stringContaining("heat") }),
+    ]));
     expect(markup).toContain('data-experiment-id="finnish-sauna"');
     expect(markup).toContain('data-research-href="/experiments/finnish-sauna/research"');
   });

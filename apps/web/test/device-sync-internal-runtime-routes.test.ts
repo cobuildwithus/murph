@@ -1,5 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER as bytesHeader } from "@murphai/device-syncd/hosted-runtime";
+import { jsonOk } from "@/src/lib/device-sync/settings-http";
+
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
@@ -79,6 +82,7 @@ describe("device-sync internal runtime routes", () => {
     const response = await get();
 
     expect(response.status).toBe(405);
+    expect(response.headers.has(bytesHeader)).toBe(false);
     expect(response.headers.get("Allow")).toBe("POST");
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual({
@@ -118,6 +122,7 @@ describe("device-sync internal runtime routes", () => {
       const response = await post(jsonRequest({ requestId: "request_auth_failure" }));
 
       expect(response.status).toBe(401);
+      expect(response.headers.has(bytesHeader)).toBe(false);
       expect(response.headers.get("Cache-Control")).toBe("no-store");
       expect(authorityMock).not.toHaveBeenCalled();
       await expect(response.json()).resolves.toEqual({
@@ -159,6 +164,40 @@ describe("device-sync internal runtime routes", () => {
     });
   });
 
+  it("serializes once with the same jsonOk semantics, ignores request markers and supports old JSON readers", async () => {
+    const payload = { connections: [], generatedAt: "2026-09-08T16:00:00.000Z", userId: "synthetic-雪-🧪" };
+    const toJSON = vi.fn(() => payload);
+    mocks.readHostedDeviceSyncRuntimeState.mockResolvedValueOnce({ toJSON });
+    const request = jsonRequest({ requestId: "synthetic_request" });
+    request.headers.set(bytesHeader, "1");
+    const clone = vi.spyOn(Response.prototype, "clone");
+    const response = await snapshotRoute.POST(request);
+    expect(toJSON).toHaveBeenCalledTimes(1);
+    expect(clone).not.toHaveBeenCalled();
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(request, {
+      maxBodyBytes: 256 * 1024,
+    });
+    const legacyResponse = jsonOk(payload);
+    expect(response.status).toBe(legacyResponse.status);
+    const headers = new Headers(response.headers);
+    headers.delete(bytesHeader);
+    expect([...headers]).toEqual([...legacyResponse.headers]);
+    expect(response.headers.get(bytesHeader)).toBe(String(new TextEncoder().encode(JSON.stringify(payload)).byteLength));
+    // An old consumer reads exactly the same JSON and need not know the marker.
+    await expect(response.json()).resolves.toEqual(await legacyResponse.json());
+    clone.mockRestore();
+  });
+
+  it("never marks an authorized snapshot producer failure as successful output", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.readHostedDeviceSyncRuntimeState.mockRejectedValueOnce(new Error("Synthetic read failure"));
+    const response = await snapshotRoute.POST(jsonRequest({}));
+    expect(response.status).toBe(500);
+    expect(response.headers.has(bytesHeader)).toBe(false);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    error.mockRestore();
+  });
+
   it("delegates dirty-pending POST with the original request and trusted user id", async () => {
     const request = jsonRequest({ requestId: "request_dirty_pending" });
 
@@ -166,6 +205,7 @@ describe("device-sync internal runtime routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.has(bytesHeader)).toBe(false);
     expect(mocks.readHostedDeviceSyncPendingDirtyState).toHaveBeenCalledWith({
       request,
       trustedUserId: "member_runtime_1",
@@ -183,6 +223,7 @@ describe("device-sync internal runtime routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.has(bytesHeader)).toBe(false);
     expect(mocks.ackHostedDeviceSyncDirtyStateProcessed).toHaveBeenCalledWith({
       request,
       trustedUserId: "member_runtime_1",

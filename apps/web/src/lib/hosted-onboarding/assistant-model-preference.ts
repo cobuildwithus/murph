@@ -5,12 +5,17 @@ import {
   type Prisma,
 } from "@prisma/client";
 import {
+  HOSTED_ASSISTANT_ASTRA_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
+  HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
+  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
   HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_VENICE_PROVIDER,
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
@@ -37,7 +42,10 @@ import {
   parseHostedBillingPlanCode,
   parseHostedFamilyPlanCode,
 } from "./billing-plans";
-import { hasActiveHostedMemberAccess } from "./member-access";
+import {
+  hasActiveHostedMemberAccess,
+  type HostedMemberPersonAccessState,
+} from "./member-access";
 import { hostedOnboardingError } from "./errors";
 import {
   lockHostedMemberRow,
@@ -62,6 +70,19 @@ export function resolveAvailableHostedAssistantProvider(
       && isHostedVeniceAssistantEnabled(source)
     ? HOSTED_ASSISTANT_VENICE_PROVIDER
     : HOSTED_ASSISTANT_DEFAULT_PROVIDER;
+}
+
+export function resolveHostedMemberAssistantProvider(
+  member: HostedMemberPersonAccessState & {
+    assistantProviderPreference: string | null;
+    threadContainer?: object | null;
+  },
+): HostedAssistantProvider {
+  return resolveAvailableHostedAssistantProvider(
+    isHostedPersonalAssistantConfigurationAvailable(member)
+      ? parseHostedAssistantProviderOverride(member.assistantProviderPreference)
+      : null,
+  );
 }
 
 export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
@@ -90,6 +111,7 @@ export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
     },
   },
   billingStatus: true,
+  createdAt: true,
   inferenceConnection: {
     select: {
       contextWindowTokens: true,
@@ -139,6 +161,7 @@ export interface HostedMemberAssistantModelResolution {
   dormantSolPreference: boolean;
   hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantPriorityUntil?: string;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   model: HostedAssistantProductModel;
@@ -201,7 +224,16 @@ export async function readHostedMemberAssistantModelPreference(input: {
 }): Promise<HostedMemberAssistantModelResolution> {
   const member = await readHostedMemberAssistantModelState(input);
 
-  return resolveHostedMemberAssistantModel(member);
+  return {
+    ...resolveHostedMemberAssistantModel(member),
+    ...(member?.threadContainer === null && member.createdAt
+      ? {
+          hostedAssistantPriorityUntil: new Date(
+            member.createdAt.getTime() + 86_400_000,
+          ).toISOString(),
+        }
+      : {}),
+  };
 }
 
 export async function updateHostedMemberAssistantModelPreferenceTx(input: {
@@ -272,17 +304,16 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
       message: "Venice is not available for this Murph deployment.",
     });
   }
-  if (input.model === HOSTED_ASSISTANT_SOL_MODEL && !current.solAvailable) {
-    throw hostedOnboardingError({
-      code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
-      httpStatus: 403,
-      message: "GPT-5.6 Sol requires an active paid Edge or Max plan.",
-    });
-  }
+  assertHostedAssistantModelSelection({
+    current,
+    model: input.model,
+    provider: input.provider,
+    storedModel: parseHostedAssistantModelOverride(member.assistantModelPreference),
+  });
 
-  const defaultModel = isThreadContainerMember
+  const defaultModel = (input.provider ?? current.provider) === HOSTED_ASSISTANT_VENICE_PROVIDER
     ? HOSTED_ASSISTANT_SOL_MODEL
-    : HOSTED_ASSISTANT_TERRA_MODEL;
+    : HOSTED_ASSISTANT_DEFAULT_MODEL;
   const nextModelPreference = input.model === undefined
     ? member.assistantModelPreference
     : input.model === defaultModel
@@ -360,6 +391,71 @@ async function readHostedMemberAssistantModelState(input: {
   });
 }
 
+function assertHostedAssistantModelSelection(input: {
+  current: HostedMemberAssistantModelResolution;
+  model: HostedAssistantProductModel | undefined;
+  provider: HostedAssistantProvider | undefined;
+  storedModel: HostedAssistantProductModel | null;
+}): void {
+  if (input.model === HOSTED_ASSISTANT_SOL_MODEL && !input.current.solAvailable) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
+      httpStatus: 403,
+      message: "GPT-5.6 Sol requires an active paid Edge or Max plan.",
+    });
+  }
+  if (input.model === HOSTED_ASSISTANT_ASTRA_MODEL
+      && !input.current.availableModels.includes(HOSTED_ASSISTANT_ASTRA_MODEL)) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE",
+      httpStatus: 403,
+      message: "GPT-6 Astra requires an active paid Edge or Max plan.",
+    });
+  }
+  const selectedModel = input.model ?? input.storedModel;
+  if ((selectedModel === HOSTED_ASSISTANT_GPT_61_SOL_MODEL
+      || selectedModel === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
+      || selectedModel === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL)
+      && (input.provider ?? input.current.provider) !== HOSTED_ASSISTANT_DEFAULT_PROVIDER) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_MODEL_REQUIRES_OPENAI",
+      httpStatus: 400,
+      message: "Choose OpenAI to use GPT-6.1 Sol, GPT-6 Sol, or GPT-6 Luna.",
+    });
+  }
+  if ((input.model ?? input.current.model) === HOSTED_ASSISTANT_ASTRA_MODEL
+      && (input.provider ?? input.current.provider) !== HOSTED_ASSISTANT_DEFAULT_PROVIDER) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_MODEL_ASTRA_REQUIRES_OPENAI",
+      httpStatus: 400,
+      message: "Choose OpenAI to use GPT-6 Astra.",
+    });
+  }
+}
+
+function resolveEffectiveHostedAssistantModel(input: {
+  astraAvailable: boolean;
+  provider: HostedAssistantProvider;
+  solAvailable: boolean;
+  storedModel: HostedAssistantProductModel | null;
+}): HostedAssistantProductModel {
+  const defaultModel = input.provider === HOSTED_ASSISTANT_VENICE_PROVIDER
+    ? HOSTED_ASSISTANT_SOL_MODEL : HOSTED_ASSISTANT_DEFAULT_MODEL;
+  if (input.storedModel !== null
+      && input.provider === HOSTED_ASSISTANT_VENICE_PROVIDER
+      && !HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[input.storedModel]) {
+    return defaultModel;
+  }
+  if (input.storedModel === HOSTED_ASSISTANT_ASTRA_MODEL
+      && (!input.astraAvailable || input.provider !== HOSTED_ASSISTANT_DEFAULT_PROVIDER)) {
+    return defaultModel;
+  }
+  if (input.storedModel === HOSTED_ASSISTANT_SOL_MODEL && !input.solAvailable) {
+    return defaultModel;
+  }
+  return input.storedModel ?? defaultModel;
+}
+
 export function resolveHostedMemberAssistantModel(
   member: HostedMemberAssistantModelState | null,
 ): HostedMemberAssistantModelResolution {
@@ -372,7 +468,7 @@ export function resolveHostedMemberAssistantModel(
       customInferenceReverificationRequired: false,
       customInferenceSelected: false,
       dormantSolPreference: false,
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
       provider: HOSTED_ASSISTANT_DEFAULT_PROVIDER,
       reasoningEffort: HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
       solAvailable: false,
@@ -414,6 +510,7 @@ export function resolveHostedMemberAssistantModel(
     isThreadContainerMember,
     suspendedAt: member.suspendedAt,
   });
+  const astraAvailable = !isThreadContainerMember && solAvailable;
   const storedModelPreference = configurationAvailable
     ? isThreadContainerMember
       ? isHostedAssistantProductModel(member.assistantModelPreference)
@@ -428,11 +525,13 @@ export function resolveHostedMemberAssistantModel(
     !isThreadContainerMember
     && storedModelPreference === HOSTED_ASSISTANT_SOL_MODEL
     && !solAvailable;
-  const model = isThreadContainerMember
-    ? storedModelPreference ?? HOSTED_ASSISTANT_SOL_MODEL
-    : dormantSolPreference
-      ? HOSTED_ASSISTANT_TERRA_MODEL
-      : storedModelPreference ?? HOSTED_ASSISTANT_TERRA_MODEL;
+  const provider = resolveHostedMemberAssistantProvider(member);
+  const model = resolveEffectiveHostedAssistantModel({
+    astraAvailable,
+    provider,
+    solAvailable,
+    storedModel: storedModelPreference,
+  });
   const storedReasoningEffort = configurationAvailable &&
       !isThreadContainerMember &&
       isHostedAssistantReasoningEffort(member.assistantReasoningEffortPreference)
@@ -441,12 +540,12 @@ export function resolveHostedMemberAssistantModel(
   const reasoningEffortOverride = parseHostedAssistantReasoningEffortOverride(
     storedReasoningEffort,
   );
-  const provider = resolveAvailableHostedAssistantProvider(storedProviderOverride);
 
   return {
     availableModels: configurationAvailable
       ? HOSTED_ASSISTANT_PRODUCT_MODELS.filter(
-          (candidate) => candidate !== HOSTED_ASSISTANT_SOL_MODEL || solAvailable,
+          (candidate) => (candidate !== HOSTED_ASSISTANT_SOL_MODEL || solAvailable)
+            && (candidate !== HOSTED_ASSISTANT_ASTRA_MODEL || astraAvailable),
         )
       : [],
     availableProviders: configurationAvailable
@@ -468,9 +567,7 @@ export function resolveHostedMemberAssistantModel(
     ...(customInferenceOverride
       ? { hostedAssistantCustomInferenceOverride: customInferenceOverride }
       : {}),
-    ...(model !== HOSTED_ASSISTANT_TERRA_MODEL
-      ? { hostedAssistantModelOverride: model }
-      : {}),
+    hostedAssistantModelOverride: model,
     ...(storedProviderOverride
       ? { hostedAssistantProviderOverride: storedProviderOverride }
       : {}),
@@ -485,9 +582,9 @@ export function resolveHostedMemberAssistantModel(
 }
 
 function isHostedPersonalAssistantConfigurationAvailable(
-  member: HostedMemberAssistantModelState,
+  member: HostedMemberPersonAccessState & { threadContainer?: object | null },
 ): boolean {
-  if (member.threadContainer !== null) {
+  if (member.threadContainer) {
     return false;
   }
 

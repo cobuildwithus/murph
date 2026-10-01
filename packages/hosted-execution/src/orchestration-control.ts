@@ -1,10 +1,27 @@
 import {
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
-  type HostedMailboxKind,
   type HostedMailboxLane,
-  type HostedMailboxLaneLag,
   type HostedWorkspaceInvocationProcessingMode,
-} from "./runtime-control.ts";
+} from "./runtime-control-values.ts";
+import type { HostedMailboxKind } from "./runtime-control.ts";
+export { isHostedMailboxLane } from "./runtime-control-values.ts";
+
+import type {
+  HostedRuntimeReconciliationBlockedReason,
+  HostedRuntimeSystemMailboxFrontierClass,
+} from "./reconciliation-facts-wire.ts";
+
+export {
+  HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
+  HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
+  projectHostedRuntimeReconciliationFactsWireResponse,
+  type HostedRuntimeReconciliationBlockedReason,
+  type HostedRuntimeReconciliationFacts,
+  type HostedRuntimeReconciliationFactsBlocked,
+  type HostedRuntimeReconciliationFactsWireResponse,
+  type HostedRuntimeReconciliationFactsWorkspace,
+  type HostedRuntimeSystemMailboxFrontierClass,
+} from "./reconciliation-facts-wire.ts";
 
 export const HOSTED_USER_RUNTIME_WORKFLOW_TYPE =
   "hostedUserRuntimeWorkflow" as const;
@@ -22,6 +39,7 @@ export const HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON =
 
 export const HOSTED_RUNTIME_SIGNAL_KINDS = [
   "mailbox_appended",
+  "runtime_owner_released",
   "runtime_recheck_requested",
   "runtime_wake_requested",
 ] as const;
@@ -36,6 +54,10 @@ export type HostedRuntimeSignal =
       laneSeq: string;
     }
   | {
+      kind: "runtime_owner_released";
+      runtimeAttemptId: string;
+    }
+  | {
       kind: "runtime_recheck_requested";
     }
   | {
@@ -47,18 +69,6 @@ export interface HostedRuntimeMailboxPointer {
   lane: HostedMailboxLane;
   laneSeq: string;
 }
-
-export const HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS = [
-  "ai_usage_denied",
-  "ai_usage_gate_unavailable",
-  "automation_engagement_paused",
-  "health_data_consent_withdrawn",
-  "hosted_runtime_not_configured",
-  "user_not_active",
-] as const;
-
-export type HostedRuntimeReconciliationBlockedReason =
-  (typeof HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS)[number];
 
 export interface HostedRuntimeReconciliationFactsRequest {
   userId: string;
@@ -72,12 +82,19 @@ export type HostedRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMod
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
+  "environment-interview.completed",
+  "health.daily-metric.reported",
+  "journal.group-fact.recorded",
+  "member.channels.updated",
   "runtime.browser-vault-refresh-requested",
   "runtime.maintenance-requested",
 ] as const satisfies readonly HostedMailboxKind[];
 
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES =
-  ["assistant.notification.requested:group-join:"] as const;
+  [
+    "assistant.notification.requested:device-delivery-stalled:v1:",
+    "assistant.notification.requested:group-join:",
+  ] as const;
 
 export function isHostedSystemMailboxModelFreeNotification(input: {
   dedupeKey: string | null | undefined;
@@ -93,37 +110,33 @@ export function isHostedSystemMailboxModelFreeNotification(input: {
   );
 }
 
-export const HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES = [
-  "default_owned",
-  "model_free",
-] as const;
+export function classifyHostedSystemMailboxExecutionClass(input: {
+  dedupeKey: string | null | undefined;
+  kind: string;
+}): HostedRuntimeSystemMailboxFrontierClass {
+  if (
+    isHostedSystemMailboxModelFreeNotification({
+      dedupeKey: input.dedupeKey,
+      kind: input.kind,
+    })
+  ) {
+    return "model_free";
+  }
 
-export type HostedRuntimeSystemMailboxFrontierClass =
-  (typeof HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES)[number];
-
-export interface HostedRuntimeReconciliationFactsWorkspace {
-  hostedMailboxSystemHandledThroughSeq?: string;
-  inboxMediaRetentionWakeAt: string | null;
-  nextWakeAt: string | null;
-  nextWakeReason: string | null;
-  systemMailboxFrontier?: HostedRuntimeSystemMailboxFrontierClass | null;
-  version: string | null;
-}
-
-export interface HostedRuntimeReconciliationFactsBlocked {
-  reason: HostedRuntimeReconciliationBlockedReason;
-  retryAt: string | null;
-}
-
-export interface HostedRuntimeReconciliationFacts {
-  blocked: HostedRuntimeReconciliationFactsBlocked | null;
-  environmentInterviewPending: boolean;
-  mailboxLag: HostedMailboxLaneLag[];
-  workspace: HostedRuntimeReconciliationFactsWorkspace | null;
+  return HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS.some((kind) =>
+    kind === input.kind && kind !== "assistant.notification.requested"
+  )
+    ? "model_free"
+    : "default_owned";
 }
 
 export interface HostedRuntimeEnsureProcessingRequest {
+  /** Ephemeral reservation only; SDP never enters an invocation job. */
+  voiceCallId?: string;
+  admission?: import("./runtime-owner.ts").HostedRuntimeOwnerResponse;
   assistantExecutionBlocked?: true;
+  conversationWorkPending?: true;
+  mailboxWakeHighWater?: import("./runtime-control.ts").HostedMailboxWakeHighWater;
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
 }

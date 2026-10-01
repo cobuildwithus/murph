@@ -1,0 +1,109 @@
+.astra {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 66% 6%, #d6eaf0a6, transparent 65%),
+    linear-gradient(115deg, #edf2f1 0%, #d6e3e7 32%, #9dbcca 67%, #5e849e 100%);
+}
+
+.aurora,
+.stars {
+  position: absolute;
+  inset: 0;
+}
+
+.aurora {
+  inset: -20%;
+  background:
+    radial-gradient(ellipse at 70% 85%, #24466055, transparent 48%),
+    radial-gradient(ellipse at 55% 30%, #e2f4eb77, transparent 50%);
+  animation: aurora-drift 18s ease-in-out infinite alternate;
+}
+
+.galaxyPlane {
+  position: absolute;
+  left: 71%;
+  top: 60%;
+  width: 66%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%) rotate(-16deg) scaleY(0.45);
+}
+
+.galaxy {
+  position: absolute;
+  inset: 0;
+  transform-origin: center;
+  animation: galaxy-rotation 240s linear infinite;
+}
+
+@keyframes galaxy-rotation {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.star {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+}
+
+.starlight {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #f6fcff;
+  opacity: 0.48;
+  animation: distant-starlight 13s ease-in-out infinite alternate;
+}
+
+.star[data-depth="1"] {
+  width: 1.8px;
+  height: 1.8px;
+}
+
+.star[data-depth="1"] .starlight {
+  box-shadow: 0 0 3px #ecfaff66;
+  animation: starlight 8s ease-in-out infinite alternate;
+}
+
+.star[data-depth="2"] {
+  width: 2.6px;
+  height: 2.6px;
+}
+
+.star[data-depth="2"] .starlight {
+  background: #fffcf0;
+  box-shadow: 0 0 4px #fff9de99, 0 0 9px #e1f5ff55;
+  animation: starlight 6s ease-in-out infinite alternate;
+}
+
+@keyframes aurora-drift {
+  from { transform: translate(-2%, 1%); }
+  to { transform: translate(3%, -2%); }
+}
+
+@keyframes distant-starlight {
+  from { opacity: 0.25; transform: translateY(1px); }
+  to { opacity: 0.65; transform: translateY(-1px); }
+}
+
+@keyframes starlight {
+  from { opacity: 0.45; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(-2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .astra *,
+  .astra .star .starlight {
+    animation: none;
+    transition: none;
+  }
+
+  .starlight {
+    opacity: 0.7;
+  }
+}

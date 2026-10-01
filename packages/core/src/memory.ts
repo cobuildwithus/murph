@@ -45,10 +45,42 @@ export type {
 } from "@murphai/contracts";
 
 export interface UpdateMemoryInput {
+  expectedUpdatedAt?: string;
   now?: Date;
   recordId: string;
   section?: MemorySection | null;
   text: string;
+}
+
+export interface ForgetMemoryInput extends ForgetMemoryRecordInput {
+  expectedUpdatedAt?: string;
+}
+
+export class MemoryRecordNotFoundError extends Error {
+  readonly code = "MEMORY_RECORD_NOT_FOUND";
+
+  constructor() {
+    super("The requested canonical memory record does not exist.");
+    this.name = "MemoryRecordNotFoundError";
+  }
+}
+
+export class MemoryRecordConflictError extends Error {
+  readonly code = "MEMORY_RECORD_CONFLICT";
+
+  constructor() {
+    super("The canonical memory record changed after it was read.");
+    this.name = "MemoryRecordConflictError";
+  }
+}
+
+export class MemoryPersistenceError extends Error {
+  readonly code = "MEMORY_PERSISTENCE_INVALID";
+
+  constructor() {
+    super("The canonical memory write could not be verified after it completed.");
+    this.name = "MemoryPersistenceError";
+  }
 }
 
 export function resolveMemoryDocumentPath(vaultRoot: string): string {
@@ -125,6 +157,7 @@ export async function setMemoryDisplayName(
         record: next.record,
       };
     }
+    const markdown = renderMemoryDocument({ document: next.document });
     await writeCanonicalMarkdownDocument({
       vaultRoot,
       operationType: "memory_upsert",
@@ -134,7 +167,7 @@ export async function setMemoryDisplayName(
         relativePath: memoryDocumentRelativePath,
         created: !snapshot.exists,
       }),
-      markdown: renderMemoryDocument({ document: next.document }),
+      markdown,
       audit: {
         action: "memory_upsert",
         commandName: "core.setMemoryDisplayName",
@@ -142,7 +175,11 @@ export async function setMemoryDisplayName(
         targetIds: [next.record.id],
       },
     });
-    const persisted = await readPersistedMemoryRecord(vaultRoot, next.record.id, "upsert");
+    const persisted = await readPersistedMemoryRecord(
+      vaultRoot,
+      next.record.id,
+      markdown,
+    );
 
     return {
       created: next.created,
@@ -175,26 +212,29 @@ export async function updateMemory(
         const snapshot = await readMemoryDocument(lockedVaultRoot);
         const existing = snapshot.records.find((record) => record.id === input.recordId) ?? null;
         if (existing === null) {
-          throw new Error(`Memory record "${input.recordId}" does not exist.`);
+          throw new MemoryRecordNotFoundError();
         }
+        assertExpectedMemoryUpdatedAt(existing, input.expectedUpdatedAt);
 
         const next = upsertMemoryRecord(snapshot, {
-          now: input.now,
+          now: resolveNextMemoryUpdatedAt(existing.updatedAt, input.now),
           recordId: input.recordId,
           section: input.section ?? existing.section,
           text: input.text,
         });
+        const markdown = renderMemoryDocument({ document: next.document });
         await stageMarkdownDocumentWrite(
           batch,
           resolveSingletonMarkdownDocumentTarget({
             relativePath: memoryDocumentRelativePath,
             created: !snapshot.exists,
           }),
-          renderMemoryDocument({ document: next.document }),
+          markdown,
         );
 
         return {
           result: {
+            expectedMarkdown: markdown,
             recordId: next.record.id,
           },
           changes: [
@@ -206,7 +246,11 @@ export async function updateMemory(
         };
       },
     });
-    const persisted = await readPersistedMemoryRecord(vaultRoot, result.result.recordId, "update");
+    const persisted = await readPersistedMemoryRecord(
+      vaultRoot,
+      result.result.recordId,
+      result.result.expectedMarkdown,
+    );
 
     return {
       document: persisted.document,
@@ -217,7 +261,7 @@ export async function updateMemory(
 
 export async function forgetMemory(
   vaultRoot: string,
-  input: ForgetMemoryRecordInput,
+  input: ForgetMemoryInput,
 ): Promise<{
   document: MemoryDocumentSnapshot;
   existed: boolean;
@@ -225,6 +269,10 @@ export async function forgetMemory(
 }> {
   return await withLockedMemoryDocument(vaultRoot, async () => {
     const snapshot = await readMemoryDocument(vaultRoot);
+    const existing = snapshot.records.find((record) => record.id === input.recordId) ?? null;
+    if (existing !== null) {
+      assertExpectedMemoryUpdatedAt(existing, input.expectedUpdatedAt);
+    }
     const next = forgetMemoryRecord(snapshot, input);
     if (next.record === null) {
       return {
@@ -233,7 +281,6 @@ export async function forgetMemory(
         record: null,
       };
     }
-
     const markdown = renderMemoryDocument({ document: next.document });
     await writeCanonicalMarkdownDocument({
       vaultRoot,
@@ -251,7 +298,7 @@ export async function forgetMemory(
         targetIds: [next.record.id],
       },
     });
-    const nextSnapshot = await readMemoryDocument(vaultRoot);
+    const nextSnapshot = await readPersistedMemoryDocument(vaultRoot, markdown);
 
     return {
       document: nextSnapshot,
@@ -259,6 +306,30 @@ export async function forgetMemory(
       record: next.record,
     };
   });
+}
+
+function assertExpectedMemoryUpdatedAt(
+  record: MemoryRecord,
+  expectedUpdatedAt: string | undefined,
+): void {
+  if (
+    expectedUpdatedAt !== undefined
+    && expectedUpdatedAt !== record.updatedAt
+  ) {
+    throw new MemoryRecordConflictError();
+  }
+}
+
+function resolveNextMemoryUpdatedAt(
+  currentUpdatedAt: string,
+  requestedNow: Date | undefined,
+): Date {
+  const next = requestedNow ?? new Date();
+  const currentTime = Date.parse(currentUpdatedAt);
+  if (!Number.isFinite(currentTime) || next.getTime() > currentTime) {
+    return next;
+  }
+  return new Date(currentTime + 1);
 }
 
 export async function buildMemoryCorePromptBlock(vaultRoot: string): Promise<string | null> {
@@ -279,21 +350,37 @@ async function withLockedMemoryDocument<TResult>(
 async function readPersistedMemoryRecord(
   vaultRoot: string,
   recordId: string,
-  operation: "update" | "upsert",
+  expectedMarkdown: string,
 ): Promise<{
   document: MemoryDocumentSnapshot;
   record: MemoryRecord;
 }> {
-  const document = await readMemoryDocument(vaultRoot);
+  const document = await readPersistedMemoryDocument(vaultRoot, expectedMarkdown);
   const record = document.records.find((entry) => entry.id === recordId) ?? null;
   if (record === null) {
-    throw new Error(`Memory record "${recordId}" was not found after ${operation}.`);
+    throw new MemoryPersistenceError();
   }
 
   return {
     document,
     record,
   };
+}
+
+async function readPersistedMemoryDocument(
+  vaultRoot: string,
+  expectedMarkdown: string,
+): Promise<MemoryDocumentSnapshot> {
+  let document: MemoryDocumentSnapshot;
+  try {
+    document = await readMemoryDocument(vaultRoot);
+  } catch {
+    throw new MemoryPersistenceError();
+  }
+  if (document.markdown !== expectedMarkdown) {
+    throw new MemoryPersistenceError();
+  }
+  return document;
 }
 
 async function persistUpsertMemory(
@@ -306,6 +393,7 @@ async function persistUpsertMemory(
   record: MemoryRecord;
 }> {
   const next = upsertMemoryRecord(snapshot, input);
+  const markdown = renderMemoryDocument({ document: next.document });
   await writeCanonicalMarkdownDocument({
     vaultRoot,
     operationType: "memory_upsert",
@@ -314,7 +402,7 @@ async function persistUpsertMemory(
       relativePath: memoryDocumentRelativePath,
       created: !snapshot.exists,
     }),
-    markdown: renderMemoryDocument({ document: next.document }),
+    markdown,
     audit: {
       action: "memory_upsert",
       commandName: "core.upsertMemory",
@@ -322,7 +410,11 @@ async function persistUpsertMemory(
       targetIds: [next.record.id],
     },
   });
-  const persisted = await readPersistedMemoryRecord(vaultRoot, next.record.id, "upsert");
+  const persisted = await readPersistedMemoryRecord(
+    vaultRoot,
+    next.record.id,
+    markdown,
+  );
 
   return {
     created: next.created,

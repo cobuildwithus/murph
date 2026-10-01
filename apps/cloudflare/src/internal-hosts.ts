@@ -2,6 +2,7 @@ export const CLOUDFLARE_HOSTED_RUNTIME_HOSTS = {
   artifactStore: "artifacts.worker",
   browserVaultReplicaStore: "browser-vault.worker",
   effectsPort: "results.worker",
+  mediaStore: "media.worker",
   runnerControl: "runner-control.worker",
   webControlPlane: "web-control.worker",
   workspaceSnapshotStore: "workspace-snapshots.worker",
@@ -11,6 +12,7 @@ export const CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS = {
   artifactStore: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore}`,
   browserVaultReplicaStore: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore}`,
   effectsPort: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort}`,
+  mediaStore: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.mediaStore}`,
   runnerControl: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl}`,
   webControlPlane: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane}`,
   workspaceSnapshotStore: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore}`,
@@ -39,6 +41,10 @@ export const CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT =
 export const CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH = "/v1/container-fatal";
 export const CLOUDFLARE_HOSTED_CONTAINER_FATAL_ENDPOINT =
   `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.runnerControl}${CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH}`;
+export const CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH =
+  "/v1/runtime-completion";
+export const CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT =
+  `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.runnerControl}${CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH}`;
 
 export const HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER =
   "x-hosted-execution-internal-host";

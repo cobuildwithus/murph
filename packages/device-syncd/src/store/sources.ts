@@ -618,7 +618,15 @@ export function prepareConnectionSourceWriteInTransaction(
     "connectionId",
     SOURCE_INSTANCE_KEY_MAX_LENGTH,
   );
-  const connectionProvider = readConnectionProvider(database, connectionId);
+  const connection = database.prepare(
+    "select provider, hosted_connection_id from device_connection where id = ?",
+  ).get(connectionId) as { provider?: unknown; hosted_connection_id?: unknown } | undefined;
+  const connectionProvider = connection
+    ? expectString(connection.provider, "device_connection.provider")
+    : null;
+  const hostedConnectionId = connection
+    ? expectNullableString(connection.hosted_connection_id, "device_connection.hosted_connection_id")
+    : null;
   const canonicalProviderSlug = connectionProvider === "junction"
     ? canonicalizeJunctionProviderSlug(input.sourceProviderSlug)
     : null;
@@ -639,6 +647,8 @@ export function prepareConnectionSourceWriteInTransaction(
         readJunctionSourceIdentityCandidates(database, requested),
       )
     : null;
+  // Hosted source keys belong to the control plane. The local account id is
+  // recreated after a cold restore and must never mint a replacement identity.
   const ownsCanonicalNewIdentity = !established
     && !exactExisting
     && canonicalProviderSlug !== null
@@ -656,7 +666,9 @@ export function prepareConnectionSourceWriteInTransaction(
     : ownsCanonicalNewIdentity
       ? {
           ...input,
-          sourceInstanceKey: canonicalSourceInstanceKey,
+          sourceInstanceKey: hostedConnectionId === null
+            ? canonicalSourceInstanceKey
+            : input.sourceInstanceKey,
           sourceProviderSlug: canonicalProviderSlug,
         }
       : input;

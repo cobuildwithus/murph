@@ -32,6 +32,11 @@ export type AssistantMaintenanceProfile =
   | 'habitat-voice'
   | 'group-room-model'
 
+export interface AssistantMaintenanceConversationEvidence {
+  prompt: string
+  status: 'available' | 'empty' | 'unavailable' | 'not-applicable'
+}
+
 interface AssistantMaintenanceEvidenceLimits {
   heading: string
   includeDurableGroupReactions: boolean
@@ -74,7 +79,7 @@ const GROUP_ROOM_MODEL_EVIDENCE_LIMITS: AssistantMaintenanceEvidenceLimits = {
 }
 
 const ASSISTANT_MAINTENANCE_EVIDENCE_EMPTY_BODY =
-  'No committed user or assistant conversation messages were found in this window. Do not write any new memory this run.'
+  'No committed user or assistant conversation messages were found in this window. Do not add facts; only maintain existing records under the authorized faithful-compaction rules.'
 const ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_EMPTY_BODY =
   'No committed group conversation or reaction entries were found in this window. Do not create or update the group room model this run.'
 const ASSISTANT_GROUP_REACTION_TARGET_TEXT_MAX_CODE_POINTS = 1_000
@@ -98,25 +103,41 @@ export async function buildAssistantMaintenanceConversationEvidence(input: {
   profile?: AssistantMaintenanceProfile
   vault: string
 }): Promise<string> {
+  return (await readAssistantMaintenanceConversationEvidence(input)).prompt
+}
+
+export async function readAssistantMaintenanceConversationEvidence(input: {
+  now: Date
+  profile?: AssistantMaintenanceProfile
+  vault: string
+}): Promise<AssistantMaintenanceConversationEvidence> {
   const profile = input.profile ?? 'member-memory'
   if (profile === 'habitat-voice') {
-    return [
-      '## Environment voice evidence boundary',
-      '',
-      'Use only the transcript embedded in the maintenance instructions. Do not read conversation history.',
-    ].join('\n')
+    return {
+      status: 'not-applicable',
+      prompt: [
+        '## Environment voice evidence boundary',
+        '',
+        'Use only the transcript embedded in the maintenance instructions. Do not read conversation history.',
+      ].join('\n'),
+    }
   }
   const limits = resolveAssistantMaintenanceEvidenceLimits(profile)
   const since = input.now.getTime() - ASSISTANT_MAINTENANCE_EVIDENCE_WINDOW_MS
   let candidates: AssistantMaintenanceEvidenceMessage[]
+  let collectionFailed = false
   try {
     candidates = await collectAssistantMaintenanceEvidenceMessages({
+      onReadFailure: () => {
+        collectionFailed = true
+      },
       limits,
       since,
       until: input.now.getTime(),
       vault: input.vault,
     })
   } catch {
+    collectionFailed = true
     candidates = []
   }
 
@@ -124,8 +145,13 @@ export async function buildAssistantMaintenanceConversationEvidence(input: {
     candidates,
     limits,
   )
+  const status = collectionFailed
+    ? 'unavailable'
+    : selected.length === 0 ? 'empty' : 'available'
   if (profile === 'member-memory') {
-    const body = selected.length === 0
+    const body = collectionFailed
+      ? 'Conversation evidence collection failed. Newer corrections or extensions may be missing. Make no memory mutations this pass.'
+      : selected.length === 0
       ? ASSISTANT_MAINTENANCE_EVIDENCE_EMPTY_BODY
       : [
           `Engine-selected committed conversation messages (newest kept, up to ${limits.maxEntries} messages / ${limits.maxTotalBytes} bytes).`,
@@ -134,7 +160,7 @@ export async function buildAssistantMaintenanceConversationEvidence(input: {
             (message) => `- [${message.createdAt}] ${message.kind}: ${message.text}`,
           ),
         ].join('\n')
-    return `${limits.heading}\n\n${body}`
+    return { prompt: `${limits.heading}\n\n${body}`, status }
   }
 
   const body = selected.length === 0
@@ -150,11 +176,12 @@ export async function buildAssistantMaintenanceConversationEvidence(input: {
         ...selected.map((message) => JSON.stringify(message)),
       ].join('\n')
 
-  return `${limits.heading}\n\n${body}`
+  return { prompt: `${limits.heading}\n\n${body}`, status }
 }
 
 async function collectAssistantMaintenanceEvidenceMessages(input: {
   limits: AssistantMaintenanceEvidenceLimits
+  onReadFailure: () => void
   since: number
   until: number
   vault: string
@@ -194,6 +221,7 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
         { maxBytes: input.limits.transcriptTailBytes },
       )
     } catch {
+      input.onReadFailure()
       continue
     }
 
@@ -229,6 +257,7 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
 
   if (input.limits.includeDurableGroupReactions) {
     messages.push(...await collectAssistantDurableGroupReactionEvidence({
+      onReadFailure: input.onReadFailure,
       maxEntryBytes: input.limits.maxEntryBytes,
       since: input.since,
       transcriptMessages: messages,
@@ -243,6 +272,7 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
 }
 
 async function collectAssistantDurableGroupReactionEvidence(input: {
+  onReadFailure: () => void
   maxEntryBytes: number
   since: number
   transcriptMessages: readonly AssistantMaintenanceEvidenceMessage[]
@@ -257,11 +287,15 @@ async function collectAssistantDurableGroupReactionEvidence(input: {
       vault: input.vault,
     })).events
   } catch {
+    input.onReadFailure()
     return []
   }
 
   const outboxIntents = await listAssistantOutboxIntents(input.vault)
-    .catch(() => [])
+    .catch(() => {
+      input.onReadFailure()
+      return []
+    })
   const targetTextIndex = buildAssistantGroupReactionTargetTextIndex({
     events,
     outboxIntents,

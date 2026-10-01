@@ -41,6 +41,7 @@ import {
   resolveOperatorHomeDirectory,
   writeOperatorConfigFile,
 } from './operator-config/storage.js'
+import { VaultCliError } from './vault-cli-errors.js'
 export {
   ROOT_OPTIONS_WITH_VALUES,
   resolveEffectiveTopLevelToken,
@@ -123,7 +124,7 @@ export type AssistantOperatorDefaults = z.infer<
 
 const assistantSelfDeliveryTargetDependencies = {
   normalizeString: normalizeOperatorConfigString,
-  resolveDefaults: resolveAssistantOperatorDefaults,
+  resolveDefaults: resolveAssistantOperatorDefaultsForPatch,
   saveDefaultsPatch: saveAssistantOperatorDefaultsPatch,
 }
 
@@ -193,32 +194,91 @@ export async function saveAssistantOperatorDefaultsPatch(
 async function readOperatorConfigForPatch(
   homeDirectory: string,
 ): Promise<OperatorConfig | null> {
-  try {
-    return await readOperatorConfig(homeDirectory)
-  } catch (error) {
-    if (!hasErrorCode(error, 'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED')) {
-      throw error
+  const parsed = await readStrictRawOperatorConfig(homeDirectory)
+  if (parsed === null) {
+    return null
+  }
+
+  const assistant = normalizeAssistantOperatorDefaultsForPatch(parsed.assistant)
+  let hostedAssistant: HostedAssistantConfig | null = null
+  if (parsed.hostedAssistant !== undefined && parsed.hostedAssistant !== null) {
+    try {
+      hostedAssistant = parseHostedAssistantConfig(parsed.hostedAssistant)
+    } catch {
+      throw invalidOperatorConfigError()
     }
   }
 
+  return normalizeParsedOperatorConfig({
+    ...parsed,
+    assistant,
+    hostedAssistant,
+  })
+}
+
+async function readStrictRawOperatorConfig(
+  homeDirectory: string,
+): Promise<RawOperatorConfig | null> {
   const raw = await readOperatorConfigFile(resolveOperatorConfigPath(homeDirectory))
   if (raw === null) {
     return null
   }
 
   try {
-    const parsed = operatorConfigSchema.parse(JSON.parse(raw))
-    return normalizeParsedOperatorConfig({
-      ...parsed,
-      assistant: stripUnsupportedAssistantBackend(parsed.assistant),
-    })
+    return operatorConfigSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
-      return null
+      throw invalidOperatorConfigError()
     }
-
     throw error
   }
+}
+
+function normalizeAssistantOperatorDefaultsForPatch(
+  defaults: unknown,
+): AssistantOperatorDefaults | null {
+  if (defaults === undefined || defaults === null) {
+    return null
+  }
+
+  const current = assistantOperatorDefaultsSchema.safeParse(defaults)
+  if (current.success) {
+    return current.data
+  }
+
+  if (typeof defaults !== 'object' || Array.isArray(defaults)) {
+    throw invalidOperatorConfigError()
+  }
+
+  try {
+    normalizeAssistantBackendTargetForPersistence(
+      (defaults as Record<string, unknown>).backend,
+    )
+  } catch (error) {
+    if (!hasErrorCode(error, 'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED')) {
+      throw error
+    }
+
+    const migrated = assistantOperatorDefaultsSchema.safeParse(
+      stripUnsupportedAssistantBackend(defaults),
+    )
+    if (migrated.success) {
+      return migrated.data
+    }
+  }
+
+  throw invalidOperatorConfigError()
+}
+
+function invalidOperatorConfigError(): VaultCliError {
+  return new VaultCliError(
+    'operator_config_invalid',
+    'Operator config is malformed. Repair or restore it before retrying.',
+    {
+      retryable: false,
+      stage: 'configuration',
+    },
+  )
 }
 
 function stripUnsupportedAssistantBackend(value: unknown): unknown {
@@ -243,7 +303,14 @@ export async function saveHostedAssistantConfig(
   hostedAssistant: HostedAssistantConfig | null,
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<OperatorConfig> {
-  const existing = await readOperatorConfig(homeDirectory)
+  const rawExisting = await readStrictRawOperatorConfig(homeDirectory)
+  const existing = rawExisting === null
+    ? null
+    : normalizeParsedOperatorConfig({
+        ...rawExisting,
+        assistant: normalizeAssistantOperatorDefaultsForPatch(rawExisting.assistant),
+        hostedAssistant: null,
+      })
   const config = buildOperatorConfig(
     {
       hostedAssistant,
@@ -348,7 +415,7 @@ export async function resolveDefaultVault(
     return expandConfiguredVaultPath(envVault, homeDirectory)
   }
 
-  const config = await readOperatorConfigForPatch(homeDirectory)
+  const config = await readStrictRawOperatorConfig(homeDirectory)
   if (config?.defaultVault) {
     const configuredDefaultVault = expandConfiguredVaultPath(
       config.defaultVault,
@@ -370,7 +437,7 @@ export async function resolveDefaultVault(
 export async function resolveConfiguredDefaultVault(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<string | null> {
-  const config = await readOperatorConfigForPatch(homeDirectory)
+  const config = await readStrictRawOperatorConfig(homeDirectory)
   if (!config?.defaultVault) {
     return null
   }
@@ -389,6 +456,13 @@ export async function resolveAssistantOperatorDefaults(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantOperatorDefaults | null> {
   const config = await readOperatorConfig(homeDirectory)
+  return normalizeAssistantOperatorDefaults(config?.assistant ?? null)
+}
+
+async function resolveAssistantOperatorDefaultsForPatch(
+  homeDirectory: string,
+): Promise<AssistantOperatorDefaults | null> {
+  const config = await readOperatorConfigForPatch(homeDirectory)
   return normalizeAssistantOperatorDefaults(config?.assistant ?? null)
 }
 

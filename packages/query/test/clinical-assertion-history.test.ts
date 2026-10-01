@@ -9,6 +9,7 @@ import {
   CURRENT_VAULT_FORMAT_VERSION,
   HEALTH_HISTORY_EVENT_KINDS,
 } from "@murphai/contracts";
+import { archiveClosedEventLedgerShards } from "@murphai/core";
 
 import { readVault } from "../src/index.ts";
 import { readHealthContext } from "../src/export-pack-health.ts";
@@ -78,6 +79,11 @@ test("readVault includes clinical assertion ledger rows in the event read model"
       "utf8",
     );
 
+    await archiveClosedEventLedgerShards({
+      now: new Date("2026-04-01T00:00:00.000Z"),
+      vaultRoot,
+    });
+
     const vault = await readVault(vaultRoot);
     const entity = vault.events.find(
       (candidate) => candidate.entityId === "evt_01JNV45RHN0TQ9ZXE0A7YSE1YV",
@@ -92,11 +98,11 @@ test("readVault includes clinical assertion ledger rows in the event read model"
     assert.equal(entity.attributes.sourceLabel, "Onboarding medical context");
     assert.equal(vault.byFamily.event?.includes(entity), true);
 
-    const health = readHealthContext(vaultRoot, {
+    const health = (await readHealthContext(vaultRoot, {
       from: "2026-03-01",
       to: "2026-03-31",
       experimentSlug: null,
-    }).health;
+    })).health;
     const healthEvent = health.healthEvents.find(
       (candidate) => candidate.id === "evt_01JNV45RHN0TQ9ZXE0A7YSE1YV",
     );

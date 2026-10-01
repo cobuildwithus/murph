@@ -21,6 +21,7 @@ vi.mock('../src/assistant/outbox.ts', () => ({
 import {
   ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_HEADING,
   buildAssistantMaintenanceConversationEvidence,
+  readAssistantMaintenanceConversationEvidence,
 } from '../src/assistant/maintenance-evidence.ts'
 import {
   upsertAssistantInputEvent,
@@ -37,6 +38,18 @@ const cleanupPaths: string[] = []
 beforeEach(() => {
   mocks.listAssistantOutboxIntents.mockReset()
   mocks.listAssistantOutboxIntents.mockResolvedValue([])
+})
+
+test('failed reaction target collection cannot prove an empty maintenance window', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-maintenance-reaction-failure-')
+  cleanupPaths.push(parentRoot)
+  mocks.listAssistantOutboxIntents.mockRejectedValueOnce(new Error('Synthetic read failure'))
+  const result = await readAssistantMaintenanceConversationEvidence({
+    now: new Date('2026-07-31T03:00:00.000Z'),
+    profile: 'group-room-model',
+    vault: vaultRoot,
+  })
+  expect(result.status).toBe('unavailable')
 })
 
 afterEach(async () => {
@@ -65,11 +78,13 @@ test('room maintenance sees a consumed durable reaction even when no chat turn f
     vaultRoot,
   })
 
-  const evidence = await buildAssistantMaintenanceConversationEvidence({
+  const snapshot = await readAssistantMaintenanceConversationEvidence({
     now: new Date('2026-07-31T03:00:00.000Z'),
     profile: 'group-room-model',
     vault: vaultRoot,
   })
+  expect(snapshot.status).toBe('available')
+  const evidence = snapshot.prompt
 
   expect(evidence).toContain(ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_HEADING)
   expect(evidence).toContain('Group reaction event:')

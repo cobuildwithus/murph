@@ -38,6 +38,20 @@ describe("changelog registry", () => {
     expect(invalidItems).toEqual([]);
   });
 
+  it("states the current-exchange boundary for group video analysis", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "group-video-analysis-in-groups",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [2371],
+      summary: expect.stringContaining("current group exchange"),
+      details: expect.stringContaining("current group exchange"),
+    });
+    expect(item?.summary).toContain("they or another participant shared it");
+    expect(`${item?.summary} ${item?.details}`).not.toContain("in that chat");
+  });
+
   it("bounds restored web search to the managed OpenAI provider", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "web-search-restored",
@@ -152,7 +166,7 @@ describe("changelog registry", () => {
       title: "Clearer iMessage card previews",
     });
     expect(item?.details).toContain("free of card values");
-    expect(item?.details).toContain("ask Murph for the card in text");
+    expect(item?.details).toContain("short preview label");
     expect(item?.tryIt).toBeUndefined();
   });
 
@@ -635,7 +649,11 @@ describe("changelog registry", () => {
 
   it("keeps the August 5 through August 9 copy outcome-oriented", () => {
     const copy = listPublishedChangelogItems()
-      .filter((item) => item.publishedOn >= "2026-08-05")
+      .filter(
+        (item) =>
+          item.publishedOn >= "2026-08-05" &&
+          item.publishedOn <= "2026-08-09",
+      )
       .map((item) => `${item.title} ${item.summary} ${item.details ?? ""}`)
       .join(" ");
 

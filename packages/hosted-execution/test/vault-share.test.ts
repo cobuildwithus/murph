@@ -2489,3 +2489,30 @@ describe("profile-name.v0 delivery records", () => {
     }
   });
 });
+
+
+describe("sleep session qualification at sharing ingress", () => {
+  const record = {
+    recordKey: "2026-04-10.garmin", occurredAt: "2026-04-10T00:00:00.000Z",
+    source: { source: "garmin", label: "Garmin" },
+    data: { date: "2026-04-10", metricKey: "total-sleep-minutes", unit: "minutes", value: 38 },
+  };
+  const scope = { projectionKind: "sleep-duration-days.v0" } as const;
+  it("preserves bounded qualifications and accepts old unqualified records", () => {
+    expect(parseHostedVaultShareDeliveryRecord(record, scope)).toEqual(record);
+    for (const sleepType of ["main_sleep", "short_sleep", "nap", "unknown"] as const) {
+      for (const sleepState of ["tentative", "confirmed"] as const) {
+        const qualified = { ...record, data: { ...record.data, sleepType, sleepState } };
+        expect(parseHostedVaultShareDeliveryRecord(qualified, scope)).toEqual(qualified);
+      }
+    }
+  });
+  it("rejects invalid classifications and qualifiers on unrelated metrics", () => {
+    for (const invalid of [{ sleepType: "rest" }, { sleepState: "finished" }]) {
+      expect(() => parseHostedVaultShareDeliveryRecord({ ...record, data: { ...record.data, ...invalid } }, scope)).toThrow();
+    }
+    expect(() => parseHostedVaultShareDeliveryRecord({
+      ...record, data: { ...record.data, metricKey: "steps", unit: "count", sleepType: "short_sleep" },
+    }, { projectionKind: "steps-days.v0" })).toThrow(/does not accept sleep classification/u);
+  });
+});

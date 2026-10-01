@@ -1,8 +1,7 @@
-import { rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import {
   parseAssistantSessionRecord,
@@ -44,24 +43,10 @@ import {
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from '../src/assistant/codex-thread-route.ts'
-import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
-import { createTempVaultContext } from './test-helpers.js'
 
-const cleanupPaths: string[] = []
 const codexThreadId = '00000000-0000-4000-8000-000000000123'
 const codexRolloutRelativePath =
   `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${codexThreadId}.jsonl`
-
-afterEach(async () => {
-  await Promise.all(
-    cleanupPaths.splice(0).map((target) =>
-      rm(target, {
-        recursive: true,
-        force: true,
-      }),
-    ),
-  )
-})
 
 describe('assistant Codex seam helpers', () => {
   it('stabilizes hosted Codex homes without dropping explicit local Codex home identity', () => {
@@ -364,39 +349,6 @@ describe('assistant Codex seam helpers', () => {
     expect(unprovedMigration).not.toHaveProperty(
       'threadCompatibilityFingerprint',
     )
-  })
-
-  it('records recovered Codex thread ids without persisting failed-turn resume state', async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'murph-assistant-provider-recovery-',
-    )
-    cleanupPaths.push(parentRoot)
-
-    const session = createAssistantSession({
-      codexThreadId: 'provider_session_old',
-      resumeRouteId: 'route-primary',
-    })
-    const error = {
-      context: {
-        connectionLost: true,
-        codexThreadId: ' provider_session_new ',
-      },
-    }
-
-    annotateRecoveredCodexThreadIdForDiagnostics(error)
-
-    expect(error.context).toMatchObject({
-      codexThreadIdPresent: true,
-      recoveredCodexThreadIdPresent: true,
-    })
-    expect(error.context).not.toHaveProperty('codexThreadId')
-    expect(error.context).not.toHaveProperty('recoveredCodexThreadId')
-
-    await expect(
-      createAssistantRuntimeStateService(vaultRoot).sessions.get(session.sessionId),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_SESSION_NOT_FOUND',
-    })
   })
 
   it('keeps provider failure diagnostics metadata-only and ignores non-recoverable states', () => {

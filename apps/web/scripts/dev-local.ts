@@ -5,6 +5,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
+import {
+  HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE,
+  HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
+} from "@murphai/hosted-local-harness/dev-hosted-local/persisted-state";
+
 import { resolveHostedWebDistDir } from "../next-artifacts";
 import { assertHostedWebDatabaseUrlConfigured } from "../src/lib/hosted-web/database-env";
 
@@ -15,6 +20,9 @@ const hostedWebDevLockMetadataFileName = "owner.json";
 const hostedWebDevOwnerPidEnvVarName = "MURPH_HOSTED_WEB_DEV_OWNER_PID";
 const hostedWebDevSourceMapsEnvVarName = "MURPH_NEXT_DEV_SOURCE_MAPS";
 const ownerWatchdogPollIntervalMs = 2_000;
+const hostedLocalPersistedStateEnvNames = new Set<string>(
+  HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
+);
 
 interface HostedWebDevServerLockMetadata {
   command: string;
@@ -108,6 +116,85 @@ export function loadHostedWebDevLocalEnv(packageDir: string): void {
   }
 }
 
+export function loadHostedWebDevCryptoState(
+  packageDir: string,
+  environment: NodeJS.ProcessEnv = process.env,
+  statePath: string = resolveHostedWebDevCryptoStatePath(packageDir, environment),
+): void {
+  if (!existsSync(statePath)) {
+    return;
+  }
+
+  const state = parseHostedWebDevCryptoState(readFileSync(statePath, "utf8"));
+  for (const name of HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES) {
+    const value = state[name];
+    if (value !== undefined) {
+      environment[name] = value;
+    }
+  }
+
+  alignHostedWebDevCallbackPublicJwk(environment);
+}
+
+function alignHostedWebDevCallbackPublicJwk(environment: NodeJS.ProcessEnv): void {
+  const keyId = environment.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?.trim() || "v1";
+  const keyringJson = environment.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON?.trim();
+  if (!keyringJson) {
+    return;
+  }
+
+  const keyring: unknown = JSON.parse(keyringJson);
+  if (!isJsonObject(keyring)) {
+    throw new TypeError("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON must be an object.");
+  }
+
+  const currentPublicJwk = keyring[keyId];
+  if (!isJsonObject(currentPublicJwk)) {
+    throw new TypeError(
+      `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON must contain key ${keyId}.`,
+    );
+  }
+
+  environment.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK = JSON.stringify(currentPublicJwk);
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseHostedWebDevCryptoState(raw: string): Record<string, string> {
+  const state: Record<string, string> = {};
+
+  for (const line of raw.split(/\r?\n/u)) {
+    const separatorIndex = line.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const name = line.slice(0, separatorIndex);
+    if (!hostedLocalPersistedStateEnvNames.has(name)) {
+      continue;
+    }
+
+    const parsedValue: unknown = JSON.parse(line.slice(separatorIndex + 1));
+    if (typeof parsedValue !== "string") {
+      throw new TypeError(`${name} must contain a serialized string value.`);
+    }
+    state[name] = parsedValue;
+  }
+
+  return state;
+}
+
+function resolveHostedWebDevCryptoStatePath(
+  packageDir: string,
+  environment: NodeJS.ProcessEnv,
+): string {
+  const repoRoot = path.resolve(packageDir, "../..");
+  const configuredPath = environment.MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH?.trim();
+  return path.resolve(repoRoot, configuredPath || HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE);
+}
+
 export function resolveHostedWebDevRuntimePaths(
   packageDir: string,
   environment: NodeJS.ProcessEnv = process.env,
@@ -132,6 +219,7 @@ async function main(): Promise<void> {
   const runtimePaths = resolveHostedWebDevRuntimePaths(packageDir, process.env);
 
   loadHostedWebDevLocalEnv(packageDir);
+  loadHostedWebDevCryptoState(packageDir, process.env);
   assertHostedWebDevRequiredEnv(process.env);
   process.chdir(packageDir);
   const releaseLock = await acquireHostedWebDevServerLock(

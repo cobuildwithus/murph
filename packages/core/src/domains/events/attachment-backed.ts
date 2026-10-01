@@ -19,7 +19,7 @@ import {
   selectLatestEventSpineEntry,
 } from "../../history/event-spine.ts";
 import { generateRecordId } from "../../ids.ts";
-import { readJsonlRecords } from "../../jsonl.ts";
+import { readEventLedgerShardRecords } from "../../event-ledger-storage.ts";
 import { withCanonicalWriteLock } from "../../operations/canonical-write-lock.ts";
 import { runCanonicalWrite, type WriteBatch } from "../../operations/write-batch.ts";
 import type { DateInput } from "../../types.ts";
@@ -349,7 +349,7 @@ export async function findCaptureByLookup(input: {
     };
   }
 
-  const records = await readJsonlRecords({
+  const records = await readEventLedgerShardRecords({
     vaultRoot: input.vaultRoot,
     relativePath: stored.lookup.ledgerFile,
   });

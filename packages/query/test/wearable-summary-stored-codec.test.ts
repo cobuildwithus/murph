@@ -6,6 +6,8 @@ import {
   buildWearableSummaryBundleFromDataset,
   summarizeWearableMetricLatestFromBundle,
   summarizeWearableMetricTrendFromBundle,
+  summarizeWearableSourceHealthFromBundle,
+  type WearableSummaryFilters,
 } from "../src/wearables.ts";
 import {
   buildActivitySessionAggregates,
@@ -21,6 +23,7 @@ import type {
 import { composePublicWearableSummaryBundleFromStoredRows } from "../src/projection/wearable-summary-compose.ts";
 import { buildWearableSummaryProjectionFromDataset } from "../src/projection/wearable-summary-projector.ts";
 import { stringifyPublicWearableProjectionSummary } from "../src/projection/wearable-summary-public-json.ts";
+import { normalizeWearableProviders } from "../src/projection/provider-scope.ts";
 import { parseJsonValue } from "../src/projection/schema.ts";
 import {
   parseStoredWearableActivityRow,
@@ -193,7 +196,37 @@ function activityOnlyDataset(
 }
 
 function composeStoredDataset(dataset: WearableDataset) {
-  return composeActivityRows(buildWearableSummaryProjectionFromDataset(dataset));
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  assertSourceHealthParity(rows, {});
+  return composeActivityRows(rows);
+}
+
+function assertSourceHealthParity(
+  rows: ReturnType<typeof buildWearableSummaryProjectionFromDataset>,
+  filters: WearableSummaryFilters,
+) {
+  const providers = normalizeWearableProviders(filters.providers);
+  // Match the store's stable SQL ordering (also exercised through real SQLite
+  // in wearable-source-health-query.test.ts).
+  const ordered = rows.filter(row => filters.providers === undefined
+    || providers.includes(JSON.parse(row.providerScopeJson)[0])).sort((left, right) => {
+      if (left.summaryKind !== right.summaryKind) return left.summaryKind < right.summaryKind ? -1 : 1;
+      if (left.summaryDate !== right.summaryDate) {
+        if (left.summaryDate === null) return 1;
+        if (right.summaryDate === null) return -1;
+        return left.summaryDate > right.summaryDate ? -1 : 1;
+      }
+      return left.sortRank - right.sortRank;
+    });
+  const stored = { providerFilterWasProvided: filters.providers !== undefined, providers, rows: ordered };
+  const expected = summarizeWearableSourceHealthFromBundle(
+    composePublicWearableSummaryBundleFromStoredRows(stored, filters), filters,
+  );
+  const actual = summarizeWearableSourceHealthFromBundle(
+    composePublicWearableSummaryBundleFromStoredRows(stored, filters, { sourceHealthOnly: true }), filters,
+  );
+  assert.deepEqual(actual, expected, JSON.stringify(filters));
+  return actual;
 }
 
 function metricSnapshot(metric: WearableResolvedMetric) {
@@ -695,6 +728,8 @@ test("stored activity composition matches direct numeric and provenance results 
   ] as const;
 
   for (const providers of providerSubsets) {
+    assertSourceHealthParity(rows,
+      providers.length ? { providers: [...providers] } : {});
     const directDataset = activityDataset({
       metricCandidates: providers.length === 0
         ? metricCandidates
@@ -967,6 +1002,7 @@ test("compose preserves stored same-public provider conflict evidence", () => {
     workoutFeatures: [],
   };
   const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  assertSourceHealthParity(rows, {});
   const composed = composePublicWearableSummaryBundleFromStoredRows({
     providerFilterWasProvided: false,
     providers: [],
@@ -1046,6 +1082,7 @@ test("compose rebuilt stored sleep rows drops zeroed Apple HealthKit summary in 
     workoutFeatures: [],
   };
   const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  assertSourceHealthParity(rows, {});
   const composed = composePublicWearableSummaryBundleFromStoredRows({
     providerFilterWasProvided: false,
     providers: [],
@@ -1104,6 +1141,7 @@ test("compose preserves stored same-public sleep-window conflict evidence", () =
     workoutFeatures: [],
   };
   const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  assertSourceHealthParity(rows, {});
   const composed = composePublicWearableSummaryBundleFromStoredRows({
     providerFilterWasProvided: false,
     providers: [],
@@ -1293,4 +1331,54 @@ test("null-marker envelopes decode to fresh objects on every parse", () => {
   // The codec memoizes empty envelopes by their JSON; a later parse must not
   // see another caller's mutation.
   assert.equal(JSON.stringify(parseStoredWearableSummary("activity", storedJson)), legacyJson);
+});
+
+
+test("source-only composition preserves projected counts, sparse ranks, provider scope, sleep freshness and diagnostics", () => {
+  const dataset = buildFixtureDataset(["garmin", "oura", "unknown"]);
+  const extra = candidate({ date: "2026-05-04", facet: "sleep", metric: "totalSleepMinutes", provider: "oura", unit: "minutes", value: 460 });
+  const sparse = candidate({ date: "2026-05-03", facet: "steps", metric: "steps", provider: "future_ring", unit: "count", value: 5000 });
+  const mixed: WearableDataset = {
+    ...dataset,
+    metricCandidates: [...dataset.metricCandidates, extra, sparse],
+    rawMetricCandidates: [...dataset.rawMetricCandidates, extra, sparse],
+    provenanceDiagnostics: [{
+      count: 2, dates: ["2026-05-01"], kind: "excluded", latestRecordedAt: "2026-05-01T12:00:00Z",
+      missingFields: ["sourceProviderSlug"], provider: "garmin",
+    }, {
+      count: 1, dates: ["2026-05-03"], kind: "included", latestRecordedAt: "2026-05-03T12:00:00Z",
+      missingFields: ["sourceType"], provider: "future-ring",
+    }],
+  };
+  const rows = buildWearableSummaryProjectionFromDataset(mixed);
+  for (const filters of [
+    {}, { providers: [] }, { providers: [" "] }, { providers: ["missing"] },
+    { providers: ["garmin"] }, { providers: ["garmin", "oura"] }, { providers: ["unknown"] },
+    { providers: ["future_ring", "missing"] }, { providers: [" OURA ", "oura"] },
+    { date: "2026-05-01" }, { from: "2026-05-02", to: "2026-05-03" },
+    { date: "2030-01-01" }, { from: "2026-05-03", to: "2026-05-01" },
+    { limit: 1 }, { providers: ["garmin", "oura"], date: "2026-05-04", limit: 1 },
+  ]) assertSourceHealthParity(rows, filters);
+  const raw = buildWearableSummaryBundleFromDataset(mixed).sourceHealth;
+  const projected = assertSourceHealthParity(rows, {});
+  assert.notDeepEqual(projected, raw, "the fixture must distinguish projected HRV/conflict evidence from raw canonical health");
+});
+
+
+test("source-only health keeps HRV in both sleep and recovery projected evidence", () => {
+  const metricCandidates = ["garmin", "oura", "whoop"].flatMap(provider =>
+    ["2026-05-01", "2026-05-02"].flatMap(date => ([
+      ["steps", 8000, "count"], ["activeCalories", 450, "kcal"],
+      ["totalSleepMinutes", 450, "minutes"], ["deepMinutes", 90, "minutes"],
+      ["remMinutes", 120, "minutes"], ["hrv", 50, "ms"],
+      ["restingHeartRate", 60, "bpm"], ["weightKg", 75, "kg"],
+    ] as const).map(([metric, value, unit]) =>
+      candidate({ date, provider, facet: metric, metric, value, unit, sourceKind: "observation" }))),
+  );
+  const dataset = activityOnlyDataset(metricCandidates);
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const actual = assertSourceHealthParity(rows, {});
+  assert.equal(actual.length, 3);
+  assert.deepEqual(actual.map(health => health.candidateMetrics), [18, 18, 18]);
+  assert.deepEqual(buildWearableSummaryBundleFromDataset(dataset).sourceHealth.map(health => health.candidateMetrics), [16, 16, 16]);
 });

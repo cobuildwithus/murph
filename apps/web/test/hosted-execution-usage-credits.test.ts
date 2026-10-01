@@ -432,7 +432,10 @@ describe("hosted usage credits", () => {
     expect(executeRaw).not.toHaveBeenCalled();
   });
 
-  it("converts a paid purchase at exactly 32 combined slots using its reservation", async () => {
+  it.each([
+    { label: "legacy", grantUsdMicros: 5_000_000n },
+    { label: "current", grantUsdMicros: 4_000_000n },
+  ])("fulfills the frozen $label purchase grant at exactly 32 combined slots", async ({ grantUsdMicros }) => {
     const events: string[] = [];
     const grantCreate = vi.fn(async (input: unknown) => {
       events.push("grant-create");
@@ -473,12 +476,12 @@ describe("hosted usage credits", () => {
         expect(sql).toContain(
           '"grant_slot_released_at" AS "grantSlotReleasedAt"',
         );
-        return [buildLockedPurchase()];
+        return [buildLockedPurchase({ grantUsdMicros })];
       }
       if (sql.includes('UPDATE "hosted_member"')) {
         events.push("projection-update");
         return [{
-          balanceUsdMicros: 5_000_000n,
+          balanceUsdMicros: grantUsdMicros,
           beneficiaryMemberId: BENEFICIARY_ID,
           ledgerVersion: 1n,
         }];
@@ -517,7 +520,7 @@ describe("hosted usage credits", () => {
       purchaseId: "purchase_1",
       tx: tx as never,
     })).resolves.toMatchObject({
-      balanceUsdMicros: 5_000_000n,
+      balanceUsdMicros: grantUsdMicros,
       entryId: expect.stringMatching(/^huce_/u),
       granted: true,
       ledgerVersion: 1n,
@@ -538,7 +541,7 @@ describe("hosted usage credits", () => {
     ]);
     expect(entryCreate).toHaveBeenCalledExactlyOnceWith({
       data: expect.objectContaining({
-        amountUsdMicros: 5_000_000n,
+        amountUsdMicros: grantUsdMicros,
         beneficiaryMemberId: BENEFICIARY_ID,
         beneficiarySequence: 1n,
         effectiveAt: PAID_AT,
@@ -553,13 +556,13 @@ describe("hosted usage credits", () => {
         beneficiaryMemberId: BENEFICIARY_ID,
         beneficiarySequence: 1n,
         entryId: expect.stringMatching(/^huce_/u),
-        remainingUsdMicros: 5_000_000n,
+        remainingUsdMicros: grantUsdMicros,
       }),
     });
     expect(purchaseUpdateMany).toHaveBeenCalledExactlyOnceWith({
       data: {
         paidAt: PAID_AT,
-        remainingCreditUsdMicros: 5_000_000n,
+        remainingCreditUsdMicros: grantUsdMicros,
         status: "fulfilled",
         terminalAt: PAID_AT,
       },

@@ -2,16 +2,14 @@ import type {
   HostedRuntimeClinicalRecordsPort,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
   HOSTED_CLINICAL_RECORDS_CONNECT_LINK_RESPONSE_MAX_BYTES,
-  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
-  HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
-  HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
+  HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES,
   HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
 } from "@murphai/hosted-execution/clinical-records-boundary";
 
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -42,7 +40,7 @@ export function createHostedWebClinicalRecordsPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted clinical records connect link",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.clinicalRecordsConnectLink,
         replayOnceOnRetryableFailure: options?.requestKey !== undefined,
         sensitiveResponseBody: {
           maxBytes: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_RESPONSE_MAX_BYTES,
@@ -64,6 +62,26 @@ export function createHostedWebClinicalRecordsPort(input: {
       }
       return result;
     },
+    async fetchDocument(request, options) {
+      const {
+        parseHostedClinicalRecordsFetchDocumentRequest,
+        parseHostedClinicalRecordsFetchDocumentResponse,
+      } = await import("@murphai/hosted-execution/clinical-records");
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: parseHostedClinicalRecordsFetchDocumentRequest(request),
+        boundUserId: input.boundUserId,
+        description: "Hosted clinical records fetch document",
+        fetchImpl: input.fetchImpl,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.clinicalRecordsFetchDocument,
+        sensitiveResponseBody: {
+          maxBytes: HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES,
+        },
+        signal: options?.signal ?? null,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+      return parseHostedClinicalRecordsFetchDocumentResponse(payload);
+    },
     async fetchPage(request, options) {
       const {
         parseHostedClinicalRecordsFetchPageRequest,
@@ -75,7 +93,7 @@ export function createHostedWebClinicalRecordsPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted clinical records fetch page",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.clinicalRecordsFetchPage,
         sensitiveResponseBody: {
           maxBytes: HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
         },
@@ -97,7 +115,7 @@ export function createHostedWebClinicalRecordsPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted clinical records read run",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.clinicalRecordsReadRun,
         sensitiveResponseBody: {
           maxBytes: HOSTED_CLINICAL_RECORDS_METADATA_RESPONSE_MAX_BYTES,
         },
@@ -119,7 +137,7 @@ export function createHostedWebClinicalRecordsPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted clinical records record outcome",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.clinicalRecordsRecordOutcome,
         sensitiveResponseBody: {
           maxBytes: HOSTED_CLINICAL_RECORDS_METADATA_RESPONSE_MAX_BYTES,
         },

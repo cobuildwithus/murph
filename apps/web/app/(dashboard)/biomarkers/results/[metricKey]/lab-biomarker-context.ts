@@ -1,11 +1,11 @@
 import {
+  resolveLabResultMetricDefinition,
   resolveReviewedBiomarkerFallbackRanges,
   type BiomarkerFallbackRangeForDisplay,
-} from "@murphai/health-commons/biomarker-fallback-ranges";
+} from "@murphai/health-metrics";
 import {
   resolveHealthCommonsBiomarkerEntityKey,
 } from "@murphai/health-commons/biomarker-entity-mappings";
-import { resolveLabResultMetricDefinition } from "@murphai/health-metrics";
 
 import { getGeneratedBiomarkerIndex } from "@/src/lib/health-commons/generated-biomarker-artifacts";
 

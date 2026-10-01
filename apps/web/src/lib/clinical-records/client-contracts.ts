@@ -1,5 +1,8 @@
+export const CLINICAL_RECORD_MAX_SOURCES = 20;
+
 export const CLINICAL_RECORD_CONNECTION_STATUSES = [
   "active",
+  "disconnected",
   "needs_reauth",
   "error",
 ] as const;
@@ -57,12 +60,18 @@ export interface ClinicalProviderSearchResponseContract {
 export interface ClinicalRecordLatestRunContract {
   completedAt: string | null;
   importedCount: number;
+  labResultCount?: number;
+  skippedExistingCount?: number;
   reviewCount: number;
   runId: string;
   status: ClinicalRecordRunStatus;
 }
 
 export interface ClinicalRecordConnectionContract {
+  canImport?: boolean;
+  importsRemaining?: number;
+  lastCheckedAt?: string | null;
+  nextSyncAt?: string | null;
   connectedAt: string;
   connectionId: string;
   displayName: string;
@@ -86,6 +95,7 @@ export interface ClinicalRecordConnectStartResponseContract {
 }
 
 export interface ClinicalRecordConnectStartRequestContract {
+  keepUpdated?: boolean;
   claim: string;
   providerDirectoryEntryId: string;
 }
@@ -149,11 +159,13 @@ export function parseClinicalRecordConnectStartResponse(
 export function parseClinicalRecordConnectStartRequest(
   value: unknown,
 ): ClinicalRecordConnectStartRequestContract {
-  const record = requireExactRecord(value, ["claim", "providerDirectoryEntryId"]);
+  const record = requireExactRecord(value, ["claim", "providerDirectoryEntryId"], ["keepUpdated"]);
+  if (record.keepUpdated !== undefined && typeof record.keepUpdated !== "boolean") throw invalidContract();
   const claim = requireString(record.claim, 40);
   if (!/^cr_[A-Za-z0-9_-]{32}$/u.test(claim)) throw invalidContract();
   return {
     claim,
+    ...(record.keepUpdated !== undefined ? { keepUpdated: record.keepUpdated } : {}),
     providerDirectoryEntryId: requireIdentifier(record.providerDirectoryEntryId),
   };
 }
@@ -212,14 +224,18 @@ function parseConnection(value: unknown): ClinicalRecordConnectionContract {
     "providerDirectoryEntryId",
     "sourceSystem",
     "status",
-  ]);
+  ], ["canImport", "importsRemaining", "lastCheckedAt", "nextSyncAt"]);
   if (record.sourceSystem !== "epic-fhir") throw invalidContract();
   return {
+    ...(record.canImport !== undefined ? { canImport: parseBoolean(record.canImport) } : {}),
+    ...(record.importsRemaining === undefined ? {} : { importsRemaining: requireCount(record.importsRemaining) }),
     connectedAt: requireIsoTimestamp(record.connectedAt),
     connectionId: requireIdentifier(record.connectionId),
     displayName: requireString(record.displayName, 160),
     lastErrorCode: optionalErrorCode(record.lastErrorCode),
     lastSyncCompletedAt: optionalIsoTimestamp(record.lastSyncCompletedAt),
+    ...(record.lastCheckedAt === undefined ? {} : { lastCheckedAt: optionalIsoTimestamp(record.lastCheckedAt) }),
+    ...(record.nextSyncAt === undefined ? {} : { nextSyncAt: optionalIsoTimestamp(record.nextSyncAt) }),
     latestRun: record.latestRun === null ? null : parseLatestRun(record.latestRun),
     providerDirectoryEntryId: requireIdentifier(record.providerDirectoryEntryId),
     sourceSystem: "epic-fhir",
@@ -234,10 +250,12 @@ function parseLatestRun(value: unknown): ClinicalRecordLatestRunContract {
     "reviewCount",
     "runId",
     "status",
-  ]);
+  ], ["labResultCount", "skippedExistingCount"]);
   return {
     completedAt: optionalIsoTimestamp(record.completedAt),
     importedCount: requireCount(record.importedCount),
+    ...(record.labResultCount === undefined ? {} : { labResultCount: requireCount(record.labResultCount) }),
+    ...(record.skippedExistingCount === undefined ? {} : { skippedExistingCount: requireCount(record.skippedExistingCount) }),
     reviewCount: requireCount(record.reviewCount),
     runId: requireIdentifier(record.runId),
     status: requireRunStatus(record.status),
@@ -261,10 +279,10 @@ function isStringMember<Value extends string>(
   return typeof value === "string" && values.some((candidate) => candidate === value);
 }
 
-function requireExactRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
+function requireExactRecord(value: unknown, keys: readonly string[], optionalKeys: readonly string[] = []): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw invalidContract();
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).sort().join(",") !== [...keys].sort().join(",")) throw invalidContract();
+  if (keys.some((key) => !(key in record)) || Object.keys(record).some((key) => !keys.includes(key) && !optionalKeys.includes(key))) throw invalidContract();
   return record;
 }
 
@@ -313,4 +331,9 @@ function requireCount(value: unknown): number {
 
 function invalidContract(): TypeError {
   return new TypeError("Clinical Records response did not match the client contract.");
+}
+
+function parseBoolean(value: unknown): boolean {
+  if (typeof value !== "boolean") throw new TypeError("Clinical Records boolean is invalid.");
+  return value;
 }

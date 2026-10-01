@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "group-sharing-permission-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Add a sharing permission in your group chat",
+    "summary": "Ask Murph to share another health metric and get a fresh consent prompt in the group, even if an earlier prompt covered something else.",
+    "details": "Like or heart the prompt in iMessage to approve the permissions it names. Your other sharing stays the same, and Murph confirms the saved permission in the group.",
+    "relevanceTags": ["groups", "sharing", "privacy"],
+    "sourcePullRequests": [3058]
+  }
+}

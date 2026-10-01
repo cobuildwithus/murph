@@ -1,6 +1,7 @@
 import { VaultError, appendBloodTest, upsertEvent } from "@murphai/core";
 import {
   BLOOD_TEST_FASTING_STATUSES,
+  BLOOD_TEST_RESULT_FLAGS,
   BLOOD_TEST_CATEGORY,
   EVENT_SOURCES,
   TEST_RESULT_STATUSES,
@@ -21,10 +22,12 @@ import {
   normalizeRepeatableFlagOption,
   type VaultServices,
 } from "@murphai/vault-usecases";
+import type { ZodIssue } from "@murphai/contracts/zod-runtime";
 import { Cli, z } from "incur";
 
 import { suggestedCommandsCta } from "./command-factory-primitives.js";
 import { createHealthEntityCrudGroup } from "./health-entity-command-registry.js";
+import { publicValidationIssue } from "./public-validation-issue.js";
 
 type BloodTestResult = BloodTestResultRecord;
 type BloodTestAppendInput = Parameters<typeof appendBloodTest>[0];
@@ -67,6 +70,24 @@ const rawVaultPathSchema = z
     (value) => value.split("/").every((segment) => segment !== "." && segment !== ".."),
     "raw/... paths cannot contain . or .. segments.",
   );
+
+function bloodTestOptionValidationContext(input: {
+  optionName: "link" | "result";
+  publicPath?: readonly (string | number)[];
+  code: string;
+  expected?: string;
+}) {
+  return {
+    issues: [
+      {
+        code: input.code,
+        publicPath: input.publicPath ?? [input.optionName],
+        expected: input.expected,
+      },
+    ],
+    stage: "validation",
+  };
+}
 
 export const bloodTestSaveResultSchema = z.object({
   vault: pathSchema,
@@ -117,6 +138,7 @@ function splitEscaped(value: string, separator: string): string[] {
 function parseKeyValueSpec(
   spec: string,
   optionName: string,
+  occurrence: number,
 ): Map<string, string> {
   const fields = new Map<string, string>();
 
@@ -131,6 +153,11 @@ function parseKeyValueSpec(
       throw new VaultCliError(
         "invalid_option",
         keyValueSpecFormatMessage(optionName),
+        bloodTestOptionValidationContext({
+          optionName: "link",
+          publicPath: ["link", occurrence],
+          code: "invalid_format",
+        }),
       );
     }
 
@@ -140,13 +167,27 @@ function parseKeyValueSpec(
       throw new VaultCliError(
         "invalid_option",
         `Expected --${optionName} entries to include non-empty keys and values.`,
+        bloodTestOptionValidationContext({
+          optionName: "link",
+          publicPath: ["link", occurrence],
+          code: "invalid_format",
+        }),
       );
     }
 
     if (fields.has(key)) {
+      const publicPath =
+        key === "type" || key === "targetId"
+          ? ["link", occurrence, key]
+          : ["link", occurrence];
       throw new VaultCliError(
         "invalid_option",
-        `Duplicate --${optionName} field "${key}".`,
+        `Duplicate --${optionName} field.`,
+        bloodTestOptionValidationContext({
+          optionName: "link",
+          publicPath,
+          code: "custom",
+        }),
       );
     }
 
@@ -156,7 +197,10 @@ function parseKeyValueSpec(
   return fields;
 }
 
-function parseJsonBloodTestResult(spec: string): BloodTestResult {
+function parseJsonBloodTestResult(
+  spec: string,
+  occurrence: number,
+): BloodTestResult {
   let value: unknown;
   try {
     value = JSON.parse(spec) as unknown;
@@ -164,6 +208,11 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
     throw new VaultCliError(
       "invalid_option",
       "Expected --result JSON object to be valid JSON.",
+      bloodTestOptionValidationContext({
+        optionName: "result",
+        publicPath: ["result", occurrence],
+        code: "custom",
+      }),
     );
   }
 
@@ -175,16 +224,26 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
     throw new VaultCliError(
       "invalid_option",
       "--result.valueText is not supported. Did you mean --result.textValue?",
+      bloodTestOptionValidationContext({
+        optionName: "result",
+        publicPath: ["result", occurrence, "valueText"],
+        code: "custom",
+      }),
     );
   }
 
   const parsed = bloodTestResultSchema.safeParse(value);
   if (!parsed.success) {
+    const recovery = bloodTestResultValidationRecovery(
+      parsed.error.issues,
+      occurrence,
+    );
     throw new VaultCliError(
       "invalid_option",
-      "Invalid --result blood-test analyte payload.",
+      recovery.message,
       {
-        issues: parsed.error.issues,
+        issues: recovery.issues,
+        stage: "validation",
       },
     );
   }
@@ -192,38 +251,171 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
   return parsed.data;
 }
 
-function parseBloodTestResult(spec: string): BloodTestResult {
+interface BloodTestIssueSelection {
+  issue: ZodIssue;
+  paths: readonly (readonly PropertyKey[])[];
+}
+
+function selectBloodTestIssues(
+  issue: ZodIssue,
+  prefix: readonly PropertyKey[] = [],
+): readonly BloodTestIssueSelection[] {
+  if (issue.code !== "invalid_union" || issue.errors.length === 0) {
+    return [{
+      issue,
+      paths: [[...prefix, ...issue.path]],
+    }];
+  }
+
+  const unionPrefix = [...prefix, ...issue.path];
+  const branches = issue.errors.map((branch) =>
+    branch.flatMap((nestedIssue) =>
+      selectBloodTestIssues(nestedIssue, unionPrefix)));
+  const minimumErrorCount = Math.min(...branches.map((branch) => branch.length));
+  const bestBranches = branches.filter(
+    (branch) => branch.length === minimumErrorCount,
+  );
+  if (bestBranches.length === 1) return bestBranches[0];
+
+  const commonConcreteSelections = bestBranches[0].filter((selection) =>
+    selection.issue.code !== "invalid_union" &&
+    bestBranches.every((branch) =>
+      branch.some((candidate) =>
+        candidate.issue.code !== "invalid_union" &&
+        bloodTestPathsMatch(candidate.paths, selection.paths)))
+  );
+  if (commonConcreteSelections.length > 0) return commonConcreteSelections;
+
+  const paths = bestBranches
+    .flatMap((branch) => branch)
+    .flatMap((selection) => selection.paths)
+    .filter((path, index, allPaths) =>
+      allPaths.findIndex((candidate) =>
+        bloodTestPathsMatch([candidate], [path])) === index);
+  return [{ issue, paths }];
+}
+
+function bloodTestPathsMatch(
+  actual: readonly (readonly PropertyKey[])[],
+  expected: readonly (readonly PropertyKey[])[],
+): boolean {
+  return actual.length === expected.length && expected.every((expectedPath) =>
+    actual.some((actualPath) =>
+      actualPath.length === expectedPath.length &&
+      actualPath.every((segment, index) => segment === expectedPath[index])));
+}
+
+function commonBloodTestPath(
+  paths: readonly (readonly PropertyKey[])[],
+): readonly PropertyKey[] {
+  const firstPath = paths[0] ?? [];
+  const mismatch = firstPath.findIndex((segment, index) =>
+    paths.some((path) => path[index] !== segment));
+  return mismatch === -1 ? firstPath : firstPath.slice(0, mismatch);
+}
+
+function bloodTestResultValidationRecovery(
+  issues: readonly ZodIssue[],
+  occurrence: number,
+) {
+  const selections = issues.flatMap((issue) => selectBloodTestIssues(issue));
+  const concreteSelections = selections.filter(
+    (selection) => selection.issue.code !== "invalid_union",
+  );
+  const recoverySelections = concreteSelections.length > 0
+    ? concreteSelections : selections;
+  const soleSelection = recoverySelections.length === 1
+    ? recoverySelections[0] : undefined;
+  const flagValues = soleSelection?.issue.code === "invalid_value"
+    ? soleSelection.issue.values : undefined;
+  let message = "Invalid --result blood-test analyte payload.";
+
+  if (
+    soleSelection !== undefined &&
+    bloodTestPathsMatch(soleSelection.paths, [["value"], ["textValue"]])
+  ) {
+    message = "Provide either value or textValue.";
+  } else if (
+    soleSelection !== undefined &&
+    bloodTestPathsMatch(soleSelection.paths, [
+      ["referenceRange", "low"],
+      ["referenceRange", "high"],
+      ["referenceRange", "text"],
+    ])
+  ) {
+    message = "Provide at least one of low, high, or text.";
+  } else if (
+    soleSelection !== undefined &&
+    bloodTestPathsMatch(soleSelection.paths, [["flag"]]) &&
+    flagValues?.length === BLOOD_TEST_RESULT_FLAGS.length &&
+    BLOOD_TEST_RESULT_FLAGS.every((flag) => flagValues.includes(flag))
+  ) {
+    message = `Set flag to one of: ${BLOOD_TEST_RESULT_FLAGS.join(", ")}.`;
+  }
+
+  return {
+    message,
+    issues: recoverySelections.map((selection) =>
+      publicValidationIssue(
+        selection.issue,
+        bloodTestResultPublicPath(
+          commonBloodTestPath(selection.paths),
+          occurrence,
+        ),
+      )),
+  };
+}
+
+function parseBloodTestResult(spec: string, occurrence: number): BloodTestResult {
   const trimmed = spec.trim();
   if (trimmed.startsWith("{")) {
-    return parseJsonBloodTestResult(trimmed);
+    return parseJsonBloodTestResult(trimmed, occurrence);
   }
 
   if (trimmed.startsWith("[")) {
     throw new VaultCliError(
       "invalid_option",
       "Expected --result JSON input to be one object per analyte, not an array. Repeat --result for each analyte or use blood-test import-json for a full payload.",
+      bloodTestOptionValidationContext({
+        optionName: "result",
+        publicPath: ["result", occurrence],
+        code: "invalid_type",
+        expected: "object",
+      }),
     );
   }
 
   throw new VaultCliError(
     "invalid_option",
     "Expected --result to be a JSON object. Example: --result '{\"analyte\":\"Glucose\",\"value\":92,\"unit\":\"mg/dL\"}'. Repeat --result for multiple analytes or use blood-test import-json for a full payload.",
+    bloodTestOptionValidationContext({
+      optionName: "result",
+      publicPath: ["result", occurrence],
+      code: "invalid_type",
+      expected: "object",
+    }),
   );
 }
 
 function parseBloodTestResults(specs: readonly string[]): BloodTestResult[] {
-  const results = specs.map((spec) => parseBloodTestResult(spec));
+  const results = specs.map((spec, occurrence) =>
+    parseBloodTestResult(spec, occurrence));
   if (results.length === 0) {
     throw new VaultCliError(
       "invalid_option",
       "At least one --result entry is required.",
+      bloodTestOptionValidationContext({
+        optionName: "result",
+        code: "invalid_type",
+        expected: "object",
+      }),
     );
   }
 
   return results;
 }
 
-function parseBloodTestLink(spec: string): BloodTestLink {
+function parseBloodTestLink(spec: string, occurrence: number): BloodTestLink {
   const shorthandSeparator = spec.indexOf(":");
   const candidate =
     shorthandSeparator > 0 && !spec.includes("=")
@@ -231,16 +423,61 @@ function parseBloodTestLink(spec: string): BloodTestLink {
           type: spec.slice(0, shorthandSeparator).trim(),
           targetId: spec.slice(shorthandSeparator + 1).trim(),
         }
-      : Object.fromEntries(parseKeyValueSpec(spec, "link"));
+      : Object.fromEntries(parseKeyValueSpec(spec, "link", occurrence));
 
   const parsed = eventRelationLinkSchema.safeParse(candidate);
   if (!parsed.success) {
     throw new VaultCliError("invalid_option", "Invalid --link payload.", {
-      issues: parsed.error.issues,
+      issues: parsed.error.issues.map((issue) =>
+        publicValidationIssue(
+          issue,
+          bloodTestLinkPublicPath(issue.path, occurrence),
+        )),
+      stage: "validation",
     });
   }
 
   return parsed.data;
+}
+
+function bloodTestResultPublicPath(
+  path: readonly PropertyKey[],
+  occurrence: number,
+): readonly (string | number)[] {
+  const [field, nestedField] = path;
+  if (field === "referenceRange") {
+    switch (nestedField) {
+      case "high":
+      case "low":
+      case "text":
+        return ["result", occurrence, "referenceRange", nestedField];
+    }
+    return ["result", occurrence, "referenceRange"];
+  }
+  switch (field) {
+    case "analyte":
+    case "biomarkerSlug":
+    case "comparator":
+    case "flag":
+    case "note":
+    case "slug":
+    case "textValue":
+    case "unit":
+    case "value":
+      return ["result", occurrence, field];
+    default:
+      return ["result", occurrence];
+  }
+}
+
+function bloodTestLinkPublicPath(
+  path: readonly PropertyKey[],
+  occurrence: number,
+): readonly (string | number)[] {
+  const [field] = path;
+  return field === "targetId" || field === "type"
+    ? ["link", occurrence, field]
+    : ["link", occurrence];
 }
 
 function parseBloodTestLinks(specs: readonly string[] | undefined) {
@@ -248,7 +485,8 @@ function parseBloodTestLinks(specs: readonly string[] | undefined) {
     return undefined;
   }
 
-  const links = specs.map((spec) => parseBloodTestLink(spec));
+  const links = specs.map((spec, occurrence) =>
+    parseBloodTestLink(spec, occurrence));
   return links.length > 0 ? links : undefined;
 }
 

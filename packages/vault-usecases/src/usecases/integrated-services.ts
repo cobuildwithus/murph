@@ -15,9 +15,11 @@ import type {
   CommandContext,
   JsonObject,
 } from "../health-cli-method-types.js"
+import type { QueryEntityFamily } from "../query-runtime.js"
 import type {
   CoreWriteServices,
   ImporterServices,
+  IntegratedVaultServiceDependencies,
   ProjectAssessmentInput,
   QueryEntity,
   QueryServices,
@@ -37,6 +39,7 @@ import {
   asEntityEnvelope,
   asListEnvelope,
   describeLookupConstraint,
+  inferEntityKind,
   materializeExportPack,
   matchesGenericKindFilter,
   normalizeIssues,
@@ -118,7 +121,14 @@ import {
   unlinkJournalStreams,
 } from "./experiment-journal-vault.js"
 import { addCaptureRecord } from "./capture.js"
-import { toVaultCliError } from "./vault-usecase-helpers.js"
+import {
+  toAssessmentProjectVaultCliError,
+  toImporterInputFileVaultCliError,
+  toVaultCliError,
+  toVaultCliFilesystemError,
+  toVaultInitializationCliError,
+  toVaultMetadataCliError,
+} from "./vault-usecase-helpers.js"
 
 const PUBLIC_WEARABLE_PROVENANCE_KEYS = new Set([
   "candidateId",
@@ -134,6 +144,15 @@ const COMPACT_WEARABLE_ARRAY_LIMIT = 8
 const COMPACT_WEARABLE_DRIFT_SIGNAL_LIMIT = 8
 const COMPACT_WEARABLE_TREND_POINT_LIMIT = 14
 const COMPACT_WEARABLE_STRING_LENGTH = 160
+
+function genericShowFamily(id: string): QueryEntityFamily | null {
+  const entityKind = inferEntityKind(id)
+  if (entityKind === "document" || entityKind === "meal") {
+    return "event"
+  }
+
+  return ALL_QUERY_ENTITY_FAMILIES.find((family) => family === entityKind) ?? null
+}
 
 type CompactWearableValue = JsonValue | typeof OMIT_COMPACT_WEARABLE_VALUE
 
@@ -438,17 +457,23 @@ function isJsonObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
-function createIntegratedCoreServices(): CoreWriteServices {
+function createIntegratedCoreServices(
+  dependencies: IntegratedVaultServiceDependencies,
+): CoreWriteServices {
   return {
     async init(input: CommandContext & {
       timezone?: string
     }) {
       const { vault } = input
       const core = await loadCoreRuntime()
-      await core.initializeVault({
-        vaultRoot: vault,
-        timezone: input.timezone ?? resolveSystemTimeZone(),
-      })
+      try {
+        await core.initializeVault({
+          vaultRoot: vault,
+          timezone: input.timezone ?? resolveSystemTimeZone(),
+        })
+      } catch (error) {
+        throw toVaultInitializationCliError(error)
+      }
       return {
         vault,
         created: true,
@@ -469,7 +494,12 @@ function createIntegratedCoreServices(): CoreWriteServices {
     async repairVault(input: CommandContext) {
       const { vault } = input
       const core = await loadCoreRuntime()
-      const result = await core.repairVault({ vaultRoot: vault })
+      let result: Awaited<ReturnType<typeof core.repairVault>>
+      try {
+        result = await core.repairVault({ vaultRoot: vault })
+      } catch (error) {
+        throw toVaultMetadataCliError(error)
+      }
       return {
         vault,
         metadataFile: result.metadataFile,
@@ -716,13 +746,13 @@ function createIntegratedCoreServices(): CoreWriteServices {
       return stopExperimentRecord(input)
     },
     async logExperimentSession(input) {
-      return logExperimentSessionRecord(input)
+      return logExperimentSessionRecord(input, dependencies)
     },
     async logExperimentSessionJson(input: CommandContext & {
       lookup: string
       inputFile: string
     }) {
-      return logExperimentSessionRecordFromInput(input)
+      return logExperimentSessionRecordFromInput(input, dependencies)
     },
     async attachExperimentSession(input) {
       return attachExperimentSessionRecord(input)
@@ -883,18 +913,22 @@ function createIntegratedCoreServices(): CoreWriteServices {
     async projectAssessment(input: ProjectAssessmentInput) {
       const { vault, assessmentId } = input
       const core = await loadCoreRuntime()
-      const assessment = await core.readAssessmentResponse({
-        vaultRoot: vault,
-        assessmentId,
-      })
-      const proposal = await core.projectAssessmentResponse({
-        assessmentResponse: assessment,
-      })
+      try {
+        const assessment = await core.readAssessmentResponse({
+          vaultRoot: vault,
+          assessmentId,
+        })
+        const proposal = await core.projectAssessmentResponse({
+          assessmentResponse: assessment,
+        })
 
-      return {
-        vault,
-        assessmentId,
-        proposal,
+        return {
+          vault,
+          assessmentId,
+          proposal,
+        }
+      } catch (error) {
+        throw toAssessmentProjectVaultCliError(error)
       }
     },
     ...createExplicitHealthCoreServices(async () => {
@@ -921,6 +955,10 @@ function createIntegratedImporterServices(): ImporterServices {
           reuseExact,
         })
       } catch (error) {
+        const inputFileError = toImporterInputFileVaultCliError(error, file)
+        if (inputFileError !== error) {
+          throw inputFileError
+        }
         throw toVaultCliError(error, {
           DOCUMENT_EXACT_SOURCE_DELETED: { code: 'conflict' },
           RAW_MANIFEST_INVALID: { code: 'conflict' },
@@ -1094,16 +1132,19 @@ function createIntegratedQueryServices(): QueryServices {
       return listFoodRecords(input)
     },
     async showMealNutritionTotals(input: CommandContext & {
+      resolveGoals?: boolean
       from?: string
       to?: string
     }) {
       const query = await loadQueryRuntime()
       const result = await query.readMealNutritionTotals(input.vault, {
+        resolveGoals: input.resolveGoals,
         from: input.from,
         to: input.to,
       })
 
       return {
+        ...(result.goalContext ? { goalContext: result.goalContext } : {}),
         vault: input.vault,
         filters: {
           from: result.from,
@@ -1226,8 +1267,10 @@ function createIntegratedQueryServices(): QueryServices {
       }
 
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(vault)
-      const entity = query.lookupEntityById(readModel, id)
+      const family = genericShowFamily(id)
+      const entity = family
+        ? await query.resolveCanonicalEntityInFamily(vault, family, id)
+        : null
 
       if (!entity) {
         throw new VaultCliError("not_found", `No entity found for "${id}".`)
@@ -1440,6 +1483,8 @@ function createIntegratedQueryServices(): QueryServices {
       to?: string
       providers?: string[]
       limit: number
+      includeWorkoutDetails?: boolean
+      includeWorkoutSummaries?: boolean
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
@@ -1447,7 +1492,24 @@ function createIntegratedQueryServices(): QueryServices {
         input.vault,
         normalized.queryFilters,
       )
-      const items = limitedCompactWearableCommandSummaryArray(rawItems, normalized.filters.limit)
+      const outputItems = input.includeWorkoutDetails
+        ? rawItems
+        : rawItems.map((item) => {
+            const summary: Record<string, unknown> = { ...item }
+            if (input.includeWorkoutSummaries) {
+              summary.workoutFeatures = item.workoutFeatures.map(({ splits: _splits, ...workout }) => ({
+                ...workout,
+                splitsOmitted: true,
+              }))
+            } else {
+              delete summary.workoutFeatures
+            }
+            return summary
+          })
+      const items = limitedCompactWearableCommandSummaryArray(
+        outputItems,
+        normalized.filters.limit,
+      )
 
       return {
         filters: normalized.filters,
@@ -1517,17 +1579,37 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const { vault, from, to, experiment, out } = input
       const query = await loadQueryRuntime()
-      const readModel = await query.readVaultTolerant(vault)
+      const [readModel, audits] = await Promise.all([
+        query.readVaultTolerant(vault),
+        query.readCanonicalEntityFamilySource(vault, 'audit'),
+      ])
+      readModel.entities = [...readModel.entities, ...audits].sort(
+        query.compareCanonicalEntities,
+      )
       const pack = query.buildExportPack(readModel, {
         from,
         to,
         experimentSlug: experiment,
       })
 
-      await materializeExportPack(vault, pack.files)
+      try {
+        await materializeExportPack(vault, pack.files)
+      } catch (error) {
+        throw toVaultCliFilesystemError(error, {
+          message: 'The export pack could not be stored in the vault.',
+          fieldPath: 'vault',
+        })
+      }
 
       if (out) {
-        await materializeExportPack(out, pack.files)
+        try {
+          await materializeExportPack(out, pack.files)
+        } catch (error) {
+          throw toVaultCliFilesystemError(error, {
+            message: 'The export pack could not be written to the output directory.',
+            fieldPath: 'out',
+          })
+        }
       }
 
       return {
@@ -1781,9 +1863,11 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-function createIntegratedVaultServiceGroups(): VaultServices {
+function createIntegratedVaultServiceGroups(
+  dependencies: IntegratedVaultServiceDependencies = {},
+): VaultServices {
   return {
-    core: createIntegratedCoreServices(),
+    core: createIntegratedCoreServices(dependencies),
     importers: createIntegratedImporterServices(),
     query: createIntegratedQueryServices(),
   }
@@ -1809,9 +1893,9 @@ function createUnwiredServiceGroup<
 }
 
 export function createIntegratedVaultServices(
-  _dependencies: Record<string, unknown> = {},
+  dependencies: IntegratedVaultServiceDependencies = {},
 ): VaultServices {
-  return createIntegratedVaultServiceGroups()
+  return createIntegratedVaultServiceGroups(dependencies)
 }
 
 export function createUnwiredVaultServices(

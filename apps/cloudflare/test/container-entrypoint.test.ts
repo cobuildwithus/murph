@@ -5,7 +5,7 @@ import {
 } from "node:http";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -15,6 +15,9 @@ import { HostedAssistantConfigurationError } from "@murphai/operator-config/host
 import {
   attachHostedRuntimeFailurePhaseCode,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedWorkspaceRestorePreparation,
+} from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
 
 type MockSpawnedProcess = EventEmitter & {
   kill: () => boolean;
@@ -38,6 +41,12 @@ type SpawnMock = (
 const mocks = vi.hoisted(() => ({
   drainHostedRuntimeDeferredUsageCompletionsBestEffort: vi.fn(async () => undefined),
   emitHostedExecutionStructuredLog: vi.fn(),
+  recordHostedContainerRuntimeCompletionBestEffort: vi.fn(
+    async (_input: {
+      job: { request: { attemptId: string } };
+      result: { status: string };
+    }) => undefined,
+  ),
   registerStopWarmCodexAppServer: vi.fn(),
   registerWaitForWarmCodexBackgroundWork: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
@@ -93,12 +102,22 @@ vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
   };
 });
 
+vi.mock("../src/container-runtime-completion.js", () => ({
+  recordHostedContainerRuntimeCompletionBestEffort:
+    mocks.recordHostedContainerRuntimeCompletionBestEffort,
+}));
+
 import {
   classifyRunnerJobError,
   createRequestAbortController,
-  resolveHostedContainerCodexSmokeHomeRoot,
   startHostedContainerEntrypoint,
 } from "../src/container-entrypoint.js";
+import {
+  buildHostedContainerCodexShellSmokeConfig,
+  hostedContainerHeavyRuntime,
+  resolveHostedContainerCodexSmokeHomeRoot,
+  resolveHostedContainerHealthCommonsPackageRoot,
+} from "../src/container-entrypoint-heavy-runtime.js";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
@@ -106,6 +125,9 @@ import {
 } from "../src/deploy-smoke-live-model.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 import { HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE } from "../src/runner-container-error-codes.js";
+import {
+  parseHostedExecutionRunnerJobInput,
+} from "../src/runner-job-transport.js";
 import { HostedRuntimeControlPlaneFetchError } from "../src/runtime-platform/control-plane-fetch.js";
 import * as hostedInvocation from "../src/hosted-workspace-invocation.js";
 
@@ -113,18 +135,33 @@ const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>>
 const nativeFetch = globalThis.fetch;
 const hostedContainerRunRequestBodyLimitBytes = 8 * 1024 * 1024;
 const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
+const TEST_PUBLIC_RELEASE_SHA = "0123456789abcdef0123456789abcdef01234567";
 
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object.`);
-  }
-  return value as Record<string, unknown>;
+function createTestHostedWorkspaceRestorePreparation(): HostedWorkspaceRestorePreparation {
+  return {
+    adoptRuntimeAbortGuard: vi.fn(),
+    phaseLogger: {
+      close: vi.fn(),
+      emit: vi.fn(),
+      failOpenPhases: vi.fn(() => []),
+    },
+    promise: new Promise<never>(() => undefined),
+    runtimePhaseStartedAt: "2026-08-27T15:00:00.000Z",
+    vaultRoot: path.join(tmpdir(), "murph-entrypoint-prepared-restore", "durable", "vault"),
+  };
+}
+
+function createTestHostedWorkspaceRestorePreparer() {
+  return vi.fn(async () => createTestHostedWorkspaceRestorePreparation());
 }
 
 beforeEach(() => {
   vi.unstubAllGlobals();
   globalThis.fetch = nativeFetch;
   mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockResolvedValue(undefined);
+  mocks.recordHostedContainerRuntimeCompletionBestEffort.mockResolvedValue(
+    undefined,
+  );
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
   mocks.spawn.mockReset();
   mocks.stopWarmCodexAppServer.mockResolvedValue(undefined);
@@ -379,6 +416,60 @@ function createDeferred<T = void>() {
 }
 
 describe("startHostedContainerEntrypoint", () => {
+  it("binds voice HTTP commands to the active invocation and releases them with it", async () => {
+    const ready = createDeferred();
+    const release = createDeferred();
+    const connect = vi.fn(async () => "v=0\r\nanswer");
+    const closeCall = vi.fn(async () => ({ providerConfirmed: true, providerSessionId: "synthetic-provider", seconds: 12 }));
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(async (_job, options) => {
+      options.onVoiceReady?.({ connect, closeCall });
+      ready.resolve();
+      await release.promise;
+      return buildWorkspaceRunnerResult();
+    });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("TCP listener missing.");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const invocation = fetch(origin + "/internal/workspace-invocation", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(buildJobBody({ wake: {
+        event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+        eventId: "voice-control", occurredAt: "2026-09-21T12:00:00.000Z",
+      } })),
+    });
+    const command = { userId: "u1", attemptId: "attempt_voice-control", leaseGeneration: "1",
+      callId: "call-synthetic", action: "connect", sdp: "v=0\r\noffer" };
+    const post = (body: unknown) => fetch(origin + "/internal/voice-control", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    try {
+      await ready.promise;
+      for (const change of [{ userId: "other" }, { attemptId: "old" }, { leaseGeneration: "2" }]) {
+        expect(await (await post({ ...command, ...change })).json()).toEqual({ kind: "unavailable" });
+      }
+      expect(connect).not.toHaveBeenCalled();
+      expect(await (await post(command)).json()).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
+      expect(connect).toHaveBeenCalledExactlyOnceWith("call-synthetic", command.sdp);
+      const { sdp: _sdp, ...close } = { ...command, action: "close" };
+      expect(await (await post(close)).json()).toEqual({ kind: "closed", providerConfirmed: true, seconds: 12 });
+      expect(closeCall).toHaveBeenCalledExactlyOnceWith("call-synthetic");
+      expect((await post({ ...command, extra: true })).status).toBe(400);
+      expect((await post({ ...command, sdp: "x".repeat(74000) })).status).toBe(413);
+      const malformed = await fetch(origin + "/internal/voice-control", {
+        method: "POST", headers: { "content-type": "application/json" }, body: "private-synthetic-offer",
+      });
+      expect(malformed.status).toBe(400);
+      expect(await malformed.text()).not.toContain("private-synthetic-offer");
+      expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain("private-synthetic-offer");
+    } finally {
+      release.resolve();
+      await invocation;
+    }
+    expect(await (await post(command)).json()).toEqual({ kind: "unavailable" });
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
   it("serves a lightweight health endpoint", async () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
@@ -404,116 +495,114 @@ describe("startHostedContainerEntrypoint", () => {
       hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
       ok: true,
       poisoned: false,
+      processStartedAtEpochMs: expect.any(Number),
       service: "cloudflare-hosted-runner-node",
+      serverListeningAtEpochMs: expect.any(Number),
     });
+    const health = response.json as Record<string, unknown>;
+    expect(health.processStartedAtEpochMs as number)
+      .toBeLessThanOrEqual(health.serverListeningAtEpochMs as number);
   });
 
-  it("publishes settled conversation warmth in health", async () => {
-    mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
-      options.onConversationActivityObserved?.();
-      return buildWorkspaceRunnerResult();
+  it("starts workspace restore preparation while one heavy hydration remains pending", async () => {
+    const heavyRuntimeHydration = createDeferred<typeof hostedContainerHeavyRuntime>();
+    const loadHeavyRuntime = vi.fn(() => heavyRuntimeHydration.promise);
+    const warmCodexStopped = createDeferred();
+    const stopWarmCodex = vi.fn(async (reason?: string) => {
+      expect(reason).toBe("hosted-workspace-restore");
+      await warmCodexStopped.promise;
     });
-    const server = await startHostedContainerEntrypoint({ port: 0 });
+    const firstPreparation = createTestHostedWorkspaceRestorePreparation();
+    const prepareWorkspaceRestore = vi.fn()
+      .mockResolvedValueOnce(firstPreparation)
+      .mockResolvedValueOnce(createTestHostedWorkspaceRestorePreparation());
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        loadHeavyRuntime,
+        prepareWorkspaceRestore,
+        stopWarmCodex,
+      },
+    });
     servers.push(server);
     const address = server.address();
+
     if (!address || typeof address === "string") {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    await sendHostedContainerJsonRequest({
+    expect(loadHeavyRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedWorkspaceInvocation).not.toHaveBeenCalled();
+
+    const pendingInvocation = sendHostedContainerJsonRequest({
       body: JSON.stringify(buildWorkspaceJobBody()),
       path: "/internal/workspace-invocation",
       port: address.port,
     });
 
-    const health = await sendHostedContainerGetRequest({
-      path: "/health",
-      port: address.port,
+    await vi.waitFor(async () => {
+      const health = await sendHostedContainerGetRequest({
+        path: "/health",
+        port: address.port,
+      });
+      expect(health.json).toMatchObject({ activeJobCount: 1 });
     });
-    const healthJson = requireRecord(health.json, "health response");
-    const completedAtEpochMs = healthJson
-      .conversationWarmActivityCompletedAtEpochMs;
-    expect(Number.isSafeInteger(completedAtEpochMs)).toBe(true);
-    expect(healthJson).toMatchObject({
-      conversationWarmActivityCompletedAtEpochMs: completedAtEpochMs,
-    });
+    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
+    expect(prepareWorkspaceRestore).not.toHaveBeenCalled();
 
-    await sendHostedContainerJsonRequest({
+    warmCodexStopped.resolve();
+    await vi.waitFor(() => {
+      expect(prepareWorkspaceRestore).toHaveBeenCalledTimes(1);
+    });
+    expect(prepareWorkspaceRestore).toHaveBeenCalledTimes(1);
+    expect(prepareWorkspaceRestore).toHaveBeenCalledWith(expect.objectContaining({
+      job: expect.objectContaining({ kind: "workspace-invocation" }),
+      signal: expect.any(AbortSignal),
+    }));
+    expect(loadHeavyRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedWorkspaceInvocation).not.toHaveBeenCalled();
+
+    const concurrentInvocation = await sendHostedContainerJsonRequest({
       body: JSON.stringify(buildWorkspaceJobBody()),
       path: "/internal/workspace-invocation",
       port: address.port,
     });
-    const healthAfterMaintenance = await sendHostedContainerGetRequest({
-      path: "/health",
+    expect(concurrentInvocation.status).toBe(409);
+    expect(loadHeavyRuntime).toHaveBeenCalledTimes(1);
+
+    heavyRuntimeHydration.resolve(hostedContainerHeavyRuntime);
+    await expect(pendingInvocation).resolves.toMatchObject({ status: 200 });
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ kind: "workspace-invocation" }),
+      expect.objectContaining({ preparedWorkspaceRestore: firstPreparation }),
+    );
+    expect(loadHeavyRuntime).toHaveBeenCalledTimes(1);
+
+    const warmInvocation = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
       port: address.port,
     });
-    expect(healthAfterMaintenance.json).toMatchObject({
-      conversationWarmActivityCompletedAtEpochMs: completedAtEpochMs,
-    });
+    expect(warmInvocation.status).toBe(200);
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
+    expect(prepareWorkspaceRestore).toHaveBeenCalledTimes(2);
+    expect(loadHeavyRuntime).toHaveBeenCalledTimes(1);
   });
 
-  it("starts conversation warmth when the observed invocation settles", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      const observedAtEpochMs = Date.parse("2026-07-22T13:00:00.000Z");
-      const settledAtEpochMs = observedAtEpochMs + 300_000;
-      const activityObserved = createDeferred();
-      const releaseInvocation = createDeferred();
-      mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
-        options.onConversationActivityObserved?.();
-        activityObserved.resolve();
-        await releaseInvocation.promise;
-        return buildWorkspaceRunnerResult();
-      });
-      vi.setSystemTime(observedAtEpochMs);
-      const server = await startHostedContainerEntrypoint({ port: 0 });
-      servers.push(server);
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-      }
-
-      const invocationPromise = sendHostedContainerJsonRequest({
-        body: JSON.stringify(buildWorkspaceJobBody()),
-        path: "/internal/workspace-invocation",
-        port: address.port,
-      });
-      await activityObserved.promise;
-
-      const healthWhileRunning = await sendHostedContainerGetRequest({
-        path: "/health",
-        port: address.port,
-      });
-      expect(healthWhileRunning.json).toMatchObject({
-        activeJobCount: 1,
-        conversationWarmActivityCompletedAtEpochMs: null,
-      });
-
-      vi.setSystemTime(settledAtEpochMs);
-      releaseInvocation.resolve();
-      await invocationPromise;
-
-      const healthAfterSettlement = await sendHostedContainerGetRequest({
-        path: "/health",
-        port: address.port,
-      });
-      expect(healthAfterSettlement.json).toMatchObject({
-        activeJobCount: 0,
-        conversationWarmActivityCompletedAtEpochMs: settledAtEpochMs,
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("settles conversation warmth when the invocation fails after observation", async () => {
-    mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
-      options.onConversationActivityObserved?.();
-      throw new Error("synthetic invocation failure");
+  it("does not prepare or run a workspace when warm Codex cannot stop", async () => {
+    const prepareWorkspaceRestore = createTestHostedWorkspaceRestorePreparer();
+    const stopWarmCodex = vi.fn().mockRejectedValueOnce(
+      new Error("synthetic warm Codex stop failure"),
+    );
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: { prepareWorkspaceRestore, stopWarmCodex },
     });
-    const server = await startHostedContainerEntrypoint({ port: 0 });
     servers.push(server);
     const address = server.address();
+
     if (!address || typeof address === "string") {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
@@ -523,15 +612,154 @@ describe("startHostedContainerEntrypoint", () => {
       path: "/internal/workspace-invocation",
       port: address.port,
     });
+
     expect(invocation.status).toBe(500);
-    const health = await sendHostedContainerGetRequest({
-      path: "/health",
-      port: address.port,
-    });
-    const healthJson = requireRecord(health.json, "health response");
-    expect(Number.isSafeInteger(
-      healthJson.conversationWarmActivityCompletedAtEpochMs,
-    )).toBe(true);
+    expect(stopWarmCodex).toHaveBeenCalledWith(
+      "hosted-workspace-restore",
+    );
+    expect(prepareWorkspaceRestore).not.toHaveBeenCalled();
+    expect(mocks.runHostedWorkspaceInvocation).not.toHaveBeenCalled();
+  });
+
+  it("keeps heavy runtime modules out of the pre-listen static module graph", () => {
+    const entrypointSource = readFileSync(
+      path.join(process.cwd(), "apps/cloudflare/src/container-entrypoint.ts"),
+      "utf8",
+    );
+    const heavyRuntimeSource = readFileSync(
+      path.join(process.cwd(), "apps/cloudflare/src/container-entrypoint-heavy-runtime.ts"),
+      "utf8",
+    );
+    const valueImports = Array.from(entrypointSource.matchAll(
+      /^\s*import(?!\s+type\b)[\s\S]*?\sfrom\s+["']([^"']+)["'];/gm,
+    ), (match) => match[1]);
+    const heavySpecifiers = [
+      "node:child_process",
+      "node:crypto",
+      "node:https",
+      "node:os",
+      "node:stream",
+      "@murphai/assistant-runtime/hosted-invocation",
+      "@murphai/assistant-runtime/hosted-runtime-contracts",
+      "@murphai/contracts",
+      "./deploy-smoke-live-model.ts",
+      "./hosted-workspace-invocation.ts",
+      "./runner-container-ca-env.ts",
+      "./runner-injected-credential.ts",
+    ];
+
+    for (const specifier of heavySpecifiers) {
+      expect(valueImports).not.toContain(specifier);
+      expect(heavyRuntimeSource).toContain(`from "${specifier}"`);
+    }
+    expect(valueImports).toContain("@murphai/assistant-engine/codex-lifecycle");
+    expect(heavyRuntimeSource).not.toContain(
+      'from "@murphai/assistant-engine/codex-lifecycle"',
+    );
+    expect(valueImports).toContain("./runner-job-transport.ts");
+    expect(valueImports).not.toContain("./container-workspace-restore-preparation.ts");
+    expect(
+      entrypointSource.match(/import\("\.\/container-entrypoint-heavy-runtime\.ts"\)/g),
+    ).toHaveLength(1);
+    expect(
+      entrypointSource.match(/import\("\.\/container-workspace-restore-preparation\.ts"\)/g),
+    ).toHaveLength(1);
+    expect(entrypointSource).toContain("if (!heavyRuntimeHydrationPromise)");
+    expect(entrypointSource).toContain(
+      "heavyRuntimeHydrationPromise = runtime.loadHeavyRuntime()",
+    );
+    const listenOffset = entrypointSource.indexOf("server.listen(");
+    const eagerHydrationOffset = entrypointSource.indexOf(
+      "hydrateHeavyRuntime();",
+      listenOffset,
+    );
+    expect(listenOffset).toBeGreaterThanOrEqual(0);
+    expect(eagerHydrationOffset).toBeGreaterThan(listenOffset);
+  });
+
+  it.each([false, true])("publishes receipt warmth before housekeeping settles (failure=%s)", async (fail) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const receivedAtEpochMs = Date.parse("2026-07-22T13:00:00.000Z");
+      vi.setSystemTime(receivedAtEpochMs + 120_000);
+      const observed = createDeferred();
+      const release = createDeferred();
+      mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
+        options.onConversationActivityObserved?.(receivedAtEpochMs);
+        // Replays, unknown evidence and provider-future timestamps cannot mint
+        // a later lease at observation or when the invocation settles.
+        for (const receipt of [receivedAtEpochMs, receivedAtEpochMs - 1, NaN, -1, Date.now() + 1]) {
+          options.onConversationActivityObserved?.(receipt);
+        }
+        observed.resolve();
+        await release.promise;
+        if (fail) throw new Error("synthetic checkpoint failure");
+        return buildWorkspaceRunnerResult();
+      });
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP port.");
+      const invocation = sendHostedContainerJsonRequest({
+        body: JSON.stringify(buildWorkspaceJobBody()),
+        path: "/internal/workspace-invocation",
+        port: address.port,
+      });
+      await observed.promise;
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+        .toMatchObject({
+          activeJobCount: 1,
+          conversationActivityReceivedAtEpochMs: receivedAtEpochMs,
+          conversationWarmActivityCompletedAtEpochMs: receivedAtEpochMs,
+        });
+      vi.setSystemTime(receivedAtEpochMs + 900_000);
+      release.resolve();
+      expect((await invocation).status).toBe(fail ? 500 : 200);
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+        .toMatchObject({ activeJobCount: 0, conversationActivityReceivedAtEpochMs: receivedAtEpochMs });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("only a newer admitted receipt extends warmth; maintenance and process replacement do not", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const firstReceipt = Date.parse("2026-07-22T13:00:00.000Z");
+      vi.setSystemTime(firstReceipt);
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP port.");
+      for (const [receipt, expected] of [
+        [firstReceipt, firstReceipt],
+        [null, firstReceipt],
+        [firstReceipt, firstReceipt],
+        [firstReceipt + 599_999, firstReceipt + 599_999],
+        [firstReceipt, firstReceipt + 599_999],
+      ] as const) {
+        vi.setSystemTime(firstReceipt + 599_999);
+        mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
+          if (receipt !== null) options.onConversationActivityObserved?.(receipt);
+          return buildWorkspaceRunnerResult();
+        });
+        await sendHostedContainerJsonRequest({
+          body: JSON.stringify(buildWorkspaceJobBody()),
+          path: "/internal/workspace-invocation",
+          port: address.port,
+        });
+        expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+          .toMatchObject({ conversationActivityReceivedAtEpochMs: expected });
+      }
+      const replacement = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(replacement);
+      const replacementAddress = replacement.address();
+      if (!replacementAddress || typeof replacementAddress === "string") throw new Error("Expected a TCP port.");
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: replacementAddress.port })).json)
+        .toMatchObject({ activeJobCount: 0, conversationActivityReceivedAtEpochMs: null });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("drains deferred usage completions before clean shutdown exit", async () => {
@@ -687,7 +915,9 @@ describe("startHostedContainerEntrypoint", () => {
     await invocationReady.promise;
     expect(observedRuntime.shutdownSignal?.aborted).toBe(false);
     process.emit("SIGTERM", "SIGTERM");
+    process.emit("SIGTERM", "SIGTERM");
     expect(observedRuntime.shutdownSignal?.aborted).toBe(true);
+    expect(exit).not.toHaveBeenCalled();
 
     const lateWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       body: JSON.stringify({
@@ -700,6 +930,7 @@ describe("startHostedContainerEntrypoint", () => {
       },
       method: "POST",
     });
+    expect(exit).not.toHaveBeenCalled();
     releaseInvocation.resolve();
     const invocationResponse = await invocation;
 
@@ -838,7 +1069,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(mocks.stopWarmCodexAppServer).toHaveBeenCalledWith("container-server-close");
   });
 
-  it("accepts runtime wakes only after the active invocation reports readiness", async () => {
+  it.each(["covered", "unknown first", "unknown second", "malformed second"])("coalesces %s mailbox coverage before runtime readiness", async (coverage) => {
     const invocationStarted = createDeferred();
     const allowInvocationReady = createDeferred();
     const invocationReady = createDeferred();
@@ -896,6 +1127,16 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     await invocationStarted.promise;
+    const pendingVoiceWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1",
+        userId: "u1", voiceCallId: "call-synthetic",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(pendingVoiceWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+    expect(pendingVoiceWake.headers.get("x-runtime-wake-pending")).toBeNull();
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       body: JSON.stringify({
         attemptId: "attempt_evt_runtime_wake_ready",
@@ -904,6 +1145,8 @@ describe("startHostedContainerEntrypoint", () => {
           activeWakeStartedAtEpochMs: 1_777_009_999_950,
           cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
         },
+        ...(coverage === "unknown first" ? {} : { mailboxWakeHighWater: { conversation: "4", system: "3" } }),
+        requestedProcessingMode: "default",
         userId: "u1",
       }),
       headers: {
@@ -913,6 +1156,14 @@ describe("startHostedContainerEntrypoint", () => {
     });
     nowEpochMs = secondPendingWakeAcceptedAtEpochMs;
     const secondPendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      ...(coverage === "unknown second" ? {} : {
+        body: JSON.stringify({
+          attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1", userId: "u1",
+          mailboxWakeHighWater: coverage === "malformed second"
+            ? { conversation: "5" } : { conversation: "5", system: "2" },
+        }),
+        headers: { "content-type": "application/json; charset=utf-8" },
+      }),
       method: "POST",
     });
     nowEpochMs = runtimeReadyAtEpochMs;
@@ -921,6 +1172,11 @@ describe("startHostedContainerEntrypoint", () => {
 
     nowEpochMs = firstWakeAcceptedAtEpochMs;
     const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1", userId: "u1", voiceCallId: "call-synthetic",
+        mailboxWakeHighWater: { conversation: "6", system: "3" },
+      }),
+      headers: { "content-type": "application/json; charset=utf-8" },
       method: "POST",
     });
     nowEpochMs = secondWakeAcceptedAtEpochMs;
@@ -934,6 +1190,12 @@ describe("startHostedContainerEntrypoint", () => {
     expect(pendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-identity-checked")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
+    expect(pendingWake.headers.get("x-runtime-wake-received-at-ms")).toBe(String(pendingWakeAcceptedAtEpochMs));
+    expect(pendingWake.headers.get("x-runtime-wake-accepted-at-ms")).toBe(String(pendingWakeAcceptedAtEpochMs));
+    expect(firstWake.headers.get("x-runtime-wake-received-at-ms")).toBe(String(firstWakeAcceptedAtEpochMs));
+    expect(firstWake.headers.get("x-runtime-wake-accepted-at-ms")).toBe(String(firstWakeAcceptedAtEpochMs));
+    expect(firstWake.headers.get("x-runtime-wake-pending")).toBeNull();
+    expect(idleWake.headers.get("x-runtime-wake-accepted-at-ms")).toBeNull();
     expect(secondPendingWake.status).toBe(204);
     expect(secondPendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(secondPendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
@@ -944,6 +1206,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runtimeWakeCount).toBe(3);
     expect(runtimeWakeNotifications).toEqual([
       {
+        ...(coverage === "covered" ? { mailboxWakeHighWater: { conversation: "5", system: "3" } } : {}),
         notifiedAtEpochMs: pendingWakeAcceptedAtEpochMs,
         orchestration: {
           activeWakeAccepted: true,
@@ -951,8 +1214,9 @@ describe("startHostedContainerEntrypoint", () => {
           activeWakeStartedAtEpochMs: 1_777_009_999_950,
           cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
         },
+        requestedProcessingMode: "default",
       },
-      { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs },
+      { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs, voiceCallId: "call-synthetic", mailboxWakeHighWater: { conversation: "6", system: "3" } },
       { notifiedAtEpochMs: secondWakeAcceptedAtEpochMs },
     ]);
     expect(invocationResponse.status).toBe(200);
@@ -982,17 +1246,21 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
         },
         {
           activeHostedRunnerJobCount: 1,
-          activeRuntimeWakePending: true,
+          activeRuntimeWakePending: false,
           activeRuntimeWakePresent: false,
-          runtimeWakeAccepted: true,
+          runtimeWakeAccepted: false,
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
-          runtimeWakePending: true,
+          runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1004,6 +1272,21 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: true,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
+          workspaceAttemptId: null,
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: true,
+          activeRuntimeWakePresent: false,
+          runtimeWakeAccepted: true,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
+          runtimeWakePending: true,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1015,6 +1298,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_ready",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1026,6 +1311,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_ready",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1193,6 +1480,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
         },
@@ -1204,6 +1493,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
         },
@@ -1217,7 +1508,8 @@ describe("startHostedContainerEntrypoint", () => {
         buildSkipped: false,
         bundleFingerprint: "bundle-fingerprint",
         generatedAt: "2026-04-24T00:00:00.000Z",
-        schemaVersion: 2,
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
+        schemaVersion: 3,
         sourceFingerprint: "source-fingerprint",
       });
     });
@@ -1248,7 +1540,8 @@ describe("startHostedContainerEntrypoint", () => {
         buildSkipped: false,
         bundleFingerprint: "bundle-fingerprint",
         generatedAt: "2026-04-24T00:00:00.000Z",
-        schemaVersion: 2,
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
+        schemaVersion: 3,
         sourceFingerprint: "source-fingerprint",
       },
       service: "cloudflare-hosted-runner-node",
@@ -1270,11 +1563,12 @@ describe("startHostedContainerEntrypoint", () => {
     expect(readFile).toHaveBeenCalledTimes(1);
   });
 
-  it("runs the managed-container Codex shell smoke through the app-server hook", async () => {
+  it.each(["", "?scope=readiness"])("runs deployment smoke and publishes its legacy health receipt for query=%s", async (query) => {
     const runCodexShellSmoke = vi.fn(async () => ({
       client: "codex-app-server" as const,
       cliSurfaceContractBytes: 37282,
-      cliSurfaceHotPathProofCount: 4,
+      cliSurfaceHotPathProofCount: 5,
+      healthCommonsCliGoalProofCount: 6,
       murphPathBytes: 28,
       noteAddBytes: 128,
       stderrBytes: 0,
@@ -1297,7 +1591,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     const response = await sendHostedContainerJsonRequest({
       body: "",
-      path: "/internal/deploy-codex-shell-smoke",
+      path: "/internal/deploy-codex-shell-smoke" + query,
       port: address.port,
     });
 
@@ -1306,7 +1600,8 @@ describe("startHostedContainerEntrypoint", () => {
       codexShell: {
         client: "codex-app-server",
         cliSurfaceContractBytes: 37282,
-        cliSurfaceHotPathProofCount: 4,
+        cliSurfaceHotPathProofCount: 5,
+        healthCommonsCliGoalProofCount: 6,
         murphPathBytes: 28,
         noteAddBytes: 128,
         stderrBytes: 0,
@@ -1319,6 +1614,84 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runCodexShellSmoke).toHaveBeenCalledWith({
       signal: expect.any(AbortSignal),
     });
+    const health = await sendHostedContainerGetRequest({ path: "/health", port: address.port });
+    expect(health.json).toMatchObject({
+      codexShellPreflightStatus: "ready",
+      codexShellPreflightCompletedAtEpochMs: expect.any(Number),
+    });
+  });
+
+  it.each([
+    ["", false],
+    ["?scope=readiness", false],
+    ["", true],
+  ] as const)("runs full deployment proof for query=%s with invalid environment=%s", async (query, invalidEnvironment) => {
+    const smokeHomeParent = await mkdtemp(path.join("/var/tmp", "murph-standby-proof-"));
+    vi.stubEnv("HOSTED_HOME", smokeHomeParent);
+    vi.stubEnv("MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "/app/node_modules/@murphai/health-commons");
+    const methods: string[] = [];
+    const commands: string[][] = [];
+    const kill = vi.fn(() => true);
+    mocks.spawn.mockImplementationOnce(() => {
+      const stdout = new EventEmitter();
+      return Object.assign(new EventEmitter(), {
+        stdout,
+        stderr: new EventEmitter(),
+        kill,
+        stdin: {
+          end() {},
+          write(line: string, callback?: (error?: Error) => void) {
+            const request = JSON.parse(line) as {
+              id?: number; method: string; params: { command?: string[] };
+            };
+            methods.push(request.method);
+            const command = request.params.command;
+            if (command) commands.push(command);
+            // Every deployment request must continue into the CLI suite.
+            // Stop at that boundary so this test never launches real commands.
+            const result = command ? {
+              exitCode: command[0] === "node" ? 0 : 1,
+              stderr: "",
+              stdout: JSON.stringify({
+                murphPathBytes: 20, vaultCliPathBytes: 24,
+                providerCredentialPresent: invalidEnvironment,
+                vaultRootInherited: true,
+              }),
+            } : {};
+            callback?.();
+            if (request.id !== undefined) queueMicrotask(() => {
+              stdout.emit("data", JSON.stringify({ id: request.id, result }) + "\n");
+            });
+          },
+        },
+      });
+    });
+    try {
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected TCP listener");
+      const response = await sendHostedContainerJsonRequest({
+        body: "", port: address.port,
+        path: "/internal/deploy-codex-shell-smoke" + query,
+      });
+      expect(response.status).toBe(500);
+      expect(commands.map((command) => command[0])).toEqual(
+        invalidEnvironment ? ["node"] : ["node", "vault-cli"],
+      );
+      expect(methods).toEqual([
+        "initialize", "initialized", "command/exec",
+        ...(invalidEnvironment ? [] : ["command/exec"]),
+      ]);
+      expect(kill).toHaveBeenCalledOnce();
+      const health = await sendHostedContainerGetRequest({ path: "/health", port: address.port });
+      expect(health.json).toMatchObject({
+        codexShellPreflightStatus: "failed",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(smokeHomeParent, { force: true, recursive: true });
+    }
   });
 
   it("surfaces content-free Codex shell smoke failure diagnostics", async () => {
@@ -1622,6 +1995,24 @@ describe("startHostedContainerEntrypoint", () => {
     );
   });
 
+  it("uses only the image-owned Health Commons package root for managed smoke", () => {
+    expect(resolveHostedContainerHealthCommonsPackageRoot({
+      MURPH_HEALTH_COMMONS_PACKAGE_ROOT:
+        " /app/node_modules/@murphai/health-commons ",
+    })).toBe("/app/node_modules/@murphai/health-commons");
+    expect(() => resolveHostedContainerHealthCommonsPackageRoot({
+      MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "relative/health-commons",
+    })).toThrow(
+      "Hosted Codex shell smoke requires the image Health Commons package root.",
+    );
+    expect(() => resolveHostedContainerHealthCommonsPackageRoot({})).toThrow(
+      "Hosted Codex shell smoke requires the image Health Commons package root.",
+    );
+    expect(buildHostedContainerCodexShellSmokeConfig("gpt-test")).toContain(
+      'include_only = ["PATH", "VAULT", "HOME", "CODEX_HOME", "TMPDIR", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]',
+    );
+  });
+
   it("surfaces capped ASCII-only live model turn smoke failure diagnostics", async () => {
     const runLiveModelTurnSmoke = vi.fn(async () => {
       throw new Error(
@@ -1746,6 +2137,7 @@ describe("startHostedContainerEntrypoint", () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
         runWorkspaceInvocation,
       },
     });
@@ -1918,7 +2310,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("parses requests through hosted runtime contracts before direct invocation", async () => {
+  it("uses the narrow runner parser before direct invocation", async () => {
     const requestBody = buildJobBody({
       wake: {
         event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u_loader_split" },
@@ -1933,24 +2325,32 @@ describe("startHostedContainerEntrypoint", () => {
     const parsedJob =
       actualContractsModule.parseHostedAssistantWorkspaceRuntimeJobInput(requestBody.job);
     const parseHostedAssistantWorkspaceRuntimeJobInput = vi.fn(() => parsedJob);
-    const contractsModule = {
-      ...actualContractsModule,
-      parseHostedAssistantWorkspaceRuntimeJobInput,
-    };
-    const loadRuntimeContracts = vi.fn(async () => contractsModule);
+    const parseRunnerJobInput = vi.fn((value: unknown) =>
+      parseHostedExecutionRunnerJobInput(value, {
+        parseWorkspaceJobInput: parseHostedAssistantWorkspaceRuntimeJobInput,
+      })
+    );
     const runWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
 
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
+        parseRunnerJobInput,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
+        processApi: {
+          async readFile() {
+            return JSON.stringify({
+              releaseSha: TEST_PUBLIC_RELEASE_SHA,
+            });
+          },
+        },
         runWorkspaceInvocation,
-        loadRuntimeContracts,
       },
     });
     servers.push(server);
 
     expect(runWorkspaceInvocation).not.toHaveBeenCalled();
-    expect(loadRuntimeContracts).not.toHaveBeenCalled();
+    expect(parseRunnerJobInput).not.toHaveBeenCalled();
 
     const address = server.address();
 
@@ -1967,7 +2367,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(loadRuntimeContracts).toHaveBeenCalledTimes(1);
+    expect(parseRunnerJobInput).toHaveBeenCalledTimes(1);
     expect(runWorkspaceInvocation).toHaveBeenCalledTimes(1);
     expect(parseHostedAssistantWorkspaceRuntimeJobInput).toHaveBeenCalledWith(requestBody.job);
     expect(runWorkspaceInvocation).toHaveBeenCalledWith(
@@ -1976,6 +2376,7 @@ describe("startHostedContainerEntrypoint", () => {
         kind: "workspace-invocation",
       },
       expect.objectContaining({
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
         supervisorEnv: expect.any(Object),
       }),
     );
@@ -1999,16 +2400,18 @@ describe("startHostedContainerEntrypoint", () => {
     const parsedJob =
       actualContractsModule.parseHostedAssistantWorkspaceRuntimeJobInput(requestBody.job);
     const parseHostedAssistantWorkspaceRuntimeJobInput = vi.fn(() => parsedJob);
-    const contractsModule = {
-      ...actualContractsModule,
-      parseHostedAssistantWorkspaceRuntimeJobInput,
-    };
+    const parseRunnerJobInput = vi.fn((value: unknown) =>
+      parseHostedExecutionRunnerJobInput(value, {
+        parseWorkspaceJobInput: parseHostedAssistantWorkspaceRuntimeJobInput,
+      })
+    );
     const runWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
+        parseRunnerJobInput,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
         runWorkspaceInvocation,
-        loadRuntimeContracts: vi.fn(async () => contractsModule),
       },
     });
     servers.push(server);
@@ -2145,6 +2548,7 @@ describe("startHostedContainerEntrypoint", () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
         runWorkspaceInvocation,
       },
     });
@@ -2836,6 +3240,101 @@ describe("startHostedContainerEntrypoint", () => {
     controller.cleanup();
   });
 
+  it("bounds shutdown while heavy runtime hydration remains pending", async () => {
+    const heavyRuntimeHydration = createDeferred<typeof hostedContainerHeavyRuntime>();
+    const loadHeavyRuntime = vi.fn(() => heavyRuntimeHydration.promise);
+    const prepareWorkspaceRestore = createTestHostedWorkspaceRestorePreparer();
+    const exitScheduler = vi.fn();
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const sigtermListenersBeforeStart = new Set(process.listeners("SIGTERM"));
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler,
+        loadHeavyRuntime,
+        prepareWorkspaceRestore,
+        shutdownDrainTimeoutMs: 10,
+      },
+    });
+    servers.push(server);
+    const serverClosed = new Promise<void>((resolve) => {
+      server.once("close", () => resolve());
+    });
+    const shutdownSignalHandler = process.listeners("SIGTERM").find(
+      (listener) => !sigtermListenersBeforeStart.has(listener),
+    );
+    if (!shutdownSignalHandler) {
+      throw new Error("Expected the hosted container entrypoint to register SIGTERM handling.");
+    }
+
+    shutdownSignalHandler("SIGTERM");
+
+    expect(exit).not.toHaveBeenCalled();
+    await serverClosed;
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
+
+    expect(loadHeavyRuntime).toHaveBeenCalledTimes(1);
+    expect(exitScheduler).not.toHaveBeenCalled();
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(0);
+    expect(prepareWorkspaceRestore).not.toHaveBeenCalled();
+  });
+
+  it("poisons and exits once when heavy runtime hydration fails", async () => {
+    const heavyRuntimeHydration = createDeferred<typeof hostedContainerHeavyRuntime>();
+    const loadHeavyRuntime = vi.fn(() => heavyRuntimeHydration.promise);
+    const prepareWorkspaceRestore = createTestHostedWorkspaceRestorePreparer();
+    const exitScheduler = vi.fn();
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler,
+        loadHeavyRuntime,
+        prepareWorkspaceRestore,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    heavyRuntimeHydration.reject(new Error("synthetic heavy hydration failure"));
+    await vi.waitFor(() => {
+      expect(exitScheduler).toHaveBeenCalledTimes(1);
+    });
+
+    const health = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
+    expect(health).toMatchObject({
+      json: {
+        ok: true,
+        poisoned: true,
+      },
+      status: 200,
+    });
+
+    const invocation = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    expect(invocation).toMatchObject({
+      json: {
+        error: "Hosted runner container is poisoned.",
+      },
+      status: 503,
+    });
+    expect(loadHeavyRuntime).toHaveBeenCalledTimes(1);
+    expect(prepareWorkspaceRestore).not.toHaveBeenCalled();
+    expect(exitScheduler).toHaveBeenCalledTimes(1);
+  });
+
 });
 
 describe("classifyRunnerJobError", () => {
@@ -2882,7 +3381,11 @@ describe("classifyRunnerJobError", () => {
     expect(JSON.stringify(classified.payload)).not.toContain("boom");
   });
 
-  it("transports a phase alongside a generic control-plane failure code", () => {
+  it.each([
+    "EACCES",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_UNTRACKED_COMPLETION",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_INTERACTED",
+  ])("transports phase and finite failure code %s without private details", (code) => {
     const fetchFailure = new HostedRuntimeControlPlaneFetchError({
       cause: new TypeError("hidden control-plane transport failure"),
       description: "Hosted workspace snapshot",
@@ -2897,7 +3400,7 @@ describe("classifyRunnerJobError", () => {
       new Error("hidden snapshot wrapper at /private/workspace/vault", {
         cause: fetchFailure,
       }),
-      { code: "EACCES" },
+      { code },
     );
     attachHostedRuntimeFailurePhaseCode(
       wrappedFailure,
@@ -2910,7 +3413,7 @@ describe("classifyRunnerJobError", () => {
       payload: {
         code: "runtime_error",
         details: {
-          errorCodeDetail: "EACCES",
+          errorCodeDetail: code,
           runtimeFailurePhaseCode:
             "runtime_phase:workspace.checkpoint.idle_compact",
         },

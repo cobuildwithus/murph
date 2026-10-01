@@ -135,6 +135,20 @@ const TABLE_CARD: CompactTablePresentationCardV1 = {
   footer: "Adjust load when form slows down.",
 };
 
+const COMPACT_COMPARISON_TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Workout set comparison",
+  subtitle: null,
+  rowHeader: "Workout",
+  columns: ["Set 1", "Set 2", "Set 3"],
+  rows: [
+    { label: "Previous Workout", values: ["–", "20 lb × 8", "–"] },
+    { label: "Current Workout", values: ["25 lb × 8", "25 lb × 8", "–"] },
+  ],
+  footer: null,
+};
+
 const DENSE_TABLE_CARD: CompactTablePresentationCardV1 = {
   kind: "compact_table",
   version: 1,
@@ -520,6 +534,27 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.doesNotMatch(serialized, /margin-top:171px/u);
   assert.match(serialized, /<h1/u);
   assert.match(serialized, /data-compact-table-layout="grid"/u);
+});
+
+test("short workout comparisons stay in one compact shared-header grid", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({
+    schemaVersion: 3,
+    card: COMPACT_COMPARISON_TABLE_CARD,
+  });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree, init] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.ok((init.height ?? Number.POSITIVE_INFINITY) < 800);
+  assert.match(serialized, /data-compact-table-layout="grid"/u);
+  assert.doesNotMatch(serialized, /data-compact-table-layout="stacked"/u);
+  assert.equal(serialized.match(/>SET 1<\/div>/gu)?.length, 1);
+  assert.equal(serialized.match(/>25 lb × 8<\/div>/gu)?.length, 2);
 });
 
 test("response-card image route restores and renders the exact compact V4 workout snapshot", async () => {
@@ -958,3 +993,23 @@ function getImageResponseCall(): [ReactElement, MockImageResponseInit] {
 function headersInitToRecord(headers: HeadersInit | undefined): Record<string, string> {
   return Object.fromEntries(new Headers(headers).entries());
 }
+
+
+test("totals-only nutrition keeps the native metric layout without extra copy or goal judgments", async () => {
+  const { NutritionCardImage } = await import("@/src/components/imessage/nutrition-card-image");
+  const card: DailyNutritionResponseCardV2 = { ...CARD, localDate: "2026-09-11",
+    goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null } };
+  const markup = renderToStaticMarkup(<NutritionCardImage card={card} />);
+  assert.match(markup, /imessage-native-nutrition-card/u);
+  assert.match(markup, /data-murph-card-logo="true"/u);
+  assert.match(markup, /1,840/u);
+  for (const label of ["PROTEIN", "CARBS", "FAT", "FIBER"]) {
+    assert.match(markup, new RegExp(label, "u"));
+  }
+  assert.doesNotMatch(markup, /estimated|logged|2026-09-11|everything eaten|partial estimates/iu);
+  assert.doesNotMatch(markup, /data-calorie-progress|stroke-dasharray|#B3332B|#995E08|#337338|target unavailable|Goal unavailable/u);
+  const unknown = renderToStaticMarkup(<NutritionCardImage card={{ ...card,
+    totals: { ...card.totals, fiberGrams: { total: null, mealCount: 0 } } }} />);
+  assert.match(unknown, />—</u);
+  assert.doesNotMatch(unknown, /0g fiber/u);
+});

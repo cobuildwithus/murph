@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "readable-group-reports",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Group reports are easier to scan",
+    "summary": "Structured group text reports separate dates and metrics into labeled sections, with each participant on their own line.",
+    "details": "Reports stay together in one message, with spacing that makes individual results easier to find.",
+    "relevanceTags": [
+      "groups",
+      "automations"
+    ],
+    "sourcePullRequests": [
+      3060
+    ]
+  }
+}

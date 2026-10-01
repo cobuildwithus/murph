@@ -123,3 +123,61 @@ export function requireBigIntString(value: unknown, label: string): string {
 
   return text;
 }
+
+export function assertAllowedObjectKeys(
+  record: Record<string, unknown>,
+  allowedKeys: ReadonlySet<string>,
+  label: string,
+): void {
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new TypeError(`${label}.${key} is not allowed.`);
+    }
+  }
+}
+
+export function parseAllowedString<T extends string>(
+  value: unknown,
+  label: string,
+  allowed: readonly T[],
+): T {
+  const text = requireString(value, label);
+
+  if (allowed.includes(text as T)) {
+    return text as T;
+  }
+
+  throw new TypeError(`${label} is not supported.`);
+}
+
+export function requireNonNegativeInteger(value: unknown, label: string): number {
+  const parsed = requireNumber(value, label);
+
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new TypeError(`${label} must be a non-negative integer.`);
+  }
+
+  return parsed;
+}
+
+export function requireNonNegativeBigIntString(value: unknown, label: string): string {
+  const text = requireString(value, label);
+
+  if (!/^[0-9]+$/u.test(text)) {
+    throw new TypeError(
+      `${label} must be a non-negative base-10 integer string.`,
+    );
+  }
+
+  return text;
+}
+
+export function requirePositiveInteger(value: unknown, label: string): number {
+  const parsed = requireNonNegativeInteger(value, label);
+
+  if (parsed === 0) {
+    throw new TypeError(`${label} must be a positive integer.`);
+  }
+
+  return parsed;
+}

@@ -367,7 +367,7 @@ interface MutableHourlyBucket {
 }
 
 export function deriveJunctionTimeseriesFeatureEnvelope(
-  resource: JunctionDenseFidelityResource,
+  resource: Exclude<JunctionDenseFidelityResource, "blood_oxygen">,
   inputSamples: readonly JunctionTimeseriesFidelityPoint[],
 ): {
   readonly envelope: JunctionTimeseriesFeatureEnvelope;
@@ -387,11 +387,6 @@ export function deriveJunctionTimeseriesFeatureEnvelope(
       const policy = getJunctionDenseFidelityPolicy("glucose");
       const supportedSamples = addForwardSupport(samples, policy);
       return deriveGlucoseEnvelope(supportedSamples, buildCoverage(supportedSamples, policy), policy);
-    }
-    case "blood_oxygen": {
-      const policy = getJunctionDenseFidelityPolicy("blood_oxygen");
-      const supportedSamples = addForwardSupport(samples, policy);
-      return deriveBloodOxygenEnvelope(supportedSamples, buildCoverage(supportedSamples, policy), policy);
     }
     case "stress_level": {
       const policy = getJunctionDenseFidelityPolicy("stress_level");
@@ -700,131 +695,6 @@ function deriveGlucoseEnvelope(
   };
 }
 
-function deriveBloodOxygenEnvelope(
-  samples: readonly JunctionPointWithSupport[],
-  coverage: JunctionFeatureEnvelopeCoverage,
-  policy: JunctionBloodOxygenFidelityPolicy,
-): {
-  readonly envelope: JunctionTimeseriesFeatureEnvelope;
-  readonly facts: readonly JunctionTimeseriesDerivedFact[];
-} {
-  const below92Episodes = deriveEpisodes(
-    samples,
-    "low",
-    (value) => value < policy.thresholds.below92Exclusive,
-    policy,
-    policy.thresholds.below92Exclusive,
-  );
-  const below90Episodes = deriveEpisodes(
-    samples,
-    "low",
-    (value) => value < policy.thresholds.below90Exclusive,
-    policy,
-    policy.thresholds.below90Exclusive,
-  );
-  const below90ReadingCount = samples.filter((sample) =>
-    sample.value < policy.thresholds.below90Exclusive
-  ).length;
-  const below92ReadingCount = samples.filter((sample) =>
-    sample.value < policy.thresholds.below92Exclusive
-  ).length;
-  const below90EstimatedMinutes = round(
-    below90Episodes.reduce((sum, episode) => sum + episode.estimatedDurationMinutes, 0),
-    policy.rounding.durationDecimals,
-  );
-  const below92EstimatedMinutes = round(
-    below92Episodes.reduce((sum, episode) => sum + episode.estimatedDurationMinutes, 0),
-    policy.rounding.durationDecimals,
-  );
-  const longestBelow90EstimatedMinutes = round(
-    Math.max(0, ...below90Episodes.map((episode) => episode.estimatedDurationMinutes)),
-    policy.rounding.durationDecimals,
-  );
-  const longestBelow92EstimatedMinutes = round(
-    Math.max(0, ...below92Episodes.map((episode) => episode.estimatedDurationMinutes)),
-    policy.rounding.durationDecimals,
-  );
-  const hourlyBucketFields = [
-    "sampleCount",
-    "meanValue",
-    "minValue",
-    "maxValue",
-    "estimatedCoverageMinutes",
-    "below90ReadingCount",
-    "below92ReadingCount",
-  ] as const;
-  const hourlyBuckets = buildHourlyBuckets(samples, policy, (bucketSamples, base) => [
-    ...base,
-    bucketSamples.filter((sample) => sample.value < policy.thresholds.below90Exclusive).length,
-    bucketSamples.filter((sample) => sample.value < policy.thresholds.below92Exclusive).length,
-  ]);
-  const features = {
-    below90ReadingCount,
-    below90EpisodeCount: below90Episodes.length,
-    below90EstimatedMinutes,
-    longestBelow90EstimatedMinutes,
-    below92ReadingCount,
-    below92EpisodeCount: below92Episodes.length,
-    below92EstimatedMinutes,
-    longestBelow92EstimatedMinutes,
-  };
-  const facts: readonly JunctionTimeseriesDerivedFact[] = [
-    {
-      metric: "spo2-below-90-reading-count",
-      unit: "count",
-      value: below90ReadingCount,
-    },
-    {
-      metric: "spo2-below-90-episode-count",
-      unit: "count",
-      value: below90Episodes.length,
-    },
-    {
-      metric: "spo2-below-90-estimated-minutes",
-      unit: "minutes",
-      value: below90EstimatedMinutes,
-    },
-    {
-      metric: "spo2-below-92-reading-count",
-      unit: "count",
-      value: below92ReadingCount,
-    },
-    {
-      metric: "spo2-below-92-episode-count",
-      unit: "count",
-      value: below92Episodes.length,
-    },
-    {
-      metric: "spo2-below-92-estimated-minutes",
-      unit: "minutes",
-      value: below92EstimatedMinutes,
-    },
-    {
-      metric: "spo2-estimated-coverage-minutes",
-      unit: "minutes",
-      value: coverage.estimatedCoverageMinutes,
-    },
-    {
-      metric: "spo2-observed-span-minutes",
-      unit: "minutes",
-      value: coverage.observedSpanMinutes,
-    },
-  ];
-
-  assertDerivedFactBound(policy, facts);
-  return {
-    envelope: buildEnvelope({
-      coverage,
-      episodes: below92Episodes,
-      features,
-      hourlyBucketFields,
-      hourlyBuckets,
-      policy,
-      sampleCount: samples.length,
-    }),
-    facts,
-  };
-}
 
 function deriveStressEnvelope(
   samples: readonly JunctionPointWithSupport[],

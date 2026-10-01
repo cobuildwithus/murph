@@ -109,10 +109,20 @@ export async function ingestCompanionMealPhoto(input: {
       userId: input.memberId,
     });
     if (appended.dedupeConflict) {
+      if (appended.captureReceipt) {
+        // The first request may also have lost its post-commit wake response.
+        await signalHostedMailboxAppendRuntime({
+          expectedUserId: input.memberId,
+          mailboxItemId: appended.item.id,
+        });
+      }
       throw hostedOnboardingError({
         code: "MEAL_PHOTO_DEDUPE_CONFLICT",
         httpStatus: 422,
         message: "Meal photo upload conflicts with an earlier capture.",
+        ...(appended.captureReceipt
+          ? { details: { captureReceipt: appended.captureReceipt } }
+          : {}),
       });
     }
   } catch (error) {

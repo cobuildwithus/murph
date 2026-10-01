@@ -42,12 +42,13 @@ describe('assistant running cardio skill', () => {
     expect(skill).toBeDefined()
     expect(skill?.name).toBe('running-cardio')
     expect(skill?.triggerHint).toContain(
-      'running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
+      'running, structured walking workouts, cycling, aerobic-base or Zone 2 work, cardio conditioning',
     )
     expect(skill?.triggerHint).toContain('competition-training')
     expect(skill?.triggerHint).toContain('concrete benchmark')
     expect(skill?.triggerHint).toContain('physical-therapy')
     expect(skill?.triggerHint).toContain('behavior-followthrough')
+    expect(skill?.triggerHint).toContain('Use daily-activity for ordinary walking breaks')
   })
 
   it('surfaces the route in the compact skill router', () => {

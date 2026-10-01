@@ -50,7 +50,6 @@ const cronMocks = vi.hoisted(() => ({
   loadRuntimeModule: vi.fn(),
   loadVault: vi.fn(),
   nextAutomationId: 1,
-  renderAutoLoggedFoodMealNote: vi.fn(),
   resolveAssistantBindingDelivery: vi.fn(),
   sendAssistantMessageLocal: vi.fn(),
   showCanonicalAutomation: vi.fn(),
@@ -85,10 +84,6 @@ vi.mock('@murphai/query', async (importOriginal) => {
 vi.mock('@murphai/vault-usecases/runtime', () => ({
   loadImporterRuntime: cronMocks.loadImporterRuntime,
   loadRuntimeModule: cronMocks.loadRuntimeModule,
-}))
-
-vi.mock('@murphai/vault-usecases/records', () => ({
-  renderAutoLoggedFoodMealNote: cronMocks.renderAutoLoggedFoodMealNote,
 }))
 
 vi.mock('../src/assistant-service.ts', () => ({
@@ -234,9 +229,6 @@ beforeEach(() => {
       title: 'Daily Oats',
     })),
   })
-  cronMocks.renderAutoLoggedFoodMealNote
-    .mockReset()
-    .mockImplementation((food: { title: string }) => `Meal note for ${food.title}`)
   cronMocks.loadImporterRuntime.mockReset().mockResolvedValue({
     addMeal: vi.fn(async () => ({
       mealId: 'meal-1',

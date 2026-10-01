@@ -31,6 +31,7 @@ import {
 } from "./usage-credit-stripe-reconciliation-context";
 import {
   lockHostedUsageCreditPurchaseReservationOwnersTx,
+  readHostedUsageCreditPurchaseMemberLockOrder,
 } from "./usage-credit-purchase-reservation-lock";
 import { requireHostedUsageCreditPurchasePayerMemberId } from "./usage-credit-purchase-stripe";
 
@@ -277,6 +278,13 @@ export async function reconcileHostedUsageCreditCheckoutEventTx(input: {
     }
     await lockHostedUsageCreditPurchaseReservationOwnersTx({
       beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+      memberLockOrder: readHostedUsageCreditPurchaseMemberLockOrder({
+        beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+        checkoutSuccessUrl: input.purchase.checkoutSuccessUrl,
+        payerMemberId: requireHostedUsageCreditPurchasePayerMemberId(
+          input.purchase,
+        ),
+      }),
       payerMemberId: requireHostedUsageCreditPurchasePayerMemberId(
         input.purchase,
       ),

@@ -7,6 +7,9 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
+  readHostedLinqProductionCanaryMemberId,
+} from "../hosted-onboarding/linq-production-canary";
+import {
   readHostedOperationalAlertEmailConfig,
   type HostedOperationalAlertEmailConfig,
 } from "../hosted-onboarding/operational-alert-email-config";
@@ -15,13 +18,12 @@ import {
   runHostedOperationalEmailIncident,
   type HostedOperationalAlertMonitorOutcome,
   type HostedOperationalAlertMonitorSpec,
-  type HostedOperationalAlertPrismaClient,
   type HostedOperationalAlertSend,
 } from "../hosted-operational-alert/incident-email-monitor";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
-export const HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS = 30_000;
+export const HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS = 60_000;
 export const HOSTED_RUNTIME_LATENCY_ALERT_MINIMUM_INTERVAL_MS =
   HOSTED_OPERATIONAL_ALERT_MINIMUM_INTERVAL_MS;
 
@@ -41,8 +43,8 @@ const MONITOR_STATUS = {
 } as const;
 
 type HostedRuntimeLatencyPrismaClient =
-  & Pick<PrismaClient, "$queryRaw">
-  & HostedOperationalAlertPrismaClient;
+  | PrismaClient
+  | Prisma.TransactionClient;
 
 export interface HostedRuntimeLatencyHealthRow {
   acceptedAt: Date;
@@ -132,12 +134,24 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
 } = {}): Promise<HostedRuntimeLatencyAlertMonitorResult> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
-  const health = await readHostedRuntimeLatencyHealth({
+  const env = input.env ?? process.env;
+  // Database Load And Collection Fanout: resolve the fixed canary once before
+  // the bounded health read. The incident admission recheck reuses that id.
+  const excludedUserId = await readHostedLinqProductionCanaryMemberId({
+    prisma,
+    source: env,
+  });
+  const monitorSpec: typeof HOSTED_RUNTIME_LATENCY_MONITOR_SPEC = {
+    ...HOSTED_RUNTIME_LATENCY_MONITOR_SPEC,
+    readHealth: ({ now, prisma }) =>
+      readHostedRuntimeLatencyHealth({ excludedUserId, now, prisma }),
+  };
+  const health = await monitorSpec.readHealth({
     now,
     prisma,
   });
   const alertConfig = readHostedRuntimeLatencyAlertConfig(
-    input.env ?? process.env,
+    env,
   );
 
   if (!alertConfig) {
@@ -156,7 +170,7 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
     prisma,
     sendAlert: input.sendAlert,
     signal: input.signal,
-    spec: HOSTED_RUNTIME_LATENCY_MONITOR_SPEC,
+    spec: monitorSpec,
   });
 
   return {
@@ -167,6 +181,7 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
 }
 
 export async function readHostedRuntimeLatencyHealth(input: {
+  excludedUserId?: string | null;
   now?: Date;
   prisma?: Pick<PrismaClient, "$queryRaw">;
 } = {}): Promise<HostedRuntimeLatencyHealth> {
@@ -176,7 +191,11 @@ export async function readHostedRuntimeLatencyHealth(input: {
     now.getTime() - HOSTED_RUNTIME_LATENCY_UNRESOLVED_WINDOW_MS,
   );
   const rows = await prisma.$queryRaw<HostedRuntimeLatencyQueryRow[]>(
-    buildHostedRuntimeLatencyHealthQuery({ now, windowStart }),
+    buildHostedRuntimeLatencyHealthQuery({
+      excludedUserId: input.excludedUserId,
+      now,
+      windowStart,
+    }),
   );
   const scanTruncated = rows.length > HOSTED_RUNTIME_LATENCY_READ_LIMIT;
   const visibleRows = scanTruncated
@@ -206,6 +225,7 @@ export async function readHostedRuntimeLatencyHealth(input: {
 }
 
 export function buildHostedRuntimeLatencyHealthQuery(input: {
+  excludedUserId?: string | null;
   now: Date;
   windowStart: Date;
 }): Prisma.Sql {
@@ -307,6 +327,9 @@ export function buildHostedRuntimeLatencyHealthQuery(input: {
         ) AS evidence(at)
         WHERE evidence.at IS NOT NULL
       ) AS execution ON TRUE
+      ${input.excludedUserId
+        ? Prisma.sql`WHERE trace.user_id <> ${input.excludedUserId}`
+        : Prisma.empty}
     )
     SELECT
       latency_origin_at AS "acceptedAt",
@@ -538,11 +561,15 @@ export function summarizeHostedRuntimeLatencyRows(input: {
   };
 }
 
-function readHostedRuntimeTerminalNonReplyCommittedAt(value: unknown): Date | null {
+export function readHostedRuntimeTerminalNonReplyCommittedAt(value: unknown): Date | null {
   return readHostedRuntimeAssistantEpochDate(
     value,
     "terminalNonReplyCommittedAtEpochMs",
   );
+}
+
+export function readHostedRuntimeTerminalReplyCommittedAt(value: unknown): Date | null {
+  return readHostedRuntimeAssistantEpochDate(value, "terminalReplyCommittedAtEpochMs");
 }
 
 function readHostedRuntimeProgressUpdateAcceptedAt(value: unknown): Date | null {
@@ -552,7 +579,7 @@ function readHostedRuntimeProgressUpdateAcceptedAt(value: unknown): Date | null 
   );
 }
 
-function readHostedRuntimeCheckpointPublicationExpectedBy(
+export function readHostedRuntimeCheckpointPublicationExpectedBy(
   value: unknown,
 ): Date | null {
   return readHostedRuntimeAssistantEpochDate(
@@ -566,7 +593,8 @@ function readHostedRuntimeAssistantEpochDate(
   leaf:
     | "checkpointPublicationExpectedByEpochMs"
     | "progressUpdateAcceptedAtEpochMs"
-    | "terminalNonReplyCommittedAtEpochMs",
+    | "terminalNonReplyCommittedAtEpochMs"
+    | "terminalReplyCommittedAtEpochMs",
 ): Date | null {
   if (!isHostedRuntimeLatencyPhaseRecord(value)) {
     return null;
@@ -638,10 +666,10 @@ function buildHostedRuntimeLatencyAlertMessage(input: {
 }): string {
   const evidence = [
     input.health.recentSlowInitialResponseCount > 0
-      ? `${input.health.recentSlowInitialResponseCount} completed ${pluralizeReply(input.health.recentSlowInitialResponseCount)} with no progress or final response within 30 seconds`
+      ? `${input.health.recentSlowInitialResponseCount} completed ${pluralizeReply(input.health.recentSlowInitialResponseCount)} with no progress or final response within ${input.health.thresholdMs / 1_000} seconds`
       : null,
     input.health.unresolvedReplyCount > 0
-      ? `${input.health.unresolvedReplyCount} unresolved ${pluralizeTurn(input.health.unresolvedReplyCount)} with no visible response or durable acknowledgement after 30 seconds`
+      ? `${input.health.unresolvedReplyCount} unresolved ${pluralizeTurn(input.health.unresolvedReplyCount)} with no visible response or durable acknowledgement after ${input.health.thresholdMs / 1_000} seconds`
       : null,
     input.health.scanTruncated
       ? "the bounded latency scan was truncated"

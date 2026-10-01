@@ -19,7 +19,7 @@ A member who reaches a Murph-owned product failure should stay focused on recove
 - In a verified private direct conversation, an explicit request for Murph human support authorizes one immediate reserved call with `kind: "frustration"`, no changelog references, and a concise de-identified product-only explanation beginning exactly `Support escalation:`. Murph writes the explanation in its own words; its model-facing contract forbids copying or quoting the member's message, and it does not display the internal summary or ask for separate approval first.
 - Outside a verified private direct conversation, move human support to private Murph without creating the reserved record. Do not volunteer the address; provide it only when explicitly requested.
 - The tool boundary rejects empty, wrong-kind, changelog-linked, and out-of-scope reserved payloads. The hosted runtime records the sanitized written issue through the Web callback inside the turn before Murph may confirm completion; ordinary feedback keeps its best-effort post-delivery flush.
-- After accepted or already accepted, say the issue was saved for triage and an account-linked escalation was recorded. On failure, say direct notification failed. Do not add the address unless requested, claim email delivery or receipt, promise a ticket, response, fix, follow-up, or timing, or retry in the same turn.
+- On the first input-schema rejection, correct only the returned issues and retry once. A second rejection is terminal. After accepted or already accepted, say the issue was saved for triage and an account-linked escalation was recorded. On unavailable, callback failure, or a second validation rejection, say direct notification failed. Do not add the address unless requested, claim email delivery or receipt, promise a ticket, response, fix, follow-up, or timing, or retry a terminal result.
 
 ## Data and privacy
 
@@ -42,7 +42,7 @@ A member who reaches a Murph-owned product failure should stay focused on recove
 - Callback replay validates both deterministic feedback rows, treats the first stored anonymous issue detail as canonical when the same accepted-input identity produces different wording, and may retry an eligible provider request with that stored body and the same Resend idempotency key. Missing, member-linked, or malformed stored detail fails before provider entry, and replay must not create a duplicate recipient-visible email.
 - This coordinated runner-and-Web rollout deliberately retains the existing provider key. During Resend's 24-hour key-retention window, a legacy alert that was already accepted before deployment and then replayed after deployment can return `invalid_idempotent_request` because the body changed; the original alert remains delivered and no duplicate is sent. Do not version the key for rollout. Monitor that provider error for 24 hours after deployment; the existing 12-second current-turn callback bound and absence of a retry queue keep the practical overlap narrow.
 - Ordinary feedback keeps the existing two-second callback bound; only the exact explicit support shape receives a bounded 12-second callback allowance, spent inside the turn where the model can truthfully report the outcome.
-- Murph never retries the model tool in the same turn or attempts to evade the server limit.
+- Input-schema rejection permits one corrected call in the same turn. Murph never retries another result or attempts to evade the server limit.
 
 ## Public source context
 

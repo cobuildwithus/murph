@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { access, readFile } from "node:fs/promises";
 
 import {
@@ -35,9 +36,12 @@ const runnerPythonPathFinallyCleanupBlock = `} finally {
     await removeHostedRunnerFinalImageBestEffort();
   }`;
 
-const hostedRunnerFlexModelSlugs = [
+const hostedRunnerProductModelSlugs = [
+  "gpt-6.1-sol",
+  "gpt-6-sol",
+  "gpt-6-luna",
+  "gpt-6-astra",
   "gpt-5.6-sol",
-  "gpt-5.6-terra",
   "gpt-5.6-luna",
 ] as const;
 
@@ -59,6 +63,7 @@ function createDeployEnvironment() {
     retryDelayMs: "30000",
     runnerCommitTimeoutMs: "45000",
     runnerReadyTimeoutMs: "20000",
+    legacyStandbyContainerMaxInstances: 0,
     traceHeadSamplingRate: 0.1,
     webControlTimeoutMs: "30000",
     workerName: "murph-hosted",
@@ -88,9 +93,6 @@ describe("hosted runner container image contract", () => {
     );
 
     expect(bundleAssemblyScript).toContain("const runnerBundleDeployRoot = path.join(");
-    expect(bundleAssemblyScript).toContain("const workspaceArtifactLockHeldEnv = ");
-    expect(bundleAssemblyScript).toContain("rerunUnderWorkspaceArtifactLockIfNeeded();");
-    expect(bundleAssemblyScript).toContain("run-with-workspace-artifact-lock.mjs");
     expect(bundleAssemblyScript).toContain('const shouldSkipBuild = process.argv.includes("--skip-build");');
     expect(bundleAssemblyScript).toContain(
       'import { resolveCloudflareDeployPaths } from "./deploy-automation.js";',
@@ -141,9 +143,18 @@ describe("hosted runner container image contract", () => {
     expect(workspaceArtifactsScript).toContain(
       "const sortedPackageNames = await topologicallySortWorkspacePackageNames(",
     );
-    expect(workspaceArtifactsScript).toContain(
-      "buildHostedRunnerWorkspaceBuildArgs(sortedPackageNames)",
+    const workspaceBuildPlanIndex = workspaceArtifactsScript.indexOf(
+      "const plan = buildHostedRunnerWorkspaceArtifactPlan(sortedPackageNames, {",
     );
+    const workspaceBuildIndex = workspaceArtifactsScript.indexOf(
+      "await runPnpmCommand(plan.buildArgs, {",
+    );
+    const assistantCliSurfaceAssemblyIndex = workspaceArtifactsScript.indexOf(
+      "await runNodeCommand(plan.assistantCliSurfaceAssemblyArgs, {",
+    );
+    expect(workspaceBuildPlanIndex).toBeGreaterThanOrEqual(0);
+    expect(workspaceBuildIndex).toBeGreaterThan(workspaceBuildPlanIndex);
+    expect(assistantCliSurfaceAssemblyIndex).toBeGreaterThan(workspaceBuildIndex);
     expect(workspaceArtifactsScript).toContain(
       "`--workspace-concurrency=${resolvePositiveIntegerEnv(",
     );
@@ -353,7 +364,6 @@ describe("hosted runner container image contract", () => {
       "@murphai/assistant-cli",
       "@murphai/assistant-engine",
       "@murphai/assistant-runtime",
-      "@murphai/assistantd",
       "@murphai/clinical-records",
       "@murphai/cloudflare-hosted-control",
       "@murphai/contracts",
@@ -426,7 +436,7 @@ describe("hosted runner container image contract", () => {
     }
   });
 
-  it("pins native and Codex CLI provisioning in the base image and keeps the final image app-only", async () => {
+  it("pins native Codex provisioning and promotes only its runtime hot set into the final image", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -444,7 +454,8 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.147.0");
+    expect(baseDockerfile).toContain("ARG CODEX_UPSTREAM_REVISION=8e68a98ef03cdde76d2e6800791ebdf1b3b95b24");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.159.1");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -485,21 +496,18 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).not.toContain("worker-secrets.json");
     expect(baseDockerfile).not.toContain("runner-bundle-builder");
     expect(baseDockerfile).not.toContain("pnpm install --frozen-lockfile");
-    expect(baseDockerfile).toContain(
-      'npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}"',
-    );
-    expect(baseDockerfile).toContain(
-      'native_codex="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/bin/codex\' -type f -perm /111 -print -quit)"',
-    );
-    expect(baseDockerfile).toContain(
-      'native_bwrap="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/codex-resources/bwrap\' -type f -perm /111 -print -quit)"',
-    );
-    expect(baseDockerfile).toContain('test -n "${native_bwrap}"');
-    expect(baseDockerfile).toContain(
-      '"${native_bwrap}" --help | grep -Fq -- \'--argv0\'',
-    );
-    expect(baseDockerfile).toContain('ln -sfn "${native_codex}" /usr/local/bin/codex');
-    expect(baseDockerfile).toContain("npm cache clean --force");
+    expect(baseDockerfile).toContain("COPY patches/codex-public-live.patch");
+    expect(baseDockerfile).toContain("git apply --check /tmp/codex-public-live.patch");
+    expect(baseDockerfile).toContain("export CODEX_BWRAP_SHA256=");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.159.1");
+    expect(baseDockerfile).toContain("COPY --from=codex-package /opt/codex/ /opt/codex/");
+    expect(baseDockerfile).toContain("ARG CODEX_CARGO_JOBS=2");
+    expect(baseDockerfile).toContain('cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex --jobs "${CODEX_CARGO_JOBS}"');
+    expect(baseDockerfile).toContain("sha256sum /opt/codex/codex-resources/bwrap");
+    expect(baseDockerfile).toContain("COPY --from=codex-builder /opt/codex/ /usr/local/lib/murph-codex/");
+    expect(baseDockerfile).toContain("test -x /usr/local/lib/murph-codex/bin/codex-code-mode-host");
+    expect(baseDockerfile).toContain("ln -sfn /usr/local/lib/murph-codex/bin/codex /usr/local/bin/codex");
+    expect(runnerBasePublishWorkflow).toContain('"patches/codex-public-live.patch"');
     expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
     expect(baseDockerfile).not.toContain("/etc/profile.d/murph-runner-path.sh");
     expect(baseDockerfile).not.toContain("export PATH=");
@@ -533,9 +541,14 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).toContain(
       "FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-app-permissions",
     );
-    const finalStageIndex = finalDockerfile.indexOf(
+    expect(finalDockerfile).toContain(
+      "FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-codex-hotset",
+    );
+    const finalStageIndex = finalDockerfile.lastIndexOf(
       "FROM ${HOSTED_RUNNER_BASE_IMAGE}",
-      finalDockerfile.indexOf("FROM ${HOSTED_RUNNER_BASE_IMAGE}") + 1,
+    );
+    const codexHotStageIndex = finalDockerfile.indexOf(
+      "FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-codex-hotset",
     );
     const permissionStageBundleCopyIndex = finalDockerfile.indexOf(
       "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
@@ -557,6 +570,9 @@ describe("hosted runner container image contract", () => {
     const finalRunnerBundleCopyIndex = finalDockerfile.indexOf(
       "COPY --from=runner-app-permissions --chown=root:root /app/ /app/",
     );
+    const finalCodexHotCopyIndex = finalDockerfile.indexOf(
+      "COPY --from=runner-codex-hotset --chown=root:root /opt/murph-codex-hot/ /",
+    );
     const finalRunnerUserIndex = finalDockerfile.indexOf("USER runner");
     const finalLocalBuildIdArgIndex = finalDockerfile.indexOf(
       "ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local",
@@ -564,35 +580,71 @@ describe("hosted runner container image contract", () => {
     const finalLocalBuildIdLabelIndex = finalDockerfile.indexOf(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
     );
+    const finalLocalWorkerNameArgIndex = finalDockerfile.indexOf(
+      "ARG HOSTED_RUNNER_LOCAL_WORKER_NAME=murph-hosted",
+    );
+    const finalLocalWorkerNameLabelIndex = finalDockerfile.indexOf(
+      'LABEL murph.hosted.local-worker-name="${HOSTED_RUNNER_LOCAL_WORKER_NAME}"',
+    );
     expect(permissionStageRootUserIndex).toBeGreaterThan(-1);
     expect(finalRunnerBundleDirArgIndex).toBeGreaterThan(permissionStageRootUserIndex);
     expect(permissionStageBundleCopyIndex).toBeGreaterThan(finalRunnerBundleDirArgIndex);
     expect(permissionStageChmodIndex).toBeGreaterThan(permissionStageBundleCopyIndex);
+    expect(codexHotStageIndex).toBeGreaterThan(permissionStageChmodIndex);
     expect(finalStageIndex).toBeGreaterThan(permissionStageChmodIndex);
+    expect(finalStageIndex).toBeGreaterThan(codexHotStageIndex);
     expect(finalRootUserIndex).toBeGreaterThan(finalStageIndex);
     expect(finalCodexCatalogEnvIndex).toBeGreaterThan(finalRootUserIndex);
     expect(finalCodexCatalogPatchIndex).toBeGreaterThan(finalCodexCatalogEnvIndex);
     expect(finalRunnerBundleCopyIndex).toBeGreaterThan(finalCodexCatalogPatchIndex);
-    expect(finalRunnerUserIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
+    expect(finalCodexHotCopyIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
+    expect(finalRunnerUserIndex).toBeGreaterThan(finalCodexHotCopyIndex);
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerUserIndex);
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
     expect(finalLocalBuildIdLabelIndex).toBeGreaterThan(finalLocalBuildIdArgIndex);
+    expect(finalLocalWorkerNameArgIndex).toBeGreaterThan(finalRunnerUserIndex);
+    expect(finalLocalWorkerNameLabelIndex).toBeGreaterThan(finalLocalWorkerNameArgIndex);
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local");
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle");
-    for (const slug of hostedRunnerFlexModelSlugs) {
+    for (const slug of hostedRunnerProductModelSlugs) {
       expect(finalDockerfile).toContain(`"${slug}"`);
     }
     expect(finalDockerfile).not.toContain("ensure_future_gpt_model");
     expect(finalDockerfile).not.toContain("future_gpt_model_from");
     expect(finalDockerfile).toContain('"id":"flex"');
     expect(finalDockerfile).toContain(
-      'jq -s -e \'length == 1 and (.[0] as $catalog | all(["gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))))\'',
+      'jq -s -e \'length == 1 and (.[0] as $catalog | ([$catalog.models[]?.slug] | sort) == (["gpt-6.1-sol","gpt-6-sol","gpt-6-luna","gpt-6-astra","gpt-5.6-sol","gpt-5.6-luna"] | sort)',
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
     );
     expect(finalDockerfile).toContain(
+      'LABEL murph.hosted.local-worker-name="${HOSTED_RUNNER_LOCAL_WORKER_NAME}"',
+    );
+    expect(finalDockerfile).toContain(
       "COPY --from=runner-app-permissions --chown=root:root /app/ /app/",
+    );
+    expect(finalDockerfile).toContain(
+      'native_codex="$(readlink -f "$(command -v codex)")"',
+    );
+    expect(finalDockerfile).toContain(
+      'native_root="$(dirname "$(dirname "${native_codex}")")"',
+    );
+    expect(finalDockerfile).toContain(
+      'test -x "${native_root}/bin/codex"',
+    );
+    expect(finalDockerfile).toContain(
+      'test -x "${native_root}/codex-resources/bwrap"',
+    );
+    expect(finalDockerfile).toContain(
+      'cp -a "${native_root}/." /opt/murph-codex-hot/usr/local/lib/murph-codex/',
+    );
+    expect(finalDockerfile).toContain(
+      "ln -s ../lib/murph-codex/bin/codex /opt/murph-codex-hot/usr/local/bin/codex",
+    );
+    expect(finalDockerfile).toContain("rm -f /usr/local/bin/codex");
+    expect(finalDockerfile).toContain(
+      'test "$(readlink -f /usr/local/bin/codex)" = "/usr/local/lib/murph-codex/bin/codex"',
     );
     expect(finalDockerfile).toContain("RUN chmod -R a-w /app");
     expect(finalDockerfile).toContain("  && chmod -R a+rX /app");
@@ -606,7 +658,12 @@ describe("hosted runner container image contract", () => {
     // no speedup), so the image intentionally ships no compile-cache warm step.
     expect(finalDockerfile).not.toContain("NODE_COMPILE_CACHE");
     expect(readLastDockerUser(baseDockerfile)).toBe("runner");
-    expect(readDockerUsers(finalDockerfile)).toEqual(["root", "root", "runner"]);
+    expect(readDockerUsers(finalDockerfile)).toEqual([
+      "root",
+      "root",
+      "root",
+      "runner",
+    ]);
     expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
     // The CMD runs the esbuild-bundled entrypoint: boot evaluates ~27 chunk
     // files instead of the unbundled graph's ~960 module files, which was the
@@ -633,48 +690,22 @@ describe("hosted runner container image contract", () => {
     ).rejects.toThrow();
   });
 
-  it("keeps the shared app bundle immutable to the runtime user across warm container reuse", async () => {
+  it("publishes exactly the product Codex models with Flex and mixed Code Mode", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
     );
-    const baseDockerfile = await readFile(
-      new URL("../../../Dockerfile.cloudflare-hosted-runner-base", import.meta.url),
-      "utf8",
-    );
-
-    const appBundleIsOwnedByRoot = finalDockerfile.includes(
-      "COPY --from=runner-app-permissions --chown=root:root /app/ /app/",
-    );
-    const appBundleIsMadeNonWritable =
-      finalDockerfile.includes(
-        "FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-app-permissions",
-      )
-      && finalDockerfile.includes(
-        "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
-      )
-      && finalDockerfile.includes("RUN chmod -R a-w /app")
-      && finalDockerfile.includes("  && chmod -R a+rX /app")
-      && finalDockerfile.includes("  && chmod a-w /app")
-      && finalDockerfile.includes("  && chmod a+rX /app");
-    const containerReturnsToRuntimeUser =
-      readLastDockerUser(baseDockerfile) === "runner"
-      && readDockerUsers(finalDockerfile).at(-1) === "runner";
-
-    expect(appBundleIsOwnedByRoot).toBe(true);
-    expect(appBundleIsMadeNonWritable).toBe(true);
-    expect(containerReturnsToRuntimeUser).toBe(true);
-    expect(appBundleIsOwnedByRoot && appBundleIsMadeNonWritable && containerReturnsToRuntimeUser).toBe(true);
-  });
-
-  it("adds Flex to native Codex GPT-5.6 models without replacing their metadata", async () => {
-    const finalDockerfile = await readFile(
-      new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
-      "utf8",
-    );
-    const { patchFilter, validationFilter } = readFinalImageCodexModelCatalogJqFilters(finalDockerfile);
+    const { patchFilter, standardFilter, validationFilter } = readFinalImageCodexModelCatalogJqFilters(finalDockerfile);
     const stockCatalogWithoutFlex: CodexModelCatalog = {
       models: [
+        { slug: "gpt-6.1-sol", context_window: 272_000, service_tiers: [{ id: "priority", name: "Priority" }] },
+        { slug: "gpt-6-sol", context_window: 272_000, service_tiers: [{ id: "priority", name: "Priority" }] },
+        { slug: "gpt-6-luna", context_window: 272_000, service_tiers: [{ id: "priority", name: "Priority" }] },
+        {
+          slug: "gpt-6-astra",
+          context_window: 272_000,
+          service_tiers: [{ id: "priority", name: "Priority" }],
+        },
         {
           slug: "gpt-5.5",
           service_tiers: [{ id: "priority", name: "Priority" }],
@@ -688,18 +719,21 @@ describe("hosted runner container image contract", () => {
           display_name: "GPT-5.6-Sol",
           slug: "gpt-5.6-sol",
           service_tiers: [{ id: "priority", name: "Priority" }],
+          tool_mode: "code_mode_only",
         },
         {
           description: "Balanced agentic coding model for everyday work.",
           display_name: "GPT-5.6-Terra",
           slug: "gpt-5.6-terra",
           service_tiers: [{ id: "priority", name: "Priority" }],
+          tool_mode: "code_mode_only",
         },
         {
           description: "Fast, cost-efficient agentic coding model.",
           display_name: "GPT-5.6-Luna",
           slug: "gpt-5.6-luna",
           service_tiers: [{ id: "priority", name: "Priority" }],
+          tool_mode: "code_mode_only",
         },
       ],
     };
@@ -707,31 +741,37 @@ describe("hosted runner container image contract", () => {
     const patchedCatalogJson = runJqFilter(patchFilter, stockCatalogWithoutFlex);
     const patchedCatalog = parseCodexModelCatalogJson(patchedCatalogJson);
 
-    expect(readCodexModelSlugs(patchedCatalog)).toEqual([
-      "gpt-5.5",
-      "gpt-5.4-mini",
-      "gpt-5.6-sol",
-      "gpt-5.6-terra",
-      "gpt-5.6-luna",
+    const standardCatalog = parseCodexModelCatalogJson(runJqFilter(standardFilter, patchedCatalog));
+    expect(readCodexModelSlugs(standardCatalog)).toEqual([
+      "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-luna",
     ]);
-    for (const slug of hostedRunnerFlexModelSlugs) {
+    expect(standardCatalog.models).toEqual(patchedCatalog.models.filter((model) => model.slug !== "gpt-6-astra"));
+    expect(finalDockerfile).toContain('"${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}.astra"');
+
+    expect(readCodexModelSlugs(patchedCatalog)).toEqual(hostedRunnerProductModelSlugs);
+    for (const slug of hostedRunnerProductModelSlugs) {
       expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(["priority", "flex"]);
+      expect(readCodexModel(patchedCatalog, slug).tool_mode).toBe("code_mode");
     }
-    expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-mini")).toEqual(["auto"]);
-    expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.5")).toEqual(["priority"]);
     expect(readCodexModel(patchedCatalog, "gpt-5.6-sol")).toMatchObject({
       description: "Flagship agentic coding model for complex professional work.",
       display_name: "GPT-5.6-Sol",
     });
-    expect(readCodexModel(patchedCatalog, "gpt-5.6-terra")).toMatchObject({
-      description: "Balanced agentic coding model for everyday work.",
-      display_name: "GPT-5.6-Terra",
-    });
+    expect(readCodexModelSlugs(patchedCatalog)).not.toContain("gpt-5.6-terra");
     expect(readCodexModel(patchedCatalog, "gpt-5.6-luna")).toMatchObject({
       description: "Fast, cost-efficient agentic coding model.",
       display_name: "GPT-5.6-Luna",
     });
     expect(runJqFilter(validationFilter, patchedCatalog, { slurp: true }).trim()).toBe("true");
+    const legacyLinuxCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, {
+      models: stockCatalogWithoutFlex.models.filter((model) => model.slug !== "gpt-6-astra"),
+    }));
+    expect(readCodexModelSlugs(legacyLinuxCatalog)).not.toContain("gpt-6-astra");
+    expect(runJqFilter(validationFilter, legacyLinuxCatalog, { slurp: true }).trim()).toBe("false");
+    expect(runJqFilter(validationFilter, {
+      models: patchedCatalog.models.map((model) => model.slug === "gpt-6-astra"
+        ? { ...model, context_window: 1_050_000 } : model),
+    }, { slurp: true }).trim()).toBe("false");
 
     expect(runJqFilter(
       validationFilter,
@@ -742,20 +782,58 @@ describe("hosted runner container image contract", () => {
     const repatchedCatalog = parseCodexModelCatalogJson(
       runJqFilter(patchFilter, patchedCatalog),
     );
-    const repatchedTargetTierIds = readCodexModelServiceTierIds(repatchedCatalog, "gpt-5.6-terra");
+    const repatchedTargetTierIds = readCodexModelServiceTierIds(repatchedCatalog, "gpt-6-sol");
     const twicePatchedCatalog = parseCodexModelCatalogJson(
       runJqFilter(patchFilter, repatchedCatalog),
     );
 
     expect(repatchedTargetTierIds.filter((tierId) => tierId === "flex")).toHaveLength(1);
-    for (const slug of hostedRunnerFlexModelSlugs) {
+    for (const slug of hostedRunnerProductModelSlugs) {
       expect(readCodexModelServiceTierIds(twicePatchedCatalog, slug).filter((tierId) => tierId === "flex"))
         .toHaveLength(1);
     }
     expect(runJqFilter(validationFilter, repatchedCatalog, { slurp: true }).trim()).toBe("true");
     expect(runJqFilter(validationFilter, {
-      models: patchedCatalog.models.filter((model) => model.slug !== "gpt-5.6-terra"),
+      models: patchedCatalog.models.filter((model) => model.slug !== "gpt-6-sol"),
     }, { slurp: true }).trim()).toBe("false");
+    expect(runJqFilter(validationFilter, {
+      models: [
+        ...patchedCatalog.models,
+        { slug: "gpt-5.5", service_tiers: [{ id: "priority", name: "Priority" }] },
+      ],
+    }, { slurp: true }).trim()).toBe("false");
+    expect(runJqFilter(validationFilter, {
+      models: patchedCatalog.models.map((model) =>
+        model.slug === "gpt-6-sol"
+          ? { ...model, tool_mode: "code_mode_only" }
+          : model
+      ),
+    }, { slurp: true }).trim()).toBe("false");
+  });
+
+  it("validates product entries directly from the native Codex catalog", async () => {
+    const finalDockerfile = await readFile(
+      new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
+      "utf8",
+    );
+    const { patchFilter, standardFilter, validationFilter } = readFinalImageCodexModelCatalogJqFilters(finalDockerfile);
+    const nativeCatalogJson = execFileSync(
+      fileURLToPath(new URL("../../../packages/assistant-engine/node_modules/.bin/codex", import.meta.url)),
+      ["debug", "models", "--bundled"],
+      { encoding: "utf8", maxBuffer: 10 * 1024 * 1024, timeout: 30_000 },
+    );
+    const nativeCatalog = parseCodexModelCatalogJson(nativeCatalogJson);
+    const productCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, nativeCatalog));
+    expect(runJqFilter(validationFilter, productCatalog, { slurp: true }).trim()).toBe("true");
+    for (const slug of hostedRunnerProductModelSlugs) {
+      expect(readCodexModel(productCatalog, slug)).toMatchObject({
+        ...readCodexModel(nativeCatalog, slug),
+        service_tiers: expect.any(Array),
+        tool_mode: "code_mode",
+      });
+    }
+    expect(readCodexModelSlugs(parseCodexModelCatalogJson(runJqFilter(standardFilter, productCatalog))).sort())
+      .toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"]);
   });
 
   it("pins the checked-in and rendered Wrangler config to an app-local build context", async () => {
@@ -802,10 +880,11 @@ describe("hosted runner container image contract", () => {
     expect(wranglerConfig).toContain('"image": "../../Dockerfile.cloudflare-hosted-runner"');
     expect(wranglerConfig).toContain('"image_build_context": "."');
     expect(wranglerConfig).toContain(
-      '"compatibility_flags": ["nodejs_compat", "containers_pid_namespace"]',
+      '"compatibility_flags": ["nodejs_compat", "containers_pid_namespace", "enable_request_signal"]',
     );
     expect(wranglerConfig).toContain('"ssh": { "enabled": false }');
     expect(wranglerConfig).not.toContain('"authorized_keys"');
+    expect(rendered.compatibility_flags).toContain("enable_request_signal");
     expect(container.ssh).toEqual({ enabled: false });
     expect(container).not.toHaveProperty("authorized_keys");
     expect(packageJson.scripts?.["deploy:worker"]).toBe(
@@ -902,7 +981,7 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain("buildCodexEnvironmentProbeScript");
     expect(hostedRunnerSmokeChild).toContain("cwd: input.vaultRoot");
     expect(hostedRunnerSmokeChild).toContain("cwdRebound: process.cwd() === expectedVaultRoot");
-    expect(hostedRunnerSmokeChild).toContain('model = "gpt-5.6-terra"');
+    expect(hostedRunnerSmokeChild).toContain('model = "gpt-6.1-sol"');
     expect(hostedRunnerSmokeChild).toContain('model_reasoning_effort = "low"');
     expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 132000");
     expect(hostedRunnerSmokeChild).toContain("runCodexVaultCliProof");
@@ -1029,6 +1108,7 @@ type CodexModelCatalog = {
 
 function readFinalImageCodexModelCatalogJqFilters(dockerfile: string): {
   patchFilter: string;
+  standardFilter: string;
   validationFilter: string;
 } {
   const patchMatch = new RegExp(
@@ -1040,12 +1120,14 @@ function readFinalImageCodexModelCatalogJqFilters(dockerfile: string): {
     "u",
   ).exec(dockerfile);
 
-  if (patchMatch === null || validationMatch === null) {
+  const standardMatch = /&& jq '([^']+)' \/tmp\/murph-codex-model-catalog\.openai-flex\.json > \/tmp\/murph-codex-model-catalog\.standard\.json/u.exec(dockerfile);
+  if (patchMatch === null || validationMatch === null || standardMatch === null) {
     throw new Error("Final image Codex model catalog patch or validation jq filter is missing");
   }
 
   return {
     patchFilter: patchMatch[1],
+    standardFilter: standardMatch[1],
     validationFilter: validationMatch[1],
   };
 }

@@ -12,7 +12,7 @@ import { formatHostedExecutionSafeLogErrorDetails } from "@/src/lib/hosted-execu
 import {
   signalHostedMailboxAppendRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
-import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import { assertHostedAppSessionCurrentTx, requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -20,12 +20,12 @@ import {
   readJsonObject,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS, lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 import { verifySensitiveActionChallenge } from "@/src/lib/sensitive-actions/server";
 
-const ACTION_APPROVAL_DECISION_BODY_LIMIT_BYTES = 4 * 1024;
+const ACTION_APPROVAL_DECISION_BODY_LIMIT_BYTES = 16 * 1024;
 
 type ActionApprovalDecision =
   | {
@@ -60,12 +60,14 @@ export const POST = withJsonError(async (
   const result = decision.decision === "approved"
     ? await approveHostedAction({
         approval,
+        request,
         authorization: decision.authorization,
         memberId: session.member.id,
         now,
         prisma,
         privyUserId: session.privyUserId,
         sessionId: session.sessionId,
+        authProof: session.authProof,
       })
     : await prisma.$transaction((tx) =>
         decideHostedActionApprovalTx({
@@ -113,8 +115,10 @@ async function approveHostedAction(input: {
   memberId: string;
   now: Date;
   prisma: ReturnType<typeof getPrisma>;
-  privyUserId: string;
+  privyUserId: string | null;
+  request: Request;
   sessionId: string;
+  authProof?: import("@/src/lib/better-auth/session").HostedAuthSessionProof;
 }) {
   const challenge = await verifySensitiveActionChallenge({
     authorization: input.authorization,
@@ -132,15 +136,24 @@ async function approveHostedAction(input: {
     privyUserId: input.privyUserId,
   });
 
-  return input.prisma.$transaction((tx) =>
-    decideHostedActionApprovalTx({
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    await assertHostedAppSessionCurrentTx({
+      memberId: input.memberId,
+      prisma: tx,
+      request: input.request,
+      sessionId: input.sessionId,
+      authProof: input.authProof,
+    });
+    return decideHostedActionApprovalTx({
       approval: input.approval,
       challenge,
       decision: "approved",
       memberId: input.memberId,
-      now: input.now,
+      now: new Date(),
       tx,
-    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 function parseActionApprovalDecision(

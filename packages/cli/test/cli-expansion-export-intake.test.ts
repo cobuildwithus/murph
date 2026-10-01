@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { initializeVault } from '@murphai/core'
+import { initializeVault, readAssessmentResponse } from '@murphai/core'
 import { buildExportPack, readVault } from '@murphai/query'
 import { Cli } from 'incur'
 import { test } from 'vitest'
@@ -82,6 +82,9 @@ test('intake import schema exposes the richer importer-backed metadata options',
   assert.equal('occurredAt' in schema.options.properties, true)
   assert.equal('importedAt' in schema.options.properties, true)
   assert.equal('source' in schema.options.properties, true)
+  assert.equal('assessmentType' in schema.options.properties, true)
+  assert.equal('questionnaireSlug' in schema.options.properties, true)
+  assert.equal('relatedId' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault'])
 })
 
@@ -159,11 +162,25 @@ test.sequential(
         '2026-03-12T09:45:00Z',
         '--source',
         'manual',
+        '--assessment-type',
+        'clinical-observation',
+        '--questionnaire-slug',
+        'baseline-intake',
+        '--related-id',
+        'evt_01J00000000000000000000001',
       ])
 
       assert.equal(imported.ok, true)
       assert.equal(imported.meta?.command, 'intake import')
       assert.match(requireData(imported).assessmentId, /^asmt_/u)
+      const saved = await readAssessmentResponse({
+        vaultRoot,
+        assessmentId: requireData(imported).assessmentId,
+      })
+      assert.equal(saved?.assessmentType, 'clinical-observation')
+      assert.equal(saved?.questionnaireSlug, 'baseline-intake')
+      assert.deepEqual(saved?.relatedIds, ['evt_01J00000000000000000000001'])
+      assert.deepEqual(saved?.responses, JSON.parse(await readFile(assessmentPath, 'utf8')))
 
       const manifestResult = await runSliceCli<{
         entityId: string
@@ -502,6 +519,23 @@ test.sequential(
 
     try {
       await initializeVault({ vaultRoot })
+      const auditId = 'aud_01JNW00000000000000000020'
+      await mkdir(path.join(vaultRoot, 'audit', '2026'), { recursive: true })
+      await writeFile(
+        path.join(vaultRoot, 'audit', '2026', '2026-03.jsonl'),
+        `${JSON.stringify({
+          schemaVersion: 'murph.audit.v1',
+          id: auditId,
+          action: 'export',
+          status: 'success',
+          occurredAt: '2026-03-11T12:00:00.000Z',
+          actor: 'cli',
+          commandName: 'vault-cli export pack',
+          summary: 'Created a synthetic export pack.',
+          changes: [],
+        })}\n`,
+        'utf8',
+      )
 
       const readModel = await readVault(vaultRoot)
       const pack = buildExportPack(readModel, {
@@ -512,13 +546,21 @@ test.sequential(
       })
       await materializeExportPack(vaultRoot, pack.files)
 
-      const linkedFile = pack.files.find((file) => file.path.endsWith('.md')) ?? pack.files[0]
+      const linkedFile = pack.files.find((file) => file.path.endsWith('daily-samples.json')) ?? pack.files[0]
       assert.ok(linkedFile)
       const storedPackFile = path.join(vaultRoot, linkedFile.path)
       const outsideFile = path.join(outsideRoot, 'secret.md')
       await writeFile(outsideFile, 'outside-vault export content', 'utf8')
       await rm(storedPackFile, { force: true })
       await symlink(outsideFile, storedPackFile)
+
+      const tolerantJournalDirectory = path.join(vaultRoot, 'journal', '2099')
+      await mkdir(tolerantJournalDirectory, { recursive: true })
+      await writeFile(
+        path.join(tolerantJournalDirectory, '2099-01-01.md'),
+        ['---', 'title broken', '---', '', 'Legacy note.'].join('\n'),
+        'utf8',
+      )
 
       const materialized = await materializeStoredExportPack({
         vault: vaultRoot,
@@ -531,6 +573,31 @@ test.sequential(
         await readFile(path.join(outRoot, linkedFile.path), 'utf8'),
         linkedFile.contents,
       )
+      const rebuiltEntities = JSON.parse(
+        await readFile(
+          path.join(outRoot, 'exports', 'packs', 'focus-pack', 'entities.json'),
+          'utf8',
+        ),
+      ) as Array<{ entityId: string }>
+      const rebuiltManifest = JSON.parse(
+        await readFile(
+          path.join(outRoot, 'exports', 'packs', 'focus-pack', 'manifest.json'),
+          'utf8',
+        ),
+      ) as {
+        files: Array<{ path: string }>
+        manifest: { fileCount: number; recordCount: number }
+      }
+      assert.equal(
+        rebuiltEntities.some((entity) => entity.entityId === auditId),
+        true,
+      )
+      assert.equal(rebuiltManifest.manifest.recordCount, rebuiltEntities.length)
+      assert.equal(rebuiltManifest.manifest.fileCount, rebuiltManifest.files.length)
+      assert.deepEqual(
+        rebuiltManifest.files.map((file) => file.path).sort(),
+        materialized.files.slice().sort(),
+      )
 
       await rm(path.join(vaultRoot, 'exports', 'packs'), { recursive: true, force: true })
       await mkdir(path.join(outsideRoot, 'focus-pack'), { recursive: true })
@@ -538,11 +605,30 @@ test.sequential(
 
       await assert.rejects(
         () => pruneStoredExportPack(vaultRoot, 'focus-pack'),
-        {
-          name: 'VaultCliError',
-          code: 'invalid_path',
-          message:
-            'Vault-relative path "exports/packs/focus-pack/manifest.json" may not traverse symbolic links inside the selected vault root.',
+        (error) => {
+          assert.equal(
+            typeof error === 'object' && error !== null && 'name' in error
+              ? error.name
+              : null,
+            'VaultCliError',
+          )
+          assert.equal(
+            typeof error === 'object' && error !== null && 'code' in error
+              ? error.code
+              : null,
+            'invalid_path',
+          )
+          assert.equal(
+            typeof error === 'object' && error !== null && 'message' in error
+              ? error.message
+              : null,
+            'The stored export pack manifest path is invalid.',
+          )
+          const serialized = JSON.stringify(error)
+          assert.equal(serialized.includes('focus-pack'), false)
+          assert.equal(serialized.includes(vaultRoot), false)
+          assert.equal(serialized.includes(outsideRoot), false)
+          return true
         },
       )
     } finally {

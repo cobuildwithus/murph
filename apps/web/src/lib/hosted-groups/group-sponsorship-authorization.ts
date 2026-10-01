@@ -34,15 +34,10 @@ import {
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
 import type { HostedGroupUsageCapacityState } from "./group-usage-capacity";
-
-export const HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR = [
-  500,
-  1_000,
-  2_000,
-] as const;
-
-export type HostedGroupSponsorshipMonthlyCapMinor =
-  (typeof HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR)[number];
+import {
+  parseHostedGroupSponsorshipMonthlyCapMinor,
+  type HostedGroupSponsorshipMonthlyCapMinor,
+} from "./group-sponsorship-contract";
 
 export type HostedGroupSponsorshipManagementAction =
   | { action: "cancel"; authorizationId: string }
@@ -144,18 +139,6 @@ type HostedGroupSponsorshipRefillAuthority = Pick<
   | "stripeCustomerIdEncrypted"
   | "stripePriceIdEncrypted"
 >;
-
-export function parseHostedGroupSponsorshipMonthlyCapMinor(
-  value: unknown,
-): HostedGroupSponsorshipMonthlyCapMinor | null {
-  return typeof value === "number" &&
-      Number.isInteger(value) &&
-      HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR.includes(
-        value as HostedGroupSponsorshipMonthlyCapMinor,
-      )
-    ? value as HostedGroupSponsorshipMonthlyCapMinor
-    : null;
-}
 
 export function parseHostedGroupSponsorshipManagementAction(
   value: Record<string, unknown>,
@@ -1986,7 +1969,7 @@ function invalidMonthlyCap() {
   return hostedOnboardingError({
     code: "HOSTED_GROUP_SPONSORSHIP_CAP_INVALID",
     httpStatus: 400,
-    message: "Choose a monthly maximum of $5, $10, or $20.",
+    message: "Choose a monthly maximum of $5, $10, $20, or $50.",
   });
 }
 

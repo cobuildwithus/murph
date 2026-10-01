@@ -23,7 +23,13 @@ import {
 import {
   openInboxRuntime,
 } from "@murphai/inboxd";
-import { describe, expect, it, vi } from "vitest";
+import {
+  listAssistantInputEvents,
+} from "@murphai/assistant-engine";
+import {
+  saveAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createHostedRuntimeEffectsPortStub,
@@ -37,6 +43,12 @@ import {
 import {
   createEmptyHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
+import {
+  readHostedPendingAssistantInputIds,
+} from "../src/hosted-runtime/pending-input-index.ts";
+import {
+  selectHostedAssistantInputIds,
+} from "../src/hosted-runtime/turn-input.ts";
 import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "../src/hosted-runtime/models.ts";
@@ -74,7 +86,12 @@ import {
 } from "../src/hosted-runtime/events/conversation.ts";
 
 describe("hosted Linq audio conversation ingestion", () => {
-  it("commits mailbox progress when stop aborts after the parser drain", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  it("retries without advancing mailbox progress when stop aborts after the parser drain", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-26T17:30:00.000Z"));
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-linq-audio-abort-"));
     const vaultRoot = path.join(workspaceRoot, "vault");
     const fakeFfmpeg = path.join(workspaceRoot, "fake-ffmpeg");
@@ -84,7 +101,16 @@ describe("hosted Linq audio conversation ingestion", () => {
     const providerSignals: Array<AbortSignal | undefined> = [];
     const transcript = "The preempted parser drain still completed.";
 
-    await initializeVault({ vaultRoot, createdAt: "2026-04-29T00:00:00.000Z" });
+    await initializeVault({ vaultRoot, createdAt: "2026-08-26T00:00:00.000Z" });
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-08-26T00:00:00.000Z",
+      }],
+      updatedAt: "2026-08-26T00:00:00.000Z",
+      version: 1,
+    });
     await writeExecutableNodeScript(
       fakeFfmpeg,
       [
@@ -141,6 +167,8 @@ describe("hosted Linq audio conversation ingestion", () => {
     mocks.markLinqChatRead.mockResolvedValue(undefined);
 
     try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-08-26T17:22:21.000Z"));
       const wake = buildHostedExecutionLinqConversationMessageWake({
         eventId: "evt_linq_audio_abort",
         linqMessage: {
@@ -160,7 +188,8 @@ describe("hosted Linq audio conversation ingestion", () => {
           ],
           service: "iMessage",
         },
-        occurredAt: "2026-04-29T17:22:20.000Z",
+        // Keep this retry fixture inside the pending-input retention window.
+        occurredAt: new Date().toISOString(),
         phoneLookupKey: "15551234567",
         userId: "member_linq_audio",
       });
@@ -170,34 +199,51 @@ describe("hosted Linq audio conversation ingestion", () => {
       const mailboxPort = createSingleItemMailboxPort(mailboxItem);
       const importItem = createHostedConversationMailboxImportItem({
         decodePayload: createDecodedPayloadDecoder(wake),
+        async loadAttachmentEvidenceCapture(input) {
+          const runtime = await openInboxRuntime({ vaultRoot });
+          try {
+            const capture = runtime.listCaptures({
+              limit: 10,
+              source: "linq",
+            }).find((candidate) => candidate.captureId === input.captureId);
+            assert.ok(capture);
+            return {
+              attachments: capture.attachments,
+              captureId: capture.captureId,
+            };
+          } finally {
+            runtime.close();
+          }
+        },
         prepareWakeContext: async () => {},
         runtime: createRuntimeConfig(),
-        stageAssistantInputEvent: async () => ({
-          async recordAttachmentEvidence() {
-            return true;
-          },
-          async recordProjection() {},
-          inputId: "assistant_input_linq_audio_abort",
-        }),
         vaultRoot,
       });
       let state = createEmptyHostedMailboxImportState();
+      let providerStarts = 0;
 
-      const firstImport = await fetchAndProcessHostedMailboxPrefix({
-        expectedUserId: "member_linq_audio",
-        importItem: (item) => importItem(item, { signal: controller.signal }),
-        lanes: ["conversation"],
-        limitPerLane: 10,
-        mailboxPort: mailboxPort.port,
-        requestId: "linq-audio-abort-first",
-        state,
-      });
-      state = firstImport.state;
+      await assert.rejects(
+        fetchAndProcessHostedMailboxPrefix({
+          expectedUserId: "member_linq_audio",
+          importItem: (item) => importItem(item, { signal: controller.signal }),
+          lanes: ["conversation"],
+          limitPerLane: 10,
+          mailboxPort: mailboxPort.port,
+          requestId: "linq-audio-abort-first",
+          state,
+        }),
+        (error) => error === abortReason,
+      );
 
       assert.deepEqual(providerSignals, [undefined]);
-      assert.equal(firstImport.importedCount, 1);
-      assert.equal(firstImport.blocked.length, 0);
-      assert.equal(state.watermarks.conversation, "1");
+      assert.equal(state.watermarks.conversation, "0");
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+      const interruptedSelection = await selectHostedAssistantInputIds({
+        mode: "background",
+        vaultRoot,
+      });
+      providerStarts += interruptedSelection.inputIds.length > 0 ? 1 : 0;
+      assert.deepEqual(interruptedSelection.inputIds, []);
       assert.equal(mailboxPort.fetchRequests.length, 1);
       assert.equal(mailboxPort.fetchRequests[0]?.lanes[0]?.importedSeq, "0");
       await assertSingleLinqAudioCapture({
@@ -216,18 +262,34 @@ describe("hosted Linq audio conversation ingestion", () => {
         state,
       });
       state = replay.state;
-      assert.equal(replay.importedCount, 0);
+      assert.equal(replay.importedCount, 1);
       assert.equal(replay.blocked.length, 0);
       assert.equal(state.watermarks.conversation, "1");
       assert.equal(mailboxPort.fetchRequests.length, 2);
-      assert.equal(mailboxPort.fetchRequests[1]?.lanes[0]?.importedSeq, "1");
+      assert.equal(mailboxPort.fetchRequests[1]?.lanes[0]?.importedSeq, "0");
       await assertSingleLinqAudioCapture({
         parseState: "succeeded",
         transcript,
         vaultRoot,
       });
+      const pendingInputIds = await readHostedPendingAssistantInputIds({ vaultRoot });
+      assert.equal(pendingInputIds.length, 1);
+      const settledSelection = await selectHostedAssistantInputIds({
+        mode: "background",
+        vaultRoot,
+      });
+      providerStarts += settledSelection.inputIds.length > 0 ? 1 : 0;
+      assert.deepEqual(settledSelection.inputIds, pendingInputIds);
+      const staged = await listAssistantInputEvents({ vault: vaultRoot });
+      assert.equal(staged.events[0]?.attachmentEvidence.status, "available");
+      assert.equal(
+        staged.events[0]?.attachmentEvidence.attachments[0]?.inlineFragments[0]?.text,
+        transcript,
+      );
+      assert.equal(providerStarts, 1);
       assert.equal(providerSignals.length, 1);
     } finally {
+      vi.useRealTimers();
       await rm(workspaceRoot, {
         force: true,
         maxRetries: 5,
@@ -661,6 +723,7 @@ function createSingleItemMailboxPort(item: HostedMailboxItem): {
   port: {
     fetch(request: HostedMailboxFetchRequest): Promise<{
       consumedSeqByLane: [];
+      assistantProvider: "openai";
       fetchedAt: string;
       items: HostedMailboxItem[];
       maxSeqByLane: [{ lane: "conversation"; maxSeq: string }];
@@ -682,6 +745,7 @@ function createSingleItemMailboxPort(item: HostedMailboxItem): {
           : false;
         return {
           consumedSeqByLane: [],
+          assistantProvider: "openai",
           fetchedAt: item.updatedAt,
           items: shouldIncludeItem ? [item] : [],
           maxSeqByLane: [

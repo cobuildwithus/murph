@@ -29,12 +29,15 @@ describe("hosted device webhook batch admission", () => {
       provider: "oura",
       rawBody: new Uint8Array(32 * 1024),
       source: { HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS: "oura" },
-    })).toEqual({ enabled: true });
+    })).toEqual({ enabled: true, reason: "queue_enabled" });
     expect(prepareHostedDeviceWebhookQueueTransport({
       provider: "oura",
       rawBody: new Uint8Array(32 * 1024 + 1),
       source: { HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS: "oura" },
-    })).toEqual({ enabled: false });
+    })).toEqual({ enabled: false, reason: "body_too_large" });
+    expect(prepareHostedDeviceWebhookQueueTransport({
+      provider: "junction", rawBody: new Uint8Array(12), source: {},
+    })).toEqual({ enabled: false, reason: "provider_not_enabled" });
   });
 
   it("admits 100 same-account deliveries in order with one active event lease", async () => {
@@ -202,6 +205,50 @@ describe("hosted device webhook batch admission", () => {
       ...entries.map((entry) => entry.transportId),
       "trace-duplicate",
       "trace-accepted",
+    ]) {
+      expect(visibleLog).not.toContain(privateMarker);
+    }
+  });
+
+  it("distinguishes source readiness failures without exposing unknown messages or event identities", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const messages = [
+      "A newer device source setup is still pending. Retry shortly.",
+      "Current device source registration is not active yet. Retry shortly.",
+      "Device data source setup is not visible yet. Retry shortly.",
+      "private-provider-payload-marker",
+    ];
+    const entries = messages.map((_, index) => createPayload(index, "private-account-marker"));
+    const result = await admitHostedDeviceWebhookBatch({
+      entries,
+      async handle(entry) {
+        throw deviceSyncError({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          httpStatus: 503,
+          message: messages[entries.indexOf(entry)]!,
+          retryable: true,
+        });
+      },
+    });
+
+    expect(result.entries.map((entry) => entry.disposition)).toEqual([
+      "retry", "retry", "retry", "retry",
+    ]);
+    expect(info.mock.calls[0]?.[1]).toMatchObject({
+      failureCounts: { WEBHOOK_SOURCE_NOT_READY: 4 },
+      sourceReadinessFailureCounts: {
+        data_source_missing: 1,
+        newer_setup_pending: 1,
+        registration_inactive: 1,
+        unclassified: 1,
+      },
+      retryCount: 4,
+    });
+    const visibleLog = JSON.stringify(info.mock.calls);
+    for (const privateMarker of [
+      ...messages,
+      "private-account-marker",
+      ...entries.map((entry) => entry.transportId),
     ]) {
       expect(visibleLog).not.toContain(privateMarker);
     }

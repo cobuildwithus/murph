@@ -2,6 +2,7 @@ import type {
   Experiment,
   ExperimentProtocol,
   ExperimentRunProjection,
+  TrendData,
 } from "@/src/types/experiments";
 
 export const CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION = 1;
@@ -40,4 +41,25 @@ export function composeExperimentDetail({
     summaryDetail: privateRun?.summaryDetail,
     conclusions: privateRun?.conclusions,
   };
+}
+
+export function formatExperimentStatisticLabel(
+  statistic: NonNullable<TrendData["statistic"]>,
+): string {
+  switch (statistic) {
+    case "count":
+      return "count";
+    case "latest":
+      return "latest";
+    case "max":
+      return "maximum";
+    case "mean":
+      return "average";
+    case "median":
+      return "median";
+    case "min":
+      return "minimum";
+    case "sum":
+      return "total";
+  }
 }

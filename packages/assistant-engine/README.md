@@ -26,6 +26,14 @@ runtime/container. A turn is an RPC into that process rather than a per-turn
 app-server subprocess. Overlapping turns fail busy instead of spawning parallel
 app-server processes.
 
+Cancelling an active turn uses native `turn/interrupt`. An acknowledged
+interruption drains host-owned effects, releases the turn, and reports cancellation
+without retiring the resident process or its independent realtime media session.
+A normal completion racing cancellation also leaves the process reusable. Missing
+terminal acknowledgement retains the bounded interruption timeout and process
+cleanup; cancellation before a turn has an addressable native ID still uses
+process shutdown. Workspace shutdown remains the owner of closing live media.
+
 Process launch identity contains only process-stable settings such as the
 command, args, stable working directory, Codex home, and sanitized stable env.
 Prompts, session/thread/turn ids, delivery routes, invocation credentials, and
@@ -118,14 +126,178 @@ authority. Dynamic-tool dispatch requires the exact active root turn and
 rejects descendant, stale-turn, or foreign-thread calls; closing the invocation
 withdraws the tools without replacing the App Server.
 
-Codex command failures reuse the existing assistant runtime-issue path. The
-turn-scoped classifier persists only a `search` or `unknown` family, a
-turn-local command ordinal saturated at 10,000, the exact numeric exit code,
-and existing duration and output-size buckets. It never persists command text,
-arguments, paths, output, payloads, or provider action identifiers. A direct
-bare `rg` or `grep` exit code 1 is treated as an expected no-match result. When
-a later direct search succeeds, `recoveredAfterFailure` records only
-family-level recovery; it does not assert that the exact query was retried.
+**Runtime failure diagnostics.** All Murph dynamic-tool returned failures share
+one private `failureDiagnostic` contract and one dispatch boundary. Handlers use
+finite branch reasons where they know the cause; unannotated failures explicitly
+receive `unknown`. `rpcResult`, prompts, schemas, calls, retries, mutations and
+thrown-error behavior are unchanged. The metadata never enters RPC content.
+
+The existing `result.runtimeIssueInputs` transport carries
+`ASSISTANT_DYNAMIC_TOOL_FAILED` classifications with the finite request kind as
+`operation`/`details.requestKind`. The shared owner replaces the former
+`AUTOMATION_TOOL_FAILED` helper. Existing group-specific issues retain their
+codes and fields and are enriched, not accompanied by another branch issue.
+Schema rejection and unsupported requests keep their existing intake issues;
+outer thrown exceptions keep the existing caller issue and exact rejection.
+Caller-owned admission/finalization refusals use the same finite issue helper,
+without a duplicate when intake or dispatch already supplied a classification.
+Success and expected domain outcomes (including inspect-not-found and accepted
+optional follow-up attachment) produce no new diagnostic.
+
+`details.failureStage` is `admission`, `validation`, `execution`, `result` or
+`delivery`. `details.failureReason` is one of `unknown`, `unavailable`,
+`authority_rejected`, `invalid_input`, `unsupported_request`, `not_found`,
+`conflict`, `limit_reached`, `action_result_mismatch`, `invalid_result`,
+`oversized_result`, `result_serialization_failed`, `empty_result`,
+`handler_exception`, `reported_failure` or `nonzero_exit`. Caught errors may add
+`details.errorCategory`: `unknown`, `invalid_input`, `not_found`, `conflict`,
+`unavailable`, `authority_rejected`, `invalid_result`, `rate_limited` or `timeout`.
+The mapper reads only fixed scalar code/status properties and the typed
+`VaultCliError` context's status/stage/timeout evidence. It never infers a cause
+from exception names, messages, stacks, nested causes or provider detail.
+Unmapped provider codes and opaque exceptions remain `unknown`; existing
+specialist group classifications remain available alongside this vocabulary.
+
+The generic completed-action failure owner continues to emit
+`CODEX_COMMAND_EXIT_NONZERO`, `CODEX_DYNAMIC_TOOL_CALL_FAILED` and
+`CODEX_TOOL_CALL_FAILED` with the same identity/duration/output-size keys,
+failure predicate and deduplication. It adds finite failure stage/reason and
+`errorCategory` (explicitly `unknown` without safe evidence). A command's
+nonzero exit is structural execution evidence; a tool's `success:false` is a
+reported result failure; a failed status alone has unknown cause. MCP provider
+payloads are not parsed. These additions do not turn a domain outcome into a
+failed action or invent failures that the tracker does not already observe.
+
+For **every recognized Vault CLI invocation**, not just `event`, the same
+command issue adds both `errorCategory` and the compatible
+`vaultCliErrorCategory` key. Recognition reuses the existing bounded executable
+parser, independently of its finite family label. This includes automation,
+knowledge, food/meal/goal/memory command families, batch invocations and an
+unknown subcommand of a recognized executable. Only child events actually
+observed by the current tracker are covered; batch results are not expanded
+into extra actions. Arbitrary shell error JSON is never classified as Vault CLI.
+The owner transiently parses the **complete** `aggregatedOutput` (or its
+snake-case alias) only at or below 16,384 UTF-8 bytes. It accepts the CLI's direct
+JSON error object or `--full-output` `{ok:false,error:...}` envelope with string
+code/message and optional boolean retryable. Only finite current projection
+codes are mapped; `contract_invalid` requires `stage=validation` to mean invalid
+input. Malformed, truncated, oversized or unrecognized output stays `unknown`.
+No arguments, output excerpts, arbitrary codes, paths, IDs, member content or
+provider payloads enter these new fields. Existing numeric exit code, saturated
+turn-local ordinal and finite family attribution are unchanged. Bare `rg` or
+`grep` exit 1 remains expected no-match; recovery remains family-level only.
+
+Shell completion details additionally carry optional `commandAttribution`:
+`recognized`, `missing_command`, `oversized_command`, `shell_syntax`,
+`unrecognized_executable` or `unrecognized_cli_path`. It explains the existing
+fallback instead of changing the family or failure predicate. `shell_syntax`
+means compound/unsupported shell syntax or malformed quoting, **not** which
+pipeline/subcommand failed. The existing 4,096-character lexical bound and
+single known-shell-wrapper rule still apply. `vaultCliCommand` is present only
+when literal leading command words match the existing runtime-state CLI timing
+catalog (including three-word paths). Quoted or option-first command paths
+remain unattributed; whitespace-split option values are never treated as argv.
+
+A recognized executable may also carry `vaultCliErrorAttribution`: `recognized`,
+`unknown_code`, `missing_output`, `oversized_output` or `unstructured_output`.
+This concerns the existing bounded JSON envelope, not arbitrary shell stderr.
+Optional `vaultCliErrorCode` and `vaultCliErrorStage` use the timing owner's exact
+code/stage vocabularies; each unknown scalar is omitted independently. A known
+coarse category can coexist with `unknown_code` when its code is outside that
+narrower catalog. No new provider-code catalog is introduced. The existing
+exercise codes distinguish `exercise_not_found` (missing item),
+`exercise_catalog_unavailable` (missing/unreadable artifacts), and
+`exercise_catalog_invalid` (invalid artifacts); validation remains invalid
+input. No source error, hint, tool result, RPC or canonical contract changes.
+
+For the next shell-failure aggregate, filter the existing
+`CODEX_COMMAND_EXIT_NONZERO` completion rows over one bounded deployment/time
+cohort. Group by the finite attribution reason first, then catalog-normalized
+`vaultCliCommand`, `vaultCliErrorAttribution`, `vaultCliErrorCode` and
+`vaultCliErrorStage`. This separates missing/compound/oversized commands from
+recognized CLI calls with missing, unstructured or unmapped error output, and
+separates input rejection, missing exercise items and missing artifacts without
+reading commands or outputs. Apply source-owned allowlists before grouping;
+map absent old fields to `missing_evidence`, never to success or `recognized`.
+These fields are optional metadata accepted by the existing issue parser and
+24-key sanitizer; older readers may ignore them. No issue schema bump or
+additional event is needed. Existing started/completed ordinal correlation,
+completion deduplication and search recovery remain unchanged.
+
+These are **classifications, not another call denominator**.
+`diagnosticRole=classification` marks dynamic-tool/branch/intake rows and
+`diagnosticRole=completion` marks generic failed-action rows. A failed dynamic
+call may produce both: never add them as failed calls. Even completion rows are
+not a lossless ledger. Use existing action-diagnostics counts for rates over the
+same window and deployment cohort. The unchanged eight-issue per-turn cap,
+best-effort writes and export retries make coverage lossy; missing diagnostics
+never prove success or no traffic. There is no new queue, awaited tool-path I/O,
+state, schema, backend or dependency.
+
+For future natural-traffic verification, use read-only aggregate queries with
+bounded time parameters. This mixed-version recipe emits only finite labels
+and counts, never raw rows or identifiers:
+
+```sql
+WITH projected AS (
+  SELECT
+    CASE
+      WHEN component = 'assistant.automation' THEN 'legacy_automation'
+      WHEN component = 'assistant.group-tool' THEN 'group_classification'
+      WHEN component = 'assistant.tool-validation' THEN 'input_validation'
+      WHEN component = 'assistant.codex-dynamic-tool' THEN 'dynamic_classification'
+      WHEN error_code = 'CODEX_COMMAND_EXIT_NONZERO' THEN 'command_completion'
+      WHEN error_code = 'CODEX_TOOL_CALL_FAILED' THEN 'mcp_completion'
+      ELSE 'dynamic_completion'
+    END AS diagnostic_surface,
+    CASE WHEN details_json->>'diagnosticRole' IN ('classification', 'completion')
+         THEN details_json->>'diagnosticRole' ELSE 'missing_evidence' END AS diagnostic_role,
+    CASE WHEN details_json->>'failureStage' IN (
+                   'admission', 'validation', 'execution', 'result', 'delivery')
+         THEN details_json->>'failureStage' ELSE 'missing_evidence' END AS failure_stage,
+    CASE WHEN NOT (details_json ? 'failureReason') THEN 'missing_evidence'
+         WHEN details_json->>'failureReason' IN (
+                   'unknown', 'unavailable', 'authority_rejected', 'invalid_input',
+                   'unsupported_request', 'not_found', 'conflict', 'version_conflict',
+                   'limit_reached', 'action_result_mismatch', 'invalid_result',
+                   'oversized_result', 'result_serialization_failed', 'empty_result',
+                   'handler_exception', 'reported_failure', 'nonzero_exit')
+         THEN details_json->>'failureReason' ELSE 'unrecognized_evidence' END AS failure_reason,
+    COALESCE(details_json->>'errorCategory', details_json->>'vaultCliErrorCategory',
+      CASE details_json->>'handlerErrorCode'
+        WHEN 'invalid_option' THEN 'invalid_input'
+        WHEN 'automation_not_found' THEN 'not_found'
+        WHEN 'unknown' THEN 'unknown' END) AS category
+  FROM hosted_assistant_runtime_issue
+  WHERE occurred_at >= $1 AND occurred_at < $2
+    AND ((component = 'assistant.automation' AND error_code = 'AUTOMATION_TOOL_FAILED')
+      OR component IN ('assistant.codex-dynamic-tool', 'assistant.group-tool')
+      OR (component = 'assistant.tool-validation' AND error_code = 'TOOL_INPUT_SCHEMA_REJECTION')
+      OR (component = 'assistant.codex-action' AND error_code IN (
+           'CODEX_COMMAND_EXIT_NONZERO', 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+           'CODEX_TOOL_CALL_FAILED')))
+)
+SELECT diagnostic_surface, diagnostic_role, failure_stage, failure_reason,
+       CASE WHEN category IS NULL THEN 'missing_evidence'
+            WHEN category IN ('unknown', 'invalid_input', 'not_found', 'conflict',
+                    'unavailable', 'authority_rejected', 'invalid_result',
+                    'rate_limited', 'timeout')
+            THEN category ELSE 'unrecognized_evidence' END AS error_category,
+       count(*) AS diagnostic_rows
+FROM projected
+GROUP BY 1, 2, 3, 4, 5;
+```
+
+Missing fields on older records are **missing evidence**, distinct from explicit
+`unknown`. Historical automation-only rows remain queryable; new classifications
+use the common dynamic-tool code and `conflict` rather than `version_conflict`.
+The generic event codes/keys and runtime-issue schema remain compatible with
+existing sanitizers and consumers; automation-specific consumers must include
+the common classification rows. Existing release provenance can select a
+compatible deployment cohort. After deployment, observe natural traffic only
+and compare classification coverage with existing action counts. No production
+failure injection or live assistant journey is required for this telemetry-only
+change.
 
 MultiAgent V2 descendants admitted before the root final reply may keep working
 through Codex's native lifecycle after that reply. Root completion and the next
@@ -144,53 +316,27 @@ is not process cleanup.
 ## Read-only Assistant Ask
 
 `executeReadOnlyAssistantAsk`, exported from
-`@murphai/assistant-engine/assistant-ask`, is the one deliberate exception to
-the warm single-process path. It starts a separate one-shot Codex App Server
-child for a target-owned Assistant Ask, so its provider latency, failure, and
-interruption domain cannot block or poison the resident foreground process. The
-trusted caller supplies the authorized target workspace root plus one untrusted
-question; the executor owns no membership, routing, mailbox, retry, or delivery
-state and returns only one schema-checked bounded answer.
+`@murphai/assistant-engine/assistant-ask`, starts a separate one-shot Codex App
+Server child for detached group/member reads. The caller supplies the target
+workspace and question; the engine owns no membership, mailbox, retry,
+persistence, or delivery state. The native `murph-group-read` profile makes the
+workspace read-only and hides private runtime/configuration state. Joined-group
+asks alone may receive `murph.group/read_shared`.
 
-The child reuses the trusted hosted Codex home for minimum provider auth and
-configuration, but starts from a fresh empty working directory and removes that
-directory after the exact child exits. It uses process lifetime `one-shot`; its
-`thread/start` request sets `permissions = "murph-group-read"`, exact
-`runtimeWorkspaceRoots`, `ephemeral = true`, and approval policy `never` without
-legacy `sandbox`. The App Server response is not an authorization boundary;
-production-like Linux smoke proves the named profile's actual filesystem,
-environment, and network enforcement. The profile permits read-only access to
-the exact target roots
-while denying `.runtime/**`, `.codex/**`, environment files, writes, other
-workspaces, and tool network. Model-run shell commands inherit no provider
-credential or hosted secret. The child's only dynamic tool is the consent-aware
-lazy `murph.group/read_shared` read. It receives no mutation or delivery route,
-MCP, web search, memory, plugin, app, or multi-agent authority.
+`executeOperatorDiagnostic` is the direct authenticated-operator variant. It
+runs one turn with `murph-operator-diagnostic-read`, the bound workspace
+including `.runtime`, and only the hosted Codex `sessions/` directory as an
+optional second root. It has no writes, network, dynamic tools, project
+configuration, effects, or delivery authority, and returns directly to the
+caller's encrypted Ops-only result instead of entering member disclosure review.
 
-The runtime may keep one such child beside foreground work. It owns the exact
-process handle and must interrupt, await with bounded grace, terminate only
-that proven-owned child if needed, and prove exit before its workspace can be
-checkpointed, replaced, or released. Further asks remain pending in the
-existing hosted mailbox; assistant-engine does not add a process pool or
-scheduler.
-
-`executeConsentedReadOnlyAssistantAsk` is the disclosure-scoped composition of
-that primitive. Its first one-shot child reads the authorized personal
-workspace with the exact immutable permission context and proposes one bounded
-answer. A second, sequential, fresh-context one-shot child receives only that
-permission, the incoming question, and the proposed answer against an empty
-runtime root. It has no personal workspace, conversation history, dynamic
-tools, delivery route, network, or other authority and returns only `allow` or
-`deny`.
-
-There is no incoming model reviewer and no rewrite pass. The reviewer interprets
-the proposed answer in the context of the question because a terse confirmation
-can disclose the question's premise. An allow returns the candidate bytes
-unchanged; deny produces `cannot_answer`, while invalid output fails closed for
-the existing retry/expiry lifecycle. This executor still owns no grant,
-membership, routing, persistence, retry, completion, or delivery
-state. Web and the hosted runtime must revalidate those boundaries before the
-read and before exact-byte group delivery.
+Every detached turn uses a fresh temporary working directory, exact host-bound
+roots, approval policy `never`, and one-shot process lifetime. The hosted
+runtime owns cancellation and retries and permits at most one detached child
+beside the resident foreground process. `executeConsentedReadOnlyAssistantAsk`
+remains the member disclosure composition: a candidate runs under
+`murph-group-read`, then a second tool-free child may allow its exact bytes or
+return `cannot_answer`.
 
 Private grant discovery reuses `murph.group(action="list_memberships")`, whose
 successful result includes a top-level `disclosureGrants` array. The runtime
@@ -213,6 +359,29 @@ expose only generic `ALL_TOOLS` metadata and dispatch the selected tool through
 native function, while code-mode-only models receive its schema in `exec`
 guidance without a search step. Murph must not add a second discovery action,
 execution envelope, or compatibility namespace.
+
+Authorized full group conversations expose `group_data` eagerly because shared
+reads are routine and namespace discovery expands unrelated schemas. Its input
+schema and authorization remain identical; private conversations keep the group
+family deferred, and read-only scheduled group turns keep their narrower tool.
+
+Response-card, exercise-routine, Telegram rich-content, and group-challenge
+card tools follow the same deferred contract. Resident messaging guidance
+provides the discovery trigger; the discovered tool remains the sole owner of
+its complete schema, prerequisite reads, eligibility, and fallback rules.
+Ordinary turns avoid those schemas; card-producing turns still pay for native
+discovery and the full selected contract.
+
+Stable route instructions own capability-dependent research guidance and the
+late-child-result policy. Dynamic context carries only the trusted ordinary
+inbound marker and current facts. Research capability changes therefore change
+the native thread fingerprint. Group email omits filesystem skill routing,
+browser procedures, and CLI recipes while retaining resident health guidance
+and the existing sender-authority boundary. Automation instructions keep task
+triggers and essential timing/readback invariants resident; detailed arguments,
+recovery, and projection semantics live in the discovered automation contract.
+Later timing questions require a fresh inspection; successful writes already
+include their own readback and need no redundant verification.
 
 Runtime authority remains independent of advertisement. Hosted transports are
 typed services on `AssistantHostedToolContext`, and each tool checks that service
@@ -257,3 +426,53 @@ An exact action retry may continue; a conflicting action requires new eligible
 member input. That binding proves current authority, not the meaning of the
 message. The result exposes a Stripe-hosted URL only when payment is required,
 and the tool never exposes a general billing or Stripe client.
+
+## Experiment support policy
+
+The experiment-onboarding entrypoint retains safety, protocol resolution, run
+creation, and active-session logging rules. First-session guidance and support
+mechanics live in the co-packaged `references/session-support.md`, which must be
+read before support questions or effects. Normal recursive skill packaging and
+filesystem reads remain the owners. Keep that reference in focused real-Codex
+fixtures when changing support policy.
+
+## Focused tests
+
+From the repository root, invoke Vitest directly to run selected test files:
+
+```sh
+pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/model-behavior.test.ts
+```
+
+Append additional file paths after the Vitest options. Do not put an extra `--`
+before the file paths: `pnpm --dir packages/assistant-engine test -- <file>`
+forwards that separator to Vitest, which drops the file filter and runs the
+package suite.
+
+## Real-Codex test fixtures
+
+Synthetic real-Codex journeys that need fixture executables can opt into
+`executeRealCodexAppServerTurn`'s `fixtureBinDirectory`. The test harness adds
+that directory to PATH and creates a private login profile beneath the journey's
+working directory, whose existing cleanup owns it. Ordinary calls retain their
+supplied environment. An explicit caller `ZDOTDIR` remains caller-owned and
+cannot be combined with automatic fixture-profile preparation. Deterministic
+harness tests exercise actual `zsh -lc` selection when zsh is installed; that
+integration case explicitly skips when the executable is absent. Portable
+profile quoting, provider-key exclusion, and caller-profile ownership remain
+covered without zsh. These tests do not start Codex or make a model request.
+
+Session preflight validates routing under the existing runtime write lock without
+preparing secret storage. Session persistence owns that directory's permission
+and symlink checks before writing a session or removing its legacy sidecar.
+
+
+## Canonical reminder verification
+
+The canonical live reminder fixture supplies a synthetic hosted automation port
+for creation and cancellation. That port delegates persistence and timing to the
+production core and cron owners; hosted authorization and route policy remain
+covered by assistant-runtime entrypoint tests. The journey checks one hosted save,
+the saved reminder model override, actual queued delivery, and one archive patch.
+`canonical-live-preflight.test.ts` verifies its port wiring, canonical records,
+optimistic concurrency, and cancellation without a model or delivery provider.

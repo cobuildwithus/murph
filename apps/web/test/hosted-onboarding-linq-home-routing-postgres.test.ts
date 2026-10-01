@@ -1,9 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
 
+import { PrismaPg } from "@prisma/adapter-pg";
 import {
   HostedBillingStatus,
   type Prisma,
-  type PrismaClient,
+  PrismaClient,
 } from "@prisma/client";
 import {
   buildHostedExecutionLinqConversationMessageWake,
@@ -13,6 +14,7 @@ import {
   createHostedMailboxAssistantInputId,
   readHostedConversationAssistantIdentifierSecret,
 } from "@murphai/hosted-execution/assistant-identifiers";
+import { Client } from "pg";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -41,11 +43,13 @@ import {
   readHostedMemberRoutingState,
   resolveHostedMemberRoutingByTelegramUserId,
   upsertHostedMemberHomeLinqBindingTx,
+  upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
-import { updateHostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { readHostedMemberSnapshot, updateHostedMemberCoreState, upsertHostedMemberEmailAuthorization } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { resolveHostedMemberActivationLinqRoute, startOfUtcDay } from "@/src/lib/hosted-onboarding/linq-home-routing";
 import { encryptHostedLinqLinePhoneNumber } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 import { buildHostedMemberIdentityPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import {
@@ -64,10 +68,24 @@ import {
 } from "@/src/lib/hosted-onboarding/telegram";
 import { planHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import { planHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
-import { runHostedLinqMessageEditPreparedTransaction } from "@/src/lib/hosted-onboarding/webhook-service";
+import {
+  handleHostedOnboardingLinqWebhook,
+  runHostedLinqMessageEditPreparedTransaction,
+} from "@/src/lib/hosted-onboarding/webhook-service";
 import { createPrismaClient } from "@/src/lib/prisma";
+import { readUnchangedHostedMemberHomeLinqBindingTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-linq";
+import { acquireHostedLinqChatOwnershipLockTx } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
+import { ensureHostedMemberChannelWelcome } from "@/src/lib/hosted-onboarding/channel-welcome";
 
 const handlerPrismaClients = vi.hoisted(() => [] as PrismaClient[]);
+const channelWelcomeTestHooks = vi.hoisted(() => ({
+  signal: vi.fn(),
+  unwrap: vi.fn(async (_input: { domain: string }) => ({ rootKey: new Uint8Array(32) })),
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: channelWelcomeTestHooks.signal,
+}));
 
 vi.mock("@/src/lib/prisma", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/src/lib/prisma")>();
@@ -83,6 +101,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   >();
   return {
     ...actual,
+    unwrapHostedDomainRootForWeb: channelWelcomeTestHooks.unwrap,
     provisionActiveHostedDomainRootEnvelopeForUserOnly:
       vi.fn().mockResolvedValue(undefined),
   };
@@ -175,6 +194,344 @@ async function acquireHostedMailboxSourceLocksForTest(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq home-routing PostgreSQL concurrency",
   () => {
+    it.each(["foreign-key insert", "member writer", "route writer"] as const)(
+      "prepared direct admission remains safe with a held %s",
+      async (lockHolder) => {
+        const authorityKey = generateKeyPairSync("ec", {
+          namedCurve: "prime256v1",
+          privateKeyEncoding: { format: "jwk" },
+          publicKeyEncoding: { format: "pem", type: "spki" },
+        });
+        const automationKey = generateKeyPairSync("ec", {
+          namedCurve: "prime256v1",
+          privateKeyEncoding: { format: "jwk" },
+          publicKeyEncoding: { format: "jwk" },
+        });
+        const webhookSecret = "synthetic-prepared-member-secret";
+        for (const [key, value] of Object.entries({
+          LINQ_WEBHOOK_SECRET: webhookSecret,
+          HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "off",
+          HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES: "+44",
+          HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: "",
+          HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "test-automation-key",
+          HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK:
+            JSON.stringify(automationKey.publicKey),
+          HOSTED_CRYPTO_ENV: "test",
+          HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
+            "projects/murph-test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1",
+          HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
+          HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+          HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+            "projects/murph-test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+          HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
+            JSON.stringify(authorityKey.privateKey),
+          HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
+        })) {
+          vi.stubEnv(key, value);
+        }
+        const fetch = vi.fn(async () => {
+          throw new Error("Unexpected external call in prepared-member proof.");
+        });
+        vi.stubGlobal("fetch", fetch);
+        channelWelcomeTestHooks.signal.mockResolvedValue({
+          workflowId: "synthetic-prepared-member-workflow",
+        });
+        const prisma = new PrismaClient({
+          adapter: new PrismaPg({
+            connectionString: databaseUrl,
+            connectionTimeoutMillis: 5_000,
+            statement_timeout: 5_000,
+          }),
+          log: [{ emit: "event", level: "query" }],
+        });
+        let preparedMemberLockAttempts = 0;
+        prisma.$on("query", ({ query }) => {
+          if (query.includes('from "hosted_member"') && query.includes("skip locked")) {
+            preparedMemberLockAttempts += 1;
+          }
+        });
+        const holder = new Client({
+          connectionString: databaseUrl,
+          connectionTimeoutMillis: 5_000,
+          statement_timeout: 5_000,
+        });
+        let fixture: Awaited<ReturnType<typeof createActivationContactFixture>> | null = null;
+        try {
+          fixture = await createActivationContactFixture(prisma, 0);
+          const { memberId, memberPhone, linePhone } = fixture;
+          const participantContact = createHostedLinqParticipantContact({
+            kind: "phone",
+            value: memberPhone,
+          });
+          if (!participantContact) throw new Error("Expected a synthetic phone contact.");
+          const chatId = `prepared-member-chat-${randomUUID()}`;
+          await prisma.$transaction((tx) => upsertHostedMemberHomeLinqBindingTx({
+            clearPending: true,
+            homeLineAssignedAt: new Date(),
+            linqChatId: chatId,
+            memberId,
+            participantContact,
+            prisma: tx,
+            recipientPhone: linePhone,
+          }), transactionOptions);
+          const eventId = `prepared-member-event-${randomUUID()}`;
+          const messageId = `prepared-member-message-${randomUUID()}`;
+          const occurredAt = new Date().toISOString();
+          const rawBody = JSON.stringify({
+            api_version: "v3",
+            created_at: occurredAt,
+            event_id: eventId,
+            event_type: "message.received",
+            webhook_version: "2026-02-03",
+            data: {
+              chat: {
+                id: chatId,
+                is_group: false,
+                owner_handle: {
+                  handle: linePhone, id: "synthetic-owner", is_me: true, service: "iMessage",
+                },
+              },
+              direction: "inbound",
+              id: messageId,
+              parts: [{ type: "text", value: "Synthetic prepared-member message" }],
+              sender_handle: { handle: memberPhone, id: "synthetic-sender", service: "iMessage" },
+              sent_at: occurredAt,
+              service: "iMessage",
+            },
+          });
+          const admit = () => {
+            const timestamp = String(Math.floor(Date.now() / 1_000));
+            return handleHostedOnboardingLinqWebhook({
+              prisma,
+              rawBody,
+              signature: createHmac("sha256", webhookSecret)
+                .update(`${timestamp}.${rawBody}`).digest("hex"),
+              timestamp,
+              // Keep post-response delivery and maintenance outside this admission proof.
+              scheduleAfterResponse: () => undefined,
+            });
+          };
+          await holder.connect();
+          await holder.query("BEGIN");
+          const feedbackId = `prepared-member-feedback-${randomUUID()}`;
+          if (lockHolder === "foreign-key insert") {
+            await holder.query(
+              `INSERT INTO hosted_product_feedback
+                (id, member_id, kind, related_changelog_item_ids_json)
+                VALUES ($1, $2, 'synthetic-lock-proof', '[]'::jsonb)`,
+              [feedbackId, memberId],
+            );
+          } else if (lockHolder === "member writer") {
+            await holder.query("UPDATE hosted_member SET updated_at = now() WHERE id = $1", [memberId]);
+          } else {
+            // Route writers serialize on the member before touching the routing row.
+            await holder.query("SELECT id FROM hosted_member WHERE id = $1 FOR NO KEY UPDATE", [memberId]);
+            await holder.query("UPDATE hosted_member_routing SET updated_at = now() WHERE member_id = $1", [memberId]);
+          }
+          // The awaited statement is the barrier: this connection retains its locks until COMMIT/end.
+          if (lockHolder !== "foreign-key insert") {
+            await expect(admit()).rejects.toMatchObject({
+              code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+              details: { preparationTarget: "direct_linq_mailbox", reason: "member" },
+              httpStatus: 503,
+              retryable: true,
+            });
+            expect(preparedMemberLockAttempts).toBe(2);
+            expect(await prisma.hostedMailboxItem.count({ where: { userId: memberId } })).toBe(0);
+            await holder.query("COMMIT");
+          }
+          await expect(admit()).resolves.toMatchObject({
+            ok: true,
+            reason: "wake-appended-active-member",
+          });
+          expect(preparedMemberLockAttempts).toBe(lockHolder === "foreign-key insert" ? 1 : 3);
+          // A separate connection observes the committed mailbox item while the FK holder is still open.
+          expect(await prisma.hostedMailboxItem.findMany({
+            where: { userId: memberId },
+            select: { dedupeKey: true, kind: true, sourceMessageLookupKey: true },
+          })).toEqual([{
+            dedupeKey: eventId,
+            kind: "conversation.message",
+            sourceMessageLookupKey: createHostedLinqMessageLookupKey(messageId),
+          }]);
+          await expect(admit()).resolves.toMatchObject({ duplicate: true });
+          expect(await prisma.hostedMailboxItem.count({ where: { userId: memberId } })).toBe(1);
+          if (lockHolder === "foreign-key insert") {
+            expect(await prisma.hostedProductFeedback.findUnique({ where: { id: feedbackId } })).toBeNull();
+            await holder.query("COMMIT");
+            expect(await prisma.hostedProductFeedback.findUnique({ where: { id: feedbackId } })).not.toBeNull();
+          }
+          expect(fetch).not.toHaveBeenCalled();
+        } finally {
+          // Closing the owned connection also rolls back an unreleased fixture transaction on failure.
+          try {
+            await holder.end();
+          } finally {
+            try {
+              if (fixture) await cleanupActivationContactFixture(prisma, fixture);
+            } finally {
+              channelWelcomeTestHooks.signal.mockReset();
+              vi.unstubAllEnvs();
+              await prisma.$disconnect();
+            }
+          }
+        }
+      },
+    );
+
+    it("reads a warm mailbox workspace once without waiting for checkpoints and preserves cold creation and replay", async () => {
+      const prisma = new PrismaClient({
+        adapter: new PrismaPg({ connectionString: databaseUrl }),
+        log: [{ emit: "event", level: "query" }],
+      });
+      const workspaceQueries: string[] = [];
+      prisma.$on("query", ({ query }) => {
+        if (query.includes('"public"."hosted_workspace"')) {
+          workspaceQueries.push(query);
+        }
+      });
+      const memberId = `member_workspace_append_${randomUUID()}`;
+      const contactLookupKey = requireString(createHostedPhoneLookupKey("+15551112222"));
+      const envelope = (eventId: string) => buildHostedExecutionLinqConversationMessageWake({
+        accountLookupKey: requireString(createHostedPhoneLookupKey("+15550000000")),
+        contactKind: "phone",
+        contactLookupKey,
+        eventId,
+        linqMessage: {
+          chatId: "synthetic-workspace-chat",
+          from: "+15551112222",
+          isFromMe: false,
+          messageId: eventId,
+          parts: [{ type: "text", value: "Synthetic message" }],
+          service: "iMessage",
+          threadIsDirect: true,
+        },
+        occurredAt: "2030-01-01T00:00:00.000Z",
+        phoneLookupKey: contactLookupKey,
+        userId: memberId,
+      });
+      const append = (eventId: string) => prisma.$transaction((tx) =>
+        appendHostedMailboxEnvelopeTx({ envelope: envelope(eventId), tx }), transactionOptions);
+      const checkpointLocked = createDeferred();
+      const releaseCheckpoint = createDeferred();
+      let checkpointResult: Promise<PromiseSettledResult<void>[]> | null = null;
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await expect(prisma.$transaction(async (tx) => {
+          await appendHostedMailboxEnvelopeTx({ envelope: envelope("rolled-back"), tx });
+          throw new Error("synthetic rollback");
+        }, transactionOptions)).rejects.toThrow("synthetic rollback");
+        expect(await prisma.hostedWorkspace.findUnique({ where: { userId: memberId } })).toBeNull();
+        expect(await prisma.hostedMailboxItem.count({ where: { userId: memberId } })).toBe(0);
+
+        workspaceQueries.length = 0;
+        const concurrent = await Promise.allSettled([append("first"), append("second")]);
+        expect(concurrent.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"]);
+        expect(workspaceQueries.filter((query) => query.startsWith("SELECT"))).toHaveLength(2);
+        const creates = workspaceQueries.filter((query) => query.startsWith("INSERT"));
+        expect(creates.length).toBeGreaterThanOrEqual(1);
+        expect(creates.length).toBeLessThanOrEqual(2);
+        expect(creates.every((query) => query.includes("ON CONFLICT DO NOTHING"))).toBe(true);
+        let retained = await prisma.hostedWorkspace.update({
+          where: { userId: memberId },
+          data: { version: 42n, snapshotRef: { key: "synthetic-snapshot" } },
+        });
+        checkpointResult = Promise.allSettled([prisma.$transaction(async (tx) => {
+          retained = await tx.hostedWorkspace.update({
+            where: { userId: memberId },
+            data: { checkpointedAt: new Date("2030-01-01T00:00:00Z") },
+          });
+          checkpointLocked.resolve();
+          await releaseCheckpoint.promise;
+        }, transactionOptions)]);
+        await checkpointLocked.promise;
+        for (const duplicate of [false, true]) {
+          workspaceQueries.length = 0;
+          expect(await append("third")).toMatchObject({ duplicate, inserted: !duplicate });
+          expect(workspaceQueries).toHaveLength(1);
+          expect(workspaceQueries[0]).toMatch(/^SELECT/u);
+        }
+        releaseCheckpoint.resolve();
+        expect(await checkpointResult).toEqual([{ status: "fulfilled", value: undefined }]);
+        expect(await prisma.hostedWorkspace.findUnique({ where: { userId: memberId } })).toEqual(retained);
+        expect(await prisma.hostedMailboxItem.findMany({
+          where: { userId: memberId },
+          orderBy: { causalSeq: "asc" },
+          select: { causalSeq: true, laneSeq: true },
+        })).toEqual([1n, 2n, 3n].map((seq) => ({ causalSeq: seq, laneSeq: seq })));
+      } finally {
+        releaseCheckpoint.resolve();
+        await checkpointResult;
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
+    it.each([false, true])("repairs a conflicting pending route without disturbing its home (has home: %s)", async (hasHome) => {
+      const client = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `member_clean_binding_${randomUUID()}`;
+      const otherMemberId = `member_pending_conflict_${randomUUID()}`;
+      const chatId = `chat_clean_binding_${randomUUID()}`;
+      const homeLineAssignedAt = new Date("2026-08-01T00:00:00Z");
+      const recipientPhone = "+15550000000";
+      const participantContact = createHostedLinqParticipantContact({ kind: "phone", value: "+15551112222" });
+      if (!participantContact) throw new Error("Expected a synthetic contact.");
+      const release = createDeferred();
+      const locked = createDeferred();
+      let blockedTransaction: Promise<void> | null = null;
+      const otherHomeKey = hasHome ? createHostedLinqChatLookupKey(`other-${chatId}`) : null;
+      try {
+        await client.hostedMember.createMany({ data: [{ id: memberId }, { id: otherMemberId }] });
+        const bind = (tx: Prisma.TransactionClient) => upsertHostedMemberHomeLinqBindingTx({
+          clearPending: true, homeLineAssignedAt, linqChatId: chatId, memberId,
+          participantContact, prisma: tx, recipientPhone,
+        });
+        await client.$transaction(bind, transactionOptions);
+        await client.hostedMemberRouting.create({ data: {
+          memberId: otherMemberId,
+          linqChatLookupKey: otherHomeKey,
+          linqChatIdEncrypted: hasHome ? "synthetic-other-home" : null,
+          pendingLinqChatLookupKey: createHostedLinqChatLookupKey(chatId),
+          pendingLinqChatIdEncrypted: "synthetic-pending-chat",
+        } });
+        const admit = () => client.$transaction(async (tx) => {
+          await acquireHostedLinqParticipantPhoneLockTx({ phoneNumber: participantContact.value, tx });
+          await acquireHostedLinqChatOwnershipLockTx({ chatId, tx });
+          await lockHostedMemberRow(tx, memberId);
+          const routingRecord = await tx.hostedMemberRouting.findUnique({ where: { memberId } });
+          const retained = await readUnchangedHostedMemberHomeLinqBindingTx({
+            chatId, homeLineAssignedAt, memberId, prisma: tx, recipientPhone, routingRecord,
+          });
+          return retained ?? bind(tx);
+        }, transactionOptions);
+        blockedTransaction = blocker.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, otherMemberId);
+          locked.resolve();
+          await release.promise;
+        }, transactionOptions);
+        await locked.promise;
+        await expect(admit()).rejects.toMatchObject({ code: "HOSTED_LINQ_PENDING_ROUTE_BUSY", retryable: true });
+        expect(await client.hostedMemberRouting.findUnique({
+          where: { memberId: otherMemberId }, select: { pendingLinqChatLookupKey: true },
+        })).toEqual({ pendingLinqChatLookupKey: createHostedLinqChatLookupKey(chatId) });
+        release.resolve();
+        await blockedTransaction;
+        const participant = { kind: participantContact.kind, lookupKey: participantContact.lookupKey };
+        await expect(admit()).resolves.toEqual(participant);
+        await expect(admit()).resolves.toEqual(participant);
+        expect(await client.hostedMemberRouting.findUnique({
+          where: { memberId: otherMemberId },
+          select: { linqChatLookupKey: true, pendingLinqChatLookupKey: true, pendingLinqChatIdEncrypted: true },
+        })).toEqual({ linqChatLookupKey: otherHomeKey, pendingLinqChatLookupKey: null, pendingLinqChatIdEncrypted: null });
+      } finally {
+        release.resolve();
+        await blockedTransaction;
+        await client.hostedMember.deleteMany({ where: { id: { in: [memberId, otherMemberId] } } });
+        await disconnectClients([client, blocker]);
+      }
+    });
+
     it("serializes edits and rejects a stale prepared lineage after the winner appends", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -340,7 +697,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("accepts three ordered edit contenders across two stale snapshots", async () => {
+    it("serializes edit contenders and preserves the newest revision", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const firstBlocker = createPrismaClient({ databaseUrl, poolMax: 1 });
       const retryBlocker = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -522,11 +879,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         releaseRetryBlocker.resolve();
         const plans = await Promise.all(editRequests);
 
-        expect(plans.map((plan) => plan.response.reason)).toEqual([
+        const secondReason = plans[1]?.response.reason;
+        expect(plans[0]?.response.reason).toBe("wake-appended-message-edit");
+        expect([
           "wake-appended-message-edit",
-          "wake-appended-message-edit",
-          "wake-appended-message-edit",
-        ]);
+          "message-edit-revision-stale",
+        ]).toContain(secondReason);
+        expect(plans[2]?.response.reason).toBe("wake-appended-message-edit");
+        if (secondReason === "message-edit-revision-stale") {
+          expect(plans[1]?.wakeHandoffs).toBeUndefined();
+        }
         expect(plans[2]?.wakeHandoffs).toEqual([
           expect.objectContaining({
             eventId: events[2]?.event_id,
@@ -537,12 +899,23 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           prisma: observer,
           sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
         });
-        await expect(observer.$transaction((tx) =>
+        const finalEntries = await observer.$transaction((tx) =>
           readHostedMailboxSourceConversationEntriesTx({
             preparation: finalPreparation,
             sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
             tx,
-          }), transactionOptions)).resolves.toHaveLength(4);
+          }), transactionOptions);
+        expect(finalEntries).toHaveLength(
+          secondReason === "wake-appended-message-edit" ? 4 : 3,
+        );
+        expect(finalEntries.at(-1)?.wake).toMatchObject({
+          eventId: events[2]?.event_id,
+          message: {
+            linqMessage: {
+              parts: [{ type: "text", value: "Corrected wording 3" }],
+            },
+          },
+        });
       } finally {
         releaseFirstBlocker.resolve();
         releaseRetryBlocker.resolve();
@@ -877,6 +1250,246 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
         }
         await disconnectClients([prisma]);
+      }
+    });
+
+    it("queues one channel welcome and consumes one slot across concurrent duplicate connections", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const callers = Array.from({ length: 3 }, () => createPrismaClient({ databaseUrl, poolMax: 1 }));
+      const fixture = await createActivationContactFixture(observer, 0);
+      const allPrepared = createDeferred();
+      const preparationTimeout = setTimeout(() => allPrepared.resolve(), 5_000);
+      let prepared = 0;
+      channelWelcomeTestHooks.unwrap.mockImplementation(async ({ domain }: { domain: string }) => {
+        if (domain === "ingress") {
+          prepared += 1;
+          if (prepared === callers.length) allPrepared.resolve();
+          await allPrepared.promise;
+          expect(prepared).toBe(callers.length);
+        }
+        return { rootKey: new Uint8Array(32) };
+      });
+      channelWelcomeTestHooks.signal.mockClear();
+      channelWelcomeTestHooks.signal.mockImplementation(async (input: { mailboxItemId: string }) => {
+        // A separate connection can only see the event after its transaction commits.
+        expect(await observer.hostedMailboxItem.count({ where: { id: input.mailboxItemId } })).toBe(1);
+      });
+      try {
+        await observer.hostedLinqLine.update({
+          data: { maxNewConversationsPerDay: 10 },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        });
+        await Promise.all(callers.map((prisma) => ensureHostedMemberChannelWelcome({
+          channel: "linq", memberId: fixture.memberId, prisma,
+        })));
+        await ensureHostedMemberChannelWelcome({ channel: "linq", memberId: fixture.memberId, prisma: observer });
+        expect(await observer.hostedMailboxItem.findMany({
+          select: { kind: true }, where: { userId: fixture.memberId },
+        })).toEqual([{ kind: "assistant.notification.requested" }]);
+        expect(await observer.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        })).toEqual({ proactiveConversationCount: 1 });
+        expect(channelWelcomeTestHooks.signal).toHaveBeenCalledTimes(1);
+        expect((await readHostedMemberRoutingState({ memberId: fixture.memberId, prisma: observer }))?.linqRecipientPhone)
+          .toBe(fixture.linePhone);
+      } finally {
+        clearTimeout(preparationTimeout);
+        allPrepared.resolve();
+        channelWelcomeTestHooks.unwrap.mockImplementation(async () => ({ rootKey: new Uint8Array(32) }));
+        channelWelcomeTestHooks.signal.mockReset();
+        await cleanupActivationContactFixture(observer, fixture);
+        await disconnectClients([observer, ...callers]);
+      }
+    });
+
+    it("queues independent phone and email welcomes when both channels connect concurrently", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const email = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const phone = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await createActivationContactFixture(observer, 0);
+      try {
+        await observer.$transaction((tx) => upsertHostedMemberEmailAuthorization({
+          memberId: fixture.memberId, prisma: tx,
+          verifiedEmail: { address: `${fixture.memberId}@example.test`, verifiedAt: new Date() },
+        }), transactionOptions);
+        const connect = () => Promise.all([
+          ensureHostedMemberChannelWelcome({ channel: "email", memberId: fixture.memberId, prisma: email }),
+          ensureHostedMemberChannelWelcome({ channel: "linq", memberId: fixture.memberId, prisma: phone }),
+        ]);
+        await connect();
+        await connect();
+        const events = await observer.hostedMailboxItem.findMany({
+          select: { dedupeKey: true, kind: true }, where: { userId: fixture.memberId },
+        });
+        expect(events).toHaveLength(2);
+        expect(events.every((event) => event.kind === "assistant.notification.requested")).toBe(true);
+        expect(events.filter((event) => event.dedupeKey.includes(":email:"))).toHaveLength(1);
+        expect(events.filter((event) => event.dedupeKey.includes(":linq:"))).toHaveLength(1);
+        expect(await observer.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        })).toEqual({ proactiveConversationCount: 1 });
+      } finally {
+        await cleanupActivationContactFixture(observer, fixture);
+        await disconnectClients([observer, email, phone]);
+      }
+    });
+
+    it("retains the healthy assigned contact line when another line has spare welcome quota", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const assigned = await createActivationContactFixture(prisma, 1);
+      const available = await createActivationContactFixture(prisma, 0);
+      try {
+        await prisma.$transaction((tx) => upsertHostedMemberHomeLinqRecipientPhoneTx({
+          clearPending: true, homeLineAssignedAt: new Date(),
+          memberId: assigned.memberId, prisma: tx, recipientPhone: assigned.linePhone,
+        }), transactionOptions);
+        const result = await prisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, assigned.memberId);
+          return resolveHostedMemberActivationLinqRoute({
+            member: assigned.member, prisma: tx,
+          });
+        }, transactionOptions);
+        expect(result.welcomeRoute).toBeNull();
+        expect((await readHostedMemberRoutingState({ memberId: assigned.memberId, prisma }))?.linqRecipientPhone)
+          .toBe(assigned.linePhone);
+        expect(await prisma.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true },
+          where: { phoneNumberLookupKey: available.lineKey },
+        })).toEqual({ proactiveConversationCount: 0 });
+        const firstConnection = await prisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, available.memberId);
+          return resolveHostedMemberActivationLinqRoute({ member: available.member, prisma: tx });
+        }, transactionOptions);
+        expect(firstConnection.welcomeRoute).toMatchObject({
+          delivery: { source: { fromPhoneNumber: available.linePhone } },
+        });
+      } finally {
+        await cleanupActivationContactFixture(prisma, assigned);
+        await cleanupActivationContactFixture(prisma, available);
+        await prisma.$disconnect();
+      }
+    });
+
+    it.each([0, 1])("persists the signup contact line with %s of 1 welcome slots consumed", async (consumed) => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await createActivationContactFixture(prisma, consumed);
+      try {
+        const result = await prisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, fixture.memberId);
+          return resolveHostedMemberActivationLinqRoute({
+            allowNoAssignableLine: true,
+            member: fixture.member,
+            prisma: tx,
+          });
+        }, transactionOptions);
+
+        const routing = await readHostedMemberRoutingState({ memberId: fixture.memberId, prisma });
+        expect(routing?.linqRecipientPhone).toBe(fixture.linePhone);
+        expect(routing?.linqHomeLineAssignedAt).toBeInstanceOf(Date);
+        expect(routing?.linqChatId).toBeNull();
+        if (consumed === 0) {
+          expect(result.welcomeRoute).toMatchObject({
+            channel: "linq",
+            delivery: {
+              kind: "participant",
+              source: { kind: "linq", fromPhoneNumber: fixture.linePhone },
+              target: fixture.memberPhone,
+            },
+          });
+        } else {
+          expect(result.welcomeRoute).toBeNull();
+        }
+        expect(await prisma.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true, totalOutboundCount: true },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        })).toEqual({ proactiveConversationCount: 1, totalOutboundCount: 0 });
+      } finally {
+        await cleanupActivationContactFixture(prisma, fixture);
+        await prisma.$disconnect();
+      }
+    });
+
+    it("keeps the contact line when a concurrent sender wins the last welcome slot", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const sender = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const signup = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await createActivationContactFixture(observer, 0);
+      const senderClaimed = createDeferred<boolean>();
+      const signupPid = createDeferred<number>();
+      const releaseSender = createDeferred();
+      let senderTransaction: Promise<boolean> | null = null;
+      let signupTransaction: Promise<Awaited<ReturnType<typeof resolveHostedMemberActivationLinqRoute>>> | null = null;
+      try {
+        senderTransaction = sender.$transaction(async (tx) => {
+          const claimed = await claimHostedLinqProactiveConversationCapacityTx({
+            dayUtc: startOfUtcDay(new Date()),
+            limit: 1,
+            phoneNumberLookupKey: fixture.lineKey,
+            prisma: tx,
+          });
+          senderClaimed.resolve(claimed);
+          await releaseSender.promise;
+          return claimed;
+        }, transactionOptions);
+        expect(await Promise.race([senderClaimed.promise, senderTransaction])).toBe(true);
+        signupTransaction = signup.$transaction(async (tx) => {
+          signupPid.resolve(await readBackendPid(tx));
+          await lockHostedMemberRow(tx, fixture.memberId);
+          return resolveHostedMemberActivationLinqRoute({
+            allowNoAssignableLine: true,
+            member: fixture.member,
+            prisma: tx,
+          });
+        }, transactionOptions);
+        await waitForBlockedBackend({ observer, pid: await signupPid.promise });
+        releaseSender.resolve();
+        await expect(senderTransaction).resolves.toBe(true);
+        await expect(signupTransaction).resolves.toEqual({ welcomeRoute: null });
+        expect((await readHostedMemberRoutingState({ memberId: fixture.memberId, prisma: observer }))?.linqRecipientPhone)
+          .toBe(fixture.linePhone);
+        expect(await observer.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true, totalOutboundCount: true },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        })).toEqual({ proactiveConversationCount: 1, totalOutboundCount: 0 });
+      } finally {
+        releaseSender.resolve();
+        await Promise.allSettled([senderTransaction, signupTransaction]);
+        await cleanupActivationContactFixture(observer, fixture);
+        await disconnectClients([observer, sender, signup]);
+      }
+    });
+
+    it("rolls back the contact assignment and welcome quota together when its transaction fails", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await createActivationContactFixture(prisma, 0);
+      try {
+        await expect(prisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, fixture.memberId);
+          const result = await resolveHostedMemberActivationLinqRoute({
+            member: fixture.member,
+            prisma: tx,
+          });
+          expect(result.welcomeRoute).not.toBeNull();
+          throw new Error("synthetic mailbox append failure");
+        }, transactionOptions)).rejects.toThrow("synthetic mailbox append failure");
+        expect(await readHostedMemberRoutingState({ memberId: fixture.memberId, prisma })).toBeNull();
+        expect(await prisma.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        })).toEqual({ proactiveConversationCount: 0 });
+
+        const retry = await prisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, fixture.memberId);
+          return resolveHostedMemberActivationLinqRoute({ member: fixture.member, prisma: tx });
+        }, transactionOptions);
+        expect(retry.welcomeRoute).not.toBeNull();
+        expect((await readHostedMemberRoutingState({ memberId: fixture.memberId, prisma }))?.linqRecipientPhone)
+          .toBe(fixture.linePhone);
+      } finally {
+        await cleanupActivationContactFixture(prisma, fixture);
+        await prisma.$disconnect();
       }
     });
 
@@ -2042,8 +2655,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
         const telegramRouteUpserted = createDeferred();
         const releaseTelegramUpsert = createDeferred();
-        const linqRouteUpsertReached = createDeferred();
-        const releaseLinqUpsert = createDeferred();
+        const linqRouteLockAcquired = createDeferred();
+        const releaseLinqRouteLock = createDeferred();
         const activationUpdated = createDeferred();
         const releaseActivation = createDeferred();
         const telegramPid = createDeferred<number>();
@@ -2064,14 +2677,18 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         const linqClient = linqBase.$extends({
           query: {
-            hostedMemberRouting: {
-              async upsert({ args, query }) {
-                if (startOrder === "linq-first") {
-                  linqRouteUpsertReached.resolve();
-                  await releaseLinqUpsert.promise;
-                }
-                return query(args);
-              },
+            async $queryRaw({ args, query }) {
+              const result = await query(args);
+              // An unchanged home route skips its upsert. Hold the actual
+              // member-row lock before the planner reaches mailbox writes.
+              if (
+                startOrder === "linq-first"
+                && args.sql.includes("FOR NO KEY UPDATE")
+              ) {
+                linqRouteLockAcquired.resolve();
+                await releaseLinqRouteLock.promise;
+              }
+              return result;
             },
           },
         });
@@ -2124,7 +2741,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           const runLinq = () => {
             linqTransaction = linqClient.$transaction(async (tx) => {
               // Keep production planners on their ordinary transaction type;
-              // the extension changes only this test's routing-upsert timing.
+              // the extension changes only this test's route-lock timing.
               const prisma = tx as Prisma.TransactionClient;
               linqPid.resolve(await readBackendPid(prisma));
               const plan = await planHostedOnboardingLinqWebhook({
@@ -2167,7 +2784,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               });
               releaseActivation.resolve();
               await activationTransaction;
-              await linqRouteUpsertReached.promise;
+              await linqRouteLockAcquired.promise;
             }
           }
 
@@ -2185,14 +2802,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           } else {
             if (memberState === "active") {
               runLinq();
-              await linqRouteUpsertReached.promise;
+              await linqRouteLockAcquired.promise;
             }
             runTelegram();
             await waitForBlockedBackend({
               observer,
               pid: await telegramPid.promise,
             });
-            releaseLinqUpsert.resolve();
+            releaseLinqRouteLock.resolve();
           }
 
           await expect(
@@ -2233,7 +2850,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
         } finally {
           releaseTelegramUpsert.resolve();
-          releaseLinqUpsert.resolve();
+          releaseLinqRouteLock.resolve();
           releaseActivation.resolve();
           await Promise.allSettled([
             activationTransaction,
@@ -2259,6 +2876,45 @@ describe.skipIf(!runPostgresConcurrencyProof)(
     );
   },
 );
+
+async function createActivationContactFixture(prisma: PrismaClient, consumed: number) {
+  const memberId = `member_contact_assignment_${randomUUID()}`;
+  const digits = String(Number.parseInt(randomUUID().replaceAll("-", "").slice(0, 7), 16) % 10_000_000).padStart(7, "0");
+  const memberPhone = `+1555${digits}`;
+  const linePhone = `+1556${digits}`;
+  const lineKey = requireString(createHostedPhoneLookupKey(linePhone));
+  await prisma.$transaction(async (tx) => {
+    await tx.hostedMember.create({ data: { id: memberId, billingStatus: HostedBillingStatus.active } });
+    const identityPrivate = await buildHostedMemberIdentityPrivateColumns({
+      memberId, phoneNumber: memberPhone, prisma: tx, privyUserId: null,
+      signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+    });
+    await tx.hostedMemberIdentity.create({ data: {
+      ...identityPrivate, memberId, maskedPhoneNumberHint: "*** test",
+      phoneLookupKey: requireString(createHostedPhoneLookupKey(memberPhone)),
+      phoneNumberVerifiedAt: new Date(),
+    } });
+    await tx.hostedLinqLine.create({ data: {
+      phoneNumberLookupKey: lineKey, phoneNumberHint: "*** test",
+      phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(linePhone),
+      configuredAt: new Date(), egressPolicy: "enabled", healthStatus: "healthy",
+      maxNewConversationsPerDay: 1, proactiveConversationCount: consumed,
+      proactiveConversationDayUtc: startOfUtcDay(new Date()), source: "test",
+    } });
+  }, transactionOptions);
+  const member = await readHostedMemberSnapshot({ memberId, prisma });
+  if (!member) throw new Error("Expected a synthetic signup member.");
+  return { lineKey, linePhone, member, memberId, memberPhone };
+}
+
+async function cleanupActivationContactFixture(
+  prisma: PrismaClient,
+  fixture: { lineKey: string; memberId: string },
+) {
+  await prisma.hostedMember.deleteMany({ where: { id: fixture.memberId } });
+  await prisma.hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: fixture.lineKey } });
+}
 
 async function disconnectClients(clients: PrismaClient[]): Promise<void> {
   await Promise.all(clients.map((client) => client.$disconnect()));

@@ -2,7 +2,9 @@ import { HostedBillingStatus, type HostedMember } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  ensureHostedMemberPhoneWelcome: vi.fn(),
   getHostedAppSession: vi.fn(),
+  prisma: { hostedMember: { findUnique: vi.fn() } },
   readActiveHostedMemberAccess: vi.fn(),
   readHostedMemberOwnsSubscription: vi.fn().mockResolvedValue(false),
   redirect: vi.fn((path: string) => {
@@ -11,6 +13,18 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => mocks.prisma }));
+vi.mock("@/src/lib/hosted-onboarding/phone-welcome", () => ({
+  ensureHostedMemberPhoneWelcome: mocks.ensureHostedMemberPhoneWelcome,
+}));
+vi.mock("@/src/lib/hosted-onboarding/linq-line-phone-resolver", () => ({
+  readHostedLinqLinePhoneNumberByLookupKey: vi.fn().mockResolvedValue("+15550000002"),
+}));
+
+beforeEach(() => {
+  mocks.ensureHostedMemberPhoneWelcome.mockReset().mockResolvedValue(undefined);
+});
 
 vi.mock("next/navigation", () => ({
   redirect: mocks.redirect,
@@ -44,6 +58,50 @@ describe("hosted page auth", () => {
       authenticatedMember: null,
       session: null,
     });
+    expect(mocks.ensureHostedMemberPhoneWelcome).not.toHaveBeenCalled();
+  });
+
+  it.each(["public", "dashboard"])("awaits phone recovery before %s page projections", async (surface) => {
+    mocks.getHostedAppSession.mockResolvedValue({ member: createHostedMember(), sessionId: "synthetic-session" });
+    let finishRecovery = () => {};
+    const pendingRecovery = new Promise<void>((resolve) => { finishRecovery = resolve; });
+    mocks.ensureHostedMemberPhoneWelcome.mockReturnValue(pendingRecovery);
+    const auth = await import("@/src/lib/hosted-onboarding/page-auth");
+    let pageReady = false;
+    const pendingPage = (surface === "public" ? auth.getHostedPageAuthSnapshot() : auth.getHostedDashboardPageAuthSnapshot())
+      .then((result) => { pageReady = true; return result; });
+    await vi.waitFor(() => expect(mocks.ensureHostedMemberPhoneWelcome).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_123", prisma: mocks.prisma,
+    }));
+    expect(pageReady).toBe(false);
+    finishRecovery();
+    await expect(pendingPage).resolves.toMatchObject({ authenticated: true });
+  });
+
+  it("reads the recovered line in the same authenticated contact response", async () => {
+    const contact = {
+      identity: { phoneLookupKey: "synthetic-phone", phoneNumberEncrypted: "sealed-phone", phoneNumberVerifiedAt: new Date() },
+      emailAuthorization: null,
+      routing: { linqRecipientPhoneLookupKey: null as string | null, replyAliasLookupKey: null, telegramUserLookupKey: null, telegramUserIdEncrypted: null },
+    };
+    mocks.getHostedAppSession.mockResolvedValue({ member: createHostedMember(), sessionId: "synthetic-session" });
+    mocks.ensureHostedMemberPhoneWelcome.mockImplementation(async () => {
+      contact.routing.linqRecipientPhoneLookupKey = "synthetic-murph-line";
+    });
+    mocks.prisma.hostedMember.findUnique.mockImplementation(async () => contact);
+    const { readHostedMurphContactContext } = await import("@/src/lib/hosted-onboarding/hosted-contact-context");
+    await expect(readHostedMurphContactContext()).resolves.toMatchObject({
+      initialContactChannels: { text: true }, murphPhoneNumber: "+15550000002",
+    });
+    expect(mocks.ensureHostedMemberPhoneWelcome.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.prisma.hostedMember.findUnique.mock.invocationCallOrder[0]!);
+  });
+
+  it("retains valid authentication when optional phone recovery fails", async () => {
+    mocks.getHostedAppSession.mockResolvedValue({ member: createHostedMember(), sessionId: "synthetic-session" });
+    mocks.ensureHostedMemberPhoneWelcome.mockRejectedValue(new Error("synthetic recovery failure"));
+    const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+    await expect(getHostedPageAuthSnapshot()).resolves.toMatchObject({ authenticated: true });
   });
 
   it("returns the member-backed snapshot when the hosted app session verifies", async () => {
@@ -197,6 +255,53 @@ describe("hosted sidebar auth", () => {
     const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
 
     await expect(getHostedSidebarAuthSnapshot()).rejects.toBe(error);
+  });
+});
+
+describe("hosted public layout auth", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mocks.getHostedAppSession.mockResolvedValue(null);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+  });
+
+  it("returns ready anonymous auth when the session read completes without a session", async () => {
+    const { getHostedPublicLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPublicLayoutAuthSnapshot()).resolves.toEqual({
+      sidebarAuth: {
+        authenticated: false,
+        label: null,
+      },
+      status: "ready",
+    });
+  });
+
+  it("preserves a session-store outage as unavailable instead of anonymous", async () => {
+    mocks.getHostedAppSession.mockRejectedValue(Object.assign(
+      new Error("Connection refused while opening a database connection."),
+      {
+        code: "P1001",
+        name: "PrismaClientKnownRequestError",
+      },
+    ));
+    const { getHostedPublicLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPublicLayoutAuthSnapshot()).resolves.toEqual({
+      status: "unavailable",
+    });
+  });
+
+  it("rethrows unexpected public layout auth failures", async () => {
+    const error = new Error("session store unavailable");
+    mocks.getHostedAppSession.mockRejectedValue(error);
+    const { getHostedPublicLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPublicLayoutAuthSnapshot()).rejects.toBe(error);
   });
 });
 
@@ -431,6 +536,8 @@ describe("hosted dashboard page auth", () => {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    groupJournalCaptureConsentRequestedAt: null,
+    groupJournalCaptureEnabled: null,
     assistantPersona: null,
     assistantPersonaCausalSeq: null,
     assistantDetail: null,
@@ -451,6 +558,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     initialOnboardingCompletedAt: null,
     billingStatus: HostedBillingStatus.active,
     createdAt: new Date("2025-03-27T08:00:00.000Z"),
+    groupPrivateConversionTrackedAt: null,
     id: "member_123",
     pendingActivationTimeZone: null,
     signupNotificationContextEncrypted: null,

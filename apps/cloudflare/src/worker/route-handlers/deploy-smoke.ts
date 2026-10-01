@@ -1,8 +1,14 @@
+import { readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment } from "../../hosted-runner-release.ts";
 import {
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_KIND,
+  HOSTED_TEMPORAL_WORKER_BINDING_CONTRACT_REVISION,
+  type HostedTemporalWorkerBindingAdmission,
+} from "@murphai/hosted-execution/contracts";
 
 import {
   json,
@@ -36,12 +42,41 @@ import {
 import {
   readWorkerVersionId,
 } from "../public-routes.ts";
+import {
+  HOSTED_RUNNER_REGION,
+  HOSTED_STANDBY_READY_TIMEOUT_MS,
+  createHostedRunnerSlotName,
+  readHostedStandbyMode,
+  readHostedStandbyReleaseId,
+  readHostedStandbyTarget,
+  resolveHostedStandbyCoordinatorName,
+  requireHostedRunnerSlotLifecycle,
+} from "../../standby-runner-contract.ts";
 
 const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_BYTES = 160 * 1024 * 1024;
 const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_KEY_PREFIX =
   "deploy-smoke/direct-r2-presigned-put";
+const TEMPORAL_WORKER_BINDING_ADMISSION_BODY_LIMIT_BYTES = 0;
 
 export const deploySmokeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
+  {
+    authorization: "web-callback-signature",
+    handle: handleTemporalWorkerBindingAdmissionRoute,
+    match: matchExactPath("/internal/temporal-worker/binding-admission"),
+    methods: ["GET"],
+    name: "temporal-worker-binding-admission",
+    signatureBodyLimitBytes: TEMPORAL_WORKER_BINDING_ADMISSION_BODY_LIMIT_BYTES,
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorization: "web-callback-signature",
+    handle: (context) => handleDeployContainerSmokeRoute(context, true),
+    match: matchExactPath("/internal/deploy/artifact-smoke"),
+    methods: ["POST"],
+    name: "deploy-artifact-smoke",
+    signatureBodyLimitBytes: DEPLOY_CONTAINER_SMOKE_BODY_LIMIT_BYTES,
+    wrongMethodResponse: "method-not-allowed",
+  },
   {
     authorization: "web-callback-signature",
     async handle(context) {
@@ -55,8 +90,25 @@ export const deploySmokeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] 
   },
 ];
 
+export function handleTemporalWorkerBindingAdmissionRoute(
+  context: WorkerRouteContext,
+): Response {
+  const admission = {
+    bindingContractRevision: HOSTED_TEMPORAL_WORKER_BINDING_CONTRACT_REVISION,
+    environment: "production",
+    kind: HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_KIND,
+    owner: "cloudflare",
+    signingKeyId: context.environment.webCallbackSigning.keyId,
+  } satisfies HostedTemporalWorkerBindingAdmission;
+  const response = json(admission);
+  response.headers.set("cache-control", "no-store");
+  response.headers.set("pragma", "no-cache");
+  return response;
+}
+
 export async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
+  artifactOnly = false,
 ): Promise<Response> {
   const directR2PresignedPut = context.url.searchParams.get("directR2PresignedPut") === "1";
   let liveModelTurnModel: string | null;
@@ -77,6 +129,15 @@ export async function handleDeployContainerSmokeRoute(
       ok: false,
     }, 400);
   }
+  // The initial smoke proves inventory before running the separate live-model
+  // phase. A later foreground claim must not invalidate that model-only probe.
+  const checkServing = !artifactOnly && liveModelTurnModel === null;
+  const standbyInventory = checkServing
+    ? await readDeployStandbyInventory(scopeHostedRunnerReleaseEnvironment(context.env, "candidate"))
+    : null;
+  if (standbyInventory && !standbyInventory.ready) {
+    return json({ ok: false, error: "Deploy standby inventory is not ready.", standbyInventory }, 503);
+  }
   const container = context.env.RUNNER_CONTAINER_SMOKE
     .getByName(resolveDeployContainerSmokeObjectName(context.env, attempt));
   const directR2Smoke = directR2PresignedPut
@@ -86,6 +147,11 @@ export async function handleDeployContainerSmokeRoute(
   let primaryError: unknown = null;
 
   try {
+    // Inventory records can predate native image replacement. Keep the fresh
+    // serving-target proof independent of the coordinator's cached ready count.
+    if (checkServing) {
+      await proveDeployRunnerTarget(context.env);
+    }
     result = await container.smokeHealth({
       ...(directR2Smoke ? { directR2PresignedPut: directR2Smoke.containerInput } : {}),
       ...(liveModelTurnModel ? { liveModelTurn: { model: liveModelTurnModel } } : {}),
@@ -143,8 +209,64 @@ export async function handleDeployContainerSmokeRoute(
   return json({
     ok: result.ok === true,
     runnerContainer: result,
+    ...(standbyInventory ? { standbyInventory } : {}),
     service: "cloudflare-hosted-runner",
   });
+}
+
+/** Prove the actual serving target before promotion, independently of warm inventory. */
+async function proveDeployRunnerTarget(env: WorkerEnvironmentSource): Promise<void> {
+  const deployment = readHostedRunnerDeployment(env);
+  if (!deployment) return;
+  const release = deployment.candidate ?? deployment.active;
+  const namespace = release.bank === "next" ? env.NEXT_RUNNER_CONTAINER : env.RUNNER_CONTAINER;
+  if (!namespace) throw new Error("Deploy runner target is unavailable.");
+  const slotName = createHostedRunnerSlotName(release.id);
+  const slot = requireHostedRunnerSlotLifecycle(namespace.getByName(slotName));
+  try {
+    const proof = await slot.prepareStandbySlot({
+      releaseId: release.id,
+      region: HOSTED_RUNNER_REGION,
+      slotName,
+      timeoutMs: HOSTED_STANDBY_READY_TIMEOUT_MS,
+    });
+    if (proof.runnerImage?.bundleFingerprint !== release.bundleFingerprint
+      || proof.runnerImage?.sourceFingerprint !== release.sourceFingerprint) {
+      throw new Error("Deploy runner target image proof does not match the candidate.");
+    }
+  } finally {
+    await slot.retireStandbySlot({});
+  }
+}
+
+async function readDeployStandbyInventory(env: WorkerEnvironmentSource) {
+  if (readHostedStandbyMode(env) === "off") return null;
+  const releaseId = readHostedStandbyReleaseId(env);
+  const namespace = env.STANDBY_COORDINATOR;
+  if (!releaseId || !namespace) {
+    throw new Error("Deploy standby inventory requires current release coordination.");
+  }
+  const coordinator = namespace.getByName(resolveHostedStandbyCoordinatorName({
+    releaseId, region: HOSTED_RUNNER_REGION,
+  }));
+  if (!coordinator.readStandbyCoordinatorState) {
+    throw new Error("Deploy standby inventory inspection is unavailable.");
+  }
+  // Reuse the same bounded fill owner as the scheduled coordinator maintenance.
+  // This never claims a slot or invokes a member's runtime.
+  await coordinator.ensureReadyStandby({ releaseId, region: HOSTED_RUNNER_REGION });
+  const state = await coordinator.readStandbyCoordinatorState();
+  const target = readHostedStandbyTarget(env);
+  const readyCount = new Set(state.readySlotNames).size;
+  const provisioningCount = state.provisioningSlotNames.length;
+  const releaseMatches = state.releaseId === releaseId && state.region === HOSTED_RUNNER_REGION;
+  return {
+    ready: releaseMatches && readyCount === target && provisioningCount === 0,
+    readyCount,
+    provisioningCount,
+    target,
+    releaseMatches,
+  };
 }
 
 export async function createDeployContainerDirectR2PresignedPutSmoke(

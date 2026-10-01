@@ -189,6 +189,21 @@ describe("hosted runtime assistant configuration tool", () => {
     });
   });
 
+  it("returns an unavailable result when GPT-6 requires OpenAI", async () => {
+    mocks.updateConfiguration.mockRejectedValue(hostedOnboardingError({
+      code: "ASSISTANT_MODEL_REQUIRES_OPENAI",
+      httpStatus: 400,
+      message: "Choose OpenAI to use GPT-6 Sol or Luna.",
+    }));
+    await expect(handleHostedRuntimeAssistantConfigurationTool({
+      memberId: "member_123",
+      request: { action: "update", assistantInputId: `ain_${"c".repeat(32)}`, model: "gpt-6-luna", provider: "venice" },
+    })).resolves.toMatchObject({
+      action: "update",
+      result: { status: "unavailable", requiredPlan: null },
+    });
+  });
+
   it("returns a gate-aware unavailable provider result", async () => {
     mocks.updateConfiguration.mockRejectedValue(hostedOnboardingError({
       code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
@@ -214,9 +229,12 @@ describe("hosted runtime assistant configuration tool", () => {
     });
   });
 
-  it("returns an Edge upgrade requirement without changing the saved target", async () => {
+  it.each([
+    ["gpt-5.6-sol", "ASSISTANT_MODEL_SOL_REQUIRES_EDGE"],
+    ["gpt-6-astra", "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE"],
+  ] as const)("returns an Edge upgrade requirement for %s without changing the saved target", async (model, code) => {
     mocks.updateConfiguration.mockRejectedValue(hostedOnboardingError({
-      code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
+      code,
       httpStatus: 403,
       message: "GPT-5.6 Sol requires an active paid Edge plan.",
     }));
@@ -226,7 +244,7 @@ describe("hosted runtime assistant configuration tool", () => {
       request: {
         action: "update",
         assistantInputId: `ain_${"f".repeat(32)}`,
-        model: "gpt-5.6-sol",
+        model,
         reasoningEffort: "low",
       },
     })).resolves.toEqual({

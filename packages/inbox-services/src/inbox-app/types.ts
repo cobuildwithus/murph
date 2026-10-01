@@ -38,6 +38,7 @@ import type {
   InboxPromoteExperimentNoteResult,
   InboxPromoteJournalResult,
   InboxPromoteMealResult,
+  InboxPreservedDocument,
   InboxPreserveDocumentAttachmentsResult,
   InboxPromotionEntry,
   InboxRequeueResult,
@@ -369,6 +370,43 @@ export interface CoreRuntimeModule {
       id: string
     }
   }>
+  listInboxDocumentDefaultPromotionCorrelations?(input: {
+    vaultRoot: string
+  }): Promise<Array<{
+    attachmentId: string
+    captureId: string
+    documentId: string
+    eventId: string
+  }>>
+  listLiveExactDocumentImportEvidence?(input: {
+    sources: ReadonlyArray<{
+      byteLength: number
+      sha256: string
+    }>
+    vaultRoot: string
+  }): Promise<Array<{
+    byteLength: number
+    sha256: string
+    evidence: Array<{
+      defaultPromotions: Array<{
+        attachmentId: string
+        captureId: string
+        documentId: string
+        eventId: string
+      }>
+      documentId: string
+      manifestPath: string
+      rawRef: string
+    }> | null
+  }>>
+  recordInboxDocumentDefaultPromotion?(input: {
+    attachmentId: string
+    captureId: string
+    documentId: string
+    vaultRoot: string
+  }): Promise<{
+    created: boolean
+  }>
   promoteInboxJournal?(input: {
     vaultRoot: string
     date: string
@@ -587,6 +625,10 @@ export interface PromoteInput extends CommandContext {
   nutrition?: MealNutrition
 }
 
+export interface PreserveDocumentAttachmentInput extends CommandContext {
+  file: string
+}
+
 export interface RepairInboxEnvelopesInput extends CommandContext {
   apply: boolean
   maxFiles?: number
@@ -637,6 +679,9 @@ export interface InboxServices {
   preserveDocumentAttachments(
     input: PromoteInput,
   ): Promise<InboxPreserveDocumentAttachmentsResult>
+  preserveDocumentAttachment(
+    input: PreserveDocumentAttachmentInput,
+  ): Promise<InboxPreservedDocument>
   promoteMeal(input: PromoteInput): Promise<InboxPromoteMealResult>
   promoteDocument(input: PromoteInput): Promise<InboxPromoteDocumentResult>
   promoteJournal(input: PromoteInput): Promise<InboxPromoteJournalResult>

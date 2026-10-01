@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-28",
+  "order": 100,
+  "item": {
+    "id": "fast-follow-ups-keep-the-right-reply",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Fast follow-ups keep the right reply",
+    "summary": "If you send a quick acknowledgement while Murph is still answering, Murph can keep the useful earlier answer without adding another reply.",
+    "details": "Attachments that finish for an older message are also kept off the newer reply.",
+    "relevanceTags": ["assistant", "messages", "reliability"],
+    "sourcePullRequests": [2476]
+  }
+}

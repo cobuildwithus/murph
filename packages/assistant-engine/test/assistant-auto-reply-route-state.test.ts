@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {
@@ -51,6 +51,72 @@ afterEach(async () => {
 })
 
 describe('assistant auto-reply exact route state', () => {
+  it('prepares only route and receipt directories while preserving anchored claims before migration', async () => {
+    const vault = await createTempVault('private-directories')
+    const paths = resolveAssistantStatePaths(vault)
+    const route = emailRoute()
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({ kind: 'blocked', reason: 'migration-incomplete' })
+    expect((await readdir(paths.assistantStateRoot)).sort()).toEqual(['auto-reply', 'receipts'])
+
+    const receipt = await createRunningReceipt({ turnId: 'turn-private-directories', vault })
+    const routePath = resolveAssistantAutoReplyRouteStatePath(paths, route.digest)
+    const routesDirectory = path.dirname(routePath)
+    await chmod(routesDirectory, 0o755)
+    await chmod(paths.turnsDirectory, 0o755)
+    await claimAssistantAutoReplyRouteContext({
+      anchored: true,
+      order: order('intent-private-directories', BASE_TIME),
+      routeDigest: route.digest,
+      turnId: receipt.turnId,
+      vault,
+    })
+    expect((await stat(routesDirectory)).mode & 0o777).toBe(0o700)
+    expect((await stat(paths.turnsDirectory)).mode & 0o777).toBe(0o700)
+    expect((await stat(routePath)).mode & 0o777).toBe(0o600)
+    expect((await readdir(paths.assistantStateRoot)).sort()).toEqual(['auto-reply', 'journals', 'receipts'])
+  })
+
+  it.each(['routes', 'receipts'] as const)(
+    'rejects symlinked %s before reading or claiming route state',
+    async (directoryKind) => {
+      const vault = await createTempVault('symlink-directory')
+      const paths = resolveAssistantStatePaths(vault)
+      const route = emailRoute()
+      await completeMigration(vault)
+      const receipt = await createRunningReceipt({ turnId: 'turn-symlink-directory', vault })
+      await readAssistantAutoReplyRouteState({ routeDigest: route.digest, vault })
+      const directory = directoryKind === 'routes'
+        ? path.dirname(resolveAssistantAutoReplyRouteStatePath(paths, route.digest))
+        : paths.turnsDirectory
+      const targetDirectory = path.join(vault, 'outside-route-state')
+      await rename(directory, targetDirectory)
+      await chmod(targetDirectory, 0o755)
+      await symlink(targetDirectory, directory)
+      const originalEntries = await readdir(targetDirectory)
+      const originalContents = await Promise.all(originalEntries.map((filename) =>
+        readFile(path.join(targetDirectory, filename), 'utf8'),
+      ))
+
+      await expect(readAssistantAutoReplyRouteState({ routeDigest: route.digest, vault }))
+        .rejects.toThrow('symlinks')
+      await expect(claimAssistantAutoReplyRouteContext({
+        anchored: false,
+        order: order('intent-symlink-directory', BASE_TIME),
+        routeDigest: route.digest,
+        turnId: receipt.turnId,
+        vault,
+      })).rejects.toThrow('symlinks')
+      expect(await readdir(targetDirectory)).toEqual(originalEntries)
+      expect(await Promise.all(originalEntries.map((filename) =>
+        readFile(path.join(targetDirectory, filename), 'utf8'),
+      ))).toEqual(originalContents)
+      expect((await stat(targetDirectory)).mode & 0o777).toBe(0o755)
+    },
+  )
+
   it('centralizes exact route partitions and rejects incomplete legacy wildcard routes', () => {
     const linqInput = requireRoute(resolveAssistantAutoReplyInputExactRoute({
       conversation: createConversation({ source: 'linq' }),

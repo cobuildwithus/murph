@@ -195,11 +195,13 @@ describe('onboarding first personal read', () => {
           created: true,
           effectiveTimeZone: null,
           lookupId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
-          nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
+          occurrenceProjection: {
+            nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
+            status: 'resolved' as const,
+          },
           routeBinding: 'current_conversation',
           schedule: request.schedule,
           status: 'active',
-          timingVerified: true,
           updatedAt: '2026-08-06T21:00:00.000Z',
         }
       },

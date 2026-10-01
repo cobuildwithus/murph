@@ -72,6 +72,14 @@ export function consumeHostedGroupStartHandoff(input: {
   }
 }
 
+export function completeHostedStarterUsageHandoff(redirectPath: string): void {
+  window.location.replace(
+    consumeHostedGroupStartHandoff()
+      ? HOSTED_GROUP_START_PATH
+      : redirectPath,
+  );
+}
+
 export function clearHostedGroupStartHandoff(input: {
   storage?: HostedGroupStartHandoffStorage | null;
 } = {}): void {

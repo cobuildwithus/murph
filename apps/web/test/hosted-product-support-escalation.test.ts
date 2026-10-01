@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH } from "@murphai/hosted-execution/runtime-control";
 
 const prismaMocks = vi.hoisted(() => ({
   count: vi.fn(),
@@ -157,6 +158,42 @@ describe("hosted product support escalation", () => {
     ].join("\n"));
     expect(emailText).not.toContain(feedback.summary);
     expect(emailText).not.toContain(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX);
+  });
+
+  it("accepts and emails a support summary at the expanded boundary", async () => {
+    const issueSummary = "x".repeat(
+      HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH
+      - HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length
+      - 1,
+    );
+    const feedback = makeSupportFeedback({
+      idempotencyKey: "6".repeat(64),
+      issueSummary,
+    });
+    const feedbackId = buildHostedProductFeedbackId({ feedback });
+    const sendEmail = vi.fn().mockResolvedValue({ providerMessageId: null });
+    prismaMocks.createMany.mockResolvedValue({ count: 2 });
+    prismaMocks.findFeedbackRows.mockResolvedValue(makeStoredSupportFeedbackRows({
+      feedback,
+      feedbackId,
+    }));
+    prismaMocks.count.mockResolvedValue(1);
+
+    expect(feedback.summary).toHaveLength(
+      HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+    );
+    await expect(recordHostedProductFeedback({
+      env: EMAIL_ENV,
+      feedback,
+      memberId: MEMBER_ID,
+      now: NOW,
+      sendEmail,
+    })).resolves.toEqual({ feedbackId, recorded: true });
+
+    expect(sendEmail).toHaveBeenCalledOnce();
+    expect(sendEmail.mock.calls[0]?.[0].text).toContain(
+      `Product issue: ${issueSummary}`,
+    );
   });
 
   it("keeps Murph's written issue out of the member-linked row and reads it from anonymous storage for email", async () => {

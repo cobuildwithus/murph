@@ -15,6 +15,7 @@ import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/type
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
 const mocks = vi.hoisted(() => ({
+  legalConsentProps: null as Record<string, unknown> | null,
   starterUsageProps: null as Record<string, unknown> | null,
   messagingSetupProps: null as Record<string, unknown> | null,
   phoneVerificationProps: null as Record<string, unknown> | null,
@@ -39,7 +40,11 @@ vi.mock("@/src/components/hosted-onboarding/join-invite-islands", () => ({
       input.idleLabel,
     );
   },
-  JoinInviteLegalConsentIsland(input: { initialStatus: HostedConsentStatus | null }) {
+  JoinInviteLegalConsentIsland(input: {
+    initialStatus: HostedConsentStatus | null;
+    inviteCode: string;
+  }) {
+    mocks.legalConsentProps = input;
     return createElement(
       "div",
       {
@@ -70,6 +75,7 @@ vi.mock("@/src/components/hosted-onboarding/join-invite-islands", () => ({
 }));
 
 beforeEach(() => {
+  mocks.legalConsentProps = null;
   mocks.starterUsageProps = null;
   mocks.messagingSetupProps = null;
   mocks.phoneVerificationProps = null;
@@ -402,11 +408,7 @@ test("JoinInvitePageView keeps messaging setup before Starter activation when me
   assert.doesNotMatch(markup, /data-starter-usage-island="true"/);
   assert.match(markup, /data-messaging-setup-island="true"/);
   expect(mocks.starterUsageProps).toBeNull();
-  expect(mocks.messagingSetupProps).toMatchObject({
-    authenticated: true,
-    expectedPrivyUserId: "privy-user-a",
-    privySessionMatchesAppSession: true,
-  });
+  expect(mocks.messagingSetupProps).toEqual({});
 });
 
 test("JoinInvitePageView keeps messaging setup before Starter activation when billing is unavailable", () => {
@@ -433,11 +435,7 @@ test("JoinInvitePageView keeps messaging setup before Starter activation when bi
   assert.doesNotMatch(markup, /data-starter-usage-island="true"/);
   assert.match(markup, /data-messaging-setup-island="true"/);
   expect(mocks.starterUsageProps).toBeNull();
-  expect(mocks.messagingSetupProps).toMatchObject({
-    authenticated: true,
-    expectedPrivyUserId: "privy-user-a",
-    privySessionMatchesAppSession: true,
-  });
+  expect(mocks.messagingSetupProps).toEqual({});
 });
 
 test("JoinInvitePageView hides pricing behind the server launch-consent gate", () => {
@@ -466,6 +464,9 @@ test("JoinInvitePageView hides pricing behind the server launch-consent gate", (
   assert.doesNotMatch(markup, /data-checkout-plan=/);
   assert.doesNotMatch(markup, /Get Pulse/);
   assert.doesNotMatch(markup, /Get Edge/);
+  expect(mocks.legalConsentProps).toMatchObject({
+    inviteCode: "invite-code",
+  });
   expect(mocks.statusRefreshProps).toMatchObject({
     legalGateActive: true,
   });
@@ -484,25 +485,13 @@ test("JoinInvitePageView renders messaging setup before checkout pricing", () =>
           },
           stage: "checkout",
         }),
-        telegramAccountForMessagingSetup: {
-          telegramUserId: "telegram-test-user",
-          username: "murph_test",
-        },
       }),
     }),
   );
 
   assert.match(markup, /data-messaging-setup-island="true"/);
   assert.doesNotMatch(markup, /Get Pulse/);
-  expect(mocks.messagingSetupProps).toMatchObject({
-    authenticated: true,
-    expectedPrivyUserId: "privy-user-a",
-    initialTelegramAccount: {
-      telegramUserId: "telegram-test-user",
-      username: "murph_test",
-    },
-    privySessionMatchesAppSession: true,
-  });
+  expect(mocks.messagingSetupProps).toEqual({});
 });
 
 test("JoinInvitePageView renders support mailto action for blocked accounts", () => {
@@ -582,7 +571,6 @@ function createModel(
 
   return {
     awaitingInviteSessionResolution: false,
-    expectedPrivyUserId: "privy-user-a",
     familyBillingRecovery: null,
     inviteCode: "invite-code",
     launchConsent: {
@@ -591,9 +579,7 @@ function createModel(
       status: "not_required",
     },
     preview: false,
-    privySessionMatchesAppSession: true,
     status,
-    telegramAccountForMessagingSetup: null,
     ...overrides,
   };
 }

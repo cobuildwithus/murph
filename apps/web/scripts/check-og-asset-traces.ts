@@ -5,11 +5,12 @@ import { fileURLToPath } from "node:url";
 import { PHASE_PRODUCTION_BUILD } from "next/constants";
 
 import { resolveHostedWebDistDir } from "../next-artifacts";
+import { MURPH_CONTACT_AVATAR_OPTIONS } from "../src/lib/murph-contact-avatars";
 
-// OG and share-card route handlers read these brand assets from disk at
-// render time (app/font-files.ts). If an asset is missing from a route's
-// serverless trace, every non-prerendered render of that route 500s with
-// ENOENT, so a missing trace entry must fail the build
+// OG, share-card, and contact-card route handlers read brand assets from disk
+// at request time through app/runtime-asset-files.ts. If an asset is missing
+// from a route's serverless trace, the route fails with ENOENT, so a missing
+// trace entry must fail the build
 // (outputFileTracingIncludes in next.config.ts owns the tracing).
 //
 // Today this is a backstop rather than the sole guarantee: the current
@@ -28,6 +29,11 @@ const requiredOgAssetSuffixes = [
   "app/fonts/DMSans-400.ttf",
   "app/fonts/DMSans-600.ttf",
 ] as const;
+const requiredContactCardAssetSuffixes = MURPH_CONTACT_AVATAR_OPTIONS.flatMap(
+  (avatar) => avatar.src ? [`public${avatar.src}`] : [],
+);
+const contactCardRouteTraceMarker =
+  "server/app/api/murph-contact-card/route.js.nft.json";
 
 // Routes that render OG/share-card images on demand. Each must have a
 // serverless trace containing every required asset. Substring-matched so the
@@ -93,17 +99,35 @@ for (const { absolutePath, relativePath } of ogTraceFiles) {
   }
 }
 
+const contactCardTraceFile = traceFiles.find((traceFile) =>
+  path.relative(appRoot, traceFile).replace(/\\/gu, "/")
+    .endsWith(contactCardRouteTraceMarker)
+);
+if (!contactCardTraceFile) {
+  throw new Error(
+    `Expected contact-card route trace is missing: ${contactCardRouteTraceMarker}`,
+  );
+}
+const contactCardTraceFiles = readTraceFiles(
+  JSON.parse(readFileSync(contactCardTraceFile, "utf8")) as unknown,
+).map((file) => file.replace(/\\/gu, "/"));
+for (const requiredAsset of requiredContactCardAssetSuffixes) {
+  if (!contactCardTraceFiles.some((file) => file.endsWith(requiredAsset))) {
+    violations.push(`${contactCardRouteTraceMarker} -> missing ${requiredAsset}`);
+  }
+}
+
 if (violations.length > 0) {
   throw new Error([
-    "OG/share-card brand assets are missing from Next build traces.",
-    "Serverless OG routes read these files at render time; a missing trace is a guaranteed ENOENT 500.",
+    "Runtime brand assets are missing from Next build traces.",
+    "Serverless routes read these files at request time; a missing trace is a guaranteed ENOENT failure.",
     "Check outputFileTracingIncludes in apps/web/next.config.ts.",
     ...violations.map((violation) => `- ${violation}`),
   ].join("\n"));
 }
 
 console.log(
-  `Checked ${ogTraceFiles.length} OG/share-card route traces for bundled brand assets.`,
+  `Checked ${ogTraceFiles.length} OG/share-card traces and the contact-card trace for bundled brand assets.`,
 );
 
 function listFiles(root: string): string[] {

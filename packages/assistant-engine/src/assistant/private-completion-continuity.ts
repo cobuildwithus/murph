@@ -13,10 +13,9 @@ import {
 } from './outbox/store.js'
 import { resolveAssistantOutboxIntentPath } from './outbox/intents.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
-import { normalizeNullableString } from './shared.js'
+import { ensureAssistantStateDirectory, normalizeNullableString } from './shared.js'
 import {
   appendTranscriptEntries,
-  ensureAssistantState,
   readAssistantSession,
   readAssistantTranscriptEntries,
   synchronizeAssistantIndexes,
@@ -38,7 +37,7 @@ export async function reconcileAssistantPrivateCompletionContinuityForSession(
   },
 ): Promise<AssistantSession> {
   return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await ensureAssistantStateDirectory(paths.sessionsDirectory)
     let session = await readAssistantSession({
       paths,
       sessionId: input.sessionId,
@@ -182,6 +181,11 @@ async function reconcileAssistantPrivateCompletionIntent(input: {
   if (continuity.sessionId !== input.session.sessionId) {
     return input.session
   }
+
+  await Promise.all([
+    ensureAssistantStateDirectory(input.paths.transcriptsDirectory),
+    ensureAssistantStateDirectory(input.paths.sessionSecretsDirectory),
+  ])
 
   let journalIntent = input.intent
   if (input.intent.privateCompletionContinuity?.status !== 'prepared') {

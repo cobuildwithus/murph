@@ -1,7 +1,7 @@
 ---
 name: strength-training
 description: |
-  Design, explain, adapt, or review evidence-informed strength and resistance training for generally healthy adults. Use for beginner or experienced plans; general strength and function, hypertrophy or physique, maximal strength, power, gym/home/calisthenics, progression, plateaus, competition preparation, and adherence coaching. Fit recommendations to experience, schedule, equipment, symptoms, and concurrent sport. Do not use for diagnosis or rehabilitation, medical clearance, rapid weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.
+  Draft, save, retrieve, or troubleshoot missing saved workout routines. Design, explain, adapt, or review evidence-informed strength and resistance training for generally healthy adults. Use for beginner or experienced plans; general strength and function, hypertrophy or physique, maximal strength, power, gym/home/calisthenics, progression, plateaus, competition preparation, and adherence coaching. Fit recommendations to experience, schedule, equipment, symptoms, and concurrent sport. Do not use for diagnosis or rehabilitation, medical clearance, rapid weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.
 ---
 
 # Strength Training
@@ -54,9 +54,9 @@ Apply only modifiers that change the plan:
 - `references/coaching.md` — adherence friction, habits, reminders, missed sessions, motivation, or reducing dependence on Murph
 - `references/safety.md` — pain, symptoms, health uncertainty, maximal or high-skill work, special populations, competition, or body-composition risk
 - `references/evidence.md` — source-level justification, disputed claims, confidence calibration, or maintenance of defaults
-- `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md` — any private messaging request to start or resume a canonical live workout, update, finish, or correct it, or log or clear one of its sets. Read it again when the member continues one with a short follow-up, or asks to put a workout log in a table, preserve set-by-set notation, or refresh its workout card. On messaging routes, use its native compact-table flow instead of Markdown table syntax.
+- `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md` — any private messaging request to start or resume a canonical live workout, update, finish, or correct it, or log or clear one of its sets. Read it again when the member continues one with a short follow-up, or asks to put a workout log in a table, preserve set-by-set notation, or refresh its workout card. Once an exact live workout owns the exchange, use only this execution owner for set confirmations. On messaging routes, use its native compact-table flow instead of Markdown table syntax.
 
-When presenting a named exercise, unfamiliar variation, or movement walkthrough, read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` and follow its list/show, image-media, progressive-disclosure, and catalog-gap rules. This skill still owns exercise choice, programming, dose, progression, substitutions, and safety. If catalog media is unavailable, give compact form cues rather than inventing an image workflow.
+When selecting or teaching a named exercise, unfamiliar variation, or movement walkthrough, read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` and follow its list/show, image-media, progressive-disclosure, and catalog-gap rules. A setup-only live-workout activation that preserves member-supplied exercise names is not selection or instruction: read `tracked-table` and do not read the catalog reference. This skill still owns exercise choice, programming, dose, progression, substitutions, and safety. If catalog media is unavailable, give compact form cues rather than inventing an image workflow.
 
 The boundaries below apply even when no reference is loaded.
 
@@ -82,11 +82,53 @@ Planning is not activation. Do not silently create a protocol, reminder, check-i
 
 Treat physique photos, body measurements, pain and symptom notes, training logs, and competition health data as private by default. Sharing requires explicit user intent.
 
-### Repeated-set logs and cumulative totals
+### Routine planning, saving, and retrieval
 
-Repeated-set logging is private-only. In a group conversation, do not read or mutate a participant's private routine or experiment; acknowledge briefly and ask them to continue in their private Murph conversation. In a verified private conversation with several small sets spread across a day, read `$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md` to resolve the current routine and read `$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md` when an experiment owns the schedule or records. A terse completion that omits the exercise is not permission to infer it from conversational recency or the previous logged set. Read the full canonical plan records and resolve the unique exercise, owner, and per-set standard for the current member-local date before writing anything. If canonical state does not resolve all three, ask one narrow clarification and do not log a set.
+Give the requested routine in this conversation. A proposed plan, a reusable saved
+routine, and a live workout are different states; a title or response card proves
+none of them was saved. When providing an unsaved plan, call it a proposal or draft
+and say it has not been saved. Never imply it is saved, available elsewhere, or
+ready to start from storage without canonical evidence.
 
-Treat each completion reply to one reminder as one occurrence, not as confirmation of an entire day. When one message explicitly confirms multiple sets, write one occurrence per confirmed set against the same resolved exercise and owner, attach the current per-set quantity to every occurrence, then re-read that owner's canonical progress before replying.
+An explicit request to save or update a routine authorizes that bounded write;
+do not ask for the same permission again. In a private conversation, use
+`vault-cli workout format save` with typed exercises and set templates, or
+`vault-cli workout format import-json` for the full structured payload. Before
+the first save, read `vault-cli workout format save --help` and use its declared
+field values, including exercise modes and activity-type slugs. Preserve exact
+exercise order, planned sets, repetition targets, and any stated loads and units; prose-only template text is
+not a substitute for structured exercise and set fields. Then run
+`vault-cli workout format show <returned-slug> --format json` and check that the
+saved template matches the request before confirming it is saved. A failed or
+ambiguous write or readback means say what remains unconfirmed; inspect the exact
+record before retrying so recovery does not create a duplicate.
+
+For “show my routine” or missing-routine questions, read the exact saved format
+by its known id, slug, or title and present it here. Use a bounded
+`vault-cli workout format list --limit 20 --format json` only when its identity
+is unknown; a limited list is not proof that no other routine exists. If an exact
+read says it is missing, say it is not saved and show any available conversational
+draft as a draft. If the read fails, say the saved state could not be checked.
+Do not turn a missing-content question into a new save without authorization,
+and do not claim that reporting feedback repaired the routine.
+
+Saving or reviewing a routine does not start or complete a workout, log sets,
+or schedule reminders. Use `tracked-table` only when the member requests live
+workout actions. Keep private reads and writes out of group conversations.
+
+### Canonical owner for set confirmations
+
+Choose one canonical write path before loading an execution skill:
+
+- A current workout command or structured card result, or a host-preserved exact `activity_session` reference from the latest explicit workout-context decision, may identify one live-workout candidate; a later unrelated delivery that made no workout-context decision does not erase it. Read `tracked-table` and no repeated-routine execution skill. Before writing, require a current exact canonical read or a matching successful canonical mutation for that same session. A visible transcript marker, conversational recency, and the previously logged set never identify the owner. Terse wording, several sets across a day, or calling the set part of a routine never redirects a verified live workout into a regimen or experiment occurrence. If the exact workout or set coordinate is unavailable, ask one narrow workout clarification and write nothing.
+- Exact regimen or experiment context owns a repeated occurrence; a daily `activity_session` is not required. This includes trusted reminder context whose `supportSeriesId`, exact owner reference, and `plannedOccurrenceAt` identify an occurrence, even when that reminder also carries a `workout_format` template reference. Read the full canonical regimen and, when applicable, exact experiment through `behavior-followthrough` and `experiment-onboarding`. Resolve one exercise, one owner, and one current per-occurrence standard before writing. Conversational recency and the previous logged set are not owner evidence.
+- An exact standalone `workout_format` reminder context, with neither of the owners above, starts a new `activity_session` through `tracked-table`. Read that format and log the stated set against the returned workout id. An older unfinished workout remains untouched and never receives the reminder completion.
+- A reminder with a host-preserved exact `automationId` but no workout reference uses `tracked-table` to inspect its saved definition before asking which workout; use its returned typed `contextReferences` before reminder prose. A recovered regimen or experiment reference returns to that owner above. Only a complete standalone workout definition plus the member's explicit set completion can start one ad-hoc session; the reminder does not prove that any other set was completed. Ambiguous definitions and explicit clears remain no-write paths.
+- If no path resolves exactly, ask one narrow clarification and write nothing.
+
+Set logging is private-only. In a group conversation, do not read or mutate a participant's private workout, routine, or experiment; acknowledge briefly and ask them to continue in their private Murph conversation.
+
+In the repeated-routine branch, treat each completion reply to one reminder as one occurrence, not as confirmation of an entire day. When one message explicitly confirms multiple sets, write one occurrence per confirmed set against the same resolved exercise and owner, attach the current per-set quantity to every occurrence, then re-read that owner's canonical progress before replying.
 
 An actual cumulative repetition total must come from explicit canonical per-session or per-set quantities. Never derive it from elapsed days, the planned rotation, assumed adherence, expected occurrences, or the current per-set standard. Keep the recorded total, theoretical full-compliance total, and any unknown historical quantity visibly separate. When old logs contain completed sets but not repetitions, give the exact known set count and an honest known subtotal or lower bound instead of fabricating precision.
 

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-28",
+  "order": 100,
+  "item": {
+    "id": "choose-a-messaging-channel",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Choose how to message Murph",
+    "summary": "Email sign-ins now keep their email welcome and follow-up while setup asks for Messages or Telegram on Web and iPhone.",
+    "details": "A verified phone or linked Telegram account completes messaging setup; email remains available for account access and verified outreach.",
+    "relevanceTags": ["onboarding", "messaging", "ios", "email"],
+    "sourcePullRequests": [2521, 122]
+  }
+}

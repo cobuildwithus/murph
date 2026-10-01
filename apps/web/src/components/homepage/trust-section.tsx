@@ -1,8 +1,6 @@
-import { MessageVolumeLine } from "@/src/components/homepage/message-volume-line";
-
 const PILLARS = [
   {
-    anchor: "5,972",
+    anchor: "5,972 studies",
     label: "Studies cited",
     body: "Every protocol traces to peer-reviewed evidence.",
   },
@@ -34,30 +32,12 @@ export function TrustSection() {
   return (
     <section className="bg-[#f5f0e8] px-5 py-16 sm:px-10 lg:px-16 lg:py-24">
       <div className="mx-auto max-w-[1080px]">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span
-              aria-hidden="true"
-              className="inline-block h-px w-10 bg-[#2d3436]/40"
-            />
-            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#2d3436]">
-              Why people trust Murph
-            </span>
-          </div>
-          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#736a58]">
-            <MessageVolumeLine />
-          </span>
-        </div>
-
-        <div className="mt-12 grid grid-cols-1 gap-y-10 sm:grid-cols-2 sm:gap-y-12 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-y-10 sm:grid-cols-2 sm:gap-y-12 lg:grid-cols-4">
           {PILLARS.map((p, i) => (
             <div
               key={p.label}
               className={`flex flex-col gap-3 ${COL_BORDER_CLASS[i]}`}
             >
-              <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#736a58]">
-                {p.label}
-              </span>
               <p className="font-serif text-[clamp(1.75rem,2.6vw,2.25rem)] font-semibold leading-[1] tracking-[-0.02em] text-[#2d3436]">
                 {p.anchor}
               </p>

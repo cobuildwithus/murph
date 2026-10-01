@@ -1,6 +1,6 @@
 # Murph New-Member Onboarding
 
-Last verified: 2026-08-11
+Last verified: 2026-09-05
 
 ## Product Decision
 
@@ -65,6 +65,14 @@ privacy, authorization, or provider boundaries.
 
 - Keep the existing `open | completed` onboarding state. Open onboarding does
   not gate ordinary Murph use.
+- While onboarding is open, the cron wake projection omits unclaimed weekly
+  health insight, monthly improvement coach, and weekly research scout work,
+  using the execution owner's exact managed identities. Canonical schedules
+  stay active; running claims, pending deliveries, retries, and uncertain
+  onboarding reads keep their ordinary wakes. After foreground delivery, the
+  existing hosted reconciliation refreshes eligibility even when no seed
+  changed or no current default route is available. It preserves earlier
+  phase-owned work and uses the existing short status retry when interrupted.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
   finite three-day recovery and continuation mechanism. Do not add a second
   automation for unfinished context collection or split open onboarding into
@@ -119,8 +127,12 @@ privacy, authorization, or provider boundaries.
   product truth.
 - Route useful facts to their canonical owner in the same turn they are
   learned. The parent normally saves the smallest truthful fact or raw source
-  before a visible reply. For the dense foundation memo, the accepted current
-  input is the durable raw source and three bounded children own the independent
+  before a visible reply. At the visible minimal-identity answer, one native
+  one-shot child saves supplied name and demographics from the durably accepted
+  input while the root asks the aspiration question. The root saves identity
+  itself if spawning is unavailable. No first-minutes check-in is scheduled.
+  Never claim a child save before canonical readback. For the dense foundation
+  memo, the accepted current input is the durable raw source and three bounded children own the independent
   movement/protocol, supplement, and medical/safety persistence families. Use
   the resume snapshot to avoid repeating known facts.
 - Hosted Codex admits root plus three concurrent V2 children. Every child is a
@@ -130,14 +142,37 @@ privacy, authorization, or provider boundaries.
   A spawn proves work started, not that writes completed. Claim saved or
   enriched details only after canonical readback. Do not add a queue or second
   state owner.
-- The onboarding skill owns conversation policy. The system-prompt overlay
-  routes the open lifecycle into that skill, and the managed automation resumes
-  it when a useful continuation exists.
+- The injected onboarding instructions own the visible opening exchanges
+  through the first aspiration question, including identity persistence. No skill or resume read is needed for those proven
+  exchanges. The onboarding skill owns ambiguous/resumed and later-stage
+  conversation policy; the managed automation resumes it when useful.
+- When an imported opening already acknowledged identity and asked the aspiration
+  question, the next full assistant turn delegates those retained source facts to
+  the same bounded identity-save child, without repeating the question or waiting
+  for the save. Visible later corrections or omissions win. Conversation evidence
+  stays durable if the member stops; canonical memory waits for a full turn. This
+  rule adds no separate background root wake or Web memory writer.
+- For eligible new direct text-only iMessage conversations, the existing Web
+  Luna path may send at most three replies: the welcome, bundled identity
+  question, and a brief acknowledgement with the aspiration question. Each
+  continuation requires the immediately preceding confirmed canonical welcome
+  or identity question and the matching count of accepted opening deliveries.
+  Resolve the member through the existing direct identity/home-chat lookup;
+  a thread-container route excludes this private-chat path. Existing delivery
+  rows enforce the cap under the chat lock; there is no stage counter.
+  A substantive health goal, request, ambiguity, or overall pause hands off to
+  the full assistant, including goals supplied while accepting the welcome.
+  The third reply accepts partial identity or skipping only identity details.
+  Existing encrypted conversation import carries both sides and suppresses
+  duplicate replies. Deploy the runtime catch-up instruction above before
+  enabling the third Web reply.
+  Container/process warmup retains its existing owner; this flow adds no
+  speculative model turn, Web memory writer, or preparation mailbox.
 - The skill uses one package-owned progressive-disclosure asset. Its top-level
   `SKILL.md` is a complete router capped at 12 KiB and directly owns the goal,
   bounded resume check, immediate-need override, relationship promise, exact
-  welcome, and minimal-identity checkpoint. Aspiration/foundation/delegation,
-  persistence/recovery/follow-up, and return/launch/completion each live in one
+  welcome. The injected opening owner holds the minimal-identity checkpoint.
+  Aspiration/foundation/delegation, persistence/recovery/follow-up, and return/launch/completion each live in one
   directly referenced file under the same skill asset. A rule has one owner;
   references do not restate the top-level policy or each other.
 - A fresh greeting or vague first message reads only the compact top-level
@@ -438,14 +473,17 @@ questions below.
 Once the member selects or confirms a desired change likely to depend on
 repeated behavior, read the behavior-followthrough owner and make one bounded
 evidence pass across the foundation, relevant canonical records, connected
-data, and confirmed enrichment. When that pass spans more than one source or
-owner, Murph sends one short natural progress update before the first read,
-names the few member-facing areas being checked and why they matter to the
-chosen next step, and continues immediately. This is required even when each
-individual read is routine, is omitted for one targeted read, and is not
-repeated in the substantive reply. Before selecting a first behavior, ground the
-member's outcome and reason, current routine or baseline, relevant data, prior
-attempts, and the main conditions that help or disrupt follow-through. Ask up
+data, and confirmed enrichment. Multiple sources or owners do not trigger a
+progress update by themselves. Routine onboarding context reads and a
+straightforward first-step question stay silent and answer directly. When the
+evidence pass is genuinely likely to leave the member waiting noticeably
+through slow inspection or several substantive actions, Murph sends one short
+natural update before the first read, names the few member-facing areas being
+checked and why they matter to the chosen next step, and continues immediately.
+The update is not repeated in the substantive reply. Before selecting a first
+behavior, ground the member's outcome and reason, current routine or baseline,
+relevant data, prior attempts, and the main conditions that help or disrupt
+follow-through. Ask up
 to three short questions across separate turns to fill only decision-changing gaps—
 usually two or three when those answers remain unknown, and fewer when context
 already supplies them. Reuse the outcome and reason already learned. Never
@@ -536,9 +574,13 @@ detail progressively at the first just-in-time instructional touchpoint.
   Preferences memory in the member's words. Use Context memory only when the
   factual answer remains useful outside onboarding and has no structured owner.
   Never create an opaque onboarding-step marker in memory.
-- A simple defer remains unresolved. Save timing or contact guidance only when
-  it is durable enough to outlive the current thread, and update or forget that
-  memory when the preference changes.
+- Interpret a defer by its object. Deferring an unanswered checkpoint leaves it
+  unresolved. The always-visible onboarding overlay owns the connection-only
+  exception: after the source is known, postponing only its optional connection
+  neither reopens the data-source checkpoint nor pauses the next foundation
+  beat, while an explicit onboarding pause still stops advancement. Save timing
+  or contact guidance only when it is durable enough to outlive the current
+  thread, and update or forget that memory when the preference changes.
 - Use the global health-record ingestion path for files, labs, labels, and
   other slow evidence. Do not complete onboarding until each
   foundation-critical accepted input, minimum fact, or raw source has a
@@ -649,7 +691,7 @@ so rollout intentionally rotates native provider threads beyond onboarding. On
 the first post-deploy turn of a pre-existing automation-capable private session
 or eligible non-email group session, the stored contract fingerprint no longer
 matches. The planner must not resume a provider thread under a different tool
-schema: it starts a fresh thread with at most 24 committed messages, 4,000 bytes
+schema: it starts a fresh thread with at most 72 committed messages, 4,000 bytes
 per message, and 12,000 bytes total, then returns to native resume after that
 replacement thread succeeds. Rolling back the schema can cause the same session
 to rotate a second time. Rollout proof uses one pre-existing private session and
@@ -666,7 +708,7 @@ clears native resume; retaining a provider thread across different target
 options would make its contract ambiguous, while persisting high reasoning as
 the member's ordinary preference would change their selected authority. The
 next ordinary turn therefore receives the same bounded committed-history
-fallback—at most 24 messages, 4,000 bytes per message, and 12,000 bytes total—
+fallback—at most 72 messages, 4,000 bytes per message, and 12,000 bytes total—
 and later turns resume the replacement thread. Cancellation or foreground
 preemption before terminal turn persistence does not rotate the session. An
 outbound delivery failure after terminal persistence does not undo the reset.
@@ -855,3 +897,25 @@ active status, revision, and `activeUntil` remain the upper delivery boundary.
     readback. An accepted onboarding lab source gets an immediate natural
     receipt update before slower preservation or extraction, and the evidence
     is durably preserved before the substantive reply.
+
+## Early stall recovery
+
+The existing managed-automation maintenance owner enrolls one canonical
+`onboarding-early-stall-check-in` after onboarding starts on a direct route.
+The timer uses the persisted onboarding start plus fifteen minutes. Enrollment
+must happen before that deadline; old accounts and delayed starts are not
+backfilled. An enrolled occurrence expires thirty minutes after onboarding
+start. Retries preserve any existing slug, including paused, archived, and
+legacy model-created schedules, and never restart the timer.
+
+Fresh conversation input takes priority. Enrollment runs in the existing idle
+or post-delivery maintenance phase, without an opening model tool call or a
+new scheduler, queue, or state field. Existing cron wake projection, evaluation,
+and outbox delivery own the rest of the lifecycle.
+
+At firing, send only while onboarding is open and Murph's latest setup question
+has been unanswered for at least ten minutes, without a pause/later/stop request.
+An answer, recent question, completion, unavailable context, or uncertainty
+means skip. Send at most one brief pressure-free check-in, without repeating
+or adding a setup question. The occurrence is consumed on send or skip.
+The next-day finite recovery window is unchanged and separately owned.

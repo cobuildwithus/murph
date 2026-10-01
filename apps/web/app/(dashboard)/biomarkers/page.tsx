@@ -6,7 +6,7 @@ import {
   UploadLabsMurphContactAction,
 } from "@/src/components/home/upload-labs-action";
 import { getGeneratedBiomarkerIndex } from "@/src/lib/health-commons/generated-biomarker-artifacts";
-import { resolveHealthCommonsBiomarkerOverview } from "@/src/lib/health-commons/biomarker-projections";
+import { cleanHealthCommonsUserFacingCopy } from "@/src/lib/health-commons/user-facing-copy";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
@@ -24,23 +24,16 @@ export const metadata: Metadata = createMurphPageMetadata({
 function listDeviceTrackedBiomarkers(): DeviceTrackedBiomarker[] {
   return getGeneratedBiomarkerIndex()
     .biomarkers
-    .filter((entry) => entry.published && !entry.hidden)
-    .flatMap((entry) => {
-      const overview = resolveHealthCommonsBiomarkerOverview(entry.routeId);
-      if (!overview || overview.privateMetricBindings.length === 0) {
-        return [];
-      }
-
-      return [{
-        category: entry.categories[0] ?? null,
-        privateMetricBindings: overview.privateMetricBindings,
-        routeId: entry.routeId,
-        shortName: overview.shortName,
-        summary: entry.summary,
-        unit: overview.unit,
-        valuePrecision: overview.valuePrecision,
-      } satisfies DeviceTrackedBiomarker];
-    })
+    .filter((entry) => entry.published && !entry.hidden && entry.privateMetricBindings.length > 0)
+    .map((entry) => ({
+      category: entry.categories[0] ?? null,
+      privateMetricBindings: entry.privateMetricBindings,
+      routeId: entry.routeId,
+      shortName: cleanHealthCommonsUserFacingCopy(entry.shortName),
+      summary: entry.summary,
+      unit: cleanHealthCommonsUserFacingCopy(entry.unit ?? "value"),
+      valuePrecision: entry.valuePrecision,
+    } satisfies DeviceTrackedBiomarker))
     .sort((left, right) => left.shortName.localeCompare(right.shortName));
 }
 

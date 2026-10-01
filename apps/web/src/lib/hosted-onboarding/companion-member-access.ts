@@ -1,3 +1,9 @@
+import { openAuthRecord } from "../better-auth/record-crypto";
+import { classifyHostedNativeCredential } from "../better-auth/transport";
+import { readHostedNativeMemberAuth } from "../better-auth/native-auth";
+import { readHostedAuthenticationCompletion } from "./authentication-completion";
+import { ensureHostedMemberPhoneWelcome } from "./phone-welcome";
+import { ensureHostedMemberChannelWelcome } from "./channel-welcome";
 import {
   HostedBillingStatus,
   type PrismaClient,
@@ -26,6 +32,13 @@ import {
   type HostedSignupNotificationContextV1,
 } from "./signup-notification-context";
 import {
+  readHostedMemberMessagingSetupState,
+  updateHostedMemberPendingActivationTimeZoneIfActivationPending,
+} from "./hosted-member-store";
+import {
+  isHostedMemberMessagingSetupRequired,
+} from "./messaging-state";
+import {
   isHostedSignupNotificationEmailConfigured,
 } from "./signup-notification-email-config";
 import { resolveHostedPrivySessionFromBearerToken } from "./hosted-session";
@@ -42,6 +55,20 @@ export async function requireHostedCompanionMemberIdFromRequest(input: {
   timeZone?: string | null;
 }): Promise<string> {
   const prisma = input.prisma ?? getPrisma();
+  const credential = classifyHostedNativeCredential({
+    authorization: input.request.headers.get("authorization"), cookie: input.request.headers.get("cookie"),
+    legacyAllowed: process.env.HOSTED_PRIVY_NATIVE_ENABLED !== "false",
+  });
+  if (credential.kind === "better-auth") {
+    const auth = await readHostedNativeMemberAuth(input.request, prisma);
+    await assertHostedHistoricalLaunchConsentGranted({ memberId: auth.member.id, prisma });
+    if (input.timeZone) await updateHostedMemberPendingActivationTimeZoneIfActivationPending({ memberId: auth.member.id, pendingActivationTimeZone: input.timeZone, prisma });
+    const completion = await readHostedAuthenticationCompletion({ member: auth.member, prisma });
+    return finishHostedCompanionAdmission({ completion, prisma, now: new Date() });
+  }
+  if (process.env.HOSTED_BETTER_AUTH_ENABLED === "true") {
+    return requireLegacyCompanionAccess(input.request, prisma);
+  }
   const session = await resolveHostedPrivySessionFromBearerToken(input.request);
 
   if (!session) {
@@ -86,6 +113,14 @@ export async function ensureHostedCompanionMemberId(input: {
 
   if (existingMember) {
     assertHostedMemberNotSuspended(existingMember);
+    const handedOff = await prisma.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: existingMember.id } } });
+    if (handedOff) {
+      // Pausing issuance cannot reopen an old member's credential writers.
+      if ((await openAuthRecord(handedOff, prisma)).credentialsChangedAt !== null) {
+        throw hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue." });
+      }
+      return requireLegacyCompanionMemberAccess(existingMember.id, prisma);
+    }
 
     if (await readActiveHostedMemberAccess({
       memberId: existingMember.id,
@@ -95,6 +130,41 @@ export async function ensureHostedCompanionMemberId(input: {
         memberId: existingMember.id,
         prisma,
       });
+      const messagingState = await readHostedMemberMessagingSetupState({
+        memberId: existingMember.id,
+        prisma,
+      });
+      if (
+        isHostedMemberMessagingSetupRequired({
+          identity: messagingState?.identity ?? null,
+          routing: messagingState?.routing ?? null,
+        })
+        && (input.identity.phone || input.identity.telegram)
+      ) {
+        // Repeating canonical completion synchronizes a newly linked provider
+        // account before readiness is projected again.
+        const completion = await completeHostedPrivyVerification({
+          identity: input.identity,
+          now,
+          prisma,
+          ...(input.timeZone ? { timeZone: input.timeZone } : {}),
+        }).catch((error: unknown) => {
+          throw remapHostedPrivyCompletionLagError(error);
+        });
+        if (completion.messagingSetupRequired) {
+          throw hostedOnboardingError({
+            code: "PRIVY_ACCOUNT_NOT_READY",
+            httpStatus: 409,
+            message:
+              "Your verified messaging account has not reached Murph yet. Wait a moment and try again.",
+            retryable: true,
+          });
+        }
+      }
+      // Repair missing phone routing on admission as well as initial linking.
+      // Existing routes return immediately through the same idempotent owner.
+      await ensureHostedMemberPhoneWelcome({ memberId: existingMember.id, prisma });
+      await ensureHostedMemberChannelWelcome({ channel: "email", memberId: existingMember.id, prisma });
       await requireHostedCompanionActivationRuntimeWake({
         memberId: existingMember.id,
         prisma,
@@ -115,6 +185,15 @@ export async function ensureHostedCompanionMemberId(input: {
     throw remapHostedPrivyCompletionLagError(error);
   });
 
+  return finishHostedCompanionAdmission({ completion, now, prisma });
+}
+
+async function finishHostedCompanionAdmission(input: {
+  completion: Awaited<ReturnType<typeof readHostedAuthenticationCompletion>>;
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<string> {
+  const { completion, now, prisma } = input;
   await assertHostedHistoricalLaunchConsentGranted({
     memberId: completion.memberId,
     prisma,
@@ -169,4 +248,16 @@ async function requireHostedCompanionActivationRuntimeWake(input: {
       retryable: true,
     });
   }
+}
+
+async function requireLegacyCompanionAccess(request: Request, prisma: PrismaClient): Promise<string> {
+  const auth = await readHostedNativeMemberAuth(request, prisma);
+  return requireLegacyCompanionMemberAccess(auth.member.id, prisma);
+}
+
+async function requireLegacyCompanionMemberAccess(memberId: string, prisma: PrismaClient): Promise<string> {
+  await assertActiveHostedMemberAccessAllowed({ memberId, prisma });
+  await assertHostedHistoricalLaunchConsentGranted({ memberId, prisma });
+  await requireHostedCompanionActivationRuntimeWake({ memberId, prisma });
+  return memberId;
 }

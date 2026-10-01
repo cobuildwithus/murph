@@ -11,6 +11,10 @@ const LOCAL_NOON_HOUR = 12;
 const MAX_LOCAL_TIME_RESOLUTION_ITERATIONS = 4;
 
 const TIME_ZONE_PARTS_CACHE = new Map<string, Intl.DateTimeFormat>();
+// Event-ledger validation repeatedly resolves a small set of explicit zones.
+// ICU's answer is process-stable; cap retained inputs, including alias spellings.
+const TIME_ZONE_NORMALIZATION_CACHE = new Map<string, string>();
+const MAX_CACHED_TIME_ZONE_NORMALIZATIONS = 64;
 
 interface FloatingIsoDateTimeParts {
   day: number;
@@ -169,13 +173,22 @@ export function normalizeIanaTimeZone(
   if (trimmed.length === 0) {
     return null;
   }
+  const cached = TIME_ZONE_NORMALIZATION_CACHE.get(trimmed);
+  if (cached !== undefined) {
+    return cached;
+  }
 
   try {
     const resolved = new Intl.DateTimeFormat("en-US", {
       timeZone: trimmed,
     }).resolvedOptions().timeZone;
 
-    return resolved || trimmed;
+    const normalized = resolved || trimmed;
+    if (TIME_ZONE_NORMALIZATION_CACHE.size >= MAX_CACHED_TIME_ZONE_NORMALIZATIONS) {
+      TIME_ZONE_NORMALIZATION_CACHE.clear();
+    }
+    TIME_ZONE_NORMALIZATION_CACHE.set(trimmed, normalized);
+    return normalized;
   } catch {
     return null;
   }

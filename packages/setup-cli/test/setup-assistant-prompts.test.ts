@@ -66,7 +66,7 @@ test('setup assistant prompt flow asks directly for the Codex model id', async (
   })
 
   assert.deepEqual(promptState.prompts, [
-    'Model id to use with Codex [gpt-5.6-terra]: ',
+    'Model id to use with Codex [gpt-6-sol]: ',
   ])
   assert.deepEqual(assistant, {
     preset: 'codex',

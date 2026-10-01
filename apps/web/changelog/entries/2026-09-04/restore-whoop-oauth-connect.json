@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "restore-whoop-oauth-connect",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "WHOOP connection is open again",
+    "summary": "WHOOP members can authorize Murph directly from Connect again under the provider's expanded allowance.",
+    "details": "The existing post-connect guide still points WHOOP members to the Murph iPhone app and Apple Health for step data.",
+    "relevanceTags": ["connected-health", "whoop", "apple-health"],
+    "sourcePullRequests": [2811],
+    "tryIt": {
+      "label": "Connect WHOOP",
+      "href": "/connect#whoop"
+    }
+  }
+}

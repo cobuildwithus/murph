@@ -6,14 +6,13 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, test, vi } from "vitest";
 
-import { formatStructuredErrorMessage } from "@murphai/operator-config/text/shared";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { getVaultCliPackageVersion } from "../src/vault-cli-package.ts";
 import {
-  formatMurphCliError,
   installSqliteExperimentalWarningFilter,
   isBrokenPipeError,
   loadCliEnvFiles,
+  renderMurphCliEntrypointError,
   resolveBrokenPipeExitCode,
   runMurphCliEntrypoint,
   runMurphCliAction,
@@ -162,8 +161,11 @@ test("loadCliEnvFiles rethrows non-ENOENT load errors", () => {
   assert.throws(() => loadCliEnvFiles("/repo/worktree"), loadFailure);
 });
 
-test("formatMurphCliError reuses the shared structured formatter", () => {
-  const error = Object.assign(new Error("Config validation failed."), {
+test("renderMurphCliEntrypointError preserves a bounded diagnostic failure", async () => {
+  const submittedValue = "private-submitted-value";
+  const providerBody = "private-provider-response";
+  const rawMessage = `Parser rejected ${submittedValue}: ${providerBody}.`;
+  const error = Object.assign(new Error(rawMessage), {
     code: "CONFIG_INVALID",
     details: {
       errors: [
@@ -173,16 +175,175 @@ test("formatMurphCliError reuses the shared structured formatter", () => {
     },
   });
 
-  assert.equal(formatMurphCliError(error), formatStructuredErrorMessage(error));
+  const rendered = await renderMurphCliEntrypointError(error, [], { human: true });
+
+  assert.equal(rendered.machineReadable, false);
   assert.equal(
-    formatMurphCliError(error),
+    rendered.output,
     [
-      "Config validation failed.",
-      "details:",
-      '- $.paths.vaultRoot: Invalid input: expected "vault"',
-      '- Invalid JSON in "<HOME_DIR>/vault/config.json".',
+      `Error (CONFIG_INVALID): ${rawMessage}`,
+      "Stage: command",
     ].join("\n"),
   );
+  assert.equal(rendered.output.includes(submittedValue), true);
+  assert.equal(rendered.output.includes(providerBody), true);
+});
+
+test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", async () => {
+  const privateValue = "private-schedule-value";
+  const error = new VaultCliError(
+    "invalid_payload",
+    "Schedule failed validation.",
+    {
+      issues: [
+        {
+          code: "invalid_value",
+          expected: "IANA time zone",
+          path: ["schedule", "timeZone"],
+          publicPath: ["schedule", "timeZone"],
+          message: privateValue,
+        },
+      ],
+      retryable: false,
+      stage: "validation",
+    },
+  );
+
+  for (const jsonArgs of [
+    ["--vault", "first", "--vault", "second", "--format", "json"],
+    ["--vault", "first", "--vault", "second", "--json"],
+  ]) {
+    const rendered = await renderMurphCliEntrypointError(
+      error,
+      jsonArgs,
+      { human: true },
+    );
+
+    assert.equal(rendered.machineReadable, true);
+    assert.equal(rendered.exitCode, 1);
+    const directError = JSON.parse(rendered.output) as {
+      code?: string;
+      error?: unknown;
+      fieldErrors?: Array<{ path?: string }>;
+      hint?: string;
+      stage?: string;
+    };
+    assert.equal(directError.code, "invalid_payload");
+    assert.equal(directError.error, undefined);
+    assert.equal(directError.stage, "validation");
+    assert.equal(directError.hint, undefined);
+    assert.equal(directError.fieldErrors?.[0]?.path, "schedule.timeZone");
+    assert.equal(rendered.output.includes(privateValue), false);
+    assert.equal(rendered.output.includes("first"), false);
+    assert.equal(rendered.output.includes("second"), false);
+  }
+
+  const rendered = await renderMurphCliEntrypointError(
+    error,
+    ["--vault", "first", "--vault", "second", "--full-output", "--format", "json"],
+    { human: true },
+  );
+
+  assert.equal(rendered.machineReadable, true);
+  assert.equal(rendered.exitCode, 1);
+  const envelope = JSON.parse(rendered.output) as {
+    error?: {
+      code?: string;
+      fieldErrors?: Array<{ path?: string }>;
+      hint?: string;
+      stage?: string;
+    };
+    meta?: { command?: string };
+    ok?: boolean;
+  };
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.error?.code, "invalid_payload");
+  assert.equal(envelope.error?.stage, "validation");
+  assert.equal(envelope.error?.hint, undefined);
+  assert.equal(envelope.error?.fieldErrors?.[0]?.path, "schedule.timeZone");
+  assert.equal(envelope.meta?.command, "invocation");
+  assert.equal(rendered.output.includes(privateValue), false);
+  assert.equal(rendered.output.includes("first"), false);
+  assert.equal(rendered.output.includes("second"), false);
+});
+
+test("renderMurphCliEntrypointError uses the final repeated format flag", async () => {
+  const error = new VaultCliError("invalid_option", "Duplicate vault option.");
+  const json = await renderMurphCliEntrypointError(
+    error,
+    ["--format", "yaml", "--json"],
+    { human: false },
+  );
+  const yaml = await renderMurphCliEntrypointError(
+    error,
+    ["--json", "--format", "yaml"],
+    { human: false },
+  );
+
+  assert.deepEqual(JSON.parse(json.output), {
+    code: "invalid_option",
+    message: "Duplicate vault option.",
+    retryable: false,
+  });
+  assert.match(yaml.output, /^code: invalid_option$/mu);
+});
+
+test("renderMurphCliEntrypointError wraps every formatter with full-output", async () => {
+  const error = new VaultCliError(
+    "invalid_option",
+    "Pass vault only once.",
+  );
+
+  const plain = await renderMurphCliEntrypointError(
+    new VaultCliError(
+      error.code,
+      error.message,
+    ),
+    ["--vault", "one", "--vault", "two", "--format", "json"],
+    { human: true },
+  );
+
+  const direct = JSON.parse(plain.output) as { code?: string; error?: unknown };
+  assert.equal(direct.code, "invalid_option");
+  assert.equal(direct.error, undefined);
+
+  const full = await renderMurphCliEntrypointError(
+    error,
+    ["--vault", "one", "--vault", "two", "--full-output", "--format", "json"],
+    { human: true },
+  );
+  const fullEnvelope = JSON.parse(full.output) as {
+    code?: string;
+    error?: { code?: string };
+    ok?: boolean;
+  };
+  assert.equal(fullEnvelope.ok, false);
+  assert.equal(fullEnvelope.code, undefined);
+  assert.equal(fullEnvelope.error?.code, "invalid_option");
+
+  const yaml = await renderMurphCliEntrypointError(
+    error,
+    ["--vault", "one", "--vault", "two", "--full-output", "--format", "yaml"],
+    { human: true },
+  );
+  assert.match(yaml.output, /^ok:\s+false$/mu);
+  assert.match(yaml.output, /^error:/mu);
+  assert.match(yaml.output, /^\s+code:\s+invalid_option$/mu);
+});
+
+test("renderMurphCliEntrypointError defaults non-interactive failures to machine TOON", async () => {
+  const rendered = await renderMurphCliEntrypointError(
+    Object.assign(new Error("permission denied at /private/vault/config.json"), {
+      code: "EACCES",
+    }),
+    [],
+    { human: false },
+  );
+
+  assert.equal(rendered.machineReadable, true);
+  assert.match(rendered.output, /permission_denied/u);
+  assert.match(rendered.output, /filesystem/u);
+  assert.match(rendered.output, /private\/vault/u);
 });
 
 test("isBrokenPipeError recognizes stdout pipe closure failures", () => {
@@ -474,7 +635,7 @@ test("runMurphCliAction rejects explicit --vault overrides for murph product com
 
   await assert.rejects(
     () =>
-      runMurphCliAction(["assistant", "chat", "--vault", "/vaults/other"], {
+      runMurphCliAction(["assistant", "status", "--vault", "/vaults/other"], {
         argv0: "murph",
       }),
     /`murph` uses one active vault/u,
@@ -742,7 +903,7 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
   });
 
   try {
-    await runMurphCliEntrypoint(["assistant", "chat"]);
+    await runMurphCliEntrypoint(["assistant", "status"]);
 
     assert.deepEqual(loadEnvFile.mock.calls.length, 2);
     assert.deepEqual(loadEnvFileCalls, [
@@ -751,7 +912,7 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
     ]);
     assert.deepEqual(serve.mock.calls, [
       [
-        ["assistant", "chat"],
+        ["assistant", "status"],
         {
           env: process.env,
         },
@@ -807,7 +968,7 @@ test("runMurphCliEntrypoint does not mask command failure when warm Codex shutdo
 
   let caughtError: unknown = null;
   try {
-    await runMurphCliEntrypoint(["assistant", "chat"]);
+    await runMurphCliEntrypoint(["assistant", "status"]);
   } catch (error) {
     caughtError = error;
   }
@@ -816,7 +977,76 @@ test("runMurphCliEntrypoint does not mask command failure when warm Codex shutdo
   assert.deepEqual(stopWarmCodexAppServer.mock.calls, [["cli-entrypoint-exit"]]);
 });
 
-test("runMurphCliAction reuses setup results for wearable launches and assistant chat handoff", async () => {
+test("runMurphCliEntrypoint preserves command failure when warm Codex shutdown also fails", async () => {
+  const primaryError = new VaultCliError("command_failed", "Primary command failed.");
+  const cleanupError = new Error("warm shutdown failed");
+  const serve = vi.fn(async () => {
+    throw primaryError;
+  });
+  const stopWarmCodexAppServer = vi.fn(async () => {
+    throw cleanupError;
+  });
+
+  mockCliActionModules({
+    codexLifecycleModule: { stopWarmCodexAppServer },
+    cli: { serve },
+    operatorConfigModule: {
+      expandConfiguredVaultPath: vi.fn(),
+      resolveConfiguredDefaultVault: vi.fn(async () => null),
+      resolveDefaultVault: vi.fn(async () => "/vaults/default"),
+      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
+    },
+    setupCliModule: {
+      createSetupCli: vi.fn(),
+      detectSetupProgramName: vi.fn(() => "murph-setup"),
+      formatSetupWearableLabel: vi.fn((value: string) => value),
+      isSetupInvocation: vi.fn(() => false),
+      listSetupPendingWearables: vi.fn(() => []),
+      listSetupReadyWearables: vi.fn(() => []),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
+    },
+  });
+
+  await assert.rejects(
+    () => runMurphCliEntrypoint(["assistant", "status"]),
+    (error) => error === primaryError,
+  );
+});
+
+test("runMurphCliEntrypoint surfaces warm Codex shutdown failure after success", async () => {
+  const cleanupError = new Error("warm shutdown failed");
+  const serve = vi.fn(async () => undefined);
+  const stopWarmCodexAppServer = vi.fn(async () => {
+    throw cleanupError;
+  });
+
+  mockCliActionModules({
+    codexLifecycleModule: { stopWarmCodexAppServer },
+    cli: { serve },
+    operatorConfigModule: {
+      expandConfiguredVaultPath: vi.fn(),
+      resolveConfiguredDefaultVault: vi.fn(async () => null),
+      resolveDefaultVault: vi.fn(async () => "/vaults/default"),
+      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
+    },
+    setupCliModule: {
+      createSetupCli: vi.fn(),
+      detectSetupProgramName: vi.fn(() => "murph-setup"),
+      formatSetupWearableLabel: vi.fn((value: string) => value),
+      isSetupInvocation: vi.fn(() => false),
+      listSetupPendingWearables: vi.fn(() => []),
+      listSetupReadyWearables: vi.fn(() => []),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
+    },
+  });
+
+  await assert.rejects(
+    () => runMurphCliEntrypoint(["assistant", "status"]),
+    (error) => error === cleanupError,
+  );
+});
+
+test("runMurphCliAction reuses setup results for wearable launches and without a terminal chat handoff", async () => {
   const serve = vi.fn(async () => undefined);
   const stderrWrites: string[] = [];
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
@@ -864,7 +1094,7 @@ test("runMurphCliAction reuses setup results for wearable launches and assistant
         },
       ]),
       listSetupReadyWearables: vi.fn(() => ["oura"]),
-      resolveSetupPostLaunchAction: vi.fn(() => "assistant-chat"),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
     },
   });
 
@@ -880,19 +1110,12 @@ test("runMurphCliAction reuses setup results for wearable launches and assistant
         env: process.env,
       },
     ],
-    [
-      ["assistant", "chat"],
-      {
-        env: process.env,
-      },
-    ],
   ]);
   assert.deepEqual(stderrSpy.mock.calls, [
     [
       "\nSelected wearable setup is waiting on credentials: WHOOP (WHOOP_CLIENT_ID). Set the missing wearable environment variables.\n",
     ],
     ["\nOpening OURA connect flow in your browser.\n\n"],
-    ["\nOpening Murph assistant chat. Type /exit to quit.\n\n"],
   ]);
 });
 

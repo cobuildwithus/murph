@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "dashboard-link-sign-in",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Sign in directly from dashboard links",
+    "summary": "Dashboard links now open sign-in automatically when you are logged out.",
+    "details": "After signing in, members with dashboard access return to the page they opened.",
+    "relevanceTags": [
+      "dashboard",
+      "account"
+    ],
+    "sourcePullRequests": []
+  }
+}

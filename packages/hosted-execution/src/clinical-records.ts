@@ -1,8 +1,6 @@
 import {
   CLINICAL_FHIR_RESOURCE_TYPES,
   clinicalFhirResourceTypeSchema,
-  clinicalFhirRetrievalScopeSchema,
-  clinicalFhirRetrievalScopesSchema,
   clinicalFhirRetrievalSliceSchema,
   clinicalFhirRetrievalSlicesSchema,
   clinicalIsoDateTimeSchema,
@@ -17,6 +15,11 @@ import {
   HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN,
   HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS,
   HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN,
+  HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES,
+  HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS,
+  HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS,
   HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
   HOSTED_CLINICAL_RECORDS_MAX_PAGES,
@@ -39,6 +42,11 @@ export {
   HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN,
   HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS,
   HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN,
+  HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES,
+  HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS,
+  HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS,
   HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
   HOSTED_CLINICAL_RECORDS_MAX_PAGES,
@@ -97,15 +105,7 @@ export const hostedClinicalRecordsReadRunRequestSchema = z.object({
   runId: identifierSchema,
 }).strict();
 
-export const hostedClinicalRecordsRetrievalScopeSchema =
-  clinicalFhirRetrievalScopeSchema;
-export const hostedClinicalRecordsRetrievalSliceSchema =
-  clinicalFhirRetrievalSliceSchema;
-
-const hostedClinicalRecordsRetrievalScopesSchema = z
-  .array(hostedClinicalRecordsRetrievalScopeSchema)
-  .min(1)
-  .pipe(clinicalFhirRetrievalScopesSchema);
+export const hostedClinicalRecordsRetrievalSliceSchema = clinicalFhirRetrievalSliceSchema;
 
 const hostedClinicalRecordsRunDescriptorBaseShape = {
   connectionId: identifierSchema,
@@ -121,21 +121,12 @@ const hostedClinicalRecordsRunDescriptorBaseShape = {
   sourceSystem: clinicalSourceSystemSchema,
 } satisfies z.ZodRawShape;
 
-export const hostedClinicalRecordsLegacyRunDescriptorSchema = z.object({
-  ...hostedClinicalRecordsRunDescriptorBaseShape,
-  retrievalScopes: hostedClinicalRecordsRetrievalScopesSchema,
-}).strict();
-
-export const hostedClinicalRecordsQueryRunDescriptorSchema = z.object({
+export const hostedClinicalRecordsRunDescriptorSchema = z.object({
   ...hostedClinicalRecordsRunDescriptorBaseShape,
   retrievalProtocol: z.literal("query-slices-v2"),
   retrievalSlices: clinicalFhirRetrievalSlicesSchema,
 }).strict();
 
-export const hostedClinicalRecordsRunDescriptorSchema = z.union([
-  hostedClinicalRecordsQueryRunDescriptorSchema,
-  hostedClinicalRecordsLegacyRunDescriptorSchema,
-]);
 
 export const hostedClinicalRecordsReadRunResponseSchema = z.discriminatedUnion("status", [
   z.object({
@@ -157,32 +148,56 @@ const hostedClinicalRecordsFetchPageRequestBaseShape = {
   runId: identifierSchema,
 } satisfies z.ZodRawShape;
 
-export const hostedClinicalRecordsLegacyFetchPageRequestSchema = z.object(
-  hostedClinicalRecordsFetchPageRequestBaseShape,
-).strict();
-
-export const hostedClinicalRecordsQueryFetchPageRequestSchema = z.object({
+export const hostedClinicalRecordsFetchPageRequestSchema = z.object({
   ...hostedClinicalRecordsFetchPageRequestBaseShape,
-  // Optional for the one-way deploy window in which the PR 1 runner can read
-  // query descriptors but does not echo this frozen fingerprint. Remove after
-  // old runner bundles and their serviceable in-flight runs have drained.
-  queryFingerprint: sha256Schema.optional(),
+  queryFingerprint: sha256Schema,
   queryScopeId: clinicalFhirRetrievalSliceSchema.options[0].shape.queryScopeId,
   retrievalProtocol: z.literal("query-slices-v2"),
   sliceId: clinicalFhirRetrievalSliceSchema.options[0].shape.sliceId,
 }).strict();
 
-export const hostedClinicalRecordsFetchPageRequestSchema = z.union([
-  hostedClinicalRecordsQueryFetchPageRequestSchema,
-  hostedClinicalRecordsLegacyFetchPageRequestSchema,
+
+export const hostedClinicalRecordsDocumentDescriptorSchema = z.object({
+  parentPageSha256: sha256Schema,
+  resourceType: z.enum(["DocumentReference", "DiagnosticReport"]),
+  resourceId: z.string().regex(/^[A-Za-z0-9.-]{1,200}$/u),
+  attachmentIndex: z.number().int().nonnegative().max(1_999),
+  ticket: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS).nullable(),
+  errorCode: errorCodeSchema.optional(),
+}).strict();
+export type HostedClinicalRecordsDocumentDescriptor = z.infer<typeof hostedClinicalRecordsDocumentDescriptorSchema>;
+
+export const hostedClinicalRecordsFetchDocumentRequestSchema = z.object({
+  runId: identifierSchema,
+  generation: z.number().int().min(1),
+  ticket: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS),
+}).strict();
+export type HostedClinicalRecordsFetchDocumentRequest = z.infer<typeof hostedClinicalRecordsFetchDocumentRequestSchema>;
+
+export const hostedClinicalRecordsFetchDocumentResponseSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("document"),
+    contentBase64: z.string().max(Math.ceil(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES / 3) * 4),
+    mediaType: z.string().min(1).max(255),
+    sha256: sha256Schema,
+    byteLength: z.number().int().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES),
+  }).strict(),
+  z.object({status: z.literal("unavailable"), errorCode: errorCodeSchema, retryable: z.boolean()}).strict(),
 ]);
+export type HostedClinicalRecordsFetchDocumentResponse = z.infer<typeof hostedClinicalRecordsFetchDocumentResponseSchema>;
+export function parseHostedClinicalRecordsFetchDocumentResponse(value: unknown): HostedClinicalRecordsFetchDocumentResponse {
+  return hostedClinicalRecordsFetchDocumentResponseSchema.parse(value);
+}
+export function parseHostedClinicalRecordsFetchDocumentRequest(value: unknown): HostedClinicalRecordsFetchDocumentRequest {
+  return hostedClinicalRecordsFetchDocumentRequestSchema.parse(value);
+}
 
 export const hostedClinicalRecordsFetchPageResponseSchema = z.discriminatedUnion("status", [
   z.object({
     body: z.string().max(HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS),
     nextCursor: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS).nullable(),
-    nextPageUrlHash: sha256Schema.optional(),
     pageUrlHash: sha256Schema.optional(),
+    documents: z.array(hostedClinicalRecordsDocumentDescriptorSchema).max(HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS).optional(),
     status: z.literal("page"),
   }).strict(),
   z.object({
@@ -196,9 +211,6 @@ export const hostedClinicalRecordsRecordOutcomeResponseSchema = z.object({
   ok: z.literal(true),
 }).strict();
 
-export type HostedClinicalRecordsRetrievalScope = z.infer<
-  typeof hostedClinicalRecordsRetrievalScopeSchema
->;
 export type HostedClinicalRecordsRetrievalSlice = z.infer<
   typeof hostedClinicalRecordsRetrievalSliceSchema
 >;
@@ -209,12 +221,6 @@ export type HostedClinicalRecordsConnectLinkRequest = z.infer<
   typeof hostedClinicalRecordsConnectLinkRequestSchema
 >;
 export type HostedClinicalRecordsRunDescriptor = z.infer<
-  typeof hostedClinicalRecordsLegacyRunDescriptorSchema
->;
-export type HostedClinicalRecordsQueryRunDescriptor = z.infer<
-  typeof hostedClinicalRecordsQueryRunDescriptorSchema
->;
-export type HostedClinicalRecordsAnyRunDescriptor = z.infer<
   typeof hostedClinicalRecordsRunDescriptorSchema
 >;
 export type HostedClinicalRecordsReadRunResponse = z.infer<
@@ -292,7 +298,7 @@ function isLoopbackHostname(hostname: string): boolean {
 
 export function parseHostedClinicalRecordsRunDescriptor(
   value: unknown,
-): HostedClinicalRecordsAnyRunDescriptor {
+): HostedClinicalRecordsRunDescriptor {
   return hostedClinicalRecordsRunDescriptorSchema.parse(value);
 }
 

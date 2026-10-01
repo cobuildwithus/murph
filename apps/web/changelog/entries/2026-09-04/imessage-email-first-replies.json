@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "imessage-email-first-replies",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Email-based iMessage conversations start with an answer",
+    "summary": "When you first message Murph through an iMessage email address, an approved conversation can begin with an answer instead of a signup link.",
+    "details": "The address keeps the iMessage conversation attached to the right account. It is not treated as a verified account email until you verify it.",
+    "relevanceTags": ["imessage", "onboarding", "conversation"],
+    "sourcePullRequests": [2820]
+  }
+}

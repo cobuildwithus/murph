@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { BrowserVaultReplicaSourceStep } from "@murphai/query/browser-replica-server";
 import {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
 } from "@murphai/contracts/browser-vault";
@@ -33,6 +34,7 @@ beforeEach(() => {
 describe("hosted browser-vault replica refresh preparation", () => {
   it("builds lab and metric rows from projection points while readVault stays sparse", async () => {
     const {
+      getQueryProjectionStatus,
       listMetricPoints,
       readVault,
     } = await import("@murphai/query");
@@ -160,12 +162,21 @@ describe("hosted browser-vault replica refresh preparation", () => {
 
       const vault = await readVault(vaultRoot);
       const points = await listMetricPoints(vaultRoot, { limit: null });
+      const refreshSteps: string[] = [];
+      await writeVaultFile(
+        vaultRoot,
+        "journal/2026/2026-05-03.md",
+        "---\ndayKey: 2026-05-03\n---\n# New journal entry\n",
+      );
+      expect((await getQueryProjectionStatus(vaultRoot)).fresh).toBe(false);
       const replica = await createHostedBrowserVaultReplicaForSourceState({
         generatedAt: "2026-05-10T00:00:00.000Z",
+        onRefreshStep: (step) => refreshSteps.push(step),
         sourceStateHash: "browser-vault-source-state-test",
         vaultRoot,
       });
 
+      expect((await getQueryProjectionStatus(vaultRoot)).fresh).toBe(false);
       expect(vault.entities.some((entity) => entity.entityId === "smp_dense_glucose")).toBe(false);
       expect(vault.samples.some((sample) => sample.entityId === "smp_dense_glucose")).toBe(false);
       expect(points.some((point) => point.metricKey === "apob" && point.value === 87)).toBe(true);
@@ -174,6 +185,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       expect(points.some((point) => point.metricKey === "hba1c" && point.value === 9.9)).toBe(false);
       expect(points.some((point) => point.source.recordId === "smp_dense_glucose")).toBe(false);
       expect(replica.entities.some((entity) => entity.id === "smp_dense_glucose")).toBe(false);
+      expect(replica.entities.some((entity) => entity.id === "journal:2026-05-03")).toBe(true);
       expect(replica.generation).toBe(BROWSER_VAULT_REPLICA_CURRENT_GENERATION);
       expect(replica.metricRows.some((row) => row.metricKey === "apob" && row.value === 87)).toBe(true);
       expect(replica.metricRows.some((row) => row.metricKey === "hba1c")).toBe(false);
@@ -192,6 +204,11 @@ describe("hosted browser-vault replica refresh preparation", () => {
         }),
       ]));
       expect(replica.labResultRows.some((row) => row.value === 5.1 || row.value === 9.9)).toBe(false);
+      expect(refreshSteps).toEqual([
+        "replica_construction_source_read",
+        "replica_construction_experiment_outcome_read",
+        "replica_construction_projection",
+      ]);
 
       const labOnlyContent = summarizeHostedBrowserVaultReplicaContent({
         ...replica,
@@ -207,6 +224,121 @@ describe("hosted browser-vault replica refresh preparation", () => {
         hasPrivateContent: true,
         labResultRows: 2,
       });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("joins real canonical refresh work after deadline and foreground-wake cancellation", async () => {
+    const {
+      getQueryProjectionStatus,
+      readVault,
+    } = await import("@murphai/query");
+    const {
+      createHostedBrowserVaultReplicaForSourceState,
+      hashHostedBrowserVaultReplicaSources,
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const {
+      createCoalescingRuntimeWakeSignal,
+    } = await import("../src/hosted-runtime/runtime-wake.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const workspace = createWorkspaceState();
+    const publishRef = vi.fn(async (input: { replicaRef: HostedBrowserVaultReplicaRef }) => ({
+      published: true as const,
+      workspace: {
+        ...workspace,
+        browserVaultReplicaRef: input.replicaRef,
+      },
+    }));
+    const write = vi.fn(async (input: { replica: unknown }) =>
+      createReplicaRefFromReplica(input.replica)
+    );
+
+    try {
+      await readVault(vaultRoot);
+      await writeVaultFile(
+        vaultRoot,
+        "ledger/events/2026/2026-05.jsonl",
+        createBrowserVaultCancellationLedger(2_048),
+      );
+      expect((await getQueryProjectionStatus(vaultRoot)).fresh).toBe(false);
+
+      const timedOut = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: { publishRef, write },
+        }),
+        timeoutMs: 0,
+        vaultRoot,
+        workspace,
+      });
+
+      expect(timedOut).toMatchObject({
+        attempt: "initial",
+        configuredTimeoutMs: 0,
+        refreshStage: "initial_source_hash",
+        refreshStep: "initial_source_hash",
+        source: { fileCount: 0, totalBytes: 0 },
+        status: "deferred_timeout",
+      });
+      if (timedOut.status !== "deferred_timeout") {
+        throw new Error("Expected an immediate Browser Vault timeout.");
+      }
+      expect([
+        timedOut.configuredTimeoutMs,
+        timedOut.currentStepElapsedMs,
+        timedOut.refreshElapsedMs,
+      ].every((value) => Number.isSafeInteger(value) && value >= 0)).toBe(true);
+      expect(timedOut.currentStepElapsedMs).toBeLessThanOrEqual(
+        timedOut.refreshElapsedMs,
+      );
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const wakeResultPromise = refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: { publishRef, write },
+        }),
+        runtimeWakeSignal,
+        timeoutMs: 60_000,
+        vaultRoot,
+        workspace,
+      });
+      setTimeout(() => runtimeWakeSignal.notify(), 0);
+      await expect(wakeResultPromise).resolves.toMatchObject({
+        status: "deferred_runtime_wake",
+      });
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+
+      const source = await hashHostedBrowserVaultReplicaSources(vaultRoot);
+      const replica = await createHostedBrowserVaultReplicaForSourceState({
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        sourceStateHash: source.hash,
+        vaultRoot,
+      });
+      expect(replica.metricRows.length).toBeGreaterThan(0);
+
+      const completed = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: { publishRef, write },
+        }),
+        timeoutMs: 60_000,
+        vaultRoot,
+        workspace,
+      });
+
+      expect(completed).toMatchObject({ status: "published" });
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).toHaveBeenCalledOnce();
+      expect((await getQueryProjectionStatus(vaultRoot)).fresh).toBe(false);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -263,6 +395,143 @@ describe("hosted browser-vault replica refresh preparation", () => {
 
       expect(secondHash.hash).not.toBe(firstHash.hash);
       expect(secondHash.fileCount).toBe(firstHash.fileCount);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("matches full-vault hash identity and accounting for mixed sources and referenced outcomes", async () => {
+    let fullVault = false;
+    vi.doMock("@murphai/query/browser-replica-server", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("@murphai/query/browser-replica-server")>();
+      return {
+        ...actual,
+        async readBrowserVaultReplicaExperiments(
+          ...args: Parameters<typeof actual.readBrowserVaultReplicaExperiments>
+        ) {
+          // Reuse the old source owner and the production hash/outcome algorithm.
+          // Only experiment hydration differs; there is no second hash implementation.
+          return fullVault
+            ? (await actual.readBrowserVaultReplicaVault(...args)).entities
+              .filter((entity) => entity.family === "experiment")
+            : await actual.readBrowserVaultReplicaExperiments(...args);
+        },
+      };
+    });
+    const { hashCanonicalQuerySources, readBrowserVaultPersonalPatternVocabulary } =
+      await import("@murphai/query/browser-replica-server");
+    const { createHostedBrowserVaultReplicaForSourceState, hashHostedBrowserVaultReplicaSources } =
+      await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-hash-"));
+    const first = createCanonicalOutcome({
+      experimentId: "exp_01ARZ3NDEKTSV4RRFFQ69G5FAV", outcomeId: "outcome_z", slug: "z-first",
+    });
+    const second = createCanonicalOutcome({
+      experimentId: "exp_01ARZ3NDEKTSV4RRFFQ69G5FAW", outcomeId: "outcome_a", slug: "a-second",
+    });
+    const outcomeFiles = {
+      z: `${JSON.stringify(first)}\n`,
+      a: `${JSON.stringify(second)}\n`,
+      malformed: "{\n",
+      invalid: '{"schemaVersion":"not-an-outcome"}\n',
+      mismatched: `${JSON.stringify(first)}\n`,
+    };
+    const compareHash = async () => {
+      fullVault = false;
+      const narrow = await hashHostedBrowserVaultReplicaSources(vaultRoot);
+      fullVault = true;
+      try {
+        expect(await hashHostedBrowserVaultReplicaSources(vaultRoot)).toEqual(narrow);
+      } finally {
+        fullVault = false;
+      }
+      return narrow;
+    };
+    try {
+      for (const [slug, suffix, outcomeName] of [
+        ["a-second", "W", "a"],
+        ["z-first", "V", "z"],
+        ["duplicate", "X", "z"],
+        ["missing", "Y", "missing"],
+        ["malformed", "Z", "malformed"],
+        ["invalid", "0", "invalid"],
+        ["mismatched", "1", "mismatched"],
+      ]) {
+        await writeVaultFile(vaultRoot, `bank/experiments/${slug}.md`, createExperimentDocument({
+          experimentId: `exp_01ARZ3NDEKTSV4RRFFQ69G5FA${suffix}`,
+          outcomeGeneratedAt: first.generatedAt,
+          outcomeId: `outcome_${outcomeName}`,
+          outcomePath: `bank/experiments/outcomes/${outcomeName}.json`,
+          slug,
+          status: "completed",
+        }));
+      }
+      for (const [name, contents] of Object.entries(outcomeFiles)) {
+        await writeVaultFile(vaultRoot, `bank/experiments/outcomes/${name}.json`, contents);
+      }
+      await writeVaultFile(vaultRoot, "ledger/events/2026/2026-05.jsonl", createBrowserVaultCancellationLedger(3));
+      await writeVaultFile(vaultRoot, "journal/2026/2026-05-03.md", "---\ndayKey: 2026-05-03\n---\n# Synthetic journal\n");
+      const canonical = await hashCanonicalQuerySources(vaultRoot);
+      const initial = await compareHash();
+      expect(initial).toMatchObject({
+        fileCount: canonical.fileCount + 6,
+        totalBytes: canonical.totalBytes + [...Object.values(outcomeFiles), outcomeFiles.z]
+          .reduce((bytes, contents) => bytes + Buffer.byteLength(contents), 0),
+      });
+      const replica = await createHostedBrowserVaultReplicaForSourceState({
+        generatedAt: "2026-05-20T00:00:00.000Z", sourceStateHash: initial.hash, vaultRoot,
+      });
+      // Entity order differs from outcome path order; the duplicate ref is hashed
+      // twice but cannot project an outcome belonging to a different experiment.
+      expect(replica.experimentOutcomes).toEqual([first, second]);
+      await writeVaultFile(vaultRoot, "bank/experiments/outcomes/unreferenced.json", "{\n");
+      expect(await compareHash()).toEqual(initial);
+
+      const vocabularyPath = "derived/knowledge/pages/journal-pattern-vocabulary.md";
+      await writeVaultFile(vaultRoot, vocabularyPath, createBrowserVaultVocabularyDocument());
+      const withVocabulary = await compareHash();
+      expect(withVocabulary.hash).not.toBe(initial.hash);
+      expect(withVocabulary.fileCount).toBe(initial.fileCount + 1);
+      expect(withVocabulary.totalBytes).toBe(initial.totalBytes + Buffer.byteLength(
+        JSON.stringify(await readBrowserVaultPersonalPatternVocabulary(vaultRoot)),
+      ));
+      await writeVaultFile(vaultRoot, "ledger/events/2026/2026-05.jsonl", createBrowserVaultCancellationLedger(4));
+      let previous = await compareHash();
+      expect(previous.hash).not.toBe(withVocabulary.hash);
+      for (const [name, contents] of Object.entries({ ...outcomeFiles, missing: "{}\n" })) {
+        await writeVaultFile(vaultRoot, `bank/experiments/outcomes/${name}.json`, `${contents} `);
+        const changed = await compareHash();
+        expect(changed.hash).not.toBe(previous.hash);
+        previous = changed;
+      }
+    } finally {
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("refreshes when the validated Pattern vocabulary changes", async () => {
+    const { hashHostedBrowserVaultReplicaSources } = await import(
+      "../src/hosted-runtime/browser-vault-replica.ts"
+    );
+    const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+    if (!testTempRoot) throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+    const vaultRoot = await mkdtemp(
+      path.join(testTempRoot, "murph-browser-vault-vocabulary-"),
+    );
+
+    try {
+      const initialHash = await hashHostedBrowserVaultReplicaSources(vaultRoot);
+      await writeVaultFile(
+        vaultRoot,
+        "derived/knowledge/pages/journal-pattern-vocabulary.md",
+        createBrowserVaultVocabularyDocument(),
+      );
+      const vocabularyHash =
+        await hashHostedBrowserVaultReplicaSources(vaultRoot);
+
+      expect(vocabularyHash.hash).not.toBe(initialHash.hash);
+      expect(vocabularyHash.fileCount).toBe(initialHash.fileCount + 1);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -543,10 +812,195 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 
+  it("skips unchanged sources and leaves newer evidence pending after a calculation race", async () => {
+    const { VAULT_LAYOUT } = await import("@murphai/contracts");
+    const vaultRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-browser-vault-refresh-"),
+    );
+    const sourcePath = path.posix.join(
+      VAULT_LAYOUT.experimentsDirectory,
+      "trial.md",
+    );
+    const initialSource =
+      "---\nexperimentId: exp_trial\nslug: trial\nstatus: active\n---\n# Trial\n";
+    const changedSource = initialSource.replace("# Trial", "# Corrected trial");
+
+    try {
+      await writeVaultFile(vaultRoot, sourcePath, initialSource);
+      const initialModule = await import(
+        "../src/hosted-runtime/browser-vault-replica.ts"
+      );
+      const initialHash =
+        await initialModule.hashHostedBrowserVaultReplicaSources(vaultRoot);
+      const currentRef: HostedBrowserVaultReplicaRef = {
+        byteLength: 128,
+        dataVersion: "browser-data-v1",
+        generatedAt: "2026-05-10T13:00:00.000Z",
+        generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+        keyId: "browser-vault-replica:key",
+        objectKey: "users/browser-vault-replicas/member_123/current.json",
+        replicaSchema: "murph.browser-vault-replica",
+        runtimeRootKeyId: "udrk:runtime:test-root",
+        schema: "murph.hosted-browser-vault-replica-ref.v1",
+        sourceBundleHash: initialHash.hash,
+      };
+      const workspace = createWorkspaceState({
+        browserVaultReplicaRef: currentRef,
+      });
+      const write = vi.fn(async (input: { replica: unknown }) =>
+        createReplicaRefFromReplica(input.replica),
+      );
+      const publishRef = vi.fn(
+        async (input: { replicaRef: HostedBrowserVaultReplicaRef }) => ({
+          published: true as const,
+          workspace: createWorkspaceState({
+            browserVaultReplicaRef: input.replicaRef,
+          }),
+        }),
+      );
+      const platform = createPlatform({
+        browserVaultReplicaPort: { publishRef, write },
+      });
+      const unchanged =
+        await initialModule.refreshHostedBrowserVaultReplicaFromRuntime({
+          generatedAt: "2026-05-10T13:00:01.000Z",
+          platform,
+          vaultRoot,
+          workspace,
+        });
+
+      expect(unchanged).toMatchObject({ status: "skipped_current" });
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+
+      vi.resetModules();
+      vi.doUnmock("@murphai/contracts");
+      vi.doUnmock("@murphai/query");
+      vi.doUnmock("@murphai/runtime-state/node");
+      vi.doMock(
+        "@murphai/query/browser-replica-server",
+        async (importOriginal) => {
+          const actual =
+            await importOriginal<
+              typeof import("@murphai/query/browser-replica-server")
+            >();
+          return {
+            ...actual,
+            async createBrowserVaultReplica(
+              input: Parameters<typeof actual.createBrowserVaultReplica>[0],
+            ) {
+              const replica = await actual.createBrowserVaultReplica(input);
+              await writeVaultFile(vaultRoot, sourcePath, changedSource);
+              return replica;
+            },
+          };
+        },
+      );
+      const racedModule = await import(
+        "../src/hosted-runtime/browser-vault-replica.ts"
+      );
+      const raced =
+        await racedModule.refreshHostedBrowserVaultReplicaFromRuntime({
+          force: true,
+          generatedAt: "2026-05-10T13:01:00.000Z",
+          platform,
+          vaultRoot,
+          workspace,
+        });
+
+      expect(raced).toMatchObject({
+        status: "deferred_source_changed",
+      });
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+
+      vi.resetModules();
+      vi.doUnmock("@murphai/contracts");
+      vi.doUnmock("@murphai/query");
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      vi.doUnmock("@murphai/runtime-state/node");
+      const retryModule = await import(
+        "../src/hosted-runtime/browser-vault-replica.ts"
+      );
+      const retried =
+        await retryModule.refreshHostedBrowserVaultReplicaFromRuntime({
+          generatedAt: "2026-05-10T13:02:00.000Z",
+          platform,
+          vaultRoot,
+          workspace,
+        });
+      const changedHash =
+        await retryModule.hashHostedBrowserVaultReplicaSources(vaultRoot);
+
+      expect(retried).toMatchObject({
+        replicaRef: { sourceBundleHash: changedHash.hash },
+        status: "published",
+      });
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).toHaveBeenCalledOnce();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not publish when evidence changes while the replica object is written", async () => {
+    const { VAULT_LAYOUT } = await import("@murphai/contracts");
+    const { refreshHostedBrowserVaultReplicaFromRuntime } = await import(
+      "../src/hosted-runtime/browser-vault-replica.ts"
+    );
+    const vaultRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-browser-vault-refresh-"),
+    );
+    const sourcePath = path.posix.join(
+      VAULT_LAYOUT.experimentsDirectory,
+      "trial.md",
+    );
+    const workspace = createWorkspaceState({ browserVaultReplicaRef: null });
+    const publishRef = vi.fn(
+      async (input: { replicaRef: HostedBrowserVaultReplicaRef }) => ({
+        published: true as const,
+        workspace: createWorkspaceState({
+          browserVaultReplicaRef: input.replicaRef,
+        }),
+      }),
+    );
+    const write = vi.fn(async (input: { replica: unknown }) => {
+      const replicaRef = createReplicaRefFromReplica(input.replica);
+      await writeVaultFile(
+        vaultRoot,
+        sourcePath,
+        "---\nexperimentId: exp_trial\nslug: trial\nstatus: active\n---\n# Changed during write\n",
+      );
+      return replicaRef;
+    });
+
+    try {
+      await writeVaultFile(
+        vaultRoot,
+        sourcePath,
+        "---\nexperimentId: exp_trial\nslug: trial\nstatus: active\n---\n# Initial trial\n",
+      );
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        generatedAt: "2026-05-10T13:00:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: { publishRef, write },
+        }),
+        vaultRoot,
+        workspace,
+      });
+
+      expect(result).toMatchObject({ status: "deferred_source_changed" });
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("force refreshes a metadata-current replica when web reported it unreadable", async () => {
     const { VAULT_LAYOUT } = await import("@murphai/contracts");
-    const { hashCanonicalQuerySources } = await import("@murphai/query");
     const {
+      hashHostedBrowserVaultReplicaSources,
       refreshHostedBrowserVaultReplicaFromRuntime,
     } = await import("../src/hosted-runtime/browser-vault-replica.ts");
     const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
@@ -566,12 +1020,13 @@ describe("hosted browser-vault replica refresh preparation", () => {
         path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md"),
         "---\nexperimentId: exp_trial\nslug: trial\nstatus: active\n---\n# Trial\n",
       );
-      const sourceHash = await hashCanonicalQuerySources(vaultRoot);
+      const sourceHash = await hashHostedBrowserVaultReplicaSources(vaultRoot);
       const workspace = createWorkspaceState({
         browserVaultReplicaRef: {
           byteLength: 128,
           dataVersion: "browser-data-v1",
           generatedAt: "2026-05-10T00:01:00.000Z",
+          generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
           keyId: "browser-vault-replica:key",
           objectKey: "users/browser-vault-replicas/member_123/missing.json",
           replicaSchema: "murph.browser-vault-replica",
@@ -581,15 +1036,26 @@ describe("hosted browser-vault replica refresh preparation", () => {
         },
       });
 
+      const platform = createPlatform({
+        browserVaultReplicaPort: {
+          publishRef,
+          write,
+        },
+      });
+      const current = await refreshHostedBrowserVaultReplicaFromRuntime({
+        generatedAt: "2026-05-10T00:01:30.000Z",
+        platform,
+        vaultRoot,
+        workspace,
+      });
+      expect(current.status).toBe("skipped_current");
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+
       const result = await refreshHostedBrowserVaultReplicaFromRuntime({
         force: true,
         generatedAt: "2026-05-10T00:01:30.000Z",
-        platform: createPlatform({
-          browserVaultReplicaPort: {
-            publishRef,
-            write,
-          },
-        }),
+        platform,
         vaultRoot,
         workspace,
       });
@@ -690,7 +1156,804 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 
+  it("publishes after 35 seconds with three narrow hashes and only one full canonical build", async () => {
+    const reads = { canonicalHash: 0, experiments: 0, fullVault: 0, construction: 0 };
+    vi.doMock("@murphai/query/browser-replica-server", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("@murphai/query/browser-replica-server")>();
+      return {
+        ...actual,
+        hashCanonicalQuerySources(...args: Parameters<typeof actual.hashCanonicalQuerySources>) {
+          reads.canonicalHash += 1;
+          return actual.hashCanonicalQuerySources(...args);
+        },
+        readBrowserVaultReplicaExperiments(...args: Parameters<typeof actual.readBrowserVaultReplicaExperiments>) {
+          reads.experiments += 1;
+          return actual.readBrowserVaultReplicaExperiments(...args);
+        },
+        readBrowserVaultReplicaVault(...args: Parameters<typeof actual.readBrowserVaultReplicaVault>) {
+          reads.fullVault += 1;
+          return actual.readBrowserVaultReplicaVault(...args);
+        },
+        readBrowserVaultReplicaSource(...args: Parameters<typeof actual.readBrowserVaultReplicaSource>) {
+          reads.construction += 1;
+          return actual.readBrowserVaultReplicaSource(...args);
+        },
+      };
+    });
+    const { refreshHostedBrowserVaultReplicaFromRuntime } =
+      await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-budget-"));
+    const workspace = createWorkspaceState();
+    const write = vi.fn(async (input: { replica: unknown }) => {
+      await vi.advanceTimersByTimeAsync(35_000);
+      return createReplicaRefFromReplica(input.replica);
+    });
+    const publishRef = vi.fn(async () => ({ published: true as const, workspace }));
+    // Virtualize the deadline, but keep the real builder's zero-delay yields.
+    const realSetTimeout = globalThis.setTimeout;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const fakeSetTimeout = globalThis.setTimeout;
+    const timers = vi.spyOn(globalThis, "setTimeout").mockImplementation((callback, delay, ...args) =>
+      (delay === 0 ? realSetTimeout : fakeSetTimeout)(callback, delay, ...args)
+    );
+    try {
+      await writeBrowserVaultStageSource(vaultRoot);
+      await writeVaultFile(vaultRoot, "ledger/events/2026/2026-05.jsonl", createBrowserVaultCancellationLedger(8));
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({ browserVaultReplicaPort: { publishRef, write } }),
+        vaultRoot,
+        workspace,
+      });
+      expect(result).toMatchObject({ status: "published" });
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).toHaveBeenCalledOnce();
+      expect(reads).toEqual({ canonicalHash: 3, experiments: 3, fullVault: 0, construction: 1 });
+    } finally {
+      timers.mockRestore();
+      vi.useRealTimers();
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it.each(["wake", "abort", "timeout"] as const)("joins all hash children without publishing after %s", async (cause) => {
+    const releases = new Map<string, () => void>();
+    let started = () => {};
+    const childrenStarted = new Promise<void>((resolve) => { started = resolve; });
+    let childrenSettled = 0;
+    async function hold<T>(name: string, operation: Promise<T>): Promise<T> {
+      const value = await operation;
+      await new Promise<void>((resolve) => {
+        releases.set(name, resolve);
+        if (releases.size === 3) started();
+      });
+      childrenSettled += 1;
+      return value;
+    }
+    vi.doMock("@murphai/query/browser-replica-server", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("@murphai/query/browser-replica-server")>();
+      return {
+        ...actual,
+        async hashCanonicalQuerySources(...args: Parameters<typeof actual.hashCanonicalQuerySources>) {
+          const value = await hold("canonical", actual.hashCanonicalQuerySources(...args));
+          args[1]?.signal?.throwIfAborted();
+          return value;
+        },
+        async readBrowserVaultReplicaExperiments(...args: Parameters<typeof actual.readBrowserVaultReplicaExperiments>) {
+          const value = await hold("experiments", actual.readBrowserVaultReplicaExperiments(...args));
+          args[1]?.signal?.throwIfAborted();
+          return value;
+        },
+        readBrowserVaultReplicaVault(...args: Parameters<typeof actual.readBrowserVaultReplicaVault>) {
+          return hold("experiments", actual.readBrowserVaultReplicaVault(...args));
+        },
+        readBrowserVaultPersonalPatternVocabulary(...args: Parameters<typeof actual.readBrowserVaultPersonalPatternVocabulary>) {
+          return hold("vocabulary", actual.readBrowserVaultPersonalPatternVocabulary(...args));
+        },
+      };
+    });
+    const { refreshHostedBrowserVaultReplicaFromRuntime } =
+      await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const { createCoalescingRuntimeWakeSignal } = await import("../src/hosted-runtime/runtime-wake.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-join-"));
+    const controller = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const write = vi.fn();
+    const publishRef = vi.fn();
+    let pending: Promise<unknown> | undefined;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      await writeBrowserVaultStageSource(vaultRoot);
+      pending = refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        platform: createPlatform({ browserVaultReplicaPort: { publishRef, write } }),
+        runtimeWakeSignal,
+        signal: controller.signal,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+      let settled = false;
+      void pending.then(() => { settled = true; }, () => { settled = true; });
+      await childrenStarted;
+      await vi.advanceTimersByTimeAsync(cause === "timeout" ? 60_000 : 35_000);
+      if (cause === "wake") runtimeWakeSignal.notify();
+      else if (cause === "abort") controller.abort(new Error("Synthetic host abort"));
+      releases.get("canonical")!();
+      releases.get("experiments")!();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(childrenSettled).toBe(2);
+      expect(settled).toBe(false);
+      releases.get("vocabulary")!();
+      await expect(pending).resolves.toMatchObject({
+        status: cause === "wake" ? "deferred_runtime_wake"
+          : cause === "abort" ? "deferred_aborted" : "deferred_timeout",
+        ...(cause === "timeout" ? {
+          configuredTimeoutMs: 60_000,
+          refreshElapsedMs: 60_000,
+          refreshStage: "initial_source_hash",
+          source: { fileCount: 0, totalBytes: 0 },
+        } : {}),
+      });
+      expect(childrenSettled).toBe(3);
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      controller.abort();
+      releases.forEach((release) => release());
+      await pending;
+      vi.useRealTimers();
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("uses a 60-second default refresh deadline", async () => {
+    mockImmediateBrowserVaultReplicaBuild();
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    let resolveWriteStarted: (() => void) | null = null;
+    const writeStarted = new Promise<void>((resolve) => {
+      resolveWriteStarted = resolve;
+    });
+    let writeStopped = false;
+    const publishRef = vi.fn();
+    const write = vi.fn(async (input: { signal?: AbortSignal | null }) => {
+      resolveWriteStarted?.();
+      await new Promise<void>((resolve) => {
+        if (input.signal?.aborted) {
+          resolve();
+          return;
+        }
+        input.signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      writeStopped = true;
+      input.signal?.throwIfAborted();
+      throw new Error("Expected the Browser Vault write to be cancelled.");
+    });
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const expectedSource = await writeBrowserVaultStageSource(vaultRoot);
+      const resultPromise = refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+      let settled = false;
+      void resultPromise.finally(() => {
+        settled = true;
+      });
+      await writeStarted;
+
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(resultPromise).resolves.toEqual({
+        attempt: "initial",
+        configuredTimeoutMs: 60_000,
+        currentStepElapsedMs: 60_000,
+        refreshElapsedMs: 60_000,
+        refreshStage: "replica_write",
+        refreshStep: "replica_write",
+        source: expectedSource,
+        status: "deferred_timeout",
+      });
+      expect(writeStopped).toBe(true);
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("records the replica-write stage before invoking the injected write", async () => {
+    mockImmediateBrowserVaultReplicaBuild();
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    let signalWasAbortedBeforeTimeout: boolean | null = null;
+    let signalWasAbortedAfterTimeout: boolean | null = null;
+    const publishRef = vi.fn();
+    const write = vi.fn((input: { signal?: AbortSignal | null }) => {
+      signalWasAbortedBeforeTimeout = input.signal?.aborted ?? null;
+      vi.advanceTimersByTime(1_000);
+      signalWasAbortedAfterTimeout = input.signal?.aborted ?? null;
+      return new Promise<never>(() => undefined);
+    });
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const expectedSource = await writeBrowserVaultStageSource(vaultRoot);
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        timeoutMs: 1_000,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+
+      expect(result).toEqual({
+        attempt: "initial",
+        configuredTimeoutMs: 1_000,
+        currentStepElapsedMs: 1_000,
+        refreshElapsedMs: 1_000,
+        refreshStage: "replica_write",
+        refreshStep: "replica_write",
+        source: expectedSource,
+        status: "deferred_timeout",
+      });
+      expect(signalWasAbortedBeforeTimeout).toBe(false);
+      expect(signalWasAbortedAfterTimeout).toBe(true);
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    "canonical_source_read",
+    "read_model_construction",
+    "personal_pattern_vocabulary_read",
+    "metric_projection",
+    "default_entity_projection",
+    "between_operations",
+  ] as const)("retains source deadline attribution for %s when the timer runs late", async (slowStep) => {
+    let nowMs = 10_000;
+    vi.doMock("@murphai/query/browser-replica-server", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("@murphai/query/browser-replica-server")>();
+      return {
+        ...actual,
+        async readBrowserVaultReplicaSource(
+          vaultRoot: Parameters<typeof actual.readBrowserVaultReplicaSource>[0],
+          options?: Parameters<typeof actual.readBrowserVaultReplicaSource>[1],
+        ) {
+          let activeStep: BrowserVaultReplicaSourceStep | null = null;
+          const result = await actual.readBrowserVaultReplicaSource(vaultRoot, {
+            ...options,
+            onSourceStep(step) {
+              if (step === null) {
+                nowMs += activeStep === slowStep ? 1_200 : 1;
+              }
+              options?.onSourceStep?.(step);
+              if (slowStep === "between_operations" && step === null
+                && activeStep === "canonical_source_read") {
+                nowMs += 1_200;
+              }
+              activeStep = step;
+            },
+          });
+          // All real source operations finish before the overdue timer runs.
+          // Moving only Date.now models synchronous work without a busy loop.
+          vi.advanceTimersByTime(1_000);
+          return result;
+        },
+      };
+    });
+    const { refreshHostedBrowserVaultReplicaFromRuntime } =
+      await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const write = vi.fn();
+    const publishRef = vi.fn();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    try {
+      const source = await writeBrowserVaultStageSource(vaultRoot);
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        deadlineMs: 11_000,
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({ browserVaultReplicaPort: { publishRef, write } }),
+        timeoutMs: 30_000,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+      expect(result).toEqual({
+        attempt: "initial",
+        configuredTimeoutMs: 30_000,
+        currentStepElapsedMs: nowMs - 10_000,
+        refreshElapsedMs: nowMs - 10_000,
+        refreshStage: "replica_construction",
+        refreshStep: "replica_construction_source_read",
+        source,
+        ...(slowStep === "between_operations" ? {} : {
+          sourceReadAtDeadline: { elapsedMs: 1_200, step: slowStep },
+        }),
+        status: "deferred_timeout",
+      });
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+      vi.useRealTimers();
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    "canonical_source_read",
+    "personal_pattern_vocabulary_read",
+  ] as const)("attributes an active %s timeout and joins cancellation", async (targetStep) => {
+    let resolveStarted = () => {};
+    const started = new Promise<void>((resolve) => { resolveStarted = resolve; });
+    let sourceStopped = false;
+    vi.doMock("@murphai/query/browser-replica-server", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("@murphai/query/browser-replica-server")>();
+      return {
+        ...actual,
+        async readBrowserVaultReplicaSource(
+          vaultRoot: Parameters<typeof actual.readBrowserVaultReplicaSource>[0],
+          options?: Parameters<typeof actual.readBrowserVaultReplicaSource>[1],
+        ) {
+          try {
+            return await actual.readBrowserVaultReplicaSource(vaultRoot, {
+              ...options,
+              onSourceStep(step) {
+                options?.onSourceStep?.(step);
+                if (step === targetStep) {
+                  resolveStarted();
+                }
+              },
+            });
+          } finally {
+            sourceStopped = true;
+          }
+        },
+      };
+    });
+    const { refreshHostedBrowserVaultReplicaFromRuntime } =
+      await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const write = vi.fn();
+    const publishRef = vi.fn();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      await writeBrowserVaultStageSource(vaultRoot);
+      const resultPromise = refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        platform: createPlatform({ browserVaultReplicaPort: { publishRef, write } }),
+        timeoutMs: 1_000,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+      await started;
+      vi.advanceTimersByTime(1_000);
+      await expect(resultPromise).resolves.toMatchObject({
+        refreshStage: "replica_construction",
+        refreshStep: "replica_construction_source_read",
+        sourceReadAtDeadline: { elapsedMs: 1_000, step: targetStep },
+        status: "deferred_timeout",
+      });
+      expect(sourceStopped).toBe(true);
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("joins an aborted local replica build before returning its timeout", async () => {
+    let resolveSourceReadStarted: (() => void) | null = null;
+    const sourceReadStarted = new Promise<void>((resolve) => {
+      resolveSourceReadStarted = resolve;
+    });
+    let releaseSourceRead = () => {};
+    const sourceReadRelease = new Promise<void>((resolve) => {
+      releaseSourceRead = resolve;
+    });
+    let resolveBuildStarted: (() => void) | null = null;
+    const buildStarted = new Promise<void>((resolve) => {
+      resolveBuildStarted = resolve;
+    });
+    let buildStopped = false;
+    vi.doMock(
+      "@murphai/query/browser-replica-server",
+      async (importOriginal) => {
+        const actual = await importOriginal<
+          typeof import("@murphai/query/browser-replica-server")
+        >();
+        return {
+          ...actual,
+          async readBrowserVaultReplicaSource(
+            vaultRoot: Parameters<typeof actual.readBrowserVaultReplicaSource>[0],
+            options?: Parameters<typeof actual.readBrowserVaultReplicaSource>[1],
+          ) {
+            resolveSourceReadStarted?.();
+            await sourceReadRelease;
+            return await actual.readBrowserVaultReplicaSource(vaultRoot, options);
+          },
+          async createBrowserVaultReplica(input: {
+            signal?: AbortSignal;
+          }) {
+            resolveBuildStarted?.();
+            await new Promise<void>((resolve) => {
+              if (input.signal?.aborted) {
+                resolve();
+                return;
+              }
+              input.signal?.addEventListener("abort", () => resolve(), {
+                once: true,
+              });
+            });
+            buildStopped = true;
+            input.signal?.throwIfAborted();
+            throw new Error("Expected the local Browser Vault build to be cancelled.");
+          },
+        };
+      },
+    );
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const publishRef = vi.fn();
+    const write = vi.fn();
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const expectedSource = await writeBrowserVaultStageSource(vaultRoot);
+      const resultPromise = refreshHostedBrowserVaultReplicaFromRuntime({
+        attempt: "retry",
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        timeoutMs: 1_000,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+      await sourceReadStarted;
+      await vi.advanceTimersByTimeAsync(400);
+      releaseSourceRead();
+      await buildStarted;
+      await vi.advanceTimersByTimeAsync(600);
+
+      await expect(resultPromise).resolves.toEqual({
+        attempt: "retry",
+        configuredTimeoutMs: 1_000,
+        currentStepElapsedMs: 600,
+        refreshElapsedMs: 1_000,
+        refreshStage: "replica_construction",
+        refreshStep: "replica_construction_projection",
+        source: expectedSource,
+        status: "deferred_timeout",
+      });
+      expect(buildStopped).toBe(true);
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      releaseSourceRead();
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("attributes a timeout during replica serialization and retains the known source summary", async () => {
+    let resolveSerializationStarted: (() => void) | null = null;
+    const serializationStarted = new Promise<void>((resolve) => {
+      resolveSerializationStarted = resolve;
+    });
+    let serializationStopped = false;
+    vi.doMock(
+      "@murphai/query/browser-replica-server",
+      async (importOriginal) => {
+        const actual = await importOriginal<
+          typeof import("@murphai/query/browser-replica-server")
+        >();
+        return {
+          ...actual,
+          async createBrowserVaultReplica(
+            input: Parameters<typeof actual.createBrowserVaultReplica>[0],
+          ) {
+            const { signal: _signal, ...uncancelledInput } = input;
+            return await actual.createBrowserVaultReplica(uncancelledInput);
+          },
+          async stringifyJsonCooperatively(
+            value: Parameters<typeof actual.stringifyJsonCooperatively>[0],
+            options?: Parameters<typeof actual.stringifyJsonCooperatively>[1],
+          ) {
+            const signal = options?.signal;
+            if (!signal) {
+              throw new Error("Browser Vault serialization must receive cancellation.");
+            }
+            resolveSerializationStarted?.();
+            await waitForAbort(signal);
+            serializationStopped = true;
+            signal.throwIfAborted();
+            return await actual.stringifyJsonCooperatively(value, options);
+          },
+        };
+      },
+    );
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const publishRef = vi.fn();
+    const write = vi.fn();
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const expectedSource = await writeBrowserVaultStageSource(vaultRoot);
+      const resultPromise = refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        timeoutMs: 1_000,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+      await serializationStarted;
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(resultPromise).resolves.toEqual({
+        attempt: "initial",
+        configuredTimeoutMs: 1_000,
+        currentStepElapsedMs: 1_000,
+        refreshElapsedMs: 1_000,
+        refreshStage: "replica_serialization",
+        refreshStep: "replica_serialization",
+        source: expectedSource,
+        status: "deferred_timeout",
+      });
+      expect(serializationStopped).toBe(true);
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("attributes a timeout during the second source hash before replica write", async () => {
+    let hashCallCount = 0;
+    let resolveSecondHashStarted: (() => void) | null = null;
+    const secondHashStarted = new Promise<void>((resolve) => {
+      resolveSecondHashStarted = resolve;
+    });
+    let secondHashStopped = false;
+    vi.doMock(
+      "@murphai/query/browser-replica-server",
+      async (importOriginal) => {
+        const actual = await importOriginal<
+          typeof import("@murphai/query/browser-replica-server")
+        >();
+        return {
+          ...actual,
+          async createBrowserVaultReplica(
+            input: Parameters<typeof actual.createBrowserVaultReplica>[0],
+          ) {
+            const { signal: _signal, ...uncancelledInput } = input;
+            return await actual.createBrowserVaultReplica(uncancelledInput);
+          },
+          async hashCanonicalQuerySources(
+            vaultRoot: Parameters<typeof actual.hashCanonicalQuerySources>[0],
+            options?: Parameters<typeof actual.hashCanonicalQuerySources>[1],
+          ) {
+            hashCallCount += 1;
+            if (hashCallCount === 1) {
+              return await actual.hashCanonicalQuerySources(vaultRoot, options);
+            }
+            const signal = options?.signal;
+            if (!signal) {
+              throw new Error("Browser Vault source hashing must receive cancellation.");
+            }
+            resolveSecondHashStarted?.();
+            await waitForAbort(signal);
+            secondHashStopped = true;
+            signal.throwIfAborted();
+            return await actual.hashCanonicalQuerySources(vaultRoot, options);
+          },
+        };
+      },
+    );
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const publishRef = vi.fn();
+    const write = vi.fn();
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const expectedSource = await writeBrowserVaultStageSource(vaultRoot);
+      const resultPromise = refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        timeoutMs: 1_000,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+      await secondHashStarted;
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(resultPromise).resolves.toEqual({
+        attempt: "initial",
+        configuredTimeoutMs: 1_000,
+        currentStepElapsedMs: 1_000,
+        refreshElapsedMs: 1_000,
+        refreshStage: "second_source_hash",
+        refreshStep: "second_source_hash",
+        source: expectedSource,
+        status: "deferred_timeout",
+      });
+      expect(secondHashStopped).toBe(true);
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("records the ref-publication stage before invoking the injected publication", async () => {
+    mockImmediateBrowserVaultReplicaBuild();
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    let signalWasAbortedBeforeTimeout: boolean | null = null;
+    let signalWasAbortedAfterTimeout: boolean | null = null;
+    const publishRef = vi.fn((input: { signal?: AbortSignal | null }) => {
+      signalWasAbortedBeforeTimeout = input.signal?.aborted ?? null;
+      vi.advanceTimersByTime(1_000);
+      signalWasAbortedAfterTimeout = input.signal?.aborted ?? null;
+      return new Promise<never>(() => undefined);
+    });
+    const write = vi.fn(async (input: { replica: unknown }) =>
+      createReplicaRefFromReplica(input.replica)
+    );
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const expectedSource = await writeBrowserVaultStageSource(vaultRoot);
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        timeoutMs: 1_000,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+
+      expect(result).toEqual({
+        attempt: "initial",
+        configuredTimeoutMs: 1_000,
+        currentStepElapsedMs: 1_000,
+        refreshElapsedMs: 1_000,
+        refreshStage: "ref_publication",
+        refreshStep: "ref_publication",
+        source: expectedSource,
+        status: "deferred_timeout",
+      });
+      expect(signalWasAbortedBeforeTimeout).toBe(false);
+      expect(signalWasAbortedAfterTimeout).toBe(true);
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).toHaveBeenCalledOnce();
+    } finally {
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not start local query work after its owner is already aborted", async () => {
+    const hashCanonicalQuerySources = vi.fn(async () => ({
+      fileCount: 0,
+      hash: "empty",
+      totalBytes: 0,
+    }));
+    vi.doMock(
+      "@murphai/query/browser-replica-server",
+      async (importOriginal) => {
+        const actual = await importOriginal<
+          typeof import("@murphai/query/browser-replica-server")
+        >();
+        return {
+          ...actual,
+          hashCanonicalQuerySources,
+        };
+      },
+    );
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const controller = new AbortController();
+    controller.abort(new DOMException("Foreground work took priority.", "AbortError"));
+
+    try {
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef: vi.fn(),
+            write: vi.fn(),
+          },
+        }),
+        signal: controller.signal,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+
+      expect(result).toMatchObject({ status: "deferred_aborted" });
+      expect(hashCanonicalQuerySources).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("caps the refresh timeout at an earlier caller deadline", async () => {
+    mockImmediateBrowserVaultReplicaBuild();
     const {
       refreshHostedBrowserVaultReplicaFromRuntime,
     } = await import("../src/hosted-runtime/browser-vault-replica.ts");
@@ -727,10 +1990,19 @@ describe("hosted browser-vault replica refresh preparation", () => {
       await vi.advanceTimersByTimeAsync(1_000);
       const result = await resultPromise;
 
-      expect(result).toMatchObject({ status: "deferred_timeout" });
+      expect(result).toMatchObject({
+        attempt: "initial",
+        configuredTimeoutMs: 60_000,
+        currentStepElapsedMs: 1_000,
+        refreshElapsedMs: 1_000,
+        refreshStage: "replica_write",
+        refreshStep: "replica_write",
+        status: "deferred_timeout",
+      });
       expect(write).toHaveBeenCalledOnce();
       expect(publishRef).not.toHaveBeenCalled();
     } finally {
+      vi.doUnmock("@murphai/query/browser-replica-server");
       vi.useRealTimers();
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -782,8 +2054,64 @@ describe("hosted browser-vault replica refresh preparation", () => {
         workspace,
       });
 
-      expect(result).toMatchObject({
+      expect(result).toEqual({
+        source: {
+          fileCount: 0,
+          totalBytes: 0,
+        },
         status: "deferred_runtime_wake",
+      });
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("retains the zero source summary when externally aborted after source hashing", async () => {
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const controller = new AbortController();
+    const workspace = createWorkspaceState({
+      browserVaultReplicaRef: null,
+      checkpointedAt: "2026-05-10T00:00:00.000Z",
+    });
+    const publishRef = vi.fn(async (input: { replicaRef: HostedBrowserVaultReplicaRef }) => ({
+      published: true,
+      workspace: {
+        ...workspace,
+        browserVaultReplicaRef: input.replicaRef,
+      },
+    }));
+    const write = vi.fn(async (input: { replica: unknown }) => {
+      controller.abort(new DOMException("Foreground work took priority.", "AbortError"));
+      return createReplicaRefFromReplica(input.replica);
+    });
+
+    try {
+      await writeBrowserVaultStageSource(vaultRoot);
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        signal: controller.signal,
+        vaultRoot,
+        workspace,
+      });
+
+      expect(result).toEqual({
+        source: {
+          fileCount: 0,
+          totalBytes: 0,
+        },
+        status: "deferred_aborted",
       });
       expect(write).toHaveBeenCalledOnce();
       expect(publishRef).not.toHaveBeenCalled();
@@ -853,7 +2181,11 @@ describe("hosted browser-vault replica refresh preparation", () => {
         workspace,
       });
 
-      expect(result).toMatchObject({
+      expect(result).toEqual({
+        source: {
+          fileCount: 0,
+          totalBytes: 0,
+        },
         status: "deferred_runtime_wake",
       });
       expect(write).toHaveBeenCalledOnce();
@@ -864,6 +2196,31 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 });
+
+function createBrowserVaultVocabularyDocument(): string {
+  return [
+    "---",
+    "title: Journal and Pattern vocabulary",
+    "slug: journal-pattern-vocabulary",
+    "pageType: ledger",
+    "status: active",
+    "---",
+    "",
+    "# Journal and Pattern vocabulary",
+    "",
+    JSON.stringify({
+      concepts: [
+        {
+          aliases: ["dancing"],
+          icon: "dance",
+          id: "dance",
+          label: "Dance",
+        },
+      ],
+      version: 1,
+    }),
+  ].join("\n");
+}
 
 function createCanonicalOutcome(input: {
   experimentId: string;
@@ -953,6 +2310,57 @@ function createExperimentDocument(input: {
   ].join("\n");
 }
 
+function createBrowserVaultCancellationLedger(recordCount: number): string {
+  return `${Array.from({ length: recordCount }, (_entry, index) =>
+    JSON.stringify({
+      dayKey: "2026-05-02",
+      id: `evt_browser_vault_cancel_${String(index).padStart(4, "0")}`,
+      kind: "test",
+      occurredAt: "2026-05-02T08:00:00.000Z",
+      recordedAt: "2026-05-02T18:00:00.000Z",
+      results: [{
+        analyte: "Apolipoprotein B",
+        biomarkerSlug: "apob",
+        unit: "mg/dL",
+        value: 80 + (index % 20),
+      }],
+      schemaVersion: "murph.event.v1",
+      source: "manual",
+      title: "Synthetic cancellation panel",
+    })
+  ).join("\n")}\n`;
+}
+
+const BROWSER_VAULT_STAGE_SOURCE_DOCUMENT = createExperimentDocument({
+  experimentId: "exp_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  slug: "timeout-stage",
+  status: "active",
+});
+
+async function writeBrowserVaultStageSource(vaultRoot: string): Promise<{
+  fileCount: number;
+  totalBytes: number;
+}> {
+  await writeVaultFile(
+    vaultRoot,
+    "bank/experiments/timeout-stage.md",
+    BROWSER_VAULT_STAGE_SOURCE_DOCUMENT,
+  );
+  return {
+    fileCount: 1,
+    totalBytes: new TextEncoder().encode(BROWSER_VAULT_STAGE_SOURCE_DOCUMENT).byteLength,
+  };
+}
+
+async function waitForAbort(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
 async function writeVaultFile(
   vaultRoot: string,
   relativePath: string,
@@ -1026,6 +2434,26 @@ function createReplicaRefFromReplica(replica: unknown): HostedBrowserVaultReplic
     schema: "murph.hosted-browser-vault-replica-ref.v1",
     sourceBundleHash,
   };
+}
+
+function mockImmediateBrowserVaultReplicaBuild(): void {
+  vi.doMock(
+    "@murphai/query/browser-replica-server",
+    async (importOriginal) => {
+      const actual = await importOriginal<
+        typeof import("@murphai/query/browser-replica-server")
+      >();
+      return {
+        ...actual,
+        async createBrowserVaultReplica(
+          input: Parameters<typeof actual.createBrowserVaultReplica>[0],
+        ) {
+          const { signal: _signal, ...uncancelledInput } = input;
+          return await actual.createBrowserVaultReplica(uncancelledInput);
+        },
+      };
+    },
+  );
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

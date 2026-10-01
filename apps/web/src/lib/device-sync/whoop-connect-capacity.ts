@@ -4,7 +4,10 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import type { DeviceSyncConnectTarget } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
-const WHOOP_DIRECT_CONNECT_MEMBER_LIMIT = 2;
+const WHOOP_PROVIDER_MEMBER_LIMIT = 100;
+const WHOOP_UNTRACKED_MEMBER_GAP = 2;
+const WHOOP_TRACKED_MEMBER_LIMIT =
+  WHOOP_PROVIDER_MEMBER_LIMIT - WHOOP_UNTRACKED_MEMBER_GAP;
 
 export async function assertHostedWhoopConnectCapacityAvailable(input: {
   memberId: string;
@@ -47,7 +50,7 @@ export async function assertHostedWhoopConnectCapacityAvailable(input: {
         AND connection.status <> 'disconnected'
       GROUP BY connection.user_id
       ORDER BY connection.user_id ASC
-      LIMIT ${WHOOP_DIRECT_CONNECT_MEMBER_LIMIT}
+      LIMIT ${WHOOP_TRACKED_MEMBER_LIMIT}
     ),
     junction_members AS (
       SELECT connection.user_id
@@ -60,7 +63,7 @@ export async function assertHostedWhoopConnectCapacityAvailable(input: {
         AND connection.status <> 'disconnected'
       GROUP BY connection.user_id
       ORDER BY connection.user_id ASC
-      LIMIT ${WHOOP_DIRECT_CONNECT_MEMBER_LIMIT}
+      LIMIT ${WHOOP_TRACKED_MEMBER_LIMIT}
     )
     SELECT member.user_id AS "userId"
     FROM (
@@ -69,11 +72,11 @@ export async function assertHostedWhoopConnectCapacityAvailable(input: {
       SELECT junction.user_id FROM junction_members AS junction
     ) AS member
     ORDER BY member.user_id ASC
-    LIMIT ${WHOOP_DIRECT_CONNECT_MEMBER_LIMIT}
+    LIMIT ${WHOOP_TRACKED_MEMBER_LIMIT}
   `);
 
   if (
-    currentMembers.length < WHOOP_DIRECT_CONNECT_MEMBER_LIMIT
+    currentMembers.length < WHOOP_TRACKED_MEMBER_LIMIT
     || currentMembers.some((member) => member.userId === input.memberId)
   ) {
     return;

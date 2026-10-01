@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 200,
+  "item": {
+    "id": "approved-files-resume-automatically",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Approved files resume automatically",
+    "summary": "When you approve a prepared file in a private Murph chat, Murph now sends it without waiting for another message.",
+    "details": "The approved attachment stays bound to its original private conversation, and completed temporary copies are cleaned up without touching saved vault files.",
+    "relevanceTags": ["files", "reliability"],
+    "sourcePullRequests": [2269]
+  }
+}

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { rm, writeFile } from 'node:fs/promises'
+import { rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
@@ -9,7 +9,7 @@ import {
 } from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 
 import { registerMealCommands } from '../src/commands/meal.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
@@ -73,14 +73,19 @@ interface MealCloseoutWorkResult {
   }>
 }
 
-function createMealCli() {
+interface MealListResult {
+  count: number
+  items: Array<{ id: string }>
+}
+
+function createMealCli(services = createIntegratedVaultServices()) {
   const cli = Cli.create('vault-cli', {
     description: 'meal add typed parity test cli',
     version: '0.0.0-test',
   })
   cli.use(incurErrorBridge)
 
-  registerMealCommands(cli, createIntegratedVaultServices())
+  registerMealCommands(cli, services)
   return cli
 }
 
@@ -360,6 +365,104 @@ test.sequential(
 )
 
 test.sequential(
+  'meal closeout-work keeps a next-local-day photo for that day closeout',
+  async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-cli-meal-closeout-local-day-',
+    )
+
+    try {
+      await initializeVault({ vaultRoot, timezone: 'Europe/Berlin' })
+      const day20PhotoPath = path.join(parentRoot, 'august-20-meal.jpg')
+      const day21PhotoPath = path.join(parentRoot, 'august-21-meal.jpg')
+      await Promise.all([
+        writeFile(day20PhotoPath, 'august 20 synthetic image', 'utf8'),
+        writeFile(day21PhotoPath, 'august 21 synthetic image', 'utf8'),
+      ])
+      const day20Meal = await addMeal({
+        externalRef: {
+          resourceId: 'capture_closeout_august_20',
+          resourceType: 'photo',
+          system: 'meal-photo-capture',
+          version: '3'.repeat(64),
+        },
+        occurredAt: '2026-08-20T19:30:00.000Z',
+        photoPath: day20PhotoPath,
+        source: 'device',
+        vaultRoot,
+      })
+      const day21Meal = await addMeal({
+        externalRef: {
+          resourceId: 'capture_closeout_august_21',
+          resourceType: 'photo',
+          system: 'meal-photo-capture',
+          version: '4'.repeat(64),
+        },
+        occurredAt: '2026-08-20T22:15:00.000Z',
+        photoPath: day21PhotoPath,
+        source: 'device',
+        vaultRoot,
+      })
+      assert.equal(day20Meal.event.dayKey, '2026-08-20')
+      assert.equal(day21Meal.event.dayKey, '2026-08-21')
+
+      const day20Result = await runInProcessJsonCli<MealCloseoutWorkResult>(
+        createMealCli(),
+        [
+          'meal',
+          'closeout-work',
+          '--occurrence-at',
+          '2026-08-20T21:00:00.000Z',
+          '--to',
+          '2026-08-20',
+          '--limit',
+          '10',
+          '--vault',
+          vaultRoot,
+        ],
+      )
+      assert.equal(day20Result.exitCode, null)
+      const day20Work = requireData(day20Result.envelope)
+      assert.deepEqual(day20Work.items.map((item) => item.id), [day20Meal.mealId])
+
+      const removed = await runInProcessJsonCli<ShowResult>(createMealCli(), [
+        'meal',
+        'remove-photo',
+        day20Meal.mealId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(removed.exitCode, null)
+      assert.ok(day21Meal.photo)
+      await stat(path.join(vaultRoot, day21Meal.photo.relativePath))
+
+      const day21Result = await runInProcessJsonCli<MealCloseoutWorkResult>(
+        createMealCli(),
+        [
+          'meal',
+          'closeout-work',
+          '--occurrence-at',
+          '2026-08-21T21:00:00.000Z',
+          '--to',
+          '2026-08-21',
+          '--limit',
+          '10',
+          '--vault',
+          vaultRoot,
+        ],
+      )
+      assert.equal(day21Result.exitCode, null)
+      assert.equal(
+        requireData(day21Result.envelope).items.some((item) => item.id === day21Meal.mealId),
+        true,
+      )
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true })
+    }
+  },
+)
+
+test.sequential(
   'meal add typed options persist the same ingredients and nutrition as JSON input',
   async () => {
     const jsonContext = await createTempVaultContext('murph-cli-meal-json-parity-')
@@ -525,6 +628,208 @@ test.sequential(
 )
 
 test.sequential(
+  'meal import-json keeps nested corrections while sanitizing root unknown fields and writing no meal',
+  async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-cli-meal-unknown-field-',
+    )
+
+    try {
+      await initializeVault({ vaultRoot })
+      const cli = createMealCli()
+      const unknownField = 'ingredientz'
+      const unknownValue = 'synthetic private value'
+      const nestedMicronutrientTypo = 'vitaminCM'
+      const payloadPath = path.join(parentRoot, 'meal.json')
+      await writeFile(
+        payloadPath,
+        `${JSON.stringify({
+          note: 'A valid meal note',
+          [unknownField]: unknownValue,
+          nutrition: {
+            micros: {
+              [nestedMicronutrientTypo]: 12,
+            },
+          },
+        })}\n`,
+        'utf8',
+      )
+
+      const result = await runInProcessJsonCli<MealAddResult>(cli, [
+        'meal',
+        'import-json',
+        '--input',
+        `@${payloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (!result.envelope.ok) {
+        assert.equal(result.envelope.error.code, 'invalid_payload')
+        assert.equal(result.envelope.error.stage, 'validation')
+        assert.match(result.envelope.error.message ?? '', /unsupported field/u)
+        assert.match(result.envelope.error.message ?? '', /ingredients/u)
+        assert.match(
+          result.envelope.error.message ?? '',
+          new RegExp(
+            `nutrition\\.micros: Unrecognized key: "${nestedMicronutrientTypo}"`,
+            'u',
+          ),
+        )
+        assert.deepEqual(
+          result.envelope.error.fieldErrors
+            ?.map((fieldError) => fieldError.path)
+            .sort(),
+          ['$', 'nutrition.micros'],
+        )
+      }
+
+      const serializedError = JSON.stringify(result.envelope)
+      assert.equal(serializedError.includes(unknownField), false)
+      assert.equal(serializedError.includes(unknownValue), false)
+      assert.equal(serializedError.includes(payloadPath), false)
+
+      const listed = await runInProcessJsonCli<MealListResult>(cli, [
+        'meal',
+        'list',
+        '--limit',
+        '10',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(listed.exitCode, null)
+      assert.equal(requireData(listed.envelope).count, 0)
+      assert.deepEqual(requireData(listed.envelope).items, [])
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true })
+    }
+  },
+)
+
+test.sequential(
+  'meal import-json rejects differing media aliases before writing and accepts equal aliases',
+  async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-cli-meal-media-alias-conflict-',
+    )
+
+    try {
+      await initializeVault({ vaultRoot })
+      const cli = createMealCli()
+      const conflictScenarios = [
+        {
+          aliasField: 'photoPath',
+          canonicalField: 'photo',
+          firstValue: path.join(parentRoot, 'private-photo-a.jpg'),
+          secondValue: path.join(parentRoot, 'private-photo-b.jpg'),
+        },
+        {
+          aliasField: 'audioPath',
+          canonicalField: 'audio',
+          firstValue: path.join(parentRoot, 'private-audio-a.m4a'),
+          secondValue: path.join(parentRoot, 'private-audio-b.m4a'),
+        },
+      ] as const
+
+      for (const [index, scenario] of conflictScenarios.entries()) {
+        const payloadPath = path.join(parentRoot, `conflict-${index}.json`)
+        await writeFile(
+          payloadPath,
+          `${JSON.stringify({
+            [scenario.aliasField]: scenario.secondValue,
+            [scenario.canonicalField]: scenario.firstValue,
+            note: 'Synthetic meal with conflicting media aliases.',
+          })}\n`,
+          'utf8',
+        )
+
+        const result = await runInProcessJsonCli<MealAddResult>(cli, [
+          'meal',
+          'import-json',
+          '--input',
+          `@${payloadPath}`,
+          '--vault',
+          vaultRoot,
+        ])
+
+        assert.equal(result.exitCode, 1)
+        assert.equal(result.envelope.ok, false)
+        if (!result.envelope.ok) {
+          assert.equal(result.envelope.error.code, 'invalid_payload')
+          assert.equal(result.envelope.error.stage, 'validation')
+          assert.match(
+            result.envelope.error.message ?? '',
+            new RegExp(
+              `${scenario.canonicalField} and ${scenario.aliasField} must match`,
+              'u',
+            ),
+          )
+          assert.deepEqual(
+            result.envelope.error.fieldErrors
+              ?.map((fieldError) => fieldError.path)
+              .sort(),
+            [scenario.aliasField, scenario.canonicalField].sort(),
+          )
+          assert.match(result.envelope.error.hint ?? '', /same path/u)
+          assert.match(result.envelope.error.hint ?? '', /No meal was written/u)
+        }
+
+        const serializedError = JSON.stringify(result.envelope)
+        assert.equal(serializedError.includes(scenario.firstValue), false)
+        assert.equal(serializedError.includes(scenario.secondValue), false)
+        assert.equal(serializedError.includes(payloadPath), false)
+      }
+
+      const afterConflicts = await runInProcessJsonCli<MealListResult>(cli, [
+        'meal',
+        'list',
+        '--limit',
+        '10',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(afterConflicts.exitCode, null)
+      assert.equal(requireData(afterConflicts.envelope).count, 0)
+
+      const equalPhotoPath = path.join(parentRoot, 'equal-photo.jpg')
+      const equalAudioPath = path.join(parentRoot, 'equal-audio.m4a')
+      const equalPayloadPath = path.join(parentRoot, 'equal-aliases.json')
+      await Promise.all([
+        writeFile(equalPhotoPath, 'synthetic photo bytes', 'utf8'),
+        writeFile(equalAudioPath, 'synthetic audio bytes', 'utf8'),
+        writeFile(
+          equalPayloadPath,
+          `${JSON.stringify({
+            audio: equalAudioPath,
+            audioPath: equalAudioPath,
+            note: 'Synthetic meal with matching media aliases.',
+            photo: equalPhotoPath,
+            photoPath: equalPhotoPath,
+          })}\n`,
+          'utf8',
+        ),
+      ])
+
+      const equalAliases = await runInProcessJsonCli<MealAddResult>(cli, [
+        'meal',
+        'import-json',
+        '--input',
+        `@${equalPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(equalAliases.exitCode, null)
+      assert.ok(requireData(equalAliases.envelope).photoPath)
+      assert.ok(requireData(equalAliases.envelope).audioPath)
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true })
+    }
+  },
+)
+
+test.sequential(
   'meal add typed ingredients and nutrition override structured payload fields',
   async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
@@ -668,3 +973,103 @@ test.sequential(
     }
   },
 )
+
+interface MealAddWithTotalsResult extends MealAddResult {
+  dailyTotals?:
+    | { status: 'available'; data: Awaited<ReturnType<ReturnType<typeof createIntegratedVaultServices>['query']['showMealNutritionTotals']>> }
+    | { status: 'unavailable'; localDate: string; code: string; hint: string }
+}
+
+test.sequential('meal save composes fresh totals and goals for its canonical local day', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-save-totals-')
+  const services = createIntegratedVaultServices()
+  const totals = vi.spyOn(services.query, 'showMealNutritionTotals')
+  try {
+    await initializeVault({ vaultRoot, timezone: 'America/Los_Angeles' })
+    await addMeal({ vaultRoot, occurredAt: '2026-04-10T18:00:00Z', note: 'Earlier synthetic meal',
+      nutrition: { totals: { calories: 300, proteinGrams: 10, carbsGrams: 40, fatGrams: 11, fiberGrams: 5 } } })
+    const result = await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(services), [
+      'meal', 'add', '--note', 'Synthetic evening meal', '--occurred-at', '2026-04-11T02:00:00Z',
+      '--nutrition-calories', '400', '--nutrition-protein-grams', '20', '--nutrition-carbs-grams', '50',
+      '--nutrition-fat-grams', '13', '--nutrition-fiber-grams', '6', '--nutrition-source', 'estimated',
+      '--with-daily-totals', '--vault', vaultRoot,
+    ])
+    assert.equal(result.exitCode, null)
+    const saved = requireData(result.envelope)
+    assert.equal(saved.dailyTotals?.status, 'available')
+    if (saved.dailyTotals?.status !== 'available') throw new Error('Expected daily totals')
+    assert.equal(totals.mock.calls.length, 1)
+    assert.deepEqual(totals.mock.calls[0], [{ vault: vaultRoot, requestId: null, from: '2026-04-10', to: '2026-04-10', resolveGoals: true }])
+    assert.equal(saved.dailyTotals.data.mealCount, 2)
+    assert.deepEqual(saved.dailyTotals.data.totals.calories, { total: 700, mealCount: 2 })
+    assert.equal(saved.dailyTotals.data.goalContext?.status, 'missing')
+    const fresh = await services.query.showMealNutritionTotals({ vault: vaultRoot, requestId: null, from: '2026-04-10', to: '2026-04-10', resolveGoals: true })
+    assert.deepEqual(saved.dailyTotals.data, fresh)
+    const shown = await runInProcessJsonCli<ShowResult>(createMealCli(), ['meal', 'show', saved.mealId, '--vault', vaultRoot])
+    assert.equal(requireData(shown.envelope).entity.id, saved.mealId)
+  } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+test.sequential.each(['unavailable', 'malformed'] as const)('a %s post-save totals read preserves success and retries only the read', async (failure) => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-save-read-failure-')
+  const services = createIntegratedVaultServices()
+  const readTotals = services.query.showMealNutritionTotals.bind(services.query)
+  const totals = vi.spyOn(services.query, 'showMealNutritionTotals')
+  if (failure === 'unavailable') totals.mockRejectedValueOnce(new Error('Synthetic read unavailable'))
+  else totals.mockImplementationOnce(async (input) => ({ ...await readTotals(input), mealCount: -1 }))
+  try {
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
+    const result = await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(services), [
+      'meal', 'add', '--note', 'Synthetic meal without numeric estimates', '--occurred-at', '2026-04-10',
+      '--with-daily-totals', '--vault', vaultRoot,
+    ])
+    assert.equal(result.exitCode, null)
+    const saved = requireData(result.envelope)
+    assert.equal(saved.dailyTotals?.status, 'unavailable')
+    if (saved.dailyTotals?.status !== 'unavailable') throw new Error('Expected unavailable totals')
+    assert.equal(saved.dailyTotals.localDate, '2026-04-10')
+    assert.match(saved.dailyTotals.hint, /do not repeat meal add/u)
+    assert.equal(saved.nutrition, null)
+    const retry = await services.query.showMealNutritionTotals({ vault: vaultRoot, requestId: null, from: '2026-04-10', to: '2026-04-10', resolveGoals: true })
+    assert.equal(retry.mealCount, 1)
+    assert.deepEqual(retry.totals.calories, { total: null, mealCount: 0 })
+  } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+test.sequential('ordinary and invalid meal saves never perform an optional totals read', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-save-read-opt-in-')
+  const services = createIntegratedVaultServices()
+  const totals = vi.spyOn(services.query, 'showMealNutritionTotals')
+  try {
+    await initializeVault({ vaultRoot })
+    const cli = createMealCli(services)
+    const saved = requireData((await runInProcessJsonCli<MealAddWithTotalsResult>(cli, [
+      'meal', 'add', '--note', 'Synthetic nonnumeric meal', '--vault', vaultRoot,
+    ])).envelope)
+    assert.equal(saved.dailyTotals, undefined)
+    const invalid = await runInProcessJsonCli(cli, ['meal', 'add', '--with-daily-totals', '--vault', vaultRoot])
+    assert.equal(invalid.envelope.ok, false)
+    assert.equal(totals.mock.calls.length, 0)
+  } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+
+test.sequential('structured meal save retains incomplete daily coverage in its combined result', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-import-totals-')
+  try {
+    await initializeVault({ vaultRoot, timezone: 'Pacific/Auckland' })
+    await addMeal({ vaultRoot, occurredAt: '2026-04-10T06:00:00Z', note: 'Synthetic earlier meal without estimates' })
+    const inputFile = path.join(parentRoot, 'meal.json')
+    await writeFile(inputFile, JSON.stringify({ note: 'Synthetic recipe', occurredAt: '2026-04-09T23:00:00Z',
+      ingredients: ['chickpeas', 'rice'], nutrition: { totals: { calories: 560 } } }))
+    const saved = requireData((await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(), [
+      'meal', 'import-json', '--input', '@' + inputFile, '--with-daily-totals', '--vault', vaultRoot,
+    ])).envelope)
+    assert.equal(saved.dailyTotals?.status, 'available')
+    if (saved.dailyTotals?.status !== 'available') throw new Error('Expected daily totals')
+    assert.equal(saved.dailyTotals.data.goalContext?.localDate, '2026-04-10')
+    assert.equal(saved.dailyTotals.data.mealCount, 2)
+    assert.deepEqual(saved.dailyTotals.data.totals.calories, { total: 560, mealCount: 1 })
+    assert.deepEqual(saved.dailyTotals.data.totals.fiberGrams, { total: null, mealCount: 0 })
+  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+})

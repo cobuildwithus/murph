@@ -31,8 +31,11 @@ export interface CodexAppServerPreparedImageInput {
 
 const CODEX_ORIGINAL_IMAGE_DETAIL_MODELS = new Set<string>([
   'gpt-5.6-luna',
-  'gpt-5.6-terra',
+  'gpt-6.1-sol',
+  'gpt-6-sol',
+  'gpt-6-luna',
   'gpt-5.6-sol',
+  'gpt-6-astra',
 ])
 const CODEX_ORIGINAL_IMAGE_DETAIL_PROVIDER_IDS = new Set<string>([
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,

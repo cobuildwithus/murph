@@ -3,12 +3,59 @@ import { expect, test } from "@playwright/test";
 const management = {
   authorizationId: "hgsa_design_component",
   chargedThisPeriodMinor: 500,
-  monthlyCapMinor: 2_000,
+  monthlyCapMinor: 5_000,
   pendingThisPeriodMinor: 500,
   pendingMonthlyCapMinor: null,
   periodEnd: "2026-08-30T16:00:00.000Z",
   status: "active",
 };
+
+test("monthly sponsorship presents the $50 maximum on desktop and phone", async ({
+  page,
+}) => {
+  for (const viewport of [
+    { height: 720, label: "desktop", width: 1_280 },
+    { height: 844, label: "phone", width: 390 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const response = await page.goto("/design?tab=components", {
+      waitUntil: "load",
+    });
+    expect(response?.status(), "design catalog should respond 200").toBe(200);
+
+    const study = page.locator("#group-usage-funding-component");
+    await expect(study).toHaveCount(1);
+    const presentation = viewport.label === "phone" ? "drawer" : "dialog";
+    const trigger = study.locator(`[data-slot="${presentation}-trigger"]`, {
+      hasText: "Sponsor this chat",
+    });
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+
+    const dialog = page.locator(
+      `[data-slot="${presentation}-content"][data-inert="true"]`,
+    );
+    await expect(dialog).toBeVisible();
+    await dialog.evaluate((element) => element.removeAttribute("inert"));
+
+    if (viewport.label === "phone") {
+      const slider = dialog.getByRole("slider", { name: "Monthly maximum" });
+      await expect(slider).toHaveAttribute("aria-valuemax", "50");
+      await slider.press("End");
+      await expect(slider).toHaveAttribute("aria-valuenow", "50");
+      await expect(slider).toHaveAttribute(
+        "aria-valuetext",
+        "Up to $50 per month",
+      );
+    } else {
+      await expect(dialog.getByText("$50", { exact: true })).toBeVisible();
+      await expect(dialog.getByRole("radio", { name: /\$50/u })).toBeVisible();
+    }
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  }
+});
 
 test("sponsorship confirmation preserves focus, safe dismissal, and retry", async ({
   page,
@@ -108,10 +155,12 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
 
   let study = await enableStudy();
 
-  const reviewButton = study.getByRole("button", { name: "Review $20 limit" });
+  const reviewButton = study.getByRole("button", {
+    name: "Review $50 limit",
+  });
   await reviewButton.click();
   let dialog = page.getByRole("alertdialog", {
-    name: "Increase your limit to $20?",
+    name: "Increase your limit to $50?",
   });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(
@@ -127,7 +176,7 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
 
   await reviewButton.click();
   dialog = page.getByRole("alertdialog", {
-    name: "Increase your limit to $20?",
+    name: "Increase your limit to $50?",
   });
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
@@ -137,9 +186,9 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
 
   await reviewButton.click();
   dialog = page.getByRole("alertdialog", {
-    name: "Increase your limit to $20?",
+    name: "Increase your limit to $50?",
   });
-  await dialog.getByRole("button", { name: "Increase to $20" }).click();
+  await dialog.getByRole("button", { name: "Increase to $50" }).click();
   await expect(dialog.getByRole("alert")).toContainText(
     "We’re not sure whether your limit changed",
   );
@@ -147,11 +196,11 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
     dialog.getByRole("button", { name: "Check current setup" }),
   ).toBeVisible();
   await expect(
-    dialog.getByRole("button", { name: "Increase to $20" }),
+    dialog.getByRole("button", { name: "Increase to $50" }),
   ).toBeEnabled();
   expect(limitRequests).toBe(1);
 
-  await dialog.getByRole("button", { name: "Increase to $20" }).click();
+  await dialog.getByRole("button", { name: "Increase to $50" }).click();
   await expect(dialog).toBeHidden();
   expect(limitRequests).toBe(2);
 

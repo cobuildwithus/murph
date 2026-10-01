@@ -112,6 +112,8 @@ export function buildTypedEventRecord(
           kind: "note",
           experimentId: draft.experimentId,
           noteType: draft.noteType,
+          clinicalFact: draft.clinicalFact,
+          plan: draft.plan,
           authoredAt: draft.authoredAt,
           signedAt: draft.signedAt,
           author: draft.author,

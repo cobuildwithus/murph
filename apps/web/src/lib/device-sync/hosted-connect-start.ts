@@ -36,9 +36,10 @@ export async function startHostedDeviceSyncConnection(input: {
   }
 
   assertHostedOnboardingMutationOrigin(input.request);
+  const browserOrigin = input.request.headers.get("origin")?.trim();
   const auth = await requireActiveHostedAppSessionFromRequest(input.request);
   assertHostedDeviceSyncBrowserCallbackHostname({
-    appSessionUrl: input.request.url,
+    appSessionUrl: browserOrigin || input.request.url,
     callbackBaseUrl: readHostedDeviceSyncPublicBaseUrl(),
   });
   const prisma = getPrisma();

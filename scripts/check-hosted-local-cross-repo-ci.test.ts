@@ -33,6 +33,7 @@ describe("hosted-local cross-repository CI coverage", () => {
           "device-connect",
           "junction-link-connect",
           "linq-first-contact",
+          "linq-reminder-device-sync-non-starvation",
         ]),
       });
   });
@@ -60,6 +61,26 @@ describe("hosted-local cross-repository CI coverage", () => {
     })).toThrowError(
       /public-murph-integration\.yml is missing required hosted-local scenarios:[\s\S]*junction-link-connect:[\s\S]*complete Junction Link browser callback/u,
     );
+  });
+
+  it("requires cold recovery independently of warm restart coverage", () => {
+    const workflowText = hostedLocalCrossRepoCiRequirements
+      .filter(({ scenario }) => scenario !== "stale-deferred-replay")
+      .map(({ scenario }) => `- scenarios: ${scenario}`).join("\n")
+      + "\n- scenarios: stuck-invocation-recovery retryable-outbox-foreground-restart";
+    expect(() => assertHostedLocalCrossRepoCiCoverage({ workflowText })).toThrow(/stale-deferred-replay/);
+  });
+
+  it("requires Telegram scheduled delivery independently of first-contact coverage", () => {
+    const workflowText = hostedLocalCrossRepoCiRequirements
+      .filter(({ scenario }) => scenario !== "telegram-scheduled-reminder")
+      .map(({ scenario }) => `- scenarios: ${scenario}`).join("\n")
+      + "\n- scenarios: telegram";
+    expect(() => assertHostedLocalCrossRepoCiCoverage({ workflowText }))
+      .toThrow(/telegram-scheduled-reminder/);
+    expect(() => assertHostedLocalCrossRepoCiCoverage({
+      workflowText: `${workflowText}\n- scenarios: telegram-scheduled-reminder`,
+    })).not.toThrow();
   });
 
   it("fails on a workflow scenario that the public harness does not own", () => {

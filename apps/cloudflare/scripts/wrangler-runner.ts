@@ -20,6 +20,42 @@ export async function runWranglerLogged(
   await waitForWranglerExit(child, wranglerArgs);
 }
 
+export async function runWranglerLoggedCaptured(
+  wranglerArgs: string[],
+  options: {
+    cwd?: string;
+    envOverrides?: Record<string, string>;
+  } = {},
+): Promise<{ stderr: string; stdout: string }> {
+  const child = spawnWranglerProcess(wranglerArgs, {
+    cwd: options.cwd,
+    env: resolveWranglerEnv(options.envOverrides),
+    stdio: ["inherit", "pipe", "pipe"],
+  });
+  const stdoutStream = child.stdout;
+  const stderrStream = child.stderr;
+
+  if (!stdoutStream || !stderrStream) {
+    throw new Error("wrangler captured runner requires piped stdout and stderr streams.");
+  }
+
+  let stdout = "";
+  let stderr = "";
+  stdoutStream.setEncoding("utf8");
+  stdoutStream.on("data", (chunk: string) => {
+    stdout += chunk;
+    process.stdout.write(chunk);
+  });
+  stderrStream.setEncoding("utf8");
+  stderrStream.on("data", (chunk: string) => {
+    stderr += chunk;
+    process.stderr.write(chunk);
+  });
+
+  await waitForWranglerExit(child, wranglerArgs);
+  return { stderr, stdout };
+}
+
 export async function runWranglerJson(
   wranglerArgs: string[],
   options: {

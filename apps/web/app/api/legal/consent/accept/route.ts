@@ -16,10 +16,24 @@ import {
 } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
+import {
+  continueHostedJoinInviteAfterLaunchConsent,
+  type HostedStarterUsageEnrollmentResult,
+} from "@/src/lib/hosted-onboarding/starter-usage-enrollment-service";
 import { getPrisma } from "@/src/lib/prisma";
 
 function isLaunchScope(scope: string): scope is HostedConsentLaunchScope {
   return scope === "launch.legal" || scope === "launch.health-data";
+}
+
+function readOptionalStarterInviteCode(body: Record<string, unknown>): string | null {
+  if (!("inviteCode" in body)) {
+    return null;
+  }
+  if (typeof body.inviteCode !== "string" || !body.inviteCode) {
+    throw new TypeError("inviteCode must be a non-empty string when provided.");
+  }
+  return body.inviteCode;
 }
 
 export const POST = withJsonError(async (request: Request) => {
@@ -28,6 +42,7 @@ export const POST = withJsonError(async (request: Request) => {
   const auth = await requireHostedAppSessionFromRequest(request);
   const body = await readJsonObject(request);
   const consent = parseHostedConsentAcceptRequest(body);
+  const starterInviteCode = readOptionalStarterInviteCode(body);
   const priorHealthDataConsentState =
     consent.scope === HOSTED_HEALTH_DATA_CONSENT_SCOPE
       ? await readHostedHealthDataConsentState({
@@ -73,5 +88,24 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  return jsonOk(status);
+  let starterEnrollment: HostedStarterUsageEnrollmentResult | null = null;
+  if (starterInviteCode && isLaunchScope(consent.scope) && status.launchGranted) {
+    const continuation = await continueHostedJoinInviteAfterLaunchConsent({
+      inviteCode: starterInviteCode,
+      member: {
+        id: auth.member.id,
+        suspendedAt: auth.member.suspendedAt,
+      },
+      source: "web_onboarding",
+    });
+    starterEnrollment = continuation.disposition === "enrolled"
+      ? continuation.enrollment
+      : null;
+  }
+
+  return jsonOk(
+    starterInviteCode && isLaunchScope(consent.scope)
+      ? { ...status, starterEnrollment }
+      : status,
+  );
 });

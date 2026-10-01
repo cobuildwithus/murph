@@ -13,7 +13,6 @@ import {
 } from "@murphai/runtime-state";
 
 import {
-  HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -70,76 +69,6 @@ export interface HostedRuntimeCryptoRootResponse {
   userId: string;
 }
 
-export interface UnwrappedHostedWorkerRuntimeRoots {
-  ingress: {
-    envelope: HostedDomainRootKeyEnvelopeV1;
-    rootKey: Uint8Array;
-  };
-  runtime: {
-    envelope: HostedDomainRootKeyEnvelopeV1;
-    rootKey: Uint8Array;
-  };
-}
-
-export async function fetchHostedWorkerRuntimeRoots(input: {
-  baseUrl: string;
-  callbackSigning: HostedWebCallbackSigningEnvironment;
-  cryptoEnv: HostedWorkerCryptoEnv;
-  allowHttpHosts?: readonly string[];
-  fetchImpl?: typeof fetch;
-  timeoutMs: number | null;
-  userId: string;
-}): Promise<UnwrappedHostedWorkerRuntimeRoots> {
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.baseUrl,
-    boundUserId: input.userId,
-    allowHttpHosts: input.allowHttpHosts,
-    callbackSigning: input.callbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: "POST",
-    path: HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
-    timeoutMs: input.timeoutMs,
-  });
-  if (!response.ok) {
-    throw new Error(`Hosted runtime crypto context fetch failed with HTTP ${response.status}.`);
-  }
-  const context = await response.json() as HostedRuntimeCryptoContextResponse;
-  return unwrapHostedWorkerRuntimeRoots({
-    context,
-    env: input.cryptoEnv,
-  });
-}
-
-export async function fetchHostedWorkerRuntimeRoot(input: {
-  baseUrl: string;
-  callbackSigning: HostedWebCallbackSigningEnvironment;
-  cryptoEnv: HostedWorkerCryptoEnv;
-  domain: "ingress" | "runtime";
-  allowHttpHosts?: readonly string[];
-  fetchImpl?: typeof fetch;
-  timeoutMs: number | null;
-  userId: string;
-}): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.baseUrl,
-    boundUserId: input.userId,
-    allowHttpHosts: input.allowHttpHosts,
-    callbackSigning: input.callbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: "POST",
-    path: HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
-    timeoutMs: input.timeoutMs,
-  });
-  if (!response.ok) {
-    throw new Error(`Hosted runtime crypto context fetch failed with HTTP ${response.status}.`);
-  }
-  return unwrapHostedWorkerRuntimeRoot({
-    context: await response.json() as HostedRuntimeCryptoContextResponse,
-    domain: input.domain,
-    env: input.cryptoEnv,
-  });
-}
-
 export async function fetchHostedWorkerRuntimeRootByRootKeyId(input: {
   baseUrl: string;
   callbackSigning: HostedWebCallbackSigningEnvironment;
@@ -180,35 +109,12 @@ export async function fetchHostedWorkerRuntimeRootByRootKeyId(input: {
     rootKeyId: input.rootKeyId,
     userId: input.userId,
   });
-  return unwrapHostedWorkerRuntimeRootEnvelope({
+  return unwrapWorkerDomainRoot({
     domain: input.domain,
     envelope: parseHostedDomainRootKeyEnvelope(context.envelope),
     env: input.cryptoEnv,
     userId: input.userId,
   });
-}
-
-export async function unwrapHostedWorkerRuntimeRoots(input: {
-  context: HostedRuntimeCryptoContextResponse;
-  env: HostedWorkerCryptoEnv;
-}): Promise<UnwrappedHostedWorkerRuntimeRoots> {
-  const ingressEnvelope = requireHostedRuntimeCryptoContextEnvelope(input.context, "ingress");
-  const runtimeEnvelope = requireHostedRuntimeCryptoContextEnvelope(input.context, "runtime");
-  const [ingress, runtime] = await Promise.all([
-    unwrapWorkerDomainRoot({
-      domain: "ingress",
-      envelope: parseHostedDomainRootKeyEnvelope(ingressEnvelope),
-      env: input.env,
-      userId: input.context.userId,
-    }),
-    unwrapWorkerDomainRoot({
-      domain: "runtime",
-      envelope: parseHostedDomainRootKeyEnvelope(runtimeEnvelope),
-      env: input.env,
-      userId: input.context.userId,
-    }),
-  ]);
-  return { ingress, runtime };
 }
 
 export async function unwrapHostedWorkerRuntimeRoot(input: {
@@ -217,25 +123,11 @@ export async function unwrapHostedWorkerRuntimeRoot(input: {
   env: HostedWorkerCryptoEnv;
 }): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
   const envelope = requireHostedRuntimeCryptoContextEnvelope(input.context, input.domain);
-  return unwrapHostedWorkerRuntimeRootEnvelope({
+  return unwrapWorkerDomainRoot({
     domain: input.domain,
     envelope: parseHostedDomainRootKeyEnvelope(envelope),
     env: input.env,
     userId: input.context.userId,
-  });
-}
-
-async function unwrapHostedWorkerRuntimeRootEnvelope(input: {
-  domain: "ingress" | "runtime";
-  envelope: HostedDomainRootKeyEnvelopeV1;
-  env: HostedWorkerCryptoEnv;
-  userId: string;
-}): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
-  return await unwrapWorkerDomainRoot({
-    domain: input.domain,
-    envelope: input.envelope,
-    env: input.env,
-    userId: input.userId,
   });
 }
 

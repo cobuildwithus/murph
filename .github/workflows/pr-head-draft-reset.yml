@@ -1,0 +1,122 @@
+name: Pull Request Head Draft Reset
+
+on:
+  workflow_run:
+    workflows: ["Pull Request Head Change"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  return-to-draft:
+    name: Return synchronized pull request to draft
+    environment:
+      name: frog-reconciliation
+      deployment: false
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Mint draft-reset pull request token
+        id: frog-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.FROG_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Convert the exact synchronized head to draft
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ steps.frog-app-token.outputs.token }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${EXPECTED_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::Head-change receipt did not expose an exact PR head SHA."
+            exit 1
+          }
+          [[ "${HEAD_REPOSITORY}" =~ ^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$ ]] || {
+            echo "::error::Head-change receipt did not expose a valid head repository."
+            exit 1
+          }
+          [[ -n "${HEAD_BRANCH}" && ${#HEAD_BRANCH} -le 255 && "${HEAD_BRANCH}" != *$'\n'* && "${HEAD_BRANCH}" != *$'\r'* ]] || {
+            echo "::error::Head-change receipt did not expose a valid head branch."
+            exit 1
+          }
+          HEAD_OWNER="${HEAD_REPOSITORY%%/*}"
+
+          candidates="$(gh api --method GET --paginate --slurp \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/pulls" \
+            -f state=open \
+            -f head="${HEAD_OWNER}:${HEAD_BRANCH}" \
+            -f per_page=100 | jq -c \
+            --arg base_repository "${GITHUB_REPOSITORY}" \
+            --arg head_branch "${HEAD_BRANCH}" \
+            --arg head_repository "${HEAD_REPOSITORY}" \
+            --arg head_sha "${EXPECTED_HEAD_SHA}" \
+            '[.[][] | select(
+              .state == "open" and
+              .base.repo.full_name == $base_repository and
+              .head.repo.full_name == $head_repository and
+              .head.ref == $head_branch and
+              .head.sha == $head_sha
+            )]')"
+          candidate_count="$(jq -r 'length' <<<"${candidates}")"
+          if [[ "${candidate_count}" != 1 ]]; then
+            echo "::error::Expected one open pull request for the exact workflow-run head; found ${candidate_count}."
+            exit 1
+          fi
+          PR_NUMBER="$(jq -r '.[0].number // empty' <<<"${candidates}")"
+          [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::GitHub did not return a valid pull request number."
+            exit 1
+          }
+
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          current_head_sha="$(jq -r '.head.sha // empty' <<<"${pr}")"
+          state="$(jq -r '.state // empty' <<<"${pr}")"
+          draft="$(jq -r '.draft' <<<"${pr}")"
+          pull_request_id="$(jq -r '.node_id // empty' <<<"${pr}")"
+
+          [[ "${current_head_sha}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::GitHub returned an invalid current PR head SHA."
+            exit 1
+          }
+          if [[ "${current_head_sha}" != "${EXPECTED_HEAD_SHA}" ]]; then
+            echo "A newer synchronize event owns ${current_head_sha}; this stale reset owns ${EXPECTED_HEAD_SHA}."
+            exit 0
+          fi
+          if [[ "${state}" != open ]]; then
+            echo "PR #${PR_NUMBER} is no longer open; no draft reset is needed."
+            exit 0
+          fi
+          if [[ "${draft}" == true ]]; then
+            echo "PR #${PR_NUMBER} is already draft at ${EXPECTED_HEAD_SHA}."
+            exit 0
+          fi
+          [[ -n "${pull_request_id}" ]] || {
+            echo "::error::GitHub did not return the pull request node id."
+            exit 1
+          }
+
+          # GraphQL variable references are literal input to gh, not shell expansions.
+          # shellcheck disable=SC2016
+          converted="$(gh api graphql \
+            -f query='mutation($pullRequestId: ID!) {
+              convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) {
+                pullRequest { id isDraft }
+              }
+            }' \
+            -f pullRequestId="${pull_request_id}")"
+          converted_id="$(jq -r '.data.convertPullRequestToDraft.pullRequest.id // empty' <<<"${converted}")"
+          converted_draft="$(jq -r '.data.convertPullRequestToDraft.pullRequest.isDraft' <<<"${converted}")"
+          [[ "${converted_id}" == "${pull_request_id}" && "${converted_draft}" == true ]] || {
+            echo "::error::GitHub did not confirm the pull request draft reset."
+            exit 1
+          }
+          echo "PR #${PR_NUMBER} returned to draft after head ${EXPECTED_HEAD_SHA}; mark it ready again to prove that exact head."

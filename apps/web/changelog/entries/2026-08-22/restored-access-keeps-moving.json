@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-22",
+  "order": 100,
+  "item": {
+    "id": "restored-access-keeps-moving",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Restored access keeps moving",
+    "summary": "When billing or Family access is restored, Murph now resumes pending work reliably even if the first background handoff is interrupted.",
+    "details": "Recovery stays tied to the exact access change until it is processed, while ordinary active billing updates do not repeatedly wake an idle Murph.",
+    "relevanceTags": ["assistant", "billing", "family", "reliability"],
+    "sourcePullRequests": [2165]
+  }
+}

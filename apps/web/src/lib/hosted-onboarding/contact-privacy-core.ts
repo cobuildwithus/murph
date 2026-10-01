@@ -37,6 +37,7 @@ export type HostedBlindIndexKind =
   | "stripe-subscription"
   | "stripe-subscription-item"
   | "stripe-subscription-schedule"
+  | "telegram-poll"
   | "telegram-message"
   | "telegram-username"
   | "telegram-user"
@@ -531,4 +532,12 @@ function readHostedPrivacyKeyring(): {
   readVersions: readonly string[];
 } {
   return readHostedContactPrivacyKeyring(process.env);
+}
+
+export function createHostedTelegramPollLookupKey(value: string): string | null {
+  return createHostedLookupKey("telegram-poll", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedTelegramPollLookupKeyReadCandidates(value: string): string[] {
+  return createHostedLookupKeyReadCandidates("telegram-poll", normalizeHostedOpaqueInput(value));
 }

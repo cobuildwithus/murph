@@ -9,17 +9,21 @@ import {
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
   HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
+  HOSTED_VAULT_SHARE_SOURCE_WORKSPACE_VERSION_PARAM,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliverResponse,
   type HostedVaultShareProjectionMode,
 } from "@murphai/hosted-execution/vault-share";
 import {
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
-  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
+  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD,
+  isHostedRuntimeVaultShareDeliverContinuation,
 } from "@murphai/hosted-execution/routes";
 
 import {
+  bindHostedRunnerWebControlRoutePath,
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   HostedWebControlPlaneResponseError,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
@@ -44,8 +48,13 @@ export function createHostedWebVaultSharePort(input: {
           boundUserId: input.boundUserId,
           description: "Hosted vault share active projection scopes",
           fetchImpl: input.fetchImpl,
-          method: "GET",
-          path: buildHostedVaultShareActiveKindsPath(request.projectionMode),
+          route: bindHostedRunnerWebControlRoutePath(
+            HOSTED_RUNNER_WEB_CONTROL_ROUTES.vaultShareActiveKinds,
+            buildHostedVaultShareActiveKindsPath(
+              request.projectionMode,
+              request.sourceWorkspaceVersion,
+            ),
+          ),
           signal,
           timeoutMs: input.timeoutMs,
           transport: input.transport,
@@ -66,43 +75,86 @@ export function createHostedWebVaultSharePort(input: {
       const headers = new Headers({
         [HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER]: String(effectDeadlineAtEpochMs),
       });
-      let payload: unknown;
-      try {
-        payload = await fetchHostedWebControlPlaneJson({
-          body: request,
-          boundUserId: input.boundUserId,
-          description: "Hosted vault share delivery",
-          fetchImpl: input.fetchImpl,
-          headers,
-          path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
-          timeoutMs: Math.max(1, settlementDeadlineAtEpochMs - Date.now()),
-          transport: input.transport,
-        });
-      } catch (error) {
-        if (isDefinitiveHostedVaultShareScopeFailure({
-          effectDeadlineAtEpochMs,
-          error,
-          transport: input.transport,
-        })) {
-          return { status: "scope-failed" };
+      const observedContinuations = new Set<string>();
+      let continuation: string | null = null;
+      let delivered = false;
+
+      while (true) {
+        let payload: unknown;
+        try {
+          payload = await fetchHostedWebControlPlaneJson({
+            body: continuation === null
+              ? request
+              : {
+                  ...request,
+                  [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD]:
+                    continuation,
+                },
+            boundUserId: input.boundUserId,
+            description: "Hosted vault share delivery",
+            fetchImpl: input.fetchImpl,
+            headers,
+            route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.vaultShareDeliver,
+            timeoutMs: Math.max(1, settlementDeadlineAtEpochMs - Date.now()),
+            transport: input.transport,
+          });
+        } catch (error) {
+          if (isDefinitiveHostedVaultShareScopeFailure({
+            effectDeadlineAtEpochMs,
+            error,
+            transport: input.transport,
+          })) {
+            return { status: "scope-failed" };
+          }
+          if (
+            !(error instanceof HostedWebControlPlaneResponseError)
+            || (
+              input.transport.mode === "proxy"
+              && !error.forwardedFromWeb
+            )
+          ) {
+            await waitForHostedVaultShareAmbiguousDeliverySettlement(
+              settlementDeadlineAtEpochMs,
+            );
+          }
+          throw error;
+        }
+
+        const response = parseHostedVaultShareDeliverResponse(payload);
+        delivered ||= response.status === "delivered";
+        const nextContinuation = readHostedVaultShareDeliverContinuation(payload);
+        if (nextContinuation === null) {
+          return delivered
+            ? { status: "delivered" }
+            : { status: "no-active-share" };
         }
         if (
-          !(error instanceof HostedWebControlPlaneResponseError)
-          || (
-            input.transport.mode === "proxy"
-            && !error.forwardedFromWeb
-          )
+          nextContinuation === continuation
+          || observedContinuations.has(nextContinuation)
         ) {
-          await waitForHostedVaultShareAmbiguousDeliverySettlement(
-            settlementDeadlineAtEpochMs,
-          );
+          throw new TypeError("Hosted vault-share delivery continuation repeated.");
         }
-        throw error;
+        observedContinuations.add(nextContinuation);
+        continuation = nextContinuation;
       }
-
-      return parseHostedVaultShareDeliverResponse(payload);
     },
   };
+}
+
+function readHostedVaultShareDeliverContinuation(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted vault share delivery response must be an object.");
+  }
+  const continuation = (value as Record<string, unknown>)[
+    HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD
+  ];
+  if (continuation === undefined) {
+    return null;
+  }
+  if (!isHostedRuntimeVaultShareDeliverContinuation(continuation)) {
+    throw new TypeError("Hosted vault-share delivery continuation is invalid.");
+  }
+  return continuation;
 }
 
 function isDefinitiveHostedVaultShareScopeFailure(input: {
@@ -147,6 +199,7 @@ async function runWithExactCallerAbort<T>(
 
 function buildHostedVaultShareActiveKindsPath(
   projectionMode?: HostedVaultShareProjectionMode,
+  sourceWorkspaceVersion?: string,
 ): string {
   const params = new URLSearchParams();
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
@@ -161,6 +214,9 @@ function buildHostedVaultShareActiveKindsPath(
   );
   if (projectionMode) {
     params.set(HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM, projectionMode);
+  }
+  if (sourceWorkspaceVersion !== undefined) {
+    params.set(HOSTED_VAULT_SHARE_SOURCE_WORKSPACE_VERSION_PARAM, sourceWorkspaceVersion);
   }
 
   return `${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}?${params.toString()}`;

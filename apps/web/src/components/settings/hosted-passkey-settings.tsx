@@ -2,171 +2,69 @@
 
 import { Fingerprint } from "lucide-react";
 
-import { usePasskeyWalletMfa } from "@/src/components/sensitive-actions/use-passkey-wallet-mfa";
-import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
-import type { HostedPrivyWalletMfaStatus } from "@/src/lib/hosted-onboarding/privy-wallet-mfa";
-import { cn } from "@/src/lib/utils";
+import type { HostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/shared";
+import { useApprovalPasskeyEnrollment } from "@/src/components/sensitive-actions/use-approval-passkey-enrollment";
 
+import { ApprovalPasskeyStatus } from "./approval-passkey-status";
 import { SettingsStatusLine } from "./connected-account-card";
+import { SettingsRow } from "./settings-row";
+import { HostedApprovalRecoverySettings } from "./hosted-approval-recovery-settings";
 
 export function HostedPasskeySettings({
   authenticated,
+  enrollmentEnabled = false,
   secureApprovalStatus,
 }: {
   authenticated: boolean;
-  secureApprovalStatus: HostedPrivyWalletMfaStatus;
+  enrollmentEnabled?: boolean;
+  secureApprovalStatus: HostedSecureApprovalStatus;
 }) {
   if (!authenticated) {
     return null;
   }
 
-  return <PasskeySetup secureApprovalStatus={secureApprovalStatus} />;
+  if (secureApprovalStatus.method === "passkey") {
+    return <HostedApprovalRecoverySettings enabled={enrollmentEnabled} />;
+  }
+  if (secureApprovalStatus.method === "initial" || secureApprovalStatus.method === "legacy-repair") {
+    return <InitialPasskeySetup enrollmentEnabled={enrollmentEnabled} legacyRepair={secureApprovalStatus.method === "legacy-repair"} />;
+  }
+  // The status reader only returns the states above or "unavailable"; a failed
+  // read stays closed with no setup, restoration or migration action.
+  return <div className="flex flex-col gap-2">
+    <SettingsRow icon={passkeyIcon} label="Passkey" value="Unavailable" empty />
+    <SettingsStatusLine message="Secure approval status is temporarily unavailable. Try again in a moment." tone="destructive" />
+  </div>;
 }
 
-function PasskeySetup({
-  secureApprovalStatus,
-}: {
-  secureApprovalStatus: HostedPrivyWalletMfaStatus;
-}) {
-  const {
-    clientAuthenticated,
-    configured,
-    ensureConfigured,
-    error,
-    pendingLabel,
-    ready,
-  } = usePasskeyWalletMfa();
-  const isRunning = pendingLabel !== null;
-  const serverConfigured = secureApprovalStatus.status === "configured";
-  const effectiveConfigured = serverConfigured || configured;
-  const needsClientAuth = ready && !clientAuthenticated;
-  const canStartSetup =
-    ready
-    && clientAuthenticated
-    && !effectiveConfigured
-    && secureApprovalStatus.status === "not_configured";
-  const showReauthAction =
-    needsClientAuth
-    && !effectiveConfigured
-    && secureApprovalStatus.status === "not_configured";
-  const valueText = effectiveConfigured
-    ? "Enabled"
-    : secureApprovalStatus.status === "needs_support"
-      ? "Needs support"
-      : secureApprovalStatus.status === "unavailable"
-        ? "Unavailable"
-    : !ready
-      ? "Checking…"
-      : "Not set up";
-  const statusMessage = resolveStatusMessage({
-    clientAuthenticated,
-    error,
-    pendingLabel,
-    ready,
-    secureApprovalStatus,
-  });
+const passkeyIcon = <Fingerprint className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />;
 
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-4 first:pt-0 last:pb-0">
-        <Fingerprint
-          className={cn(
-            "size-[18px] shrink-0",
-            effectiveConfigured ? "text-[#7a8c6e]" : "text-muted-foreground",
-          )}
-          strokeWidth={1.6}
-          aria-hidden="true"
-        />
-        <div className="min-w-0">
-          <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
-            Passkey
-          </span>
-          <p
-            className={cn(
-              "break-words font-serif text-base tracking-tight",
-              effectiveConfigured ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {valueText}
-          </p>
-        </div>
-        {canStartSetup
-          ? (
-              <div className="shrink-0">
-                <Button
-                  type="button"
-                  size="default"
-                  variant="default"
-                  disabled={isRunning}
-                  onClick={() => void ensureConfigured().catch(() => undefined)}
-                >
-                  {isRunning ? "Setting up…" : "Set up"}
-                </Button>
-              </div>
-            )
-          : showReauthAction
-            ? (
-                <div className="shrink-0">
-                  <AuthButton
-                    type="button"
-                    size="default"
-                    variant="default"
-                    disabled={isRunning}
-                    authSatisfied={clientAuthenticated}
-                  >
-                    Sign in
-                  </AuthButton>
-                </div>
-              )
-          : null}
-      </div>
-      {statusMessage
-        ? <SettingsStatusLine message={statusMessage.message} tone={statusMessage.tone} />
-          : null}
-    </div>
-  );
+function InitialPasskeySetup({ enrollmentEnabled, legacyRepair }: { enrollmentEnabled: boolean; legacyRepair: boolean }) {
+  const enrollment = useApprovalPasskeyEnrollment();
+  return <InitialPasskeySetupView legacyRepair={legacyRepair} enrollmentEnabled={enrollmentEnabled} {...enrollment} onEnroll={() => void enrollment.enroll()} />;
 }
 
-function resolveStatusMessage(input: {
-  clientAuthenticated: boolean;
+export function InitialPasskeySetupView({ enrollmentEnabled, pending, registered, error, onEnroll, legacyRepair = false, pendingLabel }: {
+  legacyRepair?: boolean;
+  pendingLabel?: string | null;
+  enrollmentEnabled: boolean;
+  pending: boolean;
+  registered: boolean;
   error: string | null;
-  pendingLabel: string | null;
-  ready: boolean;
-  secureApprovalStatus: HostedPrivyWalletMfaStatus;
-}): { message: string; tone: "destructive" | "neutral" } | null {
-  if (input.error) {
-    return { message: input.error, tone: "destructive" };
-  }
-
-  if (input.pendingLabel) {
-    return { message: input.pendingLabel, tone: "neutral" };
-  }
-
-  if (input.secureApprovalStatus.status === "needs_support") {
-    return {
-      message: "Something looks off with your secure setup. Contact support before continuing.",
-      tone: "destructive",
-    };
-  }
-
-  if (input.secureApprovalStatus.status === "unavailable") {
-    return {
-      message: "Secure approval status is temporarily unavailable. Try again in a moment.",
-      tone: "destructive",
-    };
-  }
-
-  if (
-    input.ready
-    && !input.clientAuthenticated
-    && input.secureApprovalStatus.status === "not_configured"
-  ) {
-    return {
-      message: "Sign in on this device to manage secure approvals.",
-      tone: "neutral",
-    };
-  }
-
-  return null;
+  onEnroll?: () => void;
+}) {
+  return <div className="flex flex-col gap-2">
+    {registered ? <ApprovalPasskeyStatus /> : <SettingsRow
+      icon={passkeyIcon}
+      label="Passkey" value={pending ? "Setting up…" : legacyRepair ? "Update needed" : "Not set up"} empty
+      action={<Button aria-label={legacyRepair ? "Add Murph passkey" : "Set up passkey"} aria-busy={pending} disabled={!enrollmentEnabled || pending} type="button" onClick={onEnroll}>
+        {pending ? "Setting up…" : legacyRepair ? "Add Murph passkey" : "Set up"}
+      </Button>}
+    />}
+    {legacyRepair && !registered ? <SettingsStatusLine tone="neutral"
+      message={pendingLabel ?? "Add a Murph passkey using a sign-in method already linked to your account. Your existing Murph passkeys cannot be replaced here."}
+    /> : null}
+    {error ? <SettingsStatusLine message={error} tone="destructive" /> : null}
+  </div>;
 }

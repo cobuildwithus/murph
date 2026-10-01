@@ -35,10 +35,10 @@ const TRACKED_TABLE: CompactTableResponseCardV1 = {
 describe('response-card static Linq layouts', () => {
   it('uses value-free fallback copy for generic and workout cards', () => {
     expect(buildLinqIMessageAppFallbackText(ONE_OFF_TABLE)).toBe(
-      'Your Murph summary. Ask Murph for this card in text',
+      'Your Murph summary.',
     )
     expect(buildLinqIMessageAppFallbackText(TRACKED_TABLE)).toBe(
-      'Your workout. Ask Murph for this card in text',
+      'Your workout.',
     )
     for (const card of [ONE_OFF_TABLE, TRACKED_TABLE]) {
       expect(buildLinqIMessageAppFallbackText(card)).not.toMatch(
@@ -47,27 +47,25 @@ describe('response-card static Linq layouts', () => {
     }
   })
 
-  it('preserves generic provider details without exposing tracking authority', () => {
+  it('keeps generic provider chrome compact without exposing tracking authority', () => {
     expect(buildLinqIMessageAppLayout(ONE_OFF_TABLE)).toEqual({
       caption: 'Weekly plan',
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
-      subcaption: 'Monday: Focus: Upper body',
     })
     expect(buildLinqIMessageAppLayout(TRACKED_TABLE)).toEqual({
       caption: 'Live workout',
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
-      subcaption: 'Exercise A: Set 1: 10',
     })
 
     expect(renderAssistantResponseCardText(TRACKED_TABLE)).toMatch(
       /Exercise A|10/u,
     )
     expect(JSON.stringify(buildLinqIMessageAppLayout(TRACKED_TABLE))).not.toMatch(
-      /evt_|2026/u,
+      /Exercise A|10|evt_|2026/u,
     )
   })
 })

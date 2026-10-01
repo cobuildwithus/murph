@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "telegram-group-offer-tap-reliability",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable Telegram group offers",
+    "summary": "Telegram group-offer buttons now finish reliably when related account changes happen at the same time.",
+    "details": "If the Telegram link or group offer changes before the tap commits, Murph safely declines it without leaving a partial membership or sharing grant.",
+    "relevanceTags": ["groups", "messaging", "reliability"],
+    "sourcePullRequests": [2345]
+  }
+}

@@ -548,6 +548,58 @@ describe('assistant input attachment evidence model materialization', () => {
     expect(bundle.combinedText).toContain('Table cell')
   })
 
+  it('collapses three exact 6,000-character transcript sources to the first', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const transcript = 'T'.repeat(6_000)
+    const resultPath =
+      'derived/inbox/capture-1/attachments/att-1/attempts/0001/result.json'
+    await writeVaultFile(
+      vaultRoot,
+      resultPath,
+      Buffer.from(JSON.stringify(createParserResult({
+        markdown: transcript,
+        text: transcript,
+      }))),
+    )
+
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
+      attachment: {
+        ...createAttachmentEvidence({
+          kind: 'audio',
+          mime: 'audio/mpeg',
+          rawPath: 'raw/inbox/capture-1/attachments/voice-note.mp3',
+        }),
+        derived: {
+          allowedRoot:
+            'derived/inbox/capture-1/attachments/att-1/attempts/0001',
+          kind: 'parser-result',
+          resultPath,
+        },
+        inlineFragments: [{
+          kind: 'attachment_transcript',
+          label: 'attachment-transcript',
+          text: transcript,
+          truncated: false,
+        }],
+        parseState: 'succeeded',
+      },
+      vaultRoot,
+    })
+
+    expect(transcript).toHaveLength(6_000)
+    expect(bundle.combinedText.split(transcript)).toHaveLength(2)
+    expect(bundle.fragments.filter((fragment) => fragment.text === transcript)).toEqual([
+      {
+        kind: 'attachment_transcript',
+        label: 'attachment-transcript',
+        path: resultPath,
+        text: transcript,
+        truncated: false,
+      },
+    ])
+    expect(bundle.combinedText).toContain('Table cell')
+  })
+
   it('loads parser results sequentially within one per-turn derived evidence budget', async () => {
     const vaultRoot = await createTempVaultRoot()
     const text = 'x'.repeat(8 * 1024 * 1024)

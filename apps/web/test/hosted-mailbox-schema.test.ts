@@ -57,6 +57,13 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
       ),
       "utf8",
     );
+    const hostedInboxVideoRetentionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260824010000_rearm_hosted_inbox_video_retention/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
     for (const modelName of [
       "HostedMailboxItem",
@@ -172,6 +179,21 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
       'WHERE "snapshot_ref" IS DISTINCT FROM NULL',
     );
     expect(generatedImageRetentionMigrationSql).not.toContain(
+      '"checkpointed_at"',
+    );
+    expect(hostedInboxVideoRetentionMigrationSql).toContain(
+      "date_trunc('milliseconds', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')",
+    );
+    expect(hostedInboxVideoRetentionMigrationSql).toContain(
+      '"inbox_media_retention_signal_attempted_at" = NULL',
+    );
+    expect(hostedInboxVideoRetentionMigrationSql).toContain(
+      '"version" = "version" + 1',
+    );
+    expect(hostedInboxVideoRetentionMigrationSql).toContain(
+      'WHERE "snapshot_ref" IS DISTINCT FROM NULL',
+    );
+    expect(hostedInboxVideoRetentionMigrationSql).not.toContain(
       '"checkpointed_at"',
     );
     expect(messageRetentionRecoveryMigrationSql).toContain(

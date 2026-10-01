@@ -1,8 +1,5 @@
 import {
-  HOSTED_PHONE_CALLS_PATH,
   HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS,
-  HOSTED_PHONE_CALL_STATUS_PATH,
-  HOSTED_PHONE_CALL_STOP_PATH,
 } from "@murphai/hosted-execution/phone-calls";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,14 +7,23 @@ const mocks = vi.hoisted(() => ({
   fetchHostedWebControlPlaneJson: vi.fn(),
 }));
 
-vi.mock("../src/runtime-platform/web-control-transport.ts", () => ({
-  fetchHostedWebControlPlaneJson: mocks.fetchHostedWebControlPlaneJson,
-}));
+vi.mock(
+  "../src/runtime-platform/web-control-transport.ts",
+  async (importOriginal) => ({
+    ...await importOriginal<
+      typeof import("../src/runtime-platform/web-control-transport.ts")
+    >(),
+    fetchHostedWebControlPlaneJson: mocks.fetchHostedWebControlPlaneJson,
+  }),
+);
 
 import {
   createHostedWebPhoneCallPort,
   resolveHostedPhoneCallTransportTimeoutMs,
 } from "../src/runtime-platform/phone-calls-port.ts";
+import {
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
+} from "../src/runtime-platform/web-control-transport.ts";
 
 describe("hosted Web phone-call port", () => {
   beforeEach(() => {
@@ -53,8 +59,7 @@ describe("hosted Web phone-call port", () => {
       boundUserId: "member_phone_calls",
       description: "Hosted phone-call status",
       fetchImpl: fetch,
-      method: "POST",
-      path: HOSTED_PHONE_CALL_STATUS_PATH,
+      route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.phoneCallStatus,
       sensitiveResponseBody: { maxBytes: 32 * 1024 },
       signal,
       timeoutMs: 5_000,
@@ -99,8 +104,7 @@ describe("hosted Web phone-call port", () => {
       boundUserId: "member_phone_calls",
       description: "Hosted phone call",
       fetchImpl: fetch,
-      method: "POST",
-      path: HOSTED_PHONE_CALLS_PATH,
+      route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.phoneCallStart,
       signal,
       timeoutMs: HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS,
       transport: { mode: "proxy" },
@@ -129,8 +133,7 @@ describe("hosted Web phone-call port", () => {
       boundUserId: "member_phone_calls",
       description: "Hosted phone-call termination",
       fetchImpl: fetch,
-      method: "POST",
-      path: HOSTED_PHONE_CALL_STOP_PATH,
+      route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.phoneCallStop,
       signal,
       timeoutMs: 5_000,
       transport: { mode: "proxy" },

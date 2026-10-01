@@ -28,10 +28,12 @@ export const automationContinuityPolicyValues = [
 ] as const;
 
 /**
- * The exact member-authorized support purpose carried by a plan-owned
- * automation. The automation record itself is the persisted consent owner for
- * habit and supplement support; experiment support additionally rechecks the
- * matching `assistantSupport` switch on the experiment owner.
+ * The delivery-consent category carried by a plan-owned automation. The saved
+ * automation instructions remain the provider-visible task authority; this
+ * field selects lifecycle and consent checks without rewriting that task.
+ * Habit and supplement automations persist consent on the automation record;
+ * experiment support additionally rechecks the matching `assistantSupport`
+ * switch on the experiment owner.
  */
 export const automationSupportKindValues = [
   "reminder",
@@ -91,6 +93,9 @@ export const automationTimeScheduleKindValues = [
 export const automationDeviceActivitySourceValues = [
   "whoop",
   "whoop_v2",
+  "garmin",
+  "oura",
+  "fitbit",
 ] as const;
 
 // Non-authoritative examples for help text and autocomplete surfaces. The
@@ -182,6 +187,7 @@ export function parseAutomationSupportSeriesTag(
 function validateAutomationLifecycleFields(
   value: {
     activeUntil?: string | null;
+    followUpSourceIntentId?: string;
     schedule: AutomationSchedule;
     tags?: string[];
   },
@@ -196,6 +202,14 @@ function validateAutomationLifecycleFields(
       code: z.ZodIssueCode.custom,
       message: "activeUntil must be after schedule.at for a one-shot automation.",
       path: ["activeUntil"],
+    });
+  }
+
+  if (value.followUpSourceIntentId && (!value.activeUntil || value.schedule.kind !== "at")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "A follow-up must be a finite one-shot automation.",
+      path: ["followUpSourceIntentId"],
     });
   }
 
@@ -259,7 +273,9 @@ export const automationScheduleDeviceActivitySchema = z
     afterOccurredAt: isoTimestampSchema().optional(),
     afterEntityId: z.string().min(1).optional(),
     source: z.enum(automationDeviceActivitySourceValues).optional(),
-    activityKind: automationDeviceActivityKindSchema.optional(),
+    activityKind: automationDeviceActivityKindSchema.optional().describe(
+      'Use "workout" for workouts, "sleep" for sleep, or the requested lowercase kebab-case activity kind (for example, "running"). Omit only to match all recorded activity kinds, including sleep.',
+    ),
   })
   .superRefine((schedule, ctx) => {
     const hasScalarOccurredAt = schedule.afterOccurredAt !== undefined;
@@ -405,6 +421,15 @@ export const automationAssistantTargetOverrideSchema = z
   })
   .strict();
 
+export const automationFollowUpRequestSchema = z.object({
+  afterMinutes: z.number().int().min(1).max(7 * 24 * 60),
+  instructions: z.string().trim().min(1).max(4000),
+}).strict();
+
+export type AutomationFollowUpRequest = z.infer<typeof automationFollowUpRequestSchema>;
+
+export const automationFollowUpSourceIntentIdSchema = z.string().trim().min(1).max(240);
+
 export const automationFrontmatterSchema = withContractMetadata(
   z
     .object({
@@ -416,6 +441,8 @@ export const automationFrontmatterSchema = withContractMetadata(
       status: z.enum(automationStatusValues),
       summary: z.string().min(1).max(4000).optional(),
       activeUntil: automationActiveUntilSchema.optional(),
+      followUpSourceIntentId: automationFollowUpSourceIntentIdSchema.optional(),
+      followUpParentAutomationId: z.string().min(1).optional(),
       schedule: automationScheduleSchema,
       route: automationRouteSchema,
       assistantTargetOverride: automationAssistantTargetOverrideSchema.optional(),

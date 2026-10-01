@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
+import { appendJsonlRecord, deleteEvent, readEvent, upsertEvent } from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { buildJournalView, readVault } from '@murphai/query'
+import { createBrowserVaultReplica, parseBrowserVaultReplica } from '@murphai/query/browser'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerEventCommands } from '../src/commands/event.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
@@ -132,7 +135,7 @@ test('typed event write schemas expose concrete fields and keep JSON input on ex
     assert.equal('input' in schema.options.properties, false)
   }
 
-  assertSchemaProperties(noteSchema, ['note', 'tag'])
+  assertSchemaProperties(noteSchema, ['note', 'noteType', 'relatedId', 'tag', 'icon', 'timing'])
   assertRequiredOptions(noteSchema, ['vault', 'note'])
 
   assertSchemaProperties(symptomSchema, ['symptom', 'severity', 'bodyRegion', 'note', 'tag'])
@@ -182,6 +185,10 @@ test.sequential('typed event write commands persist common event records without
       '2026-03-12T12:15:00.000Z',
       '--tag',
       'reflection',
+      '--note-type',
+      'journal-outcome',
+      '--related-id',
+      'evt_01ARZ3NDEKTSV4RRFFQ69G5FAV',
       '--vault',
       vaultRoot,
     ])
@@ -315,7 +322,12 @@ test.sequential('typed event write commands persist common event records without
     assert.equal(requireData(shownNote).entity.kind, 'note')
     assert.equal(requireData(shownNote).entity.title, 'Lunch note')
     assert.equal(requireData(shownNote).entity.data.note, 'Felt steady after lunch.')
-    assert.deepEqual(requireData(shownNote).entity.data.tags, ['reflection'])
+    assert.equal(requireData(shownNote).entity.data.noteType, 'journal-outcome')
+    assert.deepEqual(requireData(shownNote).entity.data.links, [{
+      targetId: 'evt_01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      type: 'related_to',
+    }])
+    assert.deepEqual(requireData(shownNote).entity.data.tags, ['reflection', 'timing-timed', 'journal-icon-note'])
 
     assert.equal(shownSymptom.ok, true)
     assert.equal(requireData(shownSymptom).entity.kind, 'symptom')
@@ -357,4 +369,187 @@ test.sequential('typed event write commands persist common event records without
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
+})
+
+test('Journal notes preserve time precision and selected icons through canonical writes and browser replicas', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-note-presentation-'))
+  try {
+    requireData(await runSliceCli(['init', '--vault', vault, '--timezone', 'Pacific/Kiritimati']))
+    const cases = [
+      { title: 'Daily context', timing: 'all_day', time: '2026-05-18', icon: 'note' },
+      { title: 'Early stretch', timing: 'morning', time: '2026-05-18', icon: 'mobility' },
+      { title: 'Break outside', timing: 'afternoon', time: '2026-05-18', icon: 'sunlight' },
+      { title: 'Evening reading', timing: 'evening', time: '2026-05-18', icon: 'note' },
+      { title: 'Late shift', timing: 'night', time: '2026-05-18', icon: 'work' },
+      { title: 'Unspecified period', timing: 'unknown', time: '2026-05-18', icon: 'note' },
+      { title: 'Lunch', timing: 'timed', time: '2026-05-18T12:00:00+14:00', icon: 'meal' },
+    ]
+    const ids: string[] = []
+    for (const item of cases) {
+      const result = requireData(await runSliceCli<EventAddEnvelope>([
+        'event', 'note', 'add', '--vault', vault, '--note-type', 'journal-context',
+        '--title', item.title, '--note', item.title, '--occurred-at', item.time,
+        '--timing', item.timing, '--icon', item.icon, '--tag', 'timing-late',
+      ]))
+      ids.push(result.eventId)
+    }
+    const defaultNote = requireData(await runSliceCli<EventAddEnvelope>([
+      'event', 'note', 'add', '--vault', vault, '--note-type', 'journal-context',
+      '--title', 'Date only', '--note', 'Date only', '--occurred-at', '2026-05-18',
+    ]))
+    const view = buildJournalView(await readVault(vault), [], { asOf: '2026-05-19' })
+    assert.equal(view.days.length, 1)
+    assert.equal(view.days[0]?.date, '2026-05-18')
+    for (const item of cases) {
+      const row = view.days[0]?.events.find((entry) => entry.title === item.title)
+      assert.equal(row?.timing, item.timing)
+      assert.equal(row?.timeZone, 'Pacific/Kiritimati')
+      assert.ok(row?.records[0]?.tags.includes(`journal-icon-${item.icon}`))
+      assert.ok(row?.records[0]?.tags.includes('timing-late'))
+    }
+    assert.equal(view.days[0]?.events.find((entry) => entry.records[0]?.id === defaultNote.eventId)?.timing, 'unknown')
+    const orderedTitles = view.days[0]?.events.map((entry) => entry.title) ?? []
+    assert.deepEqual(orderedTitles.slice(0, 2), ['Daily context', 'Early stretch'])
+    assert.deepEqual(orderedTitles.slice(2, 4).sort(), ['Break outside', 'Lunch'])
+    assert.deepEqual(orderedTitles.slice(4, 6), ['Evening reading', 'Late shift'])
+    assert.deepEqual(orderedTitles.slice(6).sort(), ['Date only', 'Unspecified period'])
+
+    const beforeEdit = view.eventCount
+    const readingId = ids[3]
+    assert.ok(readingId)
+    requireData(await runSliceCli([
+      'event', 'edit', readingId, '--vault', vault,
+      '--title', 'Reading', '--note', '25 min',
+      '--occurred-at', '2026-05-18T19:40:00+14:00', '--day-key-policy', 'recompute',
+      '--tag', 'timing-timed', '--tag', 'journal-icon-note', '--tag', 'timing-late',
+    ]))
+    const source = await readVault(vault)
+    const replica = parseBrowserVaultReplica(await createBrowserVaultReplica({
+      vault: source, metricPoints: [], sourceBundleHash: 'b'.repeat(64), generatedAt: '2026-05-19T00:00:00Z',
+    }))
+    assert.equal(replica.journal?.eventCount, beforeEdit)
+    const updated = replica.journal?.days.flatMap((day) => day.events).find((entry) => entry.records[0]?.id === ids[3])
+    assert.equal(updated?.title, 'Reading')
+    assert.equal(updated?.summary, '25 min')
+    assert.equal(updated?.timing, 'timed')
+    assert.equal(updated?.date, '2026-05-18')
+    assert.equal(Date.parse(updated?.occurredAt ?? ''), Date.parse('2026-05-18T19:40:00+14:00'))
+    for (const invalid of [
+      ['--timing', 'timed'],
+      ['--icon', 'not-a-real-icon'],
+    ]) {
+      const result = await runSliceCli([
+        'event', 'note', 'add', '--vault', vault, '--note-type', 'journal-context',
+        '--note', 'Invalid note', '--occurred-at', '2026-05-18', ...invalid,
+      ])
+      assert.equal(result.ok, false)
+    }
+    assert.equal(buildJournalView(await readVault(vault), [], { asOf: '2026-05-19' }).eventCount, beforeEdit)
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
+test('Journal plan creation preserves timezone and retry identity beside supported legacy wearable history', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-cli-plan-'))
+  try {
+    requireData(await runSliceCli(['init', '--vault', vault, '--timezone', 'America/New_York']))
+    const args = [
+      'event', 'note', 'add', '--vault', vault, '--note-type', 'journal-plan',
+      '--source', 'import', '--title', 'Conference trip', '--note', 'Return Sunday; equipment unknown',
+      '--occurred-at', '2026-10-02T00:30:00+02:00', '--time-zone', 'Europe/Paris',
+      '--plan-ends-at', '2026-10-04T18:00:00+02:00', '--plan-status', 'tentative',
+      '--plan-verified-at', '2026-10-01T08:00:00Z', '--plan-category', 'travel',
+      '--plan-account-id', 'synthetic-calendar', '--plan-source-id', 'synthetic-calendar/calendar-a/occurrence-1',
+    ]
+    const legacy = {
+      id: 'evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F7', kind: 'observation',
+      schemaVersion: 'murph.event.v1', source: 'device',
+      externalRef: { system: 'junction', resourceType: 'daily-summary', resourceId: 'legacy-body-summary-2026-07-15' },
+      metric: 'body-fat-pct', observationGrain: 'daily_timeseries_aggregate',
+      occurredAt: '2026-07-15T12:00:00.000Z', recordedAt: '2026-07-15T12:05:00.000Z',
+      dayKey: '2026-07-15', title: 'Legacy body composition summary', unit: '%', value: 18.4,
+    }
+    await appendJsonlRecord({ vaultRoot: vault, relativePath: 'ledger/events/2026-07.jsonl', record: legacy })
+    const saved = requireData(await runSliceCli<EventAddEnvelope>(args))
+    await appendJsonlRecord({ vaultRoot: vault, relativePath: 'ledger/events/2026-07.jsonl', record: {
+      ...legacy, id: 'evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8', externalRef: { ...legacy.externalRef, resourceId: 'another-legacy-summary' },
+    } })
+    const repeated = requireData(await runSliceCli<EventAddEnvelope>(args))
+    assert.equal(repeated.eventId, saved.eventId)
+    const shown = requireData(await runSliceCli<EventShowEnvelope>(['event', 'show', saved.eventId, '--vault', vault]))
+    assert.equal(shown.entity.data.timeZone, 'Europe/Paris')
+    assert.equal(shown.entity.data.dayKey, '2026-10-02')
+    assert.deepEqual(shown.entity.data.plan, {
+      endsAt: '2026-10-04T18:00:00+02:00', status: 'tentative',
+      lastVerifiedAt: '2026-10-01T08:00:00Z', category: 'travel', accountId: 'synthetic-calendar',
+    })
+    const canonical = (await readEvent({ vaultRoot: vault, eventId: saved.eventId })).event
+    await upsertEvent({ vaultRoot: vault, payload: { ...canonical, title: 'Member corrected trip' }, expectedRevision: 1 })
+    assert.equal(requireData(await runSliceCli<EventAddEnvelope>(args)).eventId, saved.eventId)
+    assert.equal((await readEvent({ vaultRoot: vault, eventId: saved.eventId })).event.title, 'Member corrected trip')
+    await deleteEvent({ vaultRoot: vault, eventId: saved.eventId, expectedRevision: 2 })
+    const deletedRetry = await runSliceCli(args)
+    assert.equal(deletedRetry.ok, false)
+    assert.match(JSON.stringify(deletedRetry), /source plan was deleted/)
+    const incomplete = await runSliceCli(['event', 'note', 'add', '--vault', vault, '--note', 'Trip', '--note-type', 'journal-plan', '--plan-status', 'planned'])
+    assert.equal(incomplete.ok, false)
+  } finally { await rm(vault, { recursive: true, force: true }) }
+})
+
+test('Journal plan edits reconcile dates and verification through the public revision-checked command', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-cli-plan-edit-'))
+  try {
+    requireData(await runSliceCli(['init', '--vault', vault, '--timezone', 'Europe/Paris']))
+    const saved = requireData(await runSliceCli<EventAddEnvelope>([
+      'event', 'note', 'add', '--vault', vault, '--note-type', 'journal-plan',
+      '--title', 'Trip', '--note', 'Tentative rail trip', '--source', 'import',
+      '--occurred-at', '2026-10-02T10:00:00+02:00', '--time-zone', 'Europe/Paris',
+      '--plan-ends-at', '2026-10-04T18:00:00+02:00', '--plan-status', 'tentative',
+      '--plan-verified-at', '2026-10-01T08:00:00Z', '--plan-category', 'travel',
+      '--plan-account-id', 'synthetic-calendar', '--plan-source-id', 'synthetic-calendar/trip',
+    ]))
+    const edit = ['event', 'edit', saved.eventId, '--vault', vault]
+    requireData(await runSliceCli([...edit, '--expected-revision', '1',
+      '--occurred-at', '2026-10-03T10:00:00+02:00', '--day-key-policy', 'recompute',
+      '--plan-ends-at', '2026-10-05T18:00:00+02:00', '--plan-status', 'planned',
+      '--plan-verified-at', '2026-10-02T08:00:00Z', '--note', 'Confirmed rail trip',
+    ]))
+    const event = (await readEvent({ vaultRoot: vault, eventId: saved.eventId })).event
+    assert.equal(event.kind, 'note')
+    if (event.kind !== 'note') throw new Error('Expected note')
+    assert.equal(event.dayKey, '2026-10-03')
+    assert.deepEqual(event.plan, {
+      endsAt: '2026-10-05T18:00:00+02:00', status: 'planned',
+      lastVerifiedAt: '2026-10-02T08:00:00Z', category: 'travel', accountId: 'synthetic-calendar',
+    })
+    const stale = await runSliceCli([...edit, '--expected-revision', '1', '--plan-status', 'tentative'])
+    assert.equal(stale.ok, false)
+    requireData(await runSliceCli([...edit, '--expected-revision', '2', '--plan-verified-at', '2026-10-03T08:00:00Z']))
+    const verified = (await readEvent({ vaultRoot: vault, eventId: saved.eventId })).event
+    assert.equal(verified.kind === 'note' && verified.plan?.status, 'planned')
+    assert.equal(verified.kind === 'note' && verified.plan?.lastVerifiedAt, '2026-10-03T08:00:00Z')
+  } finally { await rm(vault, { recursive: true, force: true }) }
+})
+
+test('long connected source identities remain bounded, distinct and retry-safe', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-cli-plan-identity-'))
+  try {
+    requireData(await runSliceCli(['init', '--vault', vault, '--timezone', 'UTC']))
+    const args = ['event', 'note', 'add', '--vault', vault, '--note-type', 'journal-plan',
+      '--title', 'Trip', '--note', 'Rail travel', '--occurred-at', '2026-10-02T10:00:00Z',
+      '--plan-ends-at', '2026-10-04T18:00:00Z', '--plan-status', 'planned',
+      '--plan-verified-at', '2026-10-01T08:00:00Z', '--plan-category', 'travel']
+    for (const length of [200, 201, 500]) {
+      const sourceId = 'x'.repeat(length)
+      const saved = requireData(await runSliceCli<EventAddEnvelope>([...args, '--plan-source-id', sourceId]))
+      const retry = requireData(await runSliceCli<EventAddEnvelope>([...args, '--plan-source-id', sourceId]))
+      assert.equal(retry.eventId, saved.eventId)
+      const key = (await readEvent({ vaultRoot: vault, eventId: saved.eventId })).event.externalRef?.resourceId
+      assert.ok(key && key.length <= 200)
+      if (length === 200) assert.equal(key, sourceId)
+      const other = requireData(await runSliceCli<EventAddEnvelope>([...args, '--plan-source-id', sourceId.slice(0, -1) + 'y']))
+      assert.notEqual(other.eventId, saved.eventId)
+    }
+  } finally { await rm(vault, { recursive: true, force: true }) }
 })

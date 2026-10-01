@@ -1,3 +1,4 @@
+import { toolFailureMetadata, type ToolFailureDiagnostic } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import type {
@@ -10,10 +11,16 @@ import {
 import type { GenerateVoiceMemoToolResult } from '../generate-voice-memo-tool.js'
 
 export interface DynamicToolResult {
+  failureDiagnostic?: ToolFailureDiagnostic
   /**
-   * Trusted runtime-owned text that must be delivered when the model supplies
-   * no response text or card. Analyze-video uses this for the best completed
-   * tool outcome so successful observations cannot disappear behind no-reply.
+   * Runtime-authored exact text appended after semantic response text when an
+   * opaque value cannot safely be copied through the model.
+   */
+  requiredFinalResponseSuffix?: string
+  /**
+   * Runtime-selected text that must be delivered when the model supplies no
+   * response text or card. Analyze-video failure text is trusted status;
+   * successful observation text remains untrusted data, never instructions.
    */
   requiredFinalResponseFallback?: string
   responseMediaPatch?: {
@@ -39,6 +46,7 @@ export function wrapVoiceMemoToolResult(
           },
         }
       : {}),
+    ...toolFailureMetadata(result),
     rpcResult: {
       success: result.rpcSuccess,
       contentItems: [

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "automatic-device-sync-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Automatic device sync can recover after getting stuck",
+    "summary": "Connected health data can resume automatic syncing when an earlier background check leaves it overdue.",
+    "details": "Recovery preserves existing retries and your current device-connection settings.",
+    "relevanceTags": ["devices", "sync"],
+    "sourcePullRequests": [3465]
+  }
+}

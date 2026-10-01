@@ -367,9 +367,16 @@ describe("supplements API route", () => {
       error: "supplements_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("supplements_api_failed", {
+      durationMs: expect.any(Number),
       errorCode: "supplements_api_failed",
-      errorMessage: "database unavailable",
       errorType: "Error",
+      genericOnly: false,
+      includeOffMarket: false,
+      limit: 1,
+      method: "GET",
+      nutritionOnly: false,
+      operation: "search",
+      queryLength: 8,
     });
   });
 
@@ -942,9 +949,19 @@ describe("supplements API route", () => {
       error: "supplements_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("supplements_api_failed", {
+      batchConcurrency: 3,
+      durationMs: expect.any(Number),
       errorCode: "supplements_api_failed",
-      errorMessage: "database unavailable",
       errorType: "Error",
+      genericOnly: false,
+      includeOffMarket: false,
+      limit: 1,
+      maxQueryLength: 8,
+      method: "POST",
+      nutritionOnly: false,
+      operation: "batch_search",
+      queryCount: 1,
+      uniqueQueryCount: 1,
     });
   });
 });

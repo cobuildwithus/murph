@@ -1,3 +1,4 @@
+import { CLI_TIMING_ENDPOINT_ENV } from "@murphai/runtime-state/cli-timing";
 import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/env";
@@ -18,6 +19,8 @@ export const HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
   "FORCE_COLOR",
   "HOME",
   HOSTED_RUNTIME_PROCESS_ENV,
+  // Value is set only by the live Codex process; no credential/identity is admitted.
+  CLI_TIMING_ENDPOINT_ENV,
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
   // Health Commons owns this env-name contract from @murphai/health-commons/runtime.
   // Keep it literal here so assistant-runtime does not gain that dependency edge.

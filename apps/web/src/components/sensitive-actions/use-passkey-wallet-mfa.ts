@@ -5,11 +5,13 @@ import {
   type User,
   useCreateWallet,
   useLinkWithPasskey,
+  useLoginWithPasskey,
   useMfaEnrollment,
   usePrivy,
   useWallets,
 } from "@privy-io/react-auth";
 import { useEffect, useRef, useState } from "react";
+import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 
 import {
   findHostedPrivyPasskeyCredentialIds,
@@ -22,12 +24,13 @@ import {
 type SetupStep = "load-client" | "create-passkey" | "create-wallet" | "enroll-mfa";
 
 export function usePasskeyWalletMfa() {
-  const { user, ready } = usePrivy();
+  const { user, ready, logout, login } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
   const { linkWithPasskey } = useLinkWithPasskey();
   const { createWallet } = useCreateWallet();
   const { initEnrollmentWithPasskey, submitEnrollmentWithPasskey } = useMfaEnrollment();
   const userRef = useRef<User | null>(user);
+  const { loginWithPasskey } = useLoginWithPasskey({ onComplete: ({ user: authenticatedUser }) => { userRef.current = authenticatedUser; } });
   const readyRef = useRef(ready);
   const walletsRef = useRef<ConnectedWallet[]>(wallets);
   const walletsReadyRef = useRef(walletsReady);
@@ -43,13 +46,66 @@ export function usePasskeyWalletMfa() {
   const walletSelection = selectHostedPrivyEmbeddedEthereumWallet(user);
   const configured = walletSelection.status === "ready" && hasOnlyHostedPrivyPasskeyMfa(user);
 
+  async function readSetupUser(): Promise<string> {
+    const status = await requestHostedOnboardingJson<{ legacyUserId: string | null }>({ url: "/api/settings/approval-passkeys" });
+    if (!status.legacyUserId) throw new Error("Use your current Murph passkey settings to continue.");
+    return status.legacyUserId;
+  }
+
+  function assertSetupUser(expected: string) {
+    if (userRef.current?.id !== expected) throw new Error("Use the same account as your Murph sign-in to set up secure approvals.");
+  }
+
+  async function loginForSetup() {
+    setError(null); setActiveStep("load-client");
+    try {
+      const expected = await readSetupUser();
+      await waitForClientReady({ readyRef, userRef, allowSignedOut: true });
+      if (userRef.current && userRef.current.id !== expected) await logout();
+      login({ loginMethods: ["email", "sms", "telegram", "passkey"] });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Your existing sign-in could not open.");
+    } finally { setActiveStep(null); }
+  }
+
+  async function ensureExistingFactor(expectedUserId: string): Promise<HostedPrivyEmbeddedEthereumWallet> {
+    setError(null);
+    setActiveStep("load-client");
+    try {
+      await waitForClientReady({ readyRef, userRef, allowSignedOut: true });
+      if (userRef.current?.id !== expectedUserId) {
+        if (userRef.current) await logout();
+        // Restore only the old factor. This does not call Murph login, sync
+        // contacts, create a wallet, or change the current application session.
+        await loginWithPasskey();
+        await waitForUserState(userRef, (current) => current.id === expectedUserId, "Loading secure approval");
+      }
+      const selected = selectHostedPrivyEmbeddedEthereumWallet(userRef.current);
+      if (userRef.current?.id !== expectedUserId || selected.status !== "ready" || !hasOnlyHostedPrivyPasskeyMfa(userRef.current)) {
+        throw new Error("Your existing secure approval could not be verified. Contact support to recover it.");
+      }
+      await waitForConnectedWallet({ walletsReadyRef, walletsRef }, selected.wallet.address);
+      const current = selectHostedPrivyEmbeddedEthereumWallet(userRef.current);
+      if (userRef.current?.id !== expectedUserId || current.status !== "ready"
+        || current.wallet.address !== selected.wallet.address || !hasOnlyHostedPrivyPasskeyMfa(userRef.current)) {
+        throw new Error("Your secure approval account changed. Try again.");
+      }
+      return selected.wallet;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Secure approval could not be restored.");
+      throw caught;
+    } finally { setActiveStep(null); }
+  }
+
   async function ensureConfigured(): Promise<HostedPrivyEmbeddedEthereumWallet> {
     setError(null);
     try {
+      const expected = await readSetupUser();
       if (!readyRef.current || !userRef.current) {
         setActiveStep("load-client");
         await waitForClientReady({ readyRef, userRef });
       }
+      assertSetupUser(expected);
 
       if (findHostedPrivyPasskeyCredentialIds(userRef.current).length === 0) {
         setActiveStep("create-passkey");
@@ -60,6 +116,8 @@ export function usePasskeyWalletMfa() {
           stepLabel("create-passkey"),
         );
       }
+
+      assertSetupUser(expected);
 
       let currentWallet = selectHostedPrivyEmbeddedEthereumWallet(userRef.current);
       if (currentWallet.status === "ambiguous") {
@@ -80,6 +138,7 @@ export function usePasskeyWalletMfa() {
       }
 
       const mfaMethods = readHostedPrivyMfaMethodTypes(userRef.current);
+      assertSetupUser(expected);
       if (mfaMethods.length > 0 && !hasOnlyHostedPrivyPasskeyMfa(userRef.current)) {
         throw new Error("Your passkey must be the only method protecting secure approvals. Contact support to fix this.");
       }
@@ -90,6 +149,7 @@ export function usePasskeyWalletMfa() {
           throw new Error("We couldn't find your new passkey. Try again.");
         }
         await initEnrollmentWithPasskey();
+        assertSetupUser(expected);
         await submitEnrollmentWithPasskey(
           { credentialIds },
           { removeForLogin: false },
@@ -112,6 +172,7 @@ export function usePasskeyWalletMfa() {
         );
       }
 
+      assertSetupUser(expected);
       return currentWallet.wallet;
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Secure approval setup failed. Try again.";
@@ -126,6 +187,8 @@ export function usePasskeyWalletMfa() {
     clientAuthenticated: user !== null,
     configured,
     ensureConfigured,
+    ensureExistingFactor,
+    loginForSetup,
     error,
     pendingLabel: activeStep ? `${stepLabel(activeStep)}…` : null,
     ready,
@@ -162,6 +225,7 @@ async function waitForClientReady(
   state: {
     readyRef: { current: boolean };
     userRef: { current: User | null };
+    allowSignedOut?: boolean;
   },
   timeoutMs = 10_000,
   intervalMs = 50,
@@ -169,7 +233,7 @@ async function waitForClientReady(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (state.readyRef.current) {
-      if (state.userRef.current) {
+      if (state.userRef.current || state.allowSignedOut) {
         return;
       }
       throw new Error("Sign in on this device to continue.");

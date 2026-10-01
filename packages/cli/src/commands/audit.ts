@@ -1,4 +1,5 @@
 import { Cli, z } from 'incur'
+import { AUDIT_STATUSES, integrationIngestRecordSchema } from '@murphai/contracts'
 import {
   emptyArgsSchema,
   withBaseOptions,
@@ -16,6 +17,8 @@ import {
   showAudit,
 } from './audit-command-helpers.js'
 import type { VaultServices } from '@murphai/vault-usecases'
+import { assertOrderedDateRange } from './command-factory-primitives.js'
+import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
 const auditIdSchema = z
   .string()
@@ -53,6 +56,21 @@ export function registerAuditCommands(
     description: 'Audit inspection commands routed through the query read model.',
   })
 
+  audit.command('receipt', {
+    description: 'Inspect one automatic import receipt, including evidence, outputs and publication counts.',
+    args: z.object({ id: z.string().regex(/^xfm_[0-9A-Za-z]+$/u) }),
+    options: withBaseOptions(),
+    output: z.object({
+      vault: pathSchema,
+      receipt: z.object({ relativePath: pathSchema, record: integrationIngestRecordSchema }).nullable(),
+    }),
+    async run({ args, options }) {
+      await assertInitializedVaultRoot(options.vault)
+      const { readIntegrationIngestById } = await import('@murphai/core')
+      return { vault: options.vault, receipt: await readIntegrationIngestById(options.vault, args.id) }
+    },
+  })
+
   audit.command('show', {
     description: 'Show one audit record by canonical audit id.',
     args: z.object({
@@ -83,10 +101,9 @@ export function registerAuditCommands(
         .optional()
         .describe('Optional audit actor filter such as cli, assistant, import, or system.'),
       status: z
-        .string()
-        .min(1)
+        .enum(AUDIT_STATUSES)
         .optional()
-        .describe('Optional audit status filter such as success, warning, or error.'),
+        .describe('Optional audit status filter: success or failure.'),
       from: localDateSchema
         .optional()
         .describe('Inclusive lower occurredAt date bound in YYYY-MM-DD form.'),
@@ -107,6 +124,7 @@ export function registerAuditCommands(
     }),
     output: auditListResultSchema,
     async run({ options }) {
+      assertOrderedDateRange(options.from, options.to)
       return listAuditRecords(options.vault, {
         action: options.action,
         actor: options.actor,

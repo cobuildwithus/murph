@@ -18,6 +18,13 @@ export type {
   HostedRuntimeArtifactReader,
   HostedRuntimeArtifactStore,
   HostedRuntimeArtifactWriter,
+  HostedRuntimeMediaDescriptor,
+  HostedRuntimeMediaKind,
+  HostedRuntimeMediaReadContext,
+  HostedRuntimeMediaReader,
+  HostedRuntimeMediaReadPurpose,
+  HostedRuntimeMediaStore,
+  HostedRuntimeMediaWriter,
   HostedRuntimeClinicalRecordsPort,
   HostedRuntimeCodexAuthPort,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
@@ -64,9 +71,12 @@ export type {
 } from "./hosted-runtime/platform.ts";
 export {
   HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES,
+  HOSTED_RUNTIME_MEDIA_READ_PURPOSES,
   HostedRuntimeArtifactReadError,
   HostedRuntimeArtifactWriteError,
   HostedRuntimeCanonicalCheckpointError,
+  HostedRuntimeMediaReadError,
+  HostedRuntimeMediaWriteError,
 } from "./hosted-runtime/platform.ts";
 export {
   HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,

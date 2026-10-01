@@ -13,7 +13,7 @@ The design stays deliberately small:
 - Normal verification keeps TypeScript's worker defaults.
 - When selected locally, Codex `test:diff` and acceptance commands use the
   conservative shared-host profile by default; explicit offload can run them
-  through Crabbox on a dedicated static Mac or a Blacksmith Testbox.
+  through Crabbox on a dedicated static Mac.
 - One root runner selects the canonical TypeScript 7 compiler and adds only the
   lane's configured worker flags.
 - Host admission uses temporary directories. It has no daemon, database,
@@ -50,8 +50,8 @@ without forcing Webpack workers to inherit the larger TypeScript heap.
 
 When selected, the canonical `pnpm test:diff` and `pnpm verify:acceptance`
 entrypoints first select their executor. Automatic dispatch stays local. An
-explicitly forced remote run uses either a per-worktree static Mac workspace or
-an isolated Blacksmith Testbox and disables shared-host throttling there. Local
+explicitly forced remote run uses a per-worktree static Mac workspace and
+disables shared-host throttling there. Local
 canonical verification and build entrypoints
 automatically use the profile when `CODEX_THREAD_ID` is present outside CI.
 Other local callers can opt in:

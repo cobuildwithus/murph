@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-24",
+  "order": 100,
+  "item": {
+    "id": "file-heavy-conversations-restart-lighter",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "File-heavy conversations restart lighter",
+    "summary": "Completed file deliveries no longer add avoidable weight to later conversation restarts.",
+    "details": "Files still needed for delivery remain protected while completed temporary copies can be cleared safely.",
+    "relevanceTags": ["assistant", "performance", "reliability"],
+    "sourcePullRequests": [2231]
+  }
+}

@@ -11,7 +11,8 @@ import {
   normalizeHttpsOrigin,
   requiredEnv,
   requiredString,
-  runBoundedCommand,
+  resolveProductionCanaryWebSha,
+  safeNativeTag,
   sleep,
 } from "./native-ios-hosted-e2e-support.mjs";
 
@@ -22,10 +23,8 @@ const ANDROID_TIMEOUT_MS = 85 * 60_000;
 export const PRIVATE_ANDROID_DISPATCH_TTL_SECONDS = 30 * 60;
 export const PRIVATE_ANDROID_JOB_TIMEOUT_SECONDS = 55 * 60;
 export const PRIVATE_ANDROID_TERMINAL_GRACE_SECONDS = 2 * 60;
-const PRODUCTION_ALIAS_TIMEOUT_MS = 2 * 60_000;
 const PRIVATE_RUN_CANCEL_GRACE_MS = 30_000;
 const PRIVATE_RUN_FORCE_CANCEL_TIMEOUT_MS = 2 * 60_000;
-const PRODUCTION_ALIAS_MAX_OUTPUT_CHARS = 200;
 const TOKEN_REFRESH_SKEW_MS = 2 * 60_000;
 
 export function buildDispatchInputs({
@@ -33,30 +32,18 @@ export function buildDispatchInputs({
   androidTag,
   correlationId,
   dispatchExpiresAt,
-  mode,
   webBaseUrl,
   webSha,
 }) {
   assertSha(androidSha, "Android SHA");
-  const safeAndroidTag = safeTag(androidTag);
+  const safeAndroidTag = safeNativeTag(androidTag, "private Android tag");
   assertSafeId(correlationId, "correlation id", 120);
   if (!Number.isSafeInteger(dispatchExpiresAt) || dispatchExpiresAt < 1_000_000_000) {
     throw new Error("dispatch expiry must be an epoch-second integer.");
   }
   assertSha(webSha, "web SHA");
-  const identityLifecycle = mode === "pr"
-    ? "orchestrator_owned_reset"
-    : mode === "production_canary"
-      ? "non_destructive_existing_identity"
-      : null;
-  if (!identityLifecycle) throw new Error("mode must be pr or production_canary.");
   const normalizedWebBaseUrl = normalizeHttpsOrigin(webBaseUrl);
-  const hostname = new URL(normalizedWebBaseUrl).hostname;
-  if (mode === "pr") {
-    if (hostname === "vercel.app" || !hostname.endsWith(".vercel.app")) {
-      throw new Error("PR mode requires an exact non-root Vercel origin.");
-    }
-  } else if (normalizedWebBaseUrl !== "https://www.withmurph.ai") {
+  if (normalizedWebBaseUrl !== "https://www.withmurph.ai") {
     throw new Error("Production canary requires the exact Murph production origin.");
   }
   return {
@@ -65,25 +52,11 @@ export function buildDispatchInputs({
     contract_version: NATIVE_ANDROID_HOSTED_E2E_CONTRACT_VERSION,
     correlation_id: correlationId,
     dispatch_expires_at: String(dispatchExpiresAt),
-    identity_lifecycle: identityLifecycle,
-    mode,
+    identity_lifecycle: "non_destructive_existing_identity",
+    mode: "production_canary",
     web_base_url: normalizedWebBaseUrl,
     web_sha: webSha,
   };
-}
-
-export function inspectExactPrHead(raw, { expectedSha, prNumber }) {
-  assertRecord(raw, "Web PR");
-  if (raw.number !== prNumber || !isRecord(raw.head)) {
-    throw new Error("Web PR head revalidation returned an unexpected pull request.");
-  }
-  const currentSha = requiredString(raw.head.sha, "Web PR head SHA");
-  assertSha(currentSha, "Web PR head SHA");
-  assertSha(expectedSha, "expected Web PR head SHA");
-  if (currentSha !== expectedSha) {
-    throw new Error("PR head changed before private Android dispatch.");
-  }
-  return true;
 }
 
 export function inspectPrivateDispatchTag(raw, { expectedSha, ref }) {
@@ -104,15 +77,6 @@ export function inspectPrivateDispatchTag(raw, { expectedSha, ref }) {
   return sha;
 }
 
-export function inspectCurrentProductionSha(currentSha, expectedSha) {
-  assertSha(currentSha, "current production alias SHA");
-  assertSha(expectedSha, "requested production deployment SHA");
-  if (currentSha !== expectedSha) {
-    throw new Error("Production alias no longer resolves to the requested deployment SHA.");
-  }
-  return true;
-}
-
 export function inspectPrivateRun(raw, { runId, sha }) {
   assertRecord(raw, "private Android run");
   if (raw.id !== runId || raw.event !== "workflow_dispatch" || raw.head_sha !== sha) {
@@ -126,25 +90,29 @@ export function inspectPrivateRun(raw, { runId, sha }) {
 
 export async function dispatchAndWait({
   correlationId,
-  mode,
-  prHead = null,
+  source,
   webBaseUrl,
   webSha,
 }, {
   fetchImpl = fetch,
   fetchJsonImpl = fetchJson,
   now = Date.now,
+  resolveWebSha = resolveProductionCanaryWebSha,
   sleepImpl = sleep,
   tokenSupplier: suppliedTokenSupplier = null,
 } = {}) {
   const repository = safeRepository(requiredEnv("NATIVE_ANDROID_E2E_ANDROID_REPOSITORY"));
   const workflow = safeWorkflow(requiredEnv("NATIVE_ANDROID_E2E_ANDROID_WORKFLOW"));
-  const ref = safeTag(requiredEnv("NATIVE_ANDROID_E2E_ANDROID_REF"));
+  const ref = safeNativeTag(source?.privateRef, "private Android tag");
   const encodedRepository = repository.split("/").map(encodeURIComponent).join("/");
   const tokenSupplier = suppliedTokenSupplier ?? createGitHubAppTokenSupplierFromEnv({
     fetchJsonImpl,
     now,
     repository,
+  });
+  const productionWebSha = await resolveWebSha({
+    env: withoutNativeGitHubCredentials(process.env),
+    scheduledMainSha: webSha,
   });
 
   const tag = await fetchJsonImpl(
@@ -153,14 +121,9 @@ export async function dispatchAndWait({
     "private Android tag lookup",
   );
   const expectedSha = inspectPrivateDispatchTag(tag, {
-    expectedSha: requiredEnv("NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA"),
+    expectedSha: source?.privateSha,
     ref,
   });
-  if (mode === "production_canary") await proveCurrentProductionAlias(webSha);
-  if (mode === "pr") {
-    if (!isRecord(prHead)) throw new Error("PR head revalidation inputs are required.");
-    await revalidateExactPrHead({ ...prHead, expectedSha: webSha }, fetchJsonImpl);
-  }
 
   const dispatchExpiresAt =
     Math.floor(now() / 1000) + PRIVATE_ANDROID_DISPATCH_TTL_SECONDS;
@@ -171,9 +134,8 @@ export async function dispatchAndWait({
         androidTag: ref,
         correlationId,
         dispatchExpiresAt,
-        mode,
         webBaseUrl,
-        webSha,
+        webSha: productionWebSha,
       }),
       ref,
     }),
@@ -202,7 +164,7 @@ export async function dispatchAndWait({
             `Private Android E2E completed with ${run.conclusion || "no conclusion"}.`,
           );
         }
-        console.log(`::notice::native-android-e2e stage=android_${mode} result=success`);
+        console.log("::notice::native-android-e2e stage=android_production_canary result=success");
         return;
       }
       await sleepImpl(POLL_MS);
@@ -529,45 +491,12 @@ async function holdPrivateRunExecutionFence({
   }
 }
 
-async function revalidateExactPrHead(
-  { expectedSha, prNumber, repository, token },
-  fetchJsonImpl = fetchJson,
-) {
-  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
-    throw new Error("PR number must be a positive integer.");
-  }
-  const safeWebRepository = safeRepository(repository);
-  requiredString(token, "Web GitHub token");
-  const encodedRepository = safeWebRepository.split("/").map(encodeURIComponent).join("/");
-  inspectExactPrHead(await fetchJsonImpl(
-    `https://api.github.com/repos/${encodedRepository}/pulls/${prNumber}`,
-    { headers: githubHeaders(token) },
-    "Web PR head revalidation",
-  ), { expectedSha, prNumber });
-  console.log("::notice::native-android-e2e stage=pr_head_revalidate result=success");
-}
-
-async function proveCurrentProductionAlias(expectedSha) {
-  const childEnv = { ...process.env };
+function withoutNativeGitHubCredentials(env) {
+  const childEnv = { ...env };
   delete childEnv.NATIVE_ANDROID_E2E_GITHUB_APP_ID;
   delete childEnv.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY;
   delete childEnv.NATIVE_ANDROID_E2E_GITHUB_TOKEN;
-  const currentSha = (await runBoundedCommand({
-    argv: [
-      "--dir",
-      "apps/web",
-      "exec",
-      "tsx",
-      "scripts/resolve-vercel-production-alias-sha.ts",
-    ],
-    captureStdout: true,
-    command: "pnpm",
-    env: childEnv,
-    label: "Production alias verification",
-    maxOutputChars: PRODUCTION_ALIAS_MAX_OUTPUT_CHARS,
-    timeoutMs: PRODUCTION_ALIAS_TIMEOUT_MS,
-  })).trim();
-  inspectCurrentProductionSha(currentSha, expectedSha);
+  return childEnv;
 }
 
 function githubHeaders(token) {
@@ -604,21 +533,5 @@ function safeRepository(value) {
 
 function safeWorkflow(value) {
   assertSafeId(value, "private Android workflow", 180, /^[A-Za-z0-9._-]+$/u);
-  return value;
-}
-
-function safeTag(value) {
-  assertSafeId(value, "private Android tag", 180, /^[A-Za-z0-9._/-]+$/u);
-  if (
-    value.startsWith("refs/")
-    || value.startsWith("/")
-    || value.endsWith("/")
-    || value.includes("..")
-    || value.includes("//")
-    || value.includes("@{")
-    || value.endsWith(".lock")
-  ) {
-    throw new Error("private Android ref must be a safe lightweight tag name.");
-  }
   return value;
 }

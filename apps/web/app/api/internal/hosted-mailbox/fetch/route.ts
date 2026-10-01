@@ -1,15 +1,13 @@
 import {
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
-} from "@murphai/hosted-execution/parsers";
-import type { PrismaClient } from "@prisma/client";
+} from "@murphai/hosted-execution/parsers/mailbox";
+import type { Prisma, PrismaClient } from "@prisma/client";
+import { readHostedRuntimeIngressCryptoContextForWorker } from "@/src/lib/hosted-crypto/domain-root-store";
 
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import {
-  hostedOnboardingError,
-} from "@/src/lib/hosted-onboarding/errors";
 import {
   readHostedActiveGroupRunningBit,
 } from "@/src/lib/hosted-groups/group-sponsorship-store";
@@ -24,101 +22,176 @@ import {
 import {
   fetchHostedRuntimeMailboxProjection,
   tryMarkHostedMailboxConversationAiUsageDenied,
-} from "@/src/lib/hosted-mailbox/store";
+} from "@/src/lib/hosted-mailbox/projection";
 import {
   resolveHostedRuntimeAiUsageGate,
+  hostedRuntimeUsageMemberSelect,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
+import { requireHostedRuntimeCallbackTx } from "@/src/lib/hosted-execution/runtime-owner";
+import { readHostedRuntimeCallbackAuthority } from "@/src/lib/hosted-execution/runtime-write-fence";
+
+import { runWithHostedMailboxFetchTiming } from "@/src/lib/hosted-mailbox/fetch-timing";
 
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
-type HostedRuntimeMailboxAiUsageItem = {
-  consumedAt?: string | null;
-  lane: string;
-  laneSeq: string;
-  payloadInlineCiphertext?: string | null;
-  payloadRef?: string | null;
-};
+export async function POST(request: Request): Promise<Response> {
+  let serverTiming = "";
+  const handle = withJsonError(async (request: Request) => runWithHostedMailboxFetchTiming(request, async (timing) => {
+    const userId = await requireHostedCloudflareCallbackRequest(request, {
+      runtimeAuthority: "caller_transaction",
+      maxBodyBytes: HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES,
+    });
+    timing.authenticated();
+    timing.start("parse");
+    const prisma = getPrisma();
+    const rawBody = await readOptionalJsonObject(request);
+    const body = parseHostedMailboxFetchRequest(rawBody);
+    const authority = readHostedRuntimeCallbackAuthority(request);
+    timing.start("transaction_acquire");
+    const { mailbox, includeGroupRunningBit } = await prisma.$transaction(async (tx) => {
+      timing.start("authority");
+      try {
+        await requireHostedRuntimeCallbackTx(tx, userId, authority ? { ...authority, userId } : null);
+        timing.start("member");
+        // One fresh projection supplies access, consent and read-first allowance.
+        const memberState = await tx.hostedMember.findUnique({
+          where: { id: userId },
+          select: {
+            ...hostedRuntimeUsageMemberSelect,
+            assistantProviderPreference: true,
+            inferenceConnection: { select: { selected: true, revision: true } },
+          },
+        });
+        timing.start("access");
+        const access = await requireHostedRuntimeMailboxActiveAccess(userId, {
+          prisma: tx,
+          memberState,
+        });
+        const assistantCustomInferenceRevision = !access.isThreadContainer
+            && memberState?.inferenceConnection?.selected
+          ? memberState.inferenceConnection.revision
+          : null;
+        const fetchedAt = new Date();
+        timing.start("mailbox");
+        const projection = await fetchHostedRuntimeMailboxProjection({
+          prisma: tx,
+          cursorMode: body.cursorMode ?? null,
+          lanes: body.lanes.map((laneCursor) => ({
+            importedSeq: laneCursor.importedSeq,
+            lane: laneCursor.lane,
+          })),
+          limitPerLane: body.limitPerLane,
+          now: fetchedAt,
+          userId,
+        });
+        timing.start("usage");
+        const conversationWorkPresent = hostedMailboxItemsRequireAiUsageAccess({
+          consumedSeqByLane: projection.consumedSeqByLane,
+          items: projection.items.map((item) => ({
+            consumedAt: item.consumedAt ?? null,
+            lane: item.lane,
+            laneSeq: item.laneSeq,
+            payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
+            payloadRef: item.payloadRef ?? null,
+          })),
+          lanes: body.lanes,
+        });
+        const usage = conversationWorkPresent
+          ? await readHostedRuntimeMailboxAiUsageAccess({
+              consumedSeqByLane: projection.consumedSeqByLane,
+              lanes: body.lanes,
+              maxSeqByLane: projection.maxSeqByLane,
+              memberState: memberState ?? undefined,
+              prisma: tx,
+              userId,
+            })
+          : { allowed: true, runningLow: false };
+        timing.start("projection");
+        if (!usage.allowed) {
+          return { includeGroupRunningBit: false, mailbox: parseHostedMailboxFetchResponse({
+            assistantProvider: access.assistantProvider,
+            assistantCustomInferenceRevision,
+            consumedSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({
+              consumedSeq: importedSeq,
+              lane,
+            })),
+            fetchedAt: fetchedAt.toISOString(),
+            items: [],
+            maxSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({
+              lane,
+              maxSeq: importedSeq,
+            })),
+            userId,
+          }) };
+        }
+        return { includeGroupRunningBit: conversationWorkPresent && access.isThreadContainer, mailbox: parseHostedMailboxFetchResponse({
+          assistantProvider: access.assistantProvider,
+          assistantCustomInferenceRevision,
+          ...(usage.runningLow ? { conversationUsageStatus: "low" as const } : {}),
+          consumedSeqByLane: projection.consumedSeqByLane,
+          fetchedAt: fetchedAt.toISOString(),
+          items: projection.items,
+          maxSeqByLane: projection.maxSeqByLane,
+          userId,
+        }) };
+      } catch (error) {
+        timing.failed();
+        throw error;
+      } finally {
+        timing.start("transaction_finish");
+      }
+    });
+    timing.start("group_presentation");
+    // Decrypt optional presentation only after the database transaction ends.
+    const groupRunningBit = includeGroupRunningBit
+      ? await readHostedActiveGroupRunningBit({ now: new Date(mailbox.fetchedAt), prisma, runtimeMemberId: userId }).catch(() => null)
+      : null;
+    timing.start("ingress_context");
+    const consumed = mailbox.consumedSeqByLane?.find((cursor) => cursor.lane === "conversation");
+    const inlineConversationPresent = mailbox.items.some((item) =>
+      item.kind === "conversation.message" && item.lane === "conversation"
+      && !item.consumedAt && item.payloadInlineCiphertext && !item.payloadRef
+      && (!consumed || BigInt(item.laneSeq) > BigInt(consumed.consumedSeq)));
+    const ingressCryptoContext = rawBody?.includeIngressCryptoContext === true
+      && rawBody.decodeInlinePayloads === true && inlineConversationPresent
+      ? await readMailboxIngressCryptoContext({ prisma, userId }).catch(() => null)
+      : null;
+    timing.start("serialize");
+    // This signed-envelope extension ends at the Worker; the canonical parser strips it.
+    return jsonOk({ ...mailbox, ...(groupRunningBit ? { groupRunningBit } : {}), ...(ingressCryptoContext ? { ingressCryptoContext } : {}) });
+  }, (value) => { serverTiming = value; }));
+  const response = await handle(request);
+  response.headers.set("server-timing", serverTiming);
+  return response;
+}
 
-export const POST = withJsonError(async (request: Request) => {
-  const userId = await requireHostedCloudflareCallbackRequest(request, {
-    maxBodyBytes: HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES,
-  });
-  await requireHostedRuntimeMailboxActiveAccess(userId);
-  const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
-  const prisma = getPrisma();
-  const fetchedAt = new Date();
-  const projection = await fetchHostedRuntimeMailboxProjection({
-    cursorMode: body.cursorMode ?? null,
-    lanes: body.lanes.map((laneCursor) => ({
-      importedSeq: laneCursor.importedSeq,
-      lane: laneCursor.lane,
-    })),
-    limitPerLane: body.limitPerLane,
-    now: fetchedAt,
-    userId,
-  });
-  const usageRunningLow = await requireHostedRuntimeMailboxAiUsageAccess({
-    consumedSeqByLane: projection.consumedSeqByLane,
-    items: projection.items,
-    lanes: body.lanes,
-    maxSeqByLane: projection.maxSeqByLane,
-    prisma,
-    userId,
-  });
-  // Sponsorship color is optional; it must never block ordinary mailbox work.
-  const groupRunningBit = await readHostedActiveGroupRunningBit({
-    now: fetchedAt,
-    prisma,
-    runtimeMemberId: userId,
-  }).catch(() => null);
+async function readMailboxIngressCryptoContext(input: { prisma: PrismaClient; userId: string }) {
+  const context = await readHostedRuntimeIngressCryptoContextForWorker(input);
+  return { ...context, fetchedAt: new Date().toISOString() };
+}
 
-  return jsonOk(parseHostedMailboxFetchResponse({
-    ...(usageRunningLow ? { conversationUsageStatus: "low" as const } : {}),
-    ...(groupRunningBit ? { groupRunningBit } : {}),
-    consumedSeqByLane: projection.consumedSeqByLane,
-    fetchedAt: fetchedAt.toISOString(),
-    items: projection.items,
-    maxSeqByLane: projection.maxSeqByLane,
-    userId,
-  }));
-});
-
-async function requireHostedRuntimeMailboxAiUsageAccess(input: {
+async function readHostedRuntimeMailboxAiUsageAccess(input: {
   consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];
-  items: readonly HostedRuntimeMailboxAiUsageItem[];
   lanes: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["lanes"];
   maxSeqByLane: Parameters<
     typeof readHostedMailboxConversationAiUsageHighWater
   >[0]["lanes"];
-  prisma: PrismaClient;
+  memberState: Parameters<typeof resolveHostedRuntimeAiUsageGate>[0]["memberState"];
+  prisma: PrismaClient | Prisma.TransactionClient;
   userId: string;
-}): Promise<boolean> {
-  // Gate the whole fetch batch: runtime imports lanes together, and all-or-nothing
-  // watermarks are simpler than returning partial lane output around denied AI work.
-  if (!hostedMailboxItemsRequireAiUsageAccess({
-    consumedSeqByLane: input.consumedSeqByLane,
-    items: input.items.map((item) => ({
-      consumedAt: item.consumedAt ?? null,
-      lane: item.lane,
-      laneSeq: item.laneSeq,
-      payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
-      payloadRef: item.payloadRef ?? null,
-    })),
-    lanes: input.lanes,
-  })) {
-    return false;
-  }
-
+}): Promise<{ allowed: boolean; runningLow: boolean }> {
   const gate = await resolveHostedRuntimeAiUsageGate({
     mode: "read_first",
+    memberState: input.memberState,
+    prisma: input.prisma,
     userId: input.userId,
   });
 
   if (gate.status === "allowed") {
-    return gate.usageRunningLow === true;
+    return { allowed: true, runningLow: gate.usageRunningLow === true };
   }
 
   await tryMarkHostedMailboxConversationAiUsageDenied({
@@ -132,9 +205,5 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
     userId: input.userId,
   });
 
-  throw hostedOnboardingError({
-    code: "HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED",
-    httpStatus: 403,
-    message: "Hosted runtime mailbox AI usage is denied.",
-  });
+  return { allowed: false, runningLow: false };
 }

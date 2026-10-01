@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 
 import { VaultError } from "./errors.ts";
+import { canonicalJsonlStorageForPath } from "./canonical-jsonl-storage.ts";
 import { readUtf8File } from "./fs.ts";
 import {
   assertPathWithinVaultOnDisk,
@@ -32,6 +33,13 @@ export async function readJsonlRecords({
   relativePath: string;
 }): Promise<UnknownRecord[]> {
   const normalizedRelativePath = normalizeRelativeVaultPath(relativePath);
+  const storage = canonicalJsonlStorageForPath(normalizedRelativePath);
+  if (storage) {
+    return await storage.readJsonlShardRecords({
+      vaultRoot,
+      relativePath: normalizedRelativePath,
+    });
+  }
   const content = await readUtf8File(vaultRoot, normalizedRelativePath);
   const lines = content.split("\n").filter(Boolean);
 
@@ -56,6 +64,16 @@ export async function visitJsonlRecordsInterruptible({
   visitedCount: number;
 }> {
   const normalizedRelativePath = normalizeRelativeVaultPath(relativePath);
+  const storage = canonicalJsonlStorageForPath(normalizedRelativePath);
+  if (storage) {
+    return await storage.visitJsonlShardRecordsInterruptible({
+      relativePath: normalizedRelativePath,
+      shouldContinue,
+      signal,
+      vaultRoot,
+      visit,
+    });
+  }
   if (shouldContinue?.() === false) {
     return { interrupted: true, visitedCount: 0 };
   }

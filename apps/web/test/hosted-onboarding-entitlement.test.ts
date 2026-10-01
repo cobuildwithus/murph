@@ -278,16 +278,11 @@ describe("hosted member access (single resolver)", () => {
     });
   });
 
-  it("makes readActiveHostedMemberAccess the participant-aware thread-container gate", async () => {
+  it.each([true, false])("returns the database-filtered access decision: %s", async (allowed) => {
     const now = new Date("2026-07-26T12:00:00.000Z");
     const prisma = {
       hostedMember: {
-        findUnique: vi.fn(async () => ({
-          ...person({ billingStatus: HostedBillingStatus.not_started }),
-          threadContainer: {
-            owner: person({ billingStatus: HostedBillingStatus.paused }),
-          },
-        })),
+        findUnique: vi.fn(async () => allowed ? { id: "member_container" } : null),
       },
       hostedThreadContainerParticipant: {
         findFirst: vi.fn(async () => ({ participantMemberId: "member_participant" })),
@@ -298,22 +293,13 @@ describe("hosted member access (single resolver)", () => {
       memberId: "member_container",
       now,
       prisma: prisma as never,
-    })).resolves.toBe(true);
+    })).resolves.toBe(allowed);
 
     expect(prisma.hostedMember.findUnique).toHaveBeenCalledWith({
-      select: expect.any(Object),
-      where: { id: "member_container" },
+      select: { id: true },
+      where: expect.objectContaining({ id: "member_container" }),
     });
-    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
-      select: {
-        participantMemberId: true,
-      },
-      where: expect.objectContaining({
-        containerMemberId: "member_container",
-        lastSeenAt: { gte: new Date("2026-07-19T12:00:00.000Z") },
-        removedAt: null,
-      }),
-    });
+    expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
   });
 
   it("resolves owner and current-participant access for a member set without per-member reads", async () => {

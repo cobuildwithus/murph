@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "medical-record-provider-search",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Find your medical-record provider faster",
+    "summary": "Hospital and clinic matches now appear as you type, with recognizable provider logos and a simpler connection page.",
+    "details": "Search by name, city, or ZIP code, then authorize access on your provider’s patient portal. Eligible imports also include outside-record clinical notes when shared by the provider. Available records depend on the provider and the permissions you grant.",
+    "relevanceTags": [
+      "medical-records",
+      "labs",
+      "connections"
+    ],
+    "sourcePullRequests": [
+      3497
+    ]
+  }
+}

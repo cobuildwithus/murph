@@ -5,6 +5,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   createClinicalRecordConnectIntent: vi.fn(),
   fetchClinicalRetrievalPage: vi.fn(),
+  fetchClinicalRetrievalDocument: vi.fn(),
   readClinicalRetrievalRun: vi.fn(),
   recordClinicalRetrievalOutcome: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/clinical-records/retrieval", () => ({
   fetchClinicalRetrievalPage: mocks.fetchClinicalRetrievalPage,
+  fetchClinicalRetrievalDocument: mocks.fetchClinicalRetrievalDocument,
   readClinicalRetrievalRun: mocks.readClinicalRetrievalRun,
   recordClinicalRetrievalOutcome: mocks.recordClinicalRetrievalOutcome,
 }));
@@ -43,9 +45,11 @@ let readRunRoute: ReadRunRoute;
 let connectLinkRoute: ConnectLinkRoute;
 let fetchPageRoute: FetchPageRoute;
 let recordOutcomeRoute: RecordOutcomeRoute;
+let fetchDocumentRoute: typeof import("../app/api/internal/clinical-records/runtime/fetch-document/route");
 
 describe("Clinical Records internal runtime routes", () => {
   beforeAll(async () => {
+    fetchDocumentRoute = await import("../app/api/internal/clinical-records/runtime/fetch-document/route");
     [connectLinkRoute, readRunRoute, fetchPageRoute, recordOutcomeRoute] = await Promise.all([
       import("../app/api/internal/clinical-records/connect-link/route"),
       import("../app/api/internal/clinical-records/runtime/read-run/route"),
@@ -79,6 +83,23 @@ describe("Clinical Records internal runtime routes", () => {
     mocks.recordClinicalRetrievalOutcome.mockResolvedValue(undefined);
   });
 
+  it("requires a signed active runtime fence and permits only a bound document ticket", async () => {
+    const payload = { generation: 1, runId: "run_1", ticket: "opaque-document-ticket" };
+    const endpoint = "/api/internal/clinical-records/runtime/fetch-document";
+    const missingFence = await fetchDocumentRoute.POST(jsonRequest(endpoint, payload));
+    expect(missingFence.status).toBe(401);
+    expect(mocks.requireHostedCloudflareCallbackRequest).not.toHaveBeenCalled();
+    const injectedUrl = await fetchDocumentRoute.POST(jsonRequest(endpoint, { ...payload, url: "https://outside.example.test" }, runtimeWriteFenceHeaders()));
+    expect(injectedUrl.status).toBe(400);
+    expect(mocks.fetchClinicalRetrievalDocument).not.toHaveBeenCalled();
+    mocks.fetchClinicalRetrievalDocument.mockResolvedValue({ status: "unavailable", errorCode: "document-unavailable", retryable: false });
+    const response = await fetchDocumentRoute.POST(jsonRequest(endpoint, payload, runtimeWriteFenceHeaders()));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireHostedRuntimeActiveAccess).toHaveBeenCalled();
+    expect(mocks.fetchClinicalRetrievalDocument).toHaveBeenCalledWith({ memberId: "member_clinical_1", request: payload });
+  });
+
   it("rejects all four operations before signed auth when the runtime write fence is absent", async () => {
     const responses = await Promise.all([
       connectLinkRoute.POST(jsonRequest("/api/internal/clinical-records/connect-link", {})),
@@ -90,6 +111,10 @@ describe("Clinical Records internal runtime routes", () => {
         cursor: null,
         generation: 1,
         requestId: "request_1",
+        retrievalProtocol: "query-slices-v2",
+        queryFingerprint: "a".repeat(64),
+        queryScopeId: "patient",
+        sliceId: "whole",
         resourceType: "Patient",
         runId: "run_1",
       })),
@@ -137,6 +162,10 @@ describe("Clinical Records internal runtime routes", () => {
         cursor: null,
         generation: 1,
         requestId: "request_1",
+        retrievalProtocol: "query-slices-v2",
+        queryFingerprint: "a".repeat(64),
+        queryScopeId: "patient",
+        sliceId: "whole",
         resourceType: "Patient",
         runId: "run_1",
       },
@@ -147,6 +176,8 @@ describe("Clinical Records internal runtime routes", () => {
       {
         counts: emptyOutcomeCounts(),
         errorCode: "provider-unavailable",
+        retrievalProtocol: "query-slices-v2",
+        retrievalSlices: [{ queryScopeId: "patient", sliceId: "whole" }],
         generation: 1,
         runId: "run_1",
         status: "failed",
@@ -266,6 +297,10 @@ describe("Clinical Records internal runtime routes", () => {
         cursor: null,
         generation: 1,
         requestId: "request_1",
+        retrievalProtocol: "query-slices-v2",
+        queryFingerprint: "a".repeat(64),
+        queryScopeId: "patient",
+        sliceId: "whole",
         resourceType: "Patient",
         runId: "run_1",
       }, headers)),

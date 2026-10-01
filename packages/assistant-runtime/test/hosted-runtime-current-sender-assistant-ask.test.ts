@@ -20,6 +20,7 @@ vi.mock("@murphai/assistant-engine", () => ({
 }));
 vi.mock("@murphai/assistant-engine/assistant-ask", () => ({
   executeConsentedReadOnlyAssistantAsk: vi.fn(),
+  executeOperatorDiagnostic: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
 }));
 

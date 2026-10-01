@@ -3694,6 +3694,154 @@
           "type": "string",
           "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
         },
+        "clinicalFact": {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "enum": [
+                "observation",
+                "exam-finding",
+                "social-history",
+                "family-history",
+                "condition-history",
+                "medication-order",
+                "medication-history",
+                "medication-dispense",
+                "procedure-history",
+                "immunization-history",
+                "encounter-history",
+                "care-plan",
+                "service-order",
+                "allergy-history",
+                "report-finding"
+              ]
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "subject": {
+              "type": "string",
+              "enum": [
+                "member",
+                "family",
+                "unknown"
+              ]
+            },
+            "clinicalDate": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "statement": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "codings": {
+              "minItems": 1,
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "system": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "display": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  }
+                },
+                "required": [
+                  "code",
+                  "system"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "qualifiers": {
+              "minItems": 1,
+              "maxItems": 30,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  }
+                },
+                "required": [
+                  "name",
+                  "value"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "category",
+            "label",
+            "subject",
+            "clinicalDate",
+            "statement"
+          ],
+          "additionalProperties": false
+        },
         "note": {
           "type": "string",
           "minLength": 1,
@@ -3703,6 +3851,43 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 120
+        },
+        "plan": {
+          "type": "object",
+          "properties": {
+            "endsAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "planned",
+                "tentative",
+                "canceled"
+              ]
+            },
+            "lastVerifiedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "accountId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "category": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "endsAt",
+            "status",
+            "lastVerifiedAt",
+            "category"
+          ],
+          "additionalProperties": false
         },
         "authoredAt": {
           "type": "string",
@@ -10225,9 +10410,29 @@
                     "maxLength": 4000
                   },
                   "memberRepsPerSet": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 999
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 999
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "targetWeightPerSet": {
+                    "type": "number",
+                    "minimum": 0.01,
+                    "maximum": 9999,
+                    "multipleOf": 0.01
+                  },
+                  "targetWeightUnit": {
+                    "type": "string",
+                    "enum": [
+                      "lb",
+                      "kg"
+                    ]
                   },
                   "setPlanIsFinite": {
                     "type": "boolean"
@@ -11524,7 +11729,16 @@
           "type": "string",
           "enum": [
             "main_sleep",
-            "nap"
+            "short_sleep",
+            "nap",
+            "unknown"
+          ]
+        },
+        "sleepState": {
+          "type": "string",
+          "enum": [
+            "tentative",
+            "confirmed"
           ]
         }
       },

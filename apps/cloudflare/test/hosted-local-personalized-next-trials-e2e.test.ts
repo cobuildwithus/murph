@@ -1,18 +1,8 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
 
-import {
-  type HostedExecutionBundleRef,
-  HOSTED_EXECUTION_USER_ID_HEADER,
-} from "@murphai/hosted-execution/contracts";
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
-import {
-  readHostedExecutionSnapshotBaseRef,
-  readHostedExecutionSnapshotHotRef,
-} from "@murphai/hosted-execution/parsers";
-import {
-  listHostedBundleArtifacts,
-  listHostedBundleInlineFiles,
-} from "@murphai/runtime-state/node";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -26,6 +16,8 @@ import {
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
+
+import { withHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot-restore.ts";
 
 const runId = Date.now();
 const memberId = `member_local_personalized_next_trials_${runId}`;
@@ -207,62 +199,26 @@ async function sendPromptAndReadReply(text: string): Promise<string> {
 async function readProtectedCanonicalState(
   status: HostedRunnerStatusResponse,
 ): Promise<string[]> {
-  const snapshotRef = status.workspace?.snapshotRef ?? null;
-  const refs = [
-    readHostedExecutionSnapshotBaseRef(snapshotRef),
-    readHostedExecutionSnapshotHotRef(snapshotRef),
-  ].filter((ref): ref is HostedExecutionBundleRef => ref !== null);
-  const entries = new Map<string, string>();
-
-  for (const ref of refs) {
-    const bytes = await readHostedBundleBytes(ref);
-    for (const file of listHostedBundleInlineFiles({
-      bytes,
-      expectedKind: "vault",
-    })) {
-      if (file.root === "vault" && isProtectedCanonicalPath(file.path)) {
-        entries.set(file.path, file.sha256);
-      }
-    }
-    for (const file of listHostedBundleArtifacts({
-      bytes,
-      expectedKind: "vault",
-    })) {
-      if (file.root === "vault" && isProtectedCanonicalPath(file.path)) {
-        entries.set(file.path, file.ref.sha256);
-      }
-    }
-  }
-
-  return [...entries.entries()]
-    .map(([path, sha256]) => `${path}:${sha256}`)
-    .sort();
-}
-
-function isProtectedCanonicalPath(relativePath: string): boolean {
-  return protectedCanonicalPrefixes.some((prefix) => relativePath.startsWith(prefix));
-}
-
-async function readHostedBundleBytes(
-  ref: HostedExecutionBundleRef,
-): Promise<Uint8Array> {
-  const search = new URLSearchParams({
-    key: ref.key,
-    sha256: ref.hash,
-    size: String(ref.size),
+  return withHostedLocalWorkspaceSnapshot({
+    harness: requireScenario().harness,
+    status,
     userId: memberId,
-  });
-  const response = await requireScenario().harness.request(
-    `/__test/artifacts?${search.toString()}`,
-    {
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: memberId,
-      },
-      method: "GET",
+    read: async ({ vaultRoot }) => {
+      // The shared reader requires valid restored vault metadata before this scan,
+      // so an empty protected set proves absence rather than an unsupported ref.
+      const files = await readdir(vaultRoot, { recursive: true, withFileTypes: true });
+      const entries: string[] = [];
+      for (const file of files) {
+        if (!file.isFile()) continue;
+        const absolutePath = path.join(file.parentPath, file.name);
+        const relativePath = path.relative(vaultRoot, absolutePath).split(path.sep).join("/");
+        if (!protectedCanonicalPrefixes.some((prefix) => relativePath.startsWith(prefix))) continue;
+        const sha256 = createHash("sha256").update(await readFile(absolutePath)).digest("hex");
+        entries.push(`${relativePath}:${sha256}`);
+      }
+      return entries.sort();
     },
-  );
-  expect(response.status).toBe(200);
-  return new Uint8Array(await response.arrayBuffer());
+  });
 }
 
 async function postSignedLinqWebhook(

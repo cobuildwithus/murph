@@ -22,12 +22,20 @@ const hostedCryptoDomainRootStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-crypto/domain-root-store.ts",
   import.meta.url,
 ).href;
+const hostedMemberIdentityFieldsModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/member-identity-fields.ts",
+  import.meta.url,
+).href;
 const hostedInviteServiceModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/invite-service.ts",
   import.meta.url,
 ).href;
 const hostedFamilyPlanModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/family-plan.ts",
+  import.meta.url,
+).href;
+const hostedUsageAllowanceModuleSpecifier = new URL(
+  "../../src/lib/hosted-execution/usage-allowance.ts",
   import.meta.url,
 ).href;
 
@@ -74,8 +82,11 @@ export interface HostedBillingMemberSeedForTest {
   billingStatus: HostedBillingStatusForTest;
   environment?: NodeJS.ProcessEnv;
   memberId: string;
+  /** Seeds the crypto-root marker used to detect an earlier activation. */
+  previouslyActivated: boolean;
   privyUserId?: string | null;
   verifiedEmail?: string | null;
+  verifiedPhoneNumber?: string;
 }
 
 export interface HostedBillingProjectionForTest {
@@ -96,10 +107,20 @@ export interface HostedBillingProjectionForTest {
   stripeSubscriptionScheduleId: string | null;
 }
 
+export interface HostedBillingUsageGateForTest {
+  allowed: boolean;
+  allowanceSource: string;
+  billingPlanCode: string;
+  limitUsdMicros: bigint;
+  periodEnd: Date;
+  periodStart: Date;
+  remainingUsdMicros: bigint;
+  spentUsdMicros: bigint;
+}
+
 export interface HostedFamilyProjectionForTest {
   billingActive: boolean;
   billingStatus: HostedBillingStatusForTest | null;
-  billedSeatCount: number | null;
   currentBillingPhase: string | null;
   currentBillingPlanCode: string | null;
   groupId: string | null;
@@ -123,6 +144,26 @@ export interface HostedFamilyProjectionForTest {
   } | null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
+}
+
+export async function provisionHostedBillingActivationProofForTest<TTx>(input: {
+  memberId: string;
+  previouslyActivated: boolean;
+  provision: (input: {
+    reason: string;
+    tx: TTx;
+    userId: string;
+  }) => Promise<void>;
+  tx: TTx;
+}): Promise<void> {
+  if (!input.previouslyActivated) {
+    return;
+  }
+  await input.provision({
+    reason: "hosted-billing-live.test-seed",
+    tx: input.tx,
+    userId: input.memberId,
+  });
 }
 
 interface HostedBillingTestReader {
@@ -152,6 +193,14 @@ interface HostedPrismaModule {
     databaseUrl: string;
     poolMax?: number;
   }): HostedBillingTestPrisma;
+}
+
+interface HostedUsageAllowanceModule {
+  readHostedAiUsageGate(input: {
+    memberId: string;
+    now: Date;
+    prisma: HostedBillingTestPrisma;
+  }): Promise<HostedBillingUsageGateForTest>;
 }
 
 interface HostedMemberStoreModule {
@@ -256,7 +305,6 @@ interface HostedFamilyPlanModule {
     groupId: string;
     prisma: HostedBillingTestPrisma;
   }): Promise<{
-    billedSeatCount: number | null;
     currentBillingPhase: string | null;
     currentBillingPlanCode: string | null;
     stripeCustomerId: string | null;
@@ -302,6 +350,11 @@ interface HostedFamilyPlanModule {
 }
 
 interface HostedBillingTestModules {
+  buildHostedMemberPhoneIdentityFields(phoneNumber: string): Pick<
+    Parameters<HostedMemberIdentityStoreModule["upsertHostedMemberIdentity"]>[0],
+    "maskedPhoneNumberHint" | "phoneLookupKey" | "phoneNumber"
+    | "phoneNumberVerifiedAt" | "privyUserId"
+  >;
   createHostedMember: HostedMemberStoreModule["createHostedMember"];
   createPrismaClient: HostedPrismaModule["createPrismaClient"];
   issueHostedInvite: HostedInviteServiceModule["issueHostedInvite"];
@@ -348,11 +401,6 @@ export async function seedHostedBillingMemberForTest(
           memberId: input.memberId,
           prisma: tx,
         });
-        await modules.provisionHostedCryptoDomainRootsForUserTx({
-          reason: "hosted-billing-live.test-seed",
-          tx,
-          userId: input.memberId,
-        });
         await modules.upsertHostedMemberIdentity({
           maskedPhoneNumberHint: null,
           memberId: input.memberId,
@@ -369,8 +417,22 @@ export async function seedHostedBillingMemberForTest(
           walletChainType: null,
           walletCreatedAt: null,
           walletProvider: null,
+          ...(input.verifiedPhoneNumber
+            ? {
+                ...modules.buildHostedMemberPhoneIdentityFields(input.verifiedPhoneNumber),
+                phoneNumberVerifiedAt: new Date(),
+                privyUserId,
+              }
+            : {}),
         });
       }
+
+      await provisionHostedBillingActivationProofForTest({
+        memberId: input.memberId,
+        previouslyActivated: input.previouslyActivated,
+        provision: modules.provisionHostedCryptoDomainRootsForUserTx,
+        tx,
+      });
 
       await tx.hostedMember.update({
         data: {
@@ -473,6 +535,25 @@ export async function readHostedBillingProjectionForTest(input: {
   });
 }
 
+export async function readHostedBillingUsageGateForTest(input: {
+  at: Date;
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+}): Promise<HostedBillingUsageGateForTest> {
+  return withHostedBillingTestkit(input.environment, async ({ prisma }) => {
+    const usageAllowance: HostedUsageAllowanceModule = await import(
+      hostedUsageAllowanceModuleSpecifier
+    );
+    // Stripe Test Clocks move provider time, not the Web process's wall clock.
+    // Use the production read owner's explicit time input to select that period.
+    return usageAllowance.readHostedAiUsageGate({
+      memberId: input.memberId,
+      now: input.at,
+      prisma,
+    });
+  });
+}
+
 export async function readHostedFamilyProjectionForTest(input: {
   environment?: NodeJS.ProcessEnv;
   memberId: string;
@@ -498,7 +579,6 @@ export async function readHostedFamilyProjectionForTest(input: {
       billingStatus: ownerSnapshot?.billingStatus
         ?? membership?.group.billingStatus
         ?? null,
-      billedSeatCount: billingRef?.billedSeatCount ?? null,
       currentBillingPhase: billingRef?.currentBillingPhase ?? null,
       currentBillingPlanCode: billingRef?.currentBillingPlanCode ?? null,
       groupId,
@@ -636,6 +716,7 @@ async function loadHostedBillingTestModules(
     memberStoreModule,
     memberBillingStoreModule,
     memberIdentityStoreModule,
+    memberIdentityFieldsModule,
     cryptoDomainRootStoreModule,
     inviteServiceModule,
     familyPlanModule,
@@ -644,6 +725,7 @@ async function loadHostedBillingTestModules(
     import(hostedMemberStoreModuleSpecifier),
     import(hostedMemberBillingStoreModuleSpecifier),
     import(hostedMemberIdentityStoreModuleSpecifier),
+    import(hostedMemberIdentityFieldsModuleSpecifier),
     import(hostedCryptoDomainRootStoreModuleSpecifier),
     import(hostedInviteServiceModuleSpecifier),
     import(hostedFamilyPlanModuleSpecifier),
@@ -661,6 +743,8 @@ async function loadHostedBillingTestModules(
   const familyPlan = familyPlanModule as HostedFamilyPlanModule;
   return {
     createHostedMember: memberStore.createHostedMember,
+    buildHostedMemberPhoneIdentityFields:
+      memberIdentityFieldsModule.buildHostedMemberPhoneIdentityFields,
     createPrismaClient: prisma.createPrismaClient,
     issueHostedInvite: inviteService.issueHostedInvite,
     provisionHostedCryptoDomainRootsForUserTx:

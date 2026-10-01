@@ -9,6 +9,7 @@ import {
   assertHostedWebDevRequiredEnv,
   buildHostedWebDevArgv,
   clearConflictingNextDevLock,
+  loadHostedWebDevCryptoState,
   loadHostedWebDevLocalEnv,
   removeHostedWebDevServerLockIfOwned,
   resolveHostedWebDevCacheLimitBytes,
@@ -64,6 +65,82 @@ test("hosted web dev loads local env before checking required database config", 
 
     assert.equal(process.env.DATABASE_URL, "postgresql://user:pass@example.com/db?sslmode=require");
     assert.doesNotThrow(() => assertHostedWebDevRequiredEnv(process.env));
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("hosted web dev uses the exact crypto state shared with the local Worker", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-hosted-web-crypto-"));
+  const statePath = path.join(tempDir, "hosted-local-crypto-state.dev.vars");
+  const exactSharedValue = JSON.stringify({
+    crv: "P-256",
+    d: "private-value",
+    kty: "EC",
+    x: "public-x",
+    y: "public-y",
+  });
+  const environment = createEnv({
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: "stale-value-with-whitespace\n",
+  });
+
+  try {
+    await writeFile(
+      statePath,
+      `HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK=${JSON.stringify(exactSharedValue)}\n`,
+      "utf8",
+    );
+
+    loadHostedWebDevCryptoState(tempDir, environment, statePath);
+
+    assert.equal(
+      environment.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK,
+      exactSharedValue,
+    );
+    assert.deepEqual(
+      JSON.parse(environment.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK ?? ""),
+      JSON.parse(exactSharedValue),
+    );
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("hosted web dev derives the callback public key from the shared keyring", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-hosted-web-callback-key-"));
+  const statePath = path.join(tempDir, "hosted-local-crypto-state.dev.vars");
+  const currentPublicJwk = {
+    crv: "P-256",
+    kty: "EC",
+    x: "current-public-x",
+    y: "current-public-y",
+  };
+  const environment = createEnv({
+    HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: JSON.stringify({
+      ...currentPublicJwk,
+      x: "stale-public-x",
+    }),
+  });
+
+  try {
+    await writeFile(
+      statePath,
+      [
+        `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID=${JSON.stringify("v1")}`,
+        `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON=${JSON.stringify(JSON.stringify({
+          v1: currentPublicJwk,
+        }))}`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    loadHostedWebDevCryptoState(tempDir, environment, statePath);
+
+    assert.deepEqual(
+      JSON.parse(environment.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK ?? ""),
+      currentPublicJwk,
+    );
   } finally {
     await rm(tempDir, { force: true, recursive: true });
   }

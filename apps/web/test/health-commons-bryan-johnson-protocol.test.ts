@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 import {
-  createHealthCommonsCatalogReader,
   isRunnableProtocolStatus,
 } from "@murphai/health-commons/runtime";
 import {
@@ -11,13 +10,11 @@ import {
 } from "@/src/lib/health-commons/experiment-browse";
 import {
   listHealthCommonsBiomarkerRoutes,
-  resolveHealthCommonsBiomarkerDetail,
-} from "@/src/lib/health-commons/biomarker-detail";
-import {
-  listHealthCommonsExperimentRouteParams,
-  listHealthCommonsExperimentProtocols,
-  resolveHealthCommonsExperimentProtocol,
-} from "@/src/lib/health-commons/experiment-detail";
+  resolveHealthCommonsBiomarkerShell,
+  resolveHealthCommonsBiomarkerOverview,
+  resolveHealthCommonsBiomarkerResearch,
+} from "@/src/lib/health-commons/biomarker-projections";
+import { resolveExperimentProjectionFixture } from "./health-commons-projection-fixtures";
 import {
   resolveHealthCommonsExperimentProtocolTab,
   resolveHealthCommonsExperimentResearchTab,
@@ -32,38 +29,23 @@ import {
   createHealthCommonsRouteBundleFixtureCatalog,
 } from "./health-commons-fixture-catalog";
 
-const PUBLIC_PROTOCOL_FIXTURES = [
-  {
-    key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    routeId: "finnish-sauna",
-  },
-  {
-    key: "protocol_variant:cold-water-immersion/cold-plunge",
-    routeId: "cold-plunge",
-  },
-  {
-    key: "protocol_variant:consistent-wake-time/consistent-wake-time",
-    routeId: "consistent-wake-time",
-  },
-] as const;
-
 const PUBLIC_SOURCE_KEY_RESIDUE_PATTERN =
   /source_artifact:|\b(?:source|citation)\s+keys?\b|`{2,}/iu;
 
 describe("Health Commons experiment protocol metadata", () => {
   it("keeps public experiment resolution on generated route bundles, not the monolithic catalog import", () => {
     const source = readFileSync(
-      new URL("../src/lib/health-commons/experiment-detail.ts", import.meta.url),
+      new URL("../src/lib/health-commons/experiment-projections.ts", import.meta.url),
       "utf8",
     );
 
     expect(source).not.toContain("generated/catalog.json");
     expect(source).not.toContain("./catalog");
 
-    const routeParams = listHealthCommonsExperimentRouteParams();
+    const routeParams = listHealthCommonsExperimentBrowseRouteParams();
     expect(routeParams).toContainEqual({ experimentId: "finnish-sauna" });
 
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     expect(protocol?.commons?.routeId).toBe("finnish-sauna");
     expect(protocol?.studies.length).toBeGreaterThan(0);
   });
@@ -81,18 +63,7 @@ describe("Health Commons experiment protocol metadata", () => {
   });
 
   it("uses the generated browse index directly for the public experiment library list", () => {
-    const source = readFileSync(
-      new URL("../src/lib/health-commons/experiment-detail.ts", import.meta.url),
-      "utf8",
-    );
-    const listStart = source.indexOf("export function listHealthCommonsExperimentProtocols(");
-    const resolveStart = source.indexOf("export function resolveHealthCommonsExperimentProtocol(");
-    const listBlock = source.slice(listStart, resolveStart);
-
-    expect(listBlock).toContain("getGeneratedHealthCommonsWebExperimentIndex()");
-    expect(listBlock).not.toContain("loadGeneratedHealthCommonsWebRouteBundle");
-
-    const protocols = listHealthCommonsExperimentProtocols();
+    const protocols = listHealthCommonsExperimentBrowseProtocols();
     const protocolIds = protocols.map((protocol) => protocol.id);
 
     expect(protocolIds).toContain("finnish-sauna");
@@ -102,28 +73,28 @@ describe("Health Commons experiment protocol metadata", () => {
   });
 
   it("uses the simplified protocol title", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("bryan-johnson-blueprint");
+    const protocol = resolveExperimentProjectionFixture("bryan-johnson-blueprint");
 
     expect(protocol).not.toBeNull();
     expect(protocol?.title).toBe("Bryan Johnson Sauna");
   });
 
   it("uses the dedicated Bryan Johnson sauna artwork", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("bryan-johnson-blueprint");
+    const protocol = resolveExperimentProjectionFixture("bryan-johnson-blueprint");
 
     expect(protocol).not.toBeNull();
     expect(protocol?.image).toBe("/design-assets/hero-bryan-johnson-sauna.jpg");
   });
 
   it("uses the dedicated Finnish sauna artwork", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
     expect(protocol?.image).toBe("/design-assets/hero-finnish-sauna.jpeg");
   });
 
   it("uses the dedicated Norwegian 4x4 artwork", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+    const protocol = resolveExperimentProjectionFixture("norwegian-4x4");
 
     expect(protocol).not.toBeNull();
     expect(protocol?.image).toBe("/design-assets/hero-norwegian-4x4.jpeg");
@@ -138,7 +109,7 @@ describe("Health Commons experiment protocol metadata", () => {
       .not.toContain(draftRouteId);
     expect(listHealthCommonsExperimentBrowseRouteParams().map((entry) => entry.experimentId))
       .not.toContain(draftRouteId);
-    expect(resolveHealthCommonsExperimentProtocol(draftRouteId)).toBeNull();
+    expect(resolveExperimentProjectionFixture(draftRouteId)).toBeNull();
     expect(resolveHealthCommonsExperimentShell(draftRouteId)).toBeNull();
     expect(resolveHealthCommonsExperimentProtocolTab(draftRouteId)).toBeNull();
     expect(resolveHealthCommonsExperimentResearchTab(draftRouteId)).toBeNull();
@@ -146,7 +117,7 @@ describe("Health Commons experiment protocol metadata", () => {
   });
 
   it("projects protocol session shapes from Health Commons content", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+    const protocol = resolveExperimentProjectionFixture("norwegian-4x4");
     const protocolTab = resolveHealthCommonsExperimentProtocolTab("norwegian-4x4");
 
     expect(protocol?.sessionShape?.summarySegments?.map((segment) => segment.label)).toEqual([
@@ -219,7 +190,7 @@ describe("Health Commons experiment protocol metadata", () => {
     ] as const;
 
     for (const expectedShape of expectedShapes) {
-      const protocol = resolveHealthCommonsExperimentProtocol(expectedShape.routeId);
+      const protocol = resolveExperimentProjectionFixture(expectedShape.routeId);
       const protocolTab = resolveHealthCommonsExperimentProtocolTab(expectedShape.routeId);
 
       expect(protocol?.sessionShape?.segments.map((segment) => segment.label)).toEqual(
@@ -232,65 +203,28 @@ describe("Health Commons experiment protocol metadata", () => {
   });
 
   it("uses the simplified intermittent fasting title", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("time-restricted-eating-18-6");
+    const protocol = resolveExperimentProjectionFixture("time-restricted-eating-18-6");
 
     expect(protocol).not.toBeNull();
     expect(protocol?.title).toBe("Intermittent Fasting");
   });
 
   it("uses the dedicated intermittent fasting artwork", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("time-restricted-eating-18-6");
+    const protocol = resolveExperimentProjectionFixture("time-restricted-eating-18-6");
 
     expect(protocol).not.toBeNull();
     expect(protocol?.image).toBe("/design-assets/hero-intermittent-fasting.jpg");
   });
 
   it("uses the dedicated pneumatic compression pants artwork", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("pneumatic-compression-pants");
+    const protocol = resolveExperimentProjectionFixture("pneumatic-compression-pants");
 
     expect(protocol).not.toBeNull();
     expect(protocol?.image).toBe("/design-assets/hero-pneumatic-compression-pants.jpg");
   });
 
-  it("omits protocols hidden by Health Commons frontmatter from the public experiments library", () => {
-    const catalog = createFixtureCatalog();
-
-    for (const publicProtocol of PUBLIC_PROTOCOL_FIXTURES) {
-      const protocolIndex = catalog.entities.findIndex(
-        (entity) => entity.key === publicProtocol.key,
-      );
-      const protocol = catalog.entities[protocolIndex];
-
-      expect(protocol?.entityType).toBe("protocol_variant");
-      if (!protocol || protocol.entityType !== "protocol_variant") {
-        return;
-      }
-
-      catalog.entities[protocolIndex] = {
-        ...protocol,
-        hidden: true,
-      };
-    }
-
-    const protocols = listHealthCommonsExperimentProtocols(
-      createHealthCommonsCatalogReader(catalog),
-    );
-    const protocolIds = protocols.map((entry) => entry.id);
-
-    for (const publicProtocol of PUBLIC_PROTOCOL_FIXTURES) {
-      expect(protocolIds).not.toContain(publicProtocol.routeId);
-    }
-    expect(protocolIds).toContain("bryan-johnson-blueprint");
-    expect(
-      resolveHealthCommonsExperimentProtocol(
-        "finnish-sauna",
-        createHealthCommonsCatalogReader(catalog),
-      ),
-    ).toBeNull();
-  });
-
   it("does not resolve hidden generated protocols by direct route id", () => {
-    expect(resolveHealthCommonsExperimentProtocol("hydrolyzed-collagen-peptides")).toBeNull();
+    expect(resolveExperimentProjectionFixture("hydrolyzed-collagen-peptides")).toBeNull();
   });
 
   it("omits hidden generated protocols from the generated index, browse list, and route params", () => {
@@ -311,19 +245,19 @@ describe("Health Commons experiment protocol metadata", () => {
     }
 
     expect(
-      resolveHealthCommonsExperimentProtocol("it-band-syndrome-rehab-and-return-to-run"),
+      resolveExperimentProjectionFixture("it-band-syndrome-rehab-and-return-to-run"),
     ).toBeNull();
   });
 
   it("prefers page-owned cold plunge artwork when the protocol declares media", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("cold-plunge");
+    const protocol = resolveExperimentProjectionFixture("cold-plunge");
 
     expect(protocol).not.toBeNull();
     expect(protocol?.image).toBe("/design-assets/cold-plunge-tub.jpeg");
   });
 
   it("uses cold plunge signal descriptions from the protocol page", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("cold-plunge");
+    const protocol = resolveExperimentProjectionFixture("cold-plunge");
 
     expect(protocol).not.toBeNull();
     expect(
@@ -344,7 +278,7 @@ describe("Health Commons experiment protocol metadata", () => {
   });
 
   it("strips Health Commons source keys from public Daily Step Floor copy", () => {
-    const fullProtocol = resolveHealthCommonsExperimentProtocol("daily-step-floor");
+    const fullProtocol = resolveExperimentProjectionFixture("daily-step-floor");
     const browseProtocol = listHealthCommonsExperimentBrowseProtocols().find((protocol) =>
       protocol.id === "daily-step-floor"
     );
@@ -383,13 +317,6 @@ describe("Health Commons experiment protocol metadata", () => {
       "walking-bout-minutes",
       "walking-cadence",
     ];
-    const publishedBiomarkerRouteIds = new Set(listHealthCommonsBiomarkerRoutes());
-    const expectedPublishedSignalRouteIds = expectedSignalRouteIds.map((routeId) =>
-      publishedBiomarkerRouteIds.has(routeId) ? routeId : undefined
-    );
-    expect(fullProtocol.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual(
-      expectedPublishedSignalRouteIds,
-    );
     expect(protocolTab.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual(
       expectedSignalRouteIds,
     );
@@ -463,8 +390,8 @@ describe("Health Commons experiment protocol metadata", () => {
     );
     const dirtyCopy: string[] = [];
 
-    for (const { experimentId } of listHealthCommonsExperimentRouteParams()) {
-      const fullProtocol = resolveHealthCommonsExperimentProtocol(experimentId);
+    for (const { experimentId } of listHealthCommonsExperimentBrowseRouteParams()) {
+      const fullProtocol = resolveExperimentProjectionFixture(experimentId);
       const browseProtocol = browseProtocols.get(experimentId);
       const shell = resolveHealthCommonsExperimentShell(experimentId);
       const protocolTab = resolveHealthCommonsExperimentProtocolTab(experimentId);
@@ -522,7 +449,10 @@ describe("Health Commons experiment protocol metadata", () => {
     const dirtyCopy: string[] = [];
 
     for (const biomarkerId of listHealthCommonsBiomarkerRoutes()) {
-      const biomarker = resolveHealthCommonsBiomarkerDetail(biomarkerId);
+      const shell = resolveHealthCommonsBiomarkerShell(biomarkerId);
+      const overview = resolveHealthCommonsBiomarkerOverview(biomarkerId);
+      const research = resolveHealthCommonsBiomarkerResearch(biomarkerId);
+      const biomarker = shell && overview && research ? { ...shell, ...overview, ...research } : null;
 
       if (!biomarker) {
         throw new Error(`${biomarkerId} biomarker should resolve for public routes.`);
@@ -550,9 +480,9 @@ type ExperimentResearchTab = NonNullable<
   ReturnType<typeof resolveHealthCommonsExperimentResearchTab>
 >;
 
-type BiomarkerDetail = NonNullable<
-  ReturnType<typeof resolveHealthCommonsBiomarkerDetail>
->;
+type BiomarkerDetail = Omit<NonNullable<ReturnType<typeof resolveHealthCommonsBiomarkerShell>>, "schemaVersion">
+  & Omit<NonNullable<ReturnType<typeof resolveHealthCommonsBiomarkerOverview>>, "schemaVersion">
+  & NonNullable<ReturnType<typeof resolveHealthCommonsBiomarkerResearch>>;
 
 function collectExperimentProtocolCopy(
   protocol: Pick<
@@ -643,13 +573,6 @@ function collectBiomarkerCopy(biomarker: BiomarkerDetail): string[] {
     biomarker.summary,
     biomarker.title,
     biomarker.shortName,
-    biomarker.measurement.bestContext,
-    ...biomarker.measurement.confounders,
-    ...biomarker.measurement.howToMeasure,
-    ...biomarker.measurementContexts,
-    biomarker.interpretationFrame.caveat,
-    biomarker.interpretationFrame.principle,
-    ...biomarker.explainerCards.flatMap((card) => [card.title, card.body]),
     ...biomarker.claims.flatMap((claim) => [
       claim.text,
       ...claim.caveats,
@@ -680,8 +603,4 @@ function describeSourceKeyResidue(label: string, text: string): string | null {
     .replace(/\s+/gu, " ")
     .trim();
   return `${label}: ${excerpt}`;
-}
-
-function createFixtureCatalog() {
-  return createHealthCommonsRouteBundleFixtureCatalog();
 }

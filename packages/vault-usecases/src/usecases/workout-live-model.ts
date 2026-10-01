@@ -1,6 +1,7 @@
 import {
   renderWorkoutSessionEditorResultV1,
   workoutSessionCardV1Bounds,
+  type WorkoutLiveApplyMemberActionResultV1,
   type WorkoutLiveApplyMemberActionV1,
   type WorkoutMemberActionExpectedSetResultV1,
   type WorkoutSessionDetailV1,
@@ -34,6 +35,8 @@ export interface StartLiveWorkoutExerciseInput {
   note?: string
   reps?: number
   setCount?: number
+  targetWeight?: number
+  targetWeightUnit?: LoadUnit
 }
 
 export interface StartLiveWorkoutInput {
@@ -86,6 +89,12 @@ export interface LogLiveWorkoutSetInput
   addedWeightKg?: number
 }
 
+export interface RemoveLiveWorkoutExerciseInput
+  extends LiveWorkoutLookupInput,
+    LiveWorkoutExerciseLookup {
+  expectedRevision: number
+}
+
 export interface ClearLiveWorkoutSetInput
   extends LiveWorkoutLookupInput,
     LiveWorkoutExerciseLookup {
@@ -111,7 +120,10 @@ export interface ApplyLiveWorkoutMemberActionInput {
 }
 
 export type ApplyLiveWorkoutMemberActionResult =
-  | { status: 'applied' | 'unchanged' }
+  | {
+      result?: WorkoutLiveApplyMemberActionResultV1
+      status: 'applied' | 'unchanged'
+    }
   | { reason: 'workout_changed'; status: 'rejected' }
 
 export function isOpenLiveWorkout(workout: WorkoutSession): boolean {
@@ -171,12 +183,37 @@ export function buildLiveWorkoutCardEditor(input: {
   editor: WorkoutSessionEditorProjectionV1
   workout: WorkoutSessionDetailV1
 } | null {
-  if (!isOpenLiveWorkout(input.workout) || input.presentation.state !== 'active') {
+  const snapshot = buildLiveWorkoutCardSnapshot(input)
+  if (snapshot === null || input.presentation.state !== snapshot.workout.state) return null
+  const presentationMatchesLoggedState = snapshot.workout.exercises.every(
+    (exercise, exerciseIndex) => exercise.sets.every((set, setIndex) =>
+      (set.status === 'completed')
+        === (
+          input.presentation.exercises[exerciseIndex]
+            ?.sets[setIndex]?.status === 'completed'
+        ),
+    ),
+  )
+  if (!presentationMatchesLoggedState) return null
+  return snapshot
+}
+
+export function buildLiveWorkoutCardSnapshot(input: {
+  presentation: WorkoutSessionDetailV1
+  workout: WorkoutSession
+  workoutId: string
+}): {
+  editor: WorkoutSessionEditorProjectionV1
+  workout: WorkoutSessionDetailV1
+} | null {
+  if (
+    input.workout.sourceApp !== LIVE_WORKOUT_SOURCE_APP
+    || typeof input.workout.startedAt !== 'string'
+  ) {
     return null
   }
-  if (hasAmbiguousWorkoutActionExerciseCoordinates(input.workout)) {
-    return null
-  }
+  const active = isOpenLiveWorkout(input.workout)
+  if (hasAmbiguousWorkoutActionExerciseCoordinates(input.workout)) return null
   const exercises = input.workout.exercises
     .slice()
     .sort((left, right) => left.order - right.order)
@@ -208,7 +245,7 @@ export function buildLiveWorkoutCardEditor(input: {
     for (const [setIndex, set] of sets.entries()) {
       const cardSet = presentationExercise.sets[setIndex]
       const logged = hasLoggedWorkoutSet(set)
-      if (!cardSet || logged !== (cardSet.status === 'completed')) {
+      if (!cardSet) {
         return null
       }
       if (!logged && set.weightUnit !== undefined) {
@@ -217,6 +254,9 @@ export function buildLiveWorkoutCardEditor(input: {
       const result = logged
         ? projectWorkoutSessionEditorResult(exercise, set)
         : null
+      const targetResult = logged || input.workout.routineId !== undefined
+        ? null
+        : projectWorkoutSessionEditorTarget(exercise)
       if (logged && result === null) {
         return null
       }
@@ -229,10 +269,19 @@ export function buildLiveWorkoutCardEditor(input: {
       if (logged && (actual === null || actual === undefined)) {
         return null
       }
+      const target = targetResult === null
+        ? cardSet.target
+        : renderWorkoutSessionEditorResultV1(
+            encodeWorkoutSessionEditorResult(targetResult),
+            exercise.unitOverride ?? null,
+          )
+      if (target === undefined) {
+        return null
+      }
       editorSets.push({ logged, result })
       presentationSets.push({
-        status: logged ? 'completed' : 'pending',
-        target: cardSet.target,
+        status: logged ? 'completed' : active ? 'pending' : 'skipped',
+        target,
         actual: logged ? actual ?? 'Logged' : null,
       })
     }
@@ -248,20 +297,40 @@ export function buildLiveWorkoutCardEditor(input: {
 
   return {
     editor: {
-      actionBinding: deriveWorkoutActionBinding(
-        input.workoutId,
-        input.workout,
-      ),
+      actionBinding: deriveWorkoutActionBinding(input.workoutId, input.workout),
       exercises: editorExercises,
       setRemovalBinding: deriveWorkoutSetRemovalBinding(input.workoutId, exercises),
       version: 1,
     },
     workout: {
       exercises: presentationExercises,
-      state: 'active',
+      state: active ? 'active' : 'completed',
       version: 1,
     },
   }
+}
+
+function projectWorkoutSessionEditorTarget(
+  exercise: WorkoutExercise,
+): WorkoutMemberActionExpectedSetResultV1 | null {
+  const reps = exercise.memberRepsPerSet ?? null
+  const weight = exercise.targetWeightPerSet ?? null
+  if (weight !== null) {
+    return {
+      kind: 'weight_reps',
+      reps,
+      weight,
+      weightUnit: exercise.targetWeightUnit === exercise.unitOverride
+        ? null
+        : exercise.targetWeightUnit ?? null,
+    }
+  }
+  if (reps !== null) {
+    return exercise.mode === 'weight_reps'
+      ? { kind: 'weight_reps', reps, weight: null, weightUnit: null }
+      : { kind: 'reps', reps }
+  }
+  return null
 }
 
 function projectWorkoutSessionEditorResult(

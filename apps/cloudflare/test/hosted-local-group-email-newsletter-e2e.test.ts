@@ -81,7 +81,7 @@ describe("hosted local group email newsletter e2e", () => {
     });
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: [
           ownerPhone,
           missingEmailPhone,
@@ -109,28 +109,24 @@ describe("hosted local group email newsletter e2e", () => {
   }, 180_000);
 
   it("settles one scheduled eight-scope edition through generic group email without a chat copy", async () => {
-    await Promise.all([
-      requireScenario().seedActiveHostedLinqMember({
-        homePhone,
-        memberId: ownerMemberId,
-        memberPhone: ownerPhone,
-      }),
-      requireScenario().seedActiveHostedLinqMember({
-        homePhone: buildLinqHomePhoneNumber(missingEmailMemberId),
-        memberId: missingEmailMemberId,
-        memberPhone: missingEmailPhone,
-      }),
-    ]);
-    await Promise.all([
-      seedHostedLaunchConsentForTest({
-        environment: requireScenario().runtimeEnv,
-        memberId: ownerMemberId,
-      }),
-      seedHostedLaunchConsentForTest({
-        environment: requireScenario().runtimeEnv,
-        memberId: missingEmailMemberId,
-      }),
-    ]);
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone,
+      memberId: ownerMemberId,
+      memberPhone: ownerPhone,
+    });
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone: buildLinqHomePhoneNumber(missingEmailMemberId),
+      memberId: missingEmailMemberId,
+      memberPhone: missingEmailPhone,
+    });
+    await seedHostedLaunchConsentForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: ownerMemberId,
+    });
+    await seedHostedLaunchConsentForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: missingEmailMemberId,
+    });
     await Promise.all([
       requireScenario().runWake(buildActivationWake(ownerMemberId), ownerMemberId),
       requireScenario().runWake(
@@ -228,12 +224,12 @@ describe("hosted local group email newsletter e2e", () => {
     });
 
     requireScenario().queueAssistantResponses([
-      buildAssistantProviderMurphToolCall("group", {
+      buildAssistantProviderMurphToolCall("group_data", {
         action: "read_shared",
         audience: "group_email",
         projectionScopes,
       }),
-      buildAssistantProviderMurphToolCall("group", {
+      buildAssistantProviderMurphToolCall("group_email", {
         action: "send_email",
         html: newsletterHtml,
         subject: newsletterSubject,

@@ -1,6 +1,8 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type { Metafile } from "esbuild";
 import { afterEach, describe, expect, it } from "vitest";
@@ -65,6 +67,38 @@ function staticBootClosureBytesMetafile(staticClosureBytes: number): Metafile {
         },
       },
     },
+  };
+}
+
+function staticBootChunkCountMetafile(staticChunkCount: number): Metafile {
+  if (staticChunkCount < 1) {
+    throw new Error("static chunk count must include the entry chunk");
+  }
+
+  const outputs: Metafile["outputs"] = {};
+  for (let index = 0; index < staticChunkCount; index += 1) {
+    const outputPath = index === 0
+      ? "dist-bundled/container-entrypoint.js"
+      : `dist-bundled/static-${index}.js`;
+    const nextOutputPath = index + 1 < staticChunkCount
+      ? `./static-${index + 1}.js`
+      : null;
+    outputs[outputPath] = {
+      bytes: 1,
+      entryPoint: index === 0 ? "dist/container-entrypoint.js" : undefined,
+      exports: [],
+      imports: nextOutputPath
+        ? [{ kind: "import-statement", path: nextOutputPath }]
+        : [],
+      inputs: {},
+    };
+  }
+
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 1, imports: [] },
+    },
+    outputs,
   };
 }
 
@@ -159,7 +193,7 @@ const temporaryDirectories: string[] = [];
 const ROOMY_TEST_BUDGETS = {
   entryBytes: 10_000,
   staticClosureBytes: 10_000,
-  totalBytes: 10_000,
+  staticChunkCount: 10,
 };
 const RUNNER_TREE_SHAKE_REQUIRED_PACKAGE_MANIFESTS = [
   ["@murphai/contracts", "packages/contracts/package.json"],
@@ -178,8 +212,12 @@ afterEach(async () => {
 // entrypoint has: a multi-module graph, a dynamic import (esbuild splitting),
 // an external dependency that must resolve from the staged node_modules at
 // boot, and createRequire interop from the banner.
-async function createFakeRunnerBundle(): Promise<string> {
-  const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-entrypoint-bundle-"));
+async function createFakeRunnerBundle(
+  prefix = "murph-entrypoint-bundle-",
+  canonicalPath = false,
+): Promise<string> {
+  const temporaryPath = await mkdtemp(path.join(tmpdir(), prefix));
+  const bundleDir = canonicalPath ? await realpath(temporaryPath) : temporaryPath;
   temporaryDirectories.push(bundleDir);
 
   await mkdir(path.join(bundleDir, "dist"), { recursive: true });
@@ -213,6 +251,7 @@ async function createFakeRunnerBundle(): Promise<string> {
       "export function startHostedContainerEntrypoint() {",
       "  return `${sharp()}:${helperValue}:${typeof lazyLoader}`;",
       "}",
+      "export async function readLazyValue() { return (await lazyLoader()).lazyValue; }",
       "",
     ].join("\n"),
     "utf8",
@@ -255,11 +294,50 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).resolves.toBeUndefined();
   });
 
+  it.each([false, true])("emits identical runtime chunks across staging path lengths (canonical path: %s)", async (canonicalPath) => {
+    const chunks = [];
+    for (const prefix of ["murph-bundle-short-", "murph-bundle-with-a-much-longer-staging-directory-"]) {
+      const bundleDir = await createFakeRunnerBundle(prefix, canonicalPath);
+      await bundleRunnerContainerEntrypoint(bundleDir);
+      const outputDir = path.join(bundleDir, RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME);
+      const outputNames = (await readdir(outputDir)).sort();
+      chunks.push(await Promise.all(outputNames.map(async (name) => ({
+        name,
+        content: await readFile(path.join(outputDir, name), "utf8"),
+      }))));
+
+      const entryUrl = pathToFileURL(path.join(outputDir, "container-entrypoint.js")).href;
+      const result = execFileSync(process.execPath, [
+        "--input-type=module",
+        "--eval",
+        "const entry = await import(process.argv[1]); process.stdout.write(`${entry.startHostedContainerEntrypoint()}:${await entry.readLazyValue()}`);",
+        entryUrl,
+      ], { encoding: "utf8", timeout: 10_000 });
+      expect(result).toBe("installed-sharp:helper:function:lazy");
+    }
+
+    // Equal bytes and imports in every output also preserve the static closure.
+    expect(chunks[1]).toEqual(chunks[0]);
+  });
+
   it("fails fast when the staged entry is missing", async () => {
     const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-entrypoint-missing-"));
     temporaryDirectories.push(bundleDir);
 
     await expect(bundleRunnerContainerEntrypoint(bundleDir)).rejects.toThrow();
+  });
+
+  it.each([false, true])("fails the boot probe when a retained lazy chunk throws (canonical path: %s)", async (canonicalPath) => {
+    const bundleDir = await createFakeRunnerBundle("murph-entrypoint-lazy-failure-", canonicalPath);
+    await writeFile(
+      path.join(bundleDir, "dist", "lazy.js"),
+      "throw new Error('synthetic lazy evaluation failure'); export const lazyValue = 'lazy';\n",
+      "utf8",
+    );
+
+    await expect(bundleRunnerContainerEntrypoint(bundleDir)).rejects.toThrow(
+      /bundled lazy chunk failed to evaluate:[\s\S]*synthetic lazy evaluation failure/,
+    );
   });
 
   it("fails the boot probe when the bundled entry cannot evaluate", async () => {
@@ -303,10 +381,10 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       assertRunnerEntrypointBundleWithinBudgets(metafile, {
         entryBytes: 1_000,
         staticClosureBytes: 10_000,
-        totalBytes: 3_000,
+        staticChunkCount: 10,
       }),
     ).toThrow(
-      /total output 6000B exceeds budget 3000B; entry chunk dist-bundled\/container-entrypoint\.js 2000B exceeds budget 1000B[\s\S]*5000B node_modules\/heavy\/index\.js/,
+      /entry chunk dist-bundled\/container-entrypoint\.js 2000B exceeds budget 1000B[\s\S]*5000B node_modules\/heavy\/index\.js/,
     );
 
     expect(
@@ -314,6 +392,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 2_000,
       staticClosureBytes: 2_000,
+      staticChunkCount: 1,
       totalBytes: 6_000,
     });
   });
@@ -392,29 +471,9 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /node_modules\/@junction-api\/sdk\/index\.js/,
     ],
     [
-      "staged Murph Age health-metrics calculator",
-      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age.js",
-      /node_modules\/@murphai\/health-metrics\/dist\/murph-age\.js/,
-    ],
-    [
-      "staged Murph Age health-metrics source routes",
-      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age-source-routes.js",
-      /node_modules\/@murphai\/health-metrics\/dist\/murph-age-source-routes\.js/,
-    ],
-    [
       "staged contract examples",
       ".deploy/runner-bundle/node_modules/@murphai/contracts/dist/examples.js",
       /node_modules\/@murphai\/contracts\/dist\/examples\.js/,
-    ],
-    [
-      "workspace Murph Age query runtime",
-      "packages/query/dist/murph-age.js",
-      /packages\/query\/dist\/murph-age\.js/,
-    ],
-    [
-      "workspace Murph Age browser replica",
-      "packages/query/dist/browser-replica/murph-age.js",
-      /packages\/query\/dist\/browser-replica\/murph-age\.js/,
     ],
     [
       "dynamic-tool execution runtime",
@@ -512,6 +571,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 2_000,
       staticClosureBytes: 2_000,
+      staticChunkCount: 1,
       totalBytes: 6_000,
     });
   });
@@ -529,6 +589,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 2_000,
       staticClosureBytes: 2_000,
+      staticChunkCount: 1,
       totalBytes: 6_000,
     });
   });
@@ -607,9 +668,9 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // Mirror the production baselines plus their variance allowances so
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
-      entryBytes: 1_739_005 + 48_000,
-      staticClosureBytes: 8_571_156 + 96_000,
-      totalBytes: 11_393_617,
+      entryBytes: 76_589 + 12_000,
+      staticClosureBytes: 2_047_343 + 96_000,
+      staticChunkCount: 24,
     });
   });
 
@@ -622,6 +683,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes,
       staticClosureBytes: entryBytes,
+      staticChunkCount: 1,
       totalBytes: entryBytes,
     });
 
@@ -643,6 +705,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 1_000,
       staticClosureBytes,
+      staticChunkCount: 2,
       totalBytes: staticClosureBytes,
     });
 
@@ -653,31 +716,24 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toThrow(/static boot closure .* exceeds budget/);
   });
 
-  it("gates total output at the production ratchet boundary", () => {
-    const { totalBytes } = resolveRunnerEntrypointBundleBudgets();
-    const dynamicChunkBytesAtBudget = totalBytes - 1_000;
+  it("gates the static boot chunk count at the production ratchet boundary", () => {
+    const { staticChunkCount } = resolveRunnerEntrypointBundleBudgets();
 
     expect(
       assertRunnerEntrypointBundleWithinBudgets(
-        dynamicOnlyChunkMetafile(dynamicChunkBytesAtBudget),
+        staticBootChunkCountMetafile(staticChunkCount),
       ),
-    ).toEqual({
-      entryBytes: 1_000,
-      staticClosureBytes: 1_000,
-      totalBytes,
-    });
+    ).toMatchObject({ staticChunkCount });
 
     expect(() =>
       assertRunnerEntrypointBundleWithinBudgets(
-        dynamicOnlyChunkMetafile(dynamicChunkBytesAtBudget + 1),
+        staticBootChunkCountMetafile(staticChunkCount + 1),
       ),
-    ).toThrow(/total output .* exceeds budget/);
+    ).toThrow(/static boot closure chunk count .* exceeds budget/);
   });
 
-  it("does not count dynamic-only chunks toward the static boot closure budget", () => {
-    const { staticClosureBytes, totalBytes } = resolveRunnerEntrypointBundleBudgets();
-    const dynamicChunkBytes = staticClosureBytes + 500_000;
-    expect(dynamicChunkBytes + 1_000).toBeLessThan(totalBytes);
+  it("leaves lazy-only total growth to the exact-base CI comparison", () => {
+    const dynamicChunkBytes = 20_000_000;
 
     expect(
       assertRunnerEntrypointBundleWithinBudgets(
@@ -686,6 +742,23 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 1_000,
       staticClosureBytes: 1_000,
+      staticChunkCount: 1,
+      totalBytes: dynamicChunkBytes + 1_000,
+    });
+  });
+
+  it("does not count dynamic-only chunks toward the static boot closure budget", () => {
+    const { staticClosureBytes } = resolveRunnerEntrypointBundleBudgets();
+    const dynamicChunkBytes = staticClosureBytes + 500_000;
+
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(
+        dynamicOnlyChunkMetafile(dynamicChunkBytes),
+      ),
+    ).toEqual({
+      entryBytes: 1_000,
+      staticClosureBytes: 1_000,
+      staticChunkCount: 1,
       totalBytes: dynamicChunkBytes + 1_000,
     });
   });

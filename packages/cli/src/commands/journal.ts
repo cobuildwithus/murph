@@ -1,4 +1,5 @@
 import { Cli, z } from 'incur'
+import { ID_PREFIXES, SAMPLE_STREAMS, idPattern } from '@murphai/contracts'
 import {
   requestIdFromOptions,
   withBaseOptions,
@@ -13,6 +14,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases'
 import {
+  assertOrderedDateRange,
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
 } from './command-factory-primitives.js'
@@ -37,15 +39,36 @@ const journalLinkResultSchema = z.object({
   sampleStreams: z.array(z.string().min(1)),
 })
 
+const canonicalEventIdPattern = idPattern(ID_PREFIXES.event)
+const journalEventIdOptionPattern = new RegExp(
+  `^(?:\\s*${canonicalEventIdPattern.slice(1, -1)}\\s*|\\s+)$`,
+  'u',
+)
+const journalStreamOptionPattern = new RegExp(
+  `^(?:\\s*(?:${SAMPLE_STREAMS.join('|')})\\s*|\\s+)$`,
+  'u',
+)
+
 const journalReferenceOptionsSchema = withBaseOptions({
   eventId: z
-    .array(z.string().min(1))
+    .array(
+      z.string().regex(
+        journalEventIdOptionPattern,
+        'Expected a canonical event id in evt_<ULID> form.',
+      ),
+    )
     .optional()
     .describe(
       'Optional event ids to mutate. Repeat --event-id for multiple values. Mutually exclusive with --stream.',
     ),
   stream: z
-    .array(z.string().min(1))
+    .array(z.union([
+      z.enum(SAMPLE_STREAMS),
+      z.string().regex(
+        journalStreamOptionPattern,
+        'Expected a supported sample stream.',
+      ),
+    ]))
     .optional()
     .describe(
       'Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.',
@@ -114,6 +137,7 @@ export function registerJournalCommands(cli: Cli.Cli, _services: VaultServices) 
     }),
     output: listResultSchema,
     async run({ options }) {
+      assertOrderedDateRange(options.from, options.to)
       const result = await _services.query.listJournals({
         vault: options.vault,
         requestId: requestIdFromOptions(options),

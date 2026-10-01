@@ -17,6 +17,7 @@ pnpm hosted-local e2e linq-delivery temporal-orchestration --no-bundle
 pnpm hosted-local e2e linq-scheduled-reminder
 pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live
 pnpm hosted-local e2e vault-persistence --profile e2e:live
+MURPH_E2E_VOICE_AUDIO_PATH=/tmp/synthetic-voice.wav pnpm hosted-local e2e native-voice --profile e2e:live
 pnpm hosted-local e2e --list
 pnpm hosted-local profiles
 pnpm hosted-local doctor
@@ -24,6 +25,72 @@ pnpm hosted-local run -- pnpm --dir apps/cloudflare test:workers
 ```
 
 Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
+
+E2E MinIO cleanup uses the suite's existing local build identity, including after
+scenario failure or interruption. It removes that build's exact container and
+matching build-labelled leftovers; other E2E builds keep their storage service.
+
+The manual `native-voice` scenario needs a development OpenAI key entitled to
+GPT Live and a synthetic WAV saying “Read notes/synthetic-code.txt in my vault
+and tell me the code.” It seeds an isolated member and encrypted vault, then
+uses the real authenticated Voice page, Worker egress, native CLI, mailbox,
+and usage ledger. Only the physical microphone is replaced. The browser
+receives no provider credential. Missing audio skips this opt-in scenario;
+it is not part of `all` or ordinary credential-free CI.
+
+Runner readiness smoke polls every second locally, while retaining the canonical
+smoke client's attempt and wall-clock budgets. Standby preparation includes
+container startup and Codex CLI proof, so local setup must not replace those
+budgets with a shorter attempt cap. Explicit `HOSTED_EXECUTION_SMOKE_RUNNER_*`
+overrides remain supported. Smoke failure stays fatal for E2E profiles.
+
+`e2e --no-bundle` reuses the existing runner bundle, then builds the Worker's
+production workspace dependency closure once before launching any scenarios.
+This refreshes copied Worker imports without assembling the runner bundle again or
+repeating package preparation for each scenario. Builds use the existing
+`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` setting (default `1`); failure or
+interruption stops scenario admission. Dev-only dependencies and unrelated
+workspace packages are excluded.
+
+Standalone `up` keeps its normal runner-bundle preparation. Direct callers
+setting the internal `MURPH_DEV_SKIP_RUNNER_BUNDLE=1` flag supply both an existing
+runner bundle and prepared workspace artifacts; the public `--no-bundle` E2E
+command owns the workspace preparation described above.
+
+`src/dev-hosted-local/cloudflare-source-snapshot.ts` owns the temporary Worker
+source copy and built workspace dependency materialization. `stack.ts` prepares
+the runner bundle first, then supplies the resulting snapshot paths to Wrangler;
+startup, readiness, and teardown remain with the stack.
+
+`doctor` reports Docker daemon and Buildx prerequisites separately. Isolated
+Docker configuration selects the first candidate plugin directory containing an
+executable `docker-buildx`, so an empty or unusable earlier directory cannot hide
+a later installed Buildx plugin.
+
+### Hot admission benchmark
+
+`pnpm hosted-local e2e hot-admission-latency` measures mailbox acceptance to
+native Codex turn start through the local Web, Temporal, and Docker runtime.
+It uses a deterministic local provider, discards two warm-up messages, and
+requires one running runtime attempt across every measured message. It is
+manual-only and excluded from `e2e all`.
+Each message waits for the preceding assistant pass to finish, so this measures
+new turns on a warm runtime, not steering during an unfinished turn.
+The acceptance anchor is the mailbox row's `created_at`, which uses the database
+transaction-start timestamp. The measured interval includes the remaining
+append-transaction work before the wake handoff.
+
+Set `MURPH_E2E_HOT_ADMISSION_SAMPLES` to choose 3–100 measured messages (default
+10). Set `MURPH_E2E_HOT_ADMISSION_VAULT_DIR` to an already-unpacked, ignored
+local vault directory to compare against the default small synthetic vault.
+Prepare a private copy with scheduled automations paused before running it;
+never commit private fixtures. The harness copies the directory into temporary
+storage and reports only numeric timing summaries. A canonical export does not
+include historical runtime/session state, so document that limitation when
+interpreting the comparison. Local timings do not model production network RTT.
+
+Only use `--no-bundle` when the runner bundle already matches the source being
+measured. Keep provider mode and other benchmark settings equal across runs.
 
 ## External Temporal worker package
 
@@ -139,6 +206,12 @@ key/token/password/JWK/database URL-shaped values, provider/user/contact
 identifiers, payload-like env values, and sensitive command args are redacted.
 
 ## Design rules
+
+On a child exit before readiness, port-collision classification strips terminal
+controls from the retained child output before producing the existing plain
+address-in-use marker. Diagnostic redaction and retention stay unchanged. The
+full-stack scenario helper consumes that marker through its existing three-attempt
+startup limit, with fresh port reservations and owned cleanup for each attempt.
 
 1. Root `pnpm hosted-local ...` is the canonical developer and CI entrypoint.
 2. `apps/*/package.json` may expose broad aliases, but not one-off hosted-local

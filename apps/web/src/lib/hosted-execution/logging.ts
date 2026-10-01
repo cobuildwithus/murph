@@ -1,7 +1,7 @@
 import {
   normalizeHostedExecutionErrorMessage,
   normalizeHostedExecutionOperatorMessage,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/observability";
 
 const HOSTED_EXECUTION_WORKFLOW_ID_PATTERN = /\bhosted-user-runtime:[A-Za-z0-9._:-]+/gu;
 const HOSTED_EXECUTION_DIRECT_ID_PATTERN = /\b(?:member|user)_[A-Za-z0-9._:-]+/gu;

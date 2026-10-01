@@ -4,6 +4,7 @@ import {
 import {
   executeCodexAppServerTurn,
   preinitializeCodexAppServer,
+  startCodexAppServerRealtime,
   readCodexAppServerTurnFailureContext,
 } from '../../assistant-codex.js'
 import {
@@ -16,9 +17,6 @@ import {
   createAnalyzeVideoToolRuntimeFromEnv,
 } from '../../assistant-codex/analyze-video-tool.js'
 import {
-  resolveSupportedCodexAppServerApprovalPolicy,
-} from '../../assistant-codex/app-server-requests.js'
-import {
   resolveStrictAssistantCodexModelProvider,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -26,16 +24,13 @@ import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
 } from '@murphai/hosted-execution/assistant-capabilities'
 import {
-  DEFAULT_CODEX_MODELS,
-} from './catalog.js'
-import {
   getAssistantBindingContextLines,
 } from '../bindings.js'
 import {
   extractCodexAssistantProviderUsage,
-  mergeCodexConfigOverrides,
   resolveAssistantProviderFlatPromptConversationHistorySection,
   resolveAssistantProviderPrompt,
+  resolveCodexModelProviderConfigOverrides,
 } from './helpers.js'
 import {
   supportsAnyAssistantRichUserMessageContent,
@@ -59,6 +54,8 @@ import type {
   CodexAppServerTurnInput,
   CodexAppServerTurnFailureContext,
   CodexAppServerLiveTurn,
+  CodexRealtimeOptions,
+  CodexRealtimeSession,
 } from '../../assistant-codex.js'
 import { extractCodexAppServerUserMessageImages } from '../../assistant-codex/images.js'
 
@@ -161,10 +158,8 @@ export const CODEX_ASSISTANT_CAPABILITIES: AssistantProviderCapabilities = {
 
 type CodexAssistantProcessPreparationInput = Pick<
   AssistantProviderTurnExecutionInput,
-  | 'codexConfigOverrides'
   | 'env'
   | 'providerConfig'
-  | 'showThinkingTraces'
   | 'workingDirectory'
 >
 
@@ -190,6 +185,26 @@ export async function preinitializeCodexAssistantProcess(
   })
 }
 
+export async function startCodexAssistantVoice(
+  input: CodexAssistantProcessPreparationInput & CodexRealtimeOptions & {
+    mediaModel: string
+    mediaModelProvider: string
+  },
+): Promise<CodexRealtimeSession> {
+  return await startCodexAppServerRealtime({
+    ...resolveCodexAssistantProcessLaunchInput(input),
+    model: input.mediaModel,
+    modelProvider: input.mediaModelProvider,
+    sessionId: input.sessionId,
+    sdp: input.sdp,
+    prompt: input.prompt,
+    voice: input.voice,
+    signal: input.signal,
+    onInput: input.onInput,
+    onUsage: input.onUsage,
+  })
+}
+
 export async function executeCodexAssistantTurnAttempt(
   input: AssistantProviderTurnExecutionInput,
 ): Promise<AssistantProviderTurnAttemptResult> {
@@ -208,9 +223,6 @@ export async function executeCodexAssistantTurnAttempt(
             process.env[modelProviderConfig.envKey],
         )
       : null
-  const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(
-    providerConfig.policy.approvalPolicy,
-  )
   const developerInstructions = normalizeNullableString(input.developerInstructions)
 
   const voiceMemoRuntime = createVoiceMemoToolRuntimeFromEnv({
@@ -237,11 +249,12 @@ export async function executeCodexAssistantTurnAttempt(
     ...codexProcessLaunchInput,
     abortSignal: input.abortSignal,
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
+    analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
     automationRelativeDateReferenceWindow:
       input.automationRelativeDateReferenceWindow ?? null,
     authorizeAcceptedMessageTarget:
       input.authorizeAcceptedMessageTarget ?? null,
-    approvalPolicy,
+    approvalPolicy: providerConfig.policy.approvalPolicy,
     baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
     developerInstructions,
     dynamicTools: input.dynamicTools,
@@ -251,6 +264,7 @@ export async function executeCodexAssistantTurnAttempt(
     ...(input.generateSongPolicy
       ? { generateSongPolicy: input.generateSongPolicy }
       : {}),
+    followUpAttachmentAllowed: input.followUpAttachmentAllowed === true,
     groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:
       input.groupRoomModelMaintenanceAuthorized === true,
@@ -260,15 +274,17 @@ export async function executeCodexAssistantTurnAttempt(
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,
     modelProvider: providerConfig.target.modelProvider ?? undefined,
+    onAdditionalUsage: input.onAdditionalUsage ?? null,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
     onboardingFirstReadCompletionTransitionAvailable:
       input.onboardingFirstReadCompletionTransitionAvailable ?? false,
     publicInternetFetch: input.publicInternetFetch ?? null,
-    threadConfig: input.codexThreadConfig ?? null,
+    threadConfig: resolveCodexAssistantThreadConfig(input),
+    trustedContextReferences: input.trustedContextReferences ?? null,
     onFirstAssistantResponseCompleted:
       input.activeTurnSteering
-        ? () => input.activeTurnSteering?.closeInputAdmission()
+        ? () => input.activeTurnSteering?.onFirstAssistantResponseCompleted()
         : undefined,
     onLiveTurn:
       input.activeTurnSteering
@@ -314,7 +330,6 @@ export async function executeCodexAssistantTurnAttempt(
     requireHostedPrivateImageDelivery:
       input.requireHostedPrivateImageDelivery ?? false,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
-    excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
     runtimeWorkspaceRoots: input.runtimeWorkspaceRoots ?? null,
     sandbox: input.permissions
@@ -467,6 +482,9 @@ export async function executeCodexAssistantTurnAttempt(
           }),
       transcriptResponse: result.transcriptMessage,
       responseDeliveryContextOrdinal: result.responseDeliveryContextOrdinal,
+      ...(result.responseContextReferences === undefined
+        ? {}
+        : { responseContextReferences: result.responseContextReferences }),
       ...(result.targetInputId === undefined
         ? {}
         : { targetInputId: result.targetInputId }),
@@ -474,7 +492,11 @@ export async function executeCodexAssistantTurnAttempt(
         ? {}
         : { reactions: result.reactions }),
       precedingResponseSegments: result.precedingAgentMessageSegments.map((segment) => ({
+        ...(segment.contextReferences === undefined
+          ? {}
+          : { contextReferences: segment.contextReferences }),
         deliveryContextOrdinal: segment.deliveryContextOrdinal,
+        followUpRequest: segment.followUpRequest,
         media: segment.media,
         response: segment.response,
         ...(segment.transcriptResponse === undefined
@@ -489,6 +511,7 @@ export async function executeCodexAssistantTurnAttempt(
             productFeedbackCandidate,
           }
         : {}),
+      followUpRequest: result.followUpRequest,
       responseMedia: result.responseMedia,
       ...(result.responseCard === undefined
         ? {}
@@ -576,23 +599,37 @@ function resolveCodexAssistantProcessLaunchInput(
   input: CodexAssistantProcessPreparationInput,
 ): CodexAssistantProcessLaunchInput {
   const providerConfig = input.providerConfig
-  const configOverrides = [
-    ...(mergeCodexConfigOverrides({
-      modelProvider: providerConfig.target.modelProvider,
-      showThinkingTraces: input.showThinkingTraces ?? false,
-    }) ?? []),
-    ...(input.codexConfigOverrides ?? []),
-  ]
+  const configOverrides = resolveCodexModelProviderConfigOverrides(
+    providerConfig.target.modelProvider,
+  )
 
   return {
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
-    configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
+    configOverrides,
     env: prepareCodexProcessEnv(input.env ?? process.env),
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
     workingDirectory: input.workingDirectory,
   }
+}
+
+function resolveCodexAssistantThreadConfig(
+  input: Pick<
+    AssistantProviderTurnExecutionInput,
+    'codexThreadConfig' | 'showThinkingTraces'
+  >,
+): Readonly<Record<string, unknown>> | null {
+  const config = {
+    ...(input.codexThreadConfig ?? {}),
+    ...(input.showThinkingTraces
+      ? {
+          hide_agent_reasoning: false,
+          model_reasoning_summary: 'auto',
+        }
+      : {}),
+  }
+  return Object.keys(config).length > 0 ? config : null
 }
 
 function prepareCodexProcessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -1363,8 +1400,4 @@ export function resolveCodexAssistantLabel(
   config: AssistantProviderTurnExecutionInput['providerConfig'],
 ): string {
   return config.target.oss ? 'Codex OSS app-server' : 'Codex app-server'
-}
-
-export function resolveCodexStaticModels(): typeof DEFAULT_CODEX_MODELS {
-  return DEFAULT_CODEX_MODELS
 }

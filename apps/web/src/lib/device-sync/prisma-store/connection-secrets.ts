@@ -1,12 +1,19 @@
 import { parseSerializedHostedSecureBoxEnvelope } from "@murphai/runtime-state";
 
 import {
+  isHostedSecureBoxStringTestCodecConfiguredForTests,
   openHostedUserSecureBoxString,
   openHostedUserSecureBoxStrings,
   sealHostedUserSecureBoxString,
+  sealHostedUserSecureBoxStringFromPreparedRoot,
   sealHostedUserSecureBoxStrings,
   type HostedSecureBoxPrismaClient,
 } from "../../hosted-crypto/secure-box";
+import {
+  prepareHostedDomainRootForWeb,
+  readPreparedHostedDomainRootForWebLocal,
+  type PreparedHostedDomainRootForWeb,
+} from "../../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import { maybeIsoTimestamp, normalizeNullableString } from "../shared";
 import {
@@ -61,8 +68,27 @@ export interface HostedRuntimeApplyTokenWritePreparation {
   tokenBundle: HostedStoredConnectionTokenBundle | null;
 }
 
+export async function prepareHostedConnectionSecretRoot(input: {
+  prisma: HostedSecureBoxPrismaClient;
+  testCodec: HostedDeviceSyncSecretTestCodec | null;
+  userId: string;
+}): Promise<PreparedHostedDomainRootForWeb | null> {
+  if (normalizeHostedDeviceSyncSecretTestCodec(input.testCodec)
+    || isHostedSecureBoxStringTestCodecConfiguredForTests()) {
+    return null;
+  }
+  return prepareHostedDomainRootForWeb({
+    domain: "device",
+    prepareMissing: false,
+    prisma: input.prisma,
+    reason: "device-sync.connection",
+    userId: input.userId,
+  });
+}
+
 export async function encryptHostedConnectionSecret(input: {
   connectionId: string;
+  preparedRoot?: PreparedHostedDomainRootForWeb | null;
   provider: string;
   prisma?: HostedSecureBoxPrismaClient;
   purpose: HostedDeviceSyncSecretPurpose;
@@ -77,7 +103,7 @@ export async function encryptHostedConnectionSecret(input: {
   }
 
   const descriptor = resolveHostedDeviceSyncSecretDescriptor(input.purpose, input.connectionId);
-  const encrypted = await sealHostedUserSecureBoxString({
+  const sealInput = {
     aad: buildHostedDeviceSyncSecretAad({
       connectionId: input.connectionId,
       field: descriptor.field,
@@ -90,7 +116,17 @@ export async function encryptHostedConnectionSecret(input: {
     scope: descriptor.scope,
     userId: input.userId,
     value: input.value,
-  });
+  };
+  const local = input.preparedRoot
+    ? readPreparedHostedDomainRootForWebLocal(input.preparedRoot)
+    : null;
+  const encrypted = local
+    ? await sealHostedUserSecureBoxStringFromPreparedRoot({
+        ...sealInput,
+        preparedRoot: local.root,
+        preparedRootKeyId: local.rootKeyId,
+      })
+    : await sealHostedUserSecureBoxString(sealInput);
 
   if (!encrypted) {
     throw new TypeError("Hosted device-sync secure-box encryption returned an empty ciphertext.");

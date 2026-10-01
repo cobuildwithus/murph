@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   buildInactiveMemberAccessNoticeResponse: vi.fn(),
-  buildSignupLinkResponse: vi.fn(),
+  buildFallbackSignupLinkResponse: vi.fn(),
   drainHostedLinqSideEffectsDirect: vi.fn(),
   getPrisma: vi.fn(),
   isHostedLinqConversationMessageWake: vi.fn(),
   isHostedTelegramConversationMessageWake: vi.fn(),
   readHostedMailboxLatestPendingConversationItem: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
+  readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots: vi.fn(),
   readHostedRuntimeReconciliationFacts: vi.fn(),
   resolveHostedRecognizedInboundAccess: vi.fn(),
   sendHostedTelegramAccessNotice: vi.fn(),
@@ -43,7 +44,12 @@ vi.mock("@/src/lib/hosted-onboarding/recognized-inbound-access", () => ({
 vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-shared", () => ({
   buildInactiveMemberAccessNoticeResponse:
     mocks.buildInactiveMemberAccessNoticeResponse,
-  buildSignupLinkResponse: mocks.buildSignupLinkResponse,
+  buildFallbackSignupLinkResponse: mocks.buildFallbackSignupLinkResponse,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots:
+    mocks.readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-transport", () => ({
@@ -82,6 +88,12 @@ describe("visible runtime access reconciliation", () => {
       sentCount: 1,
       skipped: [],
     });
+    mocks.readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots.mockResolvedValue([{
+      linqRecipientPhone: "+15550100001",
+      linqRecipientPhoneEncrypted: "encrypted-line",
+      linqRecipientPhoneLookupKey: "line-lookup",
+      memberId: "member_123",
+    }]);
     mocks.isHostedLinqConversationMessageWake.mockImplementation(
       (wake: { channel?: string }) => wake.channel === "linq",
     );
@@ -190,12 +202,117 @@ describe("visible runtime access reconciliation", () => {
     expect(hostedMemberFindUnique).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRecognizedInboundAccess).not.toHaveBeenCalled();
     expect(mocks.buildInactiveMemberAccessNoticeResponse).not.toHaveBeenCalled();
-    expect(mocks.buildSignupLinkResponse).not.toHaveBeenCalled();
+    expect(mocks.buildFallbackSignupLinkResponse).not.toHaveBeenCalled();
     expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
     expect(mocks.sendHostedTelegramAccessNotice).not.toHaveBeenCalled();
   });
 
-  it("turns post-admission Linq access loss into a signup handoff", async () => {
+  it("delivers a post-admission Linq access notice in a private chat", async () => {
+    const facts = blockedFacts("user_not_active");
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel: "linq",
+      eventId: "linq:event:access-notice",
+      kind: "conversation.message",
+      message: {
+        linqMessage: {
+          chatId: "chat_home",
+          from: "+15551234567",
+          messageId: "message_access_notice",
+          service: "iMessage",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Your billing needs attention.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
+    });
+    const plan = {
+      desiredSideEffects: [{ effectId: "access-notice-effect" }],
+      response: { ok: true, reason: "sent-billing-inactive-notice" },
+    };
+    mocks.buildInactiveMemberAccessNoticeResponse.mockReturnValue(plan);
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess({
+      userId: "member_123",
+    })).resolves.toBe(facts);
+
+    expect(mocks.buildInactiveMemberAccessNoticeResponse).toHaveBeenCalledWith({
+      assignedPhone: "+15550100001",
+      memberId: "member_123",
+      message: "Your billing needs attention.",
+      noticeCode: "billing_inactive",
+      occurredAt: "2026-07-25T12:00:00.000Z",
+      participantContact: expect.objectContaining({
+        kind: "phone",
+        value: "+15551234567",
+      }),
+      sourceEventId: "linq:event:access-notice",
+    });
+    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({
+      prisma,
+      sideEffects: plan.desiredSideEffects,
+    });
+  });
+
+  it("preserves a verified email participant in the private access handoff", async () => {
+    const facts = blockedFacts("user_not_active");
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel: "linq",
+      eventId: "linq:event:email-access-notice",
+      kind: "conversation.message",
+      message: {
+        contactKind: "email",
+        linqMessage: {
+          chatId: "chat_stale",
+          from: "member@example.test",
+          messageId: "message_email_access_notice",
+          service: "iMessage",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Your billing needs attention.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
+    });
+    const plan = {
+      desiredSideEffects: [{ effectId: "email-access-notice-effect" }],
+      response: { ok: true, reason: "sent-billing-inactive-notice" },
+    };
+    mocks.buildInactiveMemberAccessNoticeResponse.mockReturnValue(plan);
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess({
+      userId: "member_123",
+    })).resolves.toBe(facts);
+
+    expect(mocks.buildInactiveMemberAccessNoticeResponse).toHaveBeenCalledWith({
+      assignedPhone: "+15550100001",
+      memberId: "member_123",
+      message: "Your billing needs attention.",
+      noticeCode: "billing_inactive",
+      occurredAt: "2026-07-25T12:00:00.000Z",
+      participantContact: expect.objectContaining({
+        kind: "email",
+        value: "member@example.test",
+      }),
+      sourceEventId: "linq:event:email-access-notice",
+    });
+    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({
+      prisma,
+      sideEffects: plan.desiredSideEffects,
+    });
+  });
+
+  it("turns post-admission Linq access loss into a private signup handoff", async () => {
     const facts = blockedFacts("user_not_active");
     mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
@@ -205,6 +322,7 @@ describe("visible runtime access reconciliation", () => {
       message: {
         linqMessage: {
           chatId: "chat_home",
+          from: "+15551234567",
           messageId: "message_123",
           service: "iMessage",
           threadIsDirect: true,
@@ -224,27 +342,108 @@ describe("visible runtime access reconciliation", () => {
       desiredSideEffects: [{ effectId: "signup-effect" }],
       response: { ok: true, reason: "sent-signup-link" },
     };
-    mocks.buildSignupLinkResponse.mockReturnValue(plan);
+    mocks.buildFallbackSignupLinkResponse.mockReturnValue(plan);
 
     await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess({
       userId: "member_123",
     })).resolves.toBe(facts);
 
-    expect(mocks.buildSignupLinkResponse).toHaveBeenCalledWith({
-      chatId: "chat_home",
+    expect(mocks.buildFallbackSignupLinkResponse).toHaveBeenCalledWith({
+      assignedPhone: "+15550100001",
       inviteCode: "invite_code",
       inviteId: "invite_123",
       memberId: "member_123",
-      messageId: "message_123",
       occurredAt: "2026-07-25T12:00:00.000Z",
-      service: "iMessage",
+      participantContact: expect.objectContaining({
+        kind: "phone",
+        value: "+15551234567",
+      }),
       sourceEventId: "linq:event:123",
-      threadIsDirect: true,
     });
     expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({
       prisma,
       sideEffects: plan.desiredSideEffects,
     });
+  });
+
+  it.each([
+    {
+      access: {
+        inviteCode: "invite_code",
+        inviteId: "invite_123",
+        joinUrl: "https://withmurph.ai/join/invite_code",
+        kind: "signup",
+        message: "Finish setup.",
+        responseReason: "sent-signup-link",
+      },
+      from: "",
+      homeRoutes: [{ linqRecipientPhone: "+15550100001" }],
+    },
+    {
+      access: {
+        kind: "access_notice",
+        message: "Your billing needs attention.",
+        noticeCode: "billing_inactive",
+        responseReason: "sent-billing-inactive-notice",
+      },
+      from: "",
+      homeRoutes: [{ linqRecipientPhone: "+15550100001" }],
+    },
+    {
+      access: {
+        inviteCode: "invite_code",
+        inviteId: "invite_123",
+        joinUrl: "https://withmurph.ai/join/invite_code",
+        kind: "signup",
+        message: "Finish setup.",
+        responseReason: "sent-signup-link",
+      },
+      from: "+15551234567",
+      homeRoutes: [],
+    },
+    {
+      access: {
+        kind: "access_notice",
+        message: "Your billing needs attention.",
+        noticeCode: "billing_inactive",
+        responseReason: "sent-billing-inactive-notice",
+      },
+      from: "+15551234567",
+      homeRoutes: [],
+    },
+  ])("fails closed when private Linq access routing is incomplete", async ({
+    access,
+    from,
+    homeRoutes,
+  }) => {
+    const facts = blockedFacts("user_not_active");
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel: "linq",
+      eventId: "linq:event:incomplete-private-route",
+      kind: "conversation.message",
+      message: {
+        linqMessage: {
+          chatId: "chat_home",
+          from,
+          messageId: "message_123",
+          service: "iMessage",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue(access);
+    mocks.readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots
+      .mockResolvedValue(homeRoutes);
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess({
+      userId: "member_123",
+    })).resolves.toBe(facts);
+
+    expect(mocks.buildFallbackSignupLinkResponse).not.toHaveBeenCalled();
+    expect(mocks.buildInactiveMemberAccessNoticeResponse).not.toHaveBeenCalled();
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
   });
 
   it("re-runs reconciliation when access is restored during the blocked read", async () => {
@@ -335,6 +534,87 @@ describe("visible runtime access reconciliation", () => {
     expect(hostedMemberFindUnique).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRecognizedInboundAccess).not.toHaveBeenCalled();
     expect(mocks.sendHostedTelegramAccessNotice).not.toHaveBeenCalled();
+  });
+
+  it("reports visible access before a pending-conversation read fails", async () => {
+    const facts = blockedFacts("user_not_active");
+    const failure = new Error("synthetic visible-access failure");
+    const stages: string[] = [];
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    mocks.readHostedMailboxLatestPendingConversationItem.mockRejectedValue(failure);
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess(
+      { userId: "member_123" },
+      (stage) => stages.push(stage),
+    )).rejects.toBe(failure);
+
+    expect(stages.at(-1)).toBe("visible_access");
+  });
+
+  it("reports canonical recheck before a restored-access recheck fails", async () => {
+    const blocked = blockedFacts("user_not_active");
+    const failure = new Error("synthetic canonical-recheck failure");
+    const stages: string[] = [];
+    mocks.readHostedRuntimeReconciliationFacts
+      .mockResolvedValueOnce(blocked)
+      .mockRejectedValueOnce(failure);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel: "telegram",
+      eventId: "telegram:update:recheck",
+      kind: "conversation.message",
+      message: {
+        telegramMessage: {
+          messageId: "7",
+          threadId: "456",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "allowed",
+    });
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess(
+      { userId: "member_123" },
+      (stage) => stages.push(stage),
+    )).rejects.toBe(failure);
+
+    expect(stages.at(-1)).toBe("canonical_recheck");
+  });
+
+  it("reports blocked-access notice before Telegram delivery fails", async () => {
+    const facts = blockedFacts("ai_usage_denied");
+    const failure = new Error("synthetic access-notice failure");
+    const stages: string[] = [];
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel: "telegram",
+      eventId: "telegram:update:notice",
+      kind: "conversation.message",
+      message: {
+        telegramMessage: {
+          messageId: "7",
+          threadId: "456",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Synthetic account notice.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
+    });
+    mocks.sendHostedTelegramAccessNotice.mockRejectedValue(failure);
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess(
+      { userId: "member_123" },
+      (stage) => stages.push(stage),
+    )).rejects.toBe(failure);
+
+    expect(stages.at(-1)).toBe("blocked_access_notice");
   });
 });
 

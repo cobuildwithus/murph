@@ -102,12 +102,14 @@ describe("visible access webhook route wiring", () => {
       mocks.handleHostedOnboardingLinqWebhookWithVisibleSecondaryOutcomes,
     ).toHaveBeenCalledWith({
       rawBody,
+      webhookReceivedAt: expect.any(Date),
       scheduleAfterResponse: expect.any(Function),
       signature: null,
       timestamp: null,
     });
     expect(mocks.handleHostedOnboardingLinqWebhook).toHaveBeenCalledWith({
       rawBody,
+      webhookReceivedAt: expect.any(Date),
       scheduleAfterResponse: expect.any(Function),
       signature: null,
       timestamp: null,
@@ -133,6 +135,7 @@ describe("visible access webhook route wiring", () => {
       mocks.handleHostedOnboardingTelegramWebhookWithVisibleOutcomes,
     ).toHaveBeenCalledWith({
       rawBody,
+      webhookReceivedAt: expect.any(Date),
       scheduleAfterResponse: expect.any(Function),
       secretToken: "telegram-secret",
       signal: request.signal,
@@ -141,6 +144,7 @@ describe("visible access webhook route wiring", () => {
       mocks.handleHostedOnboardingTelegramWebhookWithVisibleAccess,
     ).toHaveBeenCalledWith({
       rawBody,
+      webhookReceivedAt: expect.any(Date),
       scheduleAfterResponse: expect.any(Function),
       secretToken: "telegram-secret",
       signal: request.signal,

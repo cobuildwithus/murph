@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  abandonHostedLinqInstantFirstTurn: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
   finishHostedOnboardingTiming: vi.fn(),
@@ -19,6 +20,16 @@ const mocks = vi.hoisted(() => ({
   })),
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-instant-first-turn", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/linq-instant-first-turn")
+  >();
+  return {
+    ...actual,
+    abandonHostedLinqInstantFirstTurn: mocks.abandonHostedLinqInstantFirstTurn,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/linq", async (importOriginal) => {
   const actual = await importOriginal<
@@ -85,11 +96,27 @@ describe("hosted Linq read receipt route authority", () => {
     });
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
     mocks.verifyAndParseHostedLinqWebhookRequest.mockReturnValue({
+      api_version: "2026-01-01",
+      created_at: "2026-06-28T12:00:00.000Z",
+      data: {
+        chat_id: "chat_123",
+        direction: "inbound",
+        is_from_me: false,
+        message: {
+          id: "linq_message_123",
+          parts: [{ type: "text", value: "hello" }],
+        },
+        recipient: "+15555550123",
+        service: "iMessage",
+        thread_is_direct: true,
+      },
       event_id: "evt_read_receipt_mismatch",
       event_type: "message.received",
+      webhook_version: "2026-01-01",
     });
     mocks.requireHostedLinqMessageReceivedEvent.mockReturnValue({
       api_version: "2026-01-01",
+      created_at: "2026-06-28T12:00:00.000Z",
       data: {
         chat_id: "chat_123",
         created_at: "2026-06-28T12:00:00.000Z",

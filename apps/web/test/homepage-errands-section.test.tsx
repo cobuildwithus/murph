@@ -9,7 +9,7 @@ import { ErrandsSection } from "@/src/components/homepage/errands-section";
 test("ErrandsSection renders the static errand timeline copy", () => {
   const markup = renderToStaticMarkup(createElement(ErrandsSection));
 
-  assert.match(markup, /Errands, handled/);
+  assert.doesNotMatch(markup, /Errands, handled/);
   assert.match(markup, /Murph can call anyone and order anything\./);
   assert.match(
     markup,
@@ -44,10 +44,6 @@ test("ErrandsSection renders the static errand timeline copy", () => {
     /The omega-3 refill came to \$23\.79 with a subscribe discount\. Approve and it ships\./,
   );
   assert.match(markup, /approved 👍/);
-  assert.match(
-    markup,
-    /One text\. Seventeen minutes\. Zero apps opened\./,
-  );
   assert.match(
     markup,
     /Also plugs into Google Calendar, Gmail, Amazon, Instacart, clinician search, and hundreds more\./,

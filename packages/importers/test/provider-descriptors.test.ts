@@ -34,7 +34,7 @@ describe("device provider descriptors", () => {
       expect(descriptor).toBeDefined();
       expect(adapter.displayName).toBe(descriptor?.displayName);
       expect(adapter.transportModes).toEqual(descriptor?.transportModes);
-      expect(adapter.oauth).toEqual(descriptor?.oauth);
+      expect(adapter.connection).toEqual(descriptor?.connection);
       expect(adapter.webhook).toEqual(descriptor?.webhook);
       expect(adapter.sync).toEqual(descriptor?.sync);
       expect(adapter.normalization).toEqual(descriptor?.normalization);
@@ -125,7 +125,7 @@ describe("device provider descriptors", () => {
       kind: "external_link",
       callbackPath: "/connect/junction/callback",
     });
-    expect(descriptor?.oauth).toBeUndefined();
+    expect(descriptor?.connection?.kind).toBe("external_link");
     expect(descriptor?.webhook).toEqual({
       path: "/webhooks/junction",
       deliveryMode: "resource",

@@ -3,6 +3,7 @@ import {
   deleteHostedRuntimeLogDataForUsers,
   hostedRuntimeLogLockKey,
   hostedRuntimeLogSubjectKey,
+  listHostedRuntimeLogs,
   recordHostedRuntimeLogs,
   type HostedRuntimeLogSqlClient,
   type HostedRuntimeLogSqlDatabase,
@@ -89,6 +90,57 @@ class FakeSqlDatabase implements HostedRuntimeLogSqlDatabase {
 }
 
 describe("dedicated hosted runtime log store", () => {
+  it.each([11, 12])("caps native diagnostics after taking the member lock (%i recent)", async (recent) => {
+    const database = new FakeSqlDatabase({
+      clientResults: [{}, {}, { rows: [{ count: recent }] }, { rowCount: 1 }, {}],
+    });
+    const active = vi.fn(async () => {
+      expect(compactSql(database.client.calls.at(-1)!.text)).toContain("pg_advisory_xact_lock");
+      return true;
+    });
+    const count = await recordHostedRuntimeLogs({
+      database, userId: "member_fixture", isUserActive: active,
+      entries: [{ ...runtimeEntry("mailbox.imported"), eventCode: "device-sync.companion_diagnostic" }],
+    });
+    expect(count).toBe(recent === 12 ? 0 : 1);
+    const quota = database.client.calls[2]!;
+    expect(compactSql(quota.text)).toContain("LIMIT 12");
+    expect(compactSql(quota.text)).toContain("at >= statement_timestamp() - interval '1 minute'");
+    expect(quota.values).toEqual([hostedRuntimeLogSubjectKey("member_fixture")]);
+    expect(database.client.calls.some((call) => call.text.includes("INSERT INTO"))).toBe(recent < 12);
+    expect(compactSql(database.client.calls.at(-1)!.text)).toBe("COMMIT");
+  });
+
+  it("does not admit native diagnostics for a deleted member or a mixed batch", async () => {
+    for (const memberActive of [false, true]) {
+      const database = new FakeSqlDatabase();
+      const entry: HostedRuntimeLogEntry = {
+        ...runtimeEntry("mailbox.imported"), eventCode: "device-sync.companion_diagnostic",
+      };
+      expect(await recordHostedRuntimeLogs({
+        database, userId: "member_fixture", isUserActive: async () => memberActive,
+        entries: memberActive ? [entry, runtimeEntry("mailbox.imported")] : [entry],
+      })).toBe(0);
+      expect(database.client.calls.some((call) => call.text.includes("INSERT INTO"))).toBe(false);
+    }
+  });
+
+  it("binds diagnostic reads to one subject, time window and event with a hard result limit", async () => {
+    const database = new FakeSqlDatabase();
+    const from = new Date("2026-01-01T00:00:00Z");
+    await listHostedRuntimeLogs({
+      database, userId: "member_fixture", from, limit: 100,
+      eventCode: "device-sync.companion_diagnostic",
+    });
+    const query = database.calls[0]!;
+    expect(compactSql(query.text)).toContain("subject_key = $1");
+    expect(compactSql(query.text)).toContain("event_code = $3 AND at >= $4");
+    expect(compactSql(query.text)).toContain("LIMIT $2");
+    expect(query.values).toEqual([
+      hostedRuntimeLogSubjectKey("member_fixture"), 50, "device-sync.companion_diagnostic", from,
+    ]);
+  });
+
   it("derives stable opaque subject and signed advisory-lock keys", () => {
     const first = hostedRuntimeLogSubjectKey("member_alpha");
     const second = hostedRuntimeLogSubjectKey("member_alpha");

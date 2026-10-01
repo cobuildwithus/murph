@@ -362,7 +362,8 @@ test("runInboxTextRetention redacts a migrated legacy/current record pair togeth
   const records = allRecords.filter(
     (record) => record.captureId === captureId,
   );
-  assert.equal(records.length, 2);
+  assert.equal(records.length, 1);
+  assert.equal(records[0]?.schemaVersion, "murph.inbox-capture.v2");
   for (const record of records) {
     assert.equal(record.text, undefined);
     assert.deepEqual(record.raw, {});
@@ -592,4 +593,57 @@ test("expired capture text disappears from the rebuilt projection", async () => 
   }
 
   await validateVault({ vaultRoot });
+});
+
+
+test("retention compacts already-expired migration copies with a bounded, lossless retry", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-expired-compaction");
+  await initializeVault({ vaultRoot, createdAt: VAULT_CREATED_AT });
+  try {
+    for (const [captureId, eventId] of [
+      ["cap_compact_one", "evt_01HQW7K0M9N8P7Q6R5S4T3VD01"],
+      ["cap_compact_two", "evt_01HQW7K0M9N8P7Q6R5S4T3VD02"],
+      ["cap_compact_mismatch", "evt_01HQW7K0M9N8P7Q6R5S4T3VD03"],
+    ]) {
+      await persistTextCapture({ captureId: captureId!, eventId: eventId!, recordedAt: OLD_AT, text: "expired content", vaultRoot });
+    }
+    await runInboxTextRetention({ now: NOW, vaultRoot });
+    const originals = await readCaptureRecords(vaultRoot);
+    const relativePath = "ledger/inbox-captures/2026/2026-06.jsonl";
+    for (const record of originals) {
+      await appendJsonlRecord({ vaultRoot, relativePath, record: {
+        ...record,
+        schemaVersion: "murph.inbox-capture.v1",
+        envelopePath: `${record.sourceDirectory}/envelope.json`,
+        textRetiredAt: "2026-06-30T00:00:00.000Z",
+        ...(record.captureId === "cap_compact_mismatch" ? { externalId: "different-delivery" } : {}),
+      } });
+    }
+    const beforeBytes = (await fs.stat(path.join(vaultRoot, relativePath))).size;
+    const first = await runInboxTextRetention({ now: NOW, maxCaptures: 1, vaultRoot });
+    assert.equal(first.expiredCaptures, 1);
+    assert.equal(first.hasMoreEligibleCaptures, true);
+    const second = await runInboxTextRetention({ now: NOW, maxCaptures: 1, vaultRoot });
+    assert.equal(second.expiredCaptures, 1);
+    assert.equal(second.hasMoreEligibleCaptures, false);
+    const remaining = await readCaptureRecords(vaultRoot);
+    assert.deepEqual(remaining.filter((record) => record.schemaVersion === "murph.inbox-capture.v2"), originals);
+    assert.equal(remaining.filter((record) => record.schemaVersion === "murph.inbox-capture.v1").length, 1);
+    assert.ok((await fs.stat(path.join(vaultRoot, relativePath))).size < beforeBytes);
+    const settledBytes = await fs.readFile(path.join(vaultRoot, relativePath));
+    const retry = await runInboxTextRetention({ now: NOW, vaultRoot });
+    assert.equal(retry.expiredCaptures, 0);
+    assert.deepEqual(await fs.readFile(path.join(vaultRoot, relativePath)), settledBytes);
+    const runtime = await openInboxRuntime({ vaultRoot });
+    try {
+      await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+      for (const record of originals) {
+        const capture = runtime.getCapture(String(record.captureId));
+        assert.ok(capture);
+        assert.equal(capture.eventId, record.eventId);
+        assert.equal(capture.externalId, record.externalId);
+        assert.equal(capture.text, null);
+      }
+    } finally { runtime.close(); }
+  } finally { await fs.rm(vaultRoot, { recursive: true, force: true }); }
 });

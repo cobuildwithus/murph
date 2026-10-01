@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "research-for-ongoing-interests",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Research for what interests you",
+    "summary": "Weekly research notes can now explore your ongoing health goals and interests, even when you have no immediate decision to make.",
+    "details": "Murph can share one useful explanation without adding a task or asking you to change your routine. Weak, repetitive, unrelated, or poorly timed findings still stay quiet.",
+    "relevanceTags": ["research", "automations"],
+    "sourcePullRequests": [3047]
+  }
+}

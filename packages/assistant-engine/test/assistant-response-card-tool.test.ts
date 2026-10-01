@@ -1,10 +1,11 @@
+import { DAILY_NUTRITION_OPTIONAL_GOALS_INTRO } from '@murphai/operator-config/assistant-response-cards'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { Buffer } from 'node:buffer'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
@@ -16,7 +17,7 @@ import {
   type LinqFetch,
 } from '@murphai/operator-config/linq-runtime'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
-import { addStructuredWorkoutRecord } from '@murphai/vault-usecases/workouts'
+import { addStructuredWorkoutRecord, showWorkoutRecord } from '@murphai/vault-usecases/workouts'
 
 import {
   executeMurphDynamicToolRequest,
@@ -228,6 +229,18 @@ const REALISTIC_LATE_WORKOUT_CARD: AssistantResponseCard = {
   },
 }
 
+function buildWorkoutCardAuthoringInput(
+  card: CompactTableWorkoutResponseCardV1,
+) {
+  return {
+    ...card,
+    tracking: {
+      entityId: card.tracking.entityId,
+      kind: card.tracking.kind,
+    },
+  }
+}
+
 const OVERSIZED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
   kind: 'compact_table',
   version: 1,
@@ -263,6 +276,7 @@ const IMAGE: AssistantResponseMedia = {
 function executeCardTool(input: {
   currentResponseCard?: AssistantResponseCard | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  env?: NodeJS.ProcessEnv
   groupChallengeResponseCardAllowed?: boolean | null
   groupSharedReadTurnState?: MurphGroupSharedReadTurnState | null
   knowledgePageReadTextFile?: (filePath: string) => Promise<string>
@@ -274,7 +288,7 @@ function executeCardTool(input: {
   return executeMurphDynamicToolRequest({
     currentResponseCard: input.currentResponseCard ?? null,
     currentResponseMedia: input.currentResponseMedia ?? [],
-    env: {},
+    env: input.env ?? {},
     fetchImpl: fetch,
     groupChallengeResponseCardAllowed:
       input.groupChallengeResponseCardAllowed ?? false,
@@ -326,6 +340,7 @@ async function createChallengeVault(input: {
 
 async function createLiveWorkoutCardVault(input: {
   ambiguousDuplicate?: boolean
+  completed?: boolean
   hiddenNote?: string
   unsupportedSet?: {
     actual: string
@@ -338,7 +353,7 @@ async function createLiveWorkoutCardVault(input: {
       | 'weighted_bodyweight'
   }
 } = {}): Promise<{
-  card: AssistantResponseCard
+  card: CompactTableWorkoutResponseCardV1
   root: string
 }> {
   const root = await mkdtemp(path.join(tmpdir(), 'murph-workout-card-tool-'))
@@ -359,6 +374,7 @@ async function createLiveWorkoutCardVault(input: {
       workout: {
         sourceApp: 'murph-live',
         startedAt: '2026-08-12T14:00:00.000Z',
+        ...(input.completed ? { endedAt: '2026-08-12T14:01:00.000Z' } : {}),
         exercises: input.ambiguousDuplicate === true
           ? [8, 12].map((reps, index) => ({
               mode: 'bodyweight' as const,
@@ -410,7 +426,7 @@ async function createLiveWorkoutCardVault(input: {
       },
       workout: {
         version: 1,
-        state: 'active',
+        state: input.completed ? 'completed' : 'active',
         exercises: input.ambiguousDuplicate === true
           ? [8, 12].map((reps) => ({
               name: 'Single-arm row',
@@ -435,7 +451,7 @@ async function createLiveWorkoutCardVault(input: {
               sets: [
                 { status: 'completed', target: '185 lb × 8', actual: '0 lb × 0' },
                 { status: 'completed', target: '185 lb × 8', actual: '185 lb × 8' },
-                { status: 'pending', target: '185 lb × 8', actual: null },
+                { status: input.completed ? 'skipped' : 'pending', target: '185 lb × 8', actual: null },
               ],
             }]
           : [{
@@ -482,13 +498,10 @@ async function persistWorkoutCardThroughLinq(input: {
     requests.push(
       typeof init.body === 'string' ? JSON.parse(init.body) : null,
     )
-    return {
-      arrayBuffer: async () => new ArrayBuffer(0),
-      json: async () => ({ message: { id: 'msg_workout_card' } }),
-      ok: true,
-      status: 200,
-      text: async () => '',
-    }
+    return new Response(
+      JSON.stringify({ message: { id: 'msg_workout_card' } }),
+      { headers: { 'Content-Type': 'application/json' } },
+    )
   }
   await sendLinqIMessageAppCard({
     card: persistedCard,
@@ -709,6 +722,12 @@ describe('murph.attach_response_card', () => {
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
     expect(privateSchema).toContain('fiberGrams')
+    expect(JSON.stringify(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema.properties.card.anyOf[1],
+    )).toContain('snapshotAt')
+    expect(JSON.stringify(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema.properties.card.anyOf[2],
+    )).not.toContain('snapshotAt')
     expect(privateSchema).not.toContain('editor')
     expect(privateSchema).not.toContain('challenge_standings')
     expect(groupSchema).toContain('participantObservations')
@@ -870,10 +889,14 @@ describe('murph.attach_response_card', () => {
       'compound requests with complete ordinary text and no card',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'vault-cli meal totals --from <date> --to <same-date>',
+      'Never add other companion prose, duplicate analysis, a target proposal or a second send.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'never calculate or reuse totals',
+      'Never write an offered/delivered marker while staging; the outbox records sent evidence in canonical memory after confirmation.',
+    )
+
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'vault-cli meal totals --from <date> --to <same-date>',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Workout footers span native and static cards; never promise native-only taps',
@@ -888,148 +911,142 @@ describe('murph.attach_response_card', () => {
       'use the full deterministic text recovery',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
+      'A structured workout card has exactly kind compact_table, version 1, title, subtitle null, footer, tracking with kind workout plus the exact evt_<ULID> entityId, and workout',
     )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'never add rowHeader, columns, or rows',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'The runtime records tracking snapshotAt',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      "New authoring uses V2 with fiber and either all five goals null (totals-only) or all five accepted snapshots (goal-aware); mixed authoring is invalid.",
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'use one workflow and end with one card or concise fallback. Never narrate safety, totals, estimation, or target resolution.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'progress owner',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'If any required detail read fails or is unreadable, use the same fail-closed behavior',
+    )
+    expect(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.description
+        .split('Author only dietary-calories').length - 1,
+    ).toBe(1)
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'meal totals --from <date> --to <same-date> --resolve-goals --format json',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      "goalContext.status ready permits the unchanged all-five accepted goal card; missing permits totals-only with all five goals null, even with a subset of compatible targets.",
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'conflict, incompatible, or capacity means ordinary text, no card, and no Goal or measurement mutation.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Rerun this same-date read after any meal or Goal mutation and before the card.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain('Otherwise one successful read in this turn is sufficient')
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain('goal list --status active')
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain('goal show <goal-id>')
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
       'V2 adds fiber and nullable goal snapshots',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Before every goal-aware daily_nutrition card, first run vault-cli goal list --status active --limit 200 --format json',
+      'use the returned validation paths to correct only invalid fields and retry this tool once with the same verified totals and targets',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'If it returns 200 records, fail closed with ordinary text, no Goal or measurement mutation, and no card',
+      'without narrating tool or schema mechanics',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'run vault-cli goal show <goal-id> --format json for every returned active Goal whose list item reports a nonzero data.metricTargetsCount',
+      'Use the exact requested localDate interactively or the engine-supplied occurrence local date for scheduled closeout, never wall-clock today.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'never select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix',
+      'A historical automatic capture cannot authorize a scheduled card.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'historical catch-up',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
+      'Do not run a universal medical-history or measurement checklist.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals',
+      "A routine totals-only card or a card with complete accepted goals needs no repeated screening unless new context raises a concern.",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Each target must use selected-value comparator between with identical numeric value and highValue',
+      'run vault-cli memory show --compact --format json once for the canonical Identity, Preferences, Instructions, and Context record',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A one-sided threshold, non-identical range, or other shape remains authoritative but makes the bundle comparator-incompatible',
+      'Do not re-ask or recite established categories.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'never expose, compare, copy, or derive from its bound or create, replace, or remove a managed target around it',
+      'Treat this known-context suitability check as workflow eligibility, not public health Q&A: never search Health Commons to decide or merely restate it.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A target in another unit likewise remains authoritative but makes the bundle incompatible: never compare, convert, copy, or derive from its raw value',
+      'If suitability is clear, proceed and state only the request-relevant outcome.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'use ordinary text with no card or managed Goal mutation, and ask no question on a scheduled closeout',
+      'For a clear request-relevant suitability outcome, explicitly name the requested target or metric.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      "For the exact card localDate, require the containing active Goal window and each target's optional startAt/targetAt interval to include that date, with inclusive boundaries",
+      "For explicit target-setting only, ask one compact question about concrete unresolved concerns that could materially change the advice.",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'use the selected capture date for a scheduled closeout, which may differ from the occurrence date for a historical catch-up, or the explicitly requested date, never wall-clock today',
+      'underweight, frailty, or malnutrition',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Ignore out-of-window targets for current authority and conflicts, and never expose, compare, copy, derive from, or mutate a Goal because of them.',
+      'kidney disease, advanced liver disease, significant heart disease, or relevant endocrine disease',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'nutrition-strategy/references/daily-nutrition-card-safety.md',
+      'post-bariatric care',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'before every daily_nutrition attachment, even with five active goals or on a scheduled closeout',
+      'Apply safety at the narrowest relevant scope',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Before deriving, saving, or surfacing numeric nutrition goals, before activating a paused nutrition proposal, and before every daily_nutrition attachment',
+      'An allergy, intolerance, dietary restriction, or clinician-directed diet is not by itself a reason to suppress the five totals or an accepted compatible target bundle.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'First run vault-cli memory show --format json and inspect the complete canonical Identity, Preferences, Instructions, and Context memory document for explicit, unambiguous safety facts; the context snapshot does not inject it',
+      'documented clinician-managed constraints that materially change or conflict with the card targets',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json',
+      'Read another clinical record family only when the conversation or canonical memory raises one concrete concern.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'vault-cli event list --kind test --from <300-days-before-today> --to <today> --limit 200 --format json',
+      'A missing unrelated fact or failed unrelated read does not block a routine card.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'vault-cli event list --kind procedure --limit 200 --format json',
+      'A scheduled occurrence with unresolved suitability uses ordinary non-numeric closeout with no proposal, Goal mutation, question, or card.',
+    )
+    expect(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.description.split(
+        'vault-cli memory show --compact --format json',
+      ).length - 1,
+    ).toBe(1)
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toMatch(
+      /condition list|regimen list|measurement entry list|event list --kind (?:procedure|encounter|test)/u,
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'vault-cli event list --kind encounter --limit 200 --format json',
+      'During private meal logging or estimation, including an explicit manual app submission, and daily-card or daily-summary requests, if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before finishing',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'use event show for every item whose list data reports nonzero diagnosesCount',
+      'Never stop at a missing-estimate refusal before trying recovery',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A safety-relevant active diagnosis with documented or suspected certainty suppresses numeric output.',
+      'Use accepted current equivalence or matching saved ingredient and portion evidence, not an informal name alone.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A failed, unreadable, or exactly 200-record encounter read, or a failed required detail read, fails closed with no Goal or measurement mutation and no card',
+      'ask one compact question and stop without a card; after the answer, edit and read back the exact existing meal and rerun fresh totals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Inspect every returned item; use event show for an item whose procedure or status is missing or truncated.',
+      'A partial card is only for an explicit request to see the currently available partial data after the limitation is clear, not the normal interactive closeout.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A completed gastric bypass, Roux-en-Y, sleeve gastrectomy, gastric sleeve, biliopancreatic diversion, duodenal switch, adjustable gastric band, lap band, or other explicit bariatric surgery suppresses numeric output.',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A failed, unreadable, or exactly 200-record procedure read, or a failed required detail read, fails closed with no Goal or measurement mutation and no card',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'any such positive wins over negative evidence from either pregnancy-evidence owner in the window and suppresses numeric output without diagnosing pregnancy',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A failed, unreadable, or exactly 200-record pregnancy-test read fails closed with no Goal or measurement mutation and no card',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Otherwise event show every returned test because list output compacts results and can truncate summaries',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'as positive evidence unless resultStatus is pending',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Canonical resultStatus unknown classifies the result rather than source lifecycle and may qualify only with that strict identity plus explicit text.',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Do not infer pregnancy from numeric hCG, reference ranges, abnormal or unknown status/flags alone, titles, notes, or ambiguous or negated text.',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A failed or unreadable memory read fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A clearly current saved age under 18 or clearly current intuitive-eating or number-sensitive preference uses the same suppression path',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Missing, stale, ambiguous, or conflicting age alone is unavailable evidence, not a universal block; scheduled occurrences never ask',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Run both vault-cli condition list --status active --limit 200 --format json and vault-cli regimen list --status active --limit 200 --format json',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'If either read fails or returns exactly 200 records, run no condition or regimen detail reads and fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'run vault-cli condition show <condition-id> --format json for every returned active condition and vault-cli regimen show <regimen-id> --format json for every returned active regimen',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'never select by title, substance, severity, context-snapshot visibility, or the default list prefix',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'If any required detail read fails or is unreadable, use the same fail-closed behavior',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'As part of that same pre-numeric and pre-activation gate, also run its bounded lossless vault-cli measurement entry list read over the canonical 45-day window',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A usable adult BMI below 18.5, including height and weight rows sharing one eventId, suppresses numeric proposal derivation or presentation, every Goal write or activation, and the card',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A failed read, or a saturated read that cannot resolve usable BMI evidence, fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'known underweight, frailty, malnutrition risk, glucose-lowering medication, safety-relevant disease or clinician-managed nutrition context, and calorie targets below 1,200 kcal/day without flooring them upward',
+      "Scheduled closeout keeps automatic-meal-capture's existing question authority.",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'nutrition-strategy/references/daily-nutrition-card-goals.md',
@@ -1047,7 +1064,7 @@ describe('murph.attach_response_card', () => {
       'Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'An explicit numeric-card request or the one first eligible managed closeout authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use',
+      "Only explicit target-setting authorizes the existing paused canonical proposal, not activation or use",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write',
@@ -1062,25 +1079,22 @@ describe('murph.attach_response_card', () => {
       'Any derived target addition or change atomically pauses the complete managed bundle until acceptance',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'its next unambiguous acceptance may complete that pending request only after the complete safety recheck passes, then activation and readback, and a fresh same-date totals read',
+      "its next unambiguous acceptance may complete that pending request only after reapplying suitability, activation/readback and fresh same-date totals",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Scheduled authority never permits questions or activation; only the first eligible managed meal closeout may create and explain one paused proposal',
+      'A scheduled occurrence never activates provisional targets.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'if the complete all-status Goal read proves the stable managed slug has never existed and already-known inputs pass the complete safety and derivation contracts',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'once that Goal exists in any status, scheduled turns never create, change, or automatically repeat it.',
+      "A scheduled closeout never asks for target inputs or creates, changes, repeats or activates provisional targets.",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Explicit active targets win metric by metric',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'one consolidated question, never a goal-less card',
+      "A meal reply (including a reply to an ordinary scheduled check-in), daily summary or numeric-card request never derives, proposes, accepts, activates or mutates targets",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'conflicts, thresholds, ranges, unsafe numbers, or missing responsible calorie inputs',
+      "conflicts, thresholds, ranges or unsafe target numbers remain ordinary text, never substitute target authority",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
       'available only to the managed private-direct closeout',
@@ -1115,8 +1129,19 @@ describe('murph.attach_response_card', () => {
     })).toMatchObject({
       kind: 'invalid-response-card-arguments',
     })
-    expect(readCardToolRequest({ card: REALISTIC_LATE_WORKOUT_CARD })).toEqual({
-      card: REALISTIC_LATE_WORKOUT_CARD,
+    const workoutAuthoringInput = buildWorkoutCardAuthoringInput(
+      REALISTIC_LATE_WORKOUT_CARD,
+    )
+    expect(readCardToolRequest({ card: workoutAuthoringInput })).toMatchObject({
+      card: {
+        ...workoutAuthoringInput,
+        tracking: {
+          ...workoutAuthoringInput.tracking,
+          snapshotAt: expect.stringMatching(
+            /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+          ),
+        },
+      },
       kind: 'attach-response-card',
     })
     expect(readCardToolRequest(
@@ -1125,6 +1150,34 @@ describe('murph.attach_response_card', () => {
     )).toEqual({
       card: ROUTINE_CARD,
       kind: 'attach-response-card',
+    })
+    const {
+      footer: _omittedFooter,
+      subtitle: _omittedSubtitle,
+      ...routineWithoutOptionalText
+    } = ROUTINE_CARD
+    expect(readCardToolRequest(
+      { card: routineWithoutOptionalText },
+      'attach_exercise_routine_card',
+    )).toEqual({
+      card: {
+        ...routineWithoutOptionalText,
+        footer: null,
+        subtitle: null,
+      },
+      kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest(
+      { card: { ...ROUTINE_CARD, footer: '' } },
+      'attach_exercise_routine_card',
+    )).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+    })
+    expect(readCardToolRequest(
+      { card: { ...ROUTINE_CARD, subtitle: 42 } },
+      'attach_exercise_routine_card',
+    )).toMatchObject({
+      kind: 'invalid-response-card-arguments',
     })
     expect(readCardToolRequest(
       { card: CARD },
@@ -1219,7 +1272,7 @@ describe('murph.attach_response_card', () => {
           fiberGrams: null,
         },
       },
-    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+    })).toMatchObject({ kind: 'attach-response-card' })
 
     const contradictoryCard = {
       ...CARD,
@@ -1248,19 +1301,60 @@ describe('murph.attach_response_card', () => {
     })
   })
 
+  it('adds runtime-owned tracking time before attaching a workout card', async () => {
+    const fixture = await createLiveWorkoutCardVault()
+    const authoringInput = buildWorkoutCardAuthoringInput(fixture.card)
+    const beforeParse = Date.now()
+    const request = readCardToolRequest({ card: authoringInput })
+    const afterParse = Date.now()
+    if (request?.kind !== 'attach-response-card') {
+      throw new TypeError('Expected a valid workout card request.')
+    }
+
+    const result = await executeCardTool({ request, vaultRoot: fixture.root })
+    const attachedCard = result.responseCardPatch?.card
+    if (
+      !attachedCard
+      || attachedCard.kind !== 'compact_table'
+      || !('workout' in attachedCard)
+    ) {
+      throw new TypeError('Expected an attached workout card.')
+    }
+
+    const snapshotTime = Date.parse(attachedCard.tracking.snapshotAt)
+    expect(snapshotTime).toBeGreaterThanOrEqual(beforeParse)
+    expect(snapshotTime).toBeLessThanOrEqual(afterParse)
+    expect(attachedCard.tracking).toMatchObject(authoringInput.tracking)
+    expect(result.rpcResult.success).toBe(true)
+  })
+
   it('selects trusted full-text recovery only for a semantic workout that exceeds the envelope', async () => {
-    const request = readCardToolRequest({ card: OVERSIZED_WORKOUT_CARD })
-    expect(request).toEqual({
-      card: OVERSIZED_WORKOUT_CARD,
+    const authoringInput = buildWorkoutCardAuthoringInput(
+      OVERSIZED_WORKOUT_CARD,
+    )
+    const request = readCardToolRequest({ card: authoringInput })
+    expect(request).toMatchObject({
+      card: {
+        ...authoringInput,
+        tracking: {
+          ...authoringInput.tracking,
+          snapshotAt: expect.stringMatching(
+            /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+          ),
+        },
+      },
       kind: 'response-card-envelope-too-large',
     })
-    if (request === null) {
+    if (
+      request === null
+      || request.kind !== 'response-card-envelope-too-large'
+    ) {
       throw new TypeError('Expected an oversized workout card request.')
     }
 
     const result = await executeCardTool({ request })
     expect(result).toMatchObject({
-      responseCardTextFallbackPatch: { card: OVERSIZED_WORKOUT_CARD },
+      responseCardTextFallbackPatch: { card: request.card },
       rpcResult: {
         contentItems: [{
           text: 'workout card envelope too large; full text recovery selected',
@@ -1414,6 +1508,7 @@ describe('murph.attach_response_card', () => {
       vaultRoot: fixture.root,
     })
 
+    expect(result.runtimeIssueInputs).toBeUndefined()
     expect(result.responseCardPatch?.card).toMatchObject({
       editor: {
         version: 1,
@@ -1448,60 +1543,122 @@ describe('murph.attach_response_card', () => {
     })
   })
 
-  it('keeps ambiguous duplicate exercise coordinates on the V4 card', async () => {
-    const fixture = await createLiveWorkoutCardVault({
-      ambiguousDuplicate: true,
-    })
-    const attached = await executeCardTool({
-      request: {
-        card: fixture.card,
-        kind: 'attach-response-card',
-      },
-      vaultRoot: fixture.root,
-    })
-    const card = attached.responseCardPatch?.card
-    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
-      throw new TypeError('Expected the attached workout card.')
+  it('rejects active cards with bounded diagnostics when their vault cannot be read', async () => {
+    const fixture = await createLiveWorkoutCardVault()
+    for (const vaultRoot of [null, path.join(fixture.root, 'absent')]) {
+      const result = await executeCardTool({
+        request: { card: fixture.card, kind: 'attach-response-card' },
+        vaultRoot,
+      })
+      expect(result.rpcResult.success).toBe(false)
+      expect(result.responseCardPatch).toBeUndefined()
+      expect(result.runtimeIssueInputs).toEqual([expect.objectContaining({
+        errorCode: 'WORKOUT_CARD_EDITOR_UNAVAILABLE',
+        details: expect.objectContaining({
+          reason: vaultRoot === null ? 'missing_vault' : 'reader_failed',
+        }),
+      })])
+      const diagnostic = JSON.stringify(result.runtimeIssueInputs)
+      expect(diagnostic).not.toContain(fixture.root)
+      expect(diagnostic).not.toContain(JSON.stringify(fixture.card))
+      expect(result.runtimeIssueInputs?.[0]?.details).toMatchObject({
+        failureReason: 'unavailable',
+        diagnosticRole: 'classification',
+      })
     }
-
-    expect(card).not.toHaveProperty('editor')
-    const delivery = await persistWorkoutCardThroughLinq({
-      card,
-      idSuffix: 'ambiguous-duplicate',
-      vaultRoot: fixture.root,
-    })
-    expect(delivery.envelope.schemaVersion).toBe(4)
   })
 
-  it('keeps a hidden canonical note out of the persisted card and Linq request', async () => {
+  it('rejects ambiguous active cards without changing canonical coordinates', async () => {
+    const fixture = await createLiveWorkoutCardVault({ ambiguousDuplicate: true })
+    const before = await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)
+    const attached = await executeCardTool({
+      request: { card: fixture.card, kind: 'attach-response-card' },
+      vaultRoot: fixture.root,
+    })
+    expect(attached.rpcResult.success).toBe(false)
+    expect(attached.responseCardPatch).toBeUndefined()
+    expect(attached.runtimeIssueInputs?.[0]?.details).toMatchObject({
+      reason: 'projection_rejected',
+    })
+    expect(await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)).toEqual(before)
+  })
+
+  it('rejects hidden canonical notes without exposing or deleting them', async () => {
     const hiddenNote = 'n'.repeat(41)
     const fixture = await createLiveWorkoutCardVault({ hiddenNote })
+    const before = await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)
     const attached = await executeCardTool({
-      request: {
-        card: fixture.card,
-        kind: 'attach-response-card',
-      },
+      request: { card: fixture.card, kind: 'attach-response-card' },
       vaultRoot: fixture.root,
     })
-    const card = attached.responseCardPatch?.card
-    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
-      throw new TypeError('Expected the attached workout card.')
+    expect(attached.rpcResult.success).toBe(false)
+    expect(attached.responseCardPatch).toBeUndefined()
+    expect(JSON.stringify(attached)).not.toContain(hiddenNote)
+    expect(await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)).toEqual(before)
+  })
+
+  it('rejects an invalid hydrated editor instead of attaching the readable input', async () => {
+    const fixture = await createLiveWorkoutCardVault()
+    const workouts = await import('@murphai/vault-usecases/workouts')
+    const trusted = await workouts.readLiveWorkoutCardEditor({
+      vault: fixture.root,
+      workoutId: fixture.card.tracking.entityId,
+      presentation: fixture.card.workout,
+    })
+    if (!trusted) throw new TypeError('Expected a trusted editor fixture.')
+    const reader = vi.spyOn(workouts, 'readLiveWorkoutCardEditor').mockResolvedValueOnce({
+      ...trusted, editor: { ...trusted.editor, actionBinding: 'invalid-binding' },
+    })
+    try {
+      const result = await executeCardTool({
+        request: { card: fixture.card, kind: 'attach-response-card' },
+        vaultRoot: fixture.root,
+      })
+      expect(result.rpcResult.success).toBe(false)
+      expect(result.responseCardPatch).toBeUndefined()
+      expect(result.runtimeIssueInputs?.[0]?.details).toMatchObject({ reason: 'schema_rejected' })
+    } finally {
+      reader.mockRestore()
     }
+  })
 
-    expect(card).not.toHaveProperty('editor')
-    expect(JSON.stringify(card)).not.toContain(hiddenNote)
-
-    const delivery = await persistWorkoutCardThroughLinq({
-      card,
-      idSuffix: 'note-privacy',
+  it('accepts a corrected presentation after rejecting a stale active card', async () => {
+    const fixture = await createLiveWorkoutCardVault()
+    const stale = structuredClone(fixture.card)
+    stale.workout.exercises[0]!.name = 'Outdated exercise label'
+    const rejected = await executeCardTool({
+      request: { card: stale, kind: 'attach-response-card' },
       vaultRoot: fixture.root,
     })
+    expect(rejected.rpcResult.success).toBe(false)
+    expect(rejected.responseCardPatch).toBeUndefined()
+    const recovered = await executeCardTool({
+      request: { card: fixture.card, kind: 'attach-response-card' },
+      currentResponseCard: rejected.responseCardPatch?.card,
+      vaultRoot: fixture.root,
+    })
+    expect(recovered.rpcResult.success).toBe(true)
+    const card = recovered.responseCardPatch?.card
+    expect(card).toHaveProperty('editor.actionBinding', expect.stringMatching(/^[a-f0-9]{64}$/u))
+    if (!card) throw new TypeError('Expected an editable workout card.')
+    const delivery = await persistWorkoutCardThroughLinq({
+      card, idSuffix: 'editable-recovery', vaultRoot: fixture.root,
+    })
+    expect(delivery.envelope.schemaVersion).toBe(6)
+  })
 
-    expect(delivery.persistedCard).not.toHaveProperty('editor')
-    expect(JSON.stringify(delivery.persistedCard)).not.toContain(hiddenNote)
-    expect(JSON.stringify(delivery.request)).not.toContain(hiddenNote)
-    expect(delivery.envelope.schemaVersion).toBe(4)
-    expect(JSON.stringify(delivery.envelope)).not.toContain(hiddenNote)
+  it('attaches completed workouts with a verified editor', async () => {
+    const fixture = await createLiveWorkoutCardVault({ completed: true })
+    const result = await executeCardTool({
+      request: { card: fixture.card, kind: 'attach-response-card' },
+      vaultRoot: fixture.root,
+    })
+    expect(result.rpcResult.success).toBe(true)
+    expect(result.responseCardPatch?.card).toMatchObject({
+      workout: { state: 'completed' },
+      editor: { actionBinding: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+    })
+    expect(result.runtimeIssueInputs).toBeUndefined()
   })
 
   it.each([
@@ -1550,37 +1707,17 @@ describe('murph.attach_response_card', () => {
       canonical: { note: 'Slow tempo', reps: 8 },
       label: 'mixed note',
     },
-  ])('preserves a canonical $label result through the V4 delivery path', async (fixtureInput, testIndex) => {
-    const fixture = await createLiveWorkoutCardVault({
-      unsupportedSet: fixtureInput,
-    })
+  ])('rejects unsupported active $label cards without losing canonical results', async (fixtureInput) => {
+    const fixture = await createLiveWorkoutCardVault({ unsupportedSet: fixtureInput })
+    const before = await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)
     const attached = await executeCardTool({
-      request: {
-        card: fixture.card,
-        kind: 'attach-response-card',
-      },
+      request: { card: fixture.card, kind: 'attach-response-card' },
       vaultRoot: fixture.root,
     })
-    const card = attached.responseCardPatch?.card
-    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
-      throw new TypeError('Expected the attached workout card.')
-    }
-    expect(card).not.toHaveProperty('editor')
-    expect(card.workout.exercises[0]?.sets[0]?.actual)
-      .toBe(fixtureInput.actual)
-
-    const delivery = await persistWorkoutCardThroughLinq({
-      card,
-      idSuffix: `unsupported-${testIndex}`,
-      vaultRoot: fixture.root,
-    })
-    expect(delivery.persistedCard).not.toHaveProperty('editor')
-    expect(delivery.persistedCard.workout.exercises[0]?.sets[0]?.actual)
-      .toBe(fixtureInput.actual)
-    expect(delivery.persisted?.message).toContain(fixtureInput.actual)
-    expect(delivery.request.message.parts[0]?.fallback_text).toContain('workout')
-    expect(delivery.envelope.schemaVersion).toBe(4)
-    expect(JSON.stringify(delivery.envelope)).toContain(fixtureInput.actual)
+    expect(attached.rpcResult.success).toBe(false)
+    expect(attached.responseCardPatch).toBeUndefined()
+    expect(attached.runtimeIssueInputs?.[0]?.details).toMatchObject({ reason: 'projection_rejected' })
+    expect(await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)).toEqual(before)
   })
 
   it('refuses group cards without a complete read, authorized participants, backed definition scopes, or canonical page', async () => {
@@ -2244,4 +2381,22 @@ describe('murph.attach_response_card', () => {
       success: false,
     })
   })
+})
+
+
+it('attaches fresh totals-only nutrition without targets, but not in a group or beside media', async () => {
+  const card = { ...CARD, goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null } }
+  const request = readCardToolRequest({ card })
+  expect(request?.kind).toBe('attach-response-card')
+  const attached = await executeCardTool({ request: request! })
+  expect(attached.responseCardPatch?.card).toEqual(card)
+  expect(attached.rpcResult.success).toBe(true)
+  expect(attached.rpcResult.contentItems).toEqual([{ type: 'inputText', text: expect.stringContaining(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO) }])
+  const group = await executeCardTool({ request: request!, privateDirectResponseCardAllowed: false })
+  expect(group.rpcResult.success).toBe(false)
+  expect(group.responseCardPatch).toBeUndefined()
+  const withMedia = await executeCardTool({ request: request!, currentResponseMedia: [IMAGE] })
+  expect(withMedia.rpcResult.success).toBe(false)
+  const duplicate = await executeCardTool({ request: request!, currentResponseCard: card })
+  expect(duplicate.rpcResult.success).toBe(false)
 })

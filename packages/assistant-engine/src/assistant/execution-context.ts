@@ -1,3 +1,6 @@
+import type { AssistantCurrentDeliveryRoute } from '@murphai/operator-config/assistant/current-delivery-route'
+import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
+import type { AssistantAutomationExecutionInspection } from './cron/inspection.js'
 import {
   normalizeAssistantBackendTarget,
   type AssistantModelTarget,
@@ -38,6 +41,9 @@ import type {
 } from '@murphai/hosted-execution/action-approval'
 import type { AssistantRuntimeIssueInput } from './issue-reporting.js'
 import type {
+  AssistantAcceptedTurnInputItemInput,
+} from './active-turn-input-journal.js'
+import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
@@ -66,6 +72,8 @@ import type {
   HostedPhoneCallStopResponse,
 } from '@murphai/hosted-execution/phone-calls'
 import type {
+  HostedPhysicalNoteRecoveryRequest,
+  HostedPhysicalNoteRecoveryResponse,
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from '@murphai/hosted-execution/physical-notes'
@@ -86,14 +94,11 @@ import type {
 } from '@murphai/hosted-execution/subscription'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
-import type {
-  AssistantCronOccurrenceUnverifiedReason,
-} from './cron/timing-verification.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantChannelTypingDependencies = Pick<
   AssistantChannelDependencies,
-  'startLinqTyping' | 'startTelegramTyping'
+  'startLinqTyping' | 'startTelegramTyping' | 'onTypingAccepted'
 >
 
 export type AssistantHostedProgressDeliveryDependencies = Pick<
@@ -128,6 +133,22 @@ export type AssistantHostedDeviceToolRequest =
       accountId: string
       action: 'reconcile'
     }
+  | {
+      action: 'configure_no_data_outreach'
+      afterDays: number
+      mode: 'after_days'
+      sourceProvider: string
+    }
+  | {
+      action: 'configure_no_data_outreach'
+      mode: 'default'
+      sourceProvider: string
+    }
+  | {
+      action: 'configure_no_data_outreach'
+      mode: 'off'
+      sourceProvider: string
+    }
 
 export interface AssistantHostedDeviceAccountSummary {
   accountId: string
@@ -155,11 +176,21 @@ export type AssistantHostedDeviceToolResponse =
       occurredAt: string
       status: 'queued'
     }
+  | {
+      action: 'configure_no_data_outreach'
+      effectiveAfterDays: number | null
+      setting: 'custom' | 'default' | 'off'
+      sourceProvider: string
+      status: 'saved' | 'unchanged'
+    }
 
 export interface AssistantHostedDeviceTool {
   request(
     request: AssistantHostedDeviceToolRequest,
-    context?: { signal?: AbortSignal | null },
+    context?: {
+      acceptedInputAuthority?: { assistantInputId: string }
+      signal?: AbortSignal | null
+    },
   ): Promise<AssistantHostedDeviceToolResponse>
 }
 
@@ -219,25 +250,40 @@ export type AssistantHostedAutomationToolRequest =
       supportSeriesId: string
     }
 
-export type AssistantAutomationTimingVerificationIssue =
-  | AssistantCronOccurrenceUnverifiedReason
+export type AssistantAutomationOccurrenceProjectionIssue =
   | 'default_timezone_unverified'
   | 'projection_unavailable'
   | 'record_readback_mismatch'
+  | 'stale_recurring_occurrence'
+
+export type AssistantAutomationOccurrenceProjection =
+  | {
+      nextOccurrenceAt: string | null
+      status: 'resolved'
+    }
+  | {
+      status: 'pending'
+    }
+  | {
+      issues: readonly AssistantAutomationOccurrenceProjectionIssue[]
+      status: 'unavailable'
+    }
 
 export type AssistantHostedAutomationToolResponse =
   | {
       action: 'inspect'
+      executionInspection?: AssistantAutomationExecutionInspection
       automationId: string
       contextReferences?: readonly AutomationContextReference[]
+      instructions?: string
+      title?: string
+      deliveryChannel?: string
       effectiveTimeZone: string | null
       lookupId: string
-      nextOccurrenceAt: string | null
+      occurrenceProjection: AssistantAutomationOccurrenceProjection
       routeBinding: 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
-      timingVerified: boolean
-      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
       updatedAt: string
     }
   | {
@@ -245,14 +291,13 @@ export type AssistantHostedAutomationToolResponse =
       automationId: string
       contextReferences?: readonly AutomationContextReference[]
       created: boolean
+      deliveryChannel?: string
       effectiveTimeZone: string | null
       lookupId: string
-      nextOccurrenceAt: string | null
-      routeBinding: 'current_conversation' | 'preserved'
+      occurrenceProjection: AssistantAutomationOccurrenceProjection
+      routeBinding: 'current_conversation' | 'member_notification' | 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
-      timingVerified: boolean
-      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
       updatedAt: string
     }
   | {
@@ -397,6 +442,7 @@ export interface AssistantHostedGroupParticipantDisplayNameReader {
 export interface AssistantHostedGroupSharedReader {
   request(
     request: AssistantHostedGroupSharedReadRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<AssistantHostedGroupSharedReadResponse>
 }
 
@@ -428,6 +474,12 @@ export interface AssistantPhoneCallPort {
 }
 
 export interface AssistantPhysicalNotePort {
+  resolve?(
+    request: HostedPhysicalNoteRecoveryRequest,
+    context?: {
+      signal?: AbortSignal | null
+    },
+  ): Promise<HostedPhysicalNoteRecoveryResponse>
   send(
     request: HostedPhysicalNoteSendRequest,
     context?: {
@@ -510,7 +562,12 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  assertTurnCommitAuthority?(input: {
+    acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
+    turnId: string
+  }): Promise<void>
   automationTool?: AssistantHostedAutomationTool | null
+  createAutomationTool?(route: AssistantCurrentDeliveryRoute): AssistantHostedAutomationTool | null
   currentAssistantInputId?: () => string | null
   createScheduledGroupTools?(input: {
     channel: string
@@ -529,6 +586,7 @@ export interface AssistantHostedExecutionContext {
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  pollTool?: ConversationPollTool | null
   imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
   groupParticipantDisplayNameReader?: AssistantHostedGroupParticipantDisplayNameReader | null
@@ -550,6 +608,7 @@ export interface AssistantHostedExecutionContext {
   providerFetch?: typeof fetch | null
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
+  releaseSha?: string | null
   resolveScheduledLinqRoute?(input: {
     fromPhoneNumber?: string | null
     homeRouteFallbackAllowed: boolean
@@ -567,7 +626,9 @@ export interface AssistantHostedExecutionContext {
     channel: 'telegram'
     signal?: AbortSignal | null
     target: string
-  }): Promise<HostedExecutionExternalThreadRouteAuthority>
+  }): Promise<HostedExecutionExternalThreadRouteAuthority & { threadIsDirect: boolean }>
+  runtimeAttemptId?: string | null
+  runtimeName?: string | null
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
 }
@@ -598,64 +659,70 @@ export function normalizeAssistantExecutionContext(
   input: AssistantExecutionContext | null | undefined,
 ): AssistantExecutionContext {
   const hosted = input?.hosted
-  const memberId = normalizeNullableString(hosted?.memberId)
+  if (!hosted) {
+    return { hosted: null }
+  }
+  const memberId = normalizeNullableString(hosted.memberId)
   const actionApprovalPort = normalizeAssistantActionApprovalPort(
-    hosted?.actionApprovalPort,
+    hosted.actionApprovalPort,
   )
-  const automationTool = normalizeAssistantAutomationTool(hosted?.automationTool)
+  const automationTool = normalizeAssistantAutomationTool(hosted.automationTool)
   const assistantConfigurationTool = normalizeAssistantConfigurationTool(
-    hosted?.assistantConfigurationTool,
+    hosted.assistantConfigurationTool,
   )
-  const connectedApps = normalizeAssistantConnectedAppsPort(hosted?.connectedApps)
+  const connectedApps = normalizeAssistantConnectedAppsPort(hosted.connectedApps)
   const clinicalRecordsConnectLinkTool = normalizeAssistantClinicalRecordsConnectLinkTool(
-    hosted?.clinicalRecordsConnectLinkTool,
+    hosted.clinicalRecordsConnectLinkTool,
   )
-  const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
+  const defaultTarget = normalizeAssistantBackendTarget(hosted.defaultTarget ?? null)
   const channelTypingDependencies = normalizeAssistantChannelTypingDependencies(
-    hosted?.channelTypingDependencies,
+    hosted.channelTypingDependencies,
   )
   const progressDeliveryDependencies = normalizeAssistantHostedProgressDeliveryDependencies(
-    hosted?.progressDeliveryDependencies,
+    hosted.progressDeliveryDependencies,
   )
   const deviceConnectProviders = normalizeAssistantHostedDeviceConnectProviders(
-    hosted?.deviceConnectProviders,
+    hosted.deviceConnectProviders,
   )
-  const deviceTool = normalizeAssistantDeviceTool(hosted?.deviceTool)
+  const deviceTool = normalizeAssistantDeviceTool(hosted.deviceTool)
   const dynamicContextPrompts = normalizeAssistantDynamicContextPrompts(
-    hosted?.dynamicContextPrompts,
+    hosted.dynamicContextPrompts,
   )
-  const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted.familyPlanTool)
   const imessageContactTool = normalizeAssistantIMessageContactTool(
-    hosted?.imessageContactTool,
+    hosted.imessageContactTool,
   )
   const personalizationTool = normalizeAssistantPersonalizationTool(
-    hosted?.personalizationTool,
+    hosted.personalizationTool,
   )
   const groupParticipantDisplayNameReader =
     normalizeAssistantGroupParticipantDisplayNameReader(
-      hosted?.groupParticipantDisplayNameReader,
+      hosted.groupParticipantDisplayNameReader,
     )
   const groupPermissionOfferTool = normalizeAssistantGroupPermissionOfferTool(
-    hosted?.groupPermissionOfferTool,
+    hosted.groupPermissionOfferTool,
   )
-  const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
+  const groupTool = normalizeAssistantGroupTool(hosted.groupTool)
   const groupSharedReader = normalizeAssistantGroupSharedReader(
-    hosted?.groupSharedReader,
+    hosted.groupSharedReader,
   )
-  const labsTool = normalizeAssistantLabsTool(hosted?.labsTool)
-  const planUsageTool = normalizeAssistantPlanUsageTool(hosted?.planUsageTool)
+  const labsTool = normalizeAssistantLabsTool(hosted.labsTool)
+  const planUsageTool = normalizeAssistantPlanUsageTool(hosted.planUsageTool)
   const subscriptionTool = normalizeAssistantSubscriptionTool(
-    hosted?.subscriptionTool,
+    hosted.subscriptionTool,
   )
-  const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
-  const physicalNotes = normalizeAssistantPhysicalNotePort(hosted?.physicalNotes)
+  const phoneCalls = normalizeAssistantPhoneCallPort(hosted.phoneCalls)
+  const physicalNotes = normalizeAssistantPhysicalNotePort(hosted.physicalNotes)
   const privateImageUrlPublisher = normalizeAssistantPrivateImageUrlPublisher(
-    hosted?.privateImageUrlPublisher,
+    hosted.privateImageUrlPublisher,
   )
   const productFeedbackCandidateSink = normalizeAssistantProductFeedbackCandidateSink(
-    hosted?.productFeedbackCandidateSink,
+    hosted.productFeedbackCandidateSink,
   )
-  const usageRecorder = normalizeAssistantUsageRecorder(hosted?.usageRecorder)
+  const releaseSha = normalizeNullableString(hosted.releaseSha)
+  const runtimeAttemptId = normalizeNullableString(hosted.runtimeAttemptId)
+  const runtimeName = normalizeNullableString(hosted.runtimeName)
+  const usageRecorder = normalizeAssistantUsageRecorder(hosted.usageRecorder)
   if (!memberId) {
     return {
       hosted: null,
@@ -664,97 +731,102 @@ export function normalizeAssistantExecutionContext(
 
   return {
     hosted: {
-      ...(actionApprovalPort ? { actionApprovalPort } : {}),
-      ...(automationTool ? { automationTool } : {}),
-      ...(typeof hosted?.currentAssistantInputId === 'function'
+      ...optionalHostedField('actionApprovalPort', actionApprovalPort),
+      ...(typeof hosted.assertTurnCommitAuthority === 'function'
+        ? {
+            assertTurnCommitAuthority:
+              hosted.assertTurnCommitAuthority.bind(hosted),
+          }
+        : {}),
+      ...optionalHostedField('automationTool', automationTool),
+      ...optionalHostedField('createAutomationTool', hosted.createAutomationTool),
+      ...(typeof hosted.currentAssistantInputId === 'function'
         ? {
             currentAssistantInputId: hosted.currentAssistantInputId,
           }
         : {}),
-      ...(typeof hosted?.createScheduledGroupTools === 'function'
+      ...(typeof hosted.createScheduledGroupTools === 'function'
         ? { createScheduledGroupTools: hosted.createScheduledGroupTools }
         : {}),
-      ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
-      ...(connectedApps ? { connectedApps } : {}),
-      ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
-      ...(hosted?.imageGenerationLauncher
+      ...optionalHostedField('assistantConfigurationTool', assistantConfigurationTool),
+      ...optionalHostedField('connectedApps', connectedApps),
+      ...optionalHostedField('clinicalRecordsConnectLinkTool', clinicalRecordsConnectLinkTool),
+      ...(hosted.imageGenerationLauncher
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
         : {}),
-      ...(familyPlanTool ? { familyPlanTool } : {}),
-      ...(imessageContactTool ? { imessageContactTool } : {}),
-      ...(personalizationTool ? { personalizationTool } : {}),
-      ...(groupParticipantDisplayNameReader
-        ? { groupParticipantDisplayNameReader }
-        : {}),
-      ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
-      ...(groupSharedReader ? { groupSharedReader } : {}),
-      ...(groupTool ? { groupTool } : {}),
-      ...(labsTool ? { labsTool } : {}),
-      ...(planUsageTool ? { planUsageTool } : {}),
-      ...(physicalNotes ? { physicalNotes } : {}),
-      ...(privateImageUrlPublisher ? { privateImageUrlPublisher } : {}),
-      ...(subscriptionTool ? { subscriptionTool } : {}),
-      ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
+      ...optionalHostedField('familyPlanTool', familyPlanTool),
+      ...optionalHostedField('pollTool', hosted.pollTool && typeof hosted.pollTool.request === 'function' ? { request: hosted.pollTool.request.bind(hosted.pollTool) } : undefined),
+      ...optionalHostedField('imessageContactTool', imessageContactTool),
+      ...optionalHostedField('personalizationTool', personalizationTool),
+      ...optionalHostedField('groupParticipantDisplayNameReader', groupParticipantDisplayNameReader),
+      ...optionalHostedField('groupPermissionOfferTool', groupPermissionOfferTool),
+      ...optionalHostedField('groupSharedReader', groupSharedReader),
+      ...optionalHostedField('groupTool', groupTool),
+      ...optionalHostedField('labsTool', labsTool),
+      ...optionalHostedField('planUsageTool', planUsageTool),
+      ...optionalHostedField('physicalNotes', physicalNotes),
+      ...optionalHostedField('privateImageUrlPublisher', privateImageUrlPublisher),
+      ...optionalHostedField('subscriptionTool', subscriptionTool),
+      ...(typeof hosted.materializeWorkspaceArtifacts === 'function'
         ? {
             materializeWorkspaceArtifacts: hosted.materializeWorkspaceArtifacts,
           }
         : {}),
-      ...(typeof hosted?.persistGeneratedImageCapture === 'function'
+      ...(typeof hosted.persistGeneratedImageCapture === 'function'
         ? {
             persistGeneratedImageCapture: hosted.persistGeneratedImageCapture,
           }
         : {}),
-      ...(defaultTarget
-        ? {
-            defaultTarget,
-          }
-        : {}),
-      ...(channelTypingDependencies
-        ? {
-            channelTypingDependencies,
-          }
-        : {}),
+      ...optionalHostedField('defaultTarget', defaultTarget),
+      ...optionalHostedField('channelTypingDependencies', channelTypingDependencies),
       ...(deviceConnectProviders.length > 0
         ? {
             deviceConnectProviders,
           }
         : {}),
-      ...(deviceTool ? { deviceTool } : {}),
+      ...optionalHostedField('deviceTool', deviceTool),
       ...(dynamicContextPrompts.length > 0
         ? {
             dynamicContextPrompts,
           }
         : {}),
-      ...(productFeedbackCandidateSink ? { productFeedbackCandidateSink } : {}),
-      ...(usageRecorder ? { usageRecorder } : {}),
+      ...optionalHostedField('productFeedbackCandidateSink', productFeedbackCandidateSink),
+      ...optionalHostedField('releaseSha', releaseSha),
+      ...optionalHostedField('runtimeAttemptId', runtimeAttemptId),
+      ...optionalHostedField('runtimeName', runtimeName),
+      ...optionalHostedField('usageRecorder', usageRecorder),
       memberId,
-      ...(progressDeliveryDependencies
-        ? {
-            progressDeliveryDependencies,
-          }
-        : {}),
-      ...(phoneCalls ? { phoneCalls } : {}),
-      ...(typeof hosted?.providerFetch === 'function'
+      ...optionalHostedField('progressDeliveryDependencies', progressDeliveryDependencies),
+      ...optionalHostedField('phoneCalls', phoneCalls),
+      ...(typeof hosted.providerFetch === 'function'
         ? { providerFetch: hosted.providerFetch }
         : {}),
-      ...(typeof hosted?.publicInternetFetch === 'function'
+      ...(typeof hosted.publicInternetFetch === 'function'
         ? { publicInternetFetch: hosted.publicInternetFetch }
         : {}),
-      ...(typeof hosted?.resolveScheduledLinqRoute === 'function'
+      ...(typeof hosted.resolveScheduledLinqRoute === 'function'
         ? { resolveScheduledLinqRoute: hosted.resolveScheduledLinqRoute }
         : {}),
-      ...(typeof hosted?.resolveScheduledExternalThreadRoute === 'function'
+      ...(typeof hosted.resolveScheduledExternalThreadRoute === 'function'
         ? {
             resolveScheduledExternalThreadRoute:
               hosted.resolveScheduledExternalThreadRoute,
           }
         : {}),
-      userEnvKeys:
-        hosted?.userEnvKeys
-          .map((key) => normalizeNullableString(key))
-          .filter((key): key is string => key !== null) ?? [],
+      userEnvKeys: hosted.userEnvKeys
+        .map((key) => normalizeNullableString(key))
+        .filter((key): key is string => key !== null) ?? [],
     },
   }
+}
+
+// Normalized capabilities and metadata are omitted, not emitted as undefined.
+// Callers retain the field order and keep raw accessor/function checks explicit.
+function optionalHostedField<Key extends keyof AssistantHostedExecutionContext>(
+  key: Key,
+  value: AssistantHostedExecutionContext[Key],
+) {
+  return value ? { [key]: value } : {}
 }
 
 function normalizeAssistantDynamicContextPrompts(
@@ -856,6 +928,9 @@ function normalizeAssistantPhysicalNotePort(
   }
 
   return {
+    ...(typeof input.resolve === 'function'
+      ? { resolve: input.resolve.bind(input) }
+      : {}),
     send: input.send.bind(input),
   }
 }
@@ -1052,6 +1127,9 @@ function normalizeAssistantChannelTypingDependencies(
   }
 
   const dependencies: AssistantChannelTypingDependencies = {}
+  if (typeof input.onTypingAccepted === 'function') {
+    dependencies.onTypingAccepted = input.onTypingAccepted
+  }
   if (typeof input.startLinqTyping === 'function') {
     dependencies.startLinqTyping = input.startLinqTyping
   }
@@ -1187,5 +1265,22 @@ export function resolveAssistantExecutionOperatorDefaults(input: {
     identityId: input.defaults?.identityId ?? null,
     selfDeliveryTargets: input.defaults?.selfDeliveryTargets ?? null,
     backend: hostedDefaultTarget,
+  }
+}
+
+export function scopeAssistantAutomationToolToRoute(input: {
+  executionContext: AssistantExecutionContext
+  route: AssistantCurrentDeliveryRoute | null
+}): AssistantExecutionContext {
+  const hosted = input.executionContext.hosted
+  if (!hosted) return input.executionContext
+  const { automationTool: _previousTool, ...unscopedHosted } = hosted
+  void _previousTool
+  const automationTool = input.route ? hosted.createAutomationTool?.(input.route) : null
+  return {
+    hosted: {
+      ...unscopedHosted,
+      ...(automationTool ? { automationTool } : {}),
+    },
   }
 }

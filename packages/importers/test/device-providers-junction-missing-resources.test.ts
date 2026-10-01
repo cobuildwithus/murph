@@ -886,6 +886,34 @@ test("Junction missing-resource slice rejects malformed values, units, intervals
   assert.deepEqual(payload.evidenceParts, []);
 });
 
+test("Junction generic sparse intervals retain timestamp requirements and zero-duration acceptance", () => {
+  for (const [resource, unit, extras, timestampRequired] of [
+    ["carbohydrates", "g", {}, false],
+    ["heart_rate_alert", "count", { type: "irregular_rhythm" }, false],
+    ["insulin_injection", "unit", { type: "insulin_lispro" }, false],
+    ["inhaler_usage", "count", {}, true],
+  ] as const) {
+    const normalize = (overrides: Record<string, unknown>) => normalizeJunctionSnapshot({
+      importedAt: "2026-02-02T00:00:00.000Z",
+      timeseries: {
+        [resource]: grouped("apple_health_kit", "phone", "synthetic-device", [{
+          id: "synthetic-reading", start: START, end: END, timestamp: TIMESTAMP,
+          value: 1, unit, ...extras, ...overrides,
+        }]),
+      },
+    });
+    assert.equal(normalize({}).events?.length, 1, resource);
+    assert.equal(normalize({ timestamp: undefined }).events?.length, timestampRequired ? 0 : 1, resource);
+    assert.equal(normalize({ end: START }).events?.length, 1, resource);
+    for (const malformed of [
+      { start: undefined }, { end: undefined }, { start: "invalid" },
+      { end: "invalid" }, { timestamp: "invalid" }, { start: END, end: START },
+    ]) {
+      assert.deepEqual(normalize(malformed).events, [], `${resource}: ${JSON.stringify(malformed)}`);
+    }
+  }
+});
+
 test("Junction body resources require canonical zoned timestamps and positive intervals", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-02-02T00:00:00.000Z",

@@ -14,6 +14,7 @@ import {
   getHostedDomainRootUnwrapCache,
 } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   HostedDomainRootPreparationMismatchError,
@@ -25,6 +26,23 @@ const privyManagementMocks = vi.hoisted(() => ({
   clientConstructor: vi.fn(),
   getUser: vi.fn(),
   setCustomMetadata: vi.fn(),
+}));
+
+const phoneWelcomeMocks = vi.hoisted(() => ({ ensure: vi.fn() }));
+// The row fixtures do not execute Prisma relation filters. Preserve their
+// state-based access decisions; the PostgreSQL proof covers the boolean query.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/phone-welcome", () => ({
+  ensureHostedMemberPhoneWelcome: phoneWelcomeMocks.ensure,
 }));
 
 const phoneCallResultRecoveryMocks = vi.hoisted(() => ({
@@ -1444,9 +1462,9 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: expect.any(String),
       joinUrl: expect.stringContaining("/join/"),
       memberId: existingMember.id,
-      // Verified email already gives Murph a delivery route, so signup no
-      // longer holds this member on messaging setup.
-      messagingSetupRequired: false,
+      // Email remains available for onboarding outreach, but the member must
+      // still add phone or Telegram before onboarding can finish.
+      messagingSetupRequired: true,
       stage: "checkout",
     });
 
@@ -1668,6 +1686,7 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(phoneWelcomeMocks.ensure).toHaveBeenCalledWith({ memberId: existingMember.id, prisma });
   });
 
   it("resolves a texted-first member by phone on first web auth without creating a duplicate", async () => {
@@ -2763,7 +2782,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(telegramRoutingUpsert).toHaveBeenCalledTimes(1);
   });
 
-  it("does not block phone auth when a linked email belongs to another member", async () => {
+  it.each(["unique-index", "linq-handle"])("does not block phone auth on a %s secondary email conflict", async (conflict) => {
     const secondaryEmailTransactionCachePresence: boolean[] = [];
     const secondaryEmailTransactionProviderDisabled: boolean[] = [];
     const phoneMember = makeMember({ id: "member_phone_secondary_email" });
@@ -2795,6 +2814,13 @@ describe("completeHostedPrivyVerification", () => {
           secondaryEmailTransactionProviderDisabled.push(
             areHostedDomainRootProviderCallsDisabled(),
           );
+          if (conflict === "linq-handle") {
+            throw hostedOnboardingError({
+              code: "HOSTED_LINQ_EMAIL_HANDLE_IDENTITY_CONFLICT",
+              httpStatus: 409,
+              message: "Synthetic cross-owner email conflict.",
+            });
+          }
           throw new Prisma.PrismaClientKnownRequestError(
             "duplicate verified email",
             {
@@ -3050,6 +3076,9 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   prisma: T,
 ): T & CompleteHostedPrivyVerificationPrisma {
   const prismaWithQueryRaw = prisma as T & CompleteHostedPrivyVerificationPrisma;
+  if (!("hostedAuthRecord" in prismaWithQueryRaw)) Object.defineProperty(prismaWithQueryRaw, "hostedAuthRecord", {
+    configurable: true, value: { findUnique: vi.fn().mockResolvedValue(null) },
+  });
   const routingRecordsByMemberId = new Map<string, Record<string, unknown>>();
   const hostedInvite = readHostedInviteDelegate(prismaWithQueryRaw.hostedInvite);
   const hostedMember = readHostedMemberDelegate(prismaWithQueryRaw.hostedMember);
@@ -3508,7 +3537,8 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   if (!("$queryRaw" in prismaWithQueryRaw)) {
     Object.defineProperty(prismaWithQueryRaw, "$queryRaw", {
       configurable: true,
-      value: vi.fn(async () => []),
+      value: vi.fn(async (query: TemplateStringsArray) =>
+        query.join("").includes("hosted_runtime_cutover") ? [{ phase: "legacy" }] : []),
     });
   }
   if (!("hostedAccountGroupMembership" in prismaWithQueryRaw)) {

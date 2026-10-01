@@ -5,7 +5,6 @@ import {
   cloneElement,
   createElement,
   isValidElement,
-  useEffect,
   type ReactNode,
 } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -42,16 +41,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-app-session-client", () => ({
   logoutHostedAppSession: mocks.logoutHostedAppSession,
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-privy-logout", () => ({
-  HostedPrivyLogout: ({ onDone }: { onDone: () => void }) => {
-    useEffect(() => {
-      onDone();
-    }, [onDone]);
-
-    return null;
-  },
 }));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
@@ -188,16 +177,36 @@ beforeEach(() => {
   mocks.setOpenMobile.mockClear();
 });
 
-test("Sidebar hides Patterns and the internal Overview route", () => {
+test("Sidebar exposes primary destinations without Voice or the internal Overview route", () => {
   mocks.usePathname.mockReturnValue("/experiments");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
   assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
-  assert.doesNotMatch(markup, /href="\/patterns"/);
-  assert.doesNotMatch(markup, />Patterns<\/a>/);
+  assert.match(markup, /href="\/journal"/);
+  assert.match(markup, />Journal<\/a>/);
+  assert.doesNotMatch(markup, /href="\/voice"/);
+  assert.doesNotMatch(markup, />Voice<\/a>/);
+  assert.match(markup, /href="\/patterns"/);
+  assert.match(markup, />Patterns<\/a>/);
   assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
+});
+
+test.each([
+  ["/journal", "Journal"],
+  ["/patterns", "Patterns"],
+])("Sidebar marks %s as the active primary destination", (pathname, label) => {
+  mocks.usePathname.mockReturnValue(pathname);
+
+  const markup = renderToStaticMarkup(createElement(Sidebar));
+
+  assert.match(
+    markup,
+    new RegExp(
+      `data-active="true">\\s*<a[^>]*href="${pathname}"[^>]*>[\\s\\S]*${label}<\\/a>`,
+    ),
+  );
 });
 
 test("Sidebar renders Environment as an active primary destination", () => {
@@ -221,6 +230,20 @@ test("Sidebar renders an active Biomarkers tab for the live RHR page", () => {
     markup,
     /data-active="true">\s*<a[^>]*href="\/biomarkers"[^>]*>[\s\S]*Biomarkers<\/a>/,
   );
+});
+
+test("Sidebar keeps public Goal guides out of authenticated dashboard navigation", () => {
+  mocks.usePathname.mockReturnValue("/goals/lower-resting-heart-rate");
+
+  const markup = renderToStaticMarkup(createElement(Sidebar, {
+    initialAuth: {
+      authenticated: true,
+      label: null,
+    },
+  }));
+
+  assert.doesNotMatch(markup, /href="\/goals"/);
+  assert.doesNotMatch(markup, />Goals<\/a>/);
 });
 
 test("Sidebar does not render research-only Age navigation", () => {
@@ -307,6 +330,34 @@ test("Sidebar renders signed-in account controls without a visible fallback labe
   assert.doesNotMatch(markup, /\*{3,4}\s*\d{4}/);
   assert.doesNotMatch(markup, /\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/);
   assert.doesNotMatch(markup, /\bdid:[a-z]+:[\w.-]+\b/);
+});
+
+test("Sidebar refreshes only after durable logout and permits retry after a failure", async () => {
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(Sidebar, {
+      initialAuth: { authenticated: true, label: null },
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+  const signOutItem = Array.from(container.querySelectorAll('[role="menuitem"]'))
+    .find((element) => element.textContent === "Sign out");
+  assert.ok(signOutItem);
+  mocks.logoutHostedAppSession.mockRejectedValueOnce(new Error("storage unavailable"));
+  await act(async () => {
+    signOutItem.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  assert.equal(mocks.logoutHostedAppSession.mock.calls.length, 1);
+  assert.equal(mocks.refresh.mock.calls.length, 0);
+  assert.equal(container.querySelector('[role="alert"]')?.textContent,
+    "Sign out did not finish. Try again.");
+
+  await act(async () => {
+    signOutItem.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  assert.equal(mocks.logoutHostedAppSession.mock.calls.length, 2);
+  assert.equal(mocks.refresh.mock.calls.length, 1);
+  assert.equal(container.querySelector('[role="alert"]'), null);
 });
 
 test("Sidebar surfaces a visible error when sign out fails", async () => {

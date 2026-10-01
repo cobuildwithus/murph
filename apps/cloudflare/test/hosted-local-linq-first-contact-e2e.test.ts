@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  readHostedLinqFirstContactMemberState,
   queryHostedRuntimeWorkflowForTest,
   readHostedIngressLatencyTraceForTest,
   readHostedMailboxItemForTest,
@@ -25,7 +26,6 @@ import {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRunnerStatusResponse,
@@ -34,10 +34,6 @@ import type {
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
 import {
   createIntegratedVaultServices,
 } from "@murphai/vault-usecases/vault-services";
@@ -63,10 +59,12 @@ import {
   HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
+  postHostedLocalLinqWebhook,
   startHostedLocalLinqStub,
   type ObservedLinqRequest,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.js";
 
 const userId = `member_local_linq_first_contact_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
@@ -77,6 +75,10 @@ const richLinkRetryRecoveryUserId = `member_local_linq_link_retry_recovery_${Dat
 const richLinkFallbackUserId = `member_local_linq_link_fallback_${Date.now()}`;
 const duplicateWelcomeUserId = `member_local_linq_duplicate_welcome_${Date.now()}`;
 const fastReplyUserId = `member_local_linq_fast_reply_${Date.now()}`;
+const instantFirstTurnUserId =
+  `member_local_linq_instant_first_turn_${Date.now()}`;
+const instantFirstTurnChatId =
+  `chat_local_linq_instant_first_turn_${Date.now()}`;
 const progressToolUserId = `member_local_linq_progress_tool_${Date.now()}`;
 const postAssistantReplyUserId = `member_local_linq_post_assistant_reply_${Date.now()}`;
 const checkpointReplayUserId = `member_local_linq_checkpoint_replay_${Date.now()}`;
@@ -95,8 +97,17 @@ const directRetryRecoveryReplyText =
 const richLinkLostAckUrl = "https://example.test/continue/lost-ack";
 const richLinkRetryRecoveryUrl = "https://example.test/continue/recovered";
 const richLinkFallbackUrl = "https://example.test/continue/fallback";
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 const localRunnerIdleTtlMs = "300000";
+const runRealInstantFirstTurn =
+  process.env.MURPH_RUN_REAL_LINQ_FIRST_TURN_E2E === "1";
+const itRealInstantFirstTurn = runRealInstantFirstTurn ? it : it.skip;
+const realInstantFirstTurnTimeoutMs = runRealInstantFirstTurn
+  ? 900_000
+  : 360_000;
+const linqScenarioSetupTimeoutMs = runRealInstantFirstTurn
+  ? 900_000
+  : 600_000;
 const directWakeRetryBarrierPreloadPath = fileURLToPath(new URL(
   "../../web/test/support/hosted-local-direct-wake-retry-barrier-preload.ts",
   import.meta.url,
@@ -233,7 +244,7 @@ it("releases a blocked direct-wake retry during barrier teardown", async () => {
 productionDescribe("hosted local Linq first-contact e2e", () => {
   beforeAll(async () => {
     await ensureLinqScenario();
-  }, 300_000);
+  }, linqScenarioSetupTimeoutMs);
 
   it("sends the first-contact Linq welcome through the live local worker", async () => {
     await requireScenario().seedActiveHostedLinqMember({
@@ -279,6 +290,148 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     });
   }, 300_000);
 
+  itRealInstantFirstTurn(
+    "continues a real Web-model first turn through the hosted runtime",
+    async () => {
+      const firstText = "Hey Murph";
+      const secondText = "Why can a short walk after dinner help blood sugar?";
+      const runtimeReply =
+        "A short walk helps your muscles take up glucose after the meal.";
+      const firstEventId = `evt_instant_first_turn_${instantFirstTurnUserId}`;
+      const firstReplyPath =
+        `/chats/${encodeURIComponent(instantFirstTurnChatId)}/messages`;
+      const acceptedBaseline = requireLinqStub().countAcceptedSends(
+        firstReplyPath,
+      );
+      const runtimeProviderBaseline = countAssistantProviderResponsesApiRequests();
+
+      const firstResponse = await postSignedLinqWebhook(
+        buildHostedLinqInboundEvent(
+          instantFirstTurnUserId,
+          instantFirstTurnChatId,
+          {
+            eventId: firstEventId,
+            messageId: `msg_${firstEventId}`,
+            service: "iMessage",
+            text: firstText,
+          },
+        ),
+      );
+      const firstResponseBody = await firstResponse.json();
+      expect({
+        body: firstResponseBody,
+        status: firstResponse.status,
+      }).toMatchObject({
+        body: {
+          ok: true,
+          reason: "wake-appended-active-member",
+        },
+        status: 202,
+      });
+
+      const firstReply = await requireLinqStub().waitForAdditionalAcceptedSend({
+        baselineCount: acceptedBaseline,
+        expectedPath: firstReplyPath,
+        scenario: requireScenario(),
+        userId: instantFirstTurnUserId,
+      });
+      expect(requireLinqStub().readObservedMessageText(firstReply)).toBe(
+        MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      );
+      expect(readObservedLinqIdempotencyKey(firstReply)).toMatch(
+        /^linq-instant-first-turn-v1-/u,
+      );
+
+      const memberState = await readHostedLinqFirstContactMemberState({
+        environment: requireScenario().runtimeEnv,
+        memberPhone: buildLinqRecipientPhoneNumber(instantFirstTurnUserId),
+      });
+      expect(memberState).toMatchObject({
+        homeChatId: instantFirstTurnChatId,
+        memberCount: 1,
+        memberId: expect.any(String),
+        pendingChatId: null,
+      });
+      if (!memberState.memberId) {
+        throw new Error("Expected instant first turn to activate one member.");
+      }
+      await requireScenario().waitForLatestPendingWake(memberState.memberId);
+      const firstTurnIdleStatus = await requireScenario().waitForHostedIdle(
+        memberState.memberId,
+        { timeoutMs: 450_000 },
+      );
+      expect(firstTurnIdleStatus.lastErrorCode ?? null).toBeNull();
+      expect(firstTurnIdleStatus.mailboxLag.every((lane) => lane.lag === "0"))
+        .toBe(true);
+      expect(countAssistantProviderResponsesApiRequests()).toBe(
+        runtimeProviderBaseline,
+      );
+
+      requireScenario().queueAssistantResponses([runtimeReply], {
+        matchInputContains: secondText,
+      });
+      const secondEventId = `evt_after_instant_first_turn_${instantFirstTurnUserId}`;
+      const secondResponse = await postSignedLinqWebhook(
+        buildHostedLinqInboundEvent(
+          instantFirstTurnUserId,
+          instantFirstTurnChatId,
+          {
+            eventId: secondEventId,
+            messageId: `msg_${secondEventId}`,
+            service: "iMessage",
+            text: secondText,
+          },
+        ),
+      );
+      const secondResponseBody = await secondResponse.json();
+      expect({
+        body: secondResponseBody,
+        status: secondResponse.status,
+      }).toMatchObject({
+        body: {
+          ok: true,
+          reason: "wake-appended-active-member",
+        },
+        status: 202,
+      });
+
+      await requireScenario().waitForLatestPendingWake(memberState.memberId);
+      const secondReply = await requireLinqStub().waitForAdditionalAcceptedSend({
+        baselineCount: acceptedBaseline + 1,
+        expectedPath: firstReplyPath,
+        scenario: requireScenario(),
+        userId: memberState.memberId,
+      });
+      expect(requireLinqStub().readObservedMessageText(secondReply)).toBe(
+        runtimeReply,
+      );
+      await requireScenario().waitForHostedCompletion(memberState.memberId);
+
+      const continuationRequests = requireScenario().assistantProviderRequests
+        .slice(runtimeProviderBaseline)
+        .filter((request) => request.url === "/v1/responses");
+      expect(continuationRequests).toHaveLength(1);
+      const continuationInput = readAssistantProviderRequestText(
+        continuationRequests[0]!,
+      );
+      expect({
+        hasFirstMessage: continuationInput.includes(firstText),
+        hasSecondMessage: continuationInput.includes(secondText),
+        hasWebWelcome: continuationInput.includes(
+          MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+        ),
+      }).toEqual({
+        hasFirstMessage: true,
+        hasSecondMessage: true,
+        hasWebWelcome: true,
+      });
+      expect(requireLinqStub().countAcceptedSends(firstReplyPath)).toBe(
+        acceptedBaseline + 2,
+      );
+    },
+    realInstantFirstTurnTimeoutMs,
+  );
+
   it("sends a Linq reply after a later inbound Linq message", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(directReplyUserId),
@@ -315,8 +468,10 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       requireLinqStub().listObservedMessageIds(materializedChatId).length;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
     const requestCountBeforeReply = requireLinqStub().observedRequests.length;
+    const providerRequestCountBeforeReply = requireScenario().assistantProviderRequests.length;
+    const directReplyInputText = "hello mate, this is the direct reply tool contract check";
     requireScenario().queueAssistantResponses([HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT], {
-      matchInputContains: "hello mate",
+      matchInputContains: directReplyInputText,
     });
     const directReplyEventId = `evt_direct_reply_${directReplyUserId}`;
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -325,6 +480,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       {
         eventId: directReplyEventId,
         messageId: `msg_direct_reply_${directReplyUserId}`,
+        text: directReplyInputText,
       },
     ));
     expect(webhookResponse.status).toBe(202);
@@ -366,7 +522,16 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const finalStatus = await completionPromise;
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
+    // Later scheduled work can advertise a different tool set after the reply.
+    // Attribute this proof to the first request for this exact inbound message.
+    const directReplyProviderRequest = requireScenario().assistantProviderRequests
+      .slice(providerRequestCountBeforeReply)
+      .find((request) =>
+        request.url === "/v1/responses" && request.body.includes(directReplyInputText)
+      );
+    expect(directReplyProviderRequest).toBeDefined();
+    expectAdvertisedMurphDynamicTools([directReplyProviderRequest!], {
+      calendarLinkAvailable: true,
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
       messageTargetingAvailable: true,
@@ -403,6 +568,22 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       userId: directReplyUserId,
     });
     expect(answeredMailboxItem.consumedAt).not.toBeNull();
+    const lifecycleTrace = await waitForAssistantExecutionLifecycleLatencyTrace({
+      mailboxItemId: answeredMailboxItem.id,
+      userId: directReplyUserId,
+    });
+    const pendingReplyAdmittedAtEpochMs =
+      lifecycleTrace.phaseBreakdown?.assistant?.pendingReplyAdmittedAtEpochMs;
+    const assistantInputAcceptedForExecutionAtEpochMs =
+      lifecycleTrace.phaseBreakdown?.assistant
+        ?.assistantInputAcceptedForExecutionAtEpochMs;
+    expect(pendingReplyAdmittedAtEpochMs).toEqual(expect.any(Number));
+    expect(assistantInputAcceptedForExecutionAtEpochMs).toEqual(
+      expect.any(Number),
+    );
+    expect(assistantInputAcceptedForExecutionAtEpochMs!).toBeGreaterThanOrEqual(
+      pendingReplyAdmittedAtEpochMs!,
+    );
     const lateEnsure = await ensureProcessingAfterSyntheticMailboxAppendForTest({
       harness: requireScenario().harness,
       userId: directReplyUserId,
@@ -828,7 +1009,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       matchingSends
         .slice(outboundCountBeforeReply)
         .map((request) => request.authorizationStatus),
-    ).toEqual(["hosted-sentinel", "hosted-sentinel"]);
+    ).toEqual(["expected", "expected"]);
     expect(newSendTexts).toEqual([
       progressToolAttemptText,
       progressToolFinalReplyText,
@@ -1334,7 +1515,7 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
   beforeAll(async () => {
     directWakeRetryBarrier = await startHostedLocalDirectWakeRetryBarrier();
     await restartLinqScenario({
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
     }, {
       faultInjection: true,
       webProcessEnvOverrides: {
@@ -1496,7 +1677,7 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
 testControlsDescribe("hosted local Linq stale scheduled wake e2e", () => {
   beforeAll(async () => {
     await restartLinqScenario({
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1200",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200",
     }, {
       faultInjection: true,
     });
@@ -1683,27 +1864,11 @@ function buildActivationWake(userId: string) {
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
-  const rawBody = JSON.stringify(event);
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const signature = signLinqWebhook(linqWebhookSecret, rawBody, timestamp);
-
-  return await fetch(`${requireScenario().harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`, {
-    body: rawBody,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "x-webhook-signature": signature,
-      "x-webhook-timestamp": timestamp,
-    },
-    method: "POST",
+  return postHostedLocalLinqWebhook({
+    event,
+    secret: linqWebhookSecret,
+    webBaseUrl: requireScenario().harness.webBaseUrl,
   });
-}
-
-function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
-  const signature = createHmac("sha256", secret)
-    .update(`${timestamp}.${payload}`)
-    .digest("hex");
-
-  return `sha256=${signature}`;
 }
 
 function requireLinqStub(): HostedLocalLinqStub {
@@ -1886,11 +2051,14 @@ async function seedEmptyHostedWorkspaceCheckpointForTest(
     vault: vaultRoot,
   });
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
+    harness: requireScenario().harness,
     operatorHomeRoot,
+    userId: memberId,
     vaultRoot,
   });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createBrowserVaultReplicaRef(memberId, hash, label),
     environment: requireScenario().runtimeEnv,
@@ -1899,45 +2067,10 @@ async function seedEmptyHostedWorkspaceCheckpointForTest(
     redactedStatusJson: {
       seeded: true,
     },
-    snapshotRef: createSnapshotBundleRef(hash, snapshot.bundle.byteLength),
+    snapshotRef,
     userId: memberId,
   });
   expect(checkpoint.status).toBe("updated");
-
-  await uploadHostedSnapshotArtifact({
-    bytes: snapshot.bundle,
-    hash,
-    userId: memberId,
-  });
-}
-
-async function uploadHostedSnapshotArtifact(input: {
-  bytes: Uint8Array;
-  hash: string;
-  userId: string;
-}): Promise<void> {
-  await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(input.userId)}&sha256=${input.hash}`,
-    {
-      body: new Blob([new Uint8Array(input.bytes)]),
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
-      },
-      method: "PUT",
-    },
-  );
-}
-
-function createSnapshotBundleRef(
-  hash: string,
-  size: number,
-): HostedExecutionSnapshotRef {
-  return {
-    hash,
-    key: `cloudflare-workspace-snapshots/${hash}.bundle`,
-    size,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 function createBrowserVaultReplicaRef(
@@ -1965,13 +2098,44 @@ async function startLinqScenario(
     webProcessEnvOverrides?: NodeJS.ProcessEnv;
   } = {},
 ): Promise<void> {
+  const realInstantFirstTurnOpenAiApiKey = runRealInstantFirstTurn
+    ? requireRealInstantFirstTurnOpenAiApiKey()
+    : null;
   linqStub = await startHostedLocalLinqStub({
+    canonicalChats: runRealInstantFirstTurn
+      ? [{
+          chatId: instantFirstTurnChatId,
+          handles: [
+            {
+              handle: buildLinqHomePhoneNumber(instantFirstTurnUserId),
+              isMe: true,
+              status: "active",
+            },
+            {
+              handle: buildLinqRecipientPhoneNumber(instantFirstTurnUserId),
+              isMe: false,
+              status: "active",
+            },
+          ],
+          isGroup: false,
+        }]
+      : [],
     expectedAuthorizationToken: linqApiToken,
   });
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      ...(realInstantFirstTurnOpenAiApiKey
+          ? {
+            HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS:
+              buildLinqHomePhoneNumber(instantFirstTurnUserId),
+            HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "enforce",
+            HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY:
+              realInstantFirstTurnOpenAiApiKey,
+            HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES: "+155550",
+          }
+        : {}),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqFirstContactLocalInboundAllowlist(),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -1979,7 +2143,8 @@ async function startLinqScenario(
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      OPENAI_API_KEY: "stub-local-openai-key",
+      OPENAI_API_KEY:
+        realInstantFirstTurnOpenAiApiKey ?? "stub-local-openai-key",
       ...additionalEnv,
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
@@ -2000,7 +2165,7 @@ async function ensureLinqScenario(): Promise<void> {
   }
 
   await startLinqScenario({
-    HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+    HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
   });
 }
 
@@ -2033,7 +2198,69 @@ function buildLinqFirstContactLocalInboundAllowlist(): string {
     postAssistantReplyUserId,
     checkpointReplayUserId,
     typingLoopUserId,
+    instantFirstTurnUserId,
   ].map(buildLinqRecipientPhoneNumber).join(",");
+}
+
+function requireRealInstantFirstTurnOpenAiApiKey(): string {
+  const apiKey =
+    process.env.HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY
+    ?? process.env.OPENAI_API_KEY;
+  if (!apiKey?.trim()) {
+    throw new Error(
+      "The real instant first-turn E2E requires a Web-owned OpenAI API key.",
+    );
+  }
+  return apiKey;
+}
+
+async function waitForAssistantExecutionLifecycleLatencyTrace(input: {
+  mailboxItemId: string;
+  userId: string;
+}) {
+  const startedAt = Date.now();
+  let lastError: unknown = null;
+  let lastObservation = "none";
+  while (Date.now() - startedAt < 30_000) {
+    try {
+      const trace = await readHostedIngressLatencyTraceForTest({
+        environment: requireScenario().runtimeEnv,
+        mailboxItemId: input.mailboxItemId,
+        userId: input.userId,
+      });
+      const assistant = trace.phaseBreakdown?.assistant;
+      const pendingReplyAdmittedAtEpochMs =
+        assistant?.pendingReplyAdmittedAtEpochMs;
+      const assistantInputAcceptedForExecutionAtEpochMs =
+        assistant?.assistantInputAcceptedForExecutionAtEpochMs;
+      lastObservation = [
+        `pendingAdmission=${typeof pendingReplyAdmittedAtEpochMs === "number"
+          ? "present"
+          : "missing"}`,
+        `assistantExecutionAcceptance=${typeof assistantInputAcceptedForExecutionAtEpochMs === "number"
+          ? "present"
+          : "missing"}`,
+      ].join(",");
+      if (
+        typeof pendingReplyAdmittedAtEpochMs === "number"
+        && typeof assistantInputAcceptedForExecutionAtEpochMs === "number"
+      ) {
+        return trace;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(100);
+  }
+
+  const lastErrorKind = lastError instanceof Error
+    ? lastError.name
+    : typeof lastError;
+  throw new Error(
+    "Timed out waiting for assistant execution lifecycle latency milestones. "
+      + `Observation: ${lastObservation}. `
+      + `Last read error kind: ${lastErrorKind}.`,
+  );
 }
 
 async function waitForDirectRetryLatencyTrace(input: {

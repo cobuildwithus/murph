@@ -1,11 +1,16 @@
 import "server-only";
 
+import { getGeneratedHealthCommonsWebGoalIndex } from "@murphai/health-commons/goal-index-runtime";
 import {
   buildTelegramThreadTarget,
   extractTelegramMessage,
 } from "@murphai/messaging-ingress/telegram-webhook";
 import type { HostedMember, PrismaClient } from "@prisma/client";
 
+import {
+  buildMurphTelegramUrl,
+  resolveMurphTelegramBotUsername,
+} from "../murph-contact-routing";
 import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
 import {
@@ -66,6 +71,7 @@ export type HostedVisibleSecondaryLinqDependencies = {
 export type HostedVisibleSecondaryTelegramDependencies = {
   parseHostedTelegramWebhookUpdate: typeof parseHostedTelegramWebhookUpdate;
   requireHostedOnboardingPublicBaseUrl: typeof requireHostedOnboardingPublicBaseUrl;
+  resolveMurphTelegramBotUrl?: typeof resolvePublicMurphTelegramBotUrl;
   sendHostedTelegramTextMessage: typeof sendHostedTelegramTextMessage;
   summarizeHostedTelegramWebhook: typeof summarizeHostedTelegramWebhook;
 };
@@ -84,6 +90,7 @@ const defaultLinqDependencies: HostedVisibleSecondaryLinqDependencies = {
 const defaultTelegramDependencies: HostedVisibleSecondaryTelegramDependencies = {
   parseHostedTelegramWebhookUpdate,
   requireHostedOnboardingPublicBaseUrl,
+  resolveMurphTelegramBotUrl: resolvePublicMurphTelegramBotUrl,
   sendHostedTelegramTextMessage,
   summarizeHostedTelegramWebhook,
 };
@@ -298,8 +305,16 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
     const signupUrl = reason === "unlinked-telegram"
       ? buildHostedSignupUrl(dependencies.requireHostedOnboardingPublicBaseUrl())
       : null;
+    const goalResumeUrl = reason === "unlinked-telegram" && summary.isDirect
+      ? await resolveHostedPublicGoalTelegramResumeUrl({
+          botUrl: (dependencies.resolveMurphTelegramBotUrl
+            ?? resolvePublicMurphTelegramBotUrl)(),
+          inboundText: message.text ?? null,
+        })
+      : null;
     const reply = resolveHostedTelegramVisibleSecondaryReply({
       familyInviteCode,
+      goalResumeUrl,
       isDirect: summary.isDirect,
       reason,
       signupUrl,
@@ -349,6 +364,7 @@ export function resolveHostedLinqVisibleSecondaryReply(input: {
 
 export function resolveHostedTelegramVisibleSecondaryReply(input: {
   familyInviteCode?: string | null;
+  goalResumeUrl?: string | null;
   isDirect: boolean;
   reason: string;
   signupUrl: string | null;
@@ -369,7 +385,9 @@ export function resolveHostedTelegramVisibleSecondaryReply(input: {
         return HOSTED_TELEGRAM_PRIVATE_SETUP_REPLY;
       }
       return input.signupUrl
-        ? `I can't match this Telegram account to Murph yet. Open this setup page and choose Telegram: ${input.signupUrl}\n\nThen message me again.`
+        ? input.goalResumeUrl
+          ? `I can't match this Telegram account to Murph yet. Open this setup page and choose Telegram: ${input.signupUrl}\n\nAfter setup, tap this link and send the restored goal message: ${input.goalResumeUrl}`
+          : `I can't match this Telegram account to Murph yet. Open this setup page and choose Telegram: ${input.signupUrl}\n\nThen message me again.`
         : null;
     case "ambiguous-telegram-binding":
     case "telegram-binding-changed":
@@ -383,6 +401,38 @@ export function resolveHostedTelegramVisibleSecondaryReply(input: {
     default:
       return null;
   }
+}
+
+export async function resolveHostedPublicGoalTelegramResumeUrl(input: {
+  botUrl: string | null;
+  inboundText: string | null;
+}): Promise<string | null> {
+  if (!input.botUrl || !input.inboundText) {
+    return null;
+  }
+
+  let isExactPublishedGoalPrompt = false;
+  try {
+    isExactPublishedGoalPrompt = getGeneratedHealthCommonsWebGoalIndex().goals.some(
+      (goal) => goal.startPrompt === input.inboundText,
+    );
+  } catch {
+    return null;
+  }
+  if (!isExactPublishedGoalPrompt) {
+    return null;
+  }
+
+  const resumeUrl = new URL(input.botUrl);
+  resumeUrl.searchParams.delete("start");
+  resumeUrl.searchParams.set("text", input.inboundText);
+  return resumeUrl.toString();
+}
+
+export function resolvePublicMurphTelegramBotUrl(
+  source?: Readonly<Record<string, string | undefined>>,
+): string {
+  return buildMurphTelegramUrl(resolveMurphTelegramBotUsername(source));
 }
 
 async function readHostedLinqSender(input: {

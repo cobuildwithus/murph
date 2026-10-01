@@ -1,3 +1,4 @@
+import { isRetiredDeviceFeature } from "./retired-device-features.ts";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import { isDisplayGradeMetricSampleEntity } from "./metrics/index.ts";
 
@@ -9,12 +10,28 @@ function normalizedString(value: unknown): string | null {
   return typeof value === "string" ? value.trim().toLowerCase() : null;
 }
 
-function isDisplayGradeObservation(attributes: Record<string, unknown>): boolean {
+export function isDisplayGradeObservation(attributes: Record<string, unknown>): boolean {
   return (
     normalizedString(attributes.visibility) === "display" ||
     normalizedString(attributes.queryVisibility) === "default" ||
     attributes.canonicalFact === true
   );
+}
+
+export function isDefaultProjectedEventRecord(input: {
+  attributes: Record<string, unknown>;
+  kind: string;
+}): boolean {
+  if (input.kind !== "observation") {
+    return true;
+  }
+
+  const isMetricObservation =
+    typeof input.attributes.metric === "string" &&
+    typeof input.attributes.value === "number" &&
+    Number.isFinite(input.attributes.value);
+
+  return !isMetricObservation || isDisplayGradeObservation(input.attributes);
 }
 
 function isDefaultHiddenMetricObservationEntity(entity: CanonicalEntity): boolean {
@@ -23,16 +40,15 @@ function isDefaultHiddenMetricObservationEntity(entity: CanonicalEntity): boolea
   }
 
   const attributes = isRecord(entity.attributes) ? entity.attributes : {};
-  const isMetricObservation =
-    typeof attributes.metric === "string" &&
-    typeof attributes.value === "number" &&
-    Number.isFinite(attributes.value);
-
-  return isMetricObservation && !isDisplayGradeObservation(attributes);
+  return !isDefaultProjectedEventRecord({ attributes, kind: entity.kind });
 }
 
 export function isDefaultProjectedQueryEntity(entity: CanonicalEntity): boolean {
-  if (isDefaultHiddenMetricObservationEntity(entity)) {
+  if (
+    entity.family === "audit" ||
+    isRetiredDeviceFeature(entity) ||
+    isDefaultHiddenMetricObservationEntity(entity)
+  ) {
     return false;
   }
 
@@ -44,5 +60,9 @@ export function isDefaultProjectedQueryEntity(entity: CanonicalEntity): boolean 
 }
 
 export function isSearchIndexedQueryEntity(entity: CanonicalEntity): boolean {
-  return !isDefaultHiddenMetricObservationEntity(entity);
+  return (
+    entity.family !== "audit" &&
+    !isRetiredDeviceFeature(entity) &&
+    !isDefaultHiddenMetricObservationEntity(entity)
+  );
 }

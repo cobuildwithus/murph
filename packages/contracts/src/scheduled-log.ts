@@ -42,6 +42,7 @@ export const scheduledLogStatusSchema = z.enum(scheduledLogStatusValues);
 export type ScheduledLogStatus = z.infer<typeof scheduledLogStatusSchema>;
 
 const slugSchema = z.string().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
+const scheduledLogSlugSchema = z.string().min(1).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
 const titleSchema = z.string().min(1).max(160);
 const noteSchema = z.string().min(1).max(4_000);
 const tagListSchema = z.array(slugSchema).max(32);
@@ -115,7 +116,7 @@ export const scheduledLogFrontmatterSchema = withContractMetadata(
       schemaVersion: z.literal(SCHEDULED_LOG_SCHEMA_VERSION),
       docType: z.literal(SCHEDULED_LOG_DOC_TYPE),
       scheduledLogId: scheduledLogIdSchema,
-      slug: slugSchema,
+      slug: scheduledLogSlugSchema,
       title: titleSchema,
       status: scheduledLogStatusSchema,
       schedule: executableScheduleIntentSchema,
@@ -137,7 +138,7 @@ export const scheduledLogMarkdownDocumentSchema = z.object({
 
 export const scheduledLogScaffoldPayloadSchema = z.object({
   scheduledLogId: scheduledLogIdSchema.optional(),
-  slug: slugSchema.optional(),
+  slug: scheduledLogSlugSchema.optional(),
   title: titleSchema,
   status: scheduledLogStatusSchema.default("active"),
   schedule: executableScheduleIntentSchema,

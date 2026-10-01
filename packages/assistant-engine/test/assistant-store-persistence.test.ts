@@ -8,6 +8,7 @@ import {
   readdir,
   rm,
   stat,
+  symlink,
   writeFile,
 } from 'node:fs/promises'
 import path from 'node:path'
@@ -29,6 +30,8 @@ import {
   appendAssistantTranscriptEntriesWithRefs,
   listAssistantSessions,
   listAssistantSessionsLocal,
+  listAssistantTranscriptEntries,
+  listAssistantTranscriptTailEntries,
   updateAssistantAutomationState,
 } from '../src/assistant/store.ts'
 import {
@@ -36,7 +39,7 @@ import {
   ensureAssistantState,
   inspectAssistantSessionStorage,
   isAssistantSessionExpired,
-  loadAndPersistResolvedSession,
+  loadResolvedSession,
   pruneAssistantTranscriptRetention,
   readAssistantRecentSessionIds,
   readAssistantSession,
@@ -217,6 +220,46 @@ describe('assistant store persistence seams', () => {
     )
   })
 
+  it('prepares only the transcript directory and keeps its reads and appends private', async () => {
+    const paths = await createAssistantPaths('assistant-store-transcript-directory-')
+    const vault = paths.absoluteVaultRoot
+    const sessionId = 'session-transcript-directory'
+    await expect(appendAssistantTranscriptEntriesWithRefs(vault, sessionId, []))
+      .resolves.toEqual({ entries: [], refs: [] })
+    await expect(access(paths.transcriptsDirectory)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(listAssistantTranscriptEntries(vault, sessionId)).resolves.toEqual([])
+    await expect(listAssistantTranscriptTailEntries(vault, sessionId, { maxBytes: 4096 }))
+      .resolves.toEqual([])
+    await chmod(paths.transcriptsDirectory, 0o755)
+    const appended = await appendAssistantTranscriptEntriesWithRefs(vault, sessionId, [{
+      createdAt: '2026-09-08T12:00:00.000Z',
+      kind: 'user',
+      text: 'Synthetic transcript entry',
+    }])
+    expect(appended.refs[0]?.entryIndex).toBe(0)
+    expect((await stat(paths.transcriptsDirectory)).mode & 0o777).toBe(0o700)
+    await expect(listAssistantTranscriptEntries(vault, sessionId)).resolves.toEqual(appended.entries)
+    await expect(listAssistantTranscriptTailEntries(vault, sessionId, { maxBytes: 4096 }))
+      .resolves.toEqual(appended.entries)
+    for (const directory of [paths.sessionsDirectory, paths.outboxDirectory, paths.stateDirectory]) {
+      await expect(access(directory)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+
+    await rm(paths.transcriptsDirectory, { recursive: true })
+    const outside = path.join(vault, 'outside-transcripts')
+    await mkdir(outside, { mode: 0o755 })
+    await symlink(outside, paths.transcriptsDirectory)
+    await expect(listAssistantTranscriptEntries(vault, sessionId)).rejects.toThrow(/symlinks/u)
+    await expect(listAssistantTranscriptTailEntries(vault, sessionId, { maxBytes: 4096 }))
+      .rejects.toThrow(/symlinks/u)
+    await expect(appendAssistantTranscriptEntriesWithRefs(vault, sessionId, [{
+      kind: 'user',
+      text: 'Must not escape the transcript directory',
+    }])).rejects.toThrow(/symlinks/u)
+    expect(await readdir(outside)).toEqual([])
+    expect((await stat(outside)).mode & 0o777).toBe(0o755)
+  })
+
   it('returns durable transcript entry refs from the locked append helper', async () => {
     const context = await createTempVaultContext(
       'assistant-store-persistence-transcript-refs-',
@@ -318,6 +361,25 @@ describe('assistant store persistence seams', () => {
     expect(
       isAssistantSessionExpired(session, null, new Date('2026-04-08T01:00:00.000Z')),
     ).toBe(false)
+  })
+
+  it('rejects a symlinked secret directory before session persistence or legacy cleanup', async () => {
+    const paths = await createAssistantPaths('assistant-store-secret-boundary-')
+    const session = createSession()
+    await ensureAssistantState(paths)
+    const outside = path.join(paths.absoluteVaultRoot, 'outside-secrets')
+    await mkdir(outside)
+    const outsideSidecar = path.join(outside, path.basename(
+      resolveAssistantSessionSecretsPath(paths, session.sessionId),
+    ))
+    await writeFile(outsideSidecar, 'synthetic legacy sidecar')
+    await rm(paths.sessionSecretsDirectory, { recursive: true })
+    await symlink(outside, paths.sessionSecretsDirectory)
+
+    await expect(writeAssistantSession(paths, session)).rejects.toThrow(/symlinks/u)
+    expect(await readFile(outsideSidecar, 'utf8')).toBe('synthetic legacy sidecar')
+    await expect(readFile(resolveAssistantSessionPath(paths, session.sessionId)))
+      .rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('leaves a stale legacy secret sidecar committed when a Codex session write fails', async () => {
@@ -649,7 +711,7 @@ describe('assistant store persistence seams', () => {
       throw new Error('Expected stale routing records to resolve a session id.')
     }
 
-    await expect(loadAndPersistResolvedSession({
+    await expect(loadResolvedSession({
       expectedAlias: 'stale-alias',
       paths,
       sessionId: staleAliasSessionId,
@@ -659,7 +721,7 @@ describe('assistant store persistence seams', () => {
         lookupSource: 'alias',
       },
     })).resolves.toBeNull()
-    await expect(loadAndPersistResolvedSession({
+    await expect(loadResolvedSession({
       expectedConversationKey: 'telegram:user-1:thread-stale',
       paths,
       sessionId: staleConversationSessionId,

@@ -214,6 +214,7 @@ export interface DeviceSyncControlPlane {
 
 export interface DeviceSyncRequestErrorContext {
   baseUrl: string;
+  method: string;
   path: string;
   status: number;
   controlToken: string | null;
@@ -223,12 +224,16 @@ export interface DeviceSyncRequestErrorContext {
 
 export interface DeviceSyncRequestUnavailableContext {
   baseUrl: string;
+  failureStage: "transport" | "response";
+  method: string;
   path: string;
   cause: unknown;
+  timedOut: boolean;
 }
 
 export interface DeviceSyncRequestInvalidResponseContext {
   baseUrl: string;
+  method: string;
   path: string;
   status: number;
   payload: unknown;
@@ -240,6 +245,7 @@ export interface DeviceSyncJsonRequestInput {
   fetchImpl?: typeof fetch;
   controlToken?: string | null;
   request?: RequestInit;
+  timeoutMs?: number;
   createUnavailableError(context: DeviceSyncRequestUnavailableContext): Error;
   createHttpError(context: DeviceSyncRequestErrorContext): Error;
   createInvalidResponseError(
@@ -252,6 +258,7 @@ export interface CreateDeviceSyncJsonRequesterInput {
   controlToken?: string | null;
   fetchImpl?: typeof fetch;
   requestDefaults?: RequestInit;
+  timeoutMs?: number;
   createUnavailableError(context: DeviceSyncRequestUnavailableContext): Error;
   createHttpError(context: DeviceSyncRequestErrorContext): Error;
   createInvalidResponseError(
@@ -424,6 +431,7 @@ export function createDeviceSyncJsonRequester(
       fetchImpl,
       controlToken,
       request: mergeRequestInit(input.requestDefaults, request),
+      timeoutMs: input.timeoutMs,
       createUnavailableError: input.createUnavailableError,
       createHttpError: input.createHttpError,
       createInvalidResponseError: input.createInvalidResponseError,
@@ -439,6 +447,14 @@ export async function requestDeviceSyncJson<TResponse>(
     input.path.replace(/^\/+/u, ""),
     `${input.baseUrl}/`,
   ).toString();
+  const method = (input.request?.method ?? "GET").toUpperCase();
+  const timeoutSignal = Number.isSafeInteger(input.timeoutMs) && (input.timeoutMs ?? 0) > 0
+    ? AbortSignal.timeout(input.timeoutMs ?? 0)
+    : undefined;
+  const callerSignal = input.request?.signal ?? undefined;
+  const requestSignal = timeoutSignal && callerSignal
+    ? AbortSignal.any([callerSignal, timeoutSignal])
+    : timeoutSignal ?? callerSignal;
   let response: Response;
 
   try {
@@ -448,21 +464,49 @@ export async function requestDeviceSyncJson<TResponse>(
         input.request?.headers,
         input.controlToken ?? null,
       ),
+      signal: requestSignal,
     });
   } catch (cause) {
     throw input.createUnavailableError({
       baseUrl: input.baseUrl,
+      failureStage: "transport",
+      method,
       path: input.path,
       cause,
+      timedOut: timeoutSignal?.aborted === true && callerSignal?.aborted !== true,
     });
   }
 
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (cause) {
+    if (!response.ok) {
+      throw input.createHttpError({
+        baseUrl: input.baseUrl,
+        method,
+        path: input.path,
+        status: response.status,
+        controlToken: input.controlToken ?? null,
+        payload: null,
+        errorPayload: {},
+      });
+    }
+    throw input.createUnavailableError({
+      baseUrl: input.baseUrl,
+      failureStage: "response",
+      method,
+      path: input.path,
+      cause,
+      timedOut: timeoutSignal?.aborted === true && callerSignal?.aborted !== true,
+    });
+  }
   const payload = parseJsonPayload(text);
 
   if (!response.ok) {
     throw input.createHttpError({
       baseUrl: input.baseUrl,
+      method,
       path: input.path,
       status: response.status,
       controlToken: input.controlToken ?? null,
@@ -474,6 +518,7 @@ export async function requestDeviceSyncJson<TResponse>(
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw input.createInvalidResponseError({
       baseUrl: input.baseUrl,
+      method,
       path: input.path,
       status: response.status,
       payload,

@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "patterns-evidence-filter",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Patterns wait for more evidence",
+    "summary": "Patterns now hides results based on a single comparison and activities without a session in the report\u2019s last three months.",
+    "details": "Both phone cards and the desktop table require at least two recorded days and two comparable cases. Your activity history stays in Journal.",
+    "relevanceTags": [
+      "patterns"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "href": "/patterns",
+      "label": "View your patterns"
+    }
+  }
+}

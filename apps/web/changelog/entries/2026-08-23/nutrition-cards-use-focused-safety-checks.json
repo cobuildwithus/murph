@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-23",
+  "order": 100,
+  "item": {
+    "id": "nutrition-cards-use-focused-safety-checks",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Nutrition cards complete more reliably",
+    "summary": "Requested daily nutrition cards no longer wait on unrelated medical-history lookups.",
+    "details": "Murph still asks one short safety question before new numeric targets when needed and keeps guidance nonnumeric when known context calls for a different approach.",
+    "relevanceTags": ["assistant", "nutrition", "reliability"],
+    "sourcePullRequests": [2196]
+  }
+}

@@ -5,7 +5,6 @@ import {
   getConfiguredDeviceSyncProviderManifest,
   resolveConfiguredDeviceSyncProviderDescriptor,
 } from "./config/provider-manifests.ts";
-import { resolvePublicProviderDefaultScopes } from "./public-provider-descriptor-shared.ts";
 import { listConfiguredDeviceSyncProviderNames } from "./config/provider-keys.ts";
 
 import type {
@@ -56,7 +55,7 @@ export function describeConfiguredDeviceSyncPublicProvider<
     callbackUrl: joinPublicUrl(options.publicBaseUrl, callbackPath),
     connectionKind: connection.kind,
     credentialPolicy: getConfiguredDeviceSyncProviderCredentialPolicyKind(provider),
-    defaultScopes: resolvePublicProviderDefaultScopes(descriptor, connection),
+    defaultScopes: [...(connection.defaultScopes ?? [])],
     supportsWebhooks: Boolean(webhookPath),
     webhookPath,
     webhookUrl: joinPublicUrl(options.publicBaseUrl, webhookPath),

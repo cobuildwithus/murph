@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-22",
+  "order": 100,
+  "item": {
+    "id": "reminder-location-context",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Morning checks keep reminders up to date",
+    "summary": "Murph reviews existing reminders against current context and repairs supported mistakes.",
+    "details": "Morning checks can update stale instructions, follow changed event times, and retire confirmed obsolete or duplicate reminders. Explicit timing choices and delivery destinations are preserved. Outdoor reminders also check current travel context before choosing weather.",
+    "relevanceTags": [
+      "reminders",
+      "travel"
+    ],
+    "sourcePullRequests": []
+  }
+}

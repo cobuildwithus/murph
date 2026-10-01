@@ -48,9 +48,9 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "runtime/ensure-processing",
   },
-  runtimeShellPrewarm: {
+  voiceControl: {
     method: "POST",
-    suffix: "runtime/shell-prewarm",
+    suffix: "runtime/voice",
   },
   runtimeHealthDataConsentReconcile: {
     method: "POST",
@@ -59,6 +59,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   telegramUsageLimitNotice: {
     method: "POST",
     suffix: "telegram/usage-limit-notice",
+  },
+  runtimeResourcePurge: {
+    method: "POST",
+    suffix: "runtime/resource-purge",
   },
   userDataDelete: {
     method: "POST",
@@ -74,6 +78,10 @@ export type CloudflareHostedControlUserRouteName =
   keyof typeof CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS;
 
 export type CloudflareHostedControlUserRouteParams = Readonly<Record<string, string>>;
+
+export function buildCloudflareHostedControlRuntimeResourcePurgePath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("runtimeResourcePurge", userId);
+}
 
 export function buildCloudflareHostedControlUserStatusPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("status", userId);
@@ -92,10 +100,6 @@ export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: 
   return buildCloudflareHostedControlUserRoutePath("runtimeEnsureProcessing", userId);
 }
 
-export function buildCloudflareHostedControlRuntimeShellPrewarmPath(userId: string): string {
-  return buildCloudflareHostedControlUserRoutePath("runtimeShellPrewarm", userId);
-}
-
 export function buildCloudflareHostedControlRuntimeHealthDataConsentPath(
   userId: string,
 ): string {
@@ -103,6 +107,10 @@ export function buildCloudflareHostedControlRuntimeHealthDataConsentPath(
     "runtimeHealthDataConsentReconcile",
     userId,
   );
+}
+
+export function buildCloudflareHostedControlVoiceControlPath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("voiceControl", userId);
 }
 
 export function buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId: string): string {

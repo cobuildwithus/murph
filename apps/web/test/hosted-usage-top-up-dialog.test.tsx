@@ -969,12 +969,12 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
     );
     assert.ok(capSlider);
     assert.equal(capSlider.getAttribute("aria-valuemin"), "5");
-    assert.equal(capSlider.getAttribute("aria-valuemax"), "20");
+    assert.equal(capSlider.getAttribute("aria-valuemax"), "50");
     const amountLabels = Array.from(
       rendered.container.querySelectorAll("span.font-serif.text-3xl"),
       (amountLabel) => amountLabel.textContent,
     );
-    assert.deepEqual(amountLabels, ["$5", "$10", "$20"]);
+    assert.deepEqual(amountLabels, ["$5", "$10", "$20", "$50"]);
 
     await act(async () => {
       const endKey = new rendered.window.Event("keydown", { bubbles: true });
@@ -982,10 +982,10 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
       capSlider.dispatchEvent(endKey);
       await Promise.resolve();
     });
-    assert.equal(capSlider.getAttribute("aria-valuenow"), "20");
+    assert.equal(capSlider.getAttribute("aria-valuenow"), "50");
     assert.equal(
       capSlider.getAttribute("aria-valuetext"),
-      "Up to $20 per month",
+      "Up to $50 per month",
     );
     assert.equal(
       controlByLabel(rendered.container, "Temporary running bit"),
@@ -1032,7 +1032,7 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
       method: "POST",
       payload: {
         clientRequestKey: "00000000-0000-4000-8000-000000000001",
-        monthlyCapMinor: 2_000,
+        monthlyCapMinor: 5_000,
         offerCode: "usage_5_usd",
         sponsorship: {
           creativeRequest: {
@@ -5334,6 +5334,7 @@ function groupSponsorshipMonthlyCaps() {
     { amountLabel: "$5", monthlyCapMinor: 500 },
     { amountLabel: "$10", monthlyCapMinor: 1_000 },
     { amountLabel: "$20", monthlyCapMinor: 2_000 },
+    { amountLabel: "$50", monthlyCapMinor: 5_000 },
   ] as const;
 }
 

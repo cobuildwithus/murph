@@ -1,6 +1,6 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir } from "node:fs/promises";
-import path from "node:path";
+import { lstat } from "node:fs/promises";
 
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
@@ -10,6 +10,10 @@ import {
   type AssistantHostedGroupSharedReader,
 } from "@murphai/assistant-engine";
 import {
+  hostedGroupSharedNeedsWearableRecovery,
+  parseHostedGroupSharedReadOptions,
+  type HostedGroupSharedReadOptions,
+  parseHostedGroupSharedFreshnessRequirements,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
@@ -20,11 +24,11 @@ import {
   type HostedVaultShareSelectableProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
-  ASSISTANT_STATE_DIRECTORY_MODE,
-  ASSISTANT_STATE_FILE_MODE,
+  adoptAssistantStateFile,
+  ensureAssistantStateDir,
   readVersionedJsonStateFile,
-  resolveRuntimePaths,
-  writeVersionedJsonStateFile,
+  resolveAssistantStatePaths,
+  writeAssistantStateVersionedJson,
 } from "@murphai/runtime-state/node";
 
 import type { HostedRuntimeGroupToolPort } from "./platform.ts";
@@ -40,10 +44,6 @@ const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA =
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA_VERSION = 1;
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_LABEL =
   "hosted group participant display-name cache";
-const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_DIRECTORY =
-  "assistant-runtime";
-const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_FILE =
-  "group-participant-display-names.json";
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_BYTES = 2 * 1_024 * 1_024;
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_ENTRIES = 2_048;
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_KEY_PATTERN =
@@ -96,33 +96,88 @@ interface HostedGroupParticipantDisplayNameCacheRead {
  */
 export function createHostedGroupSharedReader(input: {
   groupToolPort: HostedRuntimeGroupToolPort | null;
+  /** Omit for read-only callers. Explicitly set to admit sync requests. */
+  freshnessWaitMs?: number;
 }): AssistantHostedGroupSharedReader {
+  const waitMs = Math.min(5 * 60_000, Math.max(0, input.freshnessWaitMs ?? 0));
   return {
-    async request(request) {
-      const projectionScopes = normalizeHostedGroupSharedProjectionScopes(
-        request.projectionScopes,
-      );
-      if (!projectionScopes) {
+    async request(request, context) {
+      const projectionScopes = normalizeHostedGroupSharedProjectionScopes(request.projectionScopes);
+      if (!projectionScopes) return unavailable(GROUP_SHARED_REQUEST_INVALID);
+      if (!input.groupToolPort) return unavailable(GROUP_TOOL_UNAVAILABLE);
+      if (request.freshness !== undefined && input.freshnessWaitMs === undefined) {
         return unavailable(GROUP_SHARED_REQUEST_INVALID);
       }
-      if (!input.groupToolPort) {
-        return unavailable(GROUP_TOOL_UNAVAILABLE);
-      }
-
+      let requirements;
+      let options: HostedGroupSharedReadOptions;
       try {
-        const response = await input.groupToolPort.request({
-          action: "read_shared",
-          projectionScopes,
-        });
-        if (response.action !== "read_shared") {
-          return unavailable(GROUP_SHARED_RESULT_INVALID);
-        }
-        return response.result;
+        options = parseHostedGroupSharedReadOptions(request, projectionScopes);
+        requirements = request.freshness === undefined ? undefined
+          : parseHostedGroupSharedFreshnessRequirements(request.freshness, projectionScopes);
       } catch {
+        return unavailable(GROUP_SHARED_REQUEST_INVALID);
+      }
+      const signal = context?.signal ?? undefined;
+      try {
+        return await readSharedGroupWithFreshness({
+          groupToolPort: input.groupToolPort, projectionScopes, requirements, signal, waitMs, options,
+        });
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        // Older Web producers reject the additive request. Preserve an ordinary
+        // current read without claiming the requested refresh was completed.
+        if (requirements) {
+          try {
+            const response = await input.groupToolPort.request({ action: "read_shared", projectionScopes, ...options },
+              ...(signal ? [{ signal }] : []));
+            if (response.action === "read_shared" && response.result.status === "ok") {
+              return { ...response.result, freshness: {
+                checkedAt: new Date().toISOString(), refreshStatus: "unavailable",
+              } };
+            }
+          } catch (fallbackError) {
+            if (signal?.aborted) throw fallbackError;
+          }
+        }
         return unavailable(GROUP_SHARED_READ_FAILED);
       }
     },
   };
+}
+
+/** One refresh request per operation; polling only rereads the authorized snapshot. */
+async function readSharedGroupWithFreshness(input: {
+  options: HostedGroupSharedReadOptions;
+  groupToolPort: HostedRuntimeGroupToolPort;
+  projectionScopes: HostedVaultShareSelectableProjectionScope[];
+  requirements: ReturnType<typeof parseHostedGroupSharedFreshnessRequirements> | undefined;
+  signal: AbortSignal | undefined;
+  waitMs: number;
+}) {
+  const { signal, requirements, projectionScopes, groupToolPort } = input;
+  const deadline = Date.now() + input.waitMs;
+  signal?.throwIfAborted();
+  let response = await groupToolPort.request({
+    action: "read_shared", projectionScopes, ...input.options,
+    ...(requirements ? { freshness: requirements } : {}),
+  }, ...(signal ? [{ signal }] : []));
+  if (response.action !== "read_shared") return unavailable(GROUP_SHARED_RESULT_INVALID);
+  let result = response.result;
+  if (!requirements) return result;
+  while (result.status === "ok"
+    && result.freshness?.refreshStatus === "requested"
+    && hostedGroupSharedNeedsWearableRecovery(result, requirements)
+    && Date.now() < deadline) {
+    await delay(Math.min(15_000, deadline - Date.now()), undefined, { signal });
+    signal?.throwIfAborted();
+    response = await groupToolPort.request({ action: "read_shared", projectionScopes, ...input.options },
+      ...(signal ? [{ signal }] : []));
+    if (response.action !== "read_shared") return unavailable(GROUP_SHARED_RESULT_INVALID);
+    result = response.result.status === "ok" ? { ...response.result, freshness: {
+      checkedAt: new Date().toISOString(), refreshStatus: "requested",
+    } } : response.result;
+  }
+  return result;
 }
 
 export function normalizeHostedGroupSharedProjectionScopes(
@@ -382,11 +437,8 @@ export function createHostedGroupParticipantDisplayNameReader(input: {
 export function resolveHostedGroupParticipantDisplayNameCachePath(
   vaultRoot: string,
 ): string {
-  return path.join(
-    resolveRuntimePaths(vaultRoot).cacheRoot,
-    HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_DIRECTORY,
-    HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_FILE,
-  );
+  return resolveAssistantStatePaths(vaultRoot)
+    .groupParticipantDisplayNameCachePath;
 }
 
 async function readHostedGroupParticipantDisplayNameCache(input: {
@@ -395,25 +447,12 @@ async function readHostedGroupParticipantDisplayNameCache(input: {
   vaultRoot: string;
 }): Promise<HostedGroupParticipantDisplayNameCacheRead> {
   try {
-    const cachePath = resolveHostedGroupParticipantDisplayNameCachePathBoundary({
+    const cacheFilePath = resolveHostedGroupParticipantDisplayNameCachePathBoundary({
       cacheFilePath: input.cacheFilePath,
       vaultRoot: input.vaultRoot,
     });
-    await assertHostedGroupParticipantDisplayNameCacheAncestor(
-      cachePath.runtimeRoot,
-    );
-    await assertHostedGroupParticipantDisplayNameCacheAncestor(
-      cachePath.cacheRoot,
-    );
-    await assertHostedGroupParticipantDisplayNameCacheAncestor(
-      cachePath.cacheDirectory,
-    );
-    const cacheFileStats = await lstat(cachePath.cacheFilePath);
-    if (cacheFileStats.isSymbolicLink() || !cacheFileStats.isFile()) {
-      return invalidHostedGroupParticipantDisplayNameCacheRead();
-    }
-    await chmod(cachePath.cacheDirectory, ASSISTANT_STATE_DIRECTORY_MODE);
-    await chmod(cachePath.cacheFilePath, ASSISTANT_STATE_FILE_MODE);
+    await adoptAssistantStateFile(cacheFilePath);
+    const cacheFileStats = await lstat(cacheFilePath);
     if (
       cacheFileStats.size
       > HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_BYTES
@@ -422,7 +461,7 @@ async function readHostedGroupParticipantDisplayNameCache(input: {
     }
 
     const { value } = await readVersionedJsonStateFile({
-      currentPath: cachePath.cacheFilePath,
+      currentPath: cacheFilePath,
       label: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_LABEL,
       parseValue: parseHostedGroupParticipantDisplayNameCacheState,
       schema: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA,
@@ -488,13 +527,15 @@ async function writeHostedGroupParticipantDisplayNameCacheState(input: {
   entries: readonly HostedGroupParticipantDisplayNameCacheStoredEntry[];
   vaultRoot: string;
 }): Promise<void> {
-  const cachePath = await ensureHostedGroupParticipantDisplayNameCacheDirectory({
+  const cacheFilePath = resolveHostedGroupParticipantDisplayNameCachePathBoundary({
     cacheFilePath: input.cacheFilePath,
     vaultRoot: input.vaultRoot,
   });
-  await writeVersionedJsonStateFile({
-    filePath: cachePath.cacheFilePath,
-    mode: ASSISTANT_STATE_FILE_MODE,
+  await ensureAssistantStateDir(
+    resolveAssistantStatePaths(input.vaultRoot).stateDirectory,
+  );
+  await writeAssistantStateVersionedJson({
+    filePath: cacheFilePath,
     schema: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA,
     schemaVersion: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA_VERSION,
     value: {
@@ -503,130 +544,18 @@ async function writeHostedGroupParticipantDisplayNameCacheState(input: {
   });
 }
 
-async function ensureHostedGroupParticipantDisplayNameCacheDirectory(
-  input: {
-    cacheFilePath: string;
-    vaultRoot: string;
-  },
-): Promise<HostedGroupParticipantDisplayNameCachePathBoundary> {
-  const cachePath = resolveHostedGroupParticipantDisplayNameCachePathBoundary(input);
-  await ensureHostedGroupParticipantDisplayNameCacheAncestor(
-    cachePath.runtimeRoot,
-  );
-  await ensureHostedGroupParticipantDisplayNameCacheAncestor(
-    cachePath.cacheRoot,
-  );
-  await ensureHostedGroupParticipantDisplayNameCacheAncestor(
-    cachePath.cacheDirectory,
-  );
-  try {
-    const stats = await lstat(cachePath.cacheFilePath);
-    if (stats.isSymbolicLink() || !stats.isFile()) {
-      throw new Error(
-        "Hosted group participant display-name cache path is not a file.",
-      );
-    }
-  } catch (error) {
-    if (!isMissingPathError(error)) {
-      throw error;
-    }
-  }
-  await chmod(cachePath.cacheDirectory, ASSISTANT_STATE_DIRECTORY_MODE);
-  return cachePath;
-}
-
-interface HostedGroupParticipantDisplayNameCachePathBoundary {
-  cacheDirectory: string;
-  cacheFilePath: string;
-  cacheRoot: string;
-  runtimeRoot: string;
-}
-
 function resolveHostedGroupParticipantDisplayNameCachePathBoundary(input: {
   cacheFilePath: string;
   vaultRoot: string;
-}): HostedGroupParticipantDisplayNameCachePathBoundary {
-  const runtimePaths = resolveRuntimePaths(input.vaultRoot);
-  const cacheDirectory = path.join(
-    runtimePaths.cacheRoot,
-    HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_DIRECTORY,
-  );
-  const cacheFilePath = path.join(
-    cacheDirectory,
-    HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_FILE,
-  );
-  if (path.resolve(input.cacheFilePath) !== path.resolve(cacheFilePath)) {
+}): string {
+  const cacheFilePath = resolveAssistantStatePaths(input.vaultRoot)
+    .groupParticipantDisplayNameCachePath;
+  if (input.cacheFilePath !== cacheFilePath) {
     throw new Error(
       "Hosted group participant display-name cache path is outside its boundary.",
     );
   }
-  return {
-    cacheDirectory,
-    cacheFilePath,
-    cacheRoot: runtimePaths.cacheRoot,
-    runtimeRoot: runtimePaths.runtimeRoot,
-  };
-}
-
-async function ensureHostedGroupParticipantDisplayNameCacheAncestor(
-  directoryPath: string,
-): Promise<void> {
-  try {
-    const stats = await lstat(directoryPath);
-    if (stats.isSymbolicLink() || !stats.isDirectory()) {
-      throw new Error(
-        "Hosted group participant display-name cache path is not a directory.",
-      );
-    }
-    return;
-  } catch (error) {
-    if (!isMissingPathError(error)) {
-      throw error;
-    }
-  }
-
-  try {
-    await mkdir(directoryPath, { mode: ASSISTANT_STATE_DIRECTORY_MODE });
-  } catch (error) {
-    if (!isPathExistsError(error)) {
-      throw error;
-    }
-  }
-  const stats = await lstat(directoryPath);
-  if (stats.isSymbolicLink() || !stats.isDirectory()) {
-    throw new Error(
-      "Hosted group participant display-name cache path is not a directory.",
-    );
-  }
-}
-
-async function assertHostedGroupParticipantDisplayNameCacheAncestor(
-  directoryPath: string,
-): Promise<void> {
-  const stats = await lstat(directoryPath);
-  if (stats.isSymbolicLink() || !stats.isDirectory()) {
-    throw new Error(
-      "Hosted group participant display-name cache path is not a directory.",
-    );
-  }
-}
-
-function isMissingPathError(error: unknown): boolean {
-  return Boolean(
-    error
-    && typeof error === "object"
-    && "code" in error
-    && (error as { code?: unknown }).code === "ENOENT"
-  );
-}
-
-function isPathExistsError(error: unknown): boolean {
-  return Boolean(
-    error
-    && typeof error === "object"
-    && "code" in error
-    && (error as { code?: unknown }).code === "EEXIST"
-  );
+  return cacheFilePath;
 }
 
 function parseHostedGroupParticipantDisplayNameCacheState(

@@ -12,7 +12,13 @@ import type {
 
 import { getPrisma } from "../prisma";
 import {
+  requireHostedRuntimeCallbackTx,
+  revokeHostedRuntimeAiUsageTx,
+  type HostedRuntimeIdentity,
+} from "./runtime-owner";
+import {
   accountHostedAiUsageForAllowanceTx,
+  settleHostedAiUsageForAllowanceTx,
   type HostedAiUsageLimitNoticeCandidate,
 } from "./usage-allowance";
 import { buildHostedRetellPhoneCallUsageRecord } from "./usage-retell";
@@ -41,6 +47,11 @@ export interface RecordHostedAiUsageResult {
 
 interface RecordHostedAiUsageAccountingResult extends RecordHostedAiUsageResult {
   limitNoticeCandidates: HostedAiUsageLimitNoticeCandidate[];
+  platformAiUsageAllowedAfter: boolean | null;
+}
+
+interface RecordHostedAiUsageWithAllowanceResult extends RecordHostedAiUsageResult {
+  platformAiUsageAllowedAfter: boolean | null;
 }
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
@@ -49,6 +60,7 @@ const HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE =
   "Hosted AI usage is recorded locally; Stripe usage metering is not configured.";
 
 const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
+  operatorTaskId: true,
   apiKeyEnv: true,
   attemptCount: true,
   baseUrl: true,
@@ -105,9 +117,10 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   accountAllowance?: boolean;
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   prisma?: PrismaClient;
+  runtimeIdentity?: HostedRuntimeIdentity | null;
   trustedUserId?: string | null;
   usage: readonly unknown[];
-}): Promise<RecordHostedAiUsageResult> {
+}): Promise<RecordHostedAiUsageWithAllowanceResult> {
   const prisma = input.prisma ?? getPrisma();
   const result = await recordHostedAiUsageRecordsForAccounting({ ...input, prisma });
   for (const candidate of dedupeHostedAiUsageLimitNoticeCandidates(
@@ -123,6 +136,7 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   }
 
   return {
+    platformAiUsageAllowedAfter: result.platformAiUsageAllowedAfter,
     recordedIds: result.recordedIds,
   };
 }
@@ -151,6 +165,7 @@ export async function recordHostedRetellPhoneCallUsageTx(input: {
 async function recordHostedAiUsageRecordsForAccounting(input: {
   accountAllowance?: boolean;
   prisma?: HostedAiUsageClient;
+  runtimeIdentity?: HostedRuntimeIdentity | null;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageAccountingResult> {
@@ -158,10 +173,17 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
   const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
   const recordedIds: string[] = [];
   const limitNoticeCandidates: HostedAiUsageLimitNoticeCandidate[] = [];
+  let platformAiUsageAllowedAfter: boolean | null = null;
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    const limitNoticeCandidate = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+    const settlement = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+      if (input.runtimeIdentity !== undefined) {
+        if (input.runtimeIdentity !== null && input.runtimeIdentity.userId !== memberId) {
+          throw new TypeError("Hosted runtime usage member does not match its authority.");
+        }
+        await requireHostedRuntimeCallbackTx(tx, memberId, input.runtimeIdentity);
+      }
       await persistHostedAiUsageRecordTx({
         memberId,
         record,
@@ -169,24 +191,32 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
       });
 
       if (input.accountAllowance === true) {
-        return accountHostedAiUsageForAllowanceTx({
+        const settlement = await settleHostedAiUsageForAllowanceTx({
           memberId,
           record,
           tx,
         });
+        if (input.runtimeIdentity && settlement.platformAiUsageAllowedAfter !== true) {
+          await revokeHostedRuntimeAiUsageTx(tx, input.runtimeIdentity);
+        }
+        return settlement;
       }
 
       return null;
     });
 
-    if (limitNoticeCandidate) {
-      limitNoticeCandidates.push(limitNoticeCandidate);
+    if (settlement?.limitNoticeCandidate) {
+      limitNoticeCandidates.push(settlement.limitNoticeCandidate);
+    }
+    if (settlement) {
+      platformAiUsageAllowedAfter = settlement.platformAiUsageAllowedAfter;
     }
     recordedIds.push(record.usageId);
   }
 
   return {
     limitNoticeCandidates,
+    platformAiUsageAllowedAfter,
     recordedIds,
   };
 }
@@ -481,6 +511,7 @@ function buildHostedAiUsageCreateData(
 ): Prisma.HostedAiUsageUncheckedCreateInput {
   return {
     id: record.usageId,
+    operatorTaskId: record.operatorTaskId ?? null,
     memberId,
     sessionId: record.sessionId,
     turnId: record.turnId,
@@ -551,6 +582,7 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
 }): void {
   const expected = {
     ...input.record,
+    operatorTaskId: input.record.operatorTaskId ?? null,
     id: input.record.usageId,
     memberId: input.memberId,
     occurredAt: normalizeHostedAiUsageDate(input.record.occurredAt, "occurredAt").toISOString(),
@@ -607,6 +639,7 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     compareHostedAiUsageField("baseUrl", input.storedRecord.baseUrl, expected.baseUrl),
     compareHostedAiUsageField("apiKeyEnv", input.storedRecord.apiKeyEnv, expected.apiKeyEnv),
     compareHostedAiUsageField("credentialSource", input.storedRecord.credentialSource, expected.credentialSource),
+    compareHostedAiUsageField("operatorTaskId", input.storedRecord.operatorTaskId ?? null, expected.operatorTaskId),
     compareHostedAiUsageField("featureKey", input.storedRecord.featureKey, expected.featureKey),
     compareHostedAiUsageJsonField("gatewayTagsJson", input.storedRecord.gatewayTagsJson, expected.gatewayTags),
     compareHostedAiUsageField("reportingUserId", input.storedRecord.reportingUserId, expected.reportingUserId),

@@ -127,7 +127,7 @@ test("waits for changed Environment values after realtime topic processing", asy
     });
     const trigger = Array.from(
       rendered.window.document.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Start report"));
+    ).find((button) => button.textContent?.includes("Fill in my report"));
     assert.ok(trigger instanceof rendered.window.HTMLButtonElement);
     await act(async () => {
       trigger.click();

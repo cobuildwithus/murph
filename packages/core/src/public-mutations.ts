@@ -11,9 +11,11 @@ import {
   importDeviceBatch as importDeviceBatchInternal,
   importEventBatch as importEventBatchInternal,
   importDocument as importDocumentInternal,
+  recordInboxDocumentDefaultPromotion as recordInboxDocumentDefaultPromotionInternal,
   importSamples as importSamplesInternal,
-  resolveWorkoutSourceImportStatus as resolveWorkoutSourceImportStatusInternal,
+  validateSampleImport as validateSampleImportInternal,
 } from "./mutations.ts";
+import { resolveWorkoutSourceImportStatus as resolveWorkoutSourceImportStatusInternal } from "./domains/documents/source-evidence.ts";
 import {
   promoteInboxExperimentNote as promoteInboxExperimentNoteInternal,
   promoteInboxJournal as promoteInboxJournalInternal,
@@ -83,6 +85,7 @@ import {
 import {
   updateAssistantPreferences as updateAssistantPreferencesInternal,
   updateWearablePreferences as updateWearablePreferencesInternal,
+  updateWorkoutCapturePreferences as updateWorkoutCapturePreferencesInternal,
   updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
 } from "./preferences.ts";
 import { commitAuditedCanonicalWrite, type CanonicalMutationAuditInput } from "./audited-write.ts";
@@ -109,6 +112,8 @@ export interface CanonicalTextWriteInput {
   content: string;
   overwrite?: boolean;
   allowExistingMatch?: boolean;
+  /** Explicit retention/repair only; raw replacement requires an exact preimage. */
+  rawReplacement?: { sha256: string; byteLength: number };
 }
 
 export interface CanonicalJsonlAppendInput<TRecord extends object = Record<string, unknown>> {
@@ -349,6 +354,10 @@ export async function applyCanonicalWriteBatch(
         await batch.stageTextWrite(textWrite.relativePath, textWrite.content, {
           overwrite: textWrite.overwrite,
           allowExistingMatch: textWrite.allowExistingMatch,
+          ...(textWrite.rawReplacement ? {
+            allowRaw: true,
+            expectedTargetReceipt: textWrite.rawReplacement,
+          } : {}),
         });
       }
 
@@ -512,6 +521,12 @@ export async function importDocument(
     : importDocumentInternal(input);
 }
 
+export async function recordInboxDocumentDefaultPromotion(
+  input: Parameters<typeof recordInboxDocumentDefaultPromotionInternal>[0],
+): ReturnType<typeof recordInboxDocumentDefaultPromotionInternal> {
+  return withCanonicalInputWriteLock(input, recordInboxDocumentDefaultPromotionInternal);
+}
+
 export async function resolveWorkoutSourceImportStatus(
   input: Parameters<typeof resolveWorkoutSourceImportStatusInternal>[0],
 ): ReturnType<typeof resolveWorkoutSourceImportStatusInternal> {
@@ -570,6 +585,12 @@ export async function importSamples(
   return withCanonicalInputWriteLock(input, importSamplesInternal);
 }
 
+export async function validateSampleImport(
+  input: Parameters<typeof validateSampleImportInternal>[0],
+): ReturnType<typeof validateSampleImportInternal> {
+  return validateSampleImportInternal(input);
+}
+
 export async function upsertProvider(
   input: Parameters<typeof upsertProviderInternal>[0],
 ): ReturnType<typeof upsertProviderInternal> {
@@ -626,8 +647,12 @@ export async function promoteInboxExperimentNote(
 
 export async function importDeviceBatch(
   input: Parameters<typeof importDeviceBatchInternal>[0],
+  options: Parameters<typeof importDeviceBatchInternal>[1] = {},
 ): ReturnType<typeof importDeviceBatchInternal> {
-  return withCanonicalInputWriteLock(input, importDeviceBatchInternal);
+  options.signal?.throwIfAborted();
+  return withCanonicalWriteLock(input.vaultRoot, () =>
+    importDeviceBatchInternal(input, options),
+  );
 }
 
 export async function dedupeDeviceEventsByExternalRef(
@@ -652,6 +677,12 @@ export async function updateWorkoutUnitPreferences(
   input: Parameters<typeof updateWorkoutUnitPreferencesInternal>[0],
 ): ReturnType<typeof updateWorkoutUnitPreferencesInternal> {
   return updateWorkoutUnitPreferencesInternal(input);
+}
+
+export async function updateWorkoutCapturePreferences(
+  input: Parameters<typeof updateWorkoutCapturePreferencesInternal>[0],
+): ReturnType<typeof updateWorkoutCapturePreferencesInternal> {
+  return updateWorkoutCapturePreferencesInternal(input);
 }
 
 export async function updateWearablePreferences(

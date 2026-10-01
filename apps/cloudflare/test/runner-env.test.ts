@@ -334,7 +334,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://host.docker.internal:4011/attachment-downloads",
-      LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
+      LINQ_API_BASE_URL: "https://api.linqapp.com/api/partner/v3",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
         "http://host.docker.internal:4222/v1",
       NODE_ENV: "production",

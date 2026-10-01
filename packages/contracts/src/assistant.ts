@@ -23,6 +23,11 @@ Everyone's got something they want from their health. My job is to help you actu
 
 Ready to get started?`;
 
+export const MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS = {
+  casual: "hey — what should i call you? also, how old are you, and are you a guy or a girl?",
+  formal: "What should I call you? How old are you and what's your gender?",
+} as const;
+
 export const assistantReasoningEffortValues = [
   "low",
   "medium",
@@ -371,22 +376,38 @@ export const dailyNutritionResponseCardV2Schema: z.ZodType<
   addDailyNutritionResponseCardV2Issues,
 );
 
-/** New tool calls require all goals; the nullable V2 schema remains replay-safe. */
+/** Fresh cards are totals-only or goal-aware, never a partly authored goal bundle.
+ * The permissive nullable V2 reader remains unchanged for historical replay.
+ */
 export const dailyNutritionResponseCardV2AuthoringSchema: z.ZodType<
   DailyNutritionResponseCardV2
 > = dailyNutritionResponseCardV2BaseSchema
   .extend({
-    goals: z
-      .object({
+    goals: z.union([
+      z.object({
+        calories: z.null(),
+        proteinGrams: z.null(),
+        carbsGrams: z.null(),
+        fatGrams: z.null(),
+        fiberGrams: z.null(),
+      }).strict(),
+      z.object({
         calories: calorieGoalSnapshotSchema,
         proteinGrams: macroGoalSnapshotSchema,
         carbsGrams: macroGoalSnapshotSchema,
         fatGrams: macroGoalSnapshotSchema,
         fiberGrams: macroGoalSnapshotSchema,
-      })
-      .strict(),
+      }).strict(),
+    ]),
   })
   .superRefine(addDailyNutritionResponseCardV2Issues);
+
+export function isTotalsOnlyDailyNutritionResponseCard(
+  card: AssistantResponseCard,
+): boolean {
+  return card.kind === "daily_nutrition" && "version" in card &&
+    card.version === 2 && Object.values(card.goals).every((goal) => goal === null);
+}
 
 export const dailyNutritionResponseCardSchema: z.ZodType<
   DailyNutritionResponseCard

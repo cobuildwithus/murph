@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "earlier-message-processing",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting before a reply",
+    "summary": "Murph can start processing your iMessage or SMS sooner.",
+    "details": "Removes an extra wait when waking Murph to handle a message, while keeping message recovery in place.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3155
+    ]
+  }
+}

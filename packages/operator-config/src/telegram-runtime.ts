@@ -38,6 +38,7 @@ export type TelegramFetchImplementation = (
 ) => Promise<TelegramFetchResponse>
 
 export type TelegramTypingIndicatorHandle = {
+  isActive?: () => boolean
   stop(): Promise<void>
 }
 
@@ -306,6 +307,7 @@ export async function startTelegramTypingSession(
   })
 
   return {
+    isActive: () => !linkedStopSignal.signal.aborted && failure === null,
     async stop() {
       linkedStopSignal.controller.abort()
       linkedStopSignal.cleanup()

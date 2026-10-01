@@ -17,7 +17,6 @@ import {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRunnerStatusResponse,
@@ -26,13 +25,10 @@ import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
-import {
   createIntegratedVaultServices,
 } from "@murphai/vault-usecases/vault-services";
 
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.ts";
 import {
   buildAssistantProviderShellCommandCall,
 } from "./helpers/hosted-local-e2e-support.js";
@@ -308,7 +304,7 @@ async function runPostDeliveryMaintenancePreemptionProbe(input: {
   const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
 
   await startProbeScenario({
-    idleCheckpointDelayMs: 3_000,
+    runnerIdleTtlMs: 3_000,
     localDatabaseUrl: input.localDatabaseUrl,
     memberPhone,
   });
@@ -538,7 +534,7 @@ async function runIdleShutdownDelayProbe(input: {
 }
 
 async function startProbeScenario(input: {
-  idleCheckpointDelayMs?: number;
+  runnerIdleTtlMs?: number;
   localDatabaseUrl: string;
   memberPhone: string;
 }): Promise<void> {
@@ -547,7 +543,7 @@ async function startProbeScenario(input: {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(input.idleCheckpointDelayMs ?? 1_000),
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(input.runnerIdleTtlMs ?? 1_000),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: input.memberPhone,
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
@@ -573,8 +569,7 @@ async function startIdleShutdownDelayProbeScenario(input: {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(idleShutdownDelayProbeIdleDelayMs),
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(idleShutdownDelayProbeIdleDelayMs),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: input.memberPhone,
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
@@ -739,11 +734,14 @@ async function seedActivatedWorkspaceCheckpoint(userId: string): Promise<void> {
     vault: vaultRoot,
   });
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
+    harness: requireScenario().harness,
     operatorHomeRoot,
+    userId,
     vaultRoot,
   });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createBrowserVaultReplicaRef({
       sourceBundleHash: hash,
@@ -754,49 +752,12 @@ async function seedActivatedWorkspaceCheckpoint(userId: string): Promise<void> {
     redactedStatusJson: {
       seeded: true,
     },
-    snapshotRef: createSnapshotBundleRef({
-      hash,
-      size: snapshot.bundle.byteLength,
-    }),
+    snapshotRef,
     userId,
   });
   expect(checkpoint.status).toBe("updated");
-
-  await uploadHostedSnapshotArtifact({
-    bytes: snapshot.bundle,
-    hash,
-    userId,
-  });
 }
 
-async function uploadHostedSnapshotArtifact(input: {
-  bytes: Uint8Array;
-  hash: string;
-  userId: string;
-}): Promise<void> {
-  await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(input.userId)}&sha256=${input.hash}`,
-    {
-      body: new Blob([new Uint8Array(input.bytes)]),
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
-      },
-      method: "PUT",
-    },
-  );
-}
-
-function createSnapshotBundleRef(input: {
-  hash: string;
-  size: number;
-}): HostedExecutionSnapshotRef {
-  return {
-    hash: input.hash,
-    key: `cloudflare-workspace-snapshots/${input.hash}.bundle`,
-    size: input.size,
-    updatedAt: new Date().toISOString(),
-  };
-}
 
 function createBrowserVaultReplicaRef(input: {
   sourceBundleHash: string;

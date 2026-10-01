@@ -11,10 +11,9 @@ import {
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
 import { getPrisma } from "@/src/lib/prisma";
 
-// Companion sign-in token exchange. Auth is a bearer Privy identity token
-// verified through the existing server-side Privy verification path; there is
-// no cookie fallback, so this route carries no browser ambient authority (and
-// therefore no CSRF surface). New identities enter the same hosted member,
+// Companion sign-in token exchange accepts explicitly classified native bearer
+// credentials through their own verifier, with no browser cookie authority.
+// New logins enter the same hosted member,
 // consent, Starter enrollment, and activation owners as Web before Junction authority is
 // issued. The token is returned exactly once and must never be logged or
 // persisted; do not add logging of the session result to this route.

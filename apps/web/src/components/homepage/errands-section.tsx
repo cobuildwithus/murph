@@ -117,10 +117,7 @@ export function ErrandsSection() {
     <section className="bg-[#f5f0e8] px-4 py-20 sm:px-8 lg:px-16 lg:py-28">
       <div className="mx-auto max-w-[1200px]">
         <div className="max-w-[720px]">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
-            Errands, handled
-          </p>
-          <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
+          <h2 className="font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
             Murph can call anyone and order anything.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
@@ -139,10 +136,7 @@ export function ErrandsSection() {
               <span />
               <span />
               <div>
-                <p className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#8a6428]">
-                  One text. Seventeen minutes. Zero apps opened.
-                </p>
-                <p className="mt-4 max-w-[52ch] text-[0.875rem] leading-[1.6] text-[#736a58]">
+                <p className="max-w-[52ch] text-[0.875rem] leading-[1.6] text-[#736a58]">
                   Also plugs into Google Calendar, Gmail, Amazon, Instacart,
                   clinician search, and hundreds more.
                 </p>

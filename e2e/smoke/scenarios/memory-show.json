@@ -1,6 +1,6 @@
 {
   "id": "memory-show",
-  "command": "vault-cli memory show [memoryId] --vault <path>",
+  "command": "vault-cli memory show [memoryId] --vault <path> [--compact] [--record-only]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

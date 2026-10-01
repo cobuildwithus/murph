@@ -1,24 +1,4 @@
-"use client";
-
-import { useEffect, useState } from "react";
-
-import { Button } from "@/src/components/ui/button";
-
-const SLOW_LOAD_DELAY_MS = 8_000;
-
-export function EnvironmentReportSkeleton({
-  onRetry,
-}: {
-  onRetry: () => Promise<unknown> | unknown;
-}) {
-  const [retryCount, setRetryCount] = useState(0);
-  const [slow, setSlow] = useState(false);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => setSlow(true), SLOW_LOAD_DELAY_MS);
-    return () => window.clearTimeout(timeoutId);
-  }, [retryCount]);
-
+export function EnvironmentReportSkeleton() {
   return (
     <section
       aria-busy="true"
@@ -56,24 +36,6 @@ export function EnvironmentReportSkeleton({
         <SkeletonSection />
       </div>
 
-      {slow ? (
-        <div className="flex flex-col gap-3 border-t border-border bg-muted/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
-          <p className="text-sm text-muted-foreground">
-            This is taking longer than expected.
-          </p>
-          <Button
-            onClick={() => {
-              setSlow(false);
-              setRetryCount((current) => current + 1);
-              void onRetry();
-            }}
-            size="sm"
-            variant="outline"
-          >
-            Try again
-          </Button>
-        </div>
-      ) : null}
     </section>
   );
 }

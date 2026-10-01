@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-02",
+  "order": 100,
+  "item": {
+    "id": "connected-health-status-checks-finish-reliably",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Connected health checks finish reliably",
+    "summary": "Routine connected-health status checks now release unused backend resources sooner, reducing avoidable delays.",
+    "details": "Active syncs and authenticated requests continue unchanged. The improvement only shortens cleanup after database activity becomes idle.",
+    "relevanceTags": ["wearables", "reliability"],
+    "sourcePullRequests": [2748]
+  }
+}

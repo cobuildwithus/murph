@@ -31,11 +31,25 @@ import type {
   HostedExecutionLogLevel,
 } from "./observability.ts";
 
+export const HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS = 10 * 60 * 1_000;
+
 export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
 export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
 export const HOSTED_EXECUTION_NONCE_HEADER = "x-hosted-execution-nonce";
 export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
   "x-hosted-execution-signing-key-id";
+
+export const HOSTED_TEMPORAL_WORKER_BINDING_CONTRACT_REVISION = "bindings-v1";
+export const HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_KIND =
+  "hosted_temporal_worker_binding_admission";
+
+export interface HostedTemporalWorkerBindingAdmission {
+  bindingContractRevision: typeof HOSTED_TEMPORAL_WORKER_BINDING_CONTRACT_REVISION;
+  environment: "production";
+  kind: typeof HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_KIND;
+  owner: "cloudflare" | "web";
+  signingKeyId: string;
+}
 
 export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
   "runtime.manual-requested",
@@ -94,9 +108,11 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.ask.requested",
   "assistant.ask.completed",
   "clinical-records.sync-requested",
+  "clinical-records.enrichment-requested",
   "device-sync.wake",
   "environment-interview.completed",
   "environment-voice.captured",
+  "journal.group-fact.recorded",
   "health.daily-metric.reported",
   "meal-photo.captured",
   "member.action.requested",
@@ -116,6 +132,7 @@ export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
   "linq",
   "telegram",
   "email",
+  "voice",
 ] as const;
 
 export type HostedExecutionConversationMessageChannel =
@@ -188,6 +205,8 @@ export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBase
   initialGroupRoomModelMarkdown?: string | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  onboardingFollowupEnrollment?: boolean;
+  onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
 }
@@ -232,6 +251,7 @@ export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
   "context-handoff",
   "creative-response",
   "creative-response-text",
+  "operator-message",
 ] as const;
 
 export type HostedExecutionAssistantNotificationPromptProfile =
@@ -274,6 +294,12 @@ export interface HostedExecutionPrivateAssistantAskCompletionNotification {
 export interface HostedExecutionGroupContextHandoffNotification {
   membershipId: string;
   originAssistantInputId: string;
+  sourceDisplayName?: string | null;
+}
+
+export interface HostedExecutionOperatorTaskNotification {
+  expiresAt: string;
+  taskId: string;
 }
 
 export interface HostedExecutionAssistantNotificationRequestedPayload {
@@ -285,6 +311,7 @@ export interface HostedExecutionAssistantNotificationRequestedPayload {
   groupContextHandoff?: HostedExecutionGroupContextHandoffNotification;
   instructions: string;
   notificationPromptProfile?: HostedExecutionAssistantNotificationPromptProfile | null;
+  operatorTask?: HostedExecutionOperatorTaskNotification;
   privateAssistantAskCompletion?: HostedExecutionPrivateAssistantAskCompletionNotification;
   responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;
   route: HostedExecutionAssistantNotificationRoute;
@@ -321,6 +348,11 @@ export interface HostedExecutionAssistantAskConsentedMemberTarget {
   kind: "consented_member";
   membershipId: string;
   permissionDigest: string;
+}
+
+export interface HostedExecutionAssistantAskOperatorTaskTarget {
+  kind: "operator_task";
+  taskId: string;
 }
 
 /**
@@ -367,6 +399,7 @@ export type HostedExecutionAssistantAskResultDestination =
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
+  | HostedExecutionAssistantAskOperatorTaskTarget
   | HostedExecutionAssistantAskCurrentSenderTarget;
 
 export function isHostedExecutionAssistantAskCurrentSenderTarget(
@@ -418,6 +451,12 @@ export interface HostedExecutionAssistantAskConsentedMemberRequestedPayload {
   target: HostedExecutionAssistantAskConsentedMemberTarget;
 }
 
+export interface HostedExecutionAssistantAskOperatorTaskRequestedPayload {
+  expiresAt: string;
+  question: string;
+  target: HostedExecutionAssistantAskOperatorTaskTarget;
+}
+
 export interface HostedExecutionAssistantAskCurrentSenderRequestedPayload {
   expiresAt: string;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
@@ -436,6 +475,7 @@ export interface HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload {
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
   | HostedExecutionAssistantAskConsentedMemberRequestedPayload
+  | HostedExecutionAssistantAskOperatorTaskRequestedPayload
   | HostedExecutionAssistantAskCurrentSenderRequestedPayload
   | HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload;
 
@@ -753,10 +793,19 @@ export interface HostedExecutionEmailConversationMessagePayload {
   to?: string[];
 }
 
+/** Native normalized speech admitted by the authenticated call owner. */
+export interface HostedExecutionVoiceConversationMessagePayload {
+  channel: "voice";
+  callId: string;
+  inputId: string;
+  text: string;
+}
+
 export type HostedExecutionConversationMessagePayload =
   | HostedExecutionLinqConversationMessagePayload
   | HostedExecutionTelegramConversationMessagePayload
-  | HostedExecutionEmailConversationMessagePayload;
+  | HostedExecutionEmailConversationMessagePayload
+  | HostedExecutionVoiceConversationMessagePayload;
 
 /**
  * Returns only the human-authored text represented by a conversation wake.
@@ -773,7 +822,7 @@ export function readHostedExecutionConversationMessageText(
       .join("\n")
     : payload.channel === "telegram"
       ? payload.telegramMessage.text ?? ""
-      : "";
+      : payload.channel === "voice" ? payload.text : "";
   const normalized = text.trim();
   return normalized.length > 0 ? normalized : null;
 }
@@ -787,6 +836,8 @@ export interface HostedExecutionMemberActivatedWake extends HostedExecutionBaseW
   initialGroupRoomModelMarkdown?: string | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  onboardingFollowupEnrollment?: boolean;
+  onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
 }
@@ -849,6 +900,13 @@ export interface HostedExecutionClinicalRecordsSyncRequestedWake
   runId: string;
 }
 
+/** Local durable work points to retained clinical evidence, never provider credentials. */
+export interface HostedExecutionClinicalEnrichmentRequestedWake
+  extends HostedExecutionBaseWake {
+  jobId: string;
+  kind: "clinical-records.enrichment-requested";
+}
+
 export const HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES = 3 * 1024 * 1024;
 
 export const HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES = [
@@ -890,6 +948,29 @@ export interface HostedExecutionDailyMetricReportedWake
   extends HostedExecutionBaseWake {
   dailyMetric: HostedExecutionDailyMetricReportedPayload;
   kind: "health.daily-metric.reported";
+}
+
+export const HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES = [
+  "journal-context",
+  "journal-factor",
+  "journal-outcome",
+  "journal-plan",
+] as const;
+export const HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH = 1000;
+export const HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH = 120;
+
+export interface HostedExecutionGroupJournalFactPayload {
+  date: string;
+  factIndex: number;
+  note: string;
+  noteType: typeof HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES[number];
+  title: string;
+}
+
+export interface HostedExecutionGroupJournalFactRecordedWake
+  extends HostedExecutionBaseWake {
+  journalFact: HostedExecutionGroupJournalFactPayload;
+  kind: "journal.group-fact.recorded";
 }
 
 export interface HostedExecutionEnvironmentInterviewTopicCompletion {
@@ -977,9 +1058,11 @@ export type HostedExecutionWake =
   | HostedExecutionAssistantAskRequestedWake
   | HostedExecutionAssistantAskCompletedWake
   | HostedExecutionClinicalRecordsSyncRequestedWake
+  | HostedExecutionClinicalEnrichmentRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionEnvironmentInterviewCompletedWake
   | HostedExecutionEnvironmentVoiceCapturedWake
+  | HostedExecutionGroupJournalFactRecordedWake
   | HostedExecutionDailyMetricReportedWake
   | HostedExecutionMealPhotoCapturedWake
   | HostedExecutionMemberActionRequestedWake
@@ -1102,7 +1185,7 @@ export type HostedRuntimeTimerTriggerKind =
   (typeof HOSTED_RUNTIME_TIMER_TRIGGER_KINDS)[number];
 
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
-export const DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 10_000;
+export const DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 20_000;
 export const HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS = 1_000;
 export const MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS =
   HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + 1;
@@ -1118,6 +1201,10 @@ export const HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER =
   "x-hosted-runtime-ensure-processing-token-acquired-at-ms";
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER =
   "x-hosted-runtime-ensure-processing-direct-request-started-at-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-auth-duration-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-handler-duration-ms";
 
 export function assertHostedRuntimeProcessingTimeoutMs(
   value: number,

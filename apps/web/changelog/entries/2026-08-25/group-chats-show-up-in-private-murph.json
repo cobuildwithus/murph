@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 100,
+  "item": {
+    "id": "group-chats-show-up-in-private-murph",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Group chats show up in private Murph",
+    "summary": "When Murph joins an existing group chat, that group can now appear in its owner's private Murph without a separate join-link step.",
+    "details": "Only the group owner is added automatically. Other participants still join explicitly, and Murph does not guess between multiple unnamed groups.",
+    "relevanceTags": [
+      "groups",
+      "messaging",
+      "privacy"
+    ],
+    "sourcePullRequests": [
+      2303
+    ]
+  }
+}

@@ -3,7 +3,7 @@ import { chmod, lstat, mkdir, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import {
   appendTextFileWithMode,
@@ -122,4 +122,64 @@ test("auditAssistantStatePermissions reports missing roots, detects other entrie
     assert.equal(repairedOtherEntry.actualMode, null);
     assert.equal(repairedOtherEntry.expectedMode, null);
   });
+});
+
+test("warm assistant directory validation leaves private directories unchanged and still repairs later permission changes", async () => {
+  await withTempDir(async (root) => {
+    const assistantRoot = path.join(root, "vault", ".runtime", "operations", "assistant");
+    const directory = path.join(assistantRoot, "sessions");
+    await ensureAssistantStateDirectory(directory);
+    const before = await lstat(directory, { bigint: true });
+    await ensureAssistantStateDirectory(directory);
+    assert.equal((await lstat(directory, { bigint: true })).ctimeNs, before.ctimeNs);
+
+    await chmod(assistantRoot, 0o755);
+    await chmod(directory, 0o750);
+    await ensureAssistantStateDirectory(directory);
+    assert.equal((await lstat(assistantRoot)).mode & 0o7777, ASSISTANT_STATE_DIRECTORY_MODE);
+    assert.equal((await lstat(directory)).mode & 0o7777, ASSISTANT_STATE_DIRECTORY_MODE);
+
+    await rm(directory, { recursive: true });
+    const outside = path.join(root, "outside");
+    await mkdir(outside, { mode: 0o755 });
+    await symlink(outside, directory);
+    await assert.rejects(ensureAssistantStateDirectory(directory), /must not contain symlinks/);
+    assert.equal((await lstat(outside)).mode & 0o777, 0o755);
+  });
+});
+
+
+test("existing private ancestry needs no directory creation while missing private paths still recover", async () => {
+  const mkdirSpy = vi.fn(mkdir);
+  vi.resetModules();
+  vi.doMock("node:fs/promises", async () => ({
+    ...await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises"),
+    mkdir: mkdirSpy,
+  }));
+  try {
+    const security = await import("../src/assistant-state-security.ts");
+    await withTempDir(async (root) => {
+      const vault = path.join(root, "nested", "vault");
+      const runtime = path.join(vault, ".runtime");
+      const directory = path.join(runtime, "operations", "assistant", "sessions");
+      await security.ensureAssistantStateDirectory(directory);
+      assert.equal((await lstat(directory)).mode & 0o7777, ASSISTANT_STATE_DIRECTORY_MODE);
+      mkdirSpy.mockClear();
+      await security.ensureAssistantStateDirectory(directory);
+      assert.equal(mkdirSpy.mock.calls.length, 0);
+
+      await rm(directory, { recursive: true });
+      await security.ensureAssistantStateDirectory(directory);
+      assert.deepEqual(mkdirSpy.mock.calls, [[directory, { mode: ASSISTANT_STATE_DIRECTORY_MODE }]]);
+      mkdirSpy.mockClear();
+      await rm(runtime, { recursive: true });
+      await security.ensureAssistantStateDirectory(directory);
+      assert.deepEqual(mkdirSpy.mock.calls[0], [vault, { recursive: true }]);
+      assert.equal((await lstat(runtime)).mode & 0o7777, ASSISTANT_STATE_DIRECTORY_MODE);
+      assert.equal((await lstat(directory)).mode & 0o7777, ASSISTANT_STATE_DIRECTORY_MODE);
+    });
+  } finally {
+    vi.doUnmock("node:fs/promises");
+    vi.resetModules();
+  }
 });

@@ -15,9 +15,22 @@ afterEach(async () => {
   );
 });
 
-test("concurrent stale projection readers share one rebuild", async () => {
+test("concurrent source and global readers serialize publication and materialize provider rows once", async () => {
   vi.resetModules();
 
+  let wearableProjectionCount = 0;
+  vi.doMock("../src/projection/wearable-summary-projector.ts", async () => {
+    const actual = await vi.importActual<typeof import("../src/projection/wearable-summary-projector.ts")>(
+      "../src/projection/wearable-summary-projector.ts",
+    );
+    return {
+      ...actual,
+      buildWearableSummaryProjectionFromDataset: (...args: Parameters<typeof actual.buildWearableSummaryProjectionFromDataset>) => {
+        wearableProjectionCount += 1;
+        return actual.buildWearableSummaryProjectionFromDataset(...args);
+      },
+    };
+  });
   let rebuildCallCount = 0;
   let activeRebuildCount = 0;
   let maxActiveRebuildCount = 0;
@@ -29,9 +42,9 @@ test("concurrent stale projection readers share one rebuild", async () => {
 
     return {
       ...actual,
-      rebuildQueryProjectionWithManifest: async (
-        ...args: Parameters<typeof actual.rebuildQueryProjectionWithManifest>
-      ): ReturnType<typeof actual.rebuildQueryProjectionWithManifest> => {
+      rebuildQueryProjectionFromCanonicalSource: async (
+        ...args: Parameters<typeof actual.rebuildQueryProjectionFromCanonicalSource>
+      ): ReturnType<typeof actual.rebuildQueryProjectionFromCanonicalSource> => {
         rebuildCallCount += 1;
         activeRebuildCount += 1;
         maxActiveRebuildCount = Math.max(maxActiveRebuildCount, activeRebuildCount);
@@ -39,7 +52,7 @@ test("concurrent stale projection readers share one rebuild", async () => {
         await new Promise((resolve) => setTimeout(resolve, 25));
 
         try {
-          return await actual.rebuildQueryProjectionWithManifest(...args);
+          return await actual.rebuildQueryProjectionFromCanonicalSource(...args);
         } finally {
           activeRebuildCount -= 1;
         }
@@ -52,10 +65,29 @@ test("concurrent stale projection readers share one rebuild", async () => {
     await writeMinimalVault(vaultRoot);
 
     const query = await import("../src/index.ts");
+    const { withCliTiming, timeCliDispatch } = await import("@murphai/runtime-state/node/cli-timing");
+    const reports: import("@murphai/runtime-state/cli-timing").CliTiming[] = [];
+    async function measured<T>(command: string, read: () => Promise<T>): Promise<T> {
+      let value!: T;
+      await withCliTiming(() => timeCliDispatch(command, async () => { value = await read(); }),
+        (report) => { reports.push(report); });
+      return value;
+    }
     const [vault, wearableSourceHealth] = await Promise.all([
-      query.readVault(vaultRoot),
-      query.summarizeWearableSourceHealthRuntime(vaultRoot),
+      measured("vault show", () => query.readVault(vaultRoot)),
+      measured("wearables sources list", () => query.summarizeWearableSourceHealthRuntime(vaultRoot)),
     ]);
+    const phases = reports.flatMap((r) => r.commands.flatMap((c) => c.phases));
+    // If sources acquired the lock first, its partial publication and the
+    // later global work are both timed; the provider rows are still built once.
+    const rebuildPhases = phases.filter((p) => p.phase === "query-rebuild").length;
+    assert.ok(rebuildPhases === 1 || rebuildPhases === 2);
+    assert.equal(wearableProjectionCount, 1);
+    assert.equal(phases.filter((p) => p.phase === "query-wait").length, 2);
+    assert.equal(phases.filter((p) => p.phase === "query-freshness").length, 2);
+    assert.deepEqual(reports.flatMap((r) => r.commands.map((c) => c.command)).sort(),
+      ["vault show", "wearables sources list"]);
+    assert.equal(JSON.stringify(reports).includes(vaultRoot), false);
     const status = await query.getQueryProjectionStatus(vaultRoot);
 
     assert.equal(vault.metadata?.vaultId, "vault_01K9D9B2D7N4QW5T6Y7Z8A9B0E");
@@ -65,6 +97,7 @@ test("concurrent stale projection readers share one rebuild", async () => {
     assert.equal(maxActiveRebuildCount, 1);
   } finally {
     vi.doUnmock("../src/projection/rebuild.ts");
+    vi.doUnmock("../src/projection/wearable-summary-projector.ts");
     vi.resetModules();
   }
 });
@@ -144,3 +177,89 @@ async function writeVaultFile(
   await mkdir(path.dirname(absolutePath), { recursive: true });
   await writeFile(absolutePath, `${content}\n`, "utf8");
 }
+
+
+test("freshness phase timing follows actual scan/status/rebuild/recheck order without changing results", async () => {
+  vi.resetModules();
+  let tick = 0n;
+  const order: string[] = [];
+  let statusCalls = 0;
+  const clock = vi.spyOn(process.hrtime, "bigint").mockImplementation(() => tick);
+  vi.doMock("../src/vault-source.ts", async () => {
+    const actual = await vi.importActual<typeof import("../src/vault-source.ts")>("../src/vault-source.ts");
+    return { ...actual, listCanonicalSourceManifest: async (...args: Parameters<typeof actual.listCanonicalSourceManifest>) => {
+      order.push("manifest"); tick += 700_000_000n;
+      return actual.listCanonicalSourceManifest(...args);
+    } };
+  });
+  vi.doMock("../src/projection/freshness.ts", async () => {
+    const actual = await vi.importActual<typeof import("../src/projection/freshness.ts")>("../src/projection/freshness.ts");
+    return { ...actual, readProjectionStatus: async (...args: Parameters<typeof actual.readProjectionStatus>) => {
+      order.push("status"); tick += 200_000_000n; statusCalls += 1;
+      const status = await actual.readProjectionStatus(...args);
+      // Force the existing post-rebuild recheck path, without adding a new rebuild.
+      return statusCalls === 3 && status ? { ...status, fresh: false } : status;
+    } };
+  });
+  vi.doMock("../src/projection/rebuild.ts", async () => {
+    const actual = await vi.importActual<typeof import("../src/projection/rebuild.ts")>("../src/projection/rebuild.ts");
+    return { ...actual, rebuildQueryProjectionFromCanonicalSource: async (...args: Parameters<typeof actual.rebuildQueryProjectionFromCanonicalSource>) => {
+      order.push("rebuild"); tick += 3_000_000_000n;
+      return actual.rebuildQueryProjectionFromCanonicalSource(...args);
+    } };
+  });
+  try {
+    const root = await createTempVaultRoot();
+    await writeMinimalVault(root);
+    const query = await import("../src/query-projection.ts");
+    const { timeCliDispatch, withCliTiming } = await import("@murphai/runtime-state/node/cli-timing");
+    let report!: import("@murphai/runtime-state/cli-timing").CliTiming;
+    let rows!: Awaited<ReturnType<typeof query.listCanonicalEntitiesRuntime>>;
+    await withCliTiming(() => timeCliDispatch("goal list", async () => {
+      rows = await query.listCanonicalEntitiesRuntime(root);
+    }), (value) => { report = value; });
+    assert.deepEqual(order, ["manifest", "status", "manifest", "status", "rebuild", "manifest", "status", "manifest", "status"]);
+    const phases = Object.fromEntries(report.commands[0]!.phases.map((p) => [p.phase, p]));
+    assert.equal(phases["query-manifest"]!.count, 3);
+    assert.equal(phases["query-manifest"]!.sumUs, 2_100_000);
+    assert.equal(phases["query-status"]!.count, 4);
+    assert.equal(phases["query-status"]!.sumUs, 800_000);
+    assert.equal(phases["query-rebuild"]!.sumUs, 3_700_000);
+    assert.equal(phases["query-freshness"]!.sumUs, 6_600_000);
+    assert.equal(phases["query-wait"]!.count, 1);
+    assert.equal(phases["query-wait"]!.sumUs, 0);
+    assert.deepEqual(await query.listCanonicalEntitiesRuntime(root), rows);
+    assert.equal(JSON.stringify(report).includes(root), false);
+  } finally {
+    clock.mockRestore();
+    vi.doUnmock("../src/vault-source.ts");
+    vi.doUnmock("../src/projection/freshness.ts");
+    vi.doUnmock("../src/projection/rebuild.ts");
+    vi.resetModules();
+  }
+});
+
+test("query failures preserve the original rejection and close only measured spans", async () => {
+  vi.resetModules();
+  const failure = Object.assign(new Error("PRIVATE_SENTINEL"), { name: "AbortError" });
+  vi.doMock("../src/vault-source.ts", async () => {
+    const actual = await vi.importActual<typeof import("../src/vault-source.ts")>("../src/vault-source.ts");
+    return { ...actual, listCanonicalSourceManifest: async () => { throw failure; } };
+  });
+  try {
+    const query = await import("../src/query-projection.ts");
+    const { timeCliDispatch, withCliTiming } = await import("@murphai/runtime-state/node/cli-timing");
+    let report!: import("@murphai/runtime-state/cli-timing").CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch("goal list", async () => {
+      await query.listCanonicalEntitiesRuntime("/PRIVATE_SENTINEL");
+    }), (value) => { report = value; }), (error) => error === failure);
+    const command = report.commands[0]!;
+    assert.equal(command.outcome, "error"); // No invented timeout/cancellation dimension.
+    assert.equal(command.phases.some((p) => p.phase === "query-manifest"), true);
+    assert.equal(command.phases.some((p) => p.phase === "query-status"), false);
+    assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+  } finally {
+    vi.doUnmock("../src/vault-source.ts");
+    vi.resetModules();
+  }
+});

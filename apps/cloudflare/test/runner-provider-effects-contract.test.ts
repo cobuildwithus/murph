@@ -1,3 +1,4 @@
+import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime } from "./postgres-owner-fixtures.ts";
 // Regression coverage for the hosted Telegram provider-effect route. The
 // container-side effects-port client and the worker-side handler were only
 // ever tested against mocks of each other, which let a contract break ship
@@ -29,18 +30,7 @@ function createProviderEffectsEnv() {
   return {
     ...createHostedExecutionTestEnv(),
     TELEGRAM_BOT_TOKEN: "telegram-token",
-    USER_RUNNER: {
-      getByName() {
-        return {
-          async bindUser(userId: string) {
-            return { userId };
-          },
-          async validateRuntimeWriteFence() {
-            return true;
-          },
-        };
-      },
-    },
+    USER_RUNNER: forbiddenLegacyRuntime,
   };
 }
 
@@ -61,6 +51,10 @@ function readProviderEffectFailureLogs(): Array<Record<string, unknown>> {
 describe("telegram provider effect contract", () => {
   beforeEach(() => {
     mocks.emitHostedExecutionStructuredLog.mockClear();
+    mockPostgresOwnerCommand(async ({ userId, command }) => {
+      if (command.operation !== "authorize_effect") throw new Error("Unexpected owner operation.");
+      return { cutover: "postgres", status: "authorized", owner: createPostgresTestOwner({ userId, attemptId: command.attemptId, generation: command.generation }) };
+    });
     vi.unstubAllGlobals();
   });
 

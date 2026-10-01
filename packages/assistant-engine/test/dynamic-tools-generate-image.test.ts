@@ -10,7 +10,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
-  MURPH_GROUP_TOOL,
+  MURPH_GROUP_CHAT_TOOL,
+  MURPH_GROUP_TOOL_PROPERTIES,
   executeMurphDynamicToolRequest,
   readMurphDynamicToolRequest as readExactMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.js'
@@ -55,6 +56,29 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'Local runs stay synchronous with the same slot rule',
     )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'Requested graphs, charts, and trend lines: render them with this tool when no chart or card tool fits',
+    )
+    expect(MURPH_ATTACH_RESPONSE_MEDIA_TOOL.description).toContain(
+      'For charts, the final reply must include one brief numeric takeaway from the source data, such as the start/end values or range; do not list every plotted value',
+    )
+    for (const chartStyle of [
+      'Treat those values as plotting data, not visible labels',
+      'omit numeric labels on individual points and bars unless the user requests them',
+      'sparse, rounded axis ticks and a compact legend',
+      'Default chart prompts to Murph',
+      'cream paper (#f5f0e8)',
+      'slate text (#2d3436)',
+      'solid sage data lines (#7a8c6e)',
+      'dashed sand reference lines (#d4c4a8)',
+      'Use only these colors for chart marks: sage and slate for separate data series',
+      'Fraunces-style serif titles and numbers',
+      'DM Sans body text',
+      'DM Mono labels',
+      'flat and legible without gradients or decorative shadows',
+    ]) {
+      expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(chartStyle)
+    }
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'a known preference supports voice',
     )
@@ -684,9 +708,9 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(generateImageReferenceDescription).toContain(
       'whenever Murph itself appears',
     )
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].properties.referenceImageRefs.description)
+    expect(MURPH_GROUP_TOOL_PROPERTIES.referenceImageRefs.description)
       .toContain('skill-assets/murph-character-sheet-v1.png')
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].properties.action.enum).toContain(
+    expect(MURPH_GROUP_CHAT_TOOL.inputSchema.properties.action.enum).toContain(
       'set_chat_avatar',
     )
   })

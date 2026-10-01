@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Cli } from "incur";
@@ -62,6 +62,12 @@ interface ImportJsonResult {
   path?: string;
   created: boolean;
   entity?: never;
+}
+
+interface ShowResult {
+  entity: {
+    id: string;
+  };
 }
 
 function assertCompactSavedEntity(entity: SavedEntitySnapshot) {
@@ -137,6 +143,29 @@ function requireSavedPath(result: SaveResult): string {
   return result.path;
 }
 
+async function snapshotVaultFiles(vaultRoot: string): Promise<Array<[string, string]>> {
+  const snapshot: Array<[string, string]> = [];
+
+  async function visit(directory: string, relativeDirectory: string): Promise<void> {
+    const entries = await readdir(directory, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const relativePath = path.posix.join(relativeDirectory, entry.name);
+      const absolutePath = path.join(directory, entry.name);
+
+      if (entry.isDirectory()) {
+        await visit(absolutePath, relativePath);
+        continue;
+      }
+
+      snapshot.push([relativePath, (await readFile(absolutePath)).toString("base64")]);
+    }
+  }
+
+  await visit(vaultRoot, "");
+  return snapshot.sort(([left], [right]) => left.localeCompare(right));
+}
+
 test("regimen save schema exposes typed product and primary ingredient fields", async () => {
   const cli = createRegimenSaveCli();
 
@@ -185,6 +214,78 @@ test("regimen save schema exposes typed product and primary ingredient fields", 
     false,
   );
   assert.deepEqual(regimenJsonFallback.args.required ?? [], []);
+});
+
+test("regimen save fails closed when the selected regimen is deleted after read", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-regimen-save-deleted-after-read-",
+  );
+
+  try {
+    const cli = createRegimenSaveCli();
+    const initialized = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      "init",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(initialized.exitCode, null);
+
+    const created = await runInProcessJsonCli<SaveResult>(cli, [
+      "regimen",
+      "save",
+      "Durable behavior plan",
+      "--kind",
+      "habit",
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(created.exitCode, null);
+    const saved = requireData(created.envelope);
+    const shown = await runInProcessJsonCli<ShowResult>(cli, [
+      "regimen",
+      "show",
+      saved.regimenId,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(requireData(shown.envelope).entity.id, saved.regimenId);
+
+    await rm(path.join(vaultRoot, requireSavedPath(saved)));
+    const filesAfterDeletion = await snapshotVaultFiles(vaultRoot);
+
+    const update = await runInProcessJsonCli<SaveResult>(cli, [
+      "regimen",
+      "save",
+      "Durable behavior plan",
+      "--id",
+      saved.regimenId,
+      "--kind",
+      "habit",
+      "--status",
+      "paused",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(update.exitCode, 1);
+    assert.equal(update.envelope.ok, false);
+    if (!update.envelope.ok) {
+      assert.equal(update.envelope.error.code, "not_found");
+      assert.equal(update.envelope.error.message, "Regimen was not found.");
+      assert.equal(update.envelope.error.retryable, false);
+      assert.equal(update.envelope.error.stage, "read");
+      assert.equal(
+        update.envelope.error.hint,
+        "After this error, run only regimen list once. Do not write again this turn. If a listed regimen matches, end with one question naming its exact regimen id and the requested change; retry only after the user confirms. If none is intended, stop and ask for a separate follow-up. Never offer creation here.",
+      );
+    }
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), filesAfterDeletion);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
 });
 
 test("protocol list forwards commons-protocol filtering to the query service before limiting", async () => {
@@ -428,5 +529,203 @@ test("regimen import-json runtime output stays sparse without entity snapshots",
       force: true,
       recursive: true,
     });
+  }
+});
+
+test("protocol import maps core validation issues into a bounded repair envelope", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-protocol-repair-",
+  );
+  const payloadPath = path.join(parentRoot, "private-protocol-payload.json");
+
+  try {
+    const cli = createRegimenSaveCli();
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      "init",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(initResult.exitCode, null);
+
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        slug: "private-protocol-repair",
+        title: "Private Protocol Title",
+        effectiveSpec: "PrivateProtocolSpecSentinel",
+      }),
+      "utf8",
+    );
+
+    const result = await runInProcessJsonCli(cli, [
+      "protocol",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "contract_invalid");
+      assert.equal(result.envelope.error.retryable, false);
+      assert.equal(result.envelope.error.stage, "validation");
+      assert.equal(
+        result.envelope.error.fieldErrors?.some(
+          (field) => field.path === "effectiveSpec",
+        ),
+        true,
+      );
+      assert.equal(result.envelope.error.hint, undefined);
+    }
+
+    const serialized = JSON.stringify(result.envelope);
+    assert.doesNotMatch(
+      serialized,
+      /Private Protocol Title|PrivateProtocolSpecSentinel/u,
+    );
+    assert.equal(serialized.includes(payloadPath), false);
+    assert.doesNotMatch(serialized, /bank\/protocols/u);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("protocol import preserves fixed input constraints without leaking submitted values or writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-protocol-input-constraints-",
+  );
+  const payloadPath = path.join(parentRoot, "private-protocol-input.json");
+  const oversizedTitle = "SubmittedOversizedTitleSentinel".repeat(8);
+  const cases: Array<{
+    name: string;
+    payload: Record<string, unknown>;
+    expectedMessage: string;
+    submittedSentinels: string[];
+  }> = [
+    {
+      name: "invalid status",
+      payload: {
+        title: "SubmittedStatusTitleSentinel",
+        status: "submitted-status-sentinel",
+      },
+      expectedMessage: "status must be one of available, archived.",
+      submittedSentinels: ["SubmittedStatusTitleSentinel", "submitted-status-sentinel"],
+    },
+    {
+      name: "missing title",
+      payload: { slug: "submitted-missing-title-sentinel" },
+      expectedMessage: "title is required.",
+      submittedSentinels: ["submitted-missing-title-sentinel"],
+    },
+    {
+      name: "oversized title",
+      payload: { title: oversizedTitle },
+      expectedMessage: "title exceeds the maximum length.",
+      submittedSentinels: ["SubmittedOversizedTitleSentinel"],
+    },
+    {
+      name: "malformed top-level protocolId",
+      payload: {
+        protocolId: "submitted-top-level-id-sentinel",
+        title: "SubmittedTopLevelIdTitleSentinel",
+      },
+      expectedMessage: "protocolId must match prot_<ULID>.",
+      submittedSentinels: [
+        "submitted-top-level-id-sentinel",
+        "SubmittedTopLevelIdTitleSentinel",
+      ],
+    },
+    {
+      name: "malformed frontmatter.protocolId",
+      payload: {
+        frontmatter: {
+          protocolId: "submitted-frontmatter-id-sentinel",
+          title: "SubmittedFrontmatterIdTitleSentinel",
+        },
+      },
+      expectedMessage: "protocolId must match prot_<ULID>.",
+      submittedSentinels: [
+        "submitted-frontmatter-id-sentinel",
+        "SubmittedFrontmatterIdTitleSentinel",
+      ],
+    },
+    {
+      name: "invalid slug",
+      payload: {
+        slug: "!!!",
+        title: "SubmittedInvalidSlugTitleSentinel",
+      },
+      expectedMessage: "slug could not be normalized to a slug.",
+      submittedSentinels: ["!!!", "SubmittedInvalidSlugTitleSentinel"],
+    },
+    {
+      name: "wrong schemaVersion",
+      payload: {
+        schemaVersion: "submitted-schema-version-sentinel",
+        title: "SubmittedSchemaVersionTitleSentinel",
+      },
+      expectedMessage: "schemaVersion must be murph.frontmatter.protocol.v1.",
+      submittedSentinels: [
+        "submitted-schema-version-sentinel",
+        "SubmittedSchemaVersionTitleSentinel",
+      ],
+    },
+    {
+      name: "wrong docType",
+      payload: {
+        docType: "submitted-doc-type-sentinel",
+        title: "SubmittedDocTypeTitleSentinel",
+      },
+      expectedMessage: "docType must be protocol.",
+      submittedSentinels: ["submitted-doc-type-sentinel", "SubmittedDocTypeTitleSentinel"],
+    },
+  ];
+
+  try {
+    const cli = createRegimenSaveCli();
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      "init",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(initResult.exitCode, null);
+    const initialVaultSnapshot = await snapshotVaultFiles(vaultRoot);
+
+    for (const testCase of cases) {
+      await writeFile(payloadPath, JSON.stringify(testCase.payload), "utf8");
+
+      const result = await runInProcessJsonCli(cli, [
+        "protocol",
+        "import-json",
+        "--input",
+        `@${payloadPath}`,
+        "--vault",
+        vaultRoot,
+      ]);
+
+      assert.equal(result.exitCode, 1, testCase.name);
+      assert.equal(result.envelope.ok, false, testCase.name);
+      if (!result.envelope.ok) {
+        assert.equal(result.envelope.error.code, "contract_invalid", testCase.name);
+        assert.equal(result.envelope.error.message, testCase.expectedMessage, testCase.name);
+        assert.equal(result.envelope.error.retryable, false, testCase.name);
+        assert.equal(result.envelope.error.stage, undefined, testCase.name);
+        assert.equal(result.envelope.error.fieldErrors, undefined, testCase.name);
+        assert.equal(result.envelope.error.hint, undefined, testCase.name);
+      }
+
+      const serialized = JSON.stringify(result.envelope);
+      for (const sentinel of testCase.submittedSentinels) {
+        assert.equal(serialized.includes(sentinel), false, `${testCase.name}: ${sentinel}`);
+      }
+      assert.equal(serialized.includes(payloadPath), false, testCase.name);
+      assert.doesNotMatch(serialized, /bank\/protocols/u, testCase.name);
+      assert.deepEqual(await snapshotVaultFiles(vaultRoot), initialVaultSnapshot, testCase.name);
+    }
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
   }
 });

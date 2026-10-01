@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-18",
+  "order": 100,
+  "item": {
+    "id": "warm-conversation-wake",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less waiting during an active conversation",
+    "summary": "Murph skips an extra check before picking up your next message when your conversation is already running.",
+    "details": "This removes a small delay before processing starts. Reply time still depends on the work your message needs.",
+    "relevanceTags": ["messaging"],
+    "sourcePullRequests": []
+  }
+}

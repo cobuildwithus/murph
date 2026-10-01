@@ -25,6 +25,9 @@ export function MarkdownView({ content, className }: Props) {
     <Markdown
       options={{
         disableParsingRawHTML: true,
+        // Always emit the wrapper so `className` applies even when the
+        // markdown parses to a single top-level node.
+        forceWrapper: true,
         wrapper: ({ children }) => <div className={className}>{children}</div>,
         overrides: {
           a: SafeLink,

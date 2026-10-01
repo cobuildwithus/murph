@@ -1,3 +1,5 @@
+import { ModelSettingsHoverPreview } from "./model-settings-hover-preview";
+
 import {
   BiomarkerBoundaryResultStudy,
   BiomarkerDetailStudy,
@@ -30,7 +32,21 @@ import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-a
 import { Separator } from "@/src/components/ui/separator";
 import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
 import { HOSTED_PUBLIC_REFERRAL_REWARDS } from "@/src/lib/hosted-growth/referral-program";
-import { ValidationSlide } from "../pitch/_components/slides";
+import {
+  AskSlide,
+  BusinessModelSlide,
+  CompetitionSlide,
+  ExperimentSlide,
+  InsightSlide,
+  MoatSlide,
+  ProblemSlide,
+  ProductSlide,
+  SpreadSlide,
+  TeamSlide,
+  TitleSlide,
+  ValidationSlide,
+  WhyNowSlide,
+} from "../pitch/_components/slides";
 import {
   projectHostedVaultShareProjectionDisplays,
   resolveHostedGroupAccessOfferProjectionScopes,
@@ -40,6 +56,7 @@ import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
 import { ShareLinkPreviewsStudy } from "./share-link-previews-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
+import { CalendarLinkStudy } from "./calendar-link-study";
 import { ClinicalRecordsConnectLauncherStudy } from "./clinical-records-connect-launcher-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
@@ -60,6 +77,8 @@ import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { OpsUsageStudy } from "./ops-usage-study";
+import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
+import { JunctionRecoveryStudy, RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
 import {
   PersonaOnboardingStudy,
   PersonaSettingsStudy,
@@ -79,6 +98,7 @@ import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
 import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
+import { FoodLabelLabStudy } from "./food-label-lab-study";
 import {
   SCREENSHOT_CATEGORIES,
   type ScreenshotCategory,
@@ -86,13 +106,15 @@ import {
 
 function StudySection({
   children,
+  id,
   title,
 }: {
   children: React.ReactNode;
+  id?: string;
   title: string;
 }) {
   return (
-    <section className="flex flex-col gap-6">
+    <section className="flex flex-col gap-6" id={id}>
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
         {title}
       </h2>
@@ -100,6 +122,23 @@ function StudySection({
     </section>
   );
 }
+
+// Every pitch deck slide, in deck order, each under its own anchor.
+const PITCH_SLIDE_STUDIES = [
+  { id: "pitch-title-slide", Slide: TitleSlide },
+  { id: "pitch-problem-slide", Slide: ProblemSlide },
+  { id: "pitch-insight-slide", Slide: InsightSlide },
+  { id: "pitch-why-now-slide", Slide: WhyNowSlide },
+  { id: "pitch-product-slide", Slide: ProductSlide },
+  { id: "pitch-experiment-slide", Slide: ExperimentSlide },
+  { id: "pitch-spread-slide", Slide: SpreadSlide },
+  { id: "pitch-progress-slide", Slide: ValidationSlide },
+  { id: "pitch-competition-slide", Slide: CompetitionSlide },
+  { id: "pitch-moat-slide", Slide: MoatSlide },
+  { id: "pitch-business-model-slide", Slide: BusinessModelSlide },
+  { id: "pitch-team-slide", Slide: TeamSlide },
+  { id: "pitch-ask-slide", Slide: AskSlide },
+] as const;
 
 export function SectionsContent({
   category,
@@ -136,6 +175,7 @@ export function SectionsContent({
                 authenticated={false}
                 contactInfo={{
                   phone: "+15555550100",
+                  phoneConfigured: false,
                   telegram: "murph_test_bot",
                 }}
                 messengerChannel="imessage"
@@ -230,30 +270,34 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Settings model choice with provider usage disclosure">
+          <StudySection title="Settings model choice for Edge and Max">
             <div
               id="settings-model-provider-save-controls"
               data-design-section="settings-compact-provider-control"
               className="max-w-5xl"
-              inert
             >
-              <HostedAssistantModelSettings
-                canUpgradeToEdge={false}
-                configurationAvailable
-                customInferenceAvailable
-                initialDormantSolPreference={false}
-                initialModel="gpt-5.6-terra"
-                initialProvider="venice"
-                solAvailable
-                veniceAvailable
-              />
+              <ModelSettingsHoverPreview>
+                <HostedAssistantModelSettings
+                  availableModels={["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-astra"]}
+                  canUpgradeToEdge={false}
+                  configurationAvailable
+                  customInferenceAvailable
+                  initialDormantSolPreference={false}
+                  initialModel="gpt-6.1-sol"
+                  initialProvider="openai"
+                  solAvailable
+                  veniceAvailable
+                />
+              </ModelSettingsHoverPreview>
             </div>
           </StudySection>
 
           <Separator />
 
           <StudySection title="Settings inference routing, locked models, and endpoint">
-            <SettingsCustomInferenceStudy />
+            <ModelSettingsHoverPreview>
+              <SettingsCustomInferenceStudy />
+            </ModelSettingsHoverPreview>
           </StudySection>
 
           <Separator />
@@ -266,6 +310,12 @@ export function SectionsContent({
 
       {category === "messages" ? (
         <>
+          <Separator />
+
+          <StudySection title="Stateless calendar link">
+            <CalendarLinkStudy />
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Secure approval pending and recorded states">
@@ -294,6 +344,14 @@ export function SectionsContent({
 
       {category === "health" ? (
         <>
+          <Separator />
+
+          <StudySection title="Food Label Lab">
+            <div className="-mx-5 sm:-mx-8 lg:-mx-12" inert>
+              <FoodLabelLabStudy />
+            </div>
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Environment full-width progressive voice capture">
@@ -661,7 +719,7 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Clinical Records scheduled launcher">
+          <StudySection title="Medical records import and recovery">
             <ClinicalRecordsConnectLauncherStudy />
           </StudySection>
 
@@ -783,8 +841,30 @@ export function SectionsContent({
         <>
           <Separator />
 
+          <StudySection id="junction-recovery" title="Junction source recovery">
+            <JunctionRecoveryStudy />
+          </StudySection>
+
+          <StudySection
+            id="stalled-runtime-rechecks"
+            title="Runtime rechecks and legacy-stall discovery"
+          >
+            <RuntimeMaintenanceStudy />
+          </StudySection>
+
+          <Separator />
+
           <StudySection title="Ops usage search and recovery">
             <OpsUsageStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection
+            id="operator-tasks"
+            title="Private Murph diagnostic and direct member message"
+          >
+            <OpsOperatorTaskStudy />
           </StudySection>
         </>
       ) : null}
@@ -809,15 +889,18 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Pitch deck progress slide">
-            <div
-              id="pitch-progress-slide"
-              data-design-section="pitch-progress-slide"
-              className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <ValidationSlide />
-            </div>
+          <StudySection title="Pitch deck slides">
+            {PITCH_SLIDE_STUDIES.map(({ id, Slide }) => (
+              <div
+                key={id}
+                id={id}
+                data-design-section={id}
+                className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
+                inert
+              >
+                <Slide />
+              </div>
+            ))}
           </StudySection>
 
           <Separator />

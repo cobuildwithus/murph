@@ -25,7 +25,9 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { readHostedFamilyBillingRecoveryForOwner } from "./family-plan";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
+import { hasHostedRecoverableBilling } from "./lifecycle";
 import {
   activateHostedMemberForPositiveSourceTx,
   buildHostedMemberActivationEventId,
@@ -88,6 +90,13 @@ export interface HostedStarterUsageEnrollmentResult {
   redirectPath: string;
   status: HostedStarterUsageEnrollmentStatus;
 }
+
+export type HostedJoinInviteStarterContinuationResult =
+  | { disposition: "deferred" }
+  | {
+      disposition: "enrolled";
+      enrollment: HostedStarterUsageEnrollmentResult;
+    };
 
 export interface HostedLinqInstantStartDeferredActivationWake {
   hostedExecutionEventId: string;
@@ -155,10 +164,29 @@ export async function ensureHostedStarterUsageEnrollment(
     requireLaunchConsent: true,
     source: input.source,
     suppressSignupWelcome,
-    suppressSignupWelcomeEmail:
-      suppressSignupWelcome || companionOnboarding,
+    suppressSignupWelcomeEmail: suppressSignupWelcome,
   });
   return enrollment.result;
+}
+
+export async function continueHostedJoinInviteAfterLaunchConsent(
+  input: HostedStarterUsageEnrollmentInput,
+): Promise<HostedJoinInviteStarterContinuationResult> {
+  try {
+    const enrollment = await ensureHostedStarterUsageEnrollment(input);
+    return { disposition: "enrolled", enrollment };
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && (
+        error.code === "HOSTED_MESSAGING_CHANNEL_REQUIRED"
+        || error.code === "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED"
+      )
+    ) {
+      return { disposition: "deferred" };
+    }
+    throw error;
+  }
 }
 
 /**
@@ -286,7 +314,10 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
       prisma,
     });
   }
-  if (!policy.instantStartAdmission) {
+  if (
+    !policy.instantStartAdmission
+    && policy.source !== "companion_onboarding"
+  ) {
     await assertHostedMemberBillingStartMessagingReady({
       identity: invite.member.identity,
       prisma,
@@ -332,6 +363,32 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
         memberId: invite.member.id,
         tx,
       });
+      const familyBillingRecovery =
+        await readHostedFamilyBillingRecoveryForOwner({
+          ownerMemberId: invite.member.id,
+          prisma: tx,
+        });
+      if (familyBillingRecovery) {
+        throw hostedOnboardingError({
+          code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
+          message:
+            "This hosted account has Family billing to recover before starting individual access.",
+          httpStatus: 409,
+        });
+      }
+      if (hasHostedRecoverableBilling({
+        billingStatus: member.billingStatus,
+        hasExistingSubscription: Boolean(
+          member.billingRef?.stripeSubscriptionLookupKey,
+        ),
+      })) {
+        throw hostedOnboardingError({
+          code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
+          message:
+            "This hosted account already has billing to recover before starting individual access.",
+          httpStatus: 409,
+        });
+      }
       const hasPaidSubscription = hasHostedPaidBillingRefEvidence(
         member.billingRef,
       );

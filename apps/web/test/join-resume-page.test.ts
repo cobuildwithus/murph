@@ -261,6 +261,8 @@ async function renderJoinResumePage(searchParams: {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    groupJournalCaptureConsentRequestedAt: null,
+    groupJournalCaptureEnabled: null,
     assistantPersona: null,
     assistantPersonaCausalSeq: null,
     assistantDetail: null,
@@ -281,6 +283,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     initialOnboardingCompletedAt: null,
     billingStatus: HostedBillingStatus.active,
     createdAt: new Date("2026-06-01T00:00:00.000Z"),
+    groupPrivateConversionTrackedAt: null,
     id: "member_123",
     pendingActivationTimeZone: null,
     signupNotificationContextEncrypted: null,

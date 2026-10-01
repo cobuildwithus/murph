@@ -1,13 +1,16 @@
 import { createHash } from "node:crypto";
 
+import registrationEvidence from "./epic-registration.v1.json";
+
 import {
   clinicalFhirRetrievalPlanSchema,
+  clinicalFhirScopeAllowsOperation,
   type ClinicalFhirRetrievalPlan,
   type ClinicalFhirRetrievalSlice,
 } from "@murphai/clinical-records";
 
 export const EPIC_ACQUISITION_POLICY_ID = "epic-r4-longitudinal-v1";
-export const EPIC_ACQUISITION_POLICY_VERSION = "2026-07-21.longitudinal-active-v4";
+export const EPIC_ACQUISITION_POLICY_VERSION = "2026-09-10.document-downloads-v7";
 export const EPIC_BETA_FHIR_PAGE_COUNT = "100";
 
 const REQUIRED_BASE_SCOPES = Object.freeze(["fhirUser", "launch/patient", "openid"] as const);
@@ -17,18 +20,6 @@ export const EPIC_BETA_REQUESTED_BASE_SCOPES = Object.freeze([
   "launch/patient",
 ] as const);
 export type EpicFhirOperation = "read" | "search";
-export type EpicQueryStatus = "active-beta" | "disabled";
-export type EpicDependencyPurpose =
-  | "attachment"
-  | "author"
-  | "context"
-  | "location"
-  | "medication"
-  | "order"
-  | "performer"
-  | "provenance"
-  | "result-member"
-  | "specimen";
 
 export interface EpicRegistrationApi {
   epicCatalogName: string;
@@ -37,63 +28,23 @@ export interface EpicRegistrationApi {
   resourceType: string;
 }
 
-export interface EpicQueryTemplate {
+export interface EpicQuery {
+  queryScopeId: string;
+  resourceType: ClinicalFhirRetrievalSlice["resourceType"];
+  operation: EpicFhirOperation;
   fingerprintTemplate: string;
   fixedSearchParameters: readonly Readonly<{ name: string; value: string }>[];
-  id: string;
-  operation: EpicFhirOperation;
-  patientBinding: "path-id" | "patient-search-parameter";
-  resourceType: string;
-  windowParameter?: string;
-}
-
-export type EpicSlicingPolicy =
-  | Readonly<{
-      id: string;
-      kind: "whole-scope";
-    }>
-  | Readonly<{
-      direction: "newest-first";
-      id: string;
-      initialWindowDays: number;
-      kind: "bounded-window";
-      minimumWindowDays: number;
-      overlapDays: number;
-    }>;
-
-export interface EpicDependencyPolicy {
-  allowedParentQueryScopeIds: readonly string[];
-  countsTowardParentSliceLimits: true;
-  id: string;
-  maxTraversalDepth: 2;
-  operation: EpicFhirOperation;
-  purpose: EpicDependencyPurpose;
   registrationApiKeys: readonly string[];
-  resourceType: string;
-  sameFhirBaseOnly: true;
-}
-
-export interface EpicQueryScopePolicy {
-  activeOrder?: number;
-  dependencyPolicyIds: readonly string[];
-  queryScopeId: string;
-  queryTemplateId: string;
-  registrationApiKeys: readonly string[];
-  requiredOperations: readonly EpicFhirOperation[];
-  resourceType: string;
-  slicingPolicyId: string;
-  status: EpicQueryStatus;
+  // Provider-native clinical-date filter; also used for overlapping daily checks.
+  legacyWindowParameter?: string;
 }
 
 export interface EpicAcquisitionPolicy {
-  dependencyPolicies: readonly EpicDependencyPolicy[];
   id: string;
   policyVersion: string;
-  queryScopes: readonly EpicQueryScopePolicy[];
-  queryTemplates: readonly EpicQueryTemplate[];
+  queries: readonly EpicQuery[];
   registrationApis: readonly EpicRegistrationApi[];
   requestedBaseScopes: readonly string[];
-  slicingPolicies: readonly EpicSlicingPolicy[];
   sourceSystem: "epic-fhir";
 }
 
@@ -135,252 +86,419 @@ const REGISTRATION_APIS = [
   registrationApi("service-request-read-orders", "ServiceRequest.Read (Orders) (R4)", "ServiceRequest", "read"),
   registrationApi("service-request-search-orders", "ServiceRequest.Search (Orders) (R4)", "ServiceRequest", "search"),
   registrationApi("specimen-read-patient-chart", "Specimen.Read (Patient Chart) (R4)", "Specimen", "read"),
+  registrationApi("document-reference-search-radiology-results", "DocumentReference.Search (Radiology Results) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-external-ccda", "DocumentReference.Search (External CCDA) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-outside-clinical-notes", "DocumentReference.Search (Outside Record - Clinical Notes) (R4)", "DocumentReference", "search"),
+  registrationApi("observation-search-outside-vital-signs", "Observation.Search (Outside Record Vital Signs) (R4)", "Observation", "search"),
+  registrationApi("binary-read-external-ccda", "Binary.Read (External CCDA) (R4)", "Binary", "read"),
+  registrationApi("binary-read-outside-clinical-notes", "Binary.Read (Outside Record - Clinical Notes) (R4)", "Binary", "read"),
+  registrationApi("binary-read-radiology-results", "Binary.Read (Radiology Results) (R4)", "Binary", "read"),
+  registrationApi("binary-read-labs", "Binary.Read (Labs) (R4)", "Binary", "read"),
+  registrationApi("binary-read-generated-cdas", "Binary.Read (Generated CDAs) (R4)", "Binary", "read"),
+  registrationApi("binary-read-questionnaires", "Binary.Read (Patient-Entered Questionnaires) (R4)", "Binary", "read"),
+  registrationApi("binary-read-correspondences", "Binary.Read (Correspondences) (R4)", "Binary", "read"),
+  registrationApi("binary-read-handoff", "Binary.Read (Handoff) (R4)", "Binary", "read"),
+  registrationApi("binary-read-minimum-data-set", "Binary.Read (Minimum Data Set) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-labs", "DocumentReference.Search (Labs) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-generated-cdas", "DocumentReference.Search (Generated CDAs) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-questionnaires", "DocumentReference.Search (Patient-Entered Questionnaires) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-correspondences", "DocumentReference.Search (Correspondences) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-handoff", "DocumentReference.Search (Handoff) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-minimum-data-set", "DocumentReference.Search (Minimum Data Set) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-document-information", "Binary.Read (Document Information) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-document-information", "DocumentReference.Search (Document Information) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-clinical-references", "Binary.Read (Clinical References) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-clinical-references", "DocumentReference.Search (Clinical References) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-his", "Binary.Read (HIS) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-his", "DocumentReference.Search (HIS) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-oasis", "Binary.Read (OASIS) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-oasis", "DocumentReference.Search (OASIS) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-irf-pai", "Binary.Read (IRF-PAI) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-irf-pai", "DocumentReference.Search (IRF-PAI) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-advance-directive", "Binary.Read (Advance Directive) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-advance-directive", "DocumentReference.Search (Advance Directive) (R4)", "DocumentReference", "search"),
+  registrationApi("media-read-study", "Media.Read (Study) (R4)", "Media", "read"),
+  registrationApi("binary-read-study", "Binary.Read (Study) (R4)", "Binary", "read"),
 ] as const satisfies readonly EpicRegistrationApi[];
 
-const QUERY_TEMPLATES = [
-  searchTemplate("allergies-search", "AllergyIntolerance"),
-  searchTemplate("care-plans-search", "CarePlan"),
-  searchTemplate("care-teams-search", "CareTeam"),
-  searchTemplate("condition-encounter-diagnoses-search", "Condition", { category: "encounter-diagnosis" }),
-  searchTemplate("condition-problem-list-search", "Condition", { category: "problem-list-item" }),
-  searchTemplate("device-implants-search", "Device"),
-  searchTemplate("diagnostic-reports-search", "DiagnosticReport", {}, undefined, "epic-fhir-r4:DiagnosticReport:search:patient:_count={pageCount}:v1"),
-  searchTemplate("document-references-notes-search", "DocumentReference", { category: "clinical-note" }, "period"),
-  searchTemplate("encounters-search", "Encounter", {}, "date"),
-  searchTemplate("family-member-history-search", "FamilyMemberHistory"),
-  searchTemplate("immunizations-search", "Immunization", {}, "date"),
-  searchTemplate("laboratory-observations-search", "Observation", { category: "laboratory" }, undefined, "epic-fhir-r4:Observation:search:patient:category=laboratory:_count={pageCount}:v1"),
-  searchTemplate("medication-dispenses-search", "MedicationDispense"),
-  searchTemplate("medication-requests-search", "MedicationRequest"),
-  searchTemplate("observation-assessments-search", "Observation", { category: "survey" }, "date"),
-  searchTemplate("observation-sdoh-assessments-search", "Observation", { category: "sdoh" }, "date"),
-  searchTemplate("observation-social-history-search", "Observation", { category: "social-history" }, "issued"),
+const QUERIES: readonly EpicQuery[] = [
   {
+    queryScopeId: "patient-demographics",
+    resourceType: "Patient",
+    operation: "read",
     fingerprintTemplate: "epic-fhir-r4:Patient:read-by-launch-patient:v1",
     fixedSearchParameters: [],
-    id: "patient-demographics-read",
-    operation: "read",
-    patientBinding: "path-id",
-    resourceType: "Patient",
-  },
-  searchTemplate("procedure-orders-search", "Procedure", {}, "date"),
-  searchTemplate("procedure-surgeries-search", "Procedure", { category: "387713003" }, "date"),
-  searchTemplate("procedure-surgical-history-search", "Procedure", { category: "387713003" }),
-  searchTemplate("provider-goals-search", "Goal"),
-  searchTemplate("service-requests-search", "ServiceRequest"),
-  searchTemplate("vital-sign-observations-search", "Observation", { category: "vital-signs" }, "date"),
-] as const satisfies readonly EpicQueryTemplate[];
-
-const SLICING_POLICIES = [
-  {
-    direction: "newest-first",
-    id: "bounded-date-365d",
-    initialWindowDays: 365,
-    kind: "bounded-window",
-    minimumWindowDays: 1,
-    overlapDays: 1,
+    registrationApiKeys: ["patient-read-demographics"],
   },
   {
-    direction: "newest-first",
-    id: "bounded-period-90d",
-    initialWindowDays: 90,
-    kind: "bounded-window",
-    minimumWindowDays: 1,
-    overlapDays: 1,
+    queryScopeId: "laboratory-observations",
+    resourceType: "Observation",
+    operation: "search",
+    fingerprintTemplate:
+      "epic-fhir-r4:Observation:search:patient:category=laboratory:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "laboratory" }],
+    registrationApiKeys: ["observation-search-labs"],
   },
-  { id: "whole-scope", kind: "whole-scope" },
-] as const satisfies readonly EpicSlicingPolicy[];
+  {
+    queryScopeId: "diagnostic-reports",
+    resourceType: "DiagnosticReport",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DiagnosticReport:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["diagnostic-report-search-results"],
+  },
+  {
+    queryScopeId: "allergies",
+    resourceType: "AllergyIntolerance",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:AllergyIntolerance:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["allergy-intolerance-search-patient-chart"],
+  },
+  {
+    queryScopeId: "care-plans",
+    resourceType: "CarePlan",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:CarePlan:search:patient:category=38717003:_count={pageCount}:v2",
+    fixedSearchParameters: [{ name: "category", value: "38717003" }],
+    registrationApiKeys: ["care-plan-search-longitudinal"],
+  },
+  {
+    queryScopeId: "care-teams",
+    resourceType: "CareTeam",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:CareTeam:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["care-team-search-longitudinal"],
+  },
+  {
+    queryScopeId: "condition-encounter-diagnoses",
+    resourceType: "Condition",
+    operation: "search",
+    fingerprintTemplate:
+      "epic-fhir-r4:Condition:search:patient:category=encounter-diagnosis:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "encounter-diagnosis" }],
+    registrationApiKeys: ["condition-search-encounter-diagnosis"],
+  },
+  {
+    queryScopeId: "condition-problem-list",
+    resourceType: "Condition",
+    operation: "search",
+    fingerprintTemplate:
+      "epic-fhir-r4:Condition:search:patient:category=problem-list-item:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "problem-list-item" }],
+    registrationApiKeys: ["condition-search-problems"],
+  },
+  {
+    queryScopeId: "device-implants",
+    resourceType: "Device",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:Device:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["device-search-implants"],
+  },
+  {
+    queryScopeId: "document-references-notes",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate:
+      "epic-fhir-r4:DocumentReference:search:patient:category=clinical-note:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "clinical-note" }],
+    registrationApiKeys: ["document-reference-search-clinical-notes", "document-reference-search-labs"],
+    legacyWindowParameter: "period",
+  },
+  {
+    queryScopeId: "encounters",
+    resourceType: "Encounter",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:Encounter:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["encounter-search-patient-chart"],
+    legacyWindowParameter: "date",
+  },
+  {
+    queryScopeId: "family-member-history",
+    resourceType: "FamilyMemberHistory",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:FamilyMemberHistory:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["family-member-history-search"],
+  },
+  {
+    queryScopeId: "immunizations",
+    resourceType: "Immunization",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:Immunization:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["immunization-search-patient-chart"],
+    legacyWindowParameter: "date",
+  },
+  {
+    queryScopeId: "medication-dispenses",
+    resourceType: "MedicationDispense",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:MedicationDispense:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["medication-dispense-search-fill-status"],
+  },
+  {
+    queryScopeId: "medication-requests",
+    resourceType: "MedicationRequest",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:MedicationRequest:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["medication-request-search-signed-order"],
+  },
+  {
+    queryScopeId: "observation-assessments",
+    resourceType: "Observation",
+    operation: "search",
+    fingerprintTemplate:
+      "epic-fhir-r4:Observation:search:patient:category=survey:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "survey" }],
+    registrationApiKeys: ["observation-search-assessments"],
+    legacyWindowParameter: "date",
+  },
+  {
+    queryScopeId: "observation-sdoh-assessments",
+    resourceType: "Observation",
+    operation: "search",
+    fingerprintTemplate:
+      "epic-fhir-r4:Observation:search:patient:category=sdoh:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "sdoh" }],
+    registrationApiKeys: ["observation-search-sdoh-assessments"],
+    legacyWindowParameter: "date",
+  },
+  {
+    queryScopeId: "observation-social-history",
+    resourceType: "Observation",
+    operation: "search",
+    fingerprintTemplate:
+      "epic-fhir-r4:Observation:search:patient:category=social-history:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "social-history" }],
+    registrationApiKeys: ["observation-search-social-history"],
+    legacyWindowParameter: "issued",
+  },
+  {
+    queryScopeId: "procedure-orders",
+    resourceType: "Procedure",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:Procedure:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["procedure-search-orders"],
+    legacyWindowParameter: "date",
+  },
+  {
+    queryScopeId: "procedure-surgeries",
+    resourceType: "Procedure",
+    operation: "search",
+    fingerprintTemplate:
+      "epic-fhir-r4:Procedure:search:patient:category=387713003:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "387713003" }],
+    registrationApiKeys: ["procedure-search-surgeries"],
+    legacyWindowParameter: "date",
+  },
+  {
+    queryScopeId: "procedure-surgical-history",
+    resourceType: "Procedure",
+    operation: "search",
+    fingerprintTemplate:
+      "epic-fhir-r4:Procedure:search:patient:category=387713003:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "387713003" }],
+    registrationApiKeys: ["procedure-search-surgical-history"],
+  },
+  {
+    queryScopeId: "provider-goals",
+    resourceType: "Goal",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:Goal:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["goal-search-patient"],
+  },
+  {
+    queryScopeId: "service-requests",
+    resourceType: "ServiceRequest",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:ServiceRequest:search:patient:_count={pageCount}:v1",
+    fixedSearchParameters: [],
+    registrationApiKeys: ["service-request-search-orders"],
+  },
+  {
+    queryScopeId: "vital-sign-observations",
+    resourceType: "Observation",
+    operation: "search",
+    fingerprintTemplate:
+      "epic-fhir-r4:Observation:search:patient:category=vital-signs:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "vital-signs" }],
+    registrationApiKeys: ["observation-search-vital-signs"],
+    legacyWindowParameter: "date",
+  },
 
-const DEPENDENCY_POLICIES = [
-  dependencyPolicy("binary-attachment", "Binary", "read", "attachment", ["document-references-notes"], ["binary-read-clinical-notes"]),
-  dependencyPolicy("encounter-context", "Encounter", "read", "context", [
-    "care-plans",
-    "condition-encounter-diagnoses",
-    "diagnostic-reports",
-    "document-references-notes",
-    "immunizations",
-    "laboratory-observations",
-    "observation-assessments",
-    "observation-sdoh-assessments",
-    "procedure-orders",
-    "procedure-surgeries",
-    "service-requests",
-    "vital-sign-observations",
-  ], ["encounter-read-patient-chart"]),
-  dependencyPolicy("location-context", "Location", "read", "location", ["encounters", "immunizations"], ["location-read-organizational-directory"]),
-  dependencyPolicy("medication-definition", "Medication", "read", "medication", ["medication-dispenses", "medication-requests"], ["medication-read-organization-med-list"]),
-  dependencyPolicy("medication-request-context", "MedicationRequest", "read", "order", ["medication-dispenses"], ["medication-request-read-signed-order"]),
-  dependencyPolicy("observation-result-member", "Observation", "read", "result-member", [
-    "diagnostic-reports",
-    "laboratory-observations",
-    "observation-assessments",
-    "observation-sdoh-assessments",
-  ], ["observation-read-assessment-member", "observation-read-lab-result"]),
-  dependencyPolicy("organization-context", "Organization", "read", "performer", [
-    "care-plans",
-    "care-teams",
-    "diagnostic-reports",
-    "document-references-notes",
-    "encounters",
-    "immunizations",
-    "laboratory-observations",
-    "medication-dispenses",
-    "medication-requests",
-    "procedure-orders",
-    "procedure-surgeries",
-    "provider-goals",
-    "service-requests",
-  ], ["organization-read-organizational-directory"]),
-  dependencyPolicy("practitioner-context", "Practitioner", "read", "author", [
-    "allergies",
-    "care-plans",
-    "care-teams",
-    "condition-encounter-diagnoses",
-    "condition-problem-list",
-    "diagnostic-reports",
-    "document-references-notes",
-    "encounters",
-    "immunizations",
-    "laboratory-observations",
-    "medication-dispenses",
-    "medication-requests",
-    "observation-assessments",
-    "observation-sdoh-assessments",
-    "procedure-orders",
-    "procedure-surgeries",
-    "provider-goals",
-    "service-requests",
-    "vital-sign-observations",
-  ], ["practitioner-read-organizational-directory"]),
-  dependencyPolicy("practitioner-role-context", "PractitionerRole", "read", "performer", [
-    "care-teams",
-    "document-references-notes",
-    "encounters",
-  ], ["practitioner-role-read-organizational-directory"]),
-  dependencyPolicy("provenance-target", "Provenance", "read", "provenance", [
-    "condition-problem-list",
-    "diagnostic-reports",
-    "document-references-notes",
-    "laboratory-observations",
-    "medication-requests",
-  ], ["provenance-read"]),
-  dependencyPolicy("service-request-context", "ServiceRequest", "read", "order", [
-    "diagnostic-reports",
-    "observation-sdoh-assessments",
-    "procedure-orders",
-    "procedure-surgeries",
-  ], ["service-request-read-orders"]),
-  dependencyPolicy("specimen-context", "Specimen", "read", "specimen", [
-    "diagnostic-reports",
-    "laboratory-observations",
-  ], ["specimen-read-patient-chart"]),
-] as const satisfies readonly EpicDependencyPolicy[];
+  {
+    queryScopeId: "document-references-imaging",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=imaging-result:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "imaging-result" }],
+    registrationApiKeys: ["document-reference-search-radiology-results"],
+  },
+  {
+    queryScopeId: "document-references-external-ccda",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=external-ccda:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "external-ccda" }],
+    registrationApiKeys: ["document-reference-search-external-ccda"],
+  },
+  {
+    queryScopeId: "document-references-outside-notes",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=external-clinical-note:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "external-clinical-note" }],
+    registrationApiKeys: ["document-reference-search-outside-clinical-notes"],
+  },
+  {
+    queryScopeId: "outside-vital-sign-observations",
+    resourceType: "Observation",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:Observation:search:patient:category=external-vital-signs:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "external-vital-signs" }],
+    registrationApiKeys: ["observation-search-outside-vital-signs"],
+  },
+  {
+    queryScopeId: "document-references-summaries",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=summary-document:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "summary-document" }],
+    registrationApiKeys: ["document-reference-search-generated-cdas"],
+  },
+  {
+    queryScopeId: "document-references-questionnaires",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=questionnaire-response:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "questionnaire-response" }],
+    registrationApiKeys: ["document-reference-search-questionnaires"],
+  },
+  {
+    queryScopeId: "document-references-correspondence",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=correspondence:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "correspondence" }],
+    registrationApiKeys: ["document-reference-search-correspondences"],
+  },
+  {
+    queryScopeId: "document-references-handoff",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=handoff:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "handoff" }],
+    registrationApiKeys: ["document-reference-search-handoff"],
+  },
+  {
+    queryScopeId: "document-references-assessments",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=MDS:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "MDS" }],
+    registrationApiKeys: ["document-reference-search-minimum-data-set"],
+  },
+  {
+    queryScopeId: "document-references-document-information",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=document-information:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "document-information" }],
+    registrationApiKeys: ["document-reference-search-document-information"],
+  },
+  {
+    queryScopeId: "document-references-clinical-references",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=clinical-reference:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "clinical-reference" }],
+    registrationApiKeys: ["document-reference-search-clinical-references"],
+  },
+  {
+    queryScopeId: "document-references-his",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=HIS:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "HIS" }],
+    registrationApiKeys: ["document-reference-search-his"],
+  },
+  {
+    queryScopeId: "document-references-oasis",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=OASIS:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "OASIS" }],
+    registrationApiKeys: ["document-reference-search-oasis"],
+  },
+  {
+    queryScopeId: "document-references-irf-pai",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=IRFPAI:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "IRFPAI" }],
+    registrationApiKeys: ["document-reference-search-irf-pai"],
+  },
+  {
+    queryScopeId: "document-references-advance-directive",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=42348-3:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "42348-3" }],
+    registrationApiKeys: ["document-reference-search-advance-directive"],
+  },
+  {
+    // Epic's request table uses IRFPAI; its sample request uses IRF-PAI.
+    queryScopeId: "document-references-irf-pai-hyphenated",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=IRF-PAI:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "IRF-PAI" }],
+    registrationApiKeys: ["document-reference-search-irf-pai"],
+  },
+];
 
-const ACTIVE_QUERY_SCOPE_ORDER = [
-  "patient-demographics",
-  "laboratory-observations",
-  "diagnostic-reports",
-  "allergies",
-  "care-plans",
-  "care-teams",
-  "condition-encounter-diagnoses",
-  "condition-problem-list",
-  "device-implants",
-  "document-references-notes",
-  "encounters",
-  "family-member-history",
-  "immunizations",
-  "medication-dispenses",
-  "medication-requests",
-  "observation-assessments",
-  "observation-sdoh-assessments",
-  "observation-social-history",
-  "procedure-orders",
-  "procedure-surgeries",
-  "procedure-surgical-history",
-  "provider-goals",
-  "service-requests",
-  "vital-sign-observations",
-] as const;
-
-const QUERY_SCOPES = [
-  queryScope("allergies", "AllergyIntolerance", "allergies-search", "whole-scope", ["allergy-intolerance-search-patient-chart"], ["practitioner-context"]),
-  queryScope("care-plans", "CarePlan", "care-plans-search", "whole-scope", ["care-plan-search-longitudinal"], ["encounter-context", "organization-context", "practitioner-context"]),
-  queryScope("care-teams", "CareTeam", "care-teams-search", "whole-scope", ["care-team-search-longitudinal"], ["organization-context", "practitioner-context", "practitioner-role-context"]),
-  queryScope("condition-encounter-diagnoses", "Condition", "condition-encounter-diagnoses-search", "whole-scope", ["condition-search-encounter-diagnosis"], ["encounter-context", "practitioner-context"]),
-  queryScope("condition-problem-list", "Condition", "condition-problem-list-search", "whole-scope", ["condition-search-problems"], ["practitioner-context", "provenance-target"]),
-  queryScope("device-implants", "Device", "device-implants-search", "whole-scope", ["device-search-implants"], []),
-  queryScope("diagnostic-reports", "DiagnosticReport", "diagnostic-reports-search", "whole-scope", ["diagnostic-report-search-results"], []),
-  queryScope("document-references-notes", "DocumentReference", "document-references-notes-search", "bounded-period-90d", ["document-reference-search-clinical-notes"], ["binary-attachment", "encounter-context", "organization-context", "practitioner-context", "practitioner-role-context", "provenance-target"]),
-  queryScope("encounters", "Encounter", "encounters-search", "bounded-date-365d", ["encounter-search-patient-chart"], ["location-context", "organization-context", "practitioner-context", "practitioner-role-context"]),
-  queryScope("family-member-history", "FamilyMemberHistory", "family-member-history-search", "whole-scope", ["family-member-history-search"], []),
-  queryScope("immunizations", "Immunization", "immunizations-search", "bounded-date-365d", ["immunization-search-patient-chart"], ["encounter-context", "location-context", "organization-context", "practitioner-context"]),
-  queryScope("laboratory-observations", "Observation", "laboratory-observations-search", "whole-scope", ["observation-search-labs"], []),
-  queryScope("medication-dispenses", "MedicationDispense", "medication-dispenses-search", "whole-scope", ["medication-dispense-search-fill-status"], ["medication-definition", "medication-request-context", "organization-context", "practitioner-context"]),
-  queryScope("medication-requests", "MedicationRequest", "medication-requests-search", "whole-scope", ["medication-request-search-signed-order"], ["medication-definition", "organization-context", "practitioner-context", "provenance-target"]),
-  queryScope("observation-assessments", "Observation", "observation-assessments-search", "bounded-date-365d", ["observation-search-assessments"], ["encounter-context", "observation-result-member", "practitioner-context"]),
-  queryScope("observation-sdoh-assessments", "Observation", "observation-sdoh-assessments-search", "bounded-date-365d", ["observation-search-sdoh-assessments"], ["encounter-context", "observation-result-member", "practitioner-context", "service-request-context"]),
-  queryScope("observation-social-history", "Observation", "observation-social-history-search", "bounded-date-365d", ["observation-search-social-history"], []),
-  queryScope("patient-demographics", "Patient", "patient-demographics-read", "whole-scope", ["patient-read-demographics"], []),
-  queryScope("procedure-orders", "Procedure", "procedure-orders-search", "bounded-date-365d", ["procedure-search-orders"], ["encounter-context", "organization-context", "practitioner-context", "service-request-context"]),
-  queryScope("procedure-surgeries", "Procedure", "procedure-surgeries-search", "bounded-date-365d", ["procedure-search-surgeries"], ["encounter-context", "organization-context", "practitioner-context", "service-request-context"]),
-  queryScope("procedure-surgical-history", "Procedure", "procedure-surgical-history-search", "whole-scope", ["procedure-search-surgical-history"], []),
-  queryScope("provider-goals", "Goal", "provider-goals-search", "whole-scope", ["goal-search-patient"], ["organization-context", "practitioner-context"]),
-  queryScope("service-requests", "ServiceRequest", "service-requests-search", "whole-scope", ["service-request-search-orders"], ["encounter-context", "organization-context", "practitioner-context"]),
-  queryScope("vital-sign-observations", "Observation", "vital-sign-observations-search", "bounded-date-365d", ["observation-search-vital-signs"], ["encounter-context", "practitioner-context"]),
-].map((query) => ({
-  ...query,
-  activeOrder: activeOrderForQueryScope(query.queryScopeId),
-})) satisfies readonly EpicQueryScopePolicy[];
-
-const EPIC_ACQUISITION_POLICY_INPUT = {
-  dependencyPolicies: DEPENDENCY_POLICIES,
+export const EPIC_ACQUISITION_POLICY: EpicAcquisitionPolicy = {
   id: EPIC_ACQUISITION_POLICY_ID,
   policyVersion: EPIC_ACQUISITION_POLICY_VERSION,
-  queryScopes: QUERY_SCOPES,
-  queryTemplates: QUERY_TEMPLATES,
+  queries: QUERIES,
   registrationApis: REGISTRATION_APIS,
   requestedBaseScopes: REQUIRED_BASE_SCOPES,
-  slicingPolicies: SLICING_POLICIES,
   sourceSystem: "epic-fhir",
-} as const satisfies EpicAcquisitionPolicy;
+};
 
-export const EPIC_ACQUISITION_POLICY: EpicAcquisitionPolicy =
-  EPIC_ACQUISITION_POLICY_INPUT;
-
-const ACTIVE_QUERY_SCOPES = Object.freeze(
-  EPIC_ACQUISITION_POLICY.queryScopes
-    .filter((query) => query.status === "active-beta")
-    .sort((left, right) => (left.activeOrder ?? 0) - (right.activeOrder ?? 0)),
+// Fail closed for new or unverified APIs; the full catalog remains the frozen-plan reader.
+const AUTOMATIC_REGISTRATION_KEYS: ReadonlySet<string> = new Set(
+  registrationEvidence.apis.filter((api) => api.automaticDistribution).map((api) => api.key),
 );
+export const EPIC_AUTOMATIC_REGISTRATION_APIS = REGISTRATION_APIS.filter((api) =>
+  AUTOMATIC_REGISTRATION_KEYS.has(api.key));
+export const EPIC_AUTOMATIC_QUERIES = QUERIES.filter((query) =>
+  query.registrationApiKeys.every((key) => AUTOMATIC_REGISTRATION_KEYS.has(key)));
+export const EPIC_AUTOMATIC_RESOURCE_TYPES: readonly string[] = [...new Set(
+  EPIC_AUTOMATIC_QUERIES.map((query) => query.resourceType),
+)];
 
-export const EPIC_BETA_RESOURCE_TYPES = Object.freeze(
-  [
-    "Patient",
-    "Observation",
-    "DiagnosticReport",
-    "AllergyIntolerance",
-    "CarePlan",
-    "CareTeam",
-    "Condition",
-    "Device",
-    "DocumentReference",
-    "Encounter",
-    "FamilyMemberHistory",
-    "Immunization",
-    "MedicationDispense",
-    "MedicationRequest",
-    "Procedure",
-    "Goal",
-    "ServiceRequest",
-  ] as const,
-);
+export function isEpicAutomaticQuery(queryScopeId: string): boolean {
+  return EPIC_AUTOMATIC_QUERIES.some((query) => query.queryScopeId === queryScopeId);
+}
 
+export const EPIC_BETA_RESOURCE_TYPES = Object.freeze([
+  ...new Set(QUERIES.map((query) => query.resourceType)),
+]);
 export type EpicBetaResourceType = (typeof EPIC_BETA_RESOURCE_TYPES)[number];
 const EPIC_BETA_RESOURCE_TYPE_SET: ReadonlySet<string> = new Set(EPIC_BETA_RESOURCE_TYPES);
 type SmartPermissionVersion = "v1" | "v2";
 
 export function buildEpicBetaRetrievalPlan(input: {
+  hospitalApprovedImports?: boolean;
   frozenAt: Date;
   pageCount: string;
   resourceTypes: readonly string[];
@@ -392,36 +510,31 @@ export function buildEpicBetaRetrievalPlan(input: {
   }
   return clinicalFhirRetrievalPlanSchema.parse({
     schemaVersion: "murph.clinical-retrieval-plan.v1",
-    slices: ACTIVE_QUERY_SCOPES
-      .filter((query) => requestedResourceTypes.has(query.resourceType))
-      .map((query) => buildActiveRetrievalSlice({
+    slices: (input.hospitalApprovedImports ? QUERIES : EPIC_AUTOMATIC_QUERIES)
+      .filter((query) => requestedResourceTypes.has(query.resourceType)).map((query) =>
+      buildActiveRetrievalSlice({
         frozenAt: input.frozenAt,
         pageCount: input.pageCount,
         query,
-      })),
+      }),
+    ),
   });
 }
 
-export function buildEpicLegacyBetaRetrievalPlan(input: {
-  pageCount: string;
-  resourceTypes: readonly string[];
+/** Recent clinical dates reduce daily work; every seventh check includes older corrections. */
+export function buildEpicDailyRetrievalPlan(input: {
+  previous: ClinicalFhirRetrievalPlan; now: Date; generation: number;
 }): ClinicalFhirRetrievalPlan {
+  const from = new Date(input.now.getTime() - 7 * 86_400_000).toISOString();
+  const to = new Date(input.now.getTime() + 86_400_000).toISOString();
   return clinicalFhirRetrievalPlanSchema.parse({
-    schemaVersion: "murph.clinical-retrieval-plan.v1",
-    slices: input.resourceTypes.map((resourceType) => {
-      const queryScopeId = legacyQueryScopeIdForResource(resourceType);
-      return {
-        coverage: "whole-family",
-        queryFingerprint: sha256Hex(
-          buildEpicBetaRetrievalQueryFingerprintInput({
-            pageCount: input.pageCount,
-            queryScopeId,
-          }),
-        ),
-        queryScopeId,
-        resourceType,
-        sliceId: "whole",
-      };
+    schemaVersion: input.previous.schemaVersion,
+    slices: input.previous.slices.map((slice) => {
+      const query = requireActiveQueryForScope(slice.queryScopeId);
+      const identity = { resourceType: slice.resourceType, queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint };
+      return query.legacyWindowParameter && input.generation % 7 !== 0
+        ? { ...identity, coverage: "bounded-window", sliceId: `daily-${input.now.toISOString().slice(0, 10)}`, from, to }
+        : { ...identity, coverage: "whole-family", sliceId: "whole" };
     }),
   });
 }
@@ -431,13 +544,36 @@ export function buildEpicBetaSmartResourceScope(input: {
   resourceType: string;
 }): string {
   const queries = requireActiveQueriesForResource(input.resourceType);
-  const permission = input.permissionVersion === "v1"
-    ? "read"
-    : (["read", "search"] as const)
-      .filter((operation) => queries.some((query) => query.requiredOperations.includes(operation)))
-      .map((operation) => operation === "read" ? "r" : "s")
-      .join("");
+  const permission =
+    input.permissionVersion === "v1"
+      ? "read"
+      : (["read", "search"] as const)
+          .filter((operation) => queries.some((query) => query.operation === operation))
+          .map((operation) => (operation === "read" ? "r" : "s"))
+          .join("");
   return `patient/${input.resourceType}.${permission}`;
+}
+
+export function buildEpicBinarySmartResourceScope(input: {
+  permissionVersion: SmartPermissionVersion;
+}): string {
+  return input.permissionVersion === "v1" ? "patient/Binary.read" : "patient/Binary.r";
+}
+
+export function epicBinaryReadIsGranted(scopes: readonly string[]): boolean {
+  return scopes.some((scope) => scope.startsWith("patient/")
+    && clinicalFhirScopeAllowsOperation(scope, "Binary", "read"));
+}
+
+export function buildEpicMediaSmartResourceScope(input: {
+  permissionVersion: SmartPermissionVersion;
+}): string {
+  return input.permissionVersion === "v1" ? "patient/Media.read" : "patient/Media.r";
+}
+
+export function epicMediaReadIsGranted(scopes: readonly string[]): boolean {
+  return scopes.some((scope) => scope.startsWith("patient/")
+    && clinicalFhirScopeAllowsOperation(scope, "Media", "read"));
 }
 
 export function readGrantedEpicBetaResourceTypes(
@@ -447,11 +583,13 @@ export function readGrantedEpicBetaResourceTypes(
   const candidates = candidateResourceTypes.filter(isEpicBetaResourceType);
   return candidates.filter((resourceType) => {
     const requiredOperations = new Set(
-      requireActiveQueriesForResource(resourceType).flatMap((query) => query.requiredOperations),
+      requireActiveQueriesForResource(resourceType).flatMap((query) => [query.operation]),
     );
-    return scopes.some((scope) => [...requiredOperations].every((operation) =>
-      scopeGrantsEpicOperation(scope, resourceType, operation)
-    ));
+    return scopes.some((scope) =>
+      [...requiredOperations].every((operation) =>
+        scopeGrantsEpicOperation(scope, resourceType, operation),
+      ),
+    );
   });
 }
 
@@ -460,7 +598,7 @@ export function buildEpicBetaRetrievalQueryFingerprintInput(input: {
   queryScopeId: string;
 }): string {
   const query = requireActiveQueryForScope(input.queryScopeId);
-  const template = requireQueryTemplate(query.queryTemplateId);
+  const template = query;
   return template.fingerprintTemplate.replaceAll("{pageCount}", input.pageCount);
 }
 
@@ -477,34 +615,35 @@ export function buildEpicBetaInitialFhirPageUrl(input: {
       queryScopeId: query.queryScopeId,
     }),
   );
+  // Frozen pre-fix runs keep their original request identity during deployment.
+  const legacyCarePlan = query.queryScopeId === "care-plans" && input.retrievalSlice.queryFingerprint
+    === sha256Hex(`epic-fhir-r4:CarePlan:search:patient:_count=${input.pageCount}:v1`);
   if (
-    query.resourceType !== input.retrievalSlice.resourceType
-    || expectedQueryFingerprint !== input.retrievalSlice.queryFingerprint
+    query.resourceType !== input.retrievalSlice.resourceType ||
+    (!legacyCarePlan && expectedQueryFingerprint !== input.retrievalSlice.queryFingerprint)
   ) {
     throw new TypeError("Epic beta retrieval identity does not match its active query scope.");
   }
-  const template = requireQueryTemplate(query.queryTemplateId);
-  const slicingPolicy = requireSlicingPolicy(query.slicingPolicyId);
+  const template = query;
+  const windowParameter = query.legacyWindowParameter;
   if (
-    (slicingPolicy.kind === "whole-scope"
-      && (input.retrievalSlice.coverage !== "whole-family" || input.retrievalSlice.sliceId !== "whole"))
-    || (slicingPolicy.kind === "bounded-window"
-      && (input.retrievalSlice.coverage !== "bounded-window" || !template.windowParameter))
+    (input.retrievalSlice.coverage === "whole-family" && input.retrievalSlice.sliceId !== "whole") ||
+    (input.retrievalSlice.coverage === "bounded-window" && !windowParameter)
   ) {
     throw new TypeError("Epic beta retrieval slice does not match its active slicing policy.");
   }
   const base = input.fhirBaseUrl.replace(/\/+$/u, "");
-  if (template.patientBinding === "path-id") {
+  if (template.operation === "read") {
     return new URL(`${base}/${template.resourceType}/${encodeURIComponent(input.patientId)}`);
   }
   const url = new URL(`${base}/${template.resourceType}`);
   url.searchParams.set("patient", input.patientId);
-  for (const parameter of template.fixedSearchParameters) {
+  for (const parameter of legacyCarePlan ? [] : template.fixedSearchParameters) {
     url.searchParams.set(parameter.name, parameter.value);
   }
-  if (input.retrievalSlice.coverage === "bounded-window" && template.windowParameter) {
-    url.searchParams.append(template.windowParameter, `ge${input.retrievalSlice.from}`);
-    url.searchParams.append(template.windowParameter, `lt${input.retrievalSlice.to}`);
+  if (input.retrievalSlice.coverage === "bounded-window" && windowParameter) {
+    url.searchParams.append(windowParameter, `ge${input.retrievalSlice.from}`);
+    url.searchParams.append(windowParameter, `lt${input.retrievalSlice.to}`);
   }
   url.searchParams.set("_count", input.pageCount);
   return url;
@@ -523,96 +662,18 @@ function registrationApi(
   return { epicCatalogName, key, operation, resourceType };
 }
 
-function searchTemplate(
-  id: string,
-  resourceType: string,
-  fixedParameters: Readonly<Record<string, string>> = {},
-  windowParameter?: string,
-  fingerprintTemplate?: string,
-): EpicQueryTemplate {
-  const fixedSearchParameters = Object.entries(fixedParameters)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([name, value]) => ({ name, value }));
-  const fixedFingerprint = fixedSearchParameters
-    .map((parameter) => `${parameter.name}=${parameter.value}`)
-    .join(":");
-  return {
-    fingerprintTemplate: fingerprintTemplate
-      ?? ["epic-fhir-r4", resourceType, "search", "patient", fixedFingerprint, "_count={pageCount}", "v1"]
-        .filter(Boolean)
-        .join(":"),
-    fixedSearchParameters,
-    id,
-    operation: "search",
-    patientBinding: "patient-search-parameter",
-    resourceType,
-    ...(windowParameter ? { windowParameter } : {}),
-  };
-}
-
-function dependencyPolicy(
-  id: string,
-  resourceType: string,
-  operation: EpicFhirOperation,
-  purpose: EpicDependencyPurpose,
-  allowedParentQueryScopeIds: readonly string[],
-  registrationApiKeys: readonly string[],
-): EpicDependencyPolicy {
-  return {
-    allowedParentQueryScopeIds,
-    countsTowardParentSliceLimits: true,
-    id,
-    maxTraversalDepth: 2,
-    operation,
-    purpose,
-    registrationApiKeys,
-    resourceType,
-    sameFhirBaseOnly: true,
-  };
-}
-
-function queryScope(
-  queryScopeId: string,
-  resourceType: string,
-  queryTemplateId: string,
-  slicingPolicyId: string,
-  registrationApiKeys: readonly string[],
-  dependencyPolicyIds: readonly string[],
-): EpicQueryScopePolicy {
-  return {
-    dependencyPolicyIds,
-    queryScopeId,
-    queryTemplateId,
-    registrationApiKeys,
-    requiredOperations: [queryTemplateId.endsWith("-read") ? "read" : "search"],
-    resourceType,
-    slicingPolicyId,
-    status: "active-beta",
-  };
-}
-
-function activeOrderForQueryScope(queryScopeId: string): number {
-  const activeOrder = ACTIVE_QUERY_SCOPE_ORDER.findIndex(
-    (candidate) => candidate === queryScopeId,
-  );
-  if (activeOrder < 0) {
-    throw new TypeError(`FHIR query scope ${queryScopeId} is missing from the Epic activation order.`);
-  }
-  return activeOrder;
-}
-
-function requireActiveQueriesForResource(resourceType: string): EpicQueryScopePolicy[] {
-  const queries = ACTIVE_QUERY_SCOPES.filter((candidate) => candidate.resourceType === resourceType);
+function requireActiveQueriesForResource(resourceType: string): EpicQuery[] {
+  const queries = QUERIES.filter((candidate) => candidate.resourceType === resourceType);
   if (queries.length === 0) {
-    throw new TypeError(`FHIR resource type ${resourceType} is outside the active Epic beta acquisition policy.`);
+    throw new TypeError(
+      `FHIR resource type ${resourceType} is outside the active Epic beta acquisition policy.`,
+    );
   }
   return queries;
 }
 
-function requireActiveQueryForScope(queryScopeId: string): EpicQueryScopePolicy {
-  const query = ACTIVE_QUERY_SCOPES.find(
-    (candidate) => candidate.queryScopeId === queryScopeId,
-  );
+function requireActiveQueryForScope(queryScopeId: string): EpicQuery {
+  const query = QUERIES.find((candidate) => candidate.queryScopeId === queryScopeId);
   if (!query) {
     throw new TypeError(
       `FHIR query scope ${queryScopeId} is outside the active Epic beta acquisition policy.`,
@@ -621,24 +682,10 @@ function requireActiveQueryForScope(queryScopeId: string): EpicQueryScopePolicy 
   return query;
 }
 
-function requireQueryTemplate(queryTemplateId: string): EpicQueryTemplate {
-  const template = EPIC_ACQUISITION_POLICY.queryTemplates.find((candidate) => candidate.id === queryTemplateId);
-  if (!template) throw new TypeError("Epic query scope references an unknown query template.");
-  return template;
-}
-
-function requireSlicingPolicy(slicingPolicyId: string): EpicSlicingPolicy {
-  const policy = EPIC_ACQUISITION_POLICY.slicingPolicies.find(
-    (candidate) => candidate.id === slicingPolicyId,
-  );
-  if (!policy) throw new TypeError("Epic query scope references an unknown slicing policy.");
-  return policy;
-}
-
 function buildActiveRetrievalSlice(input: {
   frozenAt: Date;
   pageCount: string;
-  query: EpicQueryScopePolicy;
+  query: EpicQuery;
 }): ClinicalFhirRetrievalSlice {
   const resourceType = requireEpicBetaResourceType(input.query.resourceType);
   const queryFingerprint = sha256Hex(
@@ -647,53 +694,28 @@ function buildActiveRetrievalSlice(input: {
       queryScopeId: input.query.queryScopeId,
     }),
   );
-  const slicingPolicy = requireSlicingPolicy(input.query.slicingPolicyId);
-  if (slicingPolicy.kind === "whole-scope") {
-    return {
-      coverage: "whole-family",
-      queryFingerprint,
-      queryScopeId: input.query.queryScopeId,
-      resourceType,
-      sliceId: "whole",
-    };
-  }
-  const to = input.frozenAt.toISOString();
-  const from = new Date(
-    input.frozenAt.getTime() - slicingPolicy.initialWindowDays * 24 * 60 * 60 * 1_000,
-  ).toISOString();
   return {
-    coverage: "bounded-window",
-    from,
+    coverage: "whole-family",
     queryFingerprint,
     queryScopeId: input.query.queryScopeId,
     resourceType,
-    sliceId: `window-${compactIsoDate(from)}-${compactIsoDate(to)}`,
-    to,
+    sliceId: "whole",
   };
 }
 
 function requireEpicBetaResourceType(value: string): EpicBetaResourceType {
   if (!isEpicBetaResourceType(value)) {
-    throw new TypeError(`FHIR resource type ${value} is outside the active Epic beta acquisition policy.`);
+    throw new TypeError(
+      `FHIR resource type ${value} is outside the active Epic beta acquisition policy.`,
+    );
   }
   return value;
 }
 
-function legacyQueryScopeIdForResource(resourceType: string): string {
-  if (resourceType === "Patient") return "patient-demographics";
-  if (resourceType === "Observation") return "laboratory-observations";
-  if (resourceType === "DiagnosticReport") return "diagnostic-reports";
-  throw new TypeError(`FHIR resource type ${resourceType} is outside the legacy Epic beta acquisition policy.`);
-}
-
-function compactIsoDate(value: string): string {
-  return value.slice(0, 10).replaceAll("-", "");
-}
 
 function assertValidFrozenAt(value: Date): void {
-  if (!Number.isFinite(value.getTime())) {
+  if (!Number.isFinite(value.getTime()))
     throw new TypeError("Epic retrieval plan requires a valid frozen timestamp.");
-  }
 }
 
 function scopeGrantsEpicOperation(
@@ -701,12 +723,9 @@ function scopeGrantsEpicOperation(
   resourceType: EpicBetaResourceType,
   operation: EpicFhirOperation,
 ): boolean {
-  const match = /^patient\/([A-Z][A-Za-z0-9]+|\*)\.([a-z]+)$/u.exec(scope);
-  if (!match || (match[1] !== "*" && match[1] !== resourceType)) return false;
-  const permission = match[2] ?? "";
-  if (permission === "read") return true;
-  if (!/^c?r?u?d?s?$/u.test(permission)) return false;
-  return permission.includes(operation === "read" ? "r" : "s");
+  return (
+    scope.startsWith("patient/") && clinicalFhirScopeAllowsOperation(scope, resourceType, operation)
+  );
 }
 
 function sha256Hex(value: string): string {

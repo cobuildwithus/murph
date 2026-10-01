@@ -10,7 +10,8 @@ const mocks = vi.hoisted(() => ({
   replaceHostedInferenceConnection: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   requirePersonalHostedInferenceMember: vi.fn(),
-  scheduleHostedInferenceRuntimeWake: vi.fn(),
+  after: vi.fn(),
+  signalHostedRuntimeWakeRuntime: vi.fn(),
   verifyHostedInferenceConnectionCandidate: vi.fn(),
 }));
 
@@ -30,9 +31,13 @@ vi.mock(
   }),
 );
 
-vi.mock("@/src/lib/hosted-inference/runtime-wake", () => ({
-  scheduleHostedInferenceRuntimeWake:
-    mocks.scheduleHostedInferenceRuntimeWake,
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  after: mocks.after,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedRuntimeWakeRuntime: mocks.signalHostedRuntimeWakeRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-inference/verification-client", () => ({
@@ -65,7 +70,7 @@ const CONNECTION_VIEW = {
   revision: 3,
   selected: false,
   supportsImages: false,
-  verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
+  verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
   verifiedAt: "2026-07-30T12:00:00.000Z",
 };
 
@@ -104,6 +109,8 @@ describe("custom inference connection settings route", () => {
   });
 
   afterEach(() => {
+    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeWakeRuntime).not.toHaveBeenCalled();
     vi.unstubAllEnvs();
   });
 
@@ -143,9 +150,6 @@ describe("custom inference connection settings route", () => {
     ).toBeLessThan(
       mocks.replaceHostedInferenceConnection.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(mocks.scheduleHostedInferenceRuntimeWake).toHaveBeenCalledWith(
-      "member_inference_settings",
-    );
   });
 
   it("preserves the current connection when verification fails", async () => {
@@ -164,10 +168,9 @@ describe("custom inference connection settings route", () => {
 
     expect(response.status).toBe(422);
     expect(mocks.replaceHostedInferenceConnection).not.toHaveBeenCalled();
-    expect(mocks.scheduleHostedInferenceRuntimeWake).not.toHaveBeenCalled();
   });
 
-  it("wakes the runtime only when deleting the active connection", async () => {
+  it("deletes dormant and active connections without scheduling runtime work", async () => {
     mocks.deleteHostedInferenceConnection
       .mockResolvedValueOnce({ deleted: true, selected: false })
       .mockResolvedValueOnce({ deleted: true, selected: true });
@@ -181,7 +184,6 @@ describe("custom inference connection settings route", () => {
 
     expect(dormant.status).toBe(200);
     expect(active.status).toBe(200);
-    expect(mocks.scheduleHostedInferenceRuntimeWake).toHaveBeenCalledOnce();
   });
 
   it("keeps the API unavailable while the rollout flag is off", async () => {

@@ -2,6 +2,7 @@ import type { CanonicalEntity } from "../canonical-entities.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { buildPersonalPatternReportFromWearableBundleAndMetricPoints } from "../personal-patterns.ts";
+import { buildJournalView } from "../journal-view.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
@@ -55,10 +56,13 @@ import { toBrowserVaultLabResultRows } from "./lab-results.ts";
 import { projectBrowserTrainingSession } from "./training.ts";
 import { buildBrowserVaultExperimentRunCards } from "./experiment-run-cards.ts";
 import { createBrowserVaultProjectionQueryClient } from "./query.ts";
+import { stringifyJsonCooperatively } from "./json.ts";
+import { cloneJson, isBrowserSafeJson } from "./json-values.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
 ): Promise<BrowserVaultReplica> {
+  input.signal?.throwIfAborted();
   const generatedAt = input.generatedAt
     ? requireIsoDateTime(input.generatedAt, "Browser vault replica generatedAt")
     : new Date().toISOString();
@@ -70,26 +74,31 @@ export async function createBrowserVaultReplica(
   const timelineRows = buildTimeline(defaultProjectedVault, { limit: TIMELINE_LIMIT })
     .map(projectTimelineRow);
   const weeklySampleSummaries = projectWeeklySampleSummaries(defaultProjectedVault, generatedAt);
+  await yieldToBrowserVaultReplicaCancellation(input.signal);
   const allMetricPoints = input.metricPoints;
   const requestedMetrics = collectRequestedBrowserVaultMetrics(defaultProjectedVault.entities);
   const explicitRequestedMetrics = collectExplicitBrowserVaultMetrics(defaultProjectedVault.entities);
+  const requestedMetricKeys = new Set(requestedMetrics.map((metric) => metric.metricKey));
+  const explicitRequestedMetricKeys = new Set(explicitRequestedMetrics.map((metric) => metric.metricKey));
   const anchoredMetricRecords = collectExperimentMeasurementAnchorRecords(defaultProjectedVault.entities);
   const cutoff = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
   const metricPoints = allMetricPoints.filter((point) =>
-    isBrowserVaultMetricRowPoint(point, requestedMetrics) &&
+    isBrowserVaultMetricRowPoint(point, requestedMetricKeys) &&
     (point.effectiveDate >= cutoff || isAnchoredBrowserMetricPoint(point, anchoredMetricRecords))
   );
   const selectionMetricPoints = allMetricPoints.filter((point) =>
-    isBrowserVaultRequestedMetricPoint(point, requestedMetrics) &&
+    isBrowserVaultRequestedMetricPoint(point, requestedMetricKeys) &&
     (point.effectiveDate >= cutoff ||
       isAnchoredBrowserMetricPoint(point, anchoredMetricRecords) ||
-      isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetrics))
+      isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetricKeys))
   );
+  await yieldToBrowserVaultReplicaCancellation(input.signal);
   const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
   const labResultRows = toBrowserVaultLabResultRows({
     entities: defaultProjectedVault.entities,
     points: allMetricPoints,
   });
+  await yieldToBrowserVaultReplicaCancellation(input.signal);
   const metricRowPointIds = new Set(metricRows.flatMap((row) => row.pointIds));
   const metricSelectionRows = createBrowserVaultMetricSelectionRows({
     generatedAt,
@@ -101,6 +110,16 @@ export async function createBrowserVaultReplica(
   const sourceHealthRows = summarizeWearableSourceHealth(defaultProjectedVault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
   const wearableSummaryBundle = buildWearableSummaryBundle(input.vault);
+  const personalPatterns = buildPersonalPatternReportFromWearableBundleAndMetricPoints(
+    input.vault,
+    wearableSummaryBundle,
+    allMetricPoints,
+    {
+      asOf: generatedAt,
+      vocabulary: input.personalPatternVocabulary,
+    },
+  );
+  await yieldToBrowserVaultReplicaCancellation(input.signal);
   const replicaWithoutVersion: BrowserVaultReplica = {
     assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(defaultProjectedVault)),
     entities,
@@ -115,16 +134,15 @@ export async function createBrowserVaultReplica(
       row.biomarkerKey !== null &&
       row.value !== null
     ),
+    journal: buildJournalView(input.vault, allMetricPoints, {
+      asOf: addDaysToIsoDate(generatedAt.slice(0, 10), 1),
+      vocabulary: input.personalPatternVocabulary,
+    }),
     labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,
-    personalPatterns: buildPersonalPatternReportFromWearableBundleAndMetricPoints(
-      input.vault,
-      wearableSummaryBundle,
-      allMetricPoints,
-      { asOf: generatedAt },
-    ),
+    personalPatterns,
     policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: entities.map(projectBrowserVaultSearchRow),
@@ -142,7 +160,12 @@ export async function createBrowserVaultReplica(
       createBrowserVaultProjectionQueryClient(replicaWithoutVersion),
     ),
   };
-  const dataVersion = await hashBrowserVaultReplicaData(replicaWithDerivedCards);
+  input.signal?.throwIfAborted();
+  const dataVersion = await hashBrowserVaultReplicaData(
+    replicaWithDerivedCards,
+    input.signal,
+  );
+  input.signal?.throwIfAborted();
 
   return {
     ...replicaWithDerivedCards,
@@ -153,7 +176,21 @@ export async function createBrowserVaultReplica(
   };
 }
 
-export async function hashBrowserVaultReplicaData(replica: BrowserVaultReplica): Promise<string> {
+async function yieldToBrowserVaultReplicaCancellation(
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!signal) {
+    return;
+  }
+  signal.throwIfAborted();
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  signal.throwIfAborted();
+}
+
+export async function hashBrowserVaultReplicaData(
+  replica: BrowserVaultReplica,
+  signal?: AbortSignal,
+): Promise<string> {
   const stableReplica = {
     ...replica,
     generatedAt: "",
@@ -172,7 +209,10 @@ export async function hashBrowserVaultReplicaData(replica: BrowserVaultReplica):
   };
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(stableStringify(stableReplica)),
+    new TextEncoder().encode(await stringifyJsonCooperatively(stableReplica, {
+      signal,
+      sortKeys: true,
+    })),
   );
 
   return [...new Uint8Array(digest)]
@@ -336,18 +376,18 @@ function dedupeRequestedMetrics(metrics: readonly BrowserVaultRequestedMetric[])
 // metric-SELECTION surface keeps its stricter requested-only gate.
 function isBrowserVaultMetricRowPoint(
   point: MetricPoint,
-  requestedMetrics: readonly BrowserVaultRequestedMetric[],
+  requestedMetricKeys: ReadonlySet<string>,
 ): boolean {
-  return isBrowserVaultRequestedMetricPoint(point, requestedMetrics)
+  return isBrowserVaultRequestedMetricPoint(point, requestedMetricKeys)
     || point.source.kind === "test-result"
     || point.source.kind === "observation";
 }
 
 function isBrowserVaultRequestedMetricPoint(
   point: MetricPoint,
-  requestedMetrics: readonly BrowserVaultRequestedMetric[],
+  requestedMetricKeys: ReadonlySet<string>,
 ): boolean {
-  return requestedMetrics.some((metric) => metric.metricKey === point.metricKey);
+  return requestedMetricKeys.has(point.metricKey);
 }
 
 function isActiveGoalEntity(entity: CanonicalEntity): boolean {
@@ -683,27 +723,6 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
   return [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
 }
 
-function cloneJson(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function isBrowserSafeJson(value: unknown): boolean {
-  if (value === null) {
-    return true;
-  }
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return true;
-  }
-  if (Array.isArray(value)) {
-    return value.every(isBrowserSafeJson);
-  }
-  if (typeof value === "object") {
-    return Object.values(value as Record<string, unknown>).every(isBrowserSafeJson);
-  }
-
-  return false;
-}
-
 function subtractDaysFromIsoDate(value: string, days: number): string {
   const parsed = new Date(`${value}T00:00:00.000Z`);
 
@@ -715,17 +734,6 @@ function subtractDaysFromIsoDate(value: string, days: number): string {
   return parsed.toISOString().slice(0, 10);
 }
 
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
-    .join(",")}}`;
+function addDaysToIsoDate(value: string, days: number): string {
+  return subtractDaysFromIsoDate(value, -days);
 }

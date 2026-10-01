@@ -2,7 +2,7 @@
 
 Murph is your personal health assistant.
 
-Install this package to get the main `murph` command and the full local Murph experience: onboarding, vault setup, local assistant chat, inbox capture, parser tooling, and the always-on assistant loop.
+Install this package to get the main `murph` command and the full local Murph experience: onboarding, vault setup, direct local assistant turns, inbox capture, parser tooling, and the always-on assistant loop.
 
 The repo implementation happens to live in `packages/cli`, but that is a maintainer detail. For users, `@murphai/murph` is the installable Murph package.
 
@@ -33,7 +33,7 @@ murph onboard
 Once setup is complete, the main commands are:
 
 ```bash
-murph chat
+murph assistant ask "Summarize my saved health context."
 murph run
 murph status
 ```
@@ -61,6 +61,38 @@ When you need to read from the vault, use this chooser:
 - `vault-cli wearables day` or `wearables ... list` for semantic wearable summaries
 - family `manifest` commands for immutable import provenance
 
+Clinical runtime imports save source statements as note events with a typed
+`clinicalFact` object. `clinical-note payload-schema` describes the fields for
+`clinical-note import-json --input @fact.json`; `show <event-id>` reads them back.
+Use `search query "<question or finding>"` to locate them, or
+`list --tag clinical-fact-family-history` to filter runtime facts by category.
+A null clinical date means unknown, even when the containing note has a
+documentation timestamp.
+Missing units stay absent, and source history does not establish a current
+diagnosis or a dose taken. Imports with the same external reference replay
+through the canonical event owner.
+
+Use `intake import answers.json --assessment-type clinical-observation` to
+preserve structured questionnaire answers or dated provider history without
+turning them into current diagnoses or medication use. Add
+`--questionnaire-slug <slug>` when the questionnaire is known and repeat
+`--related-id <canonical-id>` to link source records. `intake show <id>` returns
+the original structured responses; `search query "<question or finding>"`
+and `timeline` help retrieve them later. These options classify the supplied
+JSON; they do not extract facts, validate medical claims, or deduplicate imports.
+
+Use `memory show <id> --record-only` when verifying an exact known memory
+record. It returns that record and its metadata without the whole document;
+`memory show --compact` still returns all saved facts for context and conflict
+checks. Add `--compact` to memory mutations for the exact affected record plus
+the created/existed outcome; canonical persistence is unchanged.
+
+For `wearables activity list`, omit detail flags for day totals, use
+`--include-workout-summaries` for individual workout facts, and use
+`--include-workout-details` when lap/split rows are needed. Summary workouts
+mark `splitsOmitted: true`; this does not mean no splits exist. Full detail wins
+when both flags are supplied. Choose the needed level before the first read.
+
 Canonical CLI writes expose typed args and options. Raw structured payloads use explicitly named JSON escape hatches instead of hiding behind canonical add/save commands:
 
 ```bash
@@ -71,6 +103,22 @@ vault-cli measurement import-json --input @measurement.json --vault ./vault
 vault-cli workout import-json --input @workout.json --vault ./vault
 vault-cli workout format import-json --input @routine.json --vault ./vault
 ```
+
+To make later conversational workout capture use one duration when a report
+omits it, save or clear the canonical default:
+
+```bash
+vault-cli workout defaults show --vault ./vault
+vault-cli workout defaults set --duration 60 --vault ./vault
+vault-cli workout defaults set --clear-duration --vault ./vault
+```
+
+Positional workout text is preserved only as the note. Pass facts stated in the
+current report through typed flags such as `--duration`, `--type`, and
+`--distance-km`; an explicit typed duration wins over the saved default. If
+typed state is unset, ordinary capture also promotes one unambiguous legacy
+workout default from saved Preferences; conflicting legacy records are never
+applied. Structured imports remain explicit and never use capture defaults.
 
 When you need route distance or duration between two points for a run, walk, ride, or hike, use:
 
@@ -89,14 +137,22 @@ vault-cli knowledge list
 vault-cli knowledge lint
 ```
 
+## Activity check-ins
+
+Device-activity automations accept `--device-source garmin`, `oura`, or `fitbit`,
+alongside the existing `whoop` and `whoop_v2` filters. Omit the source filter to
+match activity from any provider. The Fitbit filter recognizes both current
+Google Health imports and legacy Fitbit imports. Use `automation edit` with
+`--trigger-kind deviceActivity --device-source <source>` to change the selected
+source on the same automation; its activity cursor restarts at the edit time.
+
 ## What you get
 
 - a file-native health vault with canonical writes owned by `@murphai/core`
-- local assistant chat, runtime automation, status, outbox, canonical memory, and canonical automation commands
+- direct local assistant turns, runtime automation, status, outbox, canonical memory, and canonical automation commands
 - a non-canonical derived knowledge wiki you can upsert and inspect under `derived/knowledge/**`
 - inbox capture, assistant attachment evidence, and parser-driven audio/video transcription through runtime services
 - optional local device sync through the bundled workspace-private `packages/device-syncd` runtime
-- optional local assistant daemon support through the bundled workspace-private `packages/assistantd` daemon
 
 `@murphai/murph` is the installable local Murph product entrypoint. The wider monorepo also contains hosted control and execution apps plus many workspace-private owner packages, but the public npm surface is intentionally small: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`.
 

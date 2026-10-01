@@ -24,7 +24,11 @@ export async function cleanHostedWebWorkflowGeneratedArtifacts(input: {
   const repoRoot = input.repoRoot ?? defaultRepoRoot;
   const removedPaths: string[] = [];
 
-  await removeIfPresent(repoRoot, HOSTED_WEB_WORKFLOW_GENERATED_ARTIFACT_DIR, removedPaths);
+  await removeIfPresent(
+    repoRoot,
+    HOSTED_WEB_WORKFLOW_GENERATED_ARTIFACT_DIR,
+    removedPaths,
+  );
 
   for (const relativePath of HOSTED_WEB_WORKFLOW_GENERATED_CACHE_PATHS) {
     await removeIfPresent(repoRoot, relativePath, removedPaths);

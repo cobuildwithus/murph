@@ -6,6 +6,7 @@ import { Label } from "@/src/components/ui/label";
 import {
   HostedAccountDeletionErrorAlert,
   HostedAccountProviderAccessRemovalConfirmation,
+  HostedDataPrivacySettings,
 } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -43,6 +44,45 @@ export function AccountDeletionRecoveryStudy() {
         containment; focus, close, and scroll behaviour belong to the real
         dialog.
       </p>
+
+      <div
+        className="flex flex-col gap-4"
+        data-design-state="secure-approval-unavailable"
+        id="secure-approval-unavailable"
+      >
+        <div className="max-w-2xl space-y-1">
+          <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+            Deletion without secure approval
+          </h3>
+          <p className="text-sm leading-6 text-muted-foreground">
+            When secure approval cannot run, export stays unavailable while the
+            signed-in member keeps the normal delete-account entry point. These
+            inert previews mount the production Settings component.
+          </p>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div data-design-proof="secure-approval-unavailable-desktop">
+            <DialogFrame label="Desktop" width="max-w-md">
+              <div inert>
+                <HostedDataPrivacySettings
+                  authenticated
+                  authorizationEnabled={false}
+                />
+              </div>
+            </DialogFrame>
+          </div>
+          <div data-design-proof="secure-approval-unavailable-mobile">
+            <DialogFrame label="Mobile · 390px" width="max-w-[390px]">
+              <div inert>
+                <HostedDataPrivacySettings
+                  authenticated
+                  authorizationEnabled={false}
+                />
+              </div>
+            </DialogFrame>
+          </div>
+        </div>
+      </div>
 
       <div
         className="flex flex-col gap-4"
@@ -110,8 +150,8 @@ export function AccountDeletionRecoveryStudy() {
           <p className="text-sm leading-6 text-muted-foreground">
             If one or several connected-app setups still own their completion
             window, the dialog keeps the typed confirmation visible and names
-            the truthful retry boundary. A retry still requests fresh
-            authorization.
+            the truthful retry boundary. A retry preserves the confirmation and
+            resubmits deletion without secure approval.
           </p>
         </div>
         <div className="grid gap-6 lg:grid-cols-2">

@@ -78,6 +78,7 @@ interface MeasurementAddResult {
 interface MeasurementShowResult {
   entity: {
     id: string
+    occurredAt?: string | null
     data: {
       source?: string
       tags?: string[]
@@ -97,6 +98,50 @@ interface MeasurementShowResult {
     }
   }
 }
+
+test('measurement add resolves date-only occurrence in its explicit event timezone', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-timezone-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+
+  const created = requireData(
+    (
+      await runInProcessJsonCli<MeasurementAddResult>(cli, [
+        'measurement',
+        'add',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'weight',
+        '--value',
+        '72.5',
+        '--unit',
+        'kg',
+        '--occurred-at',
+        '2026-03-08',
+        '--time-zone',
+        'America/New_York',
+      ])
+    ).envelope,
+  )
+
+  assert.equal(created.occurredAt, '2026-03-08T16:00:00.000Z')
+
+  const shown = requireData(
+    (
+      await runInProcessJsonCli<MeasurementShowResult>(cli, [
+        'measurement',
+        'show',
+        created.eventId,
+        '--vault',
+        vaultRoot,
+      ])
+    ).envelope,
+  )
+  assert.equal(shown.entity.occurredAt, '2026-03-08T16:00:00.000Z')
+  assert.equal(shown.entity.data.timeZone, 'America/New_York')
+})
 
 interface MeasurementEntryListResult {
   filters: {
@@ -614,7 +659,7 @@ test('measurement entry list returns primary, legacy, and device-observation sca
       measurementIndex: 0,
       occurredAt: '2026-07-03T07:30:00.000Z',
       source: 'manual',
-      metric: 'height',
+      metric: 'body-height',
       value: 175,
       unit: 'cm',
     },
@@ -1291,7 +1336,8 @@ test('measurement add rejects non-slug typed tags before writing', async () => {
   assert.equal(result.envelope.ok, false)
   if (!result.envelope.ok) {
     assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
-    assert.match(result.envelope.error.message ?? '', /lowercase kebab-case slug/u)
+    assert.equal(result.envelope.error.message, 'The command input is invalid.')
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'tag')
   }
 })
 
@@ -1477,6 +1523,92 @@ test('measurement import-json preserves nested links and import metadata', async
   assert.equal(shown.entity.data.timeZone, 'America/Los_Angeles')
 })
 
+test('measurement import-json localizes malformed nested values without saving a partial record', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-strict-input-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+  const payloadPath = path.join(parentRoot, 'measurement-invalid.json')
+  const privateInvalidValue = 'private-invalid-measurement-value'
+  await writeFile(payloadPath, JSON.stringify({
+    occurredAt: '2026-03-16T08:00:00.000Z',
+    measurements: [
+      {
+        metric: 'resting-hr',
+        value: 54,
+        unit: 'bpm',
+      },
+      {
+        metric: 'body-fat-pct',
+        value: 18.4,
+        unit: 'percent',
+        qualifiers: { device: { value: privateInvalidValue } },
+      },
+    ],
+  }), 'utf8')
+
+  const invalid = await runInProcessJsonCli(cli, [
+    'measurement',
+    'import-json',
+    '--vault',
+    vaultRoot,
+    '--input',
+    `@${payloadPath}`,
+  ])
+
+  assert.equal(invalid.envelope.ok, false)
+  if (!invalid.envelope.ok) {
+    assert.equal(invalid.envelope.error.code, 'invalid_payload')
+    assert.equal(invalid.envelope.error.stage, 'validation')
+    assert.equal(invalid.envelope.error.retryable, false)
+    assert.deepEqual(
+      invalid.envelope.error.fieldErrors?.map((field) => field.path),
+      ['measurements.1.qualifiers'],
+    )
+    assert.equal(JSON.stringify(invalid.envelope).includes(privateInvalidValue), false)
+  }
+
+  const invalidTagsPayloadPath = path.join(parentRoot, 'measurement-invalid-tags.json')
+  await writeFile(invalidTagsPayloadPath, JSON.stringify({
+    occurredAt: '2026-03-16T08:00:00.000Z',
+    measurements: [{
+      metric: 'body-fat-pct',
+      value: 18.4,
+      unit: 'percent',
+    }],
+    tags: ['valid-tag', { value: privateInvalidValue }],
+  }), 'utf8')
+
+  const invalidTags = await runInProcessJsonCli(cli, [
+    'measurement',
+    'import-json',
+    '--vault',
+    vaultRoot,
+    '--input',
+    `@${invalidTagsPayloadPath}`,
+  ])
+
+  assert.equal(invalidTags.envelope.ok, false)
+  if (!invalidTags.envelope.ok) {
+    assert.equal(invalidTags.envelope.error.code, 'invalid_payload')
+    assert.equal(invalidTags.envelope.error.stage, 'validation')
+    assert.equal(invalidTags.envelope.error.retryable, false)
+    assert.deepEqual(
+      invalidTags.envelope.error.fieldErrors?.map((field) => field.path),
+      ['tags.1'],
+    )
+    assert.equal(JSON.stringify(invalidTags.envelope).includes(privateInvalidValue), false)
+  }
+
+  const listed = await runInProcessJsonCli<MeasurementListResult>(cli, [
+    'measurement',
+    'list',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.deepEqual(requireData(listed.envelope).items, [])
+})
+
 test('measurement add rejects raw --input because JSON imports are explicit', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-input-flags-')
   cleanupPaths.push(parentRoot)
@@ -1515,6 +1647,8 @@ test('measurement add rejects raw --input because JSON imports are explicit', as
   assert.equal(result.exitCode, 1)
   assert.equal(result.envelope.ok, false)
   if (!result.envelope.ok) {
-    assert.match(result.envelope.error.message ?? '', /input/u)
+    assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
+    assert.equal(result.envelope.error.message, 'The command arguments are invalid.')
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'arguments')
   }
 })

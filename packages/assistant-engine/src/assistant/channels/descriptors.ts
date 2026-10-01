@@ -38,6 +38,7 @@ import {
   setLinqMessageReaction,
   sendLinqVoiceMemoMessage,
   sendTelegramImageMessage,
+  sendTelegramFileMessage,
   sendTelegramRichMessage,
   prepareTelegramVoiceMemoMessage,
   sendPreparedTelegramVoiceMemoMessage,
@@ -52,6 +53,33 @@ import type {
   AssistantDeliveryCandidate,
   AssistantEmailDeliverySummary,
 } from './types.js'
+
+const VOICE_CHANNEL_ADAPTER = createAssistantChannelAdapter({
+  channel: 'voice',
+  canAutoReply(input) {
+    return input.source === 'voice' && input.threadIsDirect === true
+      ? null : 'Voice replies require an authenticated private call.'
+  },
+  inferBindingDelivery({ deliveryTarget }) {
+    // Conversation identifiers are blinded; only the accepted reply target
+    // can name the ephemeral call. Never infer another member channel.
+    const target = normalizeOptionalText(deliveryTarget)
+    return target ? { kind: 'thread', target } : null
+  },
+  supportsIdempotencyKey: false,
+  supportedResponseMediaKinds: [],
+  targetRequiredMessage: 'Voice delivery requires the accepted call target.',
+  async sendMessage({ candidate, dependencies, message, threadIsDirect, answeredMailboxItemIds }) {
+    if (!dependencies.sendVoice || threadIsDirect !== true || !answeredMailboxItemIds?.length) {
+      throw Object.assign(new VaultCliError(
+        'ASSISTANT_VOICE_DELIVERY_UNAVAILABLE',
+        'The accepted voice call is no longer available.',
+      ), { deliveryMayHaveSucceeded: false, retryable: false })
+    }
+    await dependencies.sendVoice({ callId: candidate.target, message, answeredMailboxItemIds })
+    return { providerThreadId: candidate.target }
+  },
+})
 
 const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'telegram',
@@ -68,7 +96,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   resolveDeliveryTransportIdempotent() {
     return false
   },
-  supportedResponseMediaKinds: ['image', 'vault_image', 'voice_memo'],
+  supportedResponseMediaKinds: ['image', 'vault_image', 'voice_memo', 'vault_file'],
   targetRequiredMessage:
     'Telegram delivery requires an explicit target or a stored delivery binding.',
   async startTypingIndicator({ candidate, dependencies }) {
@@ -78,7 +106,20 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: candidate.target,
     })) ?? null
   },
-  async sendMessage({ candidate, card, dependencies, idempotencyKey, media, message, replyToMessageId }) {
+  async sendMessage({ candidate, card, dependencies, idempotencyKey, media, message, replyToMessageId, threadIsDirect }) {
+    const file = media.find((item) => item.kind === 'vault_file')
+    if (file) {
+      if (media.length !== 1 || threadIsDirect !== true) {
+        throw new VaultCliError(
+          'ASSISTANT_VAULT_FILE_MEDIA_INVALID',
+          'Telegram file delivery requires one file in a private conversation.',
+        )
+      }
+      const request = { file, replyToMessageId, target: candidate.target }
+      return dependencies.sendTelegramFile
+        ? await dependencies.sendTelegramFile(request)
+        : await sendTelegramFileMessage(request, { signal: dependencies.signal })
+    }
     if (hasVoiceMemoMedia(media)) {
       return await sendTelegramVoiceMemoDelivery({
         candidate,
@@ -104,7 +145,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         fallbackMessage: message,
         idempotencyKey: idempotencyKey ?? null,
         replyToMessageId: replyToMessageId ?? null,
-        richMessage: buildTelegramRichMessage(card),
+        richMessage: buildTelegramRichMessage(card, message),
         ...(dependencies.signal ? { signal: dependencies.signal } : {}),
         target: candidate.target,
       }
@@ -1318,6 +1359,7 @@ export const ASSISTANT_CHANNEL_ADAPTERS: Readonly<Record<
   telegram: TELEGRAM_CHANNEL_ADAPTER,
   linq: LINQ_CHANNEL_ADAPTER,
   email: EMAIL_CHANNEL_ADAPTER,
+  voice: VOICE_CHANNEL_ADAPTER,
 })
 
 async function maybeRecoverMissingLinqDirectThread(input: {

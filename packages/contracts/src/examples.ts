@@ -62,6 +62,9 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
 export const examplePreferencesDocument: Readonly<PreferencesDocument> = Object.freeze<PreferencesDocument>({
   schemaVersion: 1,
   updatedAt: "2026-03-12T20:10:00Z",
+  workoutCapturePreferences: {
+    defaultDurationMinutes: 60,
+  },
   workoutUnitPreferences: {
     weight: "kg",
     bodyMeasurement: "cm",

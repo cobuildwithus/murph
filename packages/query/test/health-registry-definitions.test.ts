@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 
 import {
   allergyRegistryEntityDefinition,
-  bankEntityDefinitions,
   bankEntityDefinitionByKind,
   conditionRegistryEntityDefinition,
   extractBankEntityRegistryLinks,
@@ -44,9 +43,6 @@ import {
   workoutFormatRecordFromEntity,
   workoutFormatRegistryDefinition,
 } from "../src/health/registries.ts";
-import {
-  getBankRegistryQueryMetadata,
-} from "../src/health/bank-registry-query-metadata.ts";
 import { projectRegistryEntity } from "../src/health/projectors/registry.ts";
 import type { MarkdownDocumentRecord } from "../src/health/shared.ts";
 import {
@@ -88,7 +84,7 @@ test("query registry definitions combine canonical registry metadata with query-
       continue;
     }
 
-    const queryMetadata = getBankRegistryQueryMetadata(kind);
+    const queryMetadata = getBankEntityRegistryProjectionMetadata(kind);
 
     assert.equal(registryDefinition.registry.directory, definition.registry.directory);
     assert.deepEqual(registryDefinition.registry.idKeys, definition.registry.idKeys);
@@ -98,15 +94,6 @@ test("query registry definitions combine canonical registry metadata with query-
     assert.equal(
       typeof registryDefinition.compare,
       queryMetadata.sortBehavior ? "function" : "undefined",
-    );
-  }
-});
-
-test("bank registry definitions reuse the contracts projection owner for every family", () => {
-  for (const { kind } of bankEntityDefinitions) {
-    assert.equal(
-      getBankRegistryQueryMetadata(kind),
-      getBankEntityRegistryProjectionMetadata(kind),
     );
   }
 });
@@ -499,7 +486,7 @@ test("family and genetics split canonical payload metadata from query sort metad
   assert.ok(familyRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(familyRegistryEntityDefinition.registry.upsertPayloadSchema);
   assert.ok(familyRegistryEntityDefinition.registry.patchPayloadSchema);
-  assert.equal(getBankRegistryQueryMetadata("family").sortBehavior, "title");
+  assert.equal(getBankEntityRegistryProjectionMetadata("family").sortBehavior, "title");
 
   const parsedFamilyPayload = familyRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
     title: "Mother",
@@ -525,7 +512,7 @@ test("family and genetics split canonical payload metadata from query sort metad
   assert.ok(geneticsRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(geneticsRegistryEntityDefinition.registry.upsertPayloadSchema);
   assert.ok(geneticsRegistryEntityDefinition.registry.patchPayloadSchema);
-  assert.equal(getBankRegistryQueryMetadata("genetics").sortBehavior, "gene-title");
+  assert.equal(getBankEntityRegistryProjectionMetadata("genetics").sortBehavior, "gene-title");
 
   const parsedGeneticsPayload = geneticsRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
     gene: "APOE",
@@ -572,6 +559,11 @@ test("goal query projection round-trips shared Goal relation and window metadata
       parentGoalId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6P",
       relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"],
       relatedExperimentIds: ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+      commonsGoalRef: {
+        key: "goal_template:sleep-better",
+        pageRevisionId: `sha256:${"a".repeat(64)}`,
+        workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+      },
       domains: ["sleep", "recovery"],
     },
   };
@@ -584,6 +576,11 @@ test("goal query projection round-trips shared Goal relation and window metadata
   assert.equal(goalRecord?.entity.parentGoalId, "goal_01JNY0B2W4VG5C2A0G9S8M7R6P");
   assert.deepEqual(goalRecord?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
   assert.deepEqual(goalRecord?.entity.relatedExperimentIds, ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.deepEqual(goalRecord?.entity.commonsGoalRef, {
+    key: "goal_template:sleep-better",
+    pageRevisionId: `sha256:${"a".repeat(64)}`,
+    workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+  });
   assert.deepEqual(goalRecord?.entity.domains, ["sleep", "recovery"]);
 
   const entity = projectRegistryEntity("goal", goalRecord!);
@@ -610,7 +607,45 @@ test("goal query projection round-trips shared Goal relation and window metadata
   assert.equal(roundTripped?.entity.parentGoalId, "goal_01JNY0B2W4VG5C2A0G9S8M7R6P");
   assert.deepEqual(roundTripped?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
   assert.deepEqual(roundTripped?.entity.relatedExperimentIds, ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.deepEqual(roundTripped?.entity.commonsGoalRef, {
+    key: "goal_template:sleep-better",
+    pageRevisionId: `sha256:${"a".repeat(64)}`,
+    workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+  });
   assert.deepEqual(roundTripped?.entity.domains, ["sleep", "recovery"]);
+});
+
+test("goal query projection distinguishes legacy Goals from malformed public lineage", () => {
+  const attributes = {
+    goalId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6Q",
+    slug: "sleep-better",
+    title: "Sleep better",
+    status: "active",
+  };
+  const document = {
+    relativePath: "bank/goals/sleep-better.md",
+    markdown: "# Sleep better",
+    body: "# Sleep better",
+    attributes,
+  };
+
+  const legacy = toRegistryRecord(document, goalRegistryDefinition);
+  assert.equal(legacy?.entity.commonsGoalRef, null);
+
+  assert.throws(() => toRegistryRecord(
+    {
+      ...document,
+      attributes: {
+        ...attributes,
+        commonsGoalRef: {
+          key: "goal_template:sleep-better",
+          pageRevisionId: `sha256:${"a".repeat(64)}`,
+          workflowSpecRevisionId: "malformed",
+        },
+      },
+    },
+    goalRegistryDefinition,
+  ));
 });
 
 test("family and genetics query projections round-trip shared registry metadata without leaking legacy aliases", () => {

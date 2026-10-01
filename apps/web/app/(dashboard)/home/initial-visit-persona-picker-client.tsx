@@ -85,6 +85,11 @@ export function HomeInitialVisitPersonaPickerClient({
   }
 
   if (stage === "welcome") {
+    const contactLabel = contactAction?.kind === "text"
+      ? "Text Murph"
+      : contactAction?.kind === "email"
+        ? "Email Murph"
+        : "Message Murph";
     return (
       <Dialog
         open
@@ -117,7 +122,7 @@ export function HomeInitialVisitPersonaPickerClient({
           <div className="flex flex-col gap-2">
             {contactAction ? (
               <MurphContactLink
-                actionLabel="Text Murph"
+                actionLabel={contactLabel}
                 className={buttonVariants({
                   className: "w-full",
                   size: "xl",
@@ -126,7 +131,7 @@ export function HomeInitialVisitPersonaPickerClient({
                 onClick={() => setStage("done")}
               >
                 <MessageCircleIcon data-icon="inline-start" />
-                Text Murph
+                {contactLabel}
               </MurphContactLink>
             ) : (
               <a
@@ -139,7 +144,7 @@ export function HomeInitialVisitPersonaPickerClient({
                 onClick={() => setStage("done")}
               >
                 <MessageCircleIcon data-icon="inline-start" />
-                Text Murph
+                Set up messaging
               </a>
             )}
             <Button

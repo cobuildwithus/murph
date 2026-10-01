@@ -1,3 +1,7 @@
+import { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
+export { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
+import { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
+export { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
@@ -9,10 +13,14 @@ import {
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
   assistantVoiceOptions,
+  compactTableCardV1Bounds,
 } from '@murphai/contracts'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES,
 } from '@murphai/hosted-execution/contracts'
 import {
   HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
@@ -28,6 +36,8 @@ import {
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -73,6 +83,7 @@ import {
 } from './dynamic-tools/assistant-style.js'
 import {
   MURPH_AUTOMATION_TOOL,
+  MURPH_ATTACH_FOLLOW_UP_TOOL,
 } from './dynamic-tools/automation.js'
 import {
   MURPH_DEVICE_TOOL,
@@ -100,6 +111,7 @@ import {
 } from './dynamic-tools/connected-apps.js'
 import {
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  MURPH_EXPRESSIVE_VOICE_MEMO_TOOL,
 } from './dynamic-tools/generate-voice-memo.js'
 import {
   MURPH_CREATE_PHONE_CALL_TOOL,
@@ -107,6 +119,7 @@ import {
   MURPH_STOP_PHONE_CALL_TOOL,
 } from './dynamic-tools/phone-calls.js'
 import {
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
 } from './dynamic-tools/physical-notes.js'
 import {
@@ -118,6 +131,9 @@ import {
 import {
   MURPH_ANALYZE_VIDEO_TOOL,
 } from './dynamic-tools/analyze-video.js'
+import {
+  MURPH_CREATE_CALENDAR_LINK_TOOL,
+} from './dynamic-tools/calendar-link.js'
 export { MURPH_ASSISTANT_STYLE_TOOL } from './dynamic-tools/assistant-style.js'
 export type {
   AssistantStyleTurnSettingsOverlay,
@@ -137,9 +153,13 @@ export {
 export {
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
 } from './dynamic-tools/clinical-records.js'
-export { MURPH_SEND_PHYSICAL_NOTE_TOOL } from './dynamic-tools/physical-notes.js'
+export {
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+  MURPH_SEND_PHYSICAL_NOTE_TOOL,
+} from './dynamic-tools/physical-notes.js'
 export { MURPH_ASK_GROK_TOOL } from './dynamic-tools/ask-grok.js'
 export { MURPH_ANALYZE_VIDEO_TOOL } from './dynamic-tools/analyze-video.js'
+export { MURPH_CREATE_CALENDAR_LINK_TOOL } from './dynamic-tools/calendar-link.js'
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 export const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
@@ -180,7 +200,7 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   namespace: 'murph',
   name: 'attach_response_media',
   description:
-    `Attach up to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly.`,
+    `Attach up to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly. For charts, the final reply must include one brief numeric takeaway from the source data, such as the start/end values or range; do not list every plotted value.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -271,16 +291,19 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
 } as const
 
 export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
+  deferLoading: true,
   namespace: 'murph',
   name: 'attach_response_card',
   description:
-    'The daily-nutrition safety gate includes a lifetime vault-cli event list --kind encounter --limit 200 --format json read before numeric proposals, Goal activation, or cards. Inspect every returned item; use event show for every item whose list data reports nonzero diagnosesCount, and inspect all diagnosis entries without selecting by title, visit type, snapshot visibility, or the default prefix. A safety-relevant active diagnosis with documented or suspected certainty suppresses numeric output. Inactive, resolved, history, rule_out, ruled_out, and unrelated diagnoses do not prove a current exclusion; unresolved status or certainty on a safety-relevant diagnosis fails closed. A failed, unreadable, or exactly 200-record encounter read, or a failed required detail read, fails closed with no Goal or measurement mutation and no card; scheduled occurrences ask no question. ' +
-    'The daily-nutrition safety gate includes a lifetime vault-cli event list --kind procedure --limit 200 --format json read before numeric proposals, Goal activation, or cards. Inspect every returned item; use event show for an item whose procedure or status is missing or truncated. A completed gastric bypass, Roux-en-Y, sleeve gastrectomy, gastric sleeve, biliopancreatic diversion, duodenal switch, adjustable gastric band, lap band, or other explicit bariatric surgery suppresses numeric output. Planned, ordered, cancelled, ambiguous, or unrelated procedures do not prove post-bariatric context. A failed, unreadable, or exactly 200-record procedure read, or a failed required detail read, fails closed with no Goal or measurement mutation and no card; scheduled occurrences ask no question. ' +
-    'The daily-nutrition safety gate includes a separate vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json read before numeric proposals, Goal activation, or cards. Require exact metric pregnancy-test, unit result, value 1, and a normalized positive qualifiers.result; any such positive wins over negative evidence from either pregnancy-evidence owner in the window and suppresses numeric output without diagnosing pregnancy. Missing, negative, stale, indeterminate, malformed, or conflicting rows are unavailable evidence rather than proof of non-pregnancy. A failed, unreadable, or exactly 200-record pregnancy-test read fails closed with no Goal or measurement mutation and no card; scheduled occurrences ask no question. ' +
-    'The same gate includes vault-cli event list --kind test --from <300-days-before-today> --to <today> --limit 200 --format json. A failed, unreadable, or exactly 200-record list fails closed before any numeric effect, with no test detail reads on saturation. Otherwise event show every returned test because list output compacts results and can truncate summaries; any failed or unreadable detail fails closed. Treat a pregnancy/hCG test or matching structured analyte with an explicit positive, detected, or pregnant textValue or unambiguous test-level summary as positive evidence unless resultStatus is pending. Canonical resultStatus unknown classifies the result rather than source lifecycle and may qualify only with that strict identity plus explicit text. Do not infer pregnancy from numeric hCG, reference ranges, abnormal or unknown status/flags alone, titles, notes, or ambiguous or negated text. An explicit positive wins over negative evidence from either canonical owner in the window and suppresses numeric output, Goal mutation or activation, and cards. Missing, negative, pending, numeric-only, stale, unrelated, and ambiguous test evidence is unavailable rather than a universal block. Scheduled occurrences ask no question, perform no mutation, and attach no card. ' +
+    'For daily_nutrition cards and numeric nutrition targets, use the member request plus context already known in the conversation or vault. Do not run a universal medical-history or measurement checklist. A routine totals-only card or a card with complete accepted goals needs no repeated screening unless new context raises a concern. Before treating suitability as unresolved, asking, or proposing or changing targets, inspect the current conversation and run vault-cli memory show --compact --format json once for the canonical Identity, Preferences, Instructions, and Context record. Do not re-ask or recite established categories. Treat this known-context suitability check as workflow eligibility, not public health Q&A: never search Health Commons to decide or merely restate it. If suitability is clear, proceed and state only the request-relevant outcome. For explicit target-setting only, ask one compact question about concrete unresolved concerns that could materially change the advice. Do not screen a totals-only card for missing target-derivation inputs. Relevant concerns include: age under 18; pregnancy or breastfeeding; eating-disorder or number-sensitive tracking; underweight, frailty, or malnutrition; glucose-lowering or other nutrition-target-changing medication; kidney disease, advanced liver disease, significant heart disease, or relevant endocrine disease; post-bariatric care; or clinician-managed constraints that materially change calorie or macro targets. Apply safety at the narrowest relevant scope: a health-context fact blocks only the numeric target or advice it materially affects, not benign totals, logging, education, or unrelated low-risk work. An allergy, intolerance, dietary restriction, or clinician-directed diet is not by itself a reason to suppress the five totals or an accepted compatible target bundle. If known current context makes self-directed numeric guidance unsuitable—including underage, pregnancy or breastfeeding, eating-disorder or number-sensitive tracking context, underweight, frailty or malnutrition, glucose-lowering medication, kidney disease, advanced liver disease, significant heart disease, relevant endocrine disease, post-bariatric care, or documented clinician-managed constraints that materially change or conflict with the card targets—use helpful non-numeric text for the affected guidance, make no Goal mutation, and attach no card. Totals-only never bypasses a known numeric-suppression decision. Read another clinical record family only when the conversation or canonical memory raises one concrete concern. A missing unrelated fact or failed unrelated read does not block a routine card. A scheduled occurrence with unresolved suitability uses ordinary non-numeric closeout with no proposal, Goal mutation, question, or card. A scheduled occurrence never activates provisional targets. Treat a calorie target below 1,200 kcal/day as unsuitable; do not floor it upward. That target floor is never an intake minimum for a logged-so-far totals-only card. ' +
+    'For the first suitable complete totals-only card, include this exact brief final text after attachment: Here’s your nutrition card. If you’d like, we can set up goals too. Use it only when canonical memory/instructions and conversation show no prior decline, number sensitivity, sent invitation or pending invitation. When those conditions hold, include the introduction; goal setup is optional for the member, not a prerequisite for the card. Otherwise return the card alone. Never write an offered/delivered marker while staging; the outbox records sent evidence in canonical memory after confirmation. Never add other companion prose, duplicate analysis, a target proposal or a second send. Silence and meal replies never accept goals. Later cards need no invitation; do not reoffer unless the member engages. ' +
     'Workout footers span native and static cards; never promise native-only taps. ' +
-    'For a tracked workout, attempt the complete verified card and let input validation decide whether its actual encoded envelope fits; never refuse from an estimated exercise or set count or ask the member to simplify saved workout data. If validation rejects the complete envelope, use the full deterministic text recovery. ' +
-    'Attach one private-direct response card when the current accepted member message or the saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent, during managed meal closeout, for the verified initial card after starting or exact-reading one canonical workout, or for an unambiguous update to its established workout card, including the just-completed final snapshot. Occurrence authority alone is not card intent. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. Before every goal-aware daily_nutrition card, first run vault-cli goal list --status active --limit 200 --format json. If it returns 200 records, fail closed with ordinary text, no Goal or measurement mutation, and no card. Otherwise run vault-cli goal show <goal-id> --format json for every returned active Goal whose list item reports a nonzero data.metricTargetsCount; never select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix. Resolve metric identity, unit, comparator, effective date, conflicts, and the 1,200-kcal boundary only after inspecting that complete detail set. Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal; neither read substitutes for the other. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only. Before deriving, saving, or surfacing numeric nutrition goals, before activating a paused nutrition proposal, and before every daily_nutrition attachment, even with five active goals or on a scheduled closeout, follow nutrition-strategy/references/daily-nutrition-card-safety.md. First run vault-cli memory show --format json and inspect the complete canonical Identity, Preferences, Instructions, and Context memory document for explicit, unambiguous safety facts; the context snapshot does not inject it. A failed or unreadable memory read fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged. A clearly current saved age under 18 or clearly current intuitive-eating or number-sensitive preference uses the same suppression path. Missing, stale, ambiguous, or conflicting age alone is unavailable evidence, not a universal block; scheduled occurrences never ask. Run both vault-cli condition list --status active --limit 200 --format json and vault-cli regimen list --status active --limit 200 --format json. If either read fails or returns exactly 200 records, run no condition or regimen detail reads and fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card. Otherwise run vault-cli condition show <condition-id> --format json for every returned active condition and vault-cli regimen show <regimen-id> --format json for every returned active regimen before applying the safety gate; never select by title, substance, severity, context-snapshot visibility, or the default list prefix. If any required detail read fails or is unreadable, use the same fail-closed behavior; otherwise reuse the complete current-turn reads. Then run vault-cli event list --kind procedure --limit 200 --format json and apply its complete procedure-item and conditional-detail contract before continuing; a completed bariatric procedure suppresses numeric output, and a failed, unreadable, or saturated read fails closed. As part of that same pre-numeric and pre-activation gate, also run its bounded lossless vault-cli measurement entry list read over the canonical 45-day window. A usable adult BMI below 18.5, including height and weight rows sharing one eventId, suppresses numeric proposal derivation or presentation, every Goal write or activation, and the card. A failed read, or a saturated read that cannot resolve usable BMI evidence, fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged. The gate also blocks known underweight, frailty, malnutrition risk, glucose-lowering medication, safety-relevant disease or clinician-managed nutrition context, and calorie targets below 1,200 kcal/day without flooring them upward. Scheduled authority never permits questions or activation; only the first eligible managed meal closeout may create and explain one paused proposal after the complete safety gate and an all-status Goal read prove the stable managed slug has never existed. For the exact card localDate, require the containing active Goal window and each target\'s optional startAt/targetAt interval to include that date, with inclusive boundaries; use the selected capture date for a scheduled closeout, which may differ from the occurrence date for a historical catch-up, or the explicitly requested date, never wall-clock today. Ignore out-of-window targets for current authority and conflicts, and never expose, compare, copy, derive from, or mutate a Goal because of them. Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals. Each target must use selected-value comparator between with identical numeric value and highValue. A one-sided threshold, non-identical range, or other shape remains authoritative but makes the bundle comparator-incompatible: never expose, compare, copy, or derive from its bound or create, replace, or remove a managed target around it; use ordinary text with no card or managed Goal mutation, and ask no question on a scheduled closeout. A target in another unit likewise remains authoritative but makes the bundle incompatible: never compare, convert, copy, or derive from its raw value. An explicit numeric-card request or the one first eligible managed closeout authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use. When any target is missing, follow nutrition-strategy/references/daily-nutrition-card-goals.md: hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write; an infeasible bundle means ordinary text and no mutation. Save one paused canonical proposal, explain its values, reasoning, and effective date in ordinary text with no card, and activate it only after member acceptance. On first creation, set Goal window.startAt explicitly: use a member-requested effective date when present, otherwise the selected card localDate for a dated card request, otherwise the engine-supplied current vault-local date; never rely on the write-day default. Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date. Any derived target addition or change atomically pauses the complete managed bundle until acceptance. A scheduled closeout never asks for inputs or activates provisional targets. On the first eligible managed closeout only, if the complete all-status Goal read proves the stable managed slug has never existed and already-known inputs pass the complete safety and derivation contracts, create and explain one paused proposal in ordinary text with no card; once that Goal exists in any status, scheduled turns never create, change, or automatically repeat it. Without a complete accepted bundle or that one first-run proposal path, use ordinary closeout text and no card. When an explicit card request caused the proposal, its next unambiguous acceptance may complete that pending request only after the complete safety recheck passes, then activation and readback, and a fresh same-date totals read; corrections, declines, ambiguous replies, target-setting-only requests, and compound requests remain text-only. Explicit active targets win metric by metric; conflicts, thresholds, ranges, unsafe numbers, or missing responsible calorie inputs mean ordinary text or one consolidated question, never a goal-less card. Freeze each exact point target and Murph\'s context-aware status without a universal threshold. Use compact_table for an explicit table or structured-tracker request, a structured plan or schedule that the table alone can fully represent within its bounds, that verified initial live-workout card, or an unambiguous update to the same exact open or just-finished workout; with multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update or resolve the canonical workout, re-read it successfully, and copy only that verified snapshot with its exact evt_<ULID> reference and canonical UTC snapshot instant. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
+    'For a clear request-relevant suitability outcome, explicitly name the requested target or metric. For a tracked workout, attempt the complete verified card and let input validation decide whether its actual encoded envelope fits; never refuse from an estimated exercise or set count or ask the member to simplify saved workout data. If validation rejects the complete envelope, use the full deterministic text recovery. ' +
+    `For generic compact_table only (rowHeader/columns/rows, not structured workouts): card.rows has at most ${compactTableCardV1Bounds.rows} rows, card.columns at most ${compactTableCardV1Bounds.columns} columns, and each card.rows[].values[] string at most ${compactTableCardV1Bounds.cellValue} characters. Before calling, use concise labels and cells only when they preserve all meaning; if required rows or exact wording cannot fit, give complete ordinary text and no card. Never omit or invent rows, merge explicitly separate items, or truncate meaning to fit. After a validation error, retry only with a fixable field corrected; never repeat identical invalid arguments. If content cannot fit, use complete text. Never claim attachment without success. ` +
+    'Attach one private-direct response card when the current accepted member message or the saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent, after a verified private meal mutation (including an ordinary reply to a scheduled meal check-in), during managed meal closeout, for the verified initial card after starting or exact-reading one canonical workout, or for an unambiguous update to its established workout card, including the just-completed final snapshot. Occurrence authority alone is not card intent. Except for the fixed first totals-only introduction described above, the card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. For routine daily_nutrition, including an authorized meal estimate or explicit manual app submission, use one workflow and end with one card or concise fallback. Never narrate safety, totals, estimation, or target resolution. ' +
+    'Before every daily_nutrition card or explicit target-proposal decision, obtain fresh canonical totals with vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json, or reuse dailyTotals.data from a successful same-date meal add/import-json --with-daily-totals when dailyTotals.status is available. The combined save performs this exact read after writing; no separate show or totals confirmation is needed. Use the exact requested localDate interactively or the engine-supplied occurrence local date for scheduled closeout, never wall-clock today. This fresh canonical read owns complete active-target discovery, dates, identity, units, comparators, conflicts, the calorie floor, and legacy display compatibility. Copy exact totals { total, mealCount } and resolved goalContext.targets.*.target values; never calculate totals, reinterpret raw Goal bounds, or repeat goal list/show to resolve the active bundle. goalContext.status ready permits the unchanged all-five accepted goal card; missing permits totals-only with all five goals null, even with a subset of compatible targets. Both require suitability, intent and completeness. A meal reply (including a reply to an ordinary scheduled check-in), daily summary or numeric-card request never derives, proposes, accepts, activates or mutates targets; conflict, incompatible, or capacity means ordinary text, no card, and no Goal or measurement mutation. Never derive from or replace unresolved targets. A historical compatibility bundle is read-only display authority, never authority to derive or mutate targets. Keep the all-status managed-proposal lookup separate; it cannot substitute for this read. Rerun this same-date read after any meal or Goal mutation and before the card. Otherwise one successful read in this turn is sufficient: do not repeat it after read-only suitability checks or skill reads. During private meal logging or estimation, including an explicit manual app submission, and daily-card or daily-summary requests, if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before finishing. Inspect and estimate the existing meals from supported evidence or ask one focused follow-up for essential missing identity or amount; no separate daily-card request is required. Never stop at a missing-estimate refusal before trying recovery. Use accepted current equivalence or matching saved ingredient and portion evidence, not an informal name alone. If recovery still needs identity or amount, ask one compact question and stop without a card; after the answer, edit and read back the exact existing meal and rerun fresh totals. Do not ask merely to enable numbers when numeric presentation is suppressed. A partial card is only for an explicit request to see the currently available partial data after the limitation is clear, not the normal interactive closeout. Scheduled closeout keeps automatic-meal-capture\'s existing question authority. New authoring uses V2 with fiber and either all five goals null (totals-only) or all five accepted snapshots (goal-aware); mixed authoring is invalid. Historical nullable V2 and V1 replay remain supported. Totals-only says estimated/logged so far with date and logged meal coverage, without target judgments. Complete stored records do not prove everything eaten was logged. ' +
+    'A historical automatic capture cannot authorize a scheduled card. Author only dietary-calories. If a daily_nutrition call is rejected for malformed arguments, use the returned validation paths to correct only invalid fields and retry this tool once with the same verified totals and targets; if that retry fails, use the truthful text fallback without narrating tool or schema mechanics. Only explicit target-setting authorizes the existing paused canonical proposal, not activation or use. Neither card requests nor scheduled work authorize proposals. For explicit target-setting with a missing target, follow nutrition-strategy/references/daily-nutrition-card-goals.md: hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write; an infeasible bundle means ordinary text and no mutation. Save one paused canonical proposal, explain its values, reasoning, and effective date in ordinary text with no card, and activate it only after member acceptance. On first creation, set Goal window.startAt explicitly: use a member-requested effective date when present, otherwise the selected card localDate for a dated card request, otherwise the engine-supplied current vault-local date; never rely on the write-day default. Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date. Any derived target addition or change atomically pauses the complete managed bundle until acceptance. A scheduled closeout never asks for target inputs or creates, changes, repeats or activates provisional targets. ' +
+    'When explicit target-setting included a card request, its next unambiguous acceptance may complete that pending request only after reapplying suitability, activation/readback and fresh same-date totals; corrections, declines, ambiguous replies, target-setting-only requests and compound requests remain text-only. An ordinary summary leaves paused/abandoned Goals unchanged and never repeats a proposal. Explicit active targets win metric by metric; conflicts, thresholds, ranges or unsafe target numbers remain ordinary text, never substitute target authority. Freeze each exact point target and Murph\'s context-aware status without a universal threshold. Use compact_table for an explicit table or structured-tracker request, a structured plan or schedule that the table alone can fully represent within its bounds, that verified initial live-workout card, or an unambiguous update to the same exact open or just-finished workout; with multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update or resolve the canonical workout and re-read it successfully. A structured workout card has exactly kind compact_table, version 1, title, subtitle null, footer, tracking with kind workout plus the exact evt_<ULID> entityId, and workout; never add rowHeader, columns, or rows. The runtime records tracking snapshotAt. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -292,10 +315,11 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
 } as const
 
 export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
+  deferLoading: true,
   namespace: 'murph',
   name: 'attach_exercise_routine_card',
   description:
-    'Attach one complete Telegram exercise routine Rich Message when this tool is available and its exercise layout, optional catalog images, or both make the answer clearer. Use it for current movement instruction, an exact scheduled occurrence that teaches the saved routine now, or a request to repeat or improve an earlier routine. This card is one useful presentation option, not the only valid rich layout. Use attach_telegram_rich_content when a custom or mixed layout is clearer. The card must completely answer the request and replaces final text. Represent every named movement as its own card.exercises item, even when the routine groups movements under phases. A phase is not an exercise. Example: Mobility (ankle circles, trunk rotations) plus Balance (tandem stance, weight shifts) becomes four exercise items in one card, not two. An exercise list result is not enough: run vault-cli exercise show for every named movement before attaching the card. Include useful returned catalog images when they are available and help explain the movement; images are recommended, not required. In a multi-movement routine, put each useful returned image on its matching movement item. Keep the card at eight images or fewer. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Use subtitle for one short orientation sentence in the user\'s language when it helps. Never promise images for an exercise that has none. Use footer only when it adds information that the title, exercise details, subtitle, or safety note do not already say. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. If validation rejects the card, correct the reported fields and retry this tool once. On that retry, preserve every valid movement, instruction, and image; change only the reported invalid fields. Do not switch to separate response media on Telegram. If the corrected retry is also rejected, use one complete attach_telegram_rich_content card without images and keep every named movement separate. After either card tool succeeds, stop and send no final text. The successful fallback is the answer; do not apologize, report the rejected card, or add a second safety recap. Do not combine this card with response media.',
+    'Attach one complete Telegram exercise routine Rich Message when this tool is available and its exercise layout, optional catalog images, or both make the answer clearer. Use it for current movement instruction, an exact scheduled occurrence that teaches the saved routine now, or a request to repeat or improve an earlier routine. This card is one useful presentation option, not the only valid rich layout. Use attach_telegram_rich_content when a custom or mixed layout is clearer. The card must completely answer the request and replaces final text. Represent every named movement as its own card.exercises item, even when the routine groups movements under phases. A phase is not an exercise. Example: Mobility (ankle circles, trunk rotations) plus Balance (tandem stance, weight shifts) becomes four exercise items in one card, not two. An exercise list result is not enough: run vault-cli exercise show for every named movement before attaching the card. Include useful returned catalog images when they are available and help explain the movement; images are recommended, not required. In a multi-movement routine, put each useful returned image on its matching movement item. Keep the card at eight images or fewer. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Use at most three concrete, short instructions per movement. Safety is required: write one scenario-specific stop condition in at most 160 characters. Omit subtitle or footer when it adds nothing; the runtime records null. Never promise images for an exercise that has none. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. If validation rejects the card, correct the reported fields and retry this tool once. On that retry, preserve every valid movement, instruction, and image; change only the reported invalid fields. Do not switch to separate response media on Telegram. If the corrected retry is also rejected, use one complete attach_telegram_rich_content card without images and keep every named movement separate. After either card tool succeeds, stop and send no final text. The successful fallback is the answer; do not apologize, report the rejected card, or add a second safety recap. Do not combine this card with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -307,6 +331,7 @@ export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
 } as const
 
 export const MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL = {
+  deferLoading: true,
   namespace: 'murph',
   name: 'attach_telegram_rich_content',
   description:
@@ -322,6 +347,7 @@ export const MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL = {
 } as const
 
 export const MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL = {
+  deferLoading: true,
   namespace: 'murph',
   name: 'attach_response_card',
   description:
@@ -332,8 +358,9 @@ export const MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL = {
 export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
+  deferLoading: true,
   description:
-    `Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response; that image consumes one of the same ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} final-response media slots, so leave a slot before calling. Local runs stay synchronous with the same slot rule and save under CODEX_HOME/generated_images.`,
+    `Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response; that image consumes one of the same ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} final-response media slots, so leave a slot before calling. Local runs stay synchronous with the same slot rule and save under CODEX_HOME/generated_images. Requested graphs, charts, and trend lines: render them with this tool when no chart or card tool fits; put the chart type, labeled axes, and the plotted values in the prompt. Treat those values as plotting data, not visible labels. Explicitly ask the renderer to omit numeric labels on individual points and bars unless the user requests them. Use sparse, rounded axis ticks and a compact legend; keep annotations rare and round any displayed values to useful precision. Default chart prompts to Murph's warm lab-notebook style: cream paper (#f5f0e8), slate text (#2d3436), solid sage data lines (#7a8c6e), dashed sand reference lines (#d4c4a8). Use only these colors for chart marks: sage and slate for separate data series, distinguished by markers. Use Fraunces-style serif titles and numbers, DM Sans body text, and DM Mono labels; keep charts flat and legible without gradients or decorative shadows.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -390,8 +417,9 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
 export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
+  deferLoading: true,
   description:
-    `Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.`,
+    `Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports an input-schema rejection, accepted, already accepted, unavailable, or callback failure. An input-schema rejection includes value-free validation issues. Accepted, already accepted, unavailable, and callback-failure results are terminal.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -430,6 +458,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
 export const MURPH_FAMILY_PLAN_TOOL = {
   namespace: 'murph',
   name: 'family_plan',
+  deferLoading: true,
   description:
     'Read Family status, start checkout, or invite. Allow `read_status` for an explicit Family request or trusted private low-usage Family context. Checkout and invite actions require the current member\'s explicit request. Treat results as exact; never claim activation, invitation, payment, or usage completion.',
   inputSchema: {
@@ -578,11 +607,13 @@ export const MURPH_SUBSCRIPTION_TOOL = {
   },
 } as const
 
+export const ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN = '^ain_[0-9a-f]{32}$'
+
 export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'Read the current hosted conversation runtime\'s effective Murph main personality, optional supporting personality, tone, voice, and model context, or atomically update those fields. Persona changes require current accepted user input plus both mainPersona and supportingPersona; use read first when either current value must be preserved, and pass null to remove support. Exact scheduled automation occurrences may update tone and voice but never personas. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
+    'For a conversation update, pass message_ref from the accepted message requesting these changes; never borrow a later message\'s ref. Split changes requested by different messages into separate calls. Omit it for scheduled actions. For updates, send only the fields the user wants changed; omit unchanged fields. For an exact tone-only or voice-only request, call update once without read; its result reports the saved value. Send both personas only when changing that pair. Read the current hosted conversation runtime\'s effective Murph main personality, optional supporting personality, tone, voice, and model context, or atomically update those fields. Persona changes require current accepted user input plus both mainPersona and supportingPersona; use read first when either current value must be preserved, and pass null to remove support. Exact scheduled automation occurrences may update tone and voice but never personas. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Confirm casing as sentence case or lowercase in the reply. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
   inputSchema: {
     oneOf: [
       {
@@ -603,6 +634,10 @@ export const MURPH_PERSONALIZATION_TOOL = {
           action: {
             type: 'string',
             enum: ['update'],
+          },
+          message_ref: {
+            type: 'string',
+            pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
           },
           mainPersona: {
             type: 'string',
@@ -632,11 +667,14 @@ export const MURPH_PERSONALIZATION_TOOL = {
           },
         },
         required: ['action'],
-        anyOf: [
-          { required: ['mainPersona', 'supportingPersona'] },
-          { required: ['tone'] },
-          { required: ['voice'] },
-        ],
+        minProperties: 2,
+        // Keep properties here so generated tool arguments stay concrete.
+        // Source metadata alone cannot make an update nonempty.
+        not: { required: ['message_ref'], maxProperties: 2 },
+        dependentRequired: {
+          mainPersona: ['supportingPersona'],
+          supportingPersona: ['mainPersona'],
+        },
       },
     ],
   },
@@ -646,7 +684,7 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
   description:
-    'Read the current hosted turn model, provider, and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. OpenAI and Venice are the supported core-reply providers when listed as available; specialized tools may still use their own managed providers. Internally, Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models, providers, or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    'Read the current hosted turn model, provider, and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. OpenAI and Venice are the supported core-reply providers when listed as available; specialized tools may still use their own managed providers. Internally, Luna is the most usage-efficient model, Terra is the default, Sol and Astra require an active paid Edge or Max plan, and Astra requires OpenAI. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models, providers, or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -703,7 +741,7 @@ export const MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL = {
           },
           model: {
             type: 'string',
-            enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+            enum: HOSTED_ASSISTANT_PRODUCT_MODELS.filter((model) => model !== 'gpt-6-astra'),
             description: 'Required next-turn group room model.',
           },
         },
@@ -809,6 +847,18 @@ const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
   ],
 } as const
 
+const GROUP_SHARED_HISTORY_READ_PROPERTIES = {
+  participantId: { type: 'string', minLength: 1, maxLength: 200,
+    description: 'Optional read_shared narrowing to a current participantId returned by an earlier shared read. Required for history. Never a private member/workspace id.' },
+  history: { type: 'object', additionalProperties: false,
+    required: ['fromDate', 'throughDate'],
+    properties: {
+      fromDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+      throughDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    },
+    description: 'read_shared only: at most 90 member-local civil dates, one current participant and one existing health metric scope; no freshness or group_email. Follow dateCoverage.nextFromDate with the same throughDate until exhausted. Every page retains complete source/date observations. For requested history, use the existing metric scope: every active metric grant already covers this window. No history permission or settings visit is needed. not_granted means the metric itself is unshared and ordinary metric consent is required. This reads available canonical data, never provider backfill. State requested range and actually available dates in trends; do not treat absent dates as zeros or missing permission.' },
+} as const
+
 /**
  * Detached group consultation gets only the lazy shared-data read surface. It
  * intentionally reuses murph.group so the normal parser/executor stays the
@@ -818,11 +868,12 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read one to three exact consent-aware projections for the current authorized group. The trusted host binds member, group, and route; supply no identifiers. status="partial" means omittedParticipantIds are still current members with omitted rows, so the result is incomplete and cannot prove departure, score, diagnosis, or permission state.',
+    'Read 1–3 consent-aware projections in this group; the host binds authority. Ordinary reads cover seven days; history needs participantId, an inclusive range of up to 90 dates, and one metric scope. status="partial" means omittedParticipantIds have omitted rows: the result is incomplete and cannot prove departure, score, diagnosis or permission state.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
+      ...GROUP_SHARED_HISTORY_READ_PROPERTIES,
       action: {
         type: 'string',
         enum: ['read_shared'],
@@ -839,6 +890,23 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   },
 } as const
 
+const GROUP_SHARED_FRESHNESS_SCHEMA = {
+  type: 'array',
+  minItems: 1,
+  maxItems: 21,
+  uniqueItems: true,
+  description: 'Optional only for ordinary read_shared. For a dated wearable update, supply each required projectionScopeKey and YYYY-MM-DD date. Missing consented dates trigger a bounded sync request and fresh consent-aware reread. checkedAt is a shared-data check, not a device-upload time. Does not guarantee new provider data.',
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      projectionScopeKey: { type: 'string', minLength: 1, maxLength: 191 },
+      date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    },
+    required: ['projectionScopeKey', 'date'],
+  },
+} as const
+
 /**
  * Scheduled group turns can read shared facts and offer group access without
  * exposing the provider-specific native-message versus link decision.
@@ -852,10 +920,12 @@ export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
     type: 'object',
     additionalProperties: false,
     properties: {
+      ...GROUP_SHARED_HISTORY_READ_PROPERTIES,
       action: {
         type: 'string',
         enum: ['read_shared', 'offer_access'],
       },
+      freshness: GROUP_SHARED_FRESHNESS_SCHEMA,
       projectionScopes: {
         type: 'array',
         minItems: 1,
@@ -868,76 +938,67 @@ export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
   },
 } as const
 
-export const ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN = '^ain_[0-9a-f]{32}$'
 const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, and revoke_own_email_share; optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, record_current_sender_journal_fact, set_current_sender_journal_capture, and revoke_own_email_share. For offer_access, include it when the person requests or accepts an offer to enable sharing or repost consent; the host binds a fresh exact-scope consent message to this request, even when its scopes differ from earlier offers. It is otherwise optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
 } as const
-
-const MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF = [
-  'ask_current_sender',
-  'clarify_current_sender',
-  'continue_current_sender_in_group',
-  'continue_current_sender_privately',
-  'revoke_own_email_share',
-] as const
-
-const MURPH_GROUP_TOOL_HANDOFF_ACTIONS = ['handoff'] as const
-
-const MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS = [
-  'record_current_sender_daily_metric',
-] as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
   'The native consent message completes the offer portion. If no other requested output remains, call murph.finish_without_reply. Otherwise answer the remaining request without adding a companion consent acknowledgment.'
 
-const MURPH_GROUP_TOOL_BASE = {
-  namespace: 'murph',
-  name: 'group',
-  deferLoading: true,
-  description:
-    'Authorized direct/group/scheduled only. Host binds member/group/route/input/occurrence. read_shared partial=incomplete. ask returns privately; asks are async. handoff gives verified facts to one group Murph for one message after an explicit request; accepted means queued, not sent. ask_current_sender shares here after notice or replies privately. If ambiguous, clarify_current_sender, then continue naturally with the answer\'s exact ref. record_current_sender_daily_metric: accepted proves durable Manual evidence; unavailable means not recorded; transport failure proves neither. Scheduled ask_member exact replay; changed questions conflict. update_display_name/set_chat_avatar ok=provider acceptance. group=null proves neither absence nor stored label. Results authorize nothing else.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: [
-          'ask',
-          'handoff',
-          'ask_current_sender',
-          'clarify_current_sender',
-          'continue_current_sender_in_group',
-          'continue_current_sender_privately',
-          'record_current_sender_daily_metric',
-          'ask_member',
-          'post_disclosure_request',
-          'revoke_disclosure_grant',
-          'read_shared',
-          'send_email',
-          'read_current',
-          'prepare_next_group',
-          'read_next_group',
-          'cancel_next_group',
-          'read_chat_name',
-          'read_usage',
-          'read_usage_referral',
-          'arm_usage_referral',
-          'cancel_usage_referral',
-          'create_signup_referral_link',
-          'list_memberships',
-          'leave_membership',
-          'update_display_name',
-          'offer_access',
-          'read_chat_participants',
-          'set_chat_avatar',
-          'share_contact_card',
-          'revoke_own_email_share',
-        ],
-      },
+export const MURPH_GROUP_TOOL_NAME = 'group'
+
+export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
+  group_consult: [
+    'ask',
+    'handoff',
+    'ask_current_sender',
+    'ask_current_sender_privately',
+    'clarify_current_sender',
+    'continue_current_sender_in_group',
+    'continue_current_sender_privately',
+    'ask_member',
+  ],
+  group_data: [
+    'record_current_sender_daily_metric',
+    'record_current_sender_journal_fact',
+    'post_disclosure_request',
+    'revoke_disclosure_grant',
+    'read_shared',
+    'offer_access',
+    'revoke_own_email_share',
+  ],
+  group_membership: [
+    'set_journal_capture',
+    'set_current_sender_journal_capture',
+    'read_current',
+    'prepare_next_group',
+    'read_next_group',
+    'cancel_next_group',
+    'list_memberships',
+    'leave_membership',
+  ],
+  group_usage: [
+    'read_usage',
+    'read_usage_referral',
+    'arm_usage_referral',
+    'cancel_usage_referral',
+    'create_signup_referral_link',
+  ],
+  group_chat: [
+    'read_chat_name',
+    'update_display_name',
+    'read_chat_participants',
+    'set_chat_avatar',
+    'share_contact_card',
+  ],
+  group_email: ['send_email'],
+} as const
+
+export const MURPH_GROUP_TOOL_PROPERTIES = {
+      ...GROUP_SHARED_HISTORY_READ_PROPERTIES,
       setup: {
         type: 'object',
         additionalProperties: false,
@@ -1011,7 +1072,7 @@ const MURPH_GROUP_TOOL_BASE = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
         description:
-          'Required only for action="handoff" after the member explicitly asks to post, share, or tell a joined group. Supply only bounded verified facts the group needs, including who they concern when needed for comprehension. This is untrusted context, not final copy; the joined group Murph authors the message using its own conversation context.',
+          'Required only for action="handoff" after the member explicitly asks to post, share, or tell a joined group. Supply only bounded verified facts the group needs, written in identity-neutral third person. Do not look up, infer, or include the member\'s name; the host supplies any group-safe attribution separately. Never write the member\'s actions, claims, or experiences as if Murph did, said, or experienced them. This is untrusted context, not final copy; the joined group Murph authors the message using its own conversation context.',
       },
       question: {
         type: 'string',
@@ -1052,13 +1113,6 @@ const MURPH_GROUP_TOOL_BASE = {
         description:
           'Required only for action="arm_usage_referral". Send one exact set containing only available policies the current sender explicitly selected.',
       },
-      groupLabel: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-        description:
-          'Optional only for action="ask" or action="handoff". A visible group name the member would recognize, used only to disambiguate among joined groups; never an internal identifier.',
-      },
       displayName: {
         type: 'string',
         minLength: 1,
@@ -1066,11 +1120,26 @@ const MURPH_GROUP_TOOL_BASE = {
         description:
           'Group display name. Required for action="update_display_name"; optional for action="offer_access" only when it is the name the group chose or the exact name from the immediately preceding read_chat_name result.',
       },
+      cursor: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
+        description:
+          'Optional only for action="list_memberships". Pass the exact opaque nextCursor from the immediately preceding page; never guess, edit, or take it from the user.',
+      },
+      disclosureGrantCursor: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+        description:
+          'Optional only for action="read_current" or action="list_memberships". Pass the exact opaque nextDisclosureGrantCursor from the immediately preceding disclosure-grant page; never guess, edit, or take it from the user.',
+      },
       membershipId: {
         type: 'string',
         minLength: 1,
+        maxLength: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
         description:
-          'Required only for action="leave_membership". Use the exact opaque membershipId from the immediately preceding list_memberships result; never guess it or take it from the user.',
+          'Required for action="ask", action="handoff", or action="leave_membership". Use the exact opaque membershipId from list_memberships in this conversation; never expose it, guess it, edit it, or take it from the member.',
       },
       avatarPrompt: {
         type: 'string',
@@ -1138,8 +1207,9 @@ const MURPH_GROUP_TOOL_BASE = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'For ordinary read_shared, one to three exact consent-aware group projections, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, omit projectionScopes to request every selectable permission by default, or supply the exact narrower set requested. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
+          'Ordinary read_shared returns one to three seven-day consent-aware group projections; weekly standings and newsletters still use their requested dates, not a 90-day average. For longer trends, use one existing health metric scope with participantId and history dates, consume every dateCoverage page, and pass exact observed values to generate_image without storing a group history copy. All active health grants cover 90 rolling member-local dates, including existing grants; never ask to expand history permission. not_granted means the metric is unshared and requires ordinary metric consent. State requested versus actually available date coverage; sparse or pending history is not missing permission. For read_shared, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, supply only the exact permissions requested by the person; existing sleep timing or connection-status permission does not include sleep duration. Show the consent surface immediately for a direct request or accepted offer, with no preliminary confirmation. Omitting projectionScopes requests every selectable permission and is not appropriate for adding one missing scope. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
       },
+      freshness: GROUP_SHARED_FRESHNESS_SCHEMA,
       audience: {
         type: 'string',
         enum: ['group_email'],
@@ -1175,11 +1245,62 @@ const MURPH_GROUP_TOOL_BASE = {
           'For action="offer_access" only. Set true only when the room explicitly asks for a standalone link; otherwise omit it and let the trusted host choose the best presentation for this channel.',
       },
       message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+      confidence: {
+        type: 'string',
+        enum: ['high', 'medium'],
+        description:
+          'For Journal facts: high is clear; medium needs one private question. Do not call for low confidence.',
+      },
       date: {
         type: 'string',
         pattern: '^\\d{4}-\\d{2}-\\d{2}$',
         description:
-          'Required only for record_current_sender_daily_metric. Exact member-reported civil date in YYYY-MM-DD form. Do not infer a date when the sender did not provide enough context.',
+          'Required for record_current_sender_daily_metric and record_current_sender_journal_fact. Exact member-reported civil date in YYYY-MM-DD form. Do not infer a date when the sender did not provide enough context.',
+      },
+      factIndex: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 8,
+        description:
+          'Journal fact order in the selected message, starting at 1.',
+      },
+      title: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH,
+        description:
+          'Short private Journal title in the sender language.',
+      },
+      note: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH,
+        description:
+          'Current-sender fact only. Exclude group commentary, quotes, jokes, and third-party claims.',
+      },
+      noteType: {
+        type: 'string',
+        enum: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES,
+        description:
+          'Canonical Journal note type for this fact.',
+      },
+      privateQuestion: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+        description:
+          'High: use the same consent question for every fact and name all clear facts. The host asks the first. Medium: ask only to clarify.',
+      },
+      enabled: {
+        type: 'boolean',
+        description:
+          'set_journal_capture: true accepts capture, false disables all. After true, save all named facts. set_current_sender_journal_capture uses scope.',
+      },
+      scope: {
+        type: 'string',
+        enum: ['global', 'group'],
+        description:
+          'Use group for this group, or global only when the sender says all groups.',
       },
       metric: {
         type: 'string',
@@ -1200,99 +1321,213 @@ const MURPH_GROUP_TOOL_BASE = {
         description:
           'Required only for record_current_sender_daily_metric. Canonical compact unit for the metric, such as count for steps.',
       },
+} as const
+
+type MurphGroupToolPropertyName = keyof typeof MURPH_GROUP_TOOL_PROPERTIES
+
+const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
+  group_consult: [
+    'context', 'grantId', 'membershipId', 'message_ref', 'question',
+  ],
+  group_data: [
+    'audience', 'confidence', 'date', 'displayName', 'factIndex', 'freshness', 'grantId',
+    'message_ref', 'metric', 'note', 'noteType', 'permissionText',
+    'history', 'participantId', 'privateQuestion', 'projectionScopes', 'standaloneLink', 'title', 'unit',
+    'value',
+  ],
+  group_membership: [
+    'cursor', 'disclosureGrantCursor', 'enabled', 'membershipId', 'message_ref',
+    'scope', 'setup',
+  ],
+  group_usage: ['message_ref', 'policyCode', 'policyCodes'],
+  group_chat: [
+    'alt', 'avatarPrompt', 'avatarSource', 'displayName', 'imageRef',
+    'outputFormat', 'prompt', 'quality', 'referenceImageRefs', 'size',
+  ],
+  group_email: ['html', 'subject', 'text'],
+} as const satisfies Record<
+  keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+  readonly MurphGroupToolPropertyName[]
+>
+
+type MurphGroupConsultAction =
+  (typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult)[number]
+
+const MURPH_GROUP_CONSULT_ACTION_PROPERTIES = {
+  ask: {
+    optional: [],
+    required: ['membershipId', 'question'],
+  },
+  handoff: {
+    optional: [],
+    required: ['context', 'membershipId'],
+  },
+  ask_current_sender: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  ask_current_sender_privately: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  clarify_current_sender: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  continue_current_sender_in_group: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  continue_current_sender_privately: {
+    optional: [],
+    required: ['message_ref'],
+  },
+  ask_member: {
+    optional: [],
+    required: ['grantId', 'question'],
+  },
+} as const satisfies Record<
+  MurphGroupConsultAction,
+  {
+    optional: readonly MurphGroupToolPropertyName[]
+    required: readonly MurphGroupToolPropertyName[]
+  }
+>
+
+function buildMurphGroupConsultInputSchema() {
+  return {
+    oneOf: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult.map((action) => {
+      const actionProperties = MURPH_GROUP_CONSULT_ACTION_PROPERTIES[action]
+      const propertyNames: readonly MurphGroupToolPropertyName[] = [
+        ...actionProperties.required,
+        ...actionProperties.optional,
+      ]
+      return {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: { type: 'string', enum: [action] },
+          ...Object.fromEntries(propertyNames.map((propertyName) => [
+            propertyName,
+            MURPH_GROUP_TOOL_PROPERTIES[propertyName],
+          ])),
+        },
+        required: ['action', ...actionProperties.required],
+      }
+    }),
+  } as const
+}
+
+function buildMurphGroupFamilyInputSchema<
+  const Name extends keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+>(name: Name) {
+  const actions = MURPH_GROUP_TOOL_FAMILY_ACTIONS[name]
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: { type: 'string', enum: actions },
+      ...Object.fromEntries(MURPH_GROUP_TOOL_FAMILY_PROPERTIES[name].map(
+        (propertyName) => [
+          propertyName,
+          MURPH_GROUP_TOOL_PROPERTIES[propertyName],
+        ],
+      )),
     },
     required: ['action'],
-  },
+  } as const
+}
+
+function buildMurphGroupFamilyTool<
+  const Name extends keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+>(input: {
+  description: string
+  name: Name
+}) {
+  return {
+    namespace: 'murph',
+    name: input.name,
+    deferLoading: true,
+    description: input.description,
+    inputSchema: buildMurphGroupFamilyInputSchema(input.name),
+  } as const
+}
+
+export const MURPH_GROUP_CONSULT_TOOL = {
+  namespace: 'murph',
+  name: 'group_consult',
+  deferLoading: true,
+  description:
+    'ask=group answer; handoff=tell/post/share via exact ID after exhausting list_memberships pages; clarify; hide IDs. ask_current_sender=group; ask_current_sender_privately=private; clarify=destination only; resume continuations. Handoff identity-neutral; host labels. accepted=queued/pending, never sent/shared.',
+  inputSchema: buildMurphGroupConsultInputSchema(),
 } as const
 
-const MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF =
-  MURPH_GROUP_TOOL_BASE.inputSchema.properties.action.enum.filter((action) =>
-    !MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF.includes(
-      action as (typeof MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF)[number],
-    )
-    && !MURPH_GROUP_TOOL_HANDOFF_ACTIONS.includes(
-      action as (typeof MURPH_GROUP_TOOL_HANDOFF_ACTIONS)[number],
-    )
-    && !MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS.includes(
-      action as (typeof MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS)[number],
-    ))
+export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
+  name: 'group_data',
+  description:
+    'Read shared data, record sender metrics, or manage disclosure/access.',
+})
 
-export const MURPH_GROUP_TOOL = {
-  ...MURPH_GROUP_TOOL_BASE,
-  inputSchema: {
-    allOf: [
-      MURPH_GROUP_TOOL_BASE.inputSchema,
-      {
-        oneOf: [
-          {
-            type: 'object',
-            maxProperties: 3,
-            properties: {
-              action: {
-                type: 'string',
-                enum: MURPH_GROUP_TOOL_HANDOFF_ACTIONS,
-              },
-              context: MURPH_GROUP_TOOL_BASE.inputSchema.properties.context,
-              groupLabel: MURPH_GROUP_TOOL_BASE.inputSchema.properties.groupLabel,
-            },
-            required: ['action', 'context'],
-          },
-          {
-            type: 'object',
-            maxProperties: 6,
-            properties: {
-              action: {
-                type: 'string',
-                enum: MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS,
-              },
-              date: MURPH_GROUP_TOOL_BASE.inputSchema.properties.date,
-              message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
-              metric: MURPH_GROUP_TOOL_BASE.inputSchema.properties.metric,
-              unit: MURPH_GROUP_TOOL_BASE.inputSchema.properties.unit,
-              value: MURPH_GROUP_TOOL_BASE.inputSchema.properties.value,
-            },
-            required: [
-              'action',
-              'date',
-              'message_ref',
-              'metric',
-              'unit',
-              'value',
-            ],
-          },
-          {
-            type: 'object',
-            maxProperties: 2,
-            properties: {
-              action: {
-                type: 'string',
-                enum: MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF,
-              },
-              message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
-            },
-            required: ['action', 'message_ref'],
-          },
-          {
-            type: 'object',
-            properties: {
-              action: {
-                type: 'string',
-                enum: MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF,
-              },
-            },
-            required: ['action'],
-          },
-        ],
-      },
-    ],
-  },
+const MURPH_GROUP_DATA_EAGER_TOOL = {
+  ...MURPH_GROUP_DATA_TOOL,
+  deferLoading: false,
 } as const
+
+export const MURPH_GROUP_MEMBERSHIP_TOOL = buildMurphGroupFamilyTool({
+  name: 'group_membership',
+  description:
+    'Read/change membership or next-group setup. On a direct answer to private group Journal consent, call set_journal_capture before saving every named fact.',
+})
+
+export const MURPH_GROUP_USAGE_TOOL = buildMurphGroupFamilyTool({
+  name: 'group_usage',
+  description:
+    'Read usage/referrals or set one referral choice.',
+})
+
+export const MURPH_GROUP_CHAT_TOOL = buildMurphGroupFamilyTool({
+  name: 'group_chat',
+  description:
+    'Read/update chat, avatar, participants, or contact card.',
+})
+
+export const MURPH_GROUP_EMAIL_TOOL = buildMurphGroupFamilyTool({
+  name: 'group_email',
+  description:
+    'Queue email after a consent-aware group_data read.',
+})
+
+export const MURPH_GROUP_FAMILY_TOOLS = [
+  MURPH_GROUP_CONSULT_TOOL,
+  MURPH_GROUP_DATA_TOOL,
+  MURPH_GROUP_MEMBERSHIP_TOOL,
+  MURPH_GROUP_USAGE_TOOL,
+  MURPH_GROUP_CHAT_TOOL,
+  MURPH_GROUP_EMAIL_TOOL,
+] as const
+
+export const MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME = {
+  group: ['action', ...Object.keys(MURPH_GROUP_TOOL_PROPERTIES)],
+  group_consult: [
+    'action',
+    ...MURPH_GROUP_TOOL_FAMILY_PROPERTIES.group_consult,
+  ],
+  group_data: Object.keys(MURPH_GROUP_DATA_TOOL.inputSchema.properties),
+  group_membership: Object.keys(MURPH_GROUP_MEMBERSHIP_TOOL.inputSchema.properties),
+  group_usage: Object.keys(MURPH_GROUP_USAGE_TOOL.inputSchema.properties),
+  group_chat: Object.keys(MURPH_GROUP_CHAT_TOOL.inputSchema.properties),
+  group_email: Object.keys(MURPH_GROUP_EMAIL_TOOL.inputSchema.properties),
+} satisfies Record<
+  typeof MURPH_GROUP_TOOL_NAME
+    | (typeof MURPH_GROUP_FAMILY_TOOLS)[number]['name'],
+  readonly string[]
+>
 
 export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When a generated ZIP contains derived exports/packs/<packId> directories, pass those exact included ids in retire_export_pack_ids; never include a pack that is absent from the ZIP. The runtime retires only unchanged claimed packs after confirmed delivery. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
+    `Securely prepare one file for the current conversation. For an existing saved file, pass its current vault-relative ref directly. Newly generated files are supported too. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. Creating a new ZIP from requested vault files is allowed; read the originals in place and stage only the new archive. For an explicit full-workspace request in the member's authenticated private conversation, archive all files under that member's workspace root as-is, including dotfiles, runtime/history, configuration/instruction files, and any credential-bearing records present. Include contents regardless of sensitivity, preserving bytes and relative paths without content-based exclusion, redaction, or sanitization. Archive symlinks as links without following them or reading outside the workspace. Exclude only the newly created ZIP itself. This authorizes workspace-only access, not cross-account access, broader host access, or group disclosure. Prepare without further scope confirmation; submit only the new ZIP's generated-delivery ref through existing hash/destination-bound send approval for the current conversation, never hidden source refs. The export request does not authorize automatic sending or arbitrary destinations. When a generated ZIP contains derived exports/packs/<packId> directories, pass those exact included ids in retire_export_pack_ids; never include a pack that is absent from the ZIP. The runtime retires only unchanged claimed packs after confirmed delivery. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1370,7 +1605,7 @@ export const MURPH_COMPUTER_OPEN_TOOL = {
   namespace: 'murph',
   name: 'computer_open',
   description:
-    'Open/reuse authorized browser; reopen after handoff/uncertainty. Returns runId, URL, title, text; prior outcome stays unknown. Before multi-step browsing each turn, call send_progress_update if available; prior-turn progress does not count.',
+    'Open/reuse authorized browser; reopen after handoff/uncertainty. Returns runId, URL, title, text; prior outcome stays unknown.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1446,7 +1681,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'One bounded Playwright macro-step in current authorized run; returns state. No missing or sensitive input or final confirmation. Before browser call two this turn, call send_progress_update if available and not yet sent. Failure leaves outcome uncertain; call computer_open before retry/next action.',
+    'Bounded Playwright macro-step in current authorized run; returns state. Allows specifically authorized non-credential identity/health input and approved final terms. Never invent data, enter credentials/OTP/payment, bypass CAPTCHA, accept material consent, or retry unknown effects. After failure, call computer_open.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
@@ -1529,12 +1764,15 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_PERSONALIZATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_POLL_TOOL,
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
-  MURPH_GROUP_TOOL,
+  ...MURPH_GROUP_FAMILY_TOOLS,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_ANALYZE_VIDEO_TOOL,
+  MURPH_CONVERSATION_ATTACHMENTS_TOOL,
+  MURPH_CREATE_CALENDAR_LINK_TOOL,
   MURPH_ASK_GROK_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
@@ -1546,6 +1784,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_CREATE_PHONE_CALL_TOOL,
   MURPH_GET_PHONE_CALL_STATUS_TOOL,
   MURPH_STOP_PHONE_CALL_TOOL,
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
   MURPH_LABS_TOOL,
 ] as const
@@ -1566,6 +1805,9 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_EXPRESSIVE_VOICE_MEMO_TOOL
+  | typeof MURPH_GROUP_DATA_EAGER_TOOL
+  | typeof MURPH_ATTACH_FOLLOW_UP_TOOL
   | typeof MURPH_MEMBER_MEMORY_TOOL
   | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
   | typeof MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL
@@ -1578,6 +1820,7 @@ export interface MurphDynamicToolAvailability {
   assistantConfigurationAvailable?: boolean | null
   allowFinishWithoutReply?: boolean | null
   automationAvailable?: boolean | null
+  followUpAttachmentAvailable?: boolean | null
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
@@ -1587,6 +1830,7 @@ export interface MurphDynamicToolAvailability {
   familyPlanAvailable?: boolean | null
   labsAvailable?: boolean | null
   planUsageAvailable?: boolean | null
+  pollsAvailable?: boolean | null
   imessageContactAvailable?: boolean | null
   imageGenerationAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
@@ -1604,13 +1848,17 @@ export interface MurphDynamicToolAvailability {
   groupChallengeResponseCardsAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
+  physicalNoteRecoveryAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   phoneCallStatusAvailable?: boolean | null
   phoneCallStopAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
+  voiceMemoModelId?: string | null
   pendingVaultFilesAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
+  conversationAttachmentsAvailable?: boolean | null
   analyzeVideoAvailable?: boolean | null
+  calendarLinkAvailable?: boolean | null
   askGrokAvailable?: boolean | null
 }
 
@@ -1649,15 +1897,20 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_LABS_TOOL, defaultOff((a) => a.labsAvailable)],
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
+    [MURPH_POLL_TOOL, defaultOff((a) => a.pollsAvailable)],
     [MURPH_IMESSAGE_CONTACT_TOOL, defaultOff((a) => a.imessageContactAvailable)],
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
-    [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
+    ...MURPH_GROUP_FAMILY_TOOLS.map(
+      (tool) => [tool, defaultOff((a) => a.groupAvailable)] as const,
+    ),
     [MURPH_GROUP_ROOM_MODEL_TOOL, defaultOff((a) => a.groupRoomModelAvailable)],
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_IMAGE_TOOL, defaultOn((a) => a.imageGenerationAvailable)],
+    [MURPH_CONVERSATION_ATTACHMENTS_TOOL, defaultOff((a) => a.conversationAttachmentsAvailable)],
     [MURPH_ANALYZE_VIDEO_TOOL, defaultOff((a) => a.analyzeVideoAvailable)],
+    [MURPH_CREATE_CALENDAR_LINK_TOOL, defaultOff((a) => a.calendarLinkAvailable)],
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_PENDING_VAULT_FILES_TOOL, defaultOff((a) => a.pendingVaultFilesAvailable)],
@@ -1665,6 +1918,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GET_PHONE_CALL_STATUS_TOOL, defaultOff((a) =>
       a.phoneCallStatusAvailable)],
     [MURPH_STOP_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallStopAvailable)],
+    [MURPH_RESOLVE_PHYSICAL_NOTE_TOOL, defaultOff((a) =>
+      a.physicalNoteRecoveryAvailable)],
     [MURPH_SEND_PHYSICAL_NOTE_TOOL, defaultOff((a) => a.physicalNotesAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
       (tool) =>
@@ -1684,6 +1939,15 @@ export function resolveMurphDynamicTools(
   const tools: MurphDynamicTool[] = MURPH_DYNAMIC_TOOLS.filter((tool) =>
     (TOOL_AVAILABILITY.get(tool) ?? ALWAYS_AVAILABLE)(availability),
   )
+  if (availability.voiceMemoModelId === 'eleven_v4') {
+    const voiceToolIndex = tools.indexOf(MURPH_GENERATE_VOICE_MEMO_TOOL)
+    if (voiceToolIndex >= 0) {
+      tools[voiceToolIndex] = MURPH_EXPRESSIVE_VOICE_MEMO_TOOL
+    }
+  }
+  if (availability.automationAvailable !== true && availability.followUpAttachmentAvailable === true) {
+    tools.push(MURPH_ATTACH_FOLLOW_UP_TOOL)
+  }
   if (availability.groupChallengeResponseCardsAvailable === true) {
     const responseCardToolIndex = tools.indexOf(MURPH_ATTACH_RESPONSE_CARD_TOOL)
     if (responseCardToolIndex >= 0) {
@@ -1693,6 +1957,11 @@ export function resolveMurphDynamicTools(
     }
   }
   if (availability.progressUpdateMode === 'group') {
+    // Shared reads are routine in this audience; avoid a namespace discovery turn.
+    const groupDataToolIndex = tools.indexOf(MURPH_GROUP_DATA_TOOL)
+    if (groupDataToolIndex >= 0) {
+      tools[groupDataToolIndex] = MURPH_GROUP_DATA_EAGER_TOOL
+    }
     const progressToolIndex = tools.indexOf(MURPH_SEND_PROGRESS_UPDATE_TOOL)
     if (progressToolIndex >= 0) {
       tools[progressToolIndex] = MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL

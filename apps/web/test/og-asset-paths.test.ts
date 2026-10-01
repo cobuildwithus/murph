@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,8 +12,13 @@ import {
   fraunces600FontPath,
   logoSvgPath,
   murphMarkSvgPath,
-  ogAssetCandidatePaths,
 } from "../app/font-files";
+import { readMurphContactCardAvatarPhoto } from "../app/api/murph-contact-card/avatar-photo";
+import {
+  resolveRuntimeAssetPath,
+  runtimeAssetCandidatePaths,
+} from "../app/runtime-asset-files";
+import { findMurphContactAvatarOption } from "../src/lib/murph-contact-avatars";
 
 // These tests intentionally use the real filesystem: the failure they guard
 // against is OG routes 500ing with ENOENT because an asset path does not exist
@@ -48,8 +54,8 @@ test("candidate resolution covers the apps/web and repo-root runtime layouts", (
   ]) {
     // Local dev, tests, and `next build` run with cwd at apps/web; the
     // deployed serverless function runs with a repo-root-shaped filesystem.
-    const fromAppDir = ogAssetCandidatePaths(relativePath, appRoot);
-    const fromRepoRoot = ogAssetCandidatePaths(relativePath, repoRoot);
+    const fromAppDir = runtimeAssetCandidatePaths(relativePath, appRoot);
+    const fromRepoRoot = runtimeAssetCandidatePaths(relativePath, repoRoot);
 
     expect(fromRepoRoot[0]).toBe(path.join(repoRoot, "apps/web", relativePath));
     expect(fromAppDir[1]).toBe(path.join(appRoot, relativePath));
@@ -62,4 +68,19 @@ test("candidate resolution covers the apps/web and repo-root runtime layouts", (
       `expected a real file among ${fromRepoRoot.join(", ")}`,
     ).toBe(true);
   }
+});
+
+test("selected contact photo is read losslessly from the bundled asset", async () => {
+  const avatar = findMurphContactAvatarOption("rancher");
+  if (!avatar.src) {
+    throw new Error("Expected the selected contact avatar to have an asset.");
+  }
+
+  const photo = await readMurphContactCardAvatarPhoto(avatar.id);
+  const source = await readFile(
+    resolveRuntimeAssetPath(`public${avatar.src}`),
+  );
+
+  expect(photo?.type).toBe("PNG");
+  expect(Buffer.from(photo?.base64 ?? "", "base64")).toEqual(source);
 });

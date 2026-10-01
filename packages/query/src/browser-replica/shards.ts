@@ -37,6 +37,7 @@ export interface BrowserVaultCoreShard extends Pick<
   BrowserVaultReplica,
   | "assistantSummary"
   | "entities"
+  | "journal"
   | "personalPatterns"
   | "policy"
   | "timelineRows"
@@ -162,6 +163,7 @@ export async function splitBrowserVaultReplica(
       experimentRunCards: replica.experimentRunCards ?? [],
       hasLabBiomarkers: replica.hasLabBiomarkers ?? false,
       identity,
+      ...(replica.journal === undefined ? {} : { journal: replica.journal }),
       ...(replica.personalPatterns === undefined ? {} : { personalPatterns: replica.personalPatterns }),
       policy: replica.policy,
       schema: BROWSER_VAULT_CORE_SHARD_SCHEMA,
@@ -203,6 +205,7 @@ export function assembleBrowserVaultCoreReplica(core: BrowserVaultCoreShard): Br
     generatedAt: identity.generatedAt,
     ...(identity.generation === undefined ? {} : { generation: identity.generation }),
     hasLabBiomarkers: core.hasLabBiomarkers,
+    ...(core.journal === undefined ? {} : { journal: core.journal }),
     ...(core.personalPatterns === undefined ? {} : { personalPatterns: core.personalPatterns }),
     policy: core.policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,

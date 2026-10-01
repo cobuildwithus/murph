@@ -71,7 +71,6 @@ export type {
   BrowserVaultMetricsQueryClient,
   BrowserVaultMetricsReplica,
   BrowserVaultMetricsIndexReplica,
-  BrowserVaultOverviewView,
   BrowserVaultQueryClient,
   BrowserVaultReplica,
   BrowserVaultReplicaPolicy,
@@ -103,7 +102,6 @@ export {
   BrowserVaultMetricBucketUnavailableError,
   createBrowserVaultCoreQueryClient,
   createBrowserVaultLabsQueryClient,
-  createBrowserVaultLoadedQueryClients,
   createBrowserVaultInteractiveMetricsQueryClient,
   createBrowserVaultInteractiveQueryClient,
   createBrowserVaultMetricsQueryClient,
@@ -117,7 +115,6 @@ export {
   requireBrowserVaultMetricBucketId,
 } from "./browser-replica/metric-buckets.ts";
 export type { BrowserVaultMetricBucketId } from "./browser-replica/metric-buckets.ts";
-export type { BrowserVaultLoadedQueryClients } from "./browser-replica/query.ts";
 export {
   BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA,
   labResultRowMatchesFilters,
@@ -136,11 +133,17 @@ export type {
   BrowserVaultPresentedLabResultRow,
 } from "./browser-replica/lab-results.ts";
 export {
-  selectBrowserVaultHistory,
-  selectBrowserVaultOverview,
+  selectBrowserVaultJournal,
   selectBrowserVaultExperimentSummary,
   selectBrowserVaultTrackedExperiments,
 } from "./browser-replica/views.ts";
+export { buildJournalView, emptyJournalView } from "./journal-view.ts";
+export type {
+  JournalDay,
+  JournalEvent,
+  JournalRecord,
+  JournalView,
+} from "./journal-view.ts";
 export {
   BROWSER_VAULT_BIOMARKER_PANEL_SCHEMA,
   selectBrowserVaultBiomarkerPanel,

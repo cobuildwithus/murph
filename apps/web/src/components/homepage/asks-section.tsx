@@ -4,160 +4,83 @@ import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 
 type Tint = "sage" | "gold" | "bronze";
 
-const TINTS: Record<
-  Tint,
-  {
-    eyebrow: string;
-    panel: string;
-    bubble: string;
-    glow: string;
-  }
-> = {
+const TINTS: Record<Tint, { panel: string; bubble: string; heading: string }> = {
   sage: {
-    eyebrow: "text-[#3d5028]",
-    panel:
-      "bg-[linear-gradient(135deg,#e8efde_0%,#d5e2c4_55%,#c8d7b1_100%)]",
-    bubble: "bg-[#2c7a3f]",
-    glow: "shadow-[0_30px_80px_-35px_rgba(58,80,40,0.45)]",
+    panel: "bg-[#243f32]",
+    bubble: "bg-[#d7e59b] text-[#243f32]",
+    heading: "text-[#f5f0e8]",
   },
   gold: {
-    eyebrow: "text-[#8a6428]",
-    panel:
-      "bg-[linear-gradient(135deg,#f3e8d0_0%,#ead7af_55%,#dec390_100%)]",
-    bubble: "bg-[#8a5d17]",
-    glow: "shadow-[0_30px_80px_-35px_rgba(138,100,40,0.45)]",
+    panel: "bg-[#eddc91]",
+    bubble: "bg-[#7b4d24] text-[#fffcf6]",
+    heading: "text-[#383321]",
   },
   bronze: {
-    eyebrow: "text-[#7d4a1a]",
-    panel:
-      "bg-[linear-gradient(135deg,#ead0b0_0%,#d6ad7e_55%,#bf8a55_100%)]",
-    bubble: "bg-[#94591f]",
-    glow: "shadow-[0_30px_80px_-35px_rgba(125,74,26,0.45)]",
+    panel: "bg-[#ad542f]",
+    bubble: "bg-[#f4dbaf] text-[#613517]",
+    heading: "text-[#fffcf6]",
   },
 };
 
-export function WideFeature({
-  artifactAlign = "end",
-  artifactSide,
-  body,
+export function FeatureCard({
   bubble,
-  eyebrow,
   headline,
   tint,
   artifact,
+  layout = "compact",
 }: {
-  // Short artifacts read better vertically centered in the panel; tall ones
-  // anchor to the bottom edge.
-  artifactAlign?: "center" | "end";
-  artifactSide: "left" | "right";
-  body: string;
-  bubble: string;
-  eyebrow: string;
+  bubble?: string;
   headline: string;
-  tint: Tint;
+  tint?: Tint;
   artifact: React.ReactNode;
+  layout?: "compact" | "wide" | "reverse";
 }) {
-  const t = TINTS[tint];
-  const copy = (
-    <div className="flex flex-col justify-center gap-4 px-5 pt-8 pb-1 sm:gap-5 sm:px-10 sm:pt-12 sm:pb-2 lg:col-span-5 lg:py-16 lg:px-12">
-      <span
+  const colors = tint ? TINTS[tint] : null;
+  const wide = layout !== "compact";
+
+  return (
+    <article
+      className={cn(
+        "min-w-0",
+        wide
+          ? "grid items-center gap-8 sm:gap-12 lg:col-span-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-12 xl:gap-16"
+          : "flex flex-col gap-8 border-t border-[#2d3436]/20 pt-7 sm:gap-10 sm:pt-8",
+        colors
+          ? cn("rounded-[1.5rem] px-5 py-8 sm:rounded-[2rem] sm:p-10 lg:p-14", colors.panel)
+          : wide && "py-4 sm:py-8",
+      )}
+    >
+      <h3
         className={cn(
-          "font-mono text-[10px] font-semibold uppercase tracking-[0.2em]",
-          t.eyebrow,
+          "font-serif font-semibold tracking-[-0.035em] text-balance",
+          colors?.heading ?? "text-[#2d3436]",
+          wide
+            ? "max-w-[18ch] text-[2rem] leading-[1.06] sm:text-[2.75rem] lg:text-[2.5rem] xl:text-[3.25rem]"
+            : "max-w-[25ch] text-[1.75rem] leading-[1.12] sm:text-[2.125rem]",
+          layout === "reverse" && "lg:col-start-2 lg:row-start-1",
         )}
       >
-        {eyebrow}
-      </span>
-      <h3 className="font-serif text-[1.5rem] font-semibold leading-[1.08] tracking-[-0.03em] text-balance text-[#1f1c18] sm:text-[clamp(1.75rem,2.8vw,2.625rem)] sm:leading-[1.02] sm:tracking-[-0.035em]">
         {headline}
       </h3>
-      <p className="text-[0.875rem] leading-[1.6] text-pretty text-[#635a48] sm:text-[0.9375rem] sm:leading-[1.65] lg:max-w-[34ch]">
-        {body}
-      </p>
-    </div>
-  );
-
-  const panel = (
-    <div className="p-2.5 sm:p-4 lg:col-span-7 lg:p-5">
       <div
         className={cn(
-          "relative min-h-[330px] overflow-hidden rounded-[1.25rem] sm:min-h-[440px] sm:rounded-[1.5rem] lg:min-h-[480px]",
-          t.panel,
-          t.glow,
+          "flex min-w-0 flex-col gap-6 sm:gap-8",
+          layout === "reverse" && "lg:col-start-1 lg:row-start-1",
         )}
       >
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_20%_-10%,rgba(255,255,255,0.55)_0%,rgba(255,255,255,0)_55%)]" />
-        {/* Below lg the bubble sits in flow above the artifact: with the
-            fixed-reserve overlay, long bubble copy wraps on narrow screens
-            and collides with the artifact card. */}
-        <div
-          className={cn(
-            "relative z-20 flex px-4 pt-5 sm:px-7 sm:pt-8 lg:absolute lg:top-8 lg:px-0 lg:pt-0",
-            artifactSide === "left"
-              ? "justify-start lg:left-7"
-              : "justify-end lg:right-7",
-          )}
-        >
+        {bubble ? (
           <div
             className={cn(
-              "max-w-[240px] px-3.5 py-2 text-[0.875rem] leading-[1.4] text-white shadow-[0_8px_24px_-6px_rgba(60,40,20,0.3)] sm:max-w-[280px] sm:px-4 sm:py-2.5 sm:text-[0.9375rem]",
-              t.bubble,
-              artifactSide === "left"
-                ? "rounded-2xl rounded-tl-[6px]"
-                : "rounded-2xl rounded-tr-[6px]",
+              "max-w-[280px] self-end rounded-2xl rounded-tr-md px-4 py-2.5 text-[0.875rem] leading-[1.4] sm:text-[0.9375rem]",
+              colors?.bubble ?? "bg-[#2c7a3f] text-[#fffcf6]",
             )}
           >
             {bubble}
           </div>
+        ) : null}
+        <div className={cn("w-full min-w-0", wide ? "mx-auto max-w-[440px]" : "max-w-[500px]")}>
+          {artifact}
         </div>
-        <div
-          className={cn(
-            "relative z-10 flex h-full justify-center px-3 pb-4 pt-4 sm:px-8 sm:pb-8 sm:pt-6 lg:pt-32",
-            artifactAlign === "center"
-              ? "items-center lg:absolute lg:inset-0"
-              : "items-end",
-          )}
-        >
-          <div className="w-full max-w-[440px]">{artifact}</div>
-        </div>
-      </div>
-    </div>
-  );
-
-  return (
-    <article className="overflow-hidden rounded-[1.5rem] bg-[#fffcf6] ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_20px_60px_-30px_rgba(45,52,54,0.12)] sm:rounded-[2rem] lg:grid lg:grid-cols-12 lg:items-stretch">
-      {artifactSide === "right" ? copy : panel}
-      {artifactSide === "right" ? panel : copy}
-    </article>
-  );
-}
-
-function CompactCard({
-  body,
-  eyebrow,
-  headline,
-  artifact,
-}: {
-  body: string;
-  eyebrow: string;
-  headline: string;
-  artifact: React.ReactNode;
-}) {
-  return (
-    <article className="flex min-w-0 flex-col gap-5 rounded-[1.5rem] bg-[#fffcf6] p-5 ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_16px_50px_-30px_rgba(45,52,54,0.1)] sm:gap-6 sm:rounded-[1.75rem] sm:p-9">
-      <div className="flex flex-col gap-2.5 sm:gap-3">
-        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-[#736a58]">
-          {eyebrow}
-        </span>
-        <h3 className="font-serif text-[1.25rem] font-semibold leading-[1.08] tracking-[-0.025em] text-balance text-[#1f1c18] sm:text-[clamp(1.375rem,2vw,1.75rem)] sm:leading-[1.05] sm:tracking-[-0.03em]">
-          {headline}
-        </h3>
-        <p className="text-[0.875rem] leading-[1.55] text-pretty text-[#635a48] sm:leading-[1.6]">
-          {body}
-        </p>
-      </div>
-      <div className="mt-auto rounded-2xl bg-[#f5f0e8]/60 p-2.5 ring-1 ring-black/[0.03] sm:rounded-[1.25rem] sm:p-3">
-        {artifact}
       </div>
     </article>
   );
@@ -171,16 +94,7 @@ function RecoveryArtifact() {
   ];
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-        <span className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[#5a6e32] sm:text-[10px] sm:tracking-[0.15em]">
-          Tuesday · morning brief
-        </span>
-        <span className="text-right font-mono text-[9px] tabular-nums text-[#5a6e32] sm:text-[10px]">
-          Best HRV in 2 weeks
-        </span>
-      </div>
-
-      <p className="mt-2.5 font-serif text-[0.9375rem] leading-[1.45] text-[#2d3436] sm:mt-3 sm:text-[1rem]">
+      <p className="font-serif text-[0.9375rem] leading-[1.45] text-[#2d3436] sm:text-[1rem]">
         Recovery is above your recent baseline, and HRV was highest on the
         sauna nights. Today looks like a strong training day.
       </p>
@@ -215,19 +129,9 @@ function RecoveryArtifact() {
 function ExperimentArtifact() {
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-serif text-[1.0625rem] font-semibold leading-tight text-[#2d3436]">
-            Magnesium for Sleep
-          </p>
-          <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-            Day 9 of 14 · Active phase
-          </p>
-        </div>
-        <span className="shrink-0 rounded-full bg-[#5a6e32]/12 px-2.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#3d5028]">
-          On track
-        </span>
-      </div>
+      <p className="font-serif text-[1.0625rem] font-semibold leading-tight text-[#2d3436]">
+        Magnesium for Sleep
+      </p>
 
       <div className="mt-4">
         <div className="flex h-1.5 overflow-hidden rounded-full bg-[#2d3436]/8">
@@ -333,15 +237,7 @@ function BloodworkArtifact() {
   ];
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-        <span className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[#a04f30] sm:text-[10px] sm:tracking-[0.15em]">
-          Latest panel · vs March
-        </span>
-        <span className="text-right font-mono text-[9px] text-[#736a58] sm:text-[10px]">
-          3 flagged
-        </span>
-      </div>
-      <ul className="mt-3 divide-y divide-[#2d3436]/06 sm:mt-4">
+      <ul className="divide-y divide-[#2d3436]/06">
         {markers.map((m) => (
           <li
             key={m.label}
@@ -379,39 +275,27 @@ function BloodworkArtifact() {
 function ErrandsArtifact() {
   const items = [
     {
-      eyebrow: "Booked",
       title: "DEXA scan at BodySpec",
       meta: "Thu 2:00 PM, 1.4 mi away · $49",
     },
     {
-      eyebrow: "In your cart",
       title: "Re-up Omega-3",
       meta: "Thorne EPA/DHA, 90ct · ships in 2 days",
     },
     {
-      eyebrow: "Queued",
       title: "Dr. Patel recap on calendar",
       meta: "With 3 questions to ask · 30 min hold",
     },
   ];
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#7d4a1a]">
-          Things I lined up for you
-        </span>
-        <span className="font-mono text-[10px] text-[#736a58]">3 ready</span>
-      </div>
-      <ul className="mt-4 space-y-2.5">
+      <ul className="space-y-2.5">
         {items.map((item) => (
           <li
             key={item.title}
             className="rounded-xl bg-[#f5f0e8]/70 px-3.5 py-3 ring-1 ring-black/[0.03]"
           >
-            <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-[#7d4a1a]">
-              {item.eyebrow}
-            </span>
-            <p className="mt-0.5 font-serif text-[0.9375rem] font-semibold leading-tight text-[#2d3436]">
+            <p className="font-serif text-[0.9375rem] font-semibold leading-tight text-[#2d3436]">
               {item.title}
             </p>
             <p className="mt-0.5 font-mono text-[10px] tabular-nums text-[#736a58]">
@@ -427,16 +311,7 @@ function ErrandsArtifact() {
 function CallArtifact() {
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#7d4858]">
-          Appointment booked
-        </span>
-        <span className="font-mono text-[10px] tabular-nums text-[#736a58]">
-          just now
-        </span>
-      </div>
-
-      <div className="mt-4">
+      <div>
         <p className="font-serif text-[1.125rem] font-semibold leading-tight text-[#2d3436]">
           Cleaning + exam
         </p>
@@ -449,10 +324,7 @@ function CallArtifact() {
       </div>
 
       <div className="mt-4 rounded-xl bg-[#f5f0e8]/70 px-3.5 py-3 ring-1 ring-black/[0.03]">
-        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-          Call summary
-        </span>
-        <p className="mt-1.5 text-[0.8125rem] leading-[1.55] text-[#635a48]">
+        <p className="text-[0.8125rem] leading-[1.55] text-[#635a48]">
           4 min on the line. Navigated the menu, held for the receptionist,
           picked a slot that fits your week.
         </p>
@@ -464,16 +336,7 @@ function CallArtifact() {
 function HabitArtifact() {
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#5e5530]">
-          Habit · day 24
-        </span>
-        <span className="font-mono text-[10px] tabular-nums text-[#736a58]">
-          18 of 24 days
-        </span>
-      </div>
-
-      <div className="mt-4">
+      <div>
         <p className="font-serif text-[1.125rem] font-semibold leading-tight text-[#2d3436]">
           Daily morning run
         </p>
@@ -499,69 +362,45 @@ export function AsksGridSection() {
       <div className="mx-auto max-w-[1200px]">
         {/* Bridges the group-chat story above back to the 1:1 assistant:
             everything below happens in a private thread with Murph. */}
-        <div className="mb-10 max-w-[720px] sm:mb-12">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
-            Just you and Murph
-          </p>
-          <h2 className="mt-4 font-serif text-[1.875rem] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436] sm:text-[clamp(2rem,4vw,3.25rem)]">
+        <div className="mb-12 max-w-[960px] sm:mb-16 lg:mb-20">
+          <h2 className="font-serif text-[2.375rem] font-semibold leading-[1.02] tracking-[-0.045em] text-balance text-[#2d3436] sm:text-[clamp(3rem,5.5vw,4.75rem)]">
             No group? You’re still not doing this alone.
           </h2>
-          <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
-            Outside the group chat, Murph is all yours. Experiments, bloodwork,
-            habits, bookings, and daily readouts, in a private one on one
-            thread.
-          </p>
         </div>
-        <div className="space-y-5 sm:space-y-6">
-          <WideFeature
+        <div className="grid gap-x-16 gap-y-12 sm:gap-y-16 lg:grid-cols-2 lg:gap-y-20">
+          <FeatureCard
             tint="gold"
-            artifactSide="right"
-            eyebrow="Self-experiments"
+            layout="wide"
             headline="I run experiments so you know what actually works for you."
-            body="Pick a protocol. Murph baselines you for two weeks, runs the active phase, then texts the before-and-after. No more guessing whether anything moved."
             bubble="Did the magnesium actually work?"
             artifact={<ExperimentArtifact />}
           />
 
-          <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
-            <CompactCard
-              eyebrow="Labs"
-              headline="I find insights in your bloodwork over time."
-              body="Drop in your latest panel. Murph flags what crept up or down and turns it into the questions worth asking your doctor."
-              artifact={<BloodworkArtifact />}
-            />
-            <CompactCard
-              eyebrow="Habits"
-              headline="I make it easy to build healthy habits."
-              body="A version small enough for bad days, anchored to something you already do. Reminders ease off as it takes hold."
-              artifact={<HabitArtifact />}
-            />
-          </div>
+          <FeatureCard
+            headline="I find insights in your bloodwork over time."
+            artifact={<BloodworkArtifact />}
+          />
+          <FeatureCard
+            headline="I make it easy to build healthy habits."
+            artifact={<HabitArtifact />}
+          />
 
-          <WideFeature
+          <FeatureCard
             tint="bronze"
-            artifactSide="left"
-            eyebrow="Closes the loop"
+            layout="wide"
             headline="I order the supplements and book the scans."
-            body="Murph finds the DEXA scan nearby, drafts the supplement re-up, and queues the doctor recap on your calendar. You give the final tap. The errands stop slipping."
             bubble="Order me Omega-3, find me a DEXA scan, and confirm my doctor's appointment."
             artifact={<ErrandsArtifact />}
           />
 
-          <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
-            <CompactCard
-              eyebrow="Phone calls"
-              headline="I call the dentist and book the appointment."
-              body="Dentist, dermatologist, vet, mechanic. Murph dials, waits on hold, picks a slot that fits your week."
-              artifact={<CallArtifact />}
-            />
-            <CompactCard
-              eyebrow="Daily readout"
-              headline="I read your wearables and tell you what actually matters."
-              body="Murph pulls Oura, WHOOP, Garmin, or Apple Health overnight. Wake up to a one-line readout."
-              artifact={<RecoveryArtifact />}
-            />
-          </div>
+          <FeatureCard
+            headline="I call the dentist and book the appointment."
+            artifact={<CallArtifact />}
+          />
+          <FeatureCard
+            headline="I read your wearables and tell you what actually matters."
+            artifact={<RecoveryArtifact />}
+          />
         </div>
       </div>
     </section>

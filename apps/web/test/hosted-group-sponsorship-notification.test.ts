@@ -77,6 +77,9 @@ import {
   materializeHostedGroupSponsorshipIfApplicable,
   materializeHostedGroupSponsorshipRecoveryNotification,
 } from "@/src/lib/hosted-groups/group-sponsorship-notification";
+import type {
+  HostedGroupSponsorshipMonthlyCapMinor,
+} from "@/src/lib/hosted-groups/group-sponsorship-contract";
 
 const PAID_AT = new Date("2026-07-27T12:00:00.000Z");
 const DIRECT_DESTINATION = {
@@ -323,7 +326,7 @@ describe("group sponsorship notification", () => {
   it("uses the actual $5 activation for the public moment, not the private monthly maximum", async () => {
     const prisma = createPrismaHarness({
       chargeOrdinal: 0,
-      monthlyCapMinor: 2_000,
+      monthlyCapMinor: 5_000,
       offerCode: "usage_5_usd",
     });
 
@@ -570,7 +573,7 @@ function createPrismaHarness(input: {
   authorizationStatus?: HostedGroupSponsorshipAuthorizationStatus;
   chargeOrdinal?: number;
   hasMoment?: boolean;
-  monthlyCapMinor?: 500 | 1_000 | 2_000;
+  monthlyCapMinor?: HostedGroupSponsorshipMonthlyCapMinor;
   offerCode?: "usage_5_usd" | "usage_10_usd";
   status?: HostedUsageCreditPurchaseStatus;
   targetKind?: "group" | "personal";

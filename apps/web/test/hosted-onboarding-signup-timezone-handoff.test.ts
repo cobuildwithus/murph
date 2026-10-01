@@ -17,6 +17,18 @@ const mocks = vi.hoisted(() => ({
   writeHostedMemberSignupNotificationContextIfPendingTx: vi.fn(),
 }));
 
+// The row fixtures do not execute Prisma relation filters. Preserve their
+// state-based access decisions; the PostgreSQL proof covers the boolean query.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
+
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("@/src/lib/hosted-crypto/domain-root-store")
@@ -168,6 +180,7 @@ describe("hosted signup timezone handoff", () => {
       });
 
     const prisma = {
+      hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
         memberResolutionTransactionOpen = true;
         sequence.push("member-resolution:start");
@@ -243,6 +256,7 @@ describe("hosted signup timezone handoff", () => {
   it("leaves inactive signup notification context empty when request capture is omitted", async () => {
     let signupNotificationContextEncrypted: string | null = null;
     const prisma = {
+      hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback(prisma)),
       hostedMember: {
@@ -310,6 +324,7 @@ describe("hosted signup timezone handoff", () => {
       member: MEMBER,
     });
     const prisma = {
+      hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback(prisma)),
       hostedMember: {

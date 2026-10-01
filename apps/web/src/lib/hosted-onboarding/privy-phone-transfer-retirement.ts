@@ -1,13 +1,10 @@
 import {
+  type HostedMemberBillingRef,
   HostedBillingStatus,
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
 
-import {
-  HOSTED_PULSE_TRIAL_OFFER,
-  HOSTED_PULSE_TRIAL_POLICY_VERSION,
-} from "./billing-plans";
 import {
   createHostedPhoneLookupKeyReadCandidates,
   createHostedPrivyUserLookupKeyReadCandidates,
@@ -16,11 +13,14 @@ import {
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
+  projectHostedMemberIdentityState,
   readHostedMemberIdentity,
+  readHostedMemberIdentityRecord,
   lookupHostedMemberIdentityByPhoneNumber,
+  type HostedMemberIdentityRecord,
+  type HostedMemberIdentityState,
 } from "./hosted-member-identity-store";
 import {
-  readHostedMemberBillingSnapshot,
   readHostedMemberCoreState,
   type HostedMemberCoreState,
 } from "./hosted-member-store";
@@ -69,11 +69,21 @@ export interface HostedPrivyPhoneTransferProof {
 }
 
 export interface HostedPrivyPhoneTransferSourceRetirementProof {
-  autoTrialBilling: {
-    stripeCustomerId: string;
-    stripeSubscriptionId: string;
-  } | null;
   sourceMemberId: string;
+}
+
+export interface PreparedHostedPrivyPhoneTransferSourceRetirement {
+  readonly rawFingerprint: string;
+  readonly sourceIdentity: HostedMemberIdentityState | null;
+  readonly sourceMemberId: string;
+  readonly targetIdentity: HostedMemberIdentityState | null;
+  readonly targetMemberId: string;
+}
+
+interface HostedPrivyPhoneTransferSourceRetirementRawRows {
+  readonly sourceBillingRef: HostedMemberBillingRef | null;
+  readonly sourceIdentity: HostedMemberIdentityRecord | null;
+  readonly targetIdentity: HostedMemberIdentityRecord | null;
 }
 
 export async function acquireHostedPrivyPhoneTransferPhoneLocksTx(input: {
@@ -173,10 +183,81 @@ export async function readHostedPrivyPhoneTransferProof(input: {
   };
 }
 
+/**
+ * Projects the exact encrypted identity rows before transaction
+ * checkout. The locked transaction re-reads the same raw rows and rejects any
+ * drift before using these provider-backed projections.
+ */
+export async function prepareHostedPrivyPhoneTransferSourceRetirement(input: {
+  prisma: PrismaClient;
+  sourceMemberId: string;
+  targetMemberId: string;
+}): Promise<PreparedHostedPrivyPhoneTransferSourceRetirement> {
+  const rawRows = await readHostedPrivyPhoneTransferSourceRetirementRawRows({
+    prisma: input.prisma,
+    sourceMemberId: input.sourceMemberId,
+    targetMemberId: input.targetMemberId,
+  });
+  const rawFingerprint =
+    buildHostedPrivyPhoneTransferSourceRetirementRawFingerprint(rawRows);
+  const [sourceIdentity, targetIdentity] = await Promise.all([
+    rawRows.sourceIdentity
+      ? projectHostedMemberIdentityState(rawRows.sourceIdentity, input.prisma)
+      : null,
+    rawRows.targetIdentity
+      ? projectHostedMemberIdentityState(rawRows.targetIdentity, input.prisma)
+      : null,
+  ]);
+
+  return {
+    rawFingerprint,
+    sourceIdentity,
+    sourceMemberId: input.sourceMemberId,
+    targetIdentity,
+    targetMemberId: input.targetMemberId,
+  };
+}
+
+async function readHostedPrivyPhoneTransferSourceRetirementRawRows(input: {
+  prisma: HostedOnboardingReadClient;
+  sourceMemberId: string;
+  targetMemberId: string;
+}): Promise<HostedPrivyPhoneTransferSourceRetirementRawRows> {
+  const [sourceBillingRef, sourceIdentity, targetIdentity] = await Promise.all([
+    input.prisma.hostedMemberBillingRef.findUnique({
+      where: { memberId: input.sourceMemberId },
+    }),
+    readHostedMemberIdentityRecord({
+      memberId: input.sourceMemberId,
+      prisma: input.prisma,
+    }),
+    readHostedMemberIdentityRecord({
+      memberId: input.targetMemberId,
+      prisma: input.prisma,
+    }),
+  ]);
+  return {
+    sourceBillingRef,
+    sourceIdentity,
+    targetIdentity,
+  };
+}
+
+function buildHostedPrivyPhoneTransferSourceRetirementRawFingerprint(
+  rows: HostedPrivyPhoneTransferSourceRetirementRawRows,
+): string {
+  return JSON.stringify([
+    rows.sourceBillingRef,
+    rows.sourceIdentity,
+    rows.targetIdentity,
+  ]);
+}
+
 export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
   identity: HostedPrivyIdentity;
   member: HostedMemberCoreState;
   now: Date;
+  prepared: PreparedHostedPrivyPhoneTransferSourceRetirement;
   prisma: Prisma.TransactionClient;
   targetPhoneNumberBeforeTransfer: string | null;
   transfer: HostedPrivyPhoneTransferProof;
@@ -187,6 +268,8 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
     || phoneNumber !== input.transfer.phoneNumber
     || input.member.id === input.transfer.sourceMemberId
     || input.identity.userId === input.transfer.sourcePrivyUserId
+    || input.prepared.sourceMemberId !== input.transfer.sourceMemberId
+    || input.prepared.targetMemberId !== input.member.id
   ) {
     throwHostedPrivyPhoneTransferChanged();
   }
@@ -203,6 +286,19 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
     await lockHostedMemberRow(input.prisma, memberId);
   }
 
+  const rawRows =
+    await readHostedPrivyPhoneTransferSourceRetirementRawRows({
+      prisma: input.prisma,
+      sourceMemberId: input.transfer.sourceMemberId,
+      targetMemberId: input.member.id,
+    });
+  if (
+    buildHostedPrivyPhoneTransferSourceRetirementRawFingerprint(rawRows)
+      !== input.prepared.rawFingerprint
+  ) {
+    throwHostedPrivyPhoneTransferChanged();
+  }
+
   await Promise.all([
     assertHostedPrivyAccountDeletionNotPendingTx({
       prisma: input.prisma,
@@ -214,48 +310,46 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
     }),
   ]);
 
-  const [currentMember, currentIdentity, sourceMember, sourceIdentity] =
-    await Promise.all([
-      readHostedMemberCoreState({
-        memberId: input.member.id,
-        prisma: input.prisma,
-      }),
-      readHostedMemberIdentity({
-        memberId: input.member.id,
-        prisma: input.prisma,
-      }),
-      readHostedMemberCoreState({
-        memberId: input.transfer.sourceMemberId,
-        prisma: input.prisma,
-      }),
-      readHostedMemberIdentity({
-        memberId: input.transfer.sourceMemberId,
-        prisma: input.prisma,
-      }),
-    ]);
+  const [currentMember, sourceMember] = await Promise.all([
+    readHostedMemberCoreState({
+      memberId: input.member.id,
+      prisma: input.prisma,
+    }),
+    readHostedMemberCoreState({
+      memberId: input.transfer.sourceMemberId,
+      prisma: input.prisma,
+    }),
+  ]);
 
-  if (!currentMember || !sourceMember || !currentIdentity || !sourceIdentity) {
+  if (
+    !currentMember
+    || !sourceMember
+    || !input.prepared.targetIdentity
+    || !input.prepared.sourceIdentity
+  ) {
     throwHostedPrivyPhoneTransferChanged();
   }
   assertHostedMemberNotSuspended(currentMember);
   if (
-    currentIdentity.privyUserId !== input.identity.userId
-    || currentIdentity.phoneNumber !== input.targetPhoneNumberBeforeTransfer
-    || sourceIdentity.privyUserId !== input.transfer.sourcePrivyUserId
-    || sourceIdentity.phoneNumber !== phoneNumber
+    input.prepared.targetIdentity.privyUserId !== input.identity.userId
+    || input.prepared.targetIdentity.phoneNumber
+      !== input.targetPhoneNumberBeforeTransfer
+    || input.prepared.sourceIdentity.privyUserId
+      !== input.transfer.sourcePrivyUserId
+    || input.prepared.sourceIdentity.phoneNumber !== phoneNumber
   ) {
     throwHostedPrivyPhoneTransferChanged();
   }
 
-  const autoTrialBilling =
-    await classifyHostedPrivyPhoneTransferSourceScaffoldTx({
-      identity: sourceIdentity,
-      memberId: sourceMember.id,
-      now: input.now,
-      phoneNumber,
-      prisma: input.prisma,
-      sourcePrivyUserId: input.transfer.sourcePrivyUserId,
-    });
+  await assertHostedPrivyPhoneTransferSourceScaffoldTx({
+    identity: input.prepared.sourceIdentity,
+    memberId: sourceMember.id,
+    now: input.now,
+    phoneNumber,
+    prisma: input.prisma,
+    rawIdentity: rawRows.sourceIdentity,
+    sourcePrivyUserId: input.transfer.sourcePrivyUserId,
+  });
 
   if (!sourceMember.suspendedAt) {
     const sourceMemberFence = await input.prisma.hostedMember.updateMany({
@@ -275,7 +369,6 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
   }
 
   return {
-    autoTrialBilling,
     sourceMemberId: sourceMember.id,
   };
 }
@@ -290,8 +383,8 @@ export async function assertHostedPrivyPhoneTransferSourceRetirementFenceTx(
   },
 ): Promise<void> {
   // The full disposable-account classifier runs before provider cleanup.
-  // This final assertion intentionally ignores billing fields because the
-  // account-deletion-owned Stripe cancellation may already have updated them.
+  // Source suspension keeps the completed disposable-account classification
+  // authoritative while account deletion prepares its terminal transaction.
   const phoneNumber = input.identity.phone?.number;
   if (
     !phoneNumber
@@ -337,38 +430,18 @@ export async function assertHostedPrivyPhoneTransferSourceRetirementFenceTx(
   }
 }
 
-async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
+async function assertHostedPrivyPhoneTransferSourceScaffoldTx(input: {
   identity: NonNullable<Awaited<ReturnType<typeof readHostedMemberIdentity>>>;
   memberId: string;
   now: Date;
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
+  rawIdentity: HostedMemberIdentityRecord | null;
   sourcePrivyUserId: string;
-}): Promise<HostedPrivyPhoneTransferSourceRetirementProof["autoTrialBilling"]> {
-  const [source, rawIdentity, inviteCount, invalidInvite, webSessionCount, invalidWebSession] =
+}): Promise<void> {
+  const [source, inviteCount, invalidInvite, webSessionCount, invalidWebSession] =
     await Promise.all([
       readHostedPrivyPhoneTransferSourceShapeTx(input),
-      input.prisma.hostedMemberIdentity.findUnique({
-        where: { memberId: input.memberId },
-        select: {
-          maskedPhoneNumberHint: true,
-          memberId: true,
-          phoneLookupKey: true,
-          phoneNumberEncrypted: true,
-          phoneNumberVerifiedAt: true,
-          privyUserIdEncrypted: true,
-          privyUserLookupKey: true,
-          signupPhoneCodeSendAttemptId: true,
-          signupPhoneCodeSendAttemptStartedAt: true,
-          signupPhoneCodeSentAt: true,
-          signupPhoneNumberEncrypted: true,
-          walletAddressEncrypted: true,
-          walletAddressLookupKey: true,
-          walletChainType: true,
-          walletCreatedAt: true,
-          walletProvider: true,
-        },
-      }),
       input.prisma.hostedInvite.count({
         where: { memberId: input.memberId },
       }),
@@ -405,7 +478,7 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
     || !isExactHostedPrivyPhoneTransferSourceIdentity({
       decrypted: input.identity,
       phoneNumber: input.phoneNumber,
-      raw: rawIdentity,
+      raw: input.rawIdentity,
       sourcePrivyUserId: input.sourcePrivyUserId,
     })
     || inviteCount > 1
@@ -443,42 +516,12 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
       memberId: input.memberId,
       prisma: input.prisma,
     });
-    return null;
-  }
-
-  if (source.billingRef) {
-    if (
-      (
-        source.billingStatus !== HostedBillingStatus.active
-        && source.billingStatus !== HostedBillingStatus.canceled
-        && source.billingStatus !== HostedBillingStatus.incomplete
-      )
-      || !source.hostedWorkspace
-      || !source.routing
-      || (source.usageCreditBalanceUsdMicros ?? 0n) !== 0n
-      || (source.usageCreditLedgerVersion ?? 0n) !== 0n
-      || hasUnexpectedHostedPrivyPhoneTransferRelationCount(
-        source._count,
-        {
-          consentEvents: 2,
-          consentGrants: 2,
-          hostedCryptoAudits: 4,
-          hostedCryptoEnvelopes: 4,
-        },
-        HOSTED_PRIVY_PHONE_TRANSFER_RUNTIME_OWNED_RELATIONS,
-      )
-    ) {
-      throwHostedPrivyPhoneTransferSourceNotDisposable();
-    }
-
-    return assertHostedPrivyPhoneTransferAutoTrialScaffoldTx({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
+    return;
   }
 
   if (
-    source.billingStatus !== HostedBillingStatus.active
+    source.billingRef
+    || source.billingStatus !== HostedBillingStatus.active
     || !source.hostedWorkspace
     || !source.routing
     || source.usageCreditBalanceUsdMicros
@@ -503,7 +546,6 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  return null;
 }
 
 async function readHostedPrivyPhoneTransferSourceShapeTx(input: {
@@ -543,6 +585,7 @@ async function readHostedPrivyPhoneTransferSourceShapeTx(input: {
       usageCreditBalanceUsdMicros: true,
       usageCreditLedgerVersion: true,
       addressBookProjection: { select: { memberId: true } },
+      approvalCredentials: { select: { memberId: true } },
       _count: {
         select: {
           accountGroupInvitesAccepted: true,
@@ -602,6 +645,7 @@ function hasHostedPrivyPhoneTransferSourceCoreCustomization(
   return (
     Boolean(
       source.addressBookProjection
+      || source.approvalCredentials
       || source.codexAuthConnection
       || source.connectedAppsSession
       || source.emailAuthorization
@@ -774,161 +818,6 @@ async function assertNoHostedPrivyPhoneTransferExternalMaterialTx(input: {
   if (blockers.some(Boolean)) {
     throwHostedPrivyPhoneTransferSourceNotDisposable();
   }
-}
-
-async function assertHostedPrivyPhoneTransferAutoTrialScaffoldTx(input: {
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-}): Promise<NonNullable<
-  HostedPrivyPhoneTransferSourceRetirementProof["autoTrialBilling"]
->> {
-  const billing = await readHostedMemberBillingSnapshot({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const billingRef = billing?.billingRef;
-  const hasExpectedTrialLifecycle =
-    billing?.core.billingStatus === HostedBillingStatus.active
-      ? billingRef?.currentBillingPhase === "trial"
-      : (
-        billing?.core.billingStatus === HostedBillingStatus.canceled
-        || billing?.core.billingStatus === HostedBillingStatus.incomplete
-      )
-        && billingRef?.currentBillingPhase === null;
-  if (
-    !billing
-    || !billingRef
-    || !hasExpectedTrialLifecycle
-    || billingRef.currentBillingPlanCode !== "launch_monthly"
-    || billingRef.currentCheckoutOffer !== HOSTED_PULSE_TRIAL_OFFER
-    || billingRef.pulseTrialPolicyVersion
-      !== HOSTED_PULSE_TRIAL_POLICY_VERSION
-    || !billingRef.pulseTrialRedeemedAt
-    || !billingRef.currentTrialStartedAt
-    || billingRef.currentTrialStartedAt.getTime()
-      !== billingRef.pulseTrialRedeemedAt.getTime()
-    || !billingRef.currentTrialEndsAt
-    || billingRef.currentTrialEndsAt <= billingRef.currentTrialStartedAt
-    || !billingRef.currentPeriodStart
-    || billingRef.currentPeriodStart.getTime()
-      !== billingRef.currentTrialStartedAt.getTime()
-    || !billingRef.currentPeriodEnd
-    || billingRef.currentPeriodEnd.getTime()
-      !== billingRef.currentTrialEndsAt.getTime()
-    || !billingRef.lastStripeEventCreatedAt
-    || !billingRef.stripeCustomerId
-    || !billingRef.stripeSubscriptionId
-    || billingRef.stripeSubscriptionScheduleId
-    || billingRef.stripeCheckoutSessionId
-    || billingRef.checkoutAttemptId
-    || billingRef.checkoutIntentHash
-    || billingRef.checkoutCreatedAt
-    || billingRef.scheduledBillingPlanCode
-    || billingRef.scheduledBillingEffectiveAt
-  ) {
-    throwHostedPrivyPhoneTransferSourceNotDisposable();
-  }
-
-  const [
-    routing,
-    workspace,
-    mailboxItems,
-    mailboxLaneCounters,
-    consentEvents,
-    consentGrants,
-  ] = await Promise.all([
-    input.prisma.hostedMemberRouting.findUnique({
-      where: { memberId: input.memberId },
-    }),
-    input.prisma.hostedWorkspace.findUnique({
-      where: { userId: input.memberId },
-    }),
-    input.prisma.hostedMailboxItem.findMany({
-      where: { userId: input.memberId },
-      orderBy: { laneSeq: "asc" },
-      select: {
-        causalSeq: true,
-        consumedAt: true,
-        contentRetiredAt: true,
-        dedupeKey: true,
-        kind: true,
-        lane: true,
-        laneSeq: true,
-        occurredAt: true,
-        payloadSchema: true,
-      },
-    }),
-    input.prisma.hostedMailboxLaneCounter.findMany({
-      where: { userId: input.memberId },
-      orderBy: { lane: "asc" },
-      select: {
-        consumedSeq: true,
-        lane: true,
-        nextSeq: true,
-      },
-    }),
-    input.prisma.hostedConsentEvent.findMany({
-      where: { memberId: input.memberId },
-      select: {
-        action: true,
-        scope: true,
-        source: true,
-      },
-    }),
-    input.prisma.hostedConsentGrant.findMany({
-      where: { memberId: input.memberId },
-      select: {
-        revokedAt: true,
-        scope: true,
-        source: true,
-        status: true,
-      },
-    }),
-  ]);
-  const assignedHomeLine = routing?.linqRecipientPhoneLookupKey
-    ? await input.prisma.hostedLinqLine.findUnique({
-        where: { phoneNumberLookupKey: routing.linqRecipientPhoneLookupKey },
-        select: { phoneNumberLookupKey: true },
-      })
-    : null;
-  const hasAssignedHomeLine = Boolean(assignedHomeLine);
-
-  if (
-    !isHostedPrivyPhoneTransferActivationRoutingScaffold({
-      hasAssignedHomeLine,
-      routing,
-    })
-    // The workspace lifecycle (version, snapshot, checkpoint, wake
-    // scheduling) is runtime-owned and advances within seconds of
-    // activation, so only its existence is part of the scaffold.
-    || !workspace
-    || !isHostedPrivyPhoneTransferAutoTrialMailboxScaffold({
-      items: mailboxItems,
-      memberId: input.memberId,
-      stripeSubscriptionId: billingRef.stripeSubscriptionId,
-    })
-    || !isHostedPrivyPhoneTransferActivationMailboxCounters({
-      counters: mailboxLaneCounters,
-      items: mailboxItems,
-    })
-    || !isHostedPrivyPhoneTransferActivationConsentScaffold({
-      events: consentEvents,
-      grants: consentGrants,
-      source: "homepage-auth-dialog",
-    })
-  ) {
-    throwHostedPrivyPhoneTransferSourceNotDisposable();
-  }
-  await assertHostedPrivyPhoneTransferCryptoScaffoldTx({
-    domains: ["control", "device", "ingress", "runtime"],
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-
-  return {
-    stripeCustomerId: billingRef.stripeCustomerId,
-    stripeSubscriptionId: billingRef.stripeSubscriptionId,
-  };
 }
 
 async function assertHostedPrivyPhoneTransferStarterScaffoldTx(input: {
@@ -1205,46 +1094,6 @@ type HostedPrivyPhoneTransferMailboxItem = {
   occurredAt: Date;
   payloadSchema: string;
 };
-
-function isHostedPrivyPhoneTransferAutoTrialMailboxScaffold(input: {
-  items: readonly HostedPrivyPhoneTransferMailboxItem[];
-  memberId: string;
-  stripeSubscriptionId: string;
-}): boolean {
-  const sourceEventId = `auto-pulse-trial:${input.stripeSubscriptionId}`;
-  const activationEventId =
-    `member.activated:hosted.auto_pulse_trial.enrolled:${input.memberId}:${sourceEventId}`;
-  const welcomeEventId =
-    `assistant.notification.requested:signup-welcome:${input.memberId}:${activationEventId}`;
-  const [activation, welcome, ...runtimeControls] = input.items;
-  // The runtime consumes activation events and enqueues additional
-  // browser-vault refresh control events on its own, so consumption state
-  // and the number of trailing control events carry no member signal. Any
-  // conversation-lane item or unexpected kind is member-attributable and
-  // stays fail-closed.
-  return Boolean(
-    activation
-    && activation.kind === "member.activated"
-    && activation.dedupeKey === activationEventId
-    && activation.laneSeq === 1n
-    && activation.causalSeq === 1n
-    && welcome
-    && welcome.kind === "assistant.notification.requested"
-    && welcome.dedupeKey === welcomeEventId
-    && welcome.laneSeq === 2n
-    && welcome.causalSeq === 2n
-    && runtimeControls.every((item) =>
-      item.kind === "runtime.browser-vault-refresh-requested"
-      && item.dedupeKey.startsWith(
-        HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX,
-      )
-    )
-    && input.items.every((item) =>
-      item.lane === "system"
-      && item.payloadSchema === "murph.hosted-mailbox-item.v1"
-    ),
-  );
-}
 
 function isHostedPrivyPhoneTransferStarterMailboxScaffold(input: {
   activationEventId: string;

@@ -31,7 +31,10 @@ type PostgreSqlExplainPlanNode = {
 describe.skipIf(!runPostgresProof)(
   "hosted runtime latency candidate query",
   () => {
-    it("uses indexed candidate branches before exact hydration under dominant stale history", async () => {
+    it.each([
+      { fixture: "small correctness fixture", staleRows: 1 },
+      { fixture: "dominant stale history", staleRows: 50_000 },
+    ])("hydrates candidate branches under $fixture", async ({ staleRows }) => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const now = new Date("2026-08-12T16:00:00.000Z");
       const windowStart = new Date(now.getTime() - 24 * 60 * 60_000);
@@ -112,14 +115,14 @@ describe.skipIf(!runPostgresProof)(
               'stale-member-' || ordinal,
               ${staleAt},
               NULL
-            FROM generate_series(1, 50000) AS ordinal
+            FROM generate_series(1, ${staleRows}) AS ordinal
           `);
           await tx.$executeRaw(Prisma.sql`
             INSERT INTO hosted_linq_delivery (id, accepted_at)
             SELECT
               'stale-delivery-' || ordinal,
               ${staleAt}
-            FROM generate_series(1, 50000) AS ordinal
+            FROM generate_series(1, ${staleRows}) AS ordinal
           `);
           await tx.$executeRaw(Prisma.sql`
             INSERT INTO hosted_ingress_latency_trace (
@@ -141,7 +144,7 @@ describe.skipIf(!runPostgresProof)(
               ${staleAt},
               ${staleAt},
               'stale-delivery-' || ordinal
-            FROM generate_series(1, 50000) AS ordinal
+            FROM generate_series(1, ${staleRows}) AS ordinal
           `);
 
           const historicalAcceptedAt = new Date(
@@ -262,6 +265,9 @@ describe.skipIf(!runPostgresProof)(
             unresolvedReplyCount: 3,
           });
 
+          // The small case proves correctness without the plan and cap stress work.
+          if (staleRows === 1) return;
+
           const planRows = await tx.$queryRaw<Array<{
             "QUERY PLAN": unknown;
           }>>(Prisma.sql`
@@ -334,7 +340,106 @@ describe.skipIf(!runPostgresProof)(
           });
         }, {
           maxWait: 5_000,
-          timeout: 120_000,
+          timeout: staleRows === 1 ? 30_000 : 120_000,
+        });
+      } finally {
+        await prisma.$disconnect();
+      }
+    });
+
+    it("excludes the configured canary before bounded result limiting", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const now = new Date("2026-08-12T16:00:00.000Z");
+      const windowStart = new Date(now.getTime() - 24 * 60 * 60_000);
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.$executeRaw(Prisma.sql`
+            CREATE TEMP TABLE hosted_mailbox_item (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              consumed_at TIMESTAMP(3),
+              ai_usage_denied_at TIMESTAMP(3)
+            ) ON COMMIT DROP
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            CREATE TEMP TABLE hosted_linq_delivery (
+              id TEXT PRIMARY KEY,
+              accepted_at TIMESTAMP(3)
+            ) ON COMMIT DROP
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            CREATE TEMP TABLE hosted_ingress_latency_trace (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              mailbox_item_id TEXT NOT NULL,
+              source TEXT NOT NULL,
+              accepted_at TIMESTAMP(3) NOT NULL,
+              assistant_input_staged_at TIMESTAMP(3),
+              provider_start_at TIMESTAMP(3),
+              phase_breakdown_json JSONB,
+              provider_request_ordinal INTEGER,
+              runtime_attempt_id TEXT,
+              linq_delivery_id TEXT
+            ) ON COMMIT DROP
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO hosted_mailbox_item (
+              id,
+              user_id,
+              consumed_at,
+              ai_usage_denied_at
+            )
+            VALUES
+              ('canary-mailbox', 'canary-member', NULL, NULL),
+              ('ordinary-mailbox', 'ordinary-member', NULL, NULL)
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO hosted_ingress_latency_trace (
+              id,
+              user_id,
+              mailbox_item_id,
+              source,
+              accepted_at
+            )
+            VALUES
+              (
+                'canary-trace',
+                'canary-member',
+                'canary-mailbox',
+                'linq',
+                ${new Date(now.getTime() - 2 * 60_000)}
+              ),
+              (
+                'ordinary-trace',
+                'ordinary-member',
+                'ordinary-mailbox',
+                'linq',
+                ${new Date(now.getTime() - 3 * 60_000)}
+              )
+          `);
+
+          const query = buildHostedRuntimeLatencyHealthQuery({
+            excludedUserId: "canary-member",
+            now,
+            windowStart,
+          });
+          const rows = await tx.$queryRaw<Array<{ acceptedAt: Date }>>(query);
+          expect(rows.map((row) => row.acceptedAt)).toEqual([
+            new Date(now.getTime() - 3 * 60_000),
+          ]);
+
+          await expect(readHostedRuntimeLatencyHealth({
+            excludedUserId: "canary-member",
+            now,
+            prisma: tx,
+          })).resolves.toMatchObject({
+            oldestUnresolvedAgeMs: 3 * 60_000,
+            unresolvedReplyCount: 1,
+          });
+        }, {
+          maxWait: 5_000,
+          timeout: 30_000,
         });
       } finally {
         await prisma.$disconnect();

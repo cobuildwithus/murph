@@ -11,6 +11,21 @@ describe('assistant provider-start critical path', () => {
     let context = createAssistantProviderStartCriticalPathContext(100)
     context = stampAssistantProviderStartCriticalPath(
       context,
+      'foregroundPassStartedAtMonotonicMs',
+      102,
+    )!
+    context = stampAssistantProviderStartCriticalPath(
+      context,
+      'workspaceForegroundPassStartedAtMonotonicMs',
+      104,
+    )!
+    context = stampAssistantProviderStartCriticalPath(
+      context,
+      'assistantPhaseCallbackStartedAtMonotonicMs',
+      108,
+    )!
+    context = stampAssistantProviderStartCriticalPath(
+      context,
       'assistantPhaseStartedAtMonotonicMs',
       110,
     )!
@@ -97,6 +112,7 @@ describe('assistant provider-start critical path', () => {
 
     const timing = completeAssistantProviderStartCriticalPath(context, 270)
     expect(timing).toEqual({
+      assistantPhaseCallbackToAssistantPhaseMs: 2,
       assistantServicePreLockMs: 5,
       automationCandidateScanMs: 3,
       automationCrossSessionContextMs: 3,
@@ -111,10 +127,13 @@ describe('assistant provider-start critical path', () => {
       automationTerminalEvidenceMs: 3,
       codexAppServerPreProviderMs: 30,
       codexProcessPreparationMs: 10,
+      foregroundPassToWorkspaceForegroundPassMs: 2,
       mailboxImportDoneToAssistantPhaseMs: 10,
+      mailboxImportDoneToForegroundPassMs: 2,
       preProviderSetupMs: 18,
       providerPlanAndGateMs: 40,
       turnLockWaitMs: 7,
+      workspaceForegroundPassToAssistantPhaseCallbackMs: 4,
       workspaceAssistantPreAutomationMs: 20,
     })
     const canonicalTiming = timing && [
@@ -146,6 +165,38 @@ describe('assistant provider-start critical path', () => {
       (sum, value) => sum + (value ?? 0),
       0,
     )).toBe(timing?.automationLaneToAssistantServiceMs)
+    const mailboxToAssistantTiming = timing && [
+      timing.mailboxImportDoneToForegroundPassMs,
+      timing.foregroundPassToWorkspaceForegroundPassMs,
+      timing.workspaceForegroundPassToAssistantPhaseCallbackMs,
+      timing.assistantPhaseCallbackToAssistantPhaseMs,
+    ]
+    expect(mailboxToAssistantTiming?.reduce<number>(
+      (sum, value) => sum + (value ?? 0),
+      0,
+    )).toBe(timing?.mailboxImportDoneToAssistantPhaseMs)
+  })
+
+  test('drops an incomplete or invalid mailbox-to-assistant partition without losing the canonical path', () => {
+    const timing = completeAssistantProviderStartCriticalPath({
+      assistantPhaseCallbackStartedAtMonotonicMs: 108,
+      assistantPhaseStartedAtMonotonicMs: 110,
+      assistantServiceStartedAtMonotonicMs: 160,
+      assistantTurnLockAcquiredAtMonotonicMs: 172,
+      assistantTurnLockWaitStartedAtMonotonicMs: 165,
+      automationLaneStartedAtMonotonicMs: 130,
+      codexAppServerProcessTurnStartedAtMonotonicMs: 240,
+      codexAppServerTurnStartedAtMonotonicMs: 230,
+      foregroundPassStartedAtMonotonicMs: 102,
+      mailboxImportDoneAtMonotonicMs: 100,
+      preProviderSetupDoneAtMonotonicMs: 190,
+    }, 270)
+
+    expect(timing).toMatchObject({
+      mailboxImportDoneToAssistantPhaseMs: 10,
+    })
+    expect(timing).not.toHaveProperty('mailboxImportDoneToForegroundPassMs')
+    expect(timing).not.toHaveProperty('assistantPhaseCallbackToAssistantPhaseMs')
   })
 
   test('drops an incomplete or invalid nested automation partition without losing the canonical path', () => {

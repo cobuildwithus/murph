@@ -1,7 +1,13 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { initializeVault } from "@murphai/core";
+import { importClinicalFhirSnapshot, type ClinicalFhirSnapshotPage } from "@murphai/vault-usecases/clinical-records";
+import { parseHostedClinicalRecordsFetchPageResponse, parseHostedClinicalRecordsFetchPageRequest } from "@murphai/hosted-execution/clinical-records";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   hashClinicalFhirPageUrl,
@@ -16,11 +22,16 @@ import {
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
+  readHostedRuntimeAiAccessDecision: vi.fn(),
   openClinicalConnectionFhirBaseUrl: vi.fn(),
   openClinicalConnectionSecret: vi.fn(),
   openClinicalPageCursor: vi.fn(),
   sealClinicalPageCursor: vi.fn(),
+  sealClinicalDocumentTicket: vi.fn(),
+  openClinicalDocumentTicket: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision }));
 
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 vi.mock("@/src/lib/clinical-records/secrets", () => ({
@@ -28,6 +39,8 @@ vi.mock("@/src/lib/clinical-records/secrets", () => ({
   openClinicalConnectionSecret: mocks.openClinicalConnectionSecret,
   openClinicalPageCursor: mocks.openClinicalPageCursor,
   sealClinicalPageCursor: mocks.sealClinicalPageCursor,
+  sealClinicalDocumentTicket: mocks.sealClinicalDocumentTicket,
+  openClinicalDocumentTicket: mocks.openClinicalDocumentTicket,
 }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
@@ -38,6 +51,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 
 import {
   fetchClinicalRetrievalPage,
+  fetchClinicalRetrievalDocument,
   readClinicalRetrievalRun,
   recordClinicalRetrievalOutcome,
 } from "@/src/lib/clinical-records/retrieval";
@@ -50,6 +64,259 @@ describe("Clinical Records retrieval control plane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "");
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([false, true])("gates a frozen restricted query before provider egress (approved=%s)", async (approved) => {
+    const harness = createHarness(["Patient"]);
+    const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
+      frozenAt: new Date("2026-09-15T12:00:00Z"), pageCount: "100", resourceTypes: ["FamilyMemberHistory"] });
+    harness.state.run.retrievalPlanJson = plan;
+    harness.state.run.grantedScopesJson = ["patient/FamilyMemberHistory.s"];
+    const slice = plan.slices[0]!;
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", approved ? "epic-test" : "epic-other");
+    const fetchImpl = vi.fn(async () => fhirResponse({ resourceType: "Bundle", entry: [] }));
+    const result = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: {
+      cursor: null, generation: 1, requestId: "approved-family", resourceType: slice.resourceType, runId: RUN_ID,
+      retrievalProtocol: "query-slices-v2", queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint, sliceId: slice.sliceId,
+    } });
+    expect(result.status).toBe(approved ? "page" : "unavailable");
+    expect(fetchImpl).toHaveBeenCalledTimes(approved ? 1 : 0);
+    if (!approved) expect(result).toEqual({ status: "unavailable", errorCode: "hospital-approval-required", retryable: false });
+  });
+
+  it("revokes an issued restricted document ticket when the provider flag is removed", async () => {
+    const harness = createHarness(["DocumentReference"]);
+    const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
+      frozenAt: new Date("2026-09-15T12:00:00Z"), pageCount: "100", resourceTypes: ["DocumentReference"] });
+    harness.state.run.retrievalPlanJson = plan;
+    harness.state.run.grantedScopesJson = ["patient/DocumentReference.s", "patient/Binary.r"];
+    const slice = plan.slices.find((entry) => entry.queryScopeId === "document-references-imaging")!;
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "epic-test");
+    const fetchImpl = vi.fn(async () => fhirResponse({ resourceType: "Bundle", entry: [{ resource: {
+      resourceType: "DocumentReference", id: "report-1", status: "current",
+      meta: { lastUpdated: "2026-09-15T12:00:00Z" },
+      subject: { reference: "Patient/patient-1" }, content: [{ attachment: {
+        url: "Binary/document-1", contentType: "text/plain", size: 13,
+      } }],
+    } }] }));
+    const page = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: {
+      cursor: null, generation: 1, requestId: "restricted-document", resourceType: "DocumentReference", runId: RUN_ID,
+      retrievalProtocol: "query-slices-v2", queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint, sliceId: slice.sliceId,
+    } });
+    if (page.status !== "page" || !page.documents?.[0]?.ticket) throw new Error("Expected document ticket.");
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "");
+    const result = await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: page.documents[0].ticket } });
+    expect(result).toEqual({ status: "unavailable", errorCode: "hospital-approval-required", retryable: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("downloads linked Binary bytes with a run-bound ticket without altering raw pages or FHIR page counts", async () => {
+    const harness = createHarness(["DocumentReference"]);
+    harness.state.run.grantedScopesJson = ["patient/DocumentReference.read", "patient/Binary.read"];
+    harness.state.run.egressBytes = 40 * 1024 * 1024;
+    harness.state.run.providerRequestCount = 600;
+    const parent = { resourceType: "DocumentReference", id: "note-1", status: "current",
+      meta: { lastUpdated: "2026-09-10T12:00:00Z" }, subject: { reference: "Patient/patient-1" },
+      content: [{ attachment: { url: "Binary/document-1", contentType: "text/plain", size: 13 } }] };
+    const fetchImpl = vi.fn(async (url: URL | RequestInfo) => String(url).includes("/Binary/")
+      ? fhirResponse({ resourceType: "Binary", id: "document-1", contentType: "text/plain", data: Buffer.from("Clinical note").toString("base64") })
+      : fhirResponse({ resourceType: "Bundle", entry: [{ resource: parent }] }));
+    const slice = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-07-10T12:00:00Z"), pageCount: EPIC_BETA_FHIR_PAGE_COUNT, resourceTypes: ["DocumentReference"] }).slices[0]!;
+    const page = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: {
+      cursor: null, generation: 1, requestId: "documents-page", resourceType: "DocumentReference", runId: RUN_ID,
+      retrievalProtocol: "query-slices-v2", queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint, sliceId: slice.sliceId,
+    } });
+    expect(page.status).toBe("page");
+    if (page.status !== "page") throw new Error("Expected document page.");
+    expect(JSON.parse(page.body).entry[0].resource).toEqual(parent);
+    const descriptor = page.documents?.[0];
+    expect(descriptor?.parentPageSha256).toBe(createHash("sha256").update(page.body).digest("hex"));
+    if (!descriptor?.ticket) throw new Error("Expected an opaque document ticket.");
+    const result = await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: descriptor.ticket } });
+    expect(result).toMatchObject({ status: "document", byteLength: 13, mediaType: "text/plain",
+      contentBase64: Buffer.from("Clinical note").toString("base64") });
+    expect(harness.state.run.pageCount).toBe(1);
+    expect(harness.state.run.providerRequestCount).toBe(602);
+    expect(fetchImpl).toHaveBeenLastCalledWith(new URL("https://fhir.example.test/FHIR/R4/Binary/document-1"),
+      expect.objectContaining({ redirect: "manual", headers: expect.objectContaining({ Authorization: "Bearer access-token" }) }));
+    const blocked = await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: "forged-ticket" } });
+    expect(blocked).toEqual({ status: "unavailable", retryable: false, errorCode: "document-ticket-invalid" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { label: "interrupted stream", subject: undefined, attachment: {}, binary: {}, valid: false, binaryFetched: false },
+    { label: "absent subject", subject: undefined, attachment: {}, binary: {}, valid: true, binaryFetched: true },
+    { label: "matching relative subject", subject: { reference: "Patient/patient-1" }, attachment: {}, binary: {}, valid: true, binaryFetched: true },
+    { label: "matching absolute subject", subject: { reference: "https://fhir.example.test/FHIR/R4/Patient/patient-1" }, attachment: {}, binary: {}, valid: true, binaryFetched: true },
+    { label: "wrong patient", subject: { reference: "Patient/other" }, attachment: {}, binary: {}, valid: false, binaryFetched: false },
+    { label: "foreign patient base", subject: { reference: "https://outside.example.test/FHIR/R4/Patient/patient-1" }, attachment: {}, binary: {}, valid: false, binaryFetched: false },
+    { label: "unresolved explicit subject", subject: { display: "unresolved patient" }, attachment: {}, binary: {}, valid: false, binaryFetched: false },
+    { label: "null subject", subject: null, attachment: {}, binary: {}, valid: false, binaryFetched: false },
+    { label: "changed MIME", subject: undefined, attachment: {}, binary: { contentType: "application/pdf" }, valid: false, binaryFetched: true },
+    { label: "changed size", subject: undefined, attachment: { size: 1 }, binary: {}, valid: false, binaryFetched: true },
+    { label: "changed hash", subject: undefined, attachment: { hash: createHash("sha1").update("other").digest("base64") }, binary: {}, valid: false, binaryFetched: true },
+    { label: "malformed size", subject: undefined, attachment: { size: "13" }, binary: {}, valid: false, binaryFetched: false },
+    { label: "oversized declaration", subject: undefined, attachment: { size: 21 * 1024 * 1024 }, binary: {}, valid: false, binaryFetched: false },
+  ])("validates Media patient and Binary integrity through the attested retrieval path: $label", async ({ label, subject, attachment, binary, valid, binaryFetched }) => {
+    const harness = createHarness(["DiagnosticReport"]);
+    harness.state.run.grantedScopesJson = ["patient/DiagnosticReport.read", "patient/Media.read", "patient/Binary.read"];
+    const bytes = Buffer.from("Clinical note");
+    const parent = { resourceType: "DiagnosticReport", id: "report-media", status: "final",
+      meta: { lastUpdated: "2026-09-10T12:00:00Z" }, subject: { reference: "Patient/patient-1" },
+      media: [{ link: { reference: "Media/study-1" } }] };
+    const fetchImpl = vi.fn(async (url: URL | RequestInfo) => {
+      if (String(url).includes("/Binary/")) return fhirResponse({ resourceType: "Binary", id: "document-1",
+        contentType: "text/plain", data: bytes.toString("base64"), ...binary });
+      if (String(url).includes("/Media/") && label === "interrupted stream") {
+        return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+          controller.error(new TypeError("connection interrupted"));
+        } }), { headers: { "Content-Type": "application/fhir+json" } });
+      }
+      if (String(url).includes("/Media/")) return fhirResponse({ resourceType: "Media", id: "study-1",
+        ...(subject === undefined ? {} : { subject }), content: { url: "Binary/document-1", contentType: "text/plain",
+          size: bytes.length, hash: createHash("sha1").update(bytes).digest("base64"), ...attachment } });
+      return fhirResponse({ resourceType: "Bundle", entry: [{ resource: parent }] });
+    });
+    const slice = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-07-10T12:00:00Z"),
+      pageCount: EPIC_BETA_FHIR_PAGE_COUNT, resourceTypes: ["DiagnosticReport"] }).slices[0]!;
+    const page = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: {
+      cursor: null, generation: 1, requestId: "media-page", resourceType: "DiagnosticReport", runId: RUN_ID,
+      retrievalProtocol: "query-slices-v2", queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint, sliceId: slice.sliceId,
+    } });
+    if (page.status !== "page" || !page.documents?.[0]?.ticket) throw new Error("Expected an attested Media ticket.");
+    const result = await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: page.documents[0].ticket } });
+    expect(result).toEqual(valid
+      ? { status: "document", contentBase64: bytes.toString("base64"), mediaType: "text/plain", byteLength: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex") }
+      : { status: "unavailable", errorCode: label === "interrupted stream" ? "provider-temporarily-unavailable" : "document-response-invalid",
+        retryable: label === "interrupted stream" });
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).includes("/Binary/"))).toHaveLength(binaryFetched ? 1 : 0);
+    expect(harness.state.run.pageCount).toBe(1);
+  });
+
+  it("retains document recovery through a transient key service failure", async () => {
+    const harness = createHarness(["DocumentReference"]);
+    harness.state.run.grantedScopesJson = ["patient/DocumentReference.read", "patient/Binary.read"];
+    mocks.openClinicalDocumentTicket.mockRejectedValue(new Error("Temporary key service failure."));
+    const fetchImpl = vi.fn();
+    await expect(fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: "opaque-ticket" } })).resolves.toEqual({
+      status: "unavailable", retryable: true, errorCode: "document-ticket-temporarily-unavailable",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not request linked documents without the separate Binary grant", async () => {
+    createHarness(["DocumentReference"]);
+    const fetchImpl = vi.fn();
+    await expect(fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: "opaque-ticket" } })).resolves.toEqual({
+      status: "unavailable", retryable: false, errorCode: "document-scope-unavailable",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("imports real Web pagination through the transport and vault snapshot planner", async () => {
+    createHarness(["Observation"]);
+    const descriptor = await readClinicalRetrievalRun({ memberId: MEMBER_ID, generation: 1, runId: RUN_ID });
+    if (descriptor.status !== "ready") throw new Error("Expected a runnable descriptor.");
+    const nextUrl = "https://fhir.example.test/FHIR/R4/Observation?category=laboratory&patient=patient-1&page=2";
+    const lab = (id: string) => ({
+      resourceType: "Observation", id, status: "final", meta: { lastUpdated: "2026-07-01T12:00:00.000Z" },
+      subject: { reference: "Patient/patient-1" }, effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+      code: { coding: [{ system: "http://loinc.org", code: "4548-4", display: "Hemoglobin A1c" }] },
+      valueQuantity: { value: 5.4, unit: "%", code: "%", system: "http://unitsofmeasure.org" },
+    });
+    const fetchImpl = vi.fn(async (url: URL | RequestInfo) => {
+      const pageUrl = new URL(String(url));
+      const labs = pageUrl.searchParams.get("category") === "laboratory";
+      const second = pageUrl.searchParams.get("page") === "2";
+      return fhirResponse({ resourceType: "Bundle", type: "searchset", entry: labs ? [{ resource: lab(second ? "lab-2" : "lab-1") }] : [],
+        ...(labs && !second ? { link: [{ relation: "next", url: nextUrl }] } : {}) });
+    });
+    const pages: ClinicalFhirSnapshotPage[] = [];
+    for (const slice of descriptor.run.retrievalSlices) {
+      let cursor: string | null = null;
+      do {
+        const raw = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl,
+          request: parseHostedClinicalRecordsFetchPageRequest({ queryFingerprint: slice.queryFingerprint, queryScopeId: slice.queryScopeId, sliceId: slice.sliceId, resourceType: slice.resourceType, retrievalProtocol: "query-slices-v2", generation: 1, runId: RUN_ID, requestId: `page-${pages.length}`, cursor }) });
+        const page = parseHostedClinicalRecordsFetchPageResponse(JSON.parse(JSON.stringify(raw)));
+        if (page.status !== "page") throw new Error(`Expected page: ${page.errorCode}`);
+        expect(page).not.toHaveProperty("nextPageUrlHash");
+        pages.push({ content: page.body, resourceType: slice.resourceType, queryScopeId: slice.queryScopeId, sliceId: slice.sliceId,
+          ...(page.pageUrlHash ? { pageUrlHash: page.pageUrlHash } : {}) });
+        cursor = page.nextCursor;
+      } while (cursor);
+    }
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "clinical-web-snapshot-"));
+    try {
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const result = await importClinicalFhirSnapshot({ ...descriptor.run, pages, vaultRoot,
+        completedRetrievalSlices: descriptor.run.retrievalSlices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })) });
+      expect(result.canonical.createdCount).toBe(2);
+      expect(result.labResultCount).toBe(2);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("charges padded UTF-8 provider bytes on every replay while counting one served page", async () => {
+    const harness = createHarness(["Observation"]);
+    const body = '  {"resourceType":"Bundle","type":"searchset","entry":[],"text":{"status":"generated","div":"漢"}}  ';
+    const fetchImpl = vi.fn(async () => new Response(body, { headers: { "Content-Type": "application/fhir+json" } }));
+    for (const requestId of ["padded-first", "padded-replay"]) {
+      await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: queryObservationPageRequest(requestId) })).resolves.toMatchObject({ status: "page" });
+    }
+    expect(harness.state.run.egressBytes).toBe(2 * Buffer.byteLength(body, "utf8"));
+    expect(harness.state.run.pageCount).toBe(1);
+    expect(harness.state.run.fetchedBytes).toBeLessThan(harness.state.run.egressBytes);
+  });
+
+  it("fences egress when consent is withdrawn after initial admission", async () => {
+    const harness = createHarness(["Observation"]);
+    harness.hooks.afterRequestUpsert = async () => { mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: false }); };
+    const fetchImpl = vi.fn();
+    await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: queryObservationPageRequest("revoked") }))
+      .resolves.toMatchObject({ status: "unavailable", errorCode: "member-processing-inactive", retryable: false });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(harness.state.run.providerRequestCount).toBe(0);
+  });
+
+  it("finalizes saved counts after authorization ends without reactivating access", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    harness.state.run.status = "needs_reauth";
+    harness.state.run.connection.status = "needs_reauth";
+    harness.state.run.completedAt = new Date();
+    harness.state.run.pageCount = 2;
+    const request = { ...outcomeIdentity(), generation: 1, runId: RUN_ID, status: "partial" as const,
+      errorCode: "authorization-required", counts: { ...outcomeCounts(), createdCount: 1, fetchedPageCount: 1 } };
+    await recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request });
+    await recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request });
+    expect(harness.state.run.importedCount).toBe(1);
+    expect(harness.state.run.connection.status).toBe("needs_reauth");
+    await expect(recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: { ...request, counts: { ...request.counts, createdCount: 2 } } }))
+      .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
+  });
+
+  it("accepts partial received counts below served counts but rejects overcounts", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    harness.state.run.pageCount = 2;
+    const request = { ...outcomeIdentity(), generation: 1, runId: RUN_ID, status: "partial" as const,
+      counts: { ...outcomeCounts(), fetchedPageCount: 3 } };
+    await expect(recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request })).rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH" });
+    await recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: { ...request, counts: { ...request.counts, fetchedPageCount: 1 } } });
+    expect(harness.state.run.status).toBe("partial");
+    expect(harness.state.run.connection.accessTokenEncrypted).toBeNull();
   });
 
   it("derives the canonical manifest patient hash from decrypted context in memory", async () => {
@@ -63,71 +330,10 @@ describe("Clinical Records retrieval control plane", () => {
 
     expect(result.status).toBe("ready");
     if (result.status !== "ready") throw new Error("Expected a ready Clinical Records run.");
-    if (!("retrievalScopes" in result.run)) throw new Error("Expected a legacy retrieval run.");
     expect(result.run.patientIdHash).toBe(hashClinicalFhirPatientId("patient-1"));
   });
 
-  it("declares exact Epic beta acquisition fingerprints", async () => {
-    createHarness(["Patient", "Observation", "DiagnosticReport"]);
 
-    const result = await readClinicalRetrievalRun({
-      generation: 1,
-      memberId: MEMBER_ID,
-      runId: RUN_ID,
-    });
-
-    expect(result.status).toBe("ready");
-    if (result.status !== "ready") throw new Error("Expected a ready Clinical Records run.");
-    if (!("retrievalScopes" in result.run)) throw new Error("Expected a legacy retrieval run.");
-    expect(result.run.retrievalScopes).toEqual([
-      {
-        coverage: "whole-family",
-        queryFingerprint: sha256Hex("epic-fhir-r4:Patient:read-by-launch-patient:v1"),
-        resourceType: "Patient",
-      },
-      {
-        coverage: "whole-family",
-        queryFingerprint: sha256Hex(
-          "epic-fhir-r4:Observation:search:patient:category=laboratory:_count=100:v1",
-        ),
-        resourceType: "Observation",
-      },
-      {
-        coverage: "whole-family",
-        queryFingerprint: sha256Hex(
-          "epic-fhir-r4:DiagnosticReport:search:patient:_count=100:v1",
-        ),
-        resourceType: "DiagnosticReport",
-      },
-    ]);
-    expect("retrievalProtocol" in result.run).toBe(false);
-  });
-
-  it("fails closed when a frozen plan disagrees with the legacy Epic reader", async () => {
-    const harness = createHarness(["Observation"]);
-    harness.state.run.retrievalPlanJson = {
-      schemaVersion: "murph.clinical-retrieval-plan.v1",
-      slices: [{
-        coverage: "whole-family",
-        queryFingerprint: "b".repeat(64),
-        queryScopeId: "laboratory-observations",
-        resourceType: "Observation",
-        sliceId: "whole",
-      }],
-    };
-
-    const result = await readClinicalRetrievalRun({
-      generation: 1,
-      memberId: MEMBER_ID,
-      runId: RUN_ID,
-    });
-
-    expect(result).toEqual({
-      errorCode: "run-configuration-invalid",
-      retryable: false,
-      status: "unavailable",
-    });
-  });
 
   it("fails closed when a query-aware run has no frozen plan", async () => {
     const harness = createHarness(["Observation"], "query-slices-v2");
@@ -170,7 +376,7 @@ describe("Clinical Records retrieval control plane", () => {
     if (readResult.status !== "ready" || !("retrievalSlices" in readResult.run)) {
       throw new TypeError("Expected a query-aware retrieval descriptor.");
     }
-    expect(readResult.run.retrievalSlices).toHaveLength(5);
+    expect(readResult.run.retrievalSlices).toHaveLength(6);
     const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({
       entry: [],
       resourceType: "Bundle",
@@ -200,48 +406,6 @@ describe("Clinical Records retrieval control plane", () => {
     });
   });
 
-  it("accepts prior-runner pages without a fingerprint and preserves query-aware replay identity", async () => {
-    const harness = createHarness(["Observation"], "query-slices-v2");
-    const fetchImpl = vi.fn().mockImplementation(async () => fhirResponse({
-      entry: [],
-      resourceType: "Bundle",
-      type: "searchset",
-    }));
-    const request = {
-      cursor: null,
-      generation: 1,
-      queryScopeId: "laboratory-observations",
-      resourceType: "Observation" as const,
-      retrievalProtocol: "query-slices-v2" as const,
-      runId: RUN_ID,
-      sliceId: "whole",
-    };
-
-    const first = await fetchClinicalRetrievalPage({
-      fetchImpl,
-      memberId: MEMBER_ID,
-      request: { ...request, requestId: "request_prior_runner_1" },
-    });
-    const replay = await fetchClinicalRetrievalPage({
-      fetchImpl,
-      memberId: MEMBER_ID,
-      request: { ...request, requestId: "request_prior_runner_2" },
-    });
-
-    expect(first.status).toBe("page");
-    expect(replay.status).toBe("page");
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(harness.state.requests.size).toBe(1);
-    expect([...harness.state.requests.values()][0]).toMatchObject({
-      queryScopeId: "laboratory-observations",
-      requestFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      sliceId: "whole",
-    });
-    expect(harness.state.run).toMatchObject({
-      pageCount: 1,
-      providerRequestCount: 2,
-    });
-  });
 
   it("seals continuation cursors to query scope, fingerprint, resource type, and slice", async () => {
     const harness = createHarness(["Observation"], "query-slices-v2");
@@ -514,7 +678,11 @@ describe("Clinical Records retrieval control plane", () => {
       throw new Error("Expected an exact-link continuation cursor.");
     }
     expect(JSON.parse(harness.cursorPlaintexts.get(first.nextCursor) ?? "null")).toEqual({
-      schema: "murph.clinical-page-cursor.v2",
+      schema: "murph.clinical-page-cursor.v3",
+      queryFingerprint: queryObservationFingerprint(),
+      queryScopeId: "laboratory-observations",
+      resourceType: "Observation",
+      sliceId: "whole",
       url: exactNextUrl,
     });
 
@@ -671,7 +839,7 @@ describe("Clinical Records retrieval control plane", () => {
     );
   });
 
-  it("executes a frozen bounded query through the query-aware egress path", async () => {
+  it("executes an all-history query through the query-aware egress path", async () => {
     const harness = createHarness(["Observation"], "query-slices-v2");
     harness.state.run.connection.accessTokenExpiresAt = new Date(Date.now() + 120_000);
     const slice = buildEpicBetaRetrievalPlan({
@@ -679,8 +847,8 @@ describe("Clinical Records retrieval control plane", () => {
       pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
       resourceTypes: ["Observation"],
     }).slices.find((candidate) => candidate.queryScopeId === "observation-assessments");
-    if (!slice || slice.coverage !== "bounded-window") {
-      throw new TypeError("Expected the assessment bounded query slice.");
+    if (!slice || slice.coverage !== "whole-family") {
+      throw new TypeError("Expected the assessment lifetime query slice.");
     }
     const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({
       entry: [],
@@ -696,7 +864,7 @@ describe("Clinical Records retrieval control plane", () => {
         generation: 1,
         queryFingerprint: slice.queryFingerprint,
         queryScopeId: slice.queryScopeId,
-        requestId: "request_bounded_assessment",
+        requestId: "request_lifetime_assessment",
         resourceType: slice.resourceType,
         retrievalProtocol: "query-slices-v2",
         runId: RUN_ID,
@@ -705,7 +873,7 @@ describe("Clinical Records retrieval control plane", () => {
     })).resolves.toMatchObject({ status: "page" });
     expect(fetchImpl).toHaveBeenCalledWith(
       new URL(
-        "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=survey&date=ge2025-07-10T15%3A00%3A00.000Z&date=lt2026-07-10T15%3A00%3A00.000Z&_count=100",
+        "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=survey&_count=100",
       ),
       expect.objectContaining({ method: "GET", redirect: "manual" }),
     );
@@ -896,7 +1064,6 @@ describe("Clinical Records retrieval control plane", () => {
     expect(unauthorized.state.run.connection).toMatchObject({
       accessTokenEncrypted: null,
       patientIdEncrypted: null,
-      refreshTokenEncrypted: null,
       status: "needs_reauth",
     });
     expect(unauthorized.state.run.status).toBe("needs_reauth");
@@ -1167,10 +1334,21 @@ describe("Clinical Records retrieval control plane", () => {
     expect(harness.state.run.connection).toMatchObject({
       accessTokenEncrypted: null,
       patientIdEncrypted: null,
-      refreshTokenEncrypted: null,
       status: "needs_reauth",
     });
     expect(harness.state.run.status).toBe("needs_reauth");
+  });
+
+  it.each(["completed", "partial"] as const)("retains renewable patient access after a %s check", async (status) => {
+    const harness = createHarness(["Patient", "Observation"]);
+    Object.assign(harness.state.run.connection, { refreshTokenEncrypted: "sealed-refresh" });
+    const access = harness.state.run.connection.accessTokenEncrypted;
+    const patient = harness.state.run.connection.patientIdEncrypted;
+    await recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: {
+      ...outcomeIdentity(), counts: outcomeCounts(), generation: 1, runId: RUN_ID, status,
+    } });
+    expect(harness.state.run.connection).toMatchObject({ accessTokenEncrypted: access,
+      patientIdEncrypted: patient, refreshTokenEncrypted: "sealed-refresh", nextSyncAt: expect.any(Date), lastCheckedAt: expect.any(Date) });
   });
 
   it("requeues a preempted run and accepts a reordered idempotent completion", async () => {
@@ -1178,7 +1356,7 @@ describe("Clinical Records retrieval control plane", () => {
     harness.state.run.status = "retrieving";
     await recordClinicalRetrievalOutcome({
       memberId: MEMBER_ID,
-      request: {
+      request: {...outcomeIdentity(),
         counts: outcomeCounts(),
         errorCode: "runtime-preempted",
         generation: 1,
@@ -1200,7 +1378,7 @@ describe("Clinical Records retrieval control plane", () => {
     const counts = outcomeCounts();
     await recordClinicalRetrievalOutcome({
       memberId: MEMBER_ID,
-      request: { counts, generation: 1, runId: RUN_ID, status: "completed" },
+      request: {...outcomeIdentity(),  counts, generation: 1, runId: RUN_ID, status: "completed" },
     });
     const updateCount = harness.runUpdateCalls.length;
     const reorderedCounts = {
@@ -1216,7 +1394,7 @@ describe("Clinical Records retrieval control plane", () => {
     };
     await recordClinicalRetrievalOutcome({
       memberId: MEMBER_ID,
-      request: {
+      request: {...outcomeIdentity(),
         counts: reorderedCounts,
         generation: 1,
         runId: RUN_ID,
@@ -1266,17 +1444,7 @@ describe("Clinical Records retrieval control plane", () => {
     })).rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
     expect(mismatched.state.run.status).toBe("queued");
 
-    const priorRunner = createHarness(["Patient", "Observation"], "query-slices-v2");
-    await expect(recordClinicalRetrievalOutcome({
-      memberId: MEMBER_ID,
-      request: {
-        counts,
-        generation: 1,
-        runId: RUN_ID,
-        status: "completed",
-      },
-    })).resolves.toBeUndefined();
-    expect(priorRunner.state.run.status).toBe("complete");
+
   });
 
   it("rejects terminal and preempted outcomes when reconnect advances the generation", async () => {
@@ -1288,7 +1456,7 @@ describe("Clinical Records retrieval control plane", () => {
     };
     await expect(recordClinicalRetrievalOutcome({
       memberId: MEMBER_ID,
-      request: {
+      request: {...outcomeIdentity(),
         counts: outcomeCounts(),
         generation: 1,
         runId: RUN_ID,
@@ -1307,7 +1475,7 @@ describe("Clinical Records retrieval control plane", () => {
     };
     await expect(recordClinicalRetrievalOutcome({
       memberId: MEMBER_ID,
-      request: {
+      request: {...outcomeIdentity(),
         counts: outcomeCounts(),
         generation: 1,
         runId: RUN_ID,
@@ -1320,7 +1488,7 @@ describe("Clinical Records retrieval control plane", () => {
 
 function createHarness(
   resourceTypes: string[],
-  retrievalProtocol: "query-slices-v2" | null = null,
+  retrievalProtocol: "query-slices-v2" | null = "query-slices-v2",
 ) {
   const cursorPlaintexts = new Map<string, string>();
   const runUpdateCalls: Array<Record<string, unknown>> = [];
@@ -1370,6 +1538,7 @@ function createHarness(
     }),
   };
   const runApi = {
+    update: vi.fn(async (args: { data: Record<string, unknown> }) => { applyRunUpdate(state.run, args.data); return snapshotRun(state.run); }),
     findFirst: vi.fn(async (args?: {
       where?: { generation?: number; id?: string; memberId?: string };
     }) => {
@@ -1443,6 +1612,7 @@ function createHarness(
   };
   const prisma = {
     $transaction: vi.fn(async (operation: (tx: unknown) => Promise<unknown>) => operation({
+      $queryRaw: vi.fn().mockResolvedValue([]),
       clinicalRecordConnection: connectionApi,
       clinicalRecordRetrievalRequest: requestApi,
       clinicalRecordRetrievalRun: runApi,
@@ -1471,6 +1641,19 @@ function createHarness(
     const cursor = `cursor-${cursorSequence}`;
     cursorPlaintexts.set(cursor, input.value);
     return cursor;
+  });
+  const tickets = new Map<string, { value: string; runId: string; generation: number; memberId: string }>();
+  mocks.sealClinicalDocumentTicket.mockImplementation(async (input: { value: string; runId: string; generation: number; memberId: string }) => {
+    const token = `document-${tickets.size}`;
+    tickets.set(token, input);
+    return token;
+  });
+  mocks.openClinicalDocumentTicket.mockImplementation(async (input: { value: string; runId: string; generation: number; memberId: string }) => {
+    const ticket = tickets.get(input.value);
+    if (!ticket || ticket.runId !== input.runId || ticket.generation !== input.generation || ticket.memberId !== input.memberId) {
+      throw new TypeError("Unknown test ticket.");
+    }
+    return ticket.value;
   });
   return { cursorPlaintexts, hooks, runUpdateCalls, state };
 }
@@ -1590,7 +1773,6 @@ function buildRun(
         })
       : null as Record<string, unknown> | null,
     retrievalProtocol,
-    resourceTypesJson: resourceTypes,
     reviewCount: 0,
     status: "queued",
   };
@@ -1624,7 +1806,12 @@ function pageRequest(input: {
   requestId: string;
   resourceType: HostedClinicalRecordsFetchPageRequest["resourceType"];
 }) {
+  const slice = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-07-10T15:00:00.000Z"), pageCount: "100", resourceTypes: [input.resourceType] }).slices[0]!;
   return {
+    retrievalProtocol: "query-slices-v2" as const,
+    queryScopeId: slice.queryScopeId,
+    sliceId: slice.sliceId,
+    queryFingerprint: slice.queryFingerprint,
     cursor: input.cursor ?? null,
     generation: 1,
     requestId: input.requestId,
@@ -1733,4 +1920,11 @@ function deferred<Value>(): {
   let resolve!: (value: Value) => void;
   const promise = new Promise<Value>((done) => { resolve = done; });
   return { promise, resolve };
+}
+
+function outcomeIdentity() {
+  return {
+    retrievalProtocol: "query-slices-v2" as const,
+    retrievalSlices: buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-07-10T15:00:00.000Z"), pageCount: "100", resourceTypes: ["Patient", "Observation"] }).slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
+  };
 }

@@ -1,10 +1,13 @@
 import {
   access,
+  chmod,
   mkdir,
   readdir,
   readFile,
+  rename,
   rm,
   stat,
+  symlink,
   writeFile,
 } from 'node:fs/promises'
 import path from 'node:path'
@@ -25,6 +28,7 @@ import type {
 import { buildAutomationSupportSeriesTag } from '@murphai/contracts'
 import {
   createExperiment,
+  readMemoryDocument,
   initializeVault,
   loadVault,
   patchAutomation,
@@ -42,6 +46,7 @@ import { readMaterializedExportPackReceipt } from '@murphai/vault-usecases/expor
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   renderAssistantResponseCardText,
+  DAILY_NUTRITION_OPTIONAL_GOALS_INTRO,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import {
@@ -84,7 +89,11 @@ import {
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
-import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
+import {
+  findAssistantOutboxIntentByDedupeIdentity,
+  listAssistantOutboxIntentsForPrivateCompletionRoute,
+  pruneAssistantTerminalOutboxIntents,
+} from '../src/assistant/outbox/store.ts'
 import { createAssistantAutoReplyHistoryReader } from '../src/assistant/automation/reply.ts'
 import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.ts'
 import {
@@ -130,6 +139,7 @@ import {
 } from '../src/outbound-channel.ts'
 import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 import { ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS } from '../src/assistant/outbox/retry-policy.ts'
+import { NUTRITION_GOAL_INVITATION_SENT_MEMORY, resolveDailyNutritionIntroduction } from '../src/assistant/nutrition-card-introduction.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 import {
   onboardingFollowupPredecessorDefinitions,
@@ -254,6 +264,96 @@ afterEach(async () => {
 })
 
 describe('assistant outbox runtime', () => {
+  it('prepares only outbox and projection state for empty foreground reads and projection recovery', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext('assistant-outbox-private-path-')
+    tempRoots.push(parentRoot)
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const projectionPath = path.join(paths.stateDirectory, 'outbox-dedupe.sqlite')
+
+    await expect(readAssistantOutboxIntent(vaultRoot, 'outbox_missing')).resolves.toBeNull()
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
+    await expect(findAssistantOutboxIntentByDedupeIdentity({
+      dedupeKey: 'missing-key',
+      skipLegacyMediaFallback: true,
+      vault: vaultRoot,
+    })).resolves.toBeNull()
+    expect((await stat(projectionPath)).mode & 0o777).toBe(0o600)
+
+    await rm(projectionPath)
+    await chmod(paths.outboxDirectory, 0o755)
+    await chmod(paths.stateDirectory, 0o755)
+    await expect(listAssistantOutboxIntentsForAutoReplyRoute({
+      channel: 'telegram',
+      deliveryTarget: 'empty-route',
+      vault: vaultRoot,
+    })).resolves.toEqual([])
+    expect((await stat(paths.outboxDirectory)).mode & 0o777).toBe(0o700)
+    expect((await stat(paths.stateDirectory)).mode & 0o777).toBe(0o700)
+
+    await rm(projectionPath)
+    await expect(listAssistantOutboxIntentsForPrivateCompletionRoute({
+      actorId: null,
+      bindingDeliveryKind: 'explicit',
+      bindingDeliveryTarget: 'empty-route',
+      channel: 'telegram',
+      identityId: null,
+      threadId: null,
+      vault: vaultRoot,
+    })).resolves.toEqual([])
+    expect((await stat(projectionPath)).mode & 0o777).toBe(0o600)
+    expect((await readdir(paths.assistantStateRoot)).sort()).toEqual(['outbox', 'state'])
+    expect(await readdir(paths.outboxDirectory)).toEqual([])
+
+    const malformedPath = path.join(paths.outboxDirectory, 'outbox_malformed.json')
+    await writeFile(malformedPath, '{invalid-json', { mode: 0o600 })
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
+    await expect(access(malformedPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(paths.outboxQuarantineDirectory)).toHaveLength(1)
+    expect((await stat(paths.outboxQuarantineDirectory)).mode & 0o777).toBe(0o700)
+  })
+
+  it.each(['outboxDirectory', 'stateDirectory'] as const)(
+    'rejects a symlinked %s before foreground reads touch its target',
+    async (directoryKey) => {
+      const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-symlink-')
+      const intent = await createIntent(vaultRoot, { explicitTarget: 'symlink-route' })
+      const targetDirectory = path.join(vaultRoot, 'external-state')
+      await rename(paths[directoryKey], targetDirectory)
+      await chmod(targetDirectory, 0o755)
+      await symlink(targetDirectory, paths[directoryKey])
+      const targetPath = path.join(
+        targetDirectory,
+        directoryKey === 'outboxDirectory' ? `${intent.intentId}.json` : 'outbox-dedupe.sqlite',
+      )
+      const original = await readFile(targetPath)
+      const originalEntries = await readdir(targetDirectory)
+
+      await expect(readAssistantOutboxIntent(vaultRoot, intent.intentId)).rejects.toThrow('symlinks')
+      await expect(listAssistantOutboxIntentsLocal(vaultRoot)).rejects.toThrow('symlinks')
+      await expect(findAssistantOutboxIntentByDedupeIdentity({
+        dedupeKey: intent.dedupeKey,
+        vault: vaultRoot,
+      })).rejects.toThrow('symlinks')
+      await expect(listAssistantOutboxIntentsForAutoReplyRoute({
+        channel: 'telegram',
+        deliveryTarget: 'symlink-route',
+        vault: vaultRoot,
+      })).rejects.toThrow('symlinks')
+      await expect(listAssistantOutboxIntentsForPrivateCompletionRoute({
+        actorId: null,
+        bindingDeliveryKind: 'explicit',
+        bindingDeliveryTarget: 'symlink-route',
+        channel: 'telegram',
+        identityId: null,
+        threadId: null,
+        vault: vaultRoot,
+      })).rejects.toThrow('symlinks')
+      expect(await readFile(targetPath)).toEqual(original)
+      expect(await readdir(targetDirectory)).toEqual(originalEntries)
+      expect((await stat(targetDirectory)).mode & 0o777).toBe(0o755)
+    },
+  )
+
   it('persists the exact scheduled occurrence with a canonical outbox intent', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-scheduled-occurrence-',
@@ -290,12 +390,15 @@ describe('assistant outbox runtime', () => {
     )
   })
 
-  it('omits absent or empty context references from persisted outbox intents', async () => {
+  it('normalizes missing current input to no decision and preserves an explicit clear', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-empty-context-references-',
     )
 
     const absent = await createIntent(vaultRoot)
+    const noDecision = await createIntent(vaultRoot, {
+      automationContextReferences: null,
+    })
     const empty = await createIntent(vaultRoot, {
       automationContextReferences: [],
     })
@@ -303,12 +406,18 @@ describe('assistant outbox runtime', () => {
       vaultRoot,
       absent.intentId,
     )
+    const persistedNoDecision = await readRawOutboxIntent(
+      vaultRoot,
+      noDecision.intentId,
+    )
     const persistedEmpty = await readRawOutboxIntent(vaultRoot, empty.intentId)
 
-    expect(absent).not.toHaveProperty('automationContextReferences')
-    expect(empty).not.toHaveProperty('automationContextReferences')
-    expect(persistedAbsent).not.toHaveProperty('automationContextReferences')
-    expect(persistedEmpty).not.toHaveProperty('automationContextReferences')
+    expect(absent.automationContextReferences).toBeNull()
+    expect(noDecision.automationContextReferences).toBeNull()
+    expect(empty.automationContextReferences).toEqual([])
+    expect(persistedAbsent.automationContextReferences).toBeNull()
+    expect(persistedNoDecision.automationContextReferences).toBeNull()
+    expect(persistedEmpty.automationContextReferences).toEqual([])
   })
 
   it('retires claimed export packs only after confirmed delivery', async () => {
@@ -736,6 +845,138 @@ describe('assistant outbox runtime', () => {
     },
     120_000,
   )
+
+  it('reads projected route intents with bounded concurrency and preserves chronological order', async () => {
+    const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-route-concurrency-')
+    const routeTarget = 'route-concurrency'
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'telegram',
+      explicitTarget: routeTarget,
+    })
+    const intents: AssistantOutboxIntent[] = []
+    for (let index = 0; index < 9; index += 1) {
+      const at = new Date(Date.UTC(2026, 3, 8, 0, 0, index)).toISOString()
+      intents.push(await saveAssistantOutboxIntent(vaultRoot, {
+        ...seeded,
+        createdAt: at,
+        delivery: createDelivery({ sentAt: at, target: routeTarget, targetKind: 'explicit' }),
+        intentId: `outbox_route_concurrency_${index}`,
+        sentAt: at,
+        status: 'sent',
+        updatedAt: at,
+      }))
+    }
+    const intentPaths = new Set(intents.map((intent) =>
+      path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+    ))
+    const pendingReads = new Map<string, () => void>()
+    const startedPaths: string[] = []
+    const completedPaths: string[] = []
+    let activeReads = 0
+    let maximumReads = 0
+    let deferReads = true
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async () => {
+      const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+      return {
+        ...actual,
+        async readFile(...args: Parameters<typeof actual.readFile>) {
+          const filePath = String(args[0])
+          if (!intentPaths.has(filePath)) return await actual.readFile(...args)
+          activeReads += 1
+          maximumReads = Math.max(maximumReads, activeReads)
+          startedPaths.push(filePath)
+          try {
+            if (deferReads) {
+              await new Promise<void>((resolve) => pendingReads.set(filePath, resolve))
+              pendingReads.delete(filePath)
+            }
+            const raw = await actual.readFile(...args)
+            completedPaths.push(filePath)
+            return raw
+          } finally {
+            activeReads -= 1
+          }
+        },
+      }
+    })
+    const store = await import('../src/assistant/outbox/store.ts')
+    const reading = store.listAssistantOutboxIntentsForAutoReplyRoute({
+      actorId: seeded.actorId,
+      channel: 'telegram',
+      deliveryTarget: routeTarget,
+      identityId: seeded.identityId,
+      threadId: seeded.threadId,
+      vault: vaultRoot,
+    })
+    try {
+      await vi.waitFor(() => expect(pendingReads.size).toBe(4))
+      const firstBatch = [...pendingReads]
+      for (const [, release] of firstBatch.slice(1).reverse()) release()
+      await vi.waitFor(() => expect(completedPaths).toHaveLength(3))
+      expect(startedPaths).toHaveLength(4)
+      expect(completedPaths).not.toContain(firstBatch[0]![0])
+      deferReads = false
+      firstBatch[0]![1]()
+      const result = await reading
+      expect(result.map((intent) => intent.intentId)).toEqual(intents.map((intent) => intent.intentId))
+      expect(maximumReads).toBe(4)
+      expect(activeReads).toBe(0)
+    } finally {
+      deferReads = false
+      for (const release of pendingReads.values()) release()
+      await reading.catch(() => undefined)
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('removes missing and corrupt projected route entries while preserving valid canonical intents', async () => {
+    const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-route-stale-files-')
+    const routeTarget = 'route-stale-files'
+    const seeded = await createIntent(vaultRoot, { channel: 'telegram', explicitTarget: routeTarget })
+    const intents: AssistantOutboxIntent[] = []
+    for (let index = 0; index < 4; index += 1) {
+      const at = new Date(Date.UTC(2026, 3, 8, 0, 0, index)).toISOString()
+      intents.push(await saveAssistantOutboxIntent(vaultRoot, {
+        ...seeded,
+        createdAt: at,
+        delivery: createDelivery({ sentAt: at, target: routeTarget, targetKind: 'explicit' }),
+        intentId: `outbox_route_stale_${index}`,
+        sentAt: at,
+        status: 'sent',
+        updatedAt: at,
+      }))
+    }
+    const intentPath = (index: number) => path.join(paths.outboxDirectory, `${intents[index]!.intentId}.json`)
+    const retainedRaw = await Promise.all([0, 3].map((index) => readFile(intentPath(index), 'utf8')))
+    await rm(intentPath(1))
+    await writeFile(intentPath(2), '{invalid-json', 'utf8')
+    const query = {
+      actorId: seeded.actorId,
+      channel: 'telegram',
+      deliveryTarget: routeTarget,
+      identityId: seeded.identityId,
+      threadId: seeded.threadId,
+      vault: vaultRoot,
+    }
+    await expect(listAssistantOutboxIntentsForAutoReplyRoute(query)).resolves.toEqual([intents[0], intents[3]])
+    expect(await Promise.all([0, 3].map((index) => readFile(intentPath(index), 'utf8')))).toEqual(retainedRaw)
+    await expect(access(intentPath(2))).rejects.toMatchObject({ code: 'ENOENT' })
+    const quarantined = await readdir(paths.outboxQuarantineDirectory)
+    expect(quarantined.filter((name) => name.startsWith(`${intents[2]!.intentId}.`))).toHaveLength(1)
+    const database = openSqliteRuntimeDatabase(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), { readOnly: true })
+    try {
+      expect(database.prepare(`
+        SELECT intent_id FROM assistant_outbox_foreground_tags
+        WHERE intent_id IN (?, ?)
+      `).all(intents[1]!.intentId, intents[2]!.intentId)).toEqual([])
+    } finally {
+      database.close()
+    }
+    await expect(listAssistantOutboxIntentsForAutoReplyRoute(query)).resolves.toEqual([intents[0], intents[3]])
+    expect(await readdir(paths.outboxQuarantineDirectory)).toEqual(quarantined)
+  })
 
   it('bounds auto-reply route context while preserving an older exact provider anchor', async () => {
     const { vaultRoot } = await createAssistantVault(
@@ -1839,6 +2080,64 @@ describe('assistant outbox runtime', () => {
     ).toHaveLength(1)
   })
 
+  it('records the totals-only invitation after confirmation, not staging or a confirmation failure, without resending', async () => {
+    const { vaultRoot } = await createInitializedAssistantVault('nutrition-intro-confirmation-')
+    const card = { ...NUTRITION_RESPONSE_CARD, goals: {
+      calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null,
+    } }
+    const message = renderAssistantResponseCardText(card, DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+    const before = await readMemoryDocument(vaultRoot)
+    const intent = await createAssistantOutboxIntent({ card, channel: 'linq',
+      message, sessionId: 'intro-session', threadId: 'intro-thread', threadIsDirect: true,
+      turnId: 'intro-turn', dedupeToken: 'intro-effect', vault: vaultRoot })
+    expect(intent.message).toBe(message)
+    expect(await readMemoryDocument(vaultRoot)).toMatchObject({ exists: before.exists, records: before.records })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({ channel: 'linq', providerMessageId: 'intro-sent',
+        target: 'intro-thread', targetKind: 'thread' }),
+      deliveryDeduplicated: false, deliveryTransportIdempotent: true,
+      outboxIntentId: null, session: undefined,
+    })
+    const confirm = vi.fn().mockRejectedValueOnce(new Error('confirmation temporarily unavailable')).mockResolvedValue(undefined)
+    const dispatchHooks = { requiresTerminalConfirmation: () => true, confirmTerminalIntent: confirm }
+    const pending = await dispatchAssistantOutboxIntent({ force: true, intentId: intent.intentId, vault: vaultRoot, dispatchHooks })
+    expect(pending.intent.status).toBe('retryable')
+    expect(pending.intent.delivery).not.toBeNull()
+    expect(await readMemoryDocument(vaultRoot)).toMatchObject({ exists: before.exists, records: before.records })
+    const sent = await dispatchAssistantOutboxIntent({ force: true, intentId: intent.intentId, vault: vaultRoot, dispatchHooks })
+    expect(sent.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+    expect((await readMemoryDocument(vaultRoot)).records.some((record) => record.text === NUTRITION_GOAL_INVITATION_SENT_MEMORY)).toBe(true)
+    expect(await resolveDailyNutritionIntroduction({ card, message: DAILY_NUTRITION_OPTIONAL_GOALS_INTRO, vault: vaultRoot })).toBeNull()
+    // Recreating the frozen effect remains the same intent even after the note.
+    const replay = await createAssistantOutboxIntent({ card, channel: 'linq',
+      message, sessionId: 'intro-session', threadId: 'intro-thread', threadIsDirect: true,
+      turnId: 'intro-turn', dedupeToken: 'intro-effect', vault: vaultRoot })
+    expect(replay.intentId).toBe(intent.intentId)
+  })
+
+  it.each([
+    { code: 'ASSISTANT_TELEGRAM_DELIVERY_FAILED', deliveryMayHaveSucceeded: false, status: 'failed' },
+    { code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS', deliveryMayHaveSucceeded: true, status: 'abandoned' },
+  ])('does not record the nutrition invitation for $status delivery', async ({ code, deliveryMayHaveSucceeded, status }) => {
+    const { vaultRoot } = await createInitializedAssistantVault('nutrition-intro-failed-')
+    const card = { ...NUTRITION_RESPONSE_CARD, goals: {
+      calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null,
+    } }
+    const before = await readMemoryDocument(vaultRoot)
+    const intent = await createAssistantOutboxIntent({ card, channel: 'telegram',
+      message: renderAssistantResponseCardText(card, DAILY_NUTRITION_OPTIONAL_GOALS_INTRO),
+      sessionId: 'intro-failed-session', threadId: '12345', threadIsDirect: true,
+      turnId: 'intro-failed-turn', vault: vaultRoot })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('Synthetic delivery failure'), { code, deliveryMayHaveSucceeded }),
+    )
+    const result = await dispatchAssistantOutboxIntent({ force: true, intentId: intent.intentId, vault: vaultRoot })
+    expect(result.intent.status).toBe(status)
+    expect(await readMemoryDocument(vaultRoot)).toMatchObject({ exists: before.exists, records: before.records })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
   it('persists and dispatches response cards through the existing outbox owner', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-card-')
     const rendered = renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD)
@@ -2124,17 +2423,38 @@ describe('assistant outbox runtime', () => {
     })
   })
 
-  it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {
-    const { vaultRoot } = await createAssistantVault(
+  it.each(['goal-aware', 'totals-only', 'legacy-active-workout', 'legacy-completed-workout'] as const)('persists one %s text fallback identity before acceptance and reuses it after restart', async (mode) => {
+    const { vaultRoot } = await createInitializedAssistantVault(
       'assistant-outbox-card-fallback-restart-',
     )
+    const legacyWorkout = mode === 'legacy-active-workout' || mode === 'legacy-completed-workout'
+    const card = legacyWorkout ? {
+      ...WORKOUT_RESPONSE_CARD,
+      workout: {
+        ...WORKOUT_RESPONSE_CARD.workout,
+        state: mode === 'legacy-active-workout' ? 'active' as const : 'completed' as const,
+        exercises: WORKOUT_RESPONSE_CARD.workout.exercises.map((exercise) => ({
+          ...exercise,
+          sets: exercise.sets.map((set) => ({
+            ...set,
+            status: mode === 'legacy-completed-workout' ? 'skipped' as const : set.status,
+          })),
+        })),
+      },
+    } : mode === 'goal-aware' ? NUTRITION_RESPONSE_CARD : {
+      ...NUTRITION_RESPONSE_CARD,
+      goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null },
+    }
+    const message = renderAssistantResponseCardText(card,
+      mode === 'totals-only' ? DAILY_NUTRITION_OPTIONAL_GOALS_INTRO : null)
+    const memoryBefore = await readMemoryDocument(vaultRoot)
     const intent = await createAssistantOutboxIntent({
       actorId: '+15550001',
-      card: NUTRITION_RESPONSE_CARD,
+      card,
       channel: 'linq',
       dedupeToken: 'stable-card-fallback-restart',
       deliverySource: TEST_LINQ_DELIVERY_SOURCE,
-      message: 'ignored model prose',
+      message,
       sessionId: 'session-card-fallback-restart',
       threadId: 'thread-card-fallback-restart',
       threadIsDirect: true,
@@ -2142,7 +2462,9 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
     const originalIdempotencyKey = `assistant-outbox:${intent.intentId}`
-    const fallbackIdempotencyKey = `${originalIdempotencyKey}:fallback`
+    const fallbackIdempotencyKey = legacyWorkout
+      ? originalIdempotencyKey
+      : `${originalIdempotencyKey}:fallback`
     const processTerminated = new Error('simulated process termination')
     const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>()
     const providerRequests: Array<Record<string, unknown>> = []
@@ -2175,7 +2497,7 @@ describe('assistant outbox runtime', () => {
     await useActualOutboundDeliveryImplementation()
     sendLinq.mockImplementationOnce(async (request) => {
       expect(request).toMatchObject({
-        card: NUTRITION_RESPONSE_CARD,
+        card,
         idempotencyKey: originalIdempotencyKey,
       })
       const delivered = await sendLinqMessage(request, {
@@ -2197,7 +2519,7 @@ describe('assistant outbox runtime', () => {
           deliveryIdempotencyKey: fallbackIdempotencyKey,
           status: 'sending',
         })
-      expect(delivered.idempotencyKey).toBe(fallbackIdempotencyKey)
+      expect(delivered.idempotencyKey ?? request.idempotencyKey).toBe(fallbackIdempotencyKey)
       throw processTerminated
     })
 
@@ -2220,6 +2542,8 @@ describe('assistant outbox runtime', () => {
       status: 'sending',
     })
 
+    expect(await readMemoryDocument(vaultRoot)).toMatchObject({ exists: memoryBefore.exists, records: memoryBefore.records })
+
     sendLinq.mockImplementationOnce(async (request) => {
       return await sendLinqMessage(request, {
         env: {
@@ -2240,13 +2564,16 @@ describe('assistant outbox runtime', () => {
     expect(sendLinq).toHaveBeenCalledTimes(2)
     expect(sendLinq.mock.calls[1]?.[0]).toMatchObject({
       idempotencyKey: fallbackIdempotencyKey,
-      message: renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD),
+      message,
     })
     expect(sendLinq.mock.calls[1]?.[0]).not.toHaveProperty('card')
-    expect(providerRequests).toHaveLength(4)
-    expect(providerRequests.slice(1).map((request) => (
+    expect(providerRequests).toHaveLength(legacyWorkout ? 2 : 4)
+    expect(providerRequests.slice(legacyWorkout ? 0 : 1).map((request) => (
       request.message as { idempotency_key?: string }
-    ).idempotency_key)).toEqual([
+    ).idempotency_key)).toEqual(legacyWorkout ? [
+      originalIdempotencyKey,
+      originalIdempotencyKey,
+    ] : [
       originalIdempotencyKey,
       fallbackIdempotencyKey,
       fallbackIdempotencyKey,
@@ -2260,6 +2587,11 @@ describe('assistant outbox runtime', () => {
         providerMessageId: 'linq-card-fallback-text',
       },
     })
+    const sentMemory = await readMemoryDocument(vaultRoot)
+    expect(sentMemory.records.some((record) => record.text === NUTRITION_GOAL_INVITATION_SENT_MEMORY))
+      .toBe(mode === 'totals-only')
+    if (mode !== 'totals-only') expect(sentMemory).toMatchObject({ exists: memoryBefore.exists, records: memoryBefore.records })
+
   })
 
   it('terminalizes an exhausted private Linq attachment upload without a new reservation', async () => {
@@ -3351,7 +3683,7 @@ describe('assistant outbox runtime', () => {
     )
   })
 
-  it('prunes terminal outbox intents by age and count without touching active retries', async () => {
+  it.each(['gpt-image-2', 'gpt-image-2.5-flare'])('prunes terminal outbox intents while retaining %s capture evidence and active retries', async (source) => {
     const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-retention-')
 
     const oldTerminal = await createIntent(vaultRoot, {
@@ -3379,7 +3711,7 @@ describe('assistant outbox runtime', () => {
         ref: generatedRef,
         sha256: 'a'.repeat(64),
         sizeBytes: 128,
-        source: 'gpt-image-2',
+        source,
       }],
       message: 'visible generated image',
       sessionId: 'session-generated-delivery',
@@ -5931,16 +6263,19 @@ describe('assistant outbox runtime', () => {
       }
       const convertedRuntimeStore =
         await readAssistantCronCanonicalRuntimeStore(paths)
+      const transfersLegacyPendingOccurrence =
+        schedule.kind === 'every' &&
+        convertedAutomation.schedule.localTime === '13:30'
       expect(convertedRuntimeStore.jobs).toContainEqual(expect.objectContaining({
         jobId: automation.record.automationId,
         state: expect.objectContaining({
-          activatedAt: schedule.kind === 'at'
+          activatedAt: schedule.kind === 'at' || transfersLegacyPendingOccurrence
             ? '2026-04-09T13:32:00.000Z'
             : automation.record.createdAt,
           pendingOccurrenceAt: occurrenceAt,
         }),
       }))
-      const expectedNextRunAt = schedule.kind === 'every'
+      const expectedNextRunAt = schedule.kind === 'every' && !transfersLegacyPendingOccurrence
         ? computeAssistantCronNextRunAt(
             {
               kind: 'dailyLocal',
@@ -8692,7 +9027,9 @@ async function createIntent(
     actorId: overrides.actorId ?? null,
     answeredMailboxItemIds: overrides.answeredMailboxItemIds,
     automationAuthority: overrides.automationAuthority,
-    automationContextReferences: overrides.automationContextReferences,
+    ...(overrides.automationContextReferences === undefined
+      ? {}
+      : { automationContextReferences: overrides.automationContextReferences }),
     card: overrides.card ?? null,
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
@@ -8750,12 +9087,11 @@ function createSharedPlan(): AssistantTurnSharedPlan {
         bindingDelivery: null,
         channel: null,
         deliveryPolicy: 'not-requested',
-        effectiveThreadIsDirect: null,
+        threadIsDirect: null,
         explicitTarget: null,
         identityId: null,
         replyToMessageId: null,
         threadId: null,
-        threadIsDirect: null,
       },
       operatorAuthority: 'direct-operator',
     },

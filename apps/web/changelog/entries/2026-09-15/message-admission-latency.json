@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "message-admission-latency",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting before replies",
+    "summary": "Murph can get to work on incoming messages sooner.",
+    "details": "This improvement applies to private conversations and group chats.",
+    "relevanceTags": ["conversations", "performance"],
+    "sourcePullRequests": [3466]
+  }
+}

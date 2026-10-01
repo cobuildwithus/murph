@@ -337,6 +337,9 @@ test("assistant runtime issue parsing preserves summaries, redacts text, and cov
     ...baseRecord,
     issueKind: "tool_error",
   });
+  assert.equal(redacted.releaseSha, null);
+  assert.equal(redacted.runtimeAttemptId, null);
+  assert.equal(redacted.runtimeName, null);
   assert.equal(
     redacted.summary,
     "Provider failed for hosted-user-runtime:[redacted-id] and member_[redacted-id] "
@@ -349,6 +352,29 @@ test("assistant runtime issue parsing preserves summaries, redacts text, and cov
     note: "Tool failed for [email] and user_[redacted-id] while reading [path]",
     url: "[url]",
   });
+  assert.deepEqual(
+    parseAssistantRuntimeIssueRecord({
+      ...baseRecord,
+      issueKind: "tool_error",
+      releaseSha: "0123456789ABCDEF0123456789ABCDEF01234567",
+      runtimeAttemptId: "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+      runtimeName: "cloudflare-hosted-runner",
+    }),
+    {
+      ...redacted,
+      releaseSha: "0123456789abcdef0123456789abcdef01234567",
+      runtimeAttemptId: "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+      runtimeName: "cloudflare-hosted-runner",
+    },
+  );
+  assert.equal(
+    parseAssistantRuntimeIssueRecord({
+      ...baseRecord,
+      issueKind: "tool_error",
+      releaseSha: "cloudflare-version-uuid",
+    }).releaseSha,
+    null,
+  );
   assert.equal(
     parseAssistantRuntimeIssueRecord({
       ...baseRecord,
@@ -470,6 +496,9 @@ test("assistant runtime issue path helpers reject invalid ids before touching si
       occurredAt: "2026-04-20T11:00:00.000Z",
       operation: "provider.turn",
       phase: "provider_turn" as const,
+      releaseSha: null,
+      runtimeAttemptId: null,
+      runtimeName: null,
       schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
       severity: "error" as const,
       summary: "ignored",

@@ -20,13 +20,16 @@ import {
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import {
+  terminateHostedUserRuntimeWorkflowBestEffort,
+} from "../hosted-orchestration/workflow-termination";
+import {
   deleteHostedRuntimeLogDataForUsers,
 } from "../hosted-runtime-log/store";
 
 const CLEANUP_SCHEMA = "murph.hosted-account-deletion-cleanup.v1" as const;
 const CLEANUP_BATCH_SIZE = 25;
 const CLEANUP_BATCH_CONCURRENCY = 4;
-const CLEANUP_RUNTIME_DELETE_CONCURRENCY = 4;
+const CLEANUP_RUNTIME_TARGET_CONCURRENCY = 4;
 const CLEANUP_LEASE_MS = 5 * 60_000;
 const CLEANUP_RETRY_BASE_MS = 5 * 60_000;
 const CLEANUP_RETRY_MAX_MS = 24 * 60 * 60_000;
@@ -34,7 +37,7 @@ const CLEANUP_IDENTIFIER_LIMIT = 1_024;
 const CLEANUP_TARGET_TIMEOUT_ERROR_CODE = "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT";
 const CLEANUP_PRIVY_REBOUND_ERROR_CODE = "ACCOUNT_DELETION_PRIVY_IDENTITY_REBOUND";
 
-export const HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS = 5_000;
+export const HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS = 8_000;
 export const HOSTED_ACCOUNT_DELETION_RETRY_ATTEMPT_TIMEOUT_MS = 15_000;
 
 interface CleanupPayload {
@@ -69,6 +72,8 @@ export interface PreparedHostedAccountDeletionCleanup {
   stripeCustomerIds: readonly string[];
   stripeCompletedAt: Date | null;
   stripeSubscriptionIds: readonly string[];
+  temporalCompletedAt: Date | null;
+  temporalNextRuntimeIndex: number;
 }
 
 export interface HostedAccountDeletionCleanupRunResult {
@@ -83,6 +88,12 @@ export interface HostedAccountDeletionCleanupRunResult {
 interface HostedRuntimeLogDeletionResult {
   completed: boolean;
   errorCode: string | null;
+}
+
+interface HostedTemporalWorkflowTerminationResult {
+  completed: boolean;
+  errorCode: string | null;
+  nextRuntimeIndex: number;
 }
 
 export interface HostedAccountDeletionCleanupBatchResult {
@@ -147,6 +158,8 @@ export async function prepareHostedAccountDeletionCleanup(input: {
     stripeCustomerIds,
     stripeCompletedAt: stripeCustomerIds.length === 0 ? input.now : null,
     stripeSubscriptionIds,
+    temporalCompletedAt: null,
+    temporalNextRuntimeIndex: 0,
   };
 }
 
@@ -166,6 +179,8 @@ export async function persistHostedAccountDeletionCleanupTx(input: {
       privyUserLookupKey: input.cleanup.privyUserLookupKey,
       runtimeLogsCompletedAt: input.cleanup.runtimeLogsCompletedAt,
       stripeCompletedAt: input.cleanup.stripeCompletedAt,
+      temporalCompletedAt: input.cleanup.temporalCompletedAt,
+      temporalNextRuntimeIndex: input.cleanup.temporalNextRuntimeIndex,
     },
   });
 }
@@ -230,13 +245,36 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
   try {
     const deadline = createCleanupDeadline(attemptTimeoutMs);
     const payload = await decryptCleanupPayload(cleanup, deadline.signal);
-    const [cloudflare, runtimeLogs, stripeCustomer, privyUser] = await Promise.all([
+    const runtimeEnrollment = await advanceCleanupRuntimeEnrollment(input.prisma, cleanup, payload);
+    if (
+      !Number.isSafeInteger(cleanup.temporalNextRuntimeIndex)
+      || cleanup.temporalNextRuntimeIndex < 0
+      || cleanup.temporalNextRuntimeIndex > payload.runtimeMemberIds.length
+    ) {
+      throw new TypeError("Hosted Temporal cleanup cursor is invalid.");
+    }
+    const [
+      cloudflare,
+      runtimeLogs,
+      temporal,
+      stripeCustomer,
+      privyUser,
+    ] = await Promise.all([
       cleanup.cloudflareCompletedAt
         ? completedCloudflareResult()
         : deleteHostedRunnerData(payload.runtimeMemberIds, deadline),
       cleanup.runtimeLogsCompletedAt
         ? completedHostedRuntimeLogDeletionResult()
         : deleteHostedRuntimeLogs(payload.runtimeMemberIds, deadline),
+      cleanup.temporalCompletedAt
+        ? completedHostedTemporalWorkflowTerminationResult(
+            payload.runtimeMemberIds.length,
+          )
+        : terminateHostedRuntimeWorkflows(
+            payload.runtimeMemberIds,
+            cleanup.temporalNextRuntimeIndex,
+            deadline,
+          ),
       cleanup.stripeCompletedAt
         ? completedOrSkippedVendorResult(payload.stripeCustomerIds.length > 0)
         : deleteStripeCustomers(payload.stripeCustomerIds, deadline),
@@ -257,16 +295,21 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
       ?? (isTerminalVendorDeletion(privyUser) ? now : null);
     const runtimeLogsCompletedAt = cleanup.runtimeLogsCompletedAt
       ?? (runtimeLogs.completed ? now : null);
-    let cleanupPending =
-      !cloudflareCompletedAt
-      || !runtimeLogsCompletedAt
-      || !stripeCompletedAt
-      || !privyCompletedAt;
+    const temporalNextRuntimeIndex = Math.max(
+      cleanup.temporalNextRuntimeIndex,
+      temporal.nextRuntimeIndex,
+    );
+    const temporalCompletedAt = cleanup.temporalCompletedAt
+      ?? (temporal.completed ? now : null);
+    const cleanupMadeProgress = runtimeEnrollment.madeProgress
+      || temporalNextRuntimeIndex > cleanup.temporalNextRuntimeIndex;
+    let cleanupPending = runtimeEnrollment.pending || [cloudflareCompletedAt,
+      runtimeLogsCompletedAt, temporalCompletedAt, stripeCompletedAt, privyCompletedAt].some(at => !at);
 
     if (cleanupPending) {
       await input.prisma.hostedAccountDeletionCleanup.updateMany({
         data: {
-          attemptCount: { increment: 1 },
+          attemptCount: cleanupMadeProgress ? 0 : { increment: 1 },
           cloudflareCompletedAt,
           lastAttemptedAt: now,
           lastErrorCode: pendingErrorCode({
@@ -274,19 +317,24 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
             privyUser,
             runtimeLogs,
             stripeCustomer,
+            temporal,
           }),
           leaseExpiresAt: null,
           leaseToken: null,
-          nextAttemptAt: nextAttemptAt(now, cleanup.attemptCount),
+          nextAttemptAt: cleanupMadeProgress
+            ? now
+            : nextAttemptAt(now, cleanup.attemptCount),
           privyCompletedAt,
           runtimeLogsCompletedAt,
           stripeCompletedAt,
+          temporalCompletedAt,
+          temporalNextRuntimeIndex,
         },
         where: { id: cleanup.id, leaseToken },
       });
     } else {
-      // Persist the isolated target before deleting the receipt. The additive
-      // primary trigger keeps older cleanup code from erasing this retry owner.
+      // Persist every additive target before deleting the receipt. Primary
+      // triggers keep older cleanup code from erasing this retry owner.
       const completed = await input.prisma.hostedAccountDeletionCleanup.updateMany({
         data: {
           cloudflareCompletedAt,
@@ -295,6 +343,8 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
           privyCompletedAt,
           runtimeLogsCompletedAt,
           stripeCompletedAt,
+          temporalCompletedAt,
+          temporalNextRuntimeIndex,
         },
         where: { id: cleanup.id, leaseToken },
       });
@@ -411,8 +461,60 @@ export function pendingHostedAccountDeletionCleanupResult(
   };
 }
 
+/** Narrow internal projection for the rolling runtime census. The provider
+ * call must run outside any transaction; unrelated vendor identifiers never
+ * leave this owner. Payload bytes are zeroed by the existing decrypt helper.
+ */
+export async function readHostedAccountCleanupRuntimePage(input: {
+  cleanup: Pick<HostedAccountDeletionCleanup, "id" | "environment" | "kmsKeyName" | "payloadCiphertext">;
+  after: number;
+  signal: AbortSignal;
+}) {
+  const payload = await decryptCleanupPayload(input.cleanup, input.signal);
+  return runtimeCleanupPage(payload, input.after);
+}
+
+function runtimeCleanupPage(payload: CleanupPayload, after: number) {
+  if (!Number.isSafeInteger(after) || after < 0 || after >= payload.runtimeMemberIds.length) {
+    throw new TypeError("Runtime cleanup enrollment cursor is invalid.");
+  }
+  const userIds = payload.runtimeMemberIds.slice(after, after + 100);
+  const nextIndex = after + userIds.length;
+  return { userIds, nextIndex: nextIndex < payload.runtimeMemberIds.length ? nextIndex : null };
+}
+
+/** Shared by historical census and ordinary cleanup retries. Its caller owns
+ * the shared rolling-campaign lock. No provider work occurs in this transaction.
+ */
+export async function retainHostedAccountCleanupRuntimePageTx(tx: Prisma.TransactionClient, prepared: {
+  cleanup: Pick<HostedAccountDeletionCleanup, "id" | "environment" | "kmsKeyName" | "payloadCiphertext" | "runtimeMigrationNextIndex">;
+  userIds: readonly string[]; nextIndex: number | null;
+} | null) {
+  if (!prepared) return;
+  const { cleanup } = prepared;
+  const advanced = await tx.hostedAccountDeletionCleanup.updateMany({
+    where: { id: cleanup.id, environment: cleanup.environment, kmsKeyName: cleanup.kmsKeyName,
+      payloadCiphertext: cleanup.payloadCiphertext, runtimeMigrationNextIndex: cleanup.runtimeMigrationNextIndex },
+    data: { runtimeMigrationNextIndex: prepared.nextIndex },
+  });
+  if (advanced.count) await tx.hostedRuntimeOwner.createMany({ data: prepared.userIds.map(userId => ({ userId })), skipDuplicates: true });
+}
+
+async function advanceCleanupRuntimeEnrollment(prisma: PrismaClient, cleanup: HostedAccountDeletionCleanup, payload: CleanupPayload) {
+  if (typeof cleanup.runtimeMigrationNextIndex !== "number") return { pending: false, madeProgress: false };
+  const page = runtimeCleanupPage(payload, cleanup.runtimeMigrationNextIndex);
+  return prisma.$transaction(async tx => {
+    const gates = await tx.$queryRaw<Array<{ phase: string }>>`SELECT phase FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
+    if (gates[0]?.phase !== "rolling") return { pending: false, madeProgress: false };
+    await retainHostedAccountCleanupRuntimePageTx(tx, { cleanup, ...page });
+    const current = await tx.hostedAccountDeletionCleanup.findUnique({ where: { id: cleanup.id }, select: { runtimeMigrationNextIndex: true } });
+    const cursor = current?.runtimeMigrationNextIndex ?? null;
+    return { pending: cursor !== null, madeProgress: cursor !== cleanup.runtimeMigrationNextIndex };
+  }, { maxWait: 5_000, timeout: 5_000 });
+}
+
 async function decryptCleanupPayload(
-  cleanup: HostedAccountDeletionCleanup,
+  cleanup: Pick<HostedAccountDeletionCleanup, "id" | "environment" | "kmsKeyName" | "payloadCiphertext">,
   signal: AbortSignal,
 ): Promise<CleanupPayload> {
   const cryptoConfig = getHostedWebCryptoConfig();
@@ -464,7 +566,7 @@ async function deleteHostedRunnerData(
   const results: HostedRunnerUserDataDeletionBestEffortResult[] = [];
   let nextIndex = 0;
   const workers = Array.from({
-    length: Math.min(CLEANUP_RUNTIME_DELETE_CONCURRENCY, runtimeMemberIds.length),
+    length: Math.min(CLEANUP_RUNTIME_TARGET_CONCURRENCY, runtimeMemberIds.length),
   }, async () => {
     while (!cleanupDeadlineExpired(deadline)) {
       const index = nextIndex;
@@ -633,6 +735,58 @@ function completedHostedRuntimeLogDeletionResult(): HostedRuntimeLogDeletionResu
   return { completed: true, errorCode: null };
 }
 
+async function terminateHostedRuntimeWorkflows(
+  runtimeMemberIds: readonly string[],
+  startIndex: number,
+  deadline: CleanupDeadline,
+): Promise<HostedTemporalWorkflowTerminationResult> {
+  // This receipt owns termination retries. The workflow's deleted-member
+  // quiescence remains the defense if a late signal recreates a terminated run.
+  let nextRuntimeIndex = startIndex;
+  while (
+    nextRuntimeIndex < runtimeMemberIds.length
+    && !cleanupDeadlineExpired(deadline)
+  ) {
+    const batchStartIndex = nextRuntimeIndex;
+    const batch = runtimeMemberIds.slice(
+      batchStartIndex,
+      batchStartIndex + CLEANUP_RUNTIME_TARGET_CONCURRENCY,
+    );
+    const results = await Promise.all(batch.map((userId) =>
+      terminateHostedUserRuntimeWorkflowBestEffort({
+        reason: "account-deleted",
+        timeoutMs: remainingCleanupDeadlineMs(deadline),
+        userId,
+      })));
+    const failedOffset = results.findIndex((result) => !result.terminated);
+    if (failedOffset >= 0) {
+      const failure = results[failedOffset]!;
+      return {
+        completed: false,
+        errorCode: failure.errorCode
+          ?? (failure.configured
+            ? "HOSTED_TEMPORAL_TERMINATION_INCOMPLETE"
+            : "HOSTED_TEMPORAL_NOT_CONFIGURED"),
+        nextRuntimeIndex: batchStartIndex + failedOffset,
+      };
+    }
+    nextRuntimeIndex += results.length;
+  }
+
+  const completed = nextRuntimeIndex === runtimeMemberIds.length;
+  return {
+    completed,
+    errorCode: completed ? null : CLEANUP_TARGET_TIMEOUT_ERROR_CODE,
+    nextRuntimeIndex,
+  };
+}
+
+function completedHostedTemporalWorkflowTerminationResult(
+  nextRuntimeIndex: number,
+): HostedTemporalWorkflowTerminationResult {
+  return { completed: true, errorCode: null, nextRuntimeIndex };
+}
+
 function mergeCloudflareDeletionResults(
   results: readonly HostedRunnerUserDataDeletionBestEffortResult[],
 ): HostedRunnerUserDataDeletionBestEffortResult {
@@ -747,6 +901,7 @@ function pendingErrorCode(input: {
   privyUser: HostedAccountVendorDeletionResult;
   runtimeLogs: HostedRuntimeLogDeletionResult;
   stripeCustomer: HostedAccountVendorDeletionResult;
+  temporal: HostedTemporalWorkflowTerminationResult;
 }): string | null {
   if (!input.cloudflare.deleted) {
     return input.cloudflare.errorCode
@@ -757,6 +912,10 @@ function pendingErrorCode(input: {
   if (!input.runtimeLogs.completed) {
     return input.runtimeLogs.errorCode
       ?? "HOSTED_RUNTIME_LOG_DELETION_INCOMPLETE";
+  }
+  if (!input.temporal.completed) {
+    return input.temporal.errorCode
+      ?? "HOSTED_TEMPORAL_TERMINATION_INCOMPLETE";
   }
   const vendor = [input.stripeCustomer, input.privyUser]
     .find((result) => !isTerminalVendorDeletion(result));

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-25",
+  "order": 200,
+  "item": {
+    "id": "environment-report-on-a-phone",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "The Environment interview reads better on a phone",
+    "summary": "The topic checklist is now the largest text on the screen, the repeated setup copy is gone, and the live transcript no longer cuts a line in half.",
+    "details": "Reopening the interview no longer repeats a detail you already answered in the same session, a spoken range such as \"twelve to fourteen hours\" is saved as a number, an imperial measurement is converted before it is stored, and temperatures read in the unit system your device reports. Letter grades now follow the A to F scale.",
+    "relevanceTags": ["environment", "mobile"],
+    "sourcePullRequests": [2282]
+  }
+}

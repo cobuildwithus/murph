@@ -4,7 +4,6 @@ import { useLinkAccount, usePrivy, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import type { JoinInviteTelegramAccountSeed } from "@/src/components/hosted-onboarding/join-invite-page-model";
 import {
   ContactSupportAction,
   shouldShowContactSupportAction,
@@ -25,7 +24,7 @@ import { toErrorMessage } from "./hosted-settings-utils";
 
 export function ConnectTelegram(props: {
   authenticated: boolean;
-  initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
+  initialTelegramAccount: { telegramUserId: string; username: string | null } | null;
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
   const { authenticated, initialTelegramAccount, onSynced } = props;
@@ -50,7 +49,7 @@ export function ConnectTelegram(props: {
   const clientAuthenticated = privyReady && privyAuthenticated;
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
 
-  const { linkTelegram } = useLinkAccount({
+  const { linkOAuth } = useLinkAccount({
     onError: (error, details) => {
       if (!details || details.linkMethod === "telegram") {
         setIsLinkingTelegram(false);
@@ -168,7 +167,7 @@ export function ConnectTelegram(props: {
       return;
     }
 
-    if (typeof linkTelegram !== "function") {
+    if (typeof linkOAuth !== "function") {
       setErrorMessage("Telegram linking is not available yet.");
       return;
     }
@@ -176,7 +175,7 @@ export function ConnectTelegram(props: {
     setIsLinkingTelegram(true);
 
     try {
-      linkTelegram();
+      linkOAuth({ provider: "telegram" });
     } catch (error) {
       setIsLinkingTelegram(false);
       setErrorMessage(toHostedTelegramLinkErrorMessage(error));

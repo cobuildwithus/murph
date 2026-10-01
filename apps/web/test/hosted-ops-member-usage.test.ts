@@ -379,89 +379,27 @@ describe("hosted ops member usage", () => {
     });
   });
 
-  test("reuses active Starter wake recovery instead of granting again", async () => {
-    const decision = makeUsageGateDecision({
-          allowed: true,
-          allowanceSource: "direct_starter",
-          limitUsdMicros: 0n,
-          memberId: "hbm_starter",
-          periodEnd: new Date("2099-12-31T23:59:59.999Z"),
-          periodStart: new Date(0),
-          planResetAt: null,
-          remainingUsdMicros: 4_500_000n,
-          spentUsdMicros: 0n,
-          usageCreditBalanceUsdMicros: 4_500_000n,
-          usageCreditLedgerVersion: 44n,
-        });
-    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(decision);
-    const findResetGrants = vi.fn(async () => [{
-      beneficiaryMemberId: "hbm_starter",
-    }]);
-    const findStalledMailboxItems = vi.fn(async () => [{
-      userId: "hbm_starter",
-    }]);
-    const tx = {
-      $queryRaw: vi.fn(async () => [{
-        hasActiveUsageCreditGrant: true,
-        usageCreditBalanceUsdMicros: 4_500_000n,
-        usageCreditLedgerVersion: 44n,
-      }]),
-      hostedMailboxItem: { findMany: findStalledMailboxItems },
-      hostedOpsUsageResetReceipt: {
-        create: vi.fn(async ({ data }) => data),
-        findUnique: vi.fn(async () => null),
-      },
-      hostedUsageCreditEntry: {
-        findMany: findResetGrants,
-      },
-    };
-    const transaction = vi.fn(async (
-      run: (client: typeof tx) => Promise<unknown>,
-    ) => run(tx));
+  test("keeps full Starter allowance unchanged and rechecks accepted work", async () => {
+    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(makeUsageGateDecision({
+      allowed: true, allowanceSource: "direct_starter", limitUsdMicros: 0n,
+      remainingUsdMicros: 4_500_000n, spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 4_500_000n, usageCreditLedgerVersion: 4n,
+    }));
+    const tx = createResetTransactionFixture({
+      blockedAt: null, delivery: null, spentUsdMicros: 0n,
+      remainingStarterCreditUsdMicros: 4_500_000n, usageCreditBalanceUsdMicros: 4_500_000n,
+    });
     const prisma = asPrismaClientForHostedOpsTest({
-      $transaction: transaction,
-      hostedMailboxItem: { findMany: findStalledMailboxItems },
-      hostedUsageCreditEntry: {
-        findMany: findResetGrants,
-      },
+      $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) => run(tx)),
     });
 
-    const result = await resetHostedOpsMemberUsageForResetAll({
-      memberId: "hbm_starter",
-      now: NOW,
-      operationId: RESET_ALL_OPERATION_ID,
-    }, prisma);
-
-    expect(result).toEqual({
-      memberId: "hbm_starter",
-      outcome: "unchanged",
-      resetMode: "starter_allowance",
-      runtimeRecheckRequired: true,
-      timestamp: NOW.toISOString(),
+    await expect(resetHostedOpsMemberUsageForResetAll({
+      memberId: "hbm_container", now: NOW, operationId: RESET_ALL_OPERATION_ID,
+    }, prisma)).resolves.toMatchObject({
+      outcome: "unchanged", resetMode: "starter_allowance", runtimeRecheckRequired: true,
     });
-    expect(findResetGrants).toHaveBeenCalledWith({
-      select: { beneficiaryMemberId: true },
-      take: 1,
-      where: {
-        beneficiaryMemberId: "hbm_starter",
-        grant: { remainingUsdMicros: { gt: 0n } },
-        kind: "starter_grant",
-        sourceReferenceLookupKey: "hosted-ops-usage-reset:starter:v1",
-      },
-    });
-    expect(findStalledMailboxItems).toHaveBeenCalledWith({
-      select: { userId: true },
-      take: 1,
-      where: {
-        aiUsageDeniedAt: { not: null },
-        consumedAt: null,
-        userId: "hbm_starter",
-      },
-    });
-    expect(transaction).toHaveBeenCalledTimes(1);
-    expect(tx.hostedOpsUsageResetReceipt.create).toHaveBeenCalledTimes(1);
-    expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx)
-      .not.toHaveBeenCalled();
+    expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx).not.toHaveBeenCalled();
+    expect(tx.hostedAiUsagePeriod.updateMany).not.toHaveBeenCalled();
   });
 
   test("replays one included-usage receipt without re-reading mutable allowance", async () => {
@@ -1473,6 +1411,34 @@ describe("hosted ops member usage", () => {
       }));
   });
 
+  test("reset everyone refills only missing Starter credit and preserves other credit", async () => {
+    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(makeUsageGateDecision({
+      allowed: true, allowanceSource: "direct_starter", limitUsdMicros: 0n,
+      remainingUsdMicros: 1_700_000n, spentUsdMicros: 4_000_000n,
+      usageCreditBalanceUsdMicros: 1_700_000n, usageCreditLedgerVersion: 4n,
+    }));
+    const tx = createResetTransactionFixture({
+      blockedAt: null, delivery: null, spentUsdMicros: 4_000_000n,
+      remainingStarterCreditUsdMicros: 500_000n, usageCreditBalanceUsdMicros: 1_700_000n,
+    });
+    const prisma = asPrismaClientForHostedOpsTest({
+      $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) => run(tx)),
+    });
+
+    await expect(resetHostedOpsMemberUsageForResetAll({
+      memberId: "hbm_container", now: NOW, operationId: RESET_ALL_OPERATION_ID,
+    }, prisma)).resolves.toMatchObject({ outcome: "reset", resetMode: "starter_allowance" });
+    expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx).toHaveBeenCalledWith(expect.objectContaining({
+      grantUsdMicros: 4_000_000n,
+      lockedBeneficiary: {
+        balanceUsdMicros: 1_700_000n, beneficiaryMemberId: "hbm_container", ledgerVersion: 4n,
+      },
+    }));
+    expect(tx.hostedAiUsagePeriod.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: { blockedAt: null, spentUsdMicros: 0n, updatedAt: NOW },
+    }));
+  });
+
   test("refuses to grant another Starter allowance while credit remains", async () => {
     usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(
       makeUsageGateDecision({
@@ -1752,6 +1718,7 @@ function createResetTransactionFixture(input: {
   blockedAt?: Date | null;
   delivery?: ReturnType<typeof makeDelivery> | null;
   memberExists?: boolean;
+  remainingStarterCreditUsdMicros?: bigint;
   periodExists?: boolean;
   periodUpdatedAt?: Date;
   spentUsdMicros?: bigint;
@@ -1762,7 +1729,8 @@ function createResetTransactionFixture(input: {
     input.memberExists === false
       ? []
       : [{
-          hasActiveUsageCreditGrant: false,
+          hasActiveUsageCreditGrant: (input.usageCreditBalanceUsdMicros ?? 0n) > 0n,
+          remainingStarterCreditUsdMicros: input.remainingStarterCreditUsdMicros ?? 0n,
           usageCreditBalanceUsdMicros:
             input.usageCreditBalanceUsdMicros ?? 0n,
           usageCreditLedgerVersion: input.usageCreditLedgerVersion ?? 4n,

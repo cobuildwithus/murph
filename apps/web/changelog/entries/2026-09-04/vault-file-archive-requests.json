@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "vault-file-archive-requests",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Vault files in a ZIP",
+    "summary": "Murph handles requests to package your vault files as a ZIP in your private iMessage conversation more directly.",
+    "details": "Creating the archive leaves the original files in place. The existing approval step still comes before the attachment is sent.",
+    "relevanceTags": ["vault", "exports"],
+    "sourcePullRequests": [2873]
+  }
+}

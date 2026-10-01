@@ -1,18 +1,13 @@
 import Link from "next/link";
 
+import { PRODUCT_DATABASE_STATS } from "@/src/lib/product-database-stats";
+
+const DATABASE_COUNT_FORMATTER = new Intl.NumberFormat("en-US");
+
 function LabelLookupArtifact() {
   return (
     <div className="rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#3d5028]">
-          Label lookup
-        </span>
-        <span className="font-mono text-[10px] tabular-nums text-[#736a58]">
-          UPC match
-        </span>
-      </div>
-
-      <div className="mt-4">
+      <div>
         <p className="font-serif text-[1.125rem] font-semibold leading-tight text-[#2d3436]">
           Chocolate peanut protein bar
         </p>
@@ -87,9 +82,9 @@ function DatabaseFactsPanel() {
       </p>
 
       {[
-        ["Food labels", "2,027,814"],
-        ["Supplement facts", "239,365"],
-        ["Product tests", "20,697"],
+        ["Food labels", DATABASE_COUNT_FORMATTER.format(PRODUCT_DATABASE_STATS.foodLabels)],
+        ["Supplement facts", DATABASE_COUNT_FORMATTER.format(PRODUCT_DATABASE_STATS.supplementFacts)],
+        ["Product tests", DATABASE_COUNT_FORMATTER.format(PRODUCT_DATABASE_STATS.productTests)],
       ].map(([name, count]) => (
         <div
           key={name}
@@ -107,7 +102,7 @@ function DatabaseFactsPanel() {
       </p>
 
       <p className="pt-3 text-[0.75rem] leading-[1.5] text-black/60">
-        Counted July 2026. Growing weekly as new labels and lab results come
+        Counted {PRODUCT_DATABASE_STATS.countedThrough}. Growing weekly as new labels and lab results come
         in.
       </p>
     </div>
@@ -119,10 +114,7 @@ export function NutritionSection() {
     <section className="bg-[linear-gradient(165deg,#ebf0de_0%,#d7e2c3_100%)] px-4 py-20 sm:px-8 lg:px-16 lg:py-28">
       <div className="mx-auto max-w-[1200px]">
         <div className="max-w-[720px]">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#3d5028]">
-            Nutrition
-          </p>
-          <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#26311f]">
+          <h2 className="font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#26311f]">
             Murph reads the label so you don&apos;t have to.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3f4a34]">

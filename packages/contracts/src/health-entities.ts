@@ -22,6 +22,7 @@ import {
 } from "./shares.ts";
 import {
   allergyFrontmatterSchema,
+  commonsGoalRefSchema,
   conditionFrontmatterSchema,
   familyMemberFrontmatterSchema,
   geneticVariantFrontmatterSchema,
@@ -269,6 +270,9 @@ const checkedHealthEntityDefinitions = [
         sortBehavior: "priority-title",
         transform({ attributes, helpers }) {
           const window = helpers.firstObject(attributes, ["window"]);
+          const commonsGoalRef = attributes.commonsGoalRef === undefined
+            ? null
+            : commonsGoalRefSchema.parse(attributes.commonsGoalRef);
 
           return {
             horizon: helpers.firstString(attributes, ["horizon"]),
@@ -278,6 +282,7 @@ const checkedHealthEntityDefinitions = [
             parentGoalId: helpers.firstString(attributes, ["parentGoalId"]),
             relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
             relatedExperimentIds: helpers.firstStringArray(attributes, ["relatedExperimentIds"]),
+            commonsGoalRef,
             domains: helpers.firstStringArray(attributes, ["domains"]),
             metricTargets: Array.isArray(attributes.metricTargets)
               ? attributes.metricTargets

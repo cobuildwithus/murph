@@ -20,6 +20,7 @@ type MutableAgentSession = {
   userId: string;
   label: string | null;
   tokenHash: string;
+  imessageRenewalTokenHash?: string | null;
   createdAt: Date;
   updatedAt: Date;
   expiresAt: Date;
@@ -181,6 +182,44 @@ describe("PrismaDeviceSyncControlPlaneStore agent sessions", () => {
       replacedBySessionId: null,
     });
     expect(sessions.get("dsa_expired")?.revokedAt?.toISOString()).toBe("2026-03-25T00:00:00.000Z");
+  });
+
+  it("leaves an expired renewable Messages session available for scoped renewal", async () => {
+    const { sessions, store } = createSessionStore([
+      {
+        id: "dsa_imessage_renewable",
+        userId: "user-123",
+        label: "Murph Messages mini app",
+        tokenHash: "hash-expired-renewable",
+        imessageRenewalTokenHash: "hash-renewal",
+        createdAt: new Date("2026-03-24T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-24T00:00:00.000Z"),
+        expiresAt: new Date("2026-03-24T12:00:00.000Z"),
+        lastSeenAt: new Date("2026-03-24T11:00:00.000Z"),
+        revokedAt: null,
+        revokeReason: null,
+        replacedBySessionId: null,
+      },
+    ]);
+
+    const result = await store.authenticateAgentSessionByTokenHash(
+      "hash-expired-renewable",
+      "2026-03-25T00:00:00.000Z",
+    );
+
+    expect(result).toMatchObject({
+      status: "expired",
+      session: {
+        id: "dsa_imessage_renewable",
+        revokedAt: null,
+        revokeReason: null,
+      },
+    });
+    expect(sessions.get("dsa_imessage_renewable")).toMatchObject({
+      imessageRenewalTokenHash: "hash-renewal",
+      revokedAt: null,
+      revokeReason: null,
+    });
   });
 
   it("does not let a stale token revoke a replacement using the same session id", async () => {

@@ -1,22 +1,15 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   parseHostedMailboxFetchResponse,
+  parseHostedExecutionWake,
   parseHostedMailboxPayloadFetchResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
-  HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
-  HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
-  HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH,
-} from "@murphai/hosted-execution/routes";
-
-import {
   fetchHostedWebControlPlaneJson,
   fetchReplaySafeHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
-
-const HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED_CODE =
-  "HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED";
 
 export function createHostedWebMailboxPort(input: {
   boundUserId: string;
@@ -25,6 +18,26 @@ export function createHostedWebMailboxPort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
+    async admitVoiceInput(
+      request: Parameters<NonNullable<NonNullable<HostedRuntimePlatform["mailboxPort"]>["admitVoiceInput"]>>[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted voice input admission",
+        fetchImpl: input.fetchImpl,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.voiceInput,
+        replayOnceOnRetryableFailure: true,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+      if (typeof payload !== "object" || payload === null
+        || !("mailboxItemId" in payload) || typeof payload.mailboxItemId !== "string"
+        || !payload.mailboxItemId.trim()) {
+        throw new TypeError("Hosted voice input admission response is invalid.");
+      }
+      return { mailboxItemId: payload.mailboxItemId };
+    },
     async fetch(
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[0],
       context?: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[1],
@@ -32,11 +45,11 @@ export function createHostedWebMailboxPort(input: {
       let payload: unknown;
       try {
         payload = await fetchReplaySafeHostedWebControlPlaneJson({
-          body: request,
+          body: { ...request, decodeInlinePayloads: true },
           boundUserId: input.boundUserId,
           description: "Hosted mailbox fetch",
           fetchImpl: input.fetchImpl,
-          path: HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+          route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch,
           ...(context?.signal ? { signal: context.signal } : {}),
           timeoutMs: input.timeoutMs,
           transport: input.transport,
@@ -45,26 +58,22 @@ export function createHostedWebMailboxPort(input: {
         if (context?.signal?.aborted) {
           throw context.signal.reason;
         }
-        if (!isHostedMailboxAiUsageDeniedError(error)) {
-          throw error;
-        }
-
-        return {
-          consumedSeqByLane: request.lanes.map(({ importedSeq, lane }) => ({
-            consumedSeq: importedSeq,
-            lane,
-          })),
-          fetchedAt: new Date().toISOString(),
-          items: [],
-          maxSeqByLane: request.lanes.map(({ importedSeq, lane }) => ({
-            lane,
-            maxSeq: importedSeq,
-          })),
-          userId: input.boundUserId,
-        };
+        throw error;
       }
 
-      return parseHostedMailboxFetchResponse(payload);
+      const mailbox = parseHostedMailboxFetchResponse(payload);
+      // The ordinary parser proves these item records. Only the Worker port
+      // accepts this ephemeral enrichment; Web's canonical parser discards it.
+      const rawItems = (payload as { items: Array<Record<string, unknown>> }).items;
+      return {
+        ...mailbox,
+        items: mailbox.items.map((item, index) => ({
+          ...item,
+          ...(rawItems[index]?.decodedWake === undefined ? {} : {
+            decodedWake: parseHostedExecutionWake(rawItems[index]!.decodedWake),
+          }),
+        })),
+      };
     },
     async fetchPayload(
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetchPayload"]>[0],
@@ -74,7 +83,7 @@ export function createHostedWebMailboxPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted mailbox payload fetch",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxPayloadFetch,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -94,7 +103,7 @@ export function createHostedWebMailboxPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted member action outcome record",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.memberActionOutcome,
         replayOnceOnRetryableFailure: true,
         ...(context?.signal ? { signal: context.signal } : {}),
         timeoutMs: input.timeoutMs,
@@ -111,18 +120,4 @@ export function createHostedWebMailboxPort(input: {
       }
     },
   };
-}
-
-function isHostedMailboxAiUsageDeniedError(error: unknown): boolean {
-  let current: unknown = error;
-  const seen = new Set<unknown>();
-  while (current && typeof current === "object" && !seen.has(current)) {
-    seen.add(current);
-    const record = current as Record<string, unknown>;
-    if (record.code === HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED_CODE) {
-      return true;
-    }
-    current = record.cause;
-  }
-  return false;
 }

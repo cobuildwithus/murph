@@ -1,12 +1,11 @@
 # Product Specs Index
 
-Last verified: 2026-08-11
+Last verified: 2026-08-20
 
 | Path | Purpose | Status |
 | --- | --- | --- |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria for keeping the repo current-state only. | Active |
 | `agent-docs/product-specs/bring-your-own-inference.md` | One encrypted personal custom-inference connection with native Responses or adapted Chat Completions, Codex-only execution, fenced credential injection, and no silent managed fallback. | Specified |
-| `agent-docs/product-specs/member-owned-device-provider-applications.md` | One encrypted member-owned OAuth client application per supported device provider, provisioned through existing Kernel Managed Auth and bound by exact revision to existing device-sync OAuth, runtime, and webhook owners. | Proposed |
 | `agent-docs/product-specs/murph-personas.md` | Persona-first onboarding, canonical persona ids, and code-owned style defaults. | Implemented |
 | `agent-docs/product-specs/starter-usage.md` | One idempotent, non-expiring $4.50 starter-usage grant on the existing immutable usage-credit ledger, including migration and legacy Stripe-drain compatibility. | Active |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches, the billing-gated Edge assistant-model choice, downgrade behavior, deployment compatibility, and the enforced composed usage boundary with separate group funding. | Active |
@@ -14,14 +13,17 @@ Last verified: 2026-08-11
 | `agent-docs/product-specs/hosted-group-member-plan.md` | Private $3.50 Core subscription for confirmed hosted-group members, with an internal Group billing identity, Pulse runtime capability, $2.80 included personal AI usage, signed billing actions, and public-checkout exclusion. | Active |
 | `agent-docs/product-specs/labs-discovery.md` | Live read-only lab catalog and ZIP collection-site discovery through private Murph and the authenticated unlinked `/labs` page, with provider-neutral member-facing language. | Implemented |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated device-first Biomarkers index over preserved private lab history, with explicit identity admission, no catch-all Other section, and closed health-area notebook disclosures. | Implemented |
-| `agent-docs/product-specs/personal-patterns.md` | Private repeated action-to-next-day sleep and recovery clues, including history reuse, comparison matching, evidence stages, thresholds, refresh behavior, and ownership. | Implemented |
+| `agent-docs/product-specs/journal.md` | Private timeline derived from canonical records, including quiet conversational capture, read-time grouping, privacy, and web behavior. | Implemented |
+| `agent-docs/product-specs/personal-patterns.md` | Deterministic private context-to-outcome findings, including Journal inputs, bounded comparisons, A-E grades, proactive messages, weekly audit, and ownership. | Implemented |
+| `agent-docs/product-specs/nutrition-totals-card.md` | Private logged-so-far nutrition cards with optional goals, bounded first introduction, and unchanged target authority. | Implemented; provider rollout proof pending |
 | `agent-docs/product-specs/imessage-workout-tracking.md` | Canonical workout-backed live session cards with plan-versus-actual ownership, direct typed member actions, immutable native snapshots, stale-edit safety, and reader-first rollout. | Specified |
 | `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed $5/$10/$25 personal, exact Family-member, and hosted-group funding with current-policy saved-card reuse, Checkout fallback, authenticated payer-and-target-scoped lost-response recovery, canonical purchase/referral credit entries, optional participant-authorized group creative responses, and purchase-only refund/dispute reversal; fulfilled top-ups immediately refresh the overall usage bar. | Active |
 | `agent-docs/product-specs/hosted-usage-referrals.md` | Conversational personal/group usage missions, portable qualification, canonical credit-entry accounting, final rewards, and source-room celebration. | Active |
-| `agent-docs/product-specs/physical-notes.md` | GPT Image plus Lob physical notes composed through the existing hosted image-completion wake, one Web-owned provider effect, one complimentary claim per member or group, and ordinary Murph usage thereafter. | Active |
+| `agent-docs/product-specs/physical-notes.md` | GPT Image plus Lob physical notes composed through the existing hosted image-completion wake, with one Web-owned provider effect, standalone oldest-first recovery that reports checked outcome separately from another remaining blocker, one complimentary claim per member or group, and ordinary Murph usage thereafter. | Active |
 | `agent-docs/product-specs/hosted-support-escalation.md` | Direct support address plus explicit, member-linked, de-identified product-team escalation with a three-email-per-UTC-day server limit and stable provider idempotency. | Implemented |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan for 2-6 sponsored people with mixed Pulse/Edge seats, exact owner-funded member usage top-ups, private member accounts, chat-first invites, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
+| `agent-docs/product-specs/public-goal-guides.md` | Public outcome-first Goal guides, Health Commons contract, messaging handoff, private setup workflow, SEO boundaries, and exact revision lineage. | Active |
 | `agent-docs/product-specs/murph-safe-public-product-search.md` | Public supplement and branded-food evidence search, normalized API contract, exact product-test semantics, privacy, and abuse bounds. | Active |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |
 | `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored onboarding through a compact progressive-disclosure skill: private relationship, observable bounded-history resume rules, brief aspiration-thread capture, explicit park, progressive health foundation, contextual return, collaborative first step, finite completion, and one code-owned first personal read. | Active |

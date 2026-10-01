@@ -1,6 +1,6 @@
 # Shared Message Targeting
 
-Last verified: 2026-08-05
+Last verified: 2026-09-04
 Status: Implemented
 
 ## Decision
@@ -57,12 +57,23 @@ foreign-thread calls are rejected before accepted-message authority is
 consulted. The resolver must then:
 
 1. bind the call to its current accepted-input delivery-context ordinal;
-2. require an exact accepted input id from that context;
+2. for a native reply, require an exact accepted input id from the cumulative
+   prefix admitted in this active turn through that ordinal; for a reaction,
+   require an id from that ordinal's own segment, unchanged;
 3. reload the stored `AssistantInputEvent`;
 4. recheck conversation, route, thread, direct/group audience, account, and
    group-actor authority, including an exact match between the event's provider
    reply thread and the current thread-kind binding; and
 5. apply the action-specific native-reply or reaction capability policy.
+
+Native reply membership is bounded by the exact tool or response ordinal, not
+by the latest input in the turn. Later live-steered input does not revoke an
+earlier admitted target, but an earlier ordinal can never target later input.
+Invalid ordinals fail closed, including negative request-relative ordinals
+before held group draft reconsideration rebases them. Request 1 uses its
+`providerRequestDeliveryContextBaseOrdinal` for this same bounded prefix; it
+creates no cross-turn authority. Live-steered input must finish admission and
+checkpointing before its ordinal becomes selectable.
 
 The thread binding is the provider-route authority. A one-off explicit-target
 override is not required for tool availability or resolution and does not
@@ -71,7 +82,11 @@ replace that binding.
 The resolver fails closed for an invented, stale, cross-turn, cross-thread, or
 unsupported ref. The tool result and provider-turn result carry only the
 opaque accepted input id. The local delivery owner resolves the corresponding
-provider message id again immediately before the effect.
+provider message id again immediately before the effect. Native progress,
+preceding response segments (including split bubbles), and final responses
+repeat the same prefix-bounded canonical-event check. Deleted targets or revoked
+route authority fail delivery rather than falling back to a newer target or a
+flat reply. Reaction scope and no-reply accounting are unchanged.
 
 Provider message ids never enter prompts, tool arguments, tool results, model
 history, or diagnostics. There is no second ref map, provider-id registry,
@@ -79,9 +94,10 @@ database projection, service, API, or feature flag.
 
 ## Delivery and persistence
 
-The delivery owner clones the selected input's existing reply-delivery context.
-It does not mutate the shared accepted input. This keeps response segments and
-reactions isolated even when several inputs joined one live turn.
+The native-reply delivery owner clones the response ordinal's existing
+reply-delivery context and overlays only the selected canonical message target.
+Selecting an earlier input does not replace the response's route or audience.
+It does not mutate shared accepted input or reaction state.
 Same-route inputs accepted during that turn may update their message anchor,
 reaction capability, and idempotency inputs, but do not replace the current
 thread binding or create an explicit-target override.

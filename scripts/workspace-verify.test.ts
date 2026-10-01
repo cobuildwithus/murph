@@ -398,7 +398,7 @@ app_verify_parallel_default="$(resolve_local_parallel_default)"
 app_verify_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 acceptance_app_verify_with_coverage="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 test_lane_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
-package_coverage_shard="$(resolve_profile_controlled_value owners-a all)"
+package_coverage_shard="$(resolve_profile_controlled_value platform-a all)"
 
 log_acceptance_resource_plan
 `);
@@ -512,29 +512,11 @@ resolve_local_parallel_default
     expect(runTestCoverage).toContain("prepared_runtime_artifacts=1");
   });
 
-  it("holds the parent artifact lock for commands that write or concurrently consume shared outputs", () => {
-    const lockRouting = workspaceVerify.match(
-      /command_requires_workspace_artifact_lock\(\) \{[\s\S]*?^\}/m,
-    )?.[0];
-
-    expect(lockRouting).toContain('"test"');
-    expect(lockRouting).toContain('"test:packages"');
-    expect(lockRouting).toContain('"test:apps"');
-    expect(lockRouting).toContain('"test:diff"');
-    expect(workspaceVerify).toContain("run_test_apps_with_workspace_artifact_lock");
-    expect(workspaceVerify).toContain('pnpm --dir "apps/web" prisma:generate');
-    expect(workspaceVerify).toContain("generate_health_commons_artifacts_with_retry");
-  });
-
   it("keeps scoped diff verification out of the heavyweight host lane", () => {
-    const artifactRouting = extractWorkspaceVerifyFunction(
-      "command_requires_workspace_artifact_lock",
-    );
     const hostRouting = extractWorkspaceVerifyFunction(
       "command_requires_host_verification_slot",
     );
 
-    expect(artifactRouting).toContain('"test:diff"');
     expect(hostRouting).not.toContain('"test:diff"');
     expect(hostRouting).toContain('"verify:acceptance"');
     expect(hostRouting).toContain('"test:apps"');
@@ -576,6 +558,78 @@ resolve_test_diff_vitest_max_workers_default
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe("1\n1\n8\n4\n2\n50%\n");
   });
+
+  it.each([
+    {
+      auditor: "workspace boundary auditor",
+      failingCommand: "scripts/verify-workspace-boundaries.mjs",
+      failureMessage:
+        "Workspace boundary verification failed: synthetic invalid internal import",
+    },
+    {
+      auditor: "package-cycle auditor",
+      failingCommand: "scripts/check-workspace-package-cycles.mjs",
+      failureMessage: "Workspace package-cycle verification failed: synthetic cycle",
+    },
+  ])(
+    "returns a $auditor failure after overlapping typechecks finish",
+    ({ failingCommand, failureMessage }) => {
+      const harnessDir = mkdtempSync(
+        path.join(os.tmpdir(), "murph-workspace-boundary-status-"),
+      );
+      const cycleMarkerPath = path.join(harnessDir, "cycle-check-ran");
+      const nodeShimPath = path.join(harnessDir, "node");
+      const pnpmShimPath = path.join(harnessDir, "pnpm");
+
+      try {
+        writeFileSync(
+          nodeShimPath,
+          `#!/usr/bin/env bash
+if [[ "\${1:-}" == "scripts/check-workspace-package-cycles.mjs" ]]; then
+  : >"\${MURPH_BOUNDARY_TEST_CYCLE_MARKER}"
+fi
+if [[ "\${1:-}" == "\${MURPH_BOUNDARY_TEST_FAIL_COMMAND}" ]]; then
+  printf '%s\n' "\${MURPH_BOUNDARY_TEST_FAILURE_MESSAGE}" >&2
+  exit 23
+fi
+exit 0
+`,
+          "utf8",
+        );
+        writeFileSync(pnpmShimPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+        chmodSync(nodeShimPath, 0o755);
+        chmodSync(pnpmShimPath, 0o755);
+
+        const result = spawnSync(
+          "bash",
+          [path.join(repoRoot, "scripts", "workspace-verify.sh"), "typecheck"],
+          {
+            cwd: repoRoot,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              PATH: `${harnessDir}${path.delimiter}${process.env.PATH ?? ""}`,
+              MURPH_BOUNDARY_TEST_CYCLE_MARKER: cycleMarkerPath,
+              MURPH_BOUNDARY_TEST_FAIL_COMMAND: failingCommand,
+              MURPH_BOUNDARY_TEST_FAILURE_MESSAGE: failureMessage,
+              MURPH_TYPECHECK_PREFLIGHT_PARALLEL: "1",
+              MURPH_TYPECHECK_WORKSPACE_CONCURRENCY: "1",
+              MURPH_VERIFY_SHARED_HOST: "0",
+            },
+          },
+        );
+
+        expect(result.status, result.stderr).toBe(1);
+        expect(result.stderr).toContain(failureMessage);
+        expect(result.stderr).toContain(
+          "[workspace-verify] done Workspace package/app typecheck",
+        );
+        expect(readFileSync(cycleMarkerPath, "utf8")).toBe("");
+      } finally {
+        rmSync(harnessDir, { force: true, recursive: true });
+      }
+    },
+  );
 
   it("keeps ordinary shared-host typecheck capped while capable acceptance composes", () => {
     const resolveTypecheckDefault = extractWorkspaceVerifyFunction(
@@ -654,7 +708,7 @@ run_test_diff_repo_tools_tests
     ).toHaveLength(2);
   });
 
-  it("acquires checkout artifact locks before shared-host admission", () => {
+  it("preserves shared-host admission for expensive verification", () => {
     const webVerify = readFileSync(
       path.join(repoRoot, "apps", "web", "scripts", "verify-fast.sh"),
       "utf8",
@@ -668,36 +722,30 @@ run_test_diff_repo_tools_tests
       "utf8",
     );
 
-    for (const [label, source, artifactMarker, hostMarker] of [
+    for (const [label, source, hostMarker] of [
       [
         "workspace verification",
         workspaceVerify,
-        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}',
         'MURPH_VERIFY_HOST_SLOT_HELD:-0}',
       ],
       [
         "Web verification",
         webVerify,
-        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}',
         'MURPH_VERIFY_HOST_SLOT_HELD:-0}',
       ],
       [
         "Cloudflare verification",
         cloudflareVerify,
-        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}',
         'MURPH_VERIFY_HOST_SLOT_HELD:-0}',
       ],
       [
         "prepared runtime build",
         preparedRuntimeBuild,
-        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1"',
         'MURPH_VERIFY_HOST_SLOT_HELD !== "1"',
       ],
     ] as const) {
-      const artifactIndex = source.indexOf(artifactMarker);
       const hostIndex = source.indexOf(hostMarker);
-      expect(artifactIndex, `${label} artifact lock`).toBeGreaterThanOrEqual(0);
-      expect(hostIndex, `${label} host slot`).toBeGreaterThan(artifactIndex);
+      expect(hostIndex, `${label} host slot`).toBeGreaterThanOrEqual(0);
     }
 
     for (const source of [webVerify, cloudflareVerify]) {
@@ -716,8 +764,7 @@ run_test_diff_repo_tools_tests
       readFileSync(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
     const benchmarkScript = rootPackage.scripts["benchmark:typescript"];
-    expect(benchmarkScript.indexOf("run-with-workspace-artifact-lock.mjs"))
-      .toBeLessThan(benchmarkScript.indexOf("run-with-host-verification-slot.mjs"));
+    expect(benchmarkScript).toContain("run-with-host-verification-slot.mjs");
 
     for (const scriptName of [
       "build:workspace:clean",
@@ -912,7 +959,7 @@ run_all_package_coverage 1
 
     expect(result.status, result.stderr).toBe(0);
     const pairs = result.stdout.trim().split("\n");
-    expect(pairs).toHaveLength(27);
+    expect(pairs).toHaveLength(26);
     expect(pairs).toContain(
       "packages/hosted-execution|Package coverage for packages/hosted-execution",
     );
@@ -1099,6 +1146,83 @@ printf 'interlock-covered\n'
     expect(result.stdout).toBe("interlock-covered\n");
   });
 
+  it("does not overlap the assistant and hosted-local child runtimes", () => {
+    const runAllPackageCoverage = extractWorkspaceVerifyFunction(
+      "run_all_package_coverage",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+${runAllPackageCoverage}
+
+register_background_pid() { return 0; }
+unregister_background_pid() { return 0; }
+mark_acceptance_cli_coverage_complete() { return 0; }
+verify_log() { return 0; }
+
+run_workspace_package_coverage() {
+  local package_dir="$1"
+  local package_name="\${package_dir#packages/}"
+
+  : >"$case_dir/\${package_name}-started"
+  if [[ "$package_dir" == "packages/assistant-engine" ]]; then
+    while [[ ! -f "$case_dir/release-assistant" ]]; do
+      command sleep 0.01
+    done
+  fi
+}
+
+exercise_profile() {
+  local concurrency="$1"
+  local package_dir
+  local package_name
+  case_dir="$sandbox/concurrency-$concurrency"
+  mkdir -p "$case_dir"
+
+  package_coverage_shard=all
+  package_coverage_concurrency_limit="$concurrency"
+  package_coverage_cli_active_concurrency_limit=2
+
+  run_all_package_coverage 1 &
+  local scheduler_pid="$!"
+
+  for _ in {1..1200}; do
+    if [[ -f "$case_dir/vault-usecases-started" ]]; then
+      break
+    fi
+    command sleep 0.01
+  done
+
+  while IFS= read -r package_dir; do
+    [[ "$package_dir" == "packages/hosted-local-harness" ]] && continue
+    package_name="\${package_dir#packages/}"
+    [[ -f "$case_dir/\${package_name}-started" ]]
+  done < <(node scripts/release-verification-plan.mjs --package-dirs all)
+  [[ ! -f "$case_dir/hosted-local-harness-started" ]]
+
+  : >"$case_dir/release-assistant"
+  for _ in {1..1200}; do
+    if [[ -f "$case_dir/hosted-local-harness-started" ]]; then
+      break
+    fi
+    command sleep 0.01
+  done
+
+  [[ -f "$case_dir/hosted-local-harness-started" ]]
+  wait "$scheduler_pid"
+}
+
+sandbox="$(mktemp -d)"
+trap 'rm -rf -- "$sandbox"' EXIT
+exercise_profile 3
+exercise_profile 5
+printf 'pairwise-interlock-covered\n'
+`, 60_000);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("pairwise-interlock-covered\n");
+  });
+
   it("keeps hosted-web parallel cleanup safe after every child is reaped", () => {
     const webVerify = readFileSync(
       path.join(repoRoot, "apps", "web", "scripts", "verify-fast.sh"),
@@ -1131,7 +1255,7 @@ printf 'clean\\n'
       .toBeLessThan(runNextBuild!.indexOf('"${next_build_command[@]}"'));
   });
 
-  it("gives only the Assistant Engine root project the repository-owned heap", () => {
+  it("runs every root project together on the caller's Node heap", () => {
     const runRepoVitest = extractWorkspaceVerifyFunction("run_repo_vitest");
     const result = runShellHarness(`#!/usr/bin/env bash
 set -euo pipefail
@@ -1149,8 +1273,7 @@ run_repo_vitest --no-coverage
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      "heap=unset command=exec vitest run --config vitest.config.ts --project=!assistant-engine --no-coverage\n" +
-        "heap=--max-old-space-size=6144 command=exec vitest run --config vitest.config.ts --project=assistant-engine --no-coverage\n",
+      "heap=unset command=exec vitest run --config vitest.config.ts --no-coverage\n",
     );
   });
 
@@ -1163,7 +1286,7 @@ run_repo_vitest --no-coverage
     expect(releaseWorkflow).not.toContain("NODE_OPTIONS");
   });
 
-  it("gives only Assistant Engine package coverage the repository-owned heap", () => {
+  it("runs ordinary package coverage on the caller's Node heap", () => {
     const runWorkspacePackageCoverage = extractWorkspaceVerifyFunction(
       "run_workspace_package_coverage",
     );
@@ -1197,7 +1320,7 @@ run_workspace_package_coverage packages/core 'Core coverage'
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      "heap=--max-old-space-size=6144 workers=2 command=pnpm --dir packages/assistant-engine test:coverage\n" +
+      "heap=unset workers=2 command=pnpm --dir packages/assistant-engine test:coverage\n" +
         "heap=unset workers=2 command=pnpm --dir packages/core test:coverage\n",
     );
   });
@@ -1274,7 +1397,6 @@ fi
             MURPH_VERIFY_RETRY_COUNT: "0",
             MURPH_VERIFY_TEST_EVENT_LOG: eventLogPath,
             MURPH_VERIFY_HOST_SLOT_HELD: "1",
-            MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
             PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
           },
           timeout: 10_000,
@@ -1310,7 +1432,7 @@ fi
     )?.[0];
 
     expect(typecheckFanout).toBeTruthy();
-    expect(typecheckFanout!.indexOf("run_diff_contracts_build_with_workspace_artifact_lock")).toBeLessThan(
+    expect(typecheckFanout!.indexOf('pnpm --dir "packages/contracts" build:incremental')).toBeLessThan(
       typecheckFanout!.indexOf('pnpm -r --no-sort --workspace-concurrency="$typecheck_workspace_concurrency"'),
     );
     expect(workspaceVerify).toContain(
@@ -1322,8 +1444,34 @@ fi
     expect(workspaceVerify).toContain(
       'MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers"',
     );
-    expect(workspaceVerify).toContain("run_diff_contracts_test_with_workspace_artifact_lock");
+    expect(workspaceVerify).toContain('run_package_command_with_retry "packages/contracts" test');
     expect(workspaceVerify).toContain("run_diff_package_boundary_verification");
+  });
+
+  it("generates hosted web Prisma before Cloudflare typecheck fanout", () => {
+    const runTypecheckPackages = extractWorkspaceVerifyFunction(
+      "run_typecheck_packages",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+typecheck_workspace_concurrency=2
+run_command_with_retry() { printf '%s\\n' "$*"; }
+
+${runTypecheckPackages}
+
+run_typecheck_packages apps/cloudflare
+printf 'separator\\n'
+run_typecheck_packages packages/cli
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(
+      "Hosted web Prisma client pnpm --dir apps/web prisma:generate\n" +
+        "Workspace package typecheck pnpm -r --no-sort --workspace-concurrency=2 --filter ./apps/cloudflare typecheck\n" +
+        "separator\n" +
+        "Workspace package typecheck pnpm -r --no-sort --workspace-concurrency=2 --filter ./packages/cli typecheck\n",
+    );
   });
 
   it("propagates affected package fanout failures before boundary checks", () => {
@@ -1341,7 +1489,7 @@ run_command_with_retry() {
   return 23
 }
 
-run_diff_contracts_test_with_workspace_artifact_lock() {
+run_package_command_with_retry() {
   return 0
 }
 
@@ -1408,7 +1556,7 @@ run_command_with_retry() {
   printf '%s | %s\n' "$1" "\${*:2}"
 }
 
-run_diff_contracts_test_with_workspace_artifact_lock() {
+run_package_command_with_retry() {
   return 0
 }
 
@@ -1455,7 +1603,7 @@ run_test_diff_package_tests ${selectedPackageDirs}
     );
   });
 
-  it("gives affected Assistant Engine tests the proven heap ceiling", () => {
+  it("batches affected Assistant Engine tests with ordinary package owners", () => {
     const runTestDiffPackageTests = extractWorkspaceVerifyFunction(
       "run_test_diff_package_tests",
     );
@@ -1470,7 +1618,7 @@ run_command_with_retry() {
   return 0
 }
 
-run_diff_contracts_test_with_workspace_artifact_lock() {
+run_package_command_with_retry() {
   return 0
 }
 
@@ -1485,10 +1633,7 @@ run_test_diff_package_tests packages/assistant-engine packages/core
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain(
-      "Affected package test for packages/assistant-engine | env NODE_OPTIONS=--max-old-space-size=6144 MURPH_VITEST_MAX_WORKERS=1 pnpm --dir packages/assistant-engine test\n",
-    );
-    expect(result.stdout).toContain(
-      "Affected package tests | env MURPH_VITEST_MAX_WORKERS=1 pnpm -r --no-sort --workspace-concurrency=1 --filter ./packages/core test\n",
+      "Affected package tests | env MURPH_VITEST_MAX_WORKERS=1 pnpm -r --no-sort --workspace-concurrency=1 --filter ./packages/assistant-engine --filter ./packages/core test\n",
     );
   });
 
@@ -1499,7 +1644,7 @@ run_test_diff_package_tests packages/assistant-engine packages/core
     const result = runShellHarness(`#!/usr/bin/env bash
 set -uo pipefail
 
-run_test_apps_with_workspace_artifact_lock() {
+run_test_apps() {
   printf 'both-apps-called\\n'
   return 29
 }
@@ -1578,5 +1723,71 @@ run_test_diff_app_verification apps/web apps/cloudflare
       "tsconfig.tools.tsbuildinfo",
     );
     expect(rootPackage.scripts.clean).toContain("tsconfig.tools.tsbuildinfo");
+  });
+});
+
+describe("composed verification selection", () => {
+  function dispatch(files: string[]) {
+    const quoted = files.map((file) => `'${file}'`).join(" ");
+    return runShellHarness(`set -euo pipefail
+${extractWorkspaceVerifyFunction("load_diff_scope")}
+${extractWorkspaceVerifyFunction("run_test_diff")}
+verify_log() { :; }
+run_timed_step() { shift; printf '%s\\n' "$*"; }
+run_typecheck() { printf 'run_typecheck\\n'; }
+run_diff_repo_internal_fast_path() { printf 'internal-guards\\n'; }
+run_test_diff ${quoted}
+`);
+  }
+
+  it("executes an explicit CLI requirement even for an internal script", () => {
+    const result = dispatch(["scripts/build-test-runtime-prepared.mjs"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("run_verify_cli\n");
+    expect(result.stdout).toContain("run_test_diff_repo_tools_tests\n");
+  });
+
+  it.each(["package.json", "tsconfig.json", "tsconfig.base.json", "vitest.config.ts"])(
+    "routes shared configuration %s through package, app, CLI and fixture proof", (file) => {
+      const result = dispatch([file]);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("run_verify_cli\n");
+      expect(result.stdout).toContain("run_typecheck_packages ");
+      expect(result.stdout).toContain("run_test_diff_package_tests ");
+      expect(result.stdout).toContain("run_test_diff_app_verification apps/cloudflare apps/web");
+      expect(result.stdout).toContain("run_fixture_smoke_verification\n");
+      expect(result.stdout).toContain("run_test_diff_repo_tools_tests\n");
+    },
+  );
+
+  it("runs the smoke owner for fixture changes without unrelated app checks", () => {
+    const result = dispatch(["e2e/smoke/scenarios/synthetic/input.json"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("run_fixture_smoke_verification\n");
+    expect(result.stdout).not.toContain("run_test_diff_app_verification");
+  });
+
+  it("retains the inexpensive docs-only path", () => {
+    const result = dispatch(["agent-docs/PLANS.md"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("internal-guards\n");
+    expect(result.stdout).not.toContain("run_verify_cli");
+    expect(result.stdout).not.toContain("run_fixture_smoke_verification");
+  });
+
+  it("includes repository tools once in acceptance and propagates failure", () => {
+    for (const status of [0, 23]) {
+      const result = runShellHarness(`set -euo pipefail
+${extractWorkspaceVerifyFunction("run_verify_acceptance")}
+run_typecheck() { printf 'typecheck\\n'; }
+run_timed_step() { shift; "$@"; }
+pnpm() { printf '%s\\n' "$*"; return ${status}; }
+run_test_coverage() { printf 'coverage\\n'; }
+run_verify_acceptance
+`);
+      expect(result.status, result.stderr).toBe(status);
+      expect(result.stdout.match(/test:repo-tools/g)).toHaveLength(1);
+      expect(result.stdout.includes("coverage\n")).toBe(status === 0);
+    }
   });
 });

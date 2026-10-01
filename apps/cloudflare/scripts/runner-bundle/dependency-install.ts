@@ -1,7 +1,11 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { access, cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
+
+import { hostedRunnerRuntimePackageName } from "../runner-bundle-contract.js";
+import { resolvePnpmCommand } from "../wrangler-runner.js";
 
 import {
   createPackageManagerProcessEnv,
@@ -124,6 +128,7 @@ export async function installPackedRunnerDependencies(
     minimumReleaseAgeExclusions: workspaceTarballReleaseAgeExclusions,
     policy: workspaceInstallPolicy,
     repoRoot: input.repoRoot,
+    workspacePackages: [hostedRunnerRuntimePackageName, ...runtimeWorkspaceClosure],
   });
 }
 
@@ -146,12 +151,12 @@ async function stageWorkspacePatchedDependencies(
   installRoot: string,
   repoRoot: string,
   patchedDependencies: Record<string, string>,
-  resolvedDependencyNames: ReadonlySet<string>,
+  resolvedDependencySpecs: ReadonlySet<string>,
 ): Promise<Record<string, string>> {
   const staged: Record<string, string> = {};
 
   for (const [dependencySpec, patchPath] of Object.entries(patchedDependencies)) {
-    if (!resolvedDependencyNames.has(readPatchedDependencyPackageName(dependencySpec))) {
+    if (!resolvedDependencySpecs.has(dependencySpec)) {
       continue;
     }
 
@@ -163,10 +168,6 @@ async function stageWorkspacePatchedDependencies(
   }
 
   return staged;
-}
-
-function readPatchedDependencyPackageName(dependencySpec: string): string {
-  return /^(@[^/]+\/[^@]+|[^@]+)@/u.exec(dependencySpec)?.[1] ?? dependencySpec;
 }
 
 function buildWorkspaceTarballOverrides(
@@ -281,6 +282,7 @@ async function installPinnedProductionDependencies(
     minimumReleaseAgeExclusions: readonly string[];
     policy: WorkspacePnpmInstallPolicy;
     repoRoot: string;
+    workspacePackages: readonly string[];
   },
 ): Promise<void> {
   const installEnv = {
@@ -291,20 +293,22 @@ async function installPinnedProductionDependencies(
   await writeRunnerBundlePnpmInstallConfigFromPolicy(installRoot, input.policy, {
     minimumReleaseAgeExclusions: input.minimumReleaseAgeExclusions,
   });
-  await seedRunnerBundleResolutionLockfileFromRoot(installRoot, input.repoRoot);
+  await seedRunnerBundleResolutionLockfileFromRoot(
+    installRoot, input.repoRoot, input.workspacePackages,
+  );
   await runPnpmCommand(["install", "--prod", "--lockfile-only"], {
     cwd: installRoot,
     env: installEnv,
   });
   const lockfilePath = path.join(installRoot, "pnpm-lock.yaml");
-  const resolvedDependencyNames = extractPnpmLockPackageNames(
+  const resolvedDependencySpecs = extractPnpmLockPackageSpecs(
     await readFile(lockfilePath, "utf8"),
   );
   const stagedPatchedDependencies = await stageWorkspacePatchedDependencies(
     installRoot,
     input.repoRoot,
     input.policy.patchedDependencies,
-    resolvedDependencyNames,
+    resolvedDependencySpecs,
   );
 
   if (Object.keys(stagedPatchedDependencies).length > 0) {
@@ -358,17 +362,74 @@ async function writeRunnerBundlePatchedDependencies(
   );
 }
 
+interface ListedProductionDependency {
+  from?: string;
+  version?: string;
+  dependencies?: Record<string, ListedProductionDependency>;
+  optionalDependencies?: Record<string, ListedProductionDependency>;
+}
+
 async function seedRunnerBundleResolutionLockfileFromRoot(
   installRoot: string,
   repoRoot: string,
+  workspacePackages: readonly string[],
 ): Promise<void> {
   const rootLockfile = await readFile(path.join(repoRoot, "pnpm-lock.yaml"), "utf8");
-
+  const processEnv = await createPackageManagerProcessEnv(undefined);
+  const { stdout } = await promisify(execFile)(resolvePnpmCommand(), [
+    ...workspacePackages.flatMap((name) => ["--filter-prod", `${name}...`]),
+    "list", "--prod", "--depth", "Infinity", "--lockfile-only", "--json",
+  ], {
+    cwd: repoRoot,
+    env: processEnv.env,
+    maxBuffer: 8 * 1024 * 1024,
+  }).finally(processEnv.cleanup);
+  const packages = new Set<string>();
+  const visit = (node: ListedProductionDependency): void => {
+    for (const [name, dependency] of Object.entries({
+      ...node.dependencies, ...node.optionalDependencies,
+    })) {
+      packages.add(`${dependency.from ?? name}@${dependency.version}`);
+      // A deduplicated leaf may precede its expanded occurrence. Traverse each
+      // returned JSON branch; pnpm owns cycle handling and workspace selection.
+      visit(dependency);
+    }
+  };
+  for (const project of JSON.parse(stdout) as ListedProductionDependency[]) {
+    visit(project);
+  }
+  if (packages.size === 0) {
+    throw new Error("Runner production dependency graph is empty.");
+  }
   await writeFile(
     path.join(installRoot, "pnpm-lock.yaml"),
-    stripPnpmLockfileImporters(rootLockfile),
+    restrictRunnerBundleResolutionLockfile(rootLockfile, packages),
     "utf8",
   );
+}
+
+// The standalone resolver must not see versions introduced only by other apps.
+// Keep committed registry resolutions and peer snapshots from the runner's
+// production closure; pnpm still owns tarball resolution and patch application.
+export function restrictRunnerBundleResolutionLockfile(
+  lockfile: string,
+  packageSpecs: ReadonlySet<string>,
+): string {
+  let filteringPackages = false;
+  let retainBlock = true;
+  return stripPnpmLockfileImporters(lockfile).split(/\r?\n/u).filter((line) => {
+    if (/^\S[^:]*:\s*$/u.test(line)) {
+      filteringPackages = line === "packages:" || line === "snapshots:";
+      retainBlock = true;
+    } else if (filteringPackages) {
+      const entry = /^  (\S.*?):(?:\s*\{\})?\s*$/u.exec(line);
+      if (entry) {
+        const key = stripYamlStringQuotes(entry[1]!).split("(", 1)[0]!;
+        retainBlock = packageSpecs.has(key);
+      }
+    }
+    return retainBlock;
+  }).join("\n");
 }
 
 export function stripPnpmLockfileImporters(lockfile: string): string {
@@ -631,17 +692,17 @@ function extractPnpmLockPackageResolutions(lockfile: string): Map<string, string
   return packages;
 }
 
-function extractPnpmLockPackageNames(lockfile: string): ReadonlySet<string> {
-  const packageNames = new Set<string>();
+function extractPnpmLockPackageSpecs(lockfile: string): ReadonlySet<string> {
+  const packageSpecs = new Set<string>();
 
   for (const packageKey of extractPnpmLockPackageResolutions(lockfile).keys()) {
-    const match = /^(@[^/]+\/[^@]+|[^@]+)@/u.exec(packageKey);
-    if (match) {
-      packageNames.add(match[1]!);
+    const packageSpec = packageKey.split("(", 1)[0]!;
+    if (/^(?:@[^/]+\/[^@]+|[^@]+)@[^:]+$/u.test(packageSpec)) {
+      packageSpecs.add(packageSpec);
     }
   }
 
-  return packageNames;
+  return packageSpecs;
 }
 
 function isLocalRunnerBundlePackageKey(key: string): boolean {

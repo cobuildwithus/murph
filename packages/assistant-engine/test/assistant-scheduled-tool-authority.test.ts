@@ -86,7 +86,7 @@ describe("scheduled assistant tool authority", () => {
       action: "update" as const,
       result: {
         mainPersona: "classic" as const,
-        model: "gpt-5.6-terra" as const,
+        model: "gpt-6-sol" as const,
         modelChangeAppliesNextRun: false as const,
         modelUpdated: false as const,
         solAvailable: true,
@@ -149,7 +149,6 @@ describe("scheduled assistant tool authority", () => {
     });
 
     const result = await executeMurphDynamicToolRequest({
-      assistantStyleSettingsAvailable: true,
       env: {},
       fetchImpl: fetch,
       hostedToolContext: context,

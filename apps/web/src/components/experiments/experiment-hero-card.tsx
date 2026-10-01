@@ -23,7 +23,7 @@ interface ExperimentHeroCardProps {
   preload?: boolean;
 }
 
-const HERO_CARD_IMAGE_SIZES = "(min-width: 768px) 50vw, 100vw";
+const HERO_CARD_IMAGE_SIZES = "(min-width: 768px) 50vw, calc(100vw - 32px)";
 
 export function ExperimentHeroCard({
   id,

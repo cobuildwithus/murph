@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-08-20
+Last verified: 2026-09-22
 
 ## Decision
 
@@ -22,27 +22,41 @@ The personal and Family offer catalog is:
 
 | Offer code | Checkout subtotal | Usage credit granted |
 | --- | ---: | ---: |
-| `usage_5_usd` | $5 USD | $5 of Murph usage credit |
-| `usage_10_usd` | $10 USD | $10 of Murph usage credit |
-| `usage_25_usd` | $25 USD | $25 of Murph usage credit |
+| `usage_5_usd` | $5 USD | $4 of Murph usage credit |
+| `usage_10_usd` | $10 USD | $8 of Murph usage credit |
+| `usage_25_usd` | $25 USD | $20 of Murph usage credit |
 
 The one-time group contribution catalog is:
 
 | Offer code | Checkout subtotal | Usage credit granted |
 | --- | ---: | ---: |
-| `usage_5_usd` | $5 USD | $5 of Murph usage credit |
-| `usage_10_usd` | $10 USD | $10 of Murph usage credit |
-| `usage_20_usd` | $20 USD | $20 of Murph usage credit |
+| `usage_5_usd` | $5 USD | $4 of Murph usage credit |
+| `usage_10_usd` | $10 USD | $8 of Murph usage credit |
+| `usage_20_usd` | $20 USD | $16 of Murph usage credit |
 
 Group funding presents capped monthly sponsorship as the primary choice and a
 one-time contribution as the secondary choice. A monthly sponsor selects a
-$5, $10, or $20 maximum; the activation and automatic refills are ordinary
+$5, $10, $20, or $50 maximum; the activation and automatic refills are ordinary
 exact $5 purchases. No public surface converts dollars or usage credit
 into an estimated message count. `usage_25_usd` remains parseable for historical
 purchases and available only to current personal and Family surfaces.
 
+New purchases grant 80% of their cash subtotal as metered usage capacity,
+matching the paid subscription allowance policy. This leaves 20% before payment
+fees and other delivery costs; it is not a guarantee of net margin. Group
+sponsorship activation and automatic $5 refills each grant $4 of capacity.
+
 The cash subtotal and granted usage value are separate immutable purchase
-facts even when the initial offer is one-for-one. One dollar of v1 usage credit
+facts. Existing balances and purchases reserved before this catalog change keep
+their original grants, including delayed payment fulfillment and retries.
+Refunds and disputes continue to use the purchase's frozen grant. No balance
+rewrite or Stripe Price change is required. Before deploying the reduced-grant
+catalog, apply `20260922170000_hosted_sponsorship_topup_margin`: the sponsorship
+purchase constraint must allow both historical 5,000,000 and current 4,000,000
+micro grants on exact $5 purchases. The forward migration preserves all other
+sponsorship shape checks and validates existing rows. Keep this widened
+constraint during Web rollback so either catalog can fulfill frozen purchases.
+One dollar of v1 usage credit
 is one dollar of capacity under Murph's existing AI usage meter.
 It is not a token count, bank balance, Stripe customer balance, subscription
 invoice credit, transferable asset, or promise of cash redemption.
@@ -52,6 +66,19 @@ beneficiary, offer, grant, available usage credit, consumption, and refund and
 dispute adjustments. An authenticated member may also fund an active hosted
 group by presenting that group's existing opaque join code; the group's
 synthetic thread-container member is the beneficiary.
+
+After a verified Checkout or saved-card payment fulfills a purchase, the same
+Stripe event receipt sends one privacy-safe operator payment email before it
+completes. That projection contains payment metadata only and is not grant or
+billing authority. Delivery retries on the receipt independently of the
+already-committed purchase and grant, with a receipt-local sent marker and
+provider idempotency preventing duplicate email. Payment notification and the
+existing runtime-recheck and sponsorship effects are each attempted even when
+the other fails. Both attempts start before either is awaited, so operator-email
+latency cannot delay the runtime recheck that reopens pending accepted work; an
+unmarked notification keeps the receipt retryable. If both attempts fail, the
+existing runtime-recheck retry code remains authoritative so replay reconstructs
+the member wake while the absent email marker independently retries delivery.
 
 An active Family owner may fund one exact active member through Family
 Settings. The owner is the payer, the selected member is the beneficiary, and
@@ -173,8 +200,8 @@ authorization-period-ordinal purchase creation.
 The existing post-settlement usage path may create that local purchase. It
 never calls Stripe or waits for payment. The bounded Web billing sweep performs
 saved-card work after commit. Stripe event reconciliation is the only authority
-that grants the $5 through the existing append-only credit ledger and reopens
-pending group work. Failed or authentication-required payment moves the
+that grants the purchase's frozen usage value through the existing append-only
+credit ledger and reopens pending group work. Failed or authentication-required payment moves the
 authorization to private recovery and blocks later automatic charges. A
 same-period recovery may reset that exact failed purchase only while its $5
 charge still fits under the current cap. If the payer has since reduced the cap
@@ -1260,16 +1287,19 @@ capacity expresses urgency and governs later automatic refill admission, not
 whether someone may fund the group. The browser never submits payer or
 beneficiary identity.
 
-A group chat that has only ever talked to Murph has no `HostedGroup` row or
-join code. Its funding URL uses a signed funding-only locator instead:
+A group chat that has only ever talked to Murph has an ordinary unnamed
+`HostedGroup` and owner membership, but no owner-created join code. Its funding
+URL uses a signed funding-only locator instead:
 `gf1.<runtimeMemberId>.<hmac>` derived from the app-session HMAC key with a
 dedicated domain separator. The locator is accepted only by the funding page
 and checkout target resolution, resolves to the exact runtime member after
 re-verifying the container and active access, and is rejected by every join
-surface because it is not a join code. It writes nothing: no `HostedGroup`
-row, membership, join code, vault-share projection, or profile-name/email
-grant is created. Owner-created join codes keep funding exactly as before,
-and enrollment stays behind the owner-minted join link.
+surface because it is not a join code. Creating or resolving that funding
+locator writes no group state, membership, join code, vault-share projection,
+or profile-name/email grant. The route transaction owns the pre-existing group,
+and owner membership independently without granting a vault share.
+Owner-created join codes keep funding exactly as before, and participant
+enrollment stays behind the owner-minted join link.
 
 An exhaustion notice may also use the signed locator for an owner-created
 group so notice construction stays database-free. After authenticating that
@@ -1404,7 +1434,7 @@ and call the same idempotent reconciler by purchase ID.
    changes the assistant contract fingerprint: every existing direct or group
    session that would otherwise use native resume starts one new provider
    thread on its first post-deploy conversation turn. That turn replays the
-   committed transcript fallback, bounded to 24 messages, 4,000 bytes per
+   committed transcript fallback, bounded to 72 messages, 4,000 bytes per
    message, and 12,000 bytes total; later turns resume the new thread. A rollback
    rotates sessions that already adopted the new fingerprint once more.
 6. Do not run a second postdeploy constraint installer. The historical

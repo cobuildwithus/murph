@@ -273,6 +273,16 @@ interface ApprovedRawHttpOwner {
 // guard owns only where a raw transport capability may exist.
 export const approvedProviderRawHttpOwners = Object.freeze([
   {
+    // The dynamic KMS URL inherits the file's Google-auth/STS import heuristic.
+    // Runtime validation pins this single call to the configured KMS endpoint;
+    // auth refresh itself continues through the official Google auth client.
+    ownerName: "callUnary",
+    providerIds: ["google-cloud-kms", "google-sts"],
+    reason: "existing-provider-boundary",
+    relativePath: "apps/web/src/lib/hosted-crypto/gcp-kms.ts",
+    requiredRuntimeModule: "google-auth-library",
+  },
+  {
     ownerName: "fetchHostedLinqAttachmentDownloadUrl",
     providerIds: ["linq"],
     reason: "existing-provider-boundary",
@@ -442,23 +452,12 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     reason: "existing-provider-boundary",
     relativePath: "scripts/linq-typing-repro.ts",
   },
-  {
-    ownerName: "resolveJunctionUser",
-    providerIds: ["junction"],
-    reason: "existing-provider-boundary",
-    relativePath: "scripts/native-ios-hosted-e2e-identity.mjs",
-  },
-  {
-    ownerName: "deleteJunctionUser",
-    providerIds: ["junction"],
-    reason: "existing-provider-boundary",
-    relativePath: "scripts/native-ios-hosted-e2e-identity.mjs",
-  },
 ] satisfies readonly ApprovedRawHttpOwner[]);
 
 type ProviderRequestBoundaryViolationKind =
   | "approved-owner-overflow"
   | "invalid-approved-owner"
+  | "official-sdk-request-override"
   | "raw-provider-http";
 
 export interface ProviderRequestBoundaryViolation {
@@ -537,8 +536,28 @@ export function findProviderRequestBoundaryViolations(
   const violations = new Map<string, ProviderRequestBoundaryViolation>();
 
   traverse(sourceFile, {
+    AssignmentExpression(assignmentPath) {
+      inspectOfficialSdkRequestOverride(
+        assignmentPath,
+        readStaticMemberName(assignmentPath.node.left),
+      );
+    },
     CallExpression(callPath) {
       inspectCall(callPath);
+    },
+    ObjectProperty(propertyPath) {
+      if (!propertyPath.parentPath.isObjectExpression()) {
+        return;
+      }
+      const key = propertyPath.node.key;
+      inspectOfficialSdkRequestOverride(
+        propertyPath,
+        !propertyPath.node.computed && key.type === "Identifier"
+          ? key.name
+          : key.type === "StringLiteral"
+            ? key.value
+            : null,
+      );
     },
     OptionalCallExpression(callPath) {
       inspectCall(callPath);
@@ -611,6 +630,24 @@ export function findProviderRequestBoundaryViolations(
       boundary: `Direct ${labels.join(" / ")} provider HTTP in ${ownerName}`,
       kind: "raw-provider-http",
       node: callPath.node,
+    });
+  }
+
+  function inspectOfficialSdkRequestOverride(
+    nodePath: NodePath<Node>,
+    optionName: string | null,
+  ): void {
+    if (
+      normalizedPath !== "apps/web/src/lib/physical-notes/lob-runtime.ts"
+      || !hasRuntimeModule(runtimeModules, "@lob/lob-typescript-sdk")
+      || optionName !== "params"
+    ) {
+      return;
+    }
+    recordViolation({
+      boundary: "Lob official SDK low-level request params",
+      kind: "official-sdk-request-override",
+      node: nodePath.node,
     });
   }
 
@@ -954,6 +991,17 @@ function collectCallProviderIds(input: {
   readonly relativePath: string;
   readonly urlPath: NodePath<Node> | null;
 }): string[] {
+  const staticHost = readStaticHttpUrlHost(input.urlPath);
+  if (staticHost !== null) {
+    // A proven request host outranks naming heuristics; unresolved URLs use the fallback below.
+    return providerBoundaryRegistry
+      .filter((provider) =>
+        provider.hosts.some((host) => isSameOrSubdomain(staticHost, host)),
+      )
+      .map((provider) => provider.id)
+      .sort((left, right) => left.localeCompare(right));
+  }
+
   const providerIds = new Set(input.importedProviderIds);
   const callText = readNodeText(input.callPath.node, input.contents);
   const urlText = input.urlPath
@@ -972,6 +1020,86 @@ function collectCallProviderIds(input: {
     }
   }
   return [...providerIds].sort((left, right) => left.localeCompare(right));
+}
+
+function readStaticHttpUrlHost(
+  originalPath: NodePath<Node> | null,
+): string | null {
+  const value = readStaticString(originalPath, new Set());
+  if (value === null) {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.hostname.toLowerCase().replace(/\.+$/u, "")
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStaticString(
+  originalPath: NodePath<Node> | null,
+  resolvingBindings: Set<string>,
+): string | null {
+  if (!originalPath?.node) {
+    return null;
+  }
+  const expressionPath = unwrapExpressionPath(originalPath);
+  if (expressionPath.isStringLiteral()) {
+    return expressionPath.node.value;
+  }
+  if (expressionPath.isTemplateLiteral()) {
+    return expressionPath.node.expressions.length === 0
+      ? expressionPath.node.quasis[0]?.value.cooked ?? null
+      : null;
+  }
+  if (expressionPath.isBinaryExpression() && expressionPath.node.operator === "+") {
+    const left = readStaticString(
+      expressionPath.get("left") as NodePath<Node>,
+      resolvingBindings,
+    );
+    if (left === null) {
+      return null;
+    }
+    const right = readStaticString(
+      expressionPath.get("right") as NodePath<Node>,
+      resolvingBindings,
+    );
+    return right === null ? null : left + right;
+  }
+  if (!expressionPath.isIdentifier()) {
+    return null;
+  }
+  const binding = expressionPath.scope.getBinding(expressionPath.node.name);
+  if (!binding?.constant) {
+    return null;
+  }
+  const bindingKey = `${expressionPath.node.name}:${binding.identifier.start ?? 0}`;
+  if (resolvingBindings.has(bindingKey)) {
+    return null;
+  }
+  const declarator = binding.path.isVariableDeclarator()
+    ? binding.path
+    : binding.path.parentPath?.isVariableDeclarator()
+      ? binding.path.parentPath
+      : null;
+  if (
+    !declarator ||
+    declarator.node.id.type !== "Identifier" ||
+    declarator.node.id.name !== expressionPath.node.name
+  ) {
+    return null;
+  }
+  const initPath = declarator.get("init") as NodePath<Node> | null;
+  return initPath?.node
+    ? readStaticString(initPath, new Set(resolvingBindings).add(bindingKey))
+    : null;
+}
+
+function isSameOrSubdomain(hostname: string, registeredHost: string): boolean {
+  return hostname === registeredHost || hostname.endsWith(`.${registeredHost}`);
 }
 
 function isStaticSameOrigin(
@@ -1285,6 +1413,8 @@ function formatViolationKind(kind: ProviderRequestBoundaryViolationKind): string
       return "contains more raw transport calls than its approval permits";
     case "invalid-approved-owner":
       return "lost its required runtime SDK import";
+    case "official-sdk-request-override":
+      return "overrides low-level official SDK request options";
     case "raw-provider-http":
       return "uses raw provider HTTP";
   }

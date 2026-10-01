@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-31",
+  "order": 100,
+  "item": {
+    "id": "murph-recovers-from-invalid-command-inputs",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph recovers from invalid command inputs",
+    "summary": "When an internal command has an invalid or missing value, Murph now gets clear correction guidance instead of a generic failure.",
+    "details": "Malformed requests stop before the command runs, and recovery messages do not repeat submitted values.",
+    "relevanceTags": ["assistant", "reliability", "recovery"],
+    "sourcePullRequests": [2666]
+  }
+}

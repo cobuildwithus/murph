@@ -1,9 +1,18 @@
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER } from "@murphai/device-syncd/hosted-runtime";
 import { emitHostedExecutionStructuredLog, type HostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import {
-  assertAllowedHostedRunnerWebControlRequest,
+  assertAllowedHostedRunnerWebControlRoute,
+  HostedWebControlRouteNotAllowlistedError,
   readHostedRunnerWebControlRoute,
+  type HostedRunnerWebControlOperation,
+  type HostedRunnerWebControlRoute,
+} from "../runner-outbound/shared-web-control-policy.ts";
+export {
+  bindHostedRunnerWebControlRoutePath,
+  createHostedRunnerDeviceSyncConnectLinkRoute,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
 } from "../runner-outbound/shared-web-control-policy.ts";
 import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
@@ -11,12 +20,11 @@ import {
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
 } from "../runner-outbound/headers.ts";
-import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
-import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
 import {
-  HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
-  HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
-} from "@murphai/hosted-execution/routes";
+  fetchHostedExecutionWebControlPlaneResponse,
+  readHostedSnapshotResponseHeaderMetadata,
+} from "../web-control-plane.ts";
+import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
@@ -41,7 +49,7 @@ import {
   type HostedWorkspaceCheckpointBridgeAuthority,
 } from "./authority-headers.ts";
 
-export type HostedWebControlTransport =
+type HostedWebControlTransportConfig =
   | {
     callbackSigning: HostedWebCallbackSigningEnvironment;
     mode: "direct";
@@ -52,6 +60,18 @@ export type HostedWebControlTransport =
     mode: "proxy";
   };
 
+export interface HostedWebControlPreflightRejection {
+  method: "GET" | "POST";
+  operation: HostedRunnerWebControlOperation;
+  transport: HostedWebControlTransportConfig["mode"];
+}
+
+export type HostedWebControlTransport = HostedWebControlTransportConfig & {
+  reportPreflightRejection?: (
+    rejection: HostedWebControlPreflightRejection,
+  ) => Promise<void>;
+};
+
 interface HostedWebControlPlaneJsonRequest {
   acceptedStatuses?: readonly number[];
   body?: unknown;
@@ -59,10 +79,9 @@ interface HostedWebControlPlaneJsonRequest {
   description: string;
   fetchImpl: typeof fetch;
   headers?: Headers;
-  method?: "GET" | "POST";
-  path: string;
   preserveInitialFailureOnReplayFailure?: boolean;
   replayOnceOnRetryableFailure?: boolean;
+  route: HostedRunnerWebControlRoute;
   sensitiveResponseBody?: {
     maxBytes: number;
   };
@@ -115,12 +134,45 @@ export class HostedWebControlPlaneResponseError extends Error {
   }
 }
 
+class HostedWebControlPlaneIncompleteSnapshotResponseError extends Error {
+  readonly code = "HOSTED_WEB_CONTROL_INCOMPLETE_SNAPSHOT_RESPONSE" as const;
+
+  constructor(description: string) {
+    super(`${description} returned an incomplete snapshot response.`);
+    this.name = "HostedWebControlPlaneIncompleteSnapshotResponseError";
+  }
+}
+
 class HostedWebControlPlaneSensitiveResponseInvalidJsonError extends Error {
   readonly code = "HOSTED_WEB_CONTROL_SENSITIVE_RESPONSE_INVALID_JSON" as const;
 
   constructor(description: string) {
     super(`${description} returned invalid JSON.`);
     this.name = "HostedWebControlPlaneSensitiveResponseInvalidJsonError";
+  }
+}
+
+async function assertAllowedHostedWebControlPreflight(input: {
+  route: HostedRunnerWebControlRoute;
+  transport: HostedWebControlTransport;
+}): Promise<void> {
+  try {
+    assertAllowedHostedRunnerWebControlRoute(input.route);
+    return;
+  } catch (error) {
+    if (!(error instanceof HostedWebControlRouteNotAllowlistedError)) {
+      throw error;
+    }
+    try {
+      await input.transport.reportPreflightRejection?.({
+        method: input.route.method,
+        operation: error.operation,
+        transport: input.transport.mode,
+      });
+    } catch {
+      // Best-effort telemetry must never replace the fail-closed policy error.
+    }
+    throw error;
   }
 }
 
@@ -151,13 +203,12 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   boundUserId: string;
   description: string;
   fetchImpl: typeof fetch;
-  method?: "GET" | "POST";
-  path: string;
+  route: HostedRunnerWebControlRoute;
   signal?: AbortSignal | null;
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }): Promise<unknown> {
-  assertReplaySafeHostedWebControlRetryPath(input.path);
+  assertReplaySafeHostedWebControlRetryRoute(input.route);
 
   let attempt = 0;
   let lastError: unknown;
@@ -186,11 +237,12 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   throw lastError;
 }
 
-function assertReplaySafeHostedWebControlRetryPath(path: string): void {
-  const { pathname } = readHostedRunnerWebControlRoute(path);
+function assertReplaySafeHostedWebControlRetryRoute(
+  route: HostedRunnerWebControlRoute,
+): void {
   if (
-    pathname !== HOSTED_RUNTIME_MAILBOX_FETCH_PATH
-    && pathname !== HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH
+    route.operation !== "mailbox_fetch"
+    && route.operation !== "mailbox_payload_fetch"
   ) {
     throw new TypeError("Hosted web-control retry is only allowed for hosted mailbox reads.");
   }
@@ -250,12 +302,12 @@ async function fetchHostedWebControlPlaneJsonAttempt(
     throw new TypeError("Sensitive web-control response maxBytes must be a non-negative integer.");
   }
 
-  const method = input.method ?? (input.body === undefined ? "GET" : "POST");
-  const route = readHostedRunnerWebControlRoute(input.path);
-  assertAllowedHostedRunnerWebControlRequest({
-    method,
-    path: route.pathname,
+  await assertAllowedHostedWebControlPreflight({
+    route: input.route,
+    transport: input.transport,
   });
+  const method = input.route.method;
+  const route = readHostedRunnerWebControlRoute(input.route.path);
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);
   const requestStartedAt = Date.now();
   const requestDeadlineMs = requestStartedAt + input.timeoutMs;
@@ -381,7 +433,11 @@ async function fetchHostedWebControlPlaneJsonAttempt(
     userId: input.boundUserId,
   });
 
+  const snapshotBodyMetrics = input.route.operation === "device_sync_runtime_snapshot"
+    ? { bytesRead: 0 }
+    : undefined;
   const readResponseText = () => readHostedWebControlPlaneResponseText({
+    bodyMetrics: snapshotBodyMetrics,
     description: input.description,
     maxBytes: input.sensitiveResponseBody?.maxBytes,
     response,
@@ -432,39 +488,138 @@ async function fetchHostedWebControlPlaneJsonAttempt(
   }
 
   const text = await readResponseText();
-  if (!text.trim()) {
-    return null;
+  return decodeHostedWebControlPlaneResponseJson({
+    input,
+    requestLogDetails,
+    requestStartedAt,
+    response,
+    snapshotBodyMetrics,
+    text,
+  });
+}
+
+function decodeHostedWebControlPlaneResponseJson({
+  input,
+  requestLogDetails,
+  requestStartedAt,
+  response,
+  snapshotBodyMetrics,
+  text,
+}: {
+  input: HostedWebControlPlaneJsonRequest;
+  requestLogDetails: HostedExecutionStructuredLogDetails;
+  requestStartedAt: number;
+  response: Response;
+  snapshotBodyMetrics: { bytesRead: number } | undefined;
+  text: string;
+}): unknown {
+  const empty = !text.trim();
+  let payload: unknown = null;
+  if (!empty) {
+    try {
+      payload = JSON.parse(text);
+    } catch (error) {
+      const snapshotDetails = snapshotBodyMetrics
+        ? describeHostedSnapshotResponseBody(response, snapshotBodyMetrics.bytesRead, "invalid_json")
+        : undefined;
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runtime.control-plane",
+        details: {
+          ...requestLogDetails,
+          durationMs: Date.now() - requestStartedAt,
+          ...buildHostedRuntimeSafeErrorMetadata(error, {
+            includeSafeErrorText: false,
+          }),
+          responseStatus: response.status,
+          ...(snapshotDetails ?? { responseBodyBytes: new TextEncoder().encode(text).byteLength }),
+        },
+        level: "warn",
+        message: "Hosted runtime control-plane response returned invalid JSON.",
+        phase: "runtime.starting",
+        userId: input.boundUserId,
+      });
+      if (
+        response.ok
+        && snapshotDetails
+        && (snapshotDetails.responseExpectedBodyBytes ?? 0) > snapshotDetails.responseBodyBytes
+      ) {
+        throw new HostedWebControlPlaneIncompleteSnapshotResponseError(input.description);
+      }
+      if (input.sensitiveResponseBody) {
+        throw new HostedWebControlPlaneSensitiveResponseInvalidJsonError(
+          input.description,
+        );
+      }
+      throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
+    }
   }
 
-  try {
-    return JSON.parse(text);
-  } catch (error) {
+  if (snapshotBodyMetrics && !readHostedWebControlPlaneRecord(payload)) {
+    const snapshotDetails = describeHostedSnapshotResponseBody(
+      response,
+      snapshotBodyMetrics.bytesRead,
+      empty ? "empty" : payload === null ? "null" : Array.isArray(payload) ? "array" : "scalar",
+    );
     emitHostedExecutionStructuredLog({
       component: "hosted.runtime.control-plane",
       details: {
         ...requestLogDetails,
         durationMs: Date.now() - requestStartedAt,
-        ...buildHostedRuntimeSafeErrorMetadata(error, {
-          includeSafeErrorText: false,
-        }),
-        responseBodyBytes: new TextEncoder().encode(text).byteLength,
         responseStatus: response.status,
+        ...snapshotDetails,
       },
       level: "warn",
-      message: "Hosted runtime control-plane response returned invalid JSON.",
+      message: "Hosted runtime device-sync snapshot response returned invalid top-level shape.",
       phase: "runtime.starting",
       userId: input.boundUserId,
     });
-    if (input.sensitiveResponseBody) {
-      throw new HostedWebControlPlaneSensitiveResponseInvalidJsonError(
-        input.description,
-      );
+    // Reclassify only an already-rejected empty body. Valid JSON, including
+    // nonobjects and schema failures, stays with the existing snapshot parser.
+    if (
+      response.ok
+      && empty
+      && (snapshotDetails.responseExpectedBodyBytes ?? 0) > snapshotDetails.responseBodyBytes
+    ) {
+      throw new HostedWebControlPlaneIncompleteSnapshotResponseError(input.description);
     }
-    throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
+  return payload;
 }
 
-async function readHostedWebControlPlaneResponseText(input: {
+// Never return raw header values, body text, or parser messages from this boundary.
+function describeHostedSnapshotResponseBody(
+  response: Response,
+  responseBodyBytes: number,
+  responseBodyShape: "empty" | "invalid_json" | "null" | "array" | "scalar",
+): HostedExecutionStructuredLogDetails & {
+  responseBodyBytes: number;
+  responseExpectedBodyBytes?: number;
+} {
+  const { headers } = response;
+  const marker = headers.get(HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER);
+  const expectedBytes = marker !== null && /^(?:0|[1-9]\d{0,15})$/u.test(marker)
+    && Number.isSafeInteger(Number(marker))
+    ? Number(marker)
+    : null;
+  const mime = headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  return {
+    responseBodyBytes,
+    responseBodyShape,
+    ...readHostedSnapshotResponseHeaderMetadata(response, true),
+    responseMimeCategory: mime === undefined ? "missing"
+      : mime === "application/json" || (mime.startsWith("application/") && mime.endsWith("+json")) ? "json"
+      : mime === "text/html" ? "html"
+      : mime === "text/plain" ? "text"
+      : "other",
+    responseByteCountComparison: marker === null ? "missing"
+      : expectedBytes === null ? "invalid"
+      : expectedBytes === responseBodyBytes ? "match" : "mismatch",
+    ...(expectedBytes === null ? {} : { responseExpectedBodyBytes: expectedBytes }),
+  };
+}
+
+export async function readHostedWebControlPlaneResponseText(input: {
+  bodyMetrics?: { bytesRead: number };
   description: string;
   maxBytes: number | undefined;
   response: Response;
@@ -472,6 +627,9 @@ async function readHostedWebControlPlaneResponseText(input: {
   timeoutMs: number;
 }): Promise<string> {
   const maxBytes = input.maxBytes;
+  if (input.bodyMetrics) {
+    input.bodyMetrics.bytesRead = 0;
+  }
   if (maxBytes !== undefined) {
     const contentLengthText =
       input.response.headers.get("content-length")?.trim() ?? "";
@@ -518,10 +676,16 @@ async function readHostedWebControlPlaneResponseText(input: {
     text += decoder.decode(chunk, { stream: true });
   }
   text += decoder.decode();
+  if (input.bodyMetrics) {
+    input.bodyMetrics.bytesRead = totalBytes;
+  }
   return text;
 }
 
 function isRetryableHostedWebControlExactReplayError(error: unknown): boolean {
+  if (error instanceof HostedWebControlPlaneIncompleteSnapshotResponseError) {
+    return true;
+  }
   if (error instanceof HostedWebControlPlaneResponseError) {
     return error.status >= 500 && error.status <= 599;
   }

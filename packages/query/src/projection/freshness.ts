@@ -16,6 +16,7 @@ import {
   hasQueryProjectionTables,
   openQueryProjectionDatabase,
   readMeta,
+  writeMeta,
   type QueryProjectionLocation,
   type SqliteRow,
 } from "./schema.ts";
@@ -79,26 +80,67 @@ export async function readProjectionStatus(
       readOnly: true,
     });
 
-    if (!hasQueryProjectionTables(database)) {
-      return null;
-    }
+    const hasGlobalTables = hasQueryProjectionTables(database);
+    if (!hasGlobalTables && !hasCurrentQueryProjectionSchema(database)) return null;
 
     return {
       dbPath: location.dbPath,
       exists: true,
       schemaVersion: readMeta(database, "schema_version"),
       builtAt: readMeta(database, "built_at"),
-      entityCount: countRows(database, "query_entities"),
-      searchDocumentCount: countRows(database, "query_search_document"),
+      entityCount: hasGlobalTables ? countRows(database, "query_entities") : 0,
+      searchDocumentCount: hasGlobalTables ? countRows(database, "query_search_document") : 0,
       fresh:
+        hasGlobalTables &&
         hasCurrentQueryProjectionSchema(database) &&
-        sameSourceManifest(currentManifest, readStoredSourceManifest(database)),
+        readMeta(database, "built_at") !== null &&
+        sameSourceManifest(currentManifest, readStoredSourceManifest(database)) &&
+        wearableSourceManifestMatches(database, currentManifest),
     };
   } catch {
     return null;
   } finally {
     database?.close();
   }
+}
+
+/** The same canonical manifest contract, independently certified for wearable
+ * rows in the existing metadata owner. No timestamp or global freshness proxy. */
+export async function isWearableProjectionFresh(
+  location: QueryProjectionLocation,
+  currentManifest: readonly QuerySourceManifestEntry[],
+): Promise<boolean> {
+  if (!(await hasLocalStatePath({ currentPath: location.absolutePath }))) return false;
+  let database: DatabaseSync | undefined;
+  try {
+    database = openQueryProjectionDatabase(location, { create: false, readOnly: true });
+    return hasCurrentQueryProjectionSchema(database)
+      && wearableSourceManifestMatches(database, currentManifest);
+  } catch {
+    return false;
+  } finally {
+    database?.close();
+  }
+}
+
+/** Must be committed in the same transaction as the corresponding rows. */
+export function writeWearableSourceManifest(
+  database: DatabaseSync,
+  currentManifest: readonly QuerySourceManifestEntry[],
+): void {
+  writeMeta(database, "wearable_source_manifest", encodeSourceManifest(currentManifest));
+}
+
+function wearableSourceManifestMatches(
+  database: DatabaseSync,
+  currentManifest: readonly QuerySourceManifestEntry[],
+): boolean {
+  return readMeta(database, "wearable_source_manifest") === encodeSourceManifest(currentManifest);
+}
+
+function encodeSourceManifest(manifest: readonly QuerySourceManifestEntry[]): string {
+  return JSON.stringify(manifest.map(({ relativePath, sizeBytes, mtimeMs }) =>
+    [relativePath, sizeBytes, mtimeMs]));
 }
 
 function sameSourceManifest(

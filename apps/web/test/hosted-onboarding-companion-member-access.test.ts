@@ -12,12 +12,28 @@ const mocks = vi.hoisted(() => ({
   completeHostedPrivyVerification: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   ensureHostedStarterUsageEnrollment: vi.fn(),
+  ensureHostedMemberPhoneWelcome: vi.fn(),
+  ensureHostedMemberChannelWelcome: vi.fn(),
   getPrisma: vi.fn(),
+  nativeAuth: vi.fn(),
+  completion: vi.fn(),
+  authRecord: vi.fn(),
+  openAuthRecord: vi.fn(),
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedMemberMessagingSetupState: vi.fn(),
   retryPendingHostedStarterUsageActivationRuntimeWake: vi.fn(),
   remapHostedPrivyCompletionLagError: vi.fn((error: unknown) => error),
   resolveHostedPrivySessionFromBearerToken: vi.fn(),
+}));
+
+vi.mock("@/src/lib/better-auth/native-auth", () => ({ readHostedNativeMemberAuth: mocks.nativeAuth }));
+vi.mock("@/src/lib/better-auth/record-crypto", () => ({ openAuthRecord: mocks.openAuthRecord }));
+vi.mock("@/src/lib/hosted-onboarding/authentication-completion", () => ({ readHostedAuthenticationCompletion: mocks.completion }));
+
+vi.mock("@/src/lib/hosted-onboarding/channel-welcome", () => ({ ensureHostedMemberChannelWelcome: mocks.ensureHostedMemberChannelWelcome }));
+vi.mock("@/src/lib/hosted-onboarding/phone-welcome", () => ({
+  ensureHostedMemberPhoneWelcome: mocks.ensureHostedMemberPhoneWelcome,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -54,6 +70,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberMessagingSetupState:
+    mocks.readHostedMemberMessagingSetupState,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   lookupHostedMemberForPrivyPrincipal:
     mocks.lookupHostedMemberForPrivyPrincipal,
@@ -79,7 +100,7 @@ type AdmissionRouteModule = typeof import(
 
 let admissionRoute: AdmissionRouteModule;
 
-const prisma = { label: "test-prisma" } as never;
+const prisma = { label: "test-prisma", hostedAuthRecord: { findUnique: mocks.authRecord } } as never;
 const identity = {
   phone: {
     number: "+15550000000",
@@ -126,7 +147,7 @@ function completion(
 }
 
 function admissionRequest(
-  token = "privy-identity-token",
+  token = "synthetic.payload.signature",
   headers: Record<string, string> = {},
 ): Request {
   return new Request(
@@ -154,6 +175,12 @@ describe("native companion hosted member admission", () => {
     vi.stubEnv("HOSTED_SIGNUP_WELCOME_EMAIL_FROM", "Murph <welcome@example.com>");
     vi.stubEnv("RESEND_API_KEY", "re_test");
     mocks.getPrisma.mockReturnValue(prisma);
+    vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "false");
+    vi.stubEnv("HOSTED_PRIVY_NATIVE_ENABLED", "true");
+    mocks.authRecord.mockResolvedValue(null);
+    mocks.openAuthRecord.mockResolvedValue({ credentialsChangedAt: null });
+    mocks.nativeAuth.mockResolvedValue({ kind: "better-auth", member: member() });
+    mocks.completion.mockResolvedValue(completion());
     mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.assertActiveHostedMemberAccessAllowed.mockResolvedValue(undefined);
     mocks.assertHostedMemberNotSuspended.mockReturnValue(undefined);
@@ -164,10 +191,49 @@ describe("native companion hosted member admission", () => {
     });
     mocks.retryPendingHostedStarterUsageActivationRuntimeWake
       .mockResolvedValue(null);
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: "hbidx:phone:v1:member" },
+      routing: null,
+    });
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it("reuses canonical consent and Starter admission for replacement sessions without Privy completion", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    const response = await admissionRoute.POST(admissionRequest(`murph_auth_v1.${"a".repeat(32)}`));
+    expect(response.status).toBe(200);
+    expect(mocks.nativeAuth).toHaveBeenCalledOnce();
+    expect(mocks.completion).toHaveBeenCalledWith({ member: member(), prisma });
+    expect(mocks.ensureHostedStarterUsageEnrollment).toHaveBeenCalledOnce();
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalled();
+    expect(mocks.resolveHostedPrivySessionFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+  });
+
+  it("uses read-only legacy admission after activation, without creating members, invites or grants", async () => {
+    vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+    mocks.nativeAuth.mockResolvedValue({ kind: "legacy", member: member(HostedBillingStatus.active) });
+    expect((await admissionRoute.POST(admissionRequest())).status).toBe(200);
+    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({ memberId: "member_native", prisma });
+    expect(mocks.ensureHostedMemberPhoneWelcome).not.toHaveBeenCalled();
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
+    expect(mocks.completion).not.toHaveBeenCalled();
+  });
+
+  it("keeps the member handoff closed after issuance is paused", async () => {
+    const existing = member(HostedBillingStatus.active);
+    mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({ identity });
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(existing);
+    mocks.authRecord.mockResolvedValue({ id: existing.id });
+    expect((await admissionRoute.POST(admissionRequest())).status).toBe(200);
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
+    mocks.openAuthRecord.mockResolvedValue({ credentialsChangedAt: new Date() });
+    expect((await admissionRoute.POST(admissionRequest())).status).toBe(401);
   });
 
   it("requires bearer identity without falling back to browser authority", async () => {
@@ -198,9 +264,7 @@ describe("native companion hosted member admission", () => {
         code: "AUTH_REQUIRED",
       },
     });
-    expect(mocks.resolveHostedPrivySessionFromBearerToken).toHaveBeenCalledWith(
-      incoming,
-    );
+    expect(mocks.resolveHostedPrivySessionFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.lookupHostedMemberForPrivyPrincipal).not.toHaveBeenCalled();
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });
@@ -253,6 +317,10 @@ describe("native companion hosted member admission", () => {
       prisma,
     });
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberPhoneWelcome).toHaveBeenCalledExactlyOnceWith({
+      memberId: activeMember.id,
+      prisma,
+    });
     expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
     expect(mocks.retryPendingHostedStarterUsageActivationRuntimeWake)
       .toHaveBeenCalledWith({
@@ -311,7 +379,7 @@ describe("native companion hosted member admission", () => {
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
 
     const response = await admissionRoute.POST(admissionRequest(
-      "privy-identity-token",
+      "synthetic.payload.signature",
       {
         "x-vercel-ip-city": "Denver",
         "x-vercel-ip-country": "US",
@@ -369,7 +437,7 @@ describe("native companion hosted member admission", () => {
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
 
     const response = await admissionRoute.POST(admissionRequest(
-      "privy-identity-token",
+      "synthetic.payload.signature",
       {
         "x-vercel-ip-city": "Denver",
         "x-vercel-ip-country": "US",
@@ -397,7 +465,7 @@ describe("native companion hosted member admission", () => {
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
 
     const response = await admissionRoute.POST(admissionRequest(
-      "privy-identity-token",
+      "synthetic.payload.signature",
       {
         "x-vercel-ip-city": "Denver",
         "x-vercel-ip-country": "US",
@@ -429,6 +497,80 @@ describe("native companion hosted member admission", () => {
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+  });
+
+  it("synchronizes a newly linked channel for an active email-only member", async () => {
+    const activeMember = member(HostedBillingStatus.active);
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(activeMember);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: null },
+      routing: null,
+    });
+    mocks.completeHostedPrivyVerification.mockResolvedValue(
+      completion(HostedBillingStatus.active),
+    );
+
+    await expect(ensureHostedCompanionMemberId({
+      identity,
+      prisma,
+    })).resolves.toBe(activeMember.id);
+
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
+      identity,
+      now: expect.any(Date),
+      prisma,
+    });
+    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
+  });
+
+  it("returns retryable admission until a newly linked channel is canonical", async () => {
+    const activeMember = member(HostedBillingStatus.active);
+    mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({ identity });
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(activeMember);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: null },
+      routing: null,
+    });
+    mocks.completeHostedPrivyVerification
+      .mockResolvedValueOnce({
+        ...completion(HostedBillingStatus.active),
+        messagingSetupRequired: true,
+      })
+      .mockResolvedValueOnce(completion(HostedBillingStatus.active));
+
+    const firstResponse = await admissionRoute.POST(admissionRequest());
+    const retryResponse = await admissionRoute.POST(admissionRequest());
+
+    expect(firstResponse.status).toBe(503);
+    await expect(firstResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "COMPANION_ADMISSION_RETRYABLE",
+        retryable: true,
+      },
+    });
+    expect(retryResponse.status).toBe(200);
+    await expect(retryResponse.json()).resolves.toEqual({ ok: true });
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an active email-only member on the read path until Privy has a linked channel", async () => {
+    const activeMember = member(HostedBillingStatus.active);
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(activeMember);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: null },
+      routing: null,
+    });
+
+    await expect(ensureHostedCompanionMemberId({
+      identity: emailIdentity,
+      prisma,
+    })).resolves.toBe(activeMember.id);
+
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
   });
 
   it("returns retryable admission until a pending activation wake is accepted", async () => {

@@ -1,0 +1,15 @@
+diff --git a/wrangler-dist/cli.js b/wrangler-dist/cli.js
+index 0ad38e88742bd1998704b9740c6e2c5b37a14ec4..23af74b24d2585cc39da521096008961d05e82c2 100644
+--- a/wrangler-dist/cli.js
++++ b/wrangler-dist/cli.js
+@@ -45444,7 +45444,9 @@ function getEgressInterceptorImage() {
+ }
+ async function pullEgressInterceptorImage(dockerPath) {
+   const image = getEgressInterceptorImage();
+-  await runDockerCmd(dockerPath, ["pull", image, "--platform", "linux/amd64"]);
++  const platform4 = process.platform === "darwin" && process.arch === "arm64" ? "linux/arm64" : "linux/amd64";
++  const pullRef = image.replace(/@sha256:[a-f0-9]+$/, "");
++  await runDockerCmd(dockerPath, ["pull", pullRef, "--platform", platform4]);
+ }
+ async function pullImage(dockerPath, options, logger4) {
+   const domain2 = new URL(`http://${options.image_uri}`).hostname;

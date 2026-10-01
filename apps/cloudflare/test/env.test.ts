@@ -26,7 +26,7 @@ describe("readHostedExecutionEnvironment", () => {
     );
     expect(environment.hostedCrypto.HOSTED_CRYPTO_ENV).toBe("test");
     expect(environment.maxEventAttempts).toBe(3);
-    expect(environment.idleCheckpointDelayMs).toBe(180_000);
+    expect(environment.runnerIdleTtlMs).toBe(600_000);
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerCommitTimeoutMs).toBe(45_000);
     expect(environment.runnerReadyTimeoutMs).toBe(20_000);
@@ -168,24 +168,6 @@ describe("readHostedExecutionEnvironment", () => {
     ).toThrow(/HOSTED_WEB_BASE_URL must not use HTTP in production/u);
   });
 
-  it("rejects a production idle checkpoint delay below 180 seconds", () => {
-    expect(() =>
-      readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv({
-        HOSTED_CRYPTO_ENV: "production",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "179999",
-      })),
-    ).toThrow(
-      /HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS must be at least 180000 in production/u,
-    );
-
-    expect(
-      readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv({
-        HOSTED_CRYPTO_ENV: "production",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
-      })).idleCheckpointDelayMs,
-    ).toBe(180_000);
-  });
-
   it("reads the configured Vercel OIDC environment when provided", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
@@ -238,12 +220,10 @@ describe("readHostedExecutionEnvironment", () => {
 
   it("rejects partial numeric Worker timing environment values", () => {
     const invalidTimingValues = {
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000abc",
       HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: "3abc",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "30000abc",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "30000abc",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000abc",
-      HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000abc",
       HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000abc",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "30000abc",
     } as const;
@@ -257,21 +237,10 @@ describe("readHostedExecutionEnvironment", () => {
     }
   });
 
-  it("defaults the runner idle lifecycle to five minutes", () => {
+  it("defaults the runtime and runner idle policy to ten minutes", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv());
 
-    expect(environment.runnerIdleTtlMs).toBe(300_000);
-    expect(environment.runnerLifecycleReevaluationMs).toBe(300_000);
-  });
-
-  it("reads an independent runner lifecycle reevaluation cadence", () => {
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
-      HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
-    }));
-
-    expect(environment.runnerIdleTtlMs).toBe(1_200_000);
-    expect(environment.runnerLifecycleReevaluationMs).toBe(60_000);
+    expect(environment.runnerIdleTtlMs).toBe(600_000);
   });
 
   it("reads optional runner-secret allowlist extensions", () => {

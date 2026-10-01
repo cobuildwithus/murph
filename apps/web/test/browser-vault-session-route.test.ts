@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   CloudflareHostedControlBrowserVaultReplicaNotFoundError,
@@ -90,6 +90,7 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   readHostedWorkspace: mocks.readHostedWorkspace,
+  readHostedBrowserVaultReplicaState: mocks.readHostedWorkspace,
   readHostedWorkspaceBrowserVaultSourceStateHash:
     mocks.readHostedWorkspaceBrowserVaultSourceStateHash,
 }));
@@ -119,6 +120,10 @@ describe("browser vault session route", () => {
   beforeAll(async () => {
     browserVaultSessionRoute = await import("../app/api/browser-vault/session/route");
     settingsVaultExportSessionRoute = await import("../app/api/settings/vault-export/session/route");
+  });
+
+  afterEach(async () => {
+    await vi.dynamicImportSettled();
   });
 
   beforeEach(() => {
@@ -197,6 +202,7 @@ describe("browser vault session route", () => {
     expect(mocks.hasPendingDirtyConnectionForUser).toHaveBeenCalledWith("member_123");
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
     expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
@@ -209,6 +215,76 @@ describe("browser vault session route", () => {
       replicaRef: null,
       refreshPending: true,
       state: "empty",
+    });
+  });
+
+  it("does not schedule runtime work for an observation-only missing replica poll", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        refreshObservationOnly: true,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      encryptedReplica: null,
+      freshness: "stale",
+      refreshPending: true,
+      state: "empty",
+    });
+  });
+
+  it("does not resignal runtime work when an observation-only poll cannot find the referenced replica", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    const knownReplicaRef = createReplicaRef({
+      generatedAt: "2998-04-20T08:00:00.000Z",
+    });
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockRejectedValue(
+      new CloudflareHostedControlBrowserVaultReplicaNotFoundError(),
+    );
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef,
+        refreshObservationOnly: true,
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "BROWSER_VAULT_PARTIAL_LOAD_UNAVAILABLE",
+        message: "Requested browser vault data is temporarily unavailable.",
+        retryable: true,
+      },
     });
   });
 
@@ -233,7 +309,7 @@ describe("browser vault session route", () => {
     expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
   });
 
-  it("includes pending device import state without gating browser vault refresh", async () => {
+  it("lets a pending device import create the first browser vault replica", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
     mocks.hasPendingDirtyConnectionForUser.mockResolvedValue(true);
@@ -247,9 +323,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       deviceSyncImportPending: true,
       refreshPending: true,
@@ -704,6 +778,7 @@ describe("browser vault session route", () => {
       replicaRef,
       userId: "member_123",
     });
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
@@ -755,6 +830,7 @@ describe("browser vault session route", () => {
     expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledTimes(1);
     expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
     expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
@@ -807,6 +883,7 @@ describe("browser vault session route", () => {
     expect(response.status).toBe(200);
     expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
     expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
@@ -968,6 +1045,7 @@ describe("browser vault session route", () => {
       replicaRef: createReplicaRef(),
       userId: "member_123",
     });
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
@@ -1216,8 +1294,53 @@ describe("browser vault session route", () => {
         retryable: true,
       },
     });
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
+    });
+  });
+
+  it("does not resignal runtime work when an observation-only poll cannot find a selected shard", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createShardedReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockRejectedValue(
+      new CloudflareHostedControlBrowserVaultReplicaNotFoundError(),
+    );
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownMetricBuckets: ["00"],
+        knownReplicaRef: replicaRef,
+        knownShards: ["core", "metricsIndex"],
+        refreshObservationOnly: true,
+        requestedMetricBuckets: ["00", "01"],
+        requestedShards: ["core", "metricsIndex"],
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_VAULT_PARTIAL_LOAD_UNAVAILABLE",
+        retryable: true,
+      },
     });
   });
 
@@ -1884,6 +2007,7 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(200);
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
@@ -1901,6 +2025,25 @@ describe("browser vault session route", () => {
       createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
         browserPublicKeyJwk: browser.publicKeyJwk,
         requestRefresh: "yes",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
+      },
+    });
+  });
+
+  it("rejects a refresh request marked observation-only", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        refreshObservationOnly: true,
+        requestRefresh: true,
       }),
     );
 
@@ -2069,6 +2212,7 @@ describe("browser vault session route", () => {
       refreshPending: true,
       state: "empty",
     });
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });

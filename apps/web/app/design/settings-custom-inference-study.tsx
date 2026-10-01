@@ -34,7 +34,7 @@ export function SettingsCustomInferenceStudy() {
               selected: false,
             }}
             initialDormantSolPreference={false}
-            initialModel="gpt-5.6-terra"
+            initialModel="gpt-6-sol"
             initialProvider="openai"
             solAvailable
             veniceAvailable={false}
@@ -60,7 +60,7 @@ export function SettingsCustomInferenceStudy() {
             configurationAvailable
             customInferenceAvailable
             initialDormantSolPreference={false}
-            initialModel="gpt-5.6-terra"
+            initialModel="gpt-6-sol"
             initialProvider="venice"
             solAvailable={false}
             veniceAvailable
@@ -91,7 +91,7 @@ export function SettingsCustomInferenceStudy() {
               selected: true,
             }}
             initialDormantSolPreference={false}
-            initialModel="gpt-5.6-terra"
+            initialModel="gpt-6-sol"
             initialProvider="venice"
             solAvailable
             veniceAvailable

@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "background-recovery-after-updates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Background recovery after updates",
+    "summary": "Idle background sessions can pick up fixes after an update instead of remaining stuck on an older version.",
+    "details": "The handoff waits for work to finish and completion to be recorded, while preserving active work and recent conversation activity.",
+    "relevanceTags": [
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3079
+    ]
+  }
+}

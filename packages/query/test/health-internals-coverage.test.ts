@@ -257,15 +257,15 @@ test("health loaders and entity slices cover strict and tolerant file handling",
   );
   await assert.rejects(
     () => readMarkdownDocument(vaultRoot, "docs/invalid.md"),
-    /Failed to parse frontmatter at docs\/invalid\.md/u,
+    /Canonical vault source docs\/invalid\.md is invalid/u,
   );
   await assert.rejects(
     () => readOptionalMarkdownDocument(vaultRoot, "docs/invalid.md"),
-    /Failed to parse frontmatter at docs\/invalid\.md/u,
+    /Canonical vault source docs\/invalid\.md is invalid/u,
   );
   assert.throws(
     () => readMarkdownDocumentSync(vaultRoot, "docs/invalid.md"),
-    /Failed to parse frontmatter at docs\/invalid\.md/u,
+    /Canonical vault source docs\/invalid\.md is invalid/u,
   );
   await assert.rejects(
     () => readMarkdownDocumentOutcome(vaultRoot, "docs/missing.md"),
@@ -288,11 +288,11 @@ test("health loaders and entity slices cover strict and tolerant file handling",
 
   await assert.rejects(
     () => readJsonlRecords(vaultRoot, "records/mixed"),
-    /Failed to parse JSONL at records\/mixed\/2026-04\.jsonl:2/u,
+    /Canonical vault source records\/mixed\/2026-04\.jsonl:2 is invalid/u,
   );
   assert.throws(
     () => readJsonlRecordsSync(vaultRoot, "records/mixed"),
-    /Failed to parse JSONL at records\/mixed\/2026-04\.jsonl:2/u,
+    /Canonical vault source records\/mixed\/2026-04\.jsonl:2 is invalid/u,
   );
 
   assert.deepEqual(
@@ -859,7 +859,7 @@ test("health library and canonical collector use fallback node metadata and tole
 
   await assert.rejects(
     () => readHealthLibraryGraph(vaultRoot),
-    /Failed to parse frontmatter/u,
+    /Canonical vault source bank\/library\/broken\.md is invalid/u,
   );
   const strictGraph = await readHealthLibraryGraph(strictVaultRoot);
   assert.equal(strictGraph.nodes.length, 1);

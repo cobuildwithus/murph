@@ -138,7 +138,7 @@ describe("hosted member messaging authority", () => {
     });
   });
 
-  it("treats verified email as setup-complete without inventing a direct chat", () => {
+  it("keeps verified email available without treating it as messaging setup", () => {
     const input = {
       identity: {
         emailLinked: true,
@@ -155,7 +155,7 @@ describe("hosted member messaging authority", () => {
       hasPhone: false,
       hasTelegram: false,
     });
-    expect(isHostedMemberMessagingSetupRequired(input)).toBe(false);
+    expect(isHostedMemberMessagingSetupRequired(input)).toBe(true);
     expect(resolveHostedMemberChannels({
       emailLinked: true,
       identity: {
@@ -168,10 +168,19 @@ describe("hosted member messaging authority", () => {
       telegram: false,
     });
     expect(resolveHostedMemberAssistantNotificationRoute({
+      emailAddress: "member@example.test",
+      emailLookupKey: "hbidx:email:v1:member",
       linqChatId: null,
       memberId: "member_email",
       messaging,
-    })).toBeNull();
+    })).toMatchObject({
+      channel: "email",
+      delivery: {
+        kind: "explicit",
+        target: "member@example.test",
+      },
+      threadIsDirect: true,
+    });
   });
 
   it("treats a linked Telegram identity as setup-complete while delivery still waits for an inbound thread", () => {

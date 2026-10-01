@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-18",
+  "order": 100,
+  "item": {
+    "id": "clinical-journal-dates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer medical records in Journal",
+    "summary": "Imported records have clearer summaries, and uncertain import-day dates no longer appear as dated visits.",
+    "details": "Related notes and results from the same source report appear together. Clinical records use readable labels, and records without a clinical date no longer appear as visits on the import day. Original source evidence stays in your vault.",
+    "relevanceTags": ["journal", "medical-records"],
+    "sourcePullRequests": []
+  }
+}

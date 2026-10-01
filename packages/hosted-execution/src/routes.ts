@@ -1,4 +1,8 @@
+export const HOSTED_RUNTIME_POLL_TOOL_PATH = "/api/internal/hosted-execution/polls/tool";
+import type { HostedExecutionResolvedLinqDeliveryRoute } from "./contracts.ts";
+
 export const HOSTED_RUNTIME_MAILBOX_FETCH_PATH = "/api/internal/hosted-mailbox/fetch";
+export const HOSTED_RUNTIME_VOICE_INPUT_PATH = "/api/internal/hosted-mailbox/voice-input";
 export const HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH =
   "/api/internal/hosted-mailbox/payload/fetch";
 export const HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH =
@@ -16,8 +20,89 @@ export const HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH =
   "/api/internal/hosted-runtime/health-data-admission";
 export const HOSTED_RUNTIME_OWNER_RELEASED_PATH =
   "/api/internal/hosted-runtime/owner-released";
+export const HOSTED_RUNTIME_OWNER_RELEASE_ATTEMPT_QUERY =
+  "runtimeAttemptId";
 export const HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY =
   "immediateRecheckRequested";
+
+export interface HostedRuntimeOwnerReleaseQuery {
+  immediateRecheckRequested: boolean;
+  runtimeAttemptId: string | null;
+}
+
+export function buildHostedRuntimeOwnerReleaseSearch(input: {
+  immediateRecheckRequested: boolean;
+  runtimeAttemptId: string;
+}): string {
+  const search = new URLSearchParams();
+  search.set(
+    HOSTED_RUNTIME_OWNER_RELEASE_ATTEMPT_QUERY,
+    requireHostedRuntimeOwnerReleaseAttemptId(input.runtimeAttemptId),
+  );
+  if (input.immediateRecheckRequested) {
+    search.set(HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY, "1");
+  }
+  return `?${search.toString()}`;
+}
+
+export function parseHostedRuntimeOwnerReleaseSearch(
+  value: string,
+): HostedRuntimeOwnerReleaseQuery {
+  if (value === "") {
+    return {
+      immediateRecheckRequested: false,
+      runtimeAttemptId: null,
+    };
+  }
+
+  const search = new URLSearchParams(value);
+  const runtimeAttemptIds = search.getAll(
+    HOSTED_RUNTIME_OWNER_RELEASE_ATTEMPT_QUERY,
+  );
+  const immediateRecheckValues = search.getAll(
+    HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY,
+  );
+  const runtimeAttemptId = runtimeAttemptIds[0] ?? null;
+  const immediateRecheckRequested = immediateRecheckValues[0] === "1";
+  if (
+    runtimeAttemptIds.length > 1
+    || immediateRecheckValues.length > 1
+    || (
+      immediateRecheckValues.length === 1
+      && !immediateRecheckRequested
+    )
+  ) {
+    throw new TypeError("Hosted runtime owner-release query is invalid.");
+  }
+
+  const canonical = runtimeAttemptId === null
+    ? `?${HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY}=1`
+    : buildHostedRuntimeOwnerReleaseSearch({
+        immediateRecheckRequested,
+        runtimeAttemptId,
+      });
+  if (value !== canonical) {
+    throw new TypeError("Hosted runtime owner-release query is invalid.");
+  }
+
+  return {
+    immediateRecheckRequested,
+    runtimeAttemptId,
+  };
+}
+
+function requireHostedRuntimeOwnerReleaseAttemptId(value: string): string {
+  if (
+    value.length === 0
+    || value.length > 192
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)
+  ) {
+    throw new TypeError(
+      "Hosted runtime owner-release runtimeAttemptId must be a bounded opaque identifier.",
+    );
+  }
+  return value;
+}
 export const HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH =
   "/api/internal/hosted-runtime/crypto-context";
 export const HOSTED_RUNTIME_CRYPTO_ROOT_PATH =
@@ -44,10 +129,23 @@ export const HOSTED_RUNTIME_GROUP_TOOL_PATH =
 export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH =
   "/api/internal/hosted-execution/assistant-asks/runtime";
 export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_BODY_MAX_BYTES = 32 * 1_024;
+export const HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH =
+  "/api/internal/hosted-execution/operator-tasks/runtime";
 export const HOSTED_RUNTIME_CODEX_AUTH_PATH =
   "/api/internal/hosted-runtime/codex-auth";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH =
   "/api/internal/hosted-runtime/vault-share/deliver";
+export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD =
+  "continuation";
+export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH = 128;
+export function isHostedRuntimeVaultShareDeliverContinuation(
+  value: unknown,
+): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH
+    && /^[A-Za-z0-9_-]+$/u.test(value);
+}
 export const HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH =
   "/api/internal/hosted-runtime/vault-share/active-kinds";
 export const HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH =
@@ -75,6 +173,7 @@ export type HostedRuntimeLinqDeliveryPosture =
   typeof HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES[number];
 
 export const HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES = [
+  "automation_engagement_paused",
   "operator_disabled",
   "line_flagged",
   "line_critical",
@@ -91,7 +190,54 @@ export const HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH =
   "/api/internal/hosted-runtime/email-egress/recipient";
 export const HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH =
   "/api/internal/hosted-runtime/thread-route/authority";
+export const HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH =
+  "/api/internal/hosted-runtime/member-notification-route";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =
   "/api/internal/device-sync/recovery-sweep";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID =
   "hosted-device-sync-reconciler";
+
+export const HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH =
+  "/api/internal/hosted-execution/image-generation/access";
+
+/** Parses the complete Web-owned route; target and audience must agree. */
+export function parseHostedExecutionResolvedLinqDeliveryRoute(
+  value: unknown,
+): HostedExecutionResolvedLinqDeliveryRoute | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const target = readLinqRouteText(record.target);
+  const conversationThreadId = readLinqRouteText(record.conversationThreadId);
+  const directRecipientPhoneNumber = readLinqRouteText(record.directRecipientPhoneNumber);
+  const fromPhoneNumber = readLinqRouteText(record.fromPhoneNumber);
+  if (
+    !target
+    || (record.targetKind !== "participant" && record.targetKind !== "thread")
+    || typeof record.threadIsDirect !== "boolean"
+    || conversationThreadId === undefined
+    || directRecipientPhoneNumber === undefined
+    || fromPhoneNumber === undefined
+  ) return null;
+  if (
+    (directRecipientPhoneNumber !== null && !directRecipientPhoneNumber.startsWith("+"))
+    || (fromPhoneNumber !== null && !fromPhoneNumber.startsWith("+"))
+  ) return null;
+  if (
+    record.targetKind === "participant"
+    && (!record.threadIsDirect || directRecipientPhoneNumber !== target)
+  ) return null;
+  if (!record.threadIsDirect && directRecipientPhoneNumber !== null) return null;
+  return {
+    conversationThreadId,
+    directRecipientPhoneNumber,
+    fromPhoneNumber,
+    target,
+    targetKind: record.targetKind,
+    threadIsDirect: record.threadIsDirect,
+  };
+}
+
+function readLinqRouteText(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return typeof value === "string" ? value.trim() || undefined : undefined;
+}

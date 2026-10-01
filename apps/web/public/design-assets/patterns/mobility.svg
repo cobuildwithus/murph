@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">
+<!-- Murph Quiver-style mobility illustration. -->
+  <style>
+    .outline { fill: none; stroke: #285747; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .skin { fill: #f1e8dc; }
+    .sage { fill: #6b9485; }
+    .sage-dark { fill: #285747; }
+    .sand { fill: #ddd0bf; }
+    .sienna { fill: #c3714b; }
+  </style>
+  <circle class="skin" cx="74" cy="24" r="10"/>
+  <circle class="outline" cx="74" cy="24" r="10"/>
+  <path class="sage-dark" d="M66 20c2-8 15-9 18 0-5-2-12-2-18 0Z"/>
+  <path class="skin" d="m68 36-13 39 19 10 20-8-12-41Z"/>
+  <path class="sage" d="m68 36-7 22c7 5 17 7 26 2l-5-24Z"/>
+  <path class="outline" d="m68 36-13 39 19 10 20-8-12-41"/>
+  <path class="outline" d="M66 43 43 61 18 67"/>
+  <path class="outline" d="m84 43 20 19 26 9"/>
+  <path class="skin" d="m18 63-8 2 6 7 7-5Z"/>
+  <path class="skin" d="m130 67 9 2-6 7-8-5Z"/>
+  <path class="outline" d="m18 63-8 2 6 7 7-5m107 0 9 2-6 7-8-5"/>
+  <path class="sienna" d="m55 75 19 10-18 16-18 33H21l18-45Z"/>
+  <path class="sand" d="m74 85 20-8 16 15 26 28-11 12-34-26-17-5Z"/>
+  <path class="outline" d="m55 75 19 10 20-8 16 15 26 28-11 12-34-26-17-5-18 16-18 33H21l18-45Z"/>
+  <path class="outline" d="M38 134H13m112-2h14"/>
+  <path class="sage-dark" d="M53 75h41l-3 31-17-5-18 16-8-16Z" opacity=".12"/>
+</svg>

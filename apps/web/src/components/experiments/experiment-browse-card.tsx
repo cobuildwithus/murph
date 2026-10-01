@@ -27,7 +27,7 @@ interface ExperimentBrowseCardProps {
 }
 
 const BROWSE_CARD_IMAGE_SIZES =
-  "(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw";
+  "(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, calc(100vw - 32px)";
 
 export function ExperimentBrowseCard({
   id,

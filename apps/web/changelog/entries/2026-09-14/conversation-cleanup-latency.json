@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-14",
+  "order": 100,
+  "item": {
+    "id": "conversation-cleanup-latency",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting between messages",
+    "summary": "Murph can start working on your next message sooner when background message cleanup is running.",
+    "details": "This improvement applies to private conversations and group chats.",
+    "relevanceTags": ["conversations", "performance"],
+    "sourcePullRequests": [3451]
+  }
+}

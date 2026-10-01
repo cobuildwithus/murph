@@ -4,7 +4,10 @@ import { useSearchParams } from "next/navigation";
 import { JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } from "@murphai/device-syncd/fitbit-migration";
 
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
-import { ConnectDisconnectDialog } from "@/app/(dashboard)/connect/connect-page-dialogs";
+import {
+  ConnectDisconnectDialog,
+  ConnectSourceDialog,
+} from "@/app/(dashboard)/connect/connect-page-dialogs";
 import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { markLocallyDisconnectedSources } from "@/app/(dashboard)/connect/connect-page-helpers";
 import {
@@ -326,6 +329,9 @@ export function ConnectSourceCardStudy({
 }) {
   const searchParams = useSearchParams();
   const studyState = searchParams?.get("connectDisconnectStudy") ?? null;
+  const sourceDialogSource = searchParams?.get("connectSourceDialog") === "fitbit"
+    ? FITBIT_CONNECT_SOURCE
+    : null;
   const disconnectDialogSource = studyState === "source"
     ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) => source.id === "zepp")
       ?.source ?? null
@@ -404,6 +410,27 @@ export function ConnectSourceCardStudy({
         onConfirm={() => Promise.resolve()}
         onOpenChange={() => {}}
       />
+
+      <ConnectSourceDialog
+        inert
+        source={sourceDialogSource}
+        onOpenChange={() => {}}
+      >
+        {sourceDialogSource ? (
+          <div id="connect-source-dialog">
+            <SourceCard
+              authenticated={false}
+              errorMessage={null}
+              pending={false}
+              pendingDisconnect={false}
+              presentation="dialog"
+              source={sourceDialogSource}
+              onDisconnectTargetChange={() => {}}
+              onStartConnection={() => Promise.resolve()}
+            />
+          </div>
+        ) : null}
+      </ConnectSourceDialog>
     </>
   );
 }

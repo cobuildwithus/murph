@@ -1,30 +1,37 @@
 import {
-  decodeHostedBundleBase64,
   sha256HostedBundleHex,
-  sameHostedBundlePayloadRef,
   type HostedExecutionBundleKind,
   type HostedExecutionBundleRef,
-  type HostedExecutionBundleRefIdentity,
 } from "@murphai/runtime-state/node/hosted-bundle-codec";
 
 import {
   buildHostedStorageAad,
 } from "./crypto-context.js";
 import {
-  hostedBundleObjectKey,
   hostedBundleUserPrefix,
   hostedArtifactObjectKey,
+  hostedMediaObjectKey,
   isUserScopedHostedBundleObjectKey,
   hostedRunnerSecretsObjectKey,
 } from "./storage-paths.js";
 import {
+  encryptHostedStorageEnvelope,
   readEncryptedR2Payload,
   writeEncryptedR2Payload,
   type EncryptedR2ObjectBodyLike,
   type EncryptedR2BucketLike,
 } from "./crypto.js";
 
+export interface RuntimeMultipartUpload {
+  uploadId: string;
+  uploadPart(partNumber: number, value: import("./crypto.ts").R2PutValueLike): Promise<{ partNumber: number; etag: string }>;
+  complete(parts: Array<{ partNumber: number; etag: string }>): Promise<unknown>;
+  abort(): Promise<void>;
+}
+
 export interface R2BucketLike extends EncryptedR2BucketLike {
+  createMultipartUpload?(key: string, options?: import("./crypto.ts").R2PutOptionsLike): Promise<RuntimeMultipartUpload>;
+  resumeMultipartUpload?(key: string, uploadId: string): RuntimeMultipartUpload;
   delete?(key: string | string[]): Promise<void>;
   head?(key: string): Promise<Omit<EncryptedR2ObjectBodyLike, "arrayBuffer" | "body"> | null>;
   list?(input: {
@@ -41,13 +48,32 @@ export interface R2BucketLike extends EncryptedR2BucketLike {
 export interface HostedBundleStore {
   deleteBundle(ref: HostedExecutionBundleRef | null): Promise<void>;
   readBundle(ref: HostedExecutionBundleRef | null): Promise<Uint8Array | null>;
-  writeBundle(kind: HostedExecutionBundleKind, plaintext: Uint8Array): Promise<HostedExecutionBundleRef>;
 }
 
 export interface HostedArtifactStore {
   deleteArtifact(sha256: string): Promise<void>;
   readArtifact(sha256: string): Promise<Uint8Array | null>;
-  writeArtifact(sha256: string, plaintext: Uint8Array): Promise<void>;
+  writeArtifact(sha256: string, plaintext: Uint8Array, recovery?: {
+    signal: AbortSignal;
+    beforeRetry(error: unknown): Promise<boolean>;
+  }): Promise<void>;
+}
+
+export type HostedMediaKind = "image" | "video";
+
+export interface HostedMediaDescriptor {
+  byteSize: number;
+  mediaId: string;
+  mediaKind: HostedMediaKind;
+  sha256: string;
+}
+
+export interface HostedMediaStore {
+  deleteMedia(mediaId: string): Promise<void>;
+  readMedia(input: HostedMediaDescriptor): Promise<Uint8Array | null>;
+  writeMedia(input: HostedMediaDescriptor & {
+    plaintext: Uint8Array;
+  }): Promise<void>;
 }
 
 export class MissingHostedBundleError extends Error {
@@ -69,81 +95,6 @@ export function isStoredHostedBundleObjectKey(key: string): boolean {
 
 export interface HostedRunnerSecretsReader {
   readRunnerSecrets(userId: string): Promise<Uint8Array | null>;
-}
-
-export function describeHostedBundleBytesRef(
-  kind: HostedExecutionBundleKind,
-  plaintext: Uint8Array,
-): HostedExecutionBundleRefIdentity {
-  const hash = sha256HostedBundleHex(plaintext);
-
-  return {
-    hash,
-    key: pendingBundleRefKey(kind),
-    size: plaintext.byteLength,
-  };
-}
-
-export function describeHostedBase64BundleRef(input: {
-  kind: HostedExecutionBundleKind;
-  value: string | null;
-}): {
-  plaintext: Uint8Array;
-  ref: HostedExecutionBundleRefIdentity;
-} | null {
-  if (input.value === null) {
-    return null;
-  }
-
-  const plaintext = decodeHostedBundleBase64(input.value) ?? new Uint8Array();
-
-  return {
-    plaintext,
-    ref: describeHostedBundleBytesRef(input.kind, plaintext),
-  };
-}
-
-export async function writeHostedBundleBytesIfChanged(input: {
-  bundleStore: HostedBundleStore;
-  currentRef: HostedExecutionBundleRef | null;
-  kind: HostedExecutionBundleKind;
-  plaintext: Uint8Array;
-}): Promise<HostedExecutionBundleRef> {
-  const nextRef = describeHostedBundleBytesRef(input.kind, input.plaintext);
-
-  if (sameHostedBundlePayloadRef(input.currentRef, nextRef)) {
-    return input.currentRef!;
-  }
-
-  const writtenRef = await input.bundleStore.writeBundle(input.kind, input.plaintext);
-
-  return {
-    ...writtenRef,
-    size: writtenRef.size ?? input.plaintext.byteLength,
-  };
-}
-
-export async function writeHostedBase64BundleIfChanged(input: {
-  bundleStore: HostedBundleStore;
-  currentRef: HostedExecutionBundleRef | null;
-  kind: HostedExecutionBundleKind;
-  value: string | null;
-}): Promise<HostedExecutionBundleRef | null> {
-  const decoded = describeHostedBase64BundleRef({
-    kind: input.kind,
-    value: input.value,
-  });
-
-  if (!decoded) {
-    return null;
-  }
-
-  return writeHostedBundleBytesIfChanged({
-    bundleStore: input.bundleStore,
-    currentRef: input.currentRef,
-    kind: input.kind,
-    plaintext: decoded.plaintext,
-  });
 }
 
 export function createHostedBundleStore(input: {
@@ -197,37 +148,6 @@ export function createHostedBundleStore(input: {
 
       assertHostedBundleMatchesRef(ref, plaintext);
       return plaintext;
-    },
-
-    async writeBundle(kind, plaintext) {
-      const hash = sha256HostedBundleHex(plaintext);
-      const key = await hostedBundleObjectKey({
-        hash,
-        kind,
-        userId: input.userId ?? null,
-      });
-      await writeEncryptedR2Payload({
-        aad: buildHostedStorageAad({
-          hash,
-          key,
-          kind,
-          purpose: "bundle",
-          size: plaintext.byteLength,
-        }),
-        bucket: input.bucket,
-        cryptoKey: input.key,
-        key,
-        keyId: input.keyId,
-        plaintext,
-        scope: "bundle",
-      });
-
-      return {
-        hash,
-        key,
-        size: plaintext.byteLength,
-        updatedAt: new Date().toISOString(),
-      };
     },
   };
 }
@@ -292,25 +212,127 @@ export function createHostedArtifactStore(input: {
       });
     },
 
-    async writeArtifact(sha256, plaintext) {
+    async writeArtifact(sha256, plaintext, recovery) {
       const key = await hostedArtifactObjectKey({
         sha256,
         userId: input.userId,
       });
       await assertHostedArtifactHash(plaintext, sha256);
-      await writeEncryptedR2Payload({
+      const envelope = await encryptHostedStorageEnvelope({
         aad: buildHostedStorageAad({
           key,
           purpose: "artifact",
           sha256,
           userId: input.userId,
         }),
+        key: input.key,
+        keyId: input.keyId,
+        plaintext,
+        scope: "artifact",
+      });
+      // Keep the same authenticated envelope and user-scoped key for both PUTs.
+      // Only this storage effect can be repeated; hash/encryption failures escape.
+      const serializedEnvelope = JSON.stringify(envelope);
+      recovery?.signal.throwIfAborted();
+      try {
+        await input.bucket.put(key, serializedEnvelope);
+      } catch (error) {
+        if (!recovery || !await recovery.beforeRetry(error)) {
+          throw error;
+        }
+        recovery.signal.throwIfAborted();
+        try {
+          await input.bucket.put(key, serializedEnvelope);
+        } catch {
+          // The existing caller/device-sync owner retains the original failure.
+          throw error;
+        }
+      }
+    },
+  };
+}
+
+export function createHostedMediaStore(input: {
+  bucket: R2BucketLike;
+  key: Uint8Array;
+  keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
+  resolveKeyById?: (keyId: string) => Promise<Uint8Array | null>;
+  userId: string;
+}): HostedMediaStore {
+  return {
+    async deleteMedia(mediaId) {
+      if (!input.bucket.delete) {
+        return;
+      }
+
+      const key = await hostedMediaObjectKey({
+        mediaId,
+        userId: input.userId,
+      });
+      await input.bucket.delete(key);
+    },
+
+    async readMedia(media) {
+      const descriptor = normalizeHostedMediaDescriptor(media);
+      const key = await hostedMediaObjectKey({
+        mediaId: descriptor.mediaId,
+        userId: input.userId,
+      });
+      const plaintext = await readEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          byteSize: descriptor.byteSize,
+          key,
+          mediaId: descriptor.mediaId,
+          mediaKind: descriptor.mediaKind,
+          purpose: "media",
+          sha256: descriptor.sha256,
+          userId: input.userId,
+        }),
+        bucket: input.bucket,
+        callerLabel: "Hosted media envelope",
+        cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
+        expectedKeyId: input.keyId,
+        resolveCryptoKeyById: input.resolveKeyById,
+        key,
+        scope: "media",
+      });
+
+      if (plaintext) {
+        await assertHostedMediaBytesMatchDescriptor(plaintext, descriptor);
+      }
+      return plaintext;
+    },
+
+    async writeMedia(media) {
+      const descriptor = normalizeHostedMediaDescriptor(media);
+      if (media.plaintext.byteLength !== descriptor.byteSize) {
+        throw new Error(
+          `Hosted media byte-size mismatch: expected ${descriptor.byteSize}, got ${media.plaintext.byteLength}.`,
+        );
+      }
+      await assertHostedArtifactHash(media.plaintext, descriptor.sha256);
+      const key = await hostedMediaObjectKey({
+        mediaId: descriptor.mediaId,
+        userId: input.userId,
+      });
+      await writeEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          byteSize: descriptor.byteSize,
+          key,
+          mediaId: descriptor.mediaId,
+          mediaKind: descriptor.mediaKind,
+          purpose: "media",
+          sha256: descriptor.sha256,
+          userId: input.userId,
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
         key,
         keyId: input.keyId,
-        plaintext,
-        scope: "artifact",
+        plaintext: media.plaintext,
+        scope: "media",
       });
     },
   };
@@ -343,10 +365,6 @@ export function createHostedRunnerSecretsReader(input: {
       });
     },
   };
-}
-
-function pendingBundleRefKey(kind: HostedExecutionBundleKind): string {
-  return `pending/${kind}/candidate`;
 }
 
 function inferBundleKindFromKey(key: string): HostedExecutionBundleKind {
@@ -398,4 +416,37 @@ async function assertHostedArtifactHash(plaintext: Uint8Array, expectedSha256: s
   if (actualSha256 !== expectedSha256) {
     throw new Error(`Hosted artifact hash mismatch: expected ${expectedSha256}, got ${actualSha256}.`);
   }
+}
+
+function normalizeHostedMediaDescriptor(input: HostedMediaDescriptor): HostedMediaDescriptor {
+  if (!/^[a-f0-9]{64}$/u.test(input.mediaId)) {
+    throw new Error("Hosted media id is invalid.");
+  }
+  if (!/^[a-f0-9]{64}$/u.test(input.sha256)) {
+    throw new Error("Hosted media sha256 is invalid.");
+  }
+  if (input.mediaKind !== "image" && input.mediaKind !== "video") {
+    throw new Error("Hosted media kind is invalid.");
+  }
+  if (!Number.isSafeInteger(input.byteSize) || input.byteSize < 0) {
+    throw new Error("Hosted media byte size is invalid.");
+  }
+  return {
+    byteSize: input.byteSize,
+    mediaId: input.mediaId,
+    mediaKind: input.mediaKind,
+    sha256: input.sha256,
+  };
+}
+
+async function assertHostedMediaBytesMatchDescriptor(
+  plaintext: Uint8Array,
+  descriptor: HostedMediaDescriptor,
+): Promise<void> {
+  if (plaintext.byteLength !== descriptor.byteSize) {
+    throw new Error(
+      `Hosted media byte-size mismatch: expected ${descriptor.byteSize}, got ${plaintext.byteLength}.`,
+    );
+  }
+  await assertHostedArtifactHash(plaintext, descriptor.sha256);
 }

@@ -4,6 +4,7 @@ import {
   isHostedSignupReferralRewardEnabled,
 } from "./signup-referral-policy";
 import {
+  computeHostedReferralRewardUsageDays,
   formatHostedReferralRewardUsageDays,
 } from "./referral-reward-days";
 import {
@@ -87,4 +88,18 @@ export function formatHostedPublicReferralRewardValue(
     ...reward,
     sentenceCase: true,
   });
+}
+
+/**
+ * Compact homepage amount. The section supplies the visible Murph unit and the
+ * shared usage-versus-calendar context around this value.
+ */
+export function formatHostedPublicReferralRewardCompactValue(
+  reward: Pick<
+    HostedPublicReferralReward,
+    "policyCode" | "policyVersion" | "rewardUsdMicros"
+  >,
+): string {
+  const days = computeHostedReferralRewardUsageDays(reward);
+  return String(days);
 }

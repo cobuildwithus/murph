@@ -13,11 +13,21 @@ import {
   computeHostedRuntimeProcessingRecheckDelayMs,
 } from "../runtime-processing-timing.ts";
 import type {
+  RuntimeProcessingDiagnostics,
+  RuntimeProcessingRetryAttribution,
   RuntimeProcessingRetryReason,
 } from "./diagnostics.js";
 
 export const HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA =
   "murph.hosted-runtime-retry.v1";
+
+type RuntimeProcessingRetryLaterInput =
+  RuntimeProcessingRetryAttribution & {
+    analytics?: WorkerAnalyticsEngineDatasetLike | null;
+    diagnostics?: RuntimeProcessingDiagnostics;
+    orchestrationAttemptId?: string;
+    userId: string;
+  };
 
 export function readRuntimeProcessingRetryDelayMs(
   reason: RuntimeProcessingRetryReason,
@@ -46,12 +56,15 @@ export function computeRuntimeProcessingOwnerRecheckAt(input: {
   return computeActiveRuntimeWakeRecheckAt(input.env);
 }
 
-export function createRuntimeProcessingRetryLater(input: {
-  analytics?: WorkerAnalyticsEngineDatasetLike | null;
-  orchestrationAttemptId?: string;
-  reason: RuntimeProcessingRetryReason;
-  userId: string;
-}): HostedRuntimeEnsureProcessingResponse {
+export function createRuntimeProcessingRetryLater(
+  input: RuntimeProcessingRetryLaterInput,
+): HostedRuntimeEnsureProcessingResponse {
+  if (input.diagnostics) {
+    input.diagnostics.details.runtimeProcessingRetryReason = input.reason;
+    if (input.reason === "container_busy") {
+      input.diagnostics.details.runtimeProcessingRetryStage = input.stage;
+    }
+  }
   emitHostedExecutionStructuredLog({
     component: "hosted.runner",
     details: {
@@ -59,6 +72,9 @@ export function createRuntimeProcessingRetryLater(input: {
         ? {}
         : { orchestrationAttemptId: input.orchestrationAttemptId }),
       runtimeProcessingRetryReason: input.reason,
+      ...(input.reason === "container_busy"
+        ? { runtimeProcessingRetryStage: input.stage }
+        : {}),
     },
     level: "warn",
     message: "Hosted runner runtime processing could not be accepted yet.",
@@ -66,8 +82,12 @@ export function createRuntimeProcessingRetryLater(input: {
     userId: input.userId,
   });
   // Analytics Engine remains deliberately identifier-free; correlation lives
-  // only in the structured Workers log above.
-  recordRuntimeProcessingRetry(input.analytics ?? null, input.reason);
+  // in the structured Workers log and the detached runtime-log summary.
+  const attribution: RuntimeProcessingRetryAttribution =
+    input.reason === "container_busy"
+      ? { reason: input.reason, stage: input.stage }
+      : { reason: input.reason };
+  recordRuntimeProcessingRetry(input.analytics ?? null, attribution);
   return {
     kind: "retry_later",
     retryAt: computeRuntimeProcessingRetryAt(input.reason),
@@ -76,15 +96,22 @@ export function createRuntimeProcessingRetryLater(input: {
 
 function recordRuntimeProcessingRetry(
   analytics: WorkerAnalyticsEngineDatasetLike | null,
-  reason: RuntimeProcessingRetryReason,
+  attribution: RuntimeProcessingRetryAttribution,
 ): void {
   if (!analytics) {
     return;
   }
+  const reason = attribution.reason;
   try {
     analytics.writeDataPoint({
       indexes: [reason],
-      blobs: [HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA, reason],
+      blobs: attribution.reason === "container_busy"
+        ? [
+            HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
+            reason,
+            attribution.stage,
+          ]
+        : [HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA, reason],
       doubles: [1, readRuntimeProcessingRetryDelayMs(reason)],
     });
   } catch {
@@ -95,7 +122,7 @@ function recordRuntimeProcessingRetry(
 function computeActiveRuntimeWakeRecheckAt(env: HostedExecutionEnvironment): string {
   return new Date(
     Date.now() + computeHostedRuntimeProcessingRecheckDelayMs({
-      idleCheckpointDelayMs: env.idleCheckpointDelayMs,
+      runnerIdleTtlMs: env.runnerIdleTtlMs,
       runnerCommitTimeoutMs: env.runnerCommitTimeoutMs,
     }),
   ).toISOString();

@@ -27,13 +27,11 @@ import {
   applyStripeSubscriptionUpdated,
   cleanupHostedFamilySponsoredDirectSubscription,
   cleanupHostedStandardCheckoutAndRetireAttempt,
-  cancelHostedPulseTrialCheckoutLoserSubscription,
   HostedStripeFamilySponsoredCleanupPendingError,
   type HostedStripeCheckoutCleanup,
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
   prepareHostedStripeCheckoutCompletion,
-  prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeReversalProviderState,
   isHostedStripeRefundEventType,
   type PreparedHostedStripeCheckoutCompletion,
@@ -64,11 +62,11 @@ import {
   readStripeShouldRetryDirective,
 } from "./billing";
 import {
-  HOSTED_FAMILY_MAX_SEATS,
   HOSTED_PULSE_TRIAL_OFFER,
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPlanCode,
 } from "./billing-plans";
+import { hasHostedMemberOwnActiveAccess } from "./entitlement";
 import {
   sanitizeHostedOnboardingPersistedErrorCode,
   sanitizeHostedOnboardingPersistedErrorMessage,
@@ -84,17 +82,20 @@ import {
   requireHostedStripeApiMode,
 } from "./runtime";
 import {
+  describeHostedStripeError,
+  isHostedStripeProviderError,
   logHostedStripeFailure,
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
 import { scheduleHostedStripeReconciliationFailureAlert } from "./stripe-alert-email";
 import {
+  resolveHostedStripePaymentNotificationCandidate,
+  sendHostedStripePaymentNotificationEmail,
+} from "./stripe-payment-notification-email";
+import {
   HostedStripeCheckoutLoserCleanupPendingError,
   refundHostedExactOrdinaryInvoicePayment,
 } from "./stripe-checkout-loser-cleanup";
-import {
-  isHostedLegacyPulseTrialRetirableStatus,
-} from "./pulse-trial-subscription-cleanup";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -113,6 +114,16 @@ import {
 import {
   sendHostedSubscriptionCancellationEmailForMember,
 } from "./subscription-cancellation-email";
+import {
+  resolveHostedMemberActivationRuntimeWakeTargets,
+  signalHostedMemberActivationRuntimeWakeBestEffortResult,
+} from "./member-activation-runtime-wake";
+import {
+  buildHostedStripeActivationResultJson,
+  parseHostedStripeActivationResultJson,
+  readStoredHostedStripeActivationMailboxItems,
+  type HostedStripeActivationResultJson,
+} from "./stripe-activation-result";
 import {
   HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_TIMEOUT_MS,
   withHostedMemberStripeMutationLock,
@@ -167,6 +178,7 @@ const STRIPE_EVENT_RETRY_DELAYS_MS = [
 ] as const;
 const HOSTED_STRIPE_RUNTIME_RECHECK_PENDING_CODE =
   "HOSTED_STRIPE_RUNTIME_RECHECK_PENDING";
+const STRIPE_EVENT_ERROR_NAME_MAX_LENGTH = 120;
 const STRIPE_EVENT_LOG_STRING_MAX_LENGTH = 500;
 const STRIPE_EVENT_SAFE_PRISMA_META_KEYS = new Set([
   "column",
@@ -186,6 +198,12 @@ const STRIPE_EVENT_RETRYABLE_PRISMA_CODES = new Set([
   "P2037",
 ]);
 const HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY = "hosted_family_legacy_invoice_id";
+
+type HostedStripeEventReconciliationStage =
+  | "event_retrieval"
+  | "event_application"
+  | "post_commit"
+  | "receipt_finalization";
 
 class HostedLegacyFamilyCleanupPendingError extends Error {
   readonly code = "HOSTED_LEGACY_FAMILY_CLEANUP_PENDING";
@@ -215,6 +233,15 @@ class HostedStripeRuntimeRecheckPendingError extends Error {
   constructor(cause: unknown) {
     super("Hosted runtime recheck remains pending.", { cause });
     this.name = "HostedStripeRuntimeRecheckPendingError";
+  }
+}
+
+class HostedStripePaymentNotificationPendingError extends Error {
+  readonly code = "HOSTED_STRIPE_PAYMENT_NOTIFICATION_PENDING";
+
+  constructor(cause: unknown) {
+    super("Stripe payment notification email remains pending.", { cause });
+    this.name = "HostedStripePaymentNotificationPendingError";
   }
 }
 
@@ -401,7 +428,6 @@ async function processHostedStripeEventRecord(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
@@ -415,32 +441,13 @@ async function processHostedStripeEventRecord(
 
   switch (event.type) {
     case "checkout.session.completed":
-      if (processingContext.preparedCheckoutCompletion) {
-        return mapHostedStripeActivationOutcome(
-          await applyStripeCheckoutCompleted(
-            payload as Stripe.Checkout.Session,
-            prisma,
-            dispatchContext,
-            processingContext.preparedCryptoDomainRoots.size > 0
-              ? processingContext.preparedCryptoDomainRoots
-              : undefined,
-            processingContext.preparedCheckoutCompletion,
-          ),
-        );
-      }
       return mapHostedStripeActivationOutcome(
-        processingContext.preparedCryptoDomainRoots.size > 0
-          ? await applyStripeCheckoutCompleted(
-              payload as Stripe.Checkout.Session,
-              prisma,
-              dispatchContext,
-              processingContext.preparedCryptoDomainRoots,
-            )
-          : await applyStripeCheckoutCompleted(
-              payload as Stripe.Checkout.Session,
-              prisma,
-              dispatchContext,
-            ),
+        await applyStripeCheckoutCompleted(
+          payload as Stripe.Checkout.Session,
+          prisma,
+          dispatchContext,
+          processingContext.preparedCheckoutCompletion ?? undefined,
+        ),
       );
     case "checkout.session.expired":
       await applyStripeCheckoutExpired(payload as Stripe.Checkout.Session, prisma);
@@ -457,9 +464,6 @@ async function processHostedStripeEventRecord(
           dispatchContext,
           prisma,
           processingContext.preparedFamilyCryptoDomainRoots,
-          processingContext.preparedCryptoDomainRoots.size > 0
-            ? processingContext.preparedCryptoDomainRoots
-            : undefined,
         ),
       );
     case "subscription_schedule.updated":
@@ -528,18 +532,31 @@ async function processHostedStripeEventRecord(
     case "charge.dispute.closed":
     case "charge.dispute.funds_reinstated":
     case "charge.dispute.funds_withdrawn":
-      if (await applyStripeDisputeUpdated(
-        payload as Stripe.Dispute,
-        dispatchContext,
-        prisma,
-        processingContext.customerId,
-        processingContext.preparedReversalProviderState,
-      ) === "subscription_identity_pending") {
-        throw new HostedStripeSubscriptionIdentityPendingError(
-          "Stripe subscription identity is pending.",
+      {
+        const disputeResult = await applyStripeDisputeUpdated(
+          payload as Stripe.Dispute,
+          dispatchContext,
+          prisma,
+          processingContext.customerId,
+          processingContext.preparedReversalProviderState,
         );
+        if (disputeResult === "subscription_identity_pending") {
+          throw new HostedStripeSubscriptionIdentityPendingError(
+            "Stripe subscription identity is pending.",
+          );
+        }
+        if (typeof disputeResult === "object") {
+          return {
+            ...buildEmptyHostedStripeEventProcessingResult(),
+            activatedMemberId: disputeResult.activatedMemberId,
+            hostedExecutionEventId:
+              disputeResult.hostedExecutionEventId,
+            hostedExecutionMailboxItemId:
+              disputeResult.hostedExecutionMailboxItemId ?? null,
+          };
+        }
+        return buildEmptyHostedStripeEventProcessingResult();
       }
-      return buildEmptyHostedStripeEventProcessingResult();
     default:
       return buildEmptyHostedStripeEventProcessingResult();
   }
@@ -875,6 +892,97 @@ function computeHostedStripeEventNextAttemptAt(attemptCount: number, now = new D
   return new Date(now.getTime() + delayMs);
 }
 
+type HostedStripeEventProcessingResult = Awaited<
+  ReturnType<typeof processHostedStripeEventRecord>
+>;
+
+async function processHostedStripeEventRecordAndRetainActivation(input: {
+  activationReceipt: HostedStripeEventActivationReceipt;
+  event: Stripe.Event;
+  processingContext: HostedStripeEventProcessingContext;
+  transaction: Prisma.TransactionClient;
+}): Promise<HostedStripeEventProcessingResult> {
+  const result = await processHostedStripeEventRecord(
+    input.event,
+    input.processingContext,
+    input.transaction,
+  );
+  const activationResultJson = buildHostedStripeActivationResultJson(result);
+
+  if (activationResultJson.activationMailboxItemIds.length === 0) {
+    return result;
+  }
+
+  const retained = await input.transaction.hostedStripeEvent.updateMany({
+    where: {
+      attemptCount: input.activationReceipt.attemptCount,
+      eventId: input.activationReceipt.eventId,
+      status: HostedStripeEventStatus.processing,
+    },
+    data: {
+      activationResultJson,
+    },
+  });
+  if (retained.count !== 1) {
+    throw new Error(
+      "Stripe event receipt ownership changed before activation commit.",
+    );
+  }
+
+  return result;
+}
+
+async function restoreHostedStripeActivationResult(input: {
+  prisma: PrismaClient;
+  result: HostedStripeEventProcessingResult;
+  storedActivationResultJson: Prisma.JsonValue | null;
+}): Promise<{
+  activationResultJson: HostedStripeActivationResultJson;
+  result: HostedStripeEventProcessingResult;
+}> {
+  const currentActivationResultJson =
+    buildHostedStripeActivationResultJson(input.result);
+  if (currentActivationResultJson.activationMailboxItemIds.length > 0) {
+    return {
+      activationResultJson: currentActivationResultJson,
+      result: input.result,
+    };
+  }
+
+  const storedActivationResultJson = parseHostedStripeActivationResultJson(
+    input.storedActivationResultJson,
+  );
+  if (!storedActivationResultJson) {
+    return {
+      activationResultJson: currentActivationResultJson,
+      result: input.result,
+    };
+  }
+
+  const activations = await readStoredHostedStripeActivationMailboxItems({
+    mailboxItemIds: storedActivationResultJson.activationMailboxItemIds,
+    prisma: input.prisma,
+  });
+  const firstActivation = activations[0] ?? null;
+
+  return {
+    activationResultJson: storedActivationResultJson,
+    result: firstActivation
+      ? {
+          ...input.result,
+          activatedMemberId: firstActivation.userId,
+          activatedMembers: activations.map((activation) => ({
+            activatedMemberId: activation.userId,
+            hostedExecutionEventId: activation.dedupeKey,
+            hostedExecutionMailboxItemId: activation.id,
+          })),
+          hostedExecutionEventId: firstActivation.dedupeKey,
+          hostedExecutionMailboxItemId: firstActivation.id,
+        }
+      : input.result,
+  };
+}
+
 async function processClaimedHostedStripeEvent(
   claimed: NonNullable<Awaited<ReturnType<typeof claimHostedStripeEvent>>>,
   prisma: PrismaClient,
@@ -884,10 +992,12 @@ async function processClaimedHostedStripeEvent(
     attemptCount: claimed.attemptCount,
     eventType: claimed.type,
   });
+  let reconciliationStage: HostedStripeEventReconciliationStage = "event_retrieval";
   let usageCreditEventHandled = false;
 
   try {
     const stripeEvent = await fetchHostedStripeEventForReconciliation(claimed.eventId);
+    reconciliationStage = "event_application";
     const usageCreditReconciliation = await reconcileHostedUsageCreditStripeEvent({
       event: stripeEvent,
       prisma,
@@ -921,6 +1031,7 @@ async function processClaimedHostedStripeEvent(
       ? { memberId: null, result: buildEmptyHostedStripeEventProcessingResult() }
       : directBillingMemberId
       ? await processHostedStripeEventWithVerifiedMemberLock({
+          activationReceipt: claimed,
           memberId: directBillingMemberId,
           preflightProcessingContext,
           prisma,
@@ -929,121 +1040,195 @@ async function processClaimedHostedStripeEvent(
       : await processHostedStripeEventWithDiscoveredMemberLock(
           stripeEvent,
           prisma,
+          claimed,
           preflightProcessingContext,
         );
-    const { memberId: processingMemberId, result } = processing;
-    if (result.newlyActivatedMemberIds.length > 0) {
-      scheduleHostedSignupNotificationEmails({
-        memberIds: result.newlyActivatedMemberIds,
+    reconciliationStage = "post_commit";
+    const { memberId: processingMemberId } = processing;
+    const {
+      activationResultJson,
+      result,
+    } = await restoreHostedStripeActivationResult({
+      prisma,
+      result: processing.result,
+      storedActivationResultJson: claimed.activationResultJson,
+    });
+    const paymentNotificationCandidate =
+      resolveHostedStripePaymentNotificationCandidate({
+        event: stripeEvent,
+        usageCreditEventHandled: usageCreditReconciliation.handled,
+      });
+    let paymentNotificationSent = false;
+    if (paymentNotificationCandidate) {
+      await signalHostedStripeActivationRuntimeWakeBeforePaymentNotification({
         prisma,
+        result,
       });
     }
-    if (result.cleanupPulseTrialStripeSubscriptionId && !processingMemberId) {
-      throw new Error("Pulse Trial cleanup requires a direct billing member.");
-    }
-    if (result.cleanupFamilySponsoredStripeSubscriptionId && !processingMemberId) {
-      throw new Error("Family-sponsored cleanup requires a direct billing member.");
-    }
-    if (result.cleanupFamilySponsoredCheckout && !processingMemberId) {
-      throw new Error("Family-sponsored Checkout cleanup requires a direct billing member.");
-    }
-    if (result.cleanupStandardCheckout && !processingMemberId) {
-      throw new Error("Standard Checkout cleanup requires a direct billing member.");
-    }
-    if (legacyFamilySubscriptionId) {
-      await executeHostedLegacySyntheticFamilyCleanup({
-        invoice: stripeEvent.type === "invoice.paid"
-          ? stripeEvent.data.object as Stripe.Invoice
-          : null,
-        subscriptionId: legacyFamilySubscriptionId,
-      });
-    }
-    const runtimeRecheckMemberIds = new Set(result.runtimeRecheckMemberIds);
-    if (usageCreditReconciliation.handled && usageCreditReconciliation.wakeRequired) {
-      runtimeRecheckMemberIds.add(usageCreditReconciliation.beneficiaryMemberId);
-    }
-    if (
-      claimed.retryDirectPaidRuntimeRecheck
-      && !usageCreditReconciliation.handled
-      && processingMemberId
-      && isHostedDirectPaidRuntimeRecheckEvent(stripeEvent.type)
-      && await hasHostedMemberAcceptedDirectPaidPhase({
-        memberId: processingMemberId,
-        prisma,
-      })
-    ) {
-      runtimeRecheckMemberIds.add(processingMemberId);
-    }
-    for (const memberId of runtimeRecheckMemberIds) {
-      await signalHostedBillingRuntimeRecheckIgnoringInactive({
-        prisma,
-        userId: memberId,
-      });
-    }
-    if (
-      usageCreditReconciliation.handled &&
-      usageCreditReconciliation.purchaseId
-    ) {
-      await materializeHostedGroupSponsorshipIfApplicable({
-        prisma,
-        purchaseId: usageCreditReconciliation.purchaseId,
-      });
-    }
-    if (result.cleanupFamilySponsoredStripeSubscriptionId && processingMemberId) {
-      await cleanupHostedFamilySponsoredDirectSubscription({
-        memberId: processingMemberId,
-        prisma,
-        sourceEventId: `${claimed.eventId}:family-sponsored-cleanup`,
-        subscriptionId: result.cleanupFamilySponsoredStripeSubscriptionId,
-      });
-    }
-    if (result.cleanupFamilySponsoredCheckout && processingMemberId) {
-      await cleanupHostedFamilySponsoredDirectSubscription({
-        checkoutSessionId: result.cleanupFamilySponsoredCheckout.checkoutSessionId,
-        memberId: processingMemberId,
-        prisma,
-        sourceEventId: `${claimed.eventId}:family-sponsored-checkout-cleanup`,
-        subscriptionId: result.cleanupFamilySponsoredCheckout.subscriptionId,
-      });
-    }
-    if (result.cleanupPulseTrialStripeSubscriptionId && processingMemberId) {
-      await cancelHostedPulseTrialCheckoutLoserSubscription({
-        memberId: processingMemberId,
-        prisma,
-        subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
-      });
-    }
-    if (result.cleanupStandardCheckout && processingMemberId) {
-      await cleanupHostedStandardCheckoutAndRetireAttempt({
-        checkoutSessionId: result.cleanupStandardCheckout.checkoutSessionId,
-        memberId: processingMemberId,
-        prisma,
-        subscriptionId: result.cleanupStandardCheckout.subscriptionId,
-      });
-    }
-    if (result.welcomeEmailMemberId) {
-      await sendHostedSignupWelcomeEmailForMemberBestEffort({
-        memberId: result.welcomeEmailMemberId,
-        prisma,
-      });
-    }
-    if (result.subscriptionCancellationEmail) {
-      if (!claimed.subscriptionCancellationEmailSentAt) {
-        const cancellationEmailResult = await sendHostedSubscriptionCancellationEmailForMember({
-          memberId: result.subscriptionCancellationEmail.memberId,
-          prisma,
-          stripeSubscriptionId: result.subscriptionCancellationEmail.stripeSubscriptionId,
-        });
-
-        if (cancellationEmailResult.status === "sent") {
-          await markHostedStripeSubscriptionCancellationEmailSent({
+    const paymentNotificationAttempt = (async () => {
+      if (
+        paymentNotificationCandidate &&
+        !claimed.paymentNotificationEmailSentAt
+      ) {
+        const paymentNotificationOutcome =
+          await sendHostedStripePaymentNotificationEmail({
+            candidate: paymentNotificationCandidate,
+          });
+        if (paymentNotificationOutcome === "sent") {
+          await markHostedStripePaymentNotificationEmailSent({
             eventId: claimed.eventId,
             prisma,
             sentAt: new Date(),
           });
+          paymentNotificationSent = true;
         }
       }
+    })();
+
+    const postCanonicalAttempt = (async () => {
+      if (result.newlyActivatedMemberIds.length > 0) {
+        scheduleHostedSignupNotificationEmails({
+          memberIds: result.newlyActivatedMemberIds,
+          prisma,
+        });
+      }
+      if (
+        result.cleanupFamilySponsoredStripeSubscriptionId &&
+        !processingMemberId
+      ) {
+        throw new Error(
+          "Family-sponsored cleanup requires a direct billing member.",
+        );
+      }
+      if (result.cleanupFamilySponsoredCheckout && !processingMemberId) {
+        throw new Error(
+          "Family-sponsored Checkout cleanup requires a direct billing member.",
+        );
+      }
+      if (result.cleanupStandardCheckout && !processingMemberId) {
+        throw new Error(
+          "Standard Checkout cleanup requires a direct billing member.",
+        );
+      }
+      if (legacyFamilySubscriptionId) {
+        await executeHostedLegacySyntheticFamilyCleanup({
+          invoice: stripeEvent.type === "invoice.paid"
+            ? stripeEvent.data.object as Stripe.Invoice
+            : null,
+          subscriptionId: legacyFamilySubscriptionId,
+        });
+      }
+      const runtimeRecheckMemberIds = new Set(result.runtimeRecheckMemberIds);
+      if (
+        usageCreditReconciliation.handled &&
+        usageCreditReconciliation.wakeRequired
+      ) {
+        runtimeRecheckMemberIds.add(
+          usageCreditReconciliation.beneficiaryMemberId,
+        );
+      }
+      if (
+        claimed.retryDirectPaidRuntimeRecheck
+        && !usageCreditReconciliation.handled
+        && processingMemberId
+        && isHostedDirectPaidRuntimeRecheckEvent(stripeEvent)
+        && await hasHostedMemberActiveDirectPaidAccess({
+          memberId: processingMemberId,
+          prisma,
+        })
+      ) {
+        runtimeRecheckMemberIds.add(processingMemberId);
+      }
+      for (const memberId of runtimeRecheckMemberIds) {
+        await signalHostedBillingRuntimeRecheckIgnoringInactive({
+          prisma,
+          userId: memberId,
+        });
+      }
+      if (
+        usageCreditReconciliation.handled &&
+        usageCreditReconciliation.purchaseId
+      ) {
+        await materializeHostedGroupSponsorshipIfApplicable({
+          prisma,
+          purchaseId: usageCreditReconciliation.purchaseId,
+        });
+      }
+      if (
+        result.cleanupFamilySponsoredStripeSubscriptionId &&
+        processingMemberId
+      ) {
+        await cleanupHostedFamilySponsoredDirectSubscription({
+          memberId: processingMemberId,
+          prisma,
+          sourceEventId: `${claimed.eventId}:family-sponsored-cleanup`,
+          subscriptionId: result.cleanupFamilySponsoredStripeSubscriptionId,
+        });
+      }
+      if (result.cleanupFamilySponsoredCheckout && processingMemberId) {
+        await cleanupHostedFamilySponsoredDirectSubscription({
+          checkoutSessionId:
+            result.cleanupFamilySponsoredCheckout.checkoutSessionId,
+          memberId: processingMemberId,
+          prisma,
+          sourceEventId: `${claimed.eventId}:family-sponsored-checkout-cleanup`,
+          subscriptionId: result.cleanupFamilySponsoredCheckout.subscriptionId,
+        });
+      }
+      if (result.cleanupStandardCheckout && processingMemberId) {
+        await cleanupHostedStandardCheckoutAndRetireAttempt({
+          checkoutSessionId: result.cleanupStandardCheckout.checkoutSessionId,
+          memberId: processingMemberId,
+          prisma,
+          subscriptionId: result.cleanupStandardCheckout.subscriptionId,
+        });
+      }
+      if (result.welcomeEmailMemberId) {
+        await sendHostedSignupWelcomeEmailForMemberBestEffort({
+          memberId: result.welcomeEmailMemberId,
+          prisma,
+        });
+      }
+      if (result.subscriptionCancellationEmail) {
+        if (!claimed.subscriptionCancellationEmailSentAt) {
+          const cancellationEmailResult =
+            await sendHostedSubscriptionCancellationEmailForMember({
+              memberId: result.subscriptionCancellationEmail.memberId,
+              prisma,
+              stripeSubscriptionId:
+                result.subscriptionCancellationEmail.stripeSubscriptionId,
+            });
+
+          if (cancellationEmailResult.status === "sent") {
+            await markHostedStripeSubscriptionCancellationEmailSent({
+              eventId: claimed.eventId,
+              prisma,
+              sentAt: new Date(),
+            });
+          }
+        }
+      }
+    })();
+    const [paymentNotificationResult, postCanonicalResult] =
+      await Promise.allSettled([
+        paymentNotificationAttempt,
+        postCanonicalAttempt,
+      ]);
+    if (
+      postCanonicalResult.status === "rejected" &&
+      postCanonicalResult.reason instanceof HostedStripeRuntimeRecheckPendingError
+    ) {
+      throw postCanonicalResult.reason;
     }
+    if (paymentNotificationResult.status === "rejected") {
+      throw new HostedStripePaymentNotificationPendingError(
+        paymentNotificationResult.reason,
+      );
+    }
+    if (postCanonicalResult.status === "rejected") {
+      throw postCanonicalResult.reason;
+    }
+    reconciliationStage = "receipt_finalization";
     const completed = await prisma.hostedStripeEvent.updateMany({
       where: {
         attemptCount: claimed.attemptCount,
@@ -1051,7 +1236,7 @@ async function processClaimedHostedStripeEvent(
         status: HostedStripeEventStatus.processing,
       },
       data: {
-        activationResultJson: buildHostedStripeActivationResultJson(result),
+        activationResultJson,
         claimExpiresAt: null,
         lastErrorCode: null,
         lastErrorMessage: null,
@@ -1070,6 +1255,8 @@ async function processClaimedHostedStripeEvent(
       hostedExecutionEventScheduled: Boolean(result.hostedExecutionEventId),
       subscriptionCancellationEmailCandidate:
         Boolean(result.subscriptionCancellationEmail),
+      paymentNotificationCandidate: Boolean(paymentNotificationCandidate),
+      paymentNotificationSent,
       usageCreditGranted:
         usageCreditReconciliation.handled && usageCreditReconciliation.granted,
       welcomeEmailCandidate: Boolean(result.welcomeEmailMemberId),
@@ -1103,6 +1290,7 @@ async function processClaimedHostedStripeEvent(
       !(error instanceof HostedStripeFamilySponsoredCleanupPendingError) &&
       !(error instanceof HostedStripeSubscriptionIdentityPendingError) &&
       !(error instanceof HostedStripeEventRetrieveRetryableError) &&
+      !(error instanceof HostedStripePaymentNotificationPendingError) &&
       !(error instanceof HostedStripeRuntimeRecheckPendingError) &&
       !isHostedStripeEffectPendingError(error) &&
       !usageCreditEventHandled &&
@@ -1115,6 +1303,7 @@ async function processClaimedHostedStripeEvent(
       eventId: claimed.eventId,
       eventType: claimed.type,
       poisoned,
+      stage: reconciliationStage,
     });
     if (claimed.attemptCount === 1) {
       scheduleHostedStripeReconciliationFailureAlert({
@@ -1159,14 +1348,14 @@ async function processClaimedHostedStripeEvent(
   }
 }
 
-function isHostedDirectPaidRuntimeRecheckEvent(type: Stripe.Event.Type): boolean {
-  return type === "invoice.paid"
-    || type === "customer.subscription.created"
-    || type === "customer.subscription.updated"
-    || type === "customer.subscription.resumed";
+function isHostedDirectPaidRuntimeRecheckEvent(event: Stripe.Event): boolean {
+  return event.type === "invoice.paid"
+    || event.type === "customer.subscription.created"
+    || event.type === "customer.subscription.updated"
+    || event.type === "customer.subscription.resumed";
 }
 
-async function hasHostedMemberAcceptedDirectPaidPhase(input: {
+async function hasHostedMemberActiveDirectPaidAccess(input: {
   memberId: string;
   prisma: PrismaClient;
 }): Promise<boolean> {
@@ -1175,14 +1364,20 @@ async function hasHostedMemberAcceptedDirectPaidPhase(input: {
       id: input.memberId,
     },
     select: {
+      billingStatus: true,
       billingRef: {
         select: {
           currentBillingPhase: true,
         },
       },
+      suspendedAt: true,
     },
   });
-  return member?.billingRef?.currentBillingPhase === "paid";
+  return Boolean(
+    member
+    && member.billingRef?.currentBillingPhase === "paid"
+    && hasHostedMemberOwnActiveAccess(member),
+  );
 }
 
 function isHostedStripeEventOperationallyRetryableError(
@@ -1266,6 +1461,7 @@ function unwrapHostedStripeOperationalError(error: unknown): unknown {
 async function processHostedStripeEventWithDiscoveredMemberLock(
   stripeEvent: Stripe.Event,
   prisma: PrismaClient,
+  activationReceipt: HostedStripeEventActivationReceipt,
   preflightProcessingContext?: HostedStripeEventProcessingContext,
 ): Promise<{
   memberId: string | null;
@@ -1280,6 +1476,7 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
   );
   if (discoveredMemberId) {
     return processHostedStripeEventWithVerifiedMemberLock({
+      activationReceipt,
       memberId: discoveredMemberId,
       preflightProcessingContext: processingContext,
       prisma,
@@ -1317,20 +1514,22 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
   return {
     memberId: null,
     result: await prisma.$transaction(
-      (transaction) => processHostedStripeEventRecord(
-        stripeEvent,
-        {
+      (transaction) => processHostedStripeEventRecordAndRetainActivation({
+        activationReceipt,
+        event: stripeEvent,
+        processingContext: {
           ...processingContext,
           preparedFamilyCryptoDomainRoots,
         },
         transaction,
-      ),
+      }),
       HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     ),
   };
 }
 
 type HostedStripeEventWithVerifiedMemberLockInput = {
+  activationReceipt: HostedStripeEventActivationReceipt;
   memberId: string;
   preflightProcessingContext?: HostedStripeEventProcessingContext;
   prisma: PrismaClient;
@@ -1340,6 +1539,11 @@ type HostedStripeEventWithVerifiedMemberLockInput = {
 type HostedStripeEventWithVerifiedMemberLockResult = {
   memberId: string;
   result: Awaited<ReturnType<typeof processHostedStripeEventRecord>>;
+};
+
+type HostedStripeEventActivationReceipt = {
+  attemptCount: number;
+  eventId: string;
 };
 
 async function processHostedStripeEventWithVerifiedMemberLock(
@@ -1416,40 +1620,18 @@ async function processHostedStripeEventWithVerifiedMemberLockCore(
       if (processingMemberId !== input.memberId) {
         throw new Error("Canonical Stripe billing ownership changed before processing.");
       }
-      return processHostedStripeEventRecord(
-        input.stripeEvent,
+      return processHostedStripeEventRecordAndRetainActivation({
+        activationReceipt: input.activationReceipt,
+        event: input.stripeEvent,
         processingContext,
         transaction,
-      );
+      });
     },
   });
   return {
     memberId: input.memberId,
     result,
   };
-}
-
-function hostedStripeEventMayActivateDirectMember(
-  stripeEvent: Stripe.Event,
-  canonicalSubscription: Stripe.Subscription | null,
-): boolean {
-  if (stripeEvent.type === "invoice.paid") {
-    return true;
-  }
-  if (stripeEvent.type === "checkout.session.completed") {
-    const session = stripeEvent.data.object as Stripe.Checkout.Session;
-    return parseHostedBillingCheckoutOffer(session.metadata?.checkoutOffer)
-      === HOSTED_PULSE_TRIAL_OFFER;
-  }
-  if (stripeEvent.type.startsWith("customer.subscription.")) {
-    const subscription = canonicalSubscription
-      ?? (stripeEvent.data.object as Stripe.Subscription);
-    return parseHostedBillingCheckoutOffer(
-      subscription.metadata?.checkoutOffer,
-    ) === HOSTED_PULSE_TRIAL_OFFER
-      && isHostedLegacyPulseTrialRetirableStatus(subscription.status);
-  }
-  return false;
 }
 
 function hostedStripeEventNeedsPreflightProcessingContext(
@@ -1472,18 +1654,9 @@ async function prepareHostedStripeEventCryptoDomainRoots(input: {
 }): Promise<PreparedHostedCryptoDomainRootCandidates> {
   if (
     input.canonicalSubscription?.metadata.kind === HOSTED_FAMILY_STRIPE_METADATA_KIND
-    || !hostedStripeEventMayActivateDirectMember(
-      input.stripeEvent,
-      input.canonicalSubscription,
-    )
+    || input.stripeEvent.type !== "invoice.paid"
   ) {
     return new Map();
-  }
-  if (input.stripeEvent.type === "checkout.session.completed") {
-    return prepareHostedStripeDirectMemberActivationCrypto({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
   }
   return prepareHostedCryptoDomainRootCandidates({
     prisma: input.prisma,
@@ -1507,29 +1680,70 @@ async function markHostedStripeSubscriptionCancellationEmailSent(input: {
   });
 }
 
+async function markHostedStripePaymentNotificationEmailSent(input: {
+  eventId: string;
+  prisma: PrismaClient;
+  sentAt: Date;
+}): Promise<void> {
+  await input.prisma.hostedStripeEvent.updateMany({
+    where: {
+      eventId: input.eventId,
+      paymentNotificationEmailSentAt: null,
+    },
+    data: {
+      paymentNotificationEmailSentAt: input.sentAt,
+    },
+  });
+}
+
+type HostedStripeEventReconciliationErrorLogDetails = {
+  errorCode?: string;
+  errorMessage?: string;
+  prismaClientVersion?: string;
+  prismaCode?: string;
+  prismaMessage?: string;
+  prismaMeta?: Record<string, unknown>;
+  stripeCode?: string;
+  stripeDeclineCode?: string;
+  stripeParam?: string;
+  stripeRawType?: string;
+  stripeRequestId?: string;
+  stripeStatusCode?: number;
+  stripeType?: string;
+};
+
 function logHostedStripeEventReconciliationFailure(input: {
   attemptCount: number;
   error: unknown;
   eventId: string;
   eventType: string;
   poisoned: boolean;
+  stage: HostedStripeEventReconciliationStage;
 }): void {
   console.error("Hosted Stripe event reconciliation failed.", {
     attemptCount: input.attemptCount,
-    errorName: deriveHostedOnboardingTimingErrorName(input.error),
+    errorName:
+      sanitizeHostedOnboardingLogString(
+        deriveHostedOnboardingTimingErrorName(input.error),
+        STRIPE_EVENT_ERROR_NAME_MAX_LENGTH,
+      ) ?? "UnknownError",
     eventIdSuffix: input.eventId.slice(-6),
     eventType: sanitizeHostedOnboardingLogString(
       input.eventType,
       STRIPE_EVENT_LOG_STRING_MAX_LENGTH,
     ) ?? "unknown",
     poisoned: input.poisoned,
+    stage: input.stage,
     ...describeHostedStripeEventReconciliationErrorForLog(input.error),
   });
 }
 
 function describeHostedStripeEventReconciliationErrorForLog(
   error: unknown,
-): Record<string, unknown> {
+): HostedStripeEventReconciliationErrorLogDetails {
+  const classification =
+    describeHostedStripeEventReconciliationErrorClassificationForLog(error);
+
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     const prismaMessage = sanitizeHostedOnboardingLogString(
       error.message,
@@ -1538,6 +1752,7 @@ function describeHostedStripeEventReconciliationErrorForLog(
     const prismaMeta = sanitizeHostedStripeEventPrismaMeta(error.meta);
 
     return {
+      ...classification,
       errorCode: error.code,
       prismaClientVersion: error.clientVersion,
       prismaCode: error.code,
@@ -1553,6 +1768,7 @@ function describeHostedStripeEventReconciliationErrorForLog(
     );
 
     return {
+      ...classification,
       ...(typeof error.errorCode === "string" && error.errorCode
         ? { errorCode: error.errorCode, prismaCode: error.errorCode }
         : {}),
@@ -1567,7 +1783,58 @@ function describeHostedStripeEventReconciliationErrorForLog(
     ? sanitizeHostedOnboardingLogString(error.message, STRIPE_EVENT_LOG_STRING_MAX_LENGTH)
     : sanitizeHostedOnboardingLogString(String(error), STRIPE_EVENT_LOG_STRING_MAX_LENGTH);
 
-  return errorMessage ? { errorMessage } : {};
+  return {
+    ...classification,
+    ...(errorMessage ? { errorMessage } : {}),
+  };
+}
+
+function describeHostedStripeEventReconciliationErrorClassificationForLog(
+  error: unknown,
+): HostedStripeEventReconciliationErrorLogDetails {
+  const directFields = describeHostedStripeError(error);
+  const providerError = findHostedStripeEventProviderError(error);
+  const providerFields = providerError === null
+    ? null
+    : describeHostedStripeError(providerError);
+
+  return {
+    ...(directFields.code ? { errorCode: directFields.code } : {}),
+    ...(providerFields?.type ? { stripeType: providerFields.type } : {}),
+    ...(providerFields?.rawType ? { stripeRawType: providerFields.rawType } : {}),
+    ...(providerFields?.code ? { stripeCode: providerFields.code } : {}),
+    ...(providerFields?.declineCode
+      ? { stripeDeclineCode: providerFields.declineCode }
+      : {}),
+    ...(providerFields?.param ? { stripeParam: providerFields.param } : {}),
+    ...(providerFields && providerFields.statusCode !== null
+      ? { stripeStatusCode: providerFields.statusCode }
+      : {}),
+    ...(providerFields?.requestId
+      ? { stripeRequestId: providerFields.requestId }
+      : {}),
+  };
+}
+
+function findHostedStripeEventProviderError(error: unknown): unknown | null {
+  if (isHostedStripeProviderError(error)) {
+    return error;
+  }
+
+  const cause = readHostedStripeEventDirectCause(error);
+  return isHostedStripeProviderError(cause) ? cause : null;
+}
+
+function readHostedStripeEventDirectCause(error: unknown): unknown {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  try {
+    return Reflect.get(error, "cause");
+  } catch {
+    return null;
+  }
 }
 
 function sanitizeHostedStripeEventPrismaMeta(meta: unknown): Record<string, unknown> | null {
@@ -1760,7 +2027,6 @@ function mapHostedStripeActivationOutcome(
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
     cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
-    cleanupPulseTrialStripeSubscriptionId?: string | null;
     cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
     hostedExecutionEventId: string | null;
     hostedExecutionMailboxItemId?: string | null;
@@ -1773,7 +2039,6 @@ function mapHostedStripeActivationOutcome(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
@@ -1789,8 +2054,6 @@ function mapHostedStripeActivationOutcome(
       outcome.cleanupFamilySponsoredCheckout ?? null,
     cleanupFamilySponsoredStripeSubscriptionId:
       outcome.cleanupFamilySponsoredStripeSubscriptionId ?? null,
-    cleanupPulseTrialStripeSubscriptionId:
-      outcome.cleanupPulseTrialStripeSubscriptionId ?? null,
     cleanupStandardCheckout: outcome.cleanupStandardCheckout ?? null,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
     hostedExecutionMailboxItemId:
@@ -1802,46 +2065,30 @@ function mapHostedStripeActivationOutcome(
   };
 }
 
-function buildHostedStripeActivationResultJson(result: {
-  activatedMemberId: string | null;
-  activatedMembers: HostedStripeActivatedMemberOutcome[];
-  hostedExecutionEventId: string | null;
-  hostedExecutionMailboxItemId: string | null;
-}): Prisma.InputJsonValue {
-  const explicitActivations = result.activatedMembers.filter(
-    (activation): activation is HostedStripeActivatedMemberOutcome & {
-      activatedMemberId: string;
-      hostedExecutionEventId: string;
-    } => Boolean(activation.activatedMemberId && activation.hostedExecutionEventId),
+async function signalHostedStripeActivationRuntimeWakeBeforePaymentNotification(
+  input: {
+    prisma: PrismaClient;
+    result: {
+      activatedMemberId: string | null;
+      activatedMembers: HostedStripeActivatedMemberOutcome[];
+      hostedExecutionEventId: string | null;
+      hostedExecutionMailboxItemId: string | null;
+    };
+  },
+): Promise<void> {
+  const activationTargets = resolveHostedMemberActivationRuntimeWakeTargets(
+    input.result,
   );
-  const activations = explicitActivations.length > 0
-    ? explicitActivations
-    : result.activatedMemberId && result.hostedExecutionEventId
-    ? [{
-        activatedMemberId: result.activatedMemberId,
-        hostedExecutionEventId: result.hostedExecutionEventId,
-        hostedExecutionMailboxItemId:
-          result.hostedExecutionMailboxItemId,
-      }]
-    : [];
 
-  const activationMailboxItemIds = activations.map((activation) => {
-    const mailboxItemId = activation.hostedExecutionMailboxItemId;
-    if (!mailboxItemId) {
-      throw new Error(
-        "Stripe activation completion requires an exact mailbox pointer.",
-      );
-    }
-    return mailboxItemId;
-  });
-  if (activationMailboxItemIds.length > HOSTED_FAMILY_MAX_SEATS) {
-    throw new Error("Stripe activation completion exceeds the Family seat limit.");
+  for (const activationTarget of activationTargets) {
+    await signalHostedMemberActivationRuntimeWakeBestEffortResult({
+      hostedExecutionEventId: activationTarget.hostedExecutionEventId,
+      mailboxItemId: activationTarget.hostedExecutionMailboxItemId,
+      memberId: activationTarget.memberId,
+      prisma: input.prisma,
+      source: "stripe.webhook.activation",
+    });
   }
-
-  return {
-    activationMailboxItemIds,
-    schema: "hosted.stripe.activation-result.v1",
-  };
 }
 
 function mapHostedStripeSubscriptionUpdateOutcome(
@@ -1850,7 +2097,6 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
     cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
-    cleanupPulseTrialStripeSubscriptionId?: string | null;
     cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
     hostedExecutionEventId?: string | null;
     hostedExecutionMailboxItemId?: string | null;
@@ -1864,7 +2110,6 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
@@ -1880,8 +2125,6 @@ function mapHostedStripeSubscriptionUpdateOutcome(
       outcome?.cleanupFamilySponsoredCheckout ?? null,
     cleanupFamilySponsoredStripeSubscriptionId:
       outcome?.cleanupFamilySponsoredStripeSubscriptionId ?? null,
-    cleanupPulseTrialStripeSubscriptionId:
-      outcome?.cleanupPulseTrialStripeSubscriptionId ?? null,
     cleanupStandardCheckout: outcome?.cleanupStandardCheckout ?? null,
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
     hostedExecutionMailboxItemId:
@@ -1899,7 +2142,6 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
@@ -1913,7 +2155,6 @@ function buildEmptyHostedStripeEventProcessingResult(): {
     activatedMembers: [],
     cleanupFamilySponsoredCheckout: null,
     cleanupFamilySponsoredStripeSubscriptionId: null,
-    cleanupPulseTrialStripeSubscriptionId: null,
     cleanupStandardCheckout: null,
     hostedExecutionEventId: null,
     hostedExecutionMailboxItemId: null,

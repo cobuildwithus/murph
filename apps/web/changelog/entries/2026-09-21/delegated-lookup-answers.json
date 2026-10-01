@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-21",
+  "order": 100,
+  "item": {
+    "id": "delegated-lookup-answers",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Answers after a delegated lookup",
+    "summary": "When you ask Murph to delegate a lookup, it waits for the result before finishing its answer.",
+    "details": "Independent saves during onboarding still happen in the background so the conversation can continue. If the lookup cannot finish, Murph explains the blocker.",
+    "relevanceTags": [
+      "conversations"
+    ],
+    "sourcePullRequests": [
+      3642
+    ]
+  }
+}

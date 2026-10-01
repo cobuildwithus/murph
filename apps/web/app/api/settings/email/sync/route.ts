@@ -11,6 +11,7 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { enqueueHostedMemberChannelsUpdatedTx } from "@/src/lib/hosted-onboarding/member-channel-sync";
+import { acquireHostedLinqParticipantEmailLockTx } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
   extractHostedPrivyVerifiedEmailAccount,
 } from "@/src/lib/hosted-onboarding/privy-shared";
@@ -23,6 +24,7 @@ import {
   HostedSignupWelcomeEmailError,
   sendHostedSignupWelcomeEmailForRecentMember,
 } from "@/src/lib/hosted-onboarding/signup-welcome-email";
+import { ensureHostedMemberChannelWelcome } from "@/src/lib/hosted-onboarding/channel-welcome";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
@@ -54,6 +56,7 @@ export const POST = withJsonError(async (request: Request) => {
     prisma,
   });
   const channelSyncDispatch = await prisma.$transaction(async (tx) => {
+    await acquireHostedLinqParticipantEmailLockTx({ emailAddress: verifiedEmail.address, tx });
     await lockHostedMemberRow(tx, auth.member.id);
     const currentAuthorization = await readHostedMemberEmailAuthorization({
       memberId: auth.member.id,
@@ -87,6 +90,11 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   await sendSettingsEmailSyncWelcomeEmailBestEffort({
+    memberId: auth.member.id,
+    prisma,
+  });
+  await ensureHostedMemberChannelWelcome({
+    channel: "email",
     memberId: auth.member.id,
     prisma,
   });

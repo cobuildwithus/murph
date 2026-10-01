@@ -23,7 +23,6 @@ import { normalizeNullableString } from "./shared";
 
 const HOSTED_LINQ_CONTACT_CARD_LINE_LIMIT = 50;
 const MURPH_CONTACT_CARD_FIRST_NAME = "Murph";
-const MURPH_CONTACT_CARD_DEFAULT_ORIGIN = "https://www.withmurph.ai";
 const MURPH_CONTACT_CARD_DEFAULT_IMAGE_URL =
   "https://www.withmurph.ai/murph_headshot.png";
 const MURPH_CONTACT_CARD_IMAGE_PATH = "/murph_headshot.png";
@@ -319,18 +318,6 @@ function isCurrentMurphContactCard(card: HostedLinqContactCard): boolean {
   return card.firstName === MURPH_CONTACT_CARD_FIRST_NAME;
 }
 
-/**
- * Absolute URL for one of our own public contact-card avatar assets. Anchored
- * to the operator-configured public base URL (canonical production host as
- * the fallback), never to request-derived origins, so a hostile Host header
- * can not steer the server-side photo fetch.
- */
-export function resolveMurphContactCardAssetUrl(assetPath: string): string {
-  const publicBaseUrl = getHostedOnboardingEnvironment().publicBaseUrl
-    ?? MURPH_CONTACT_CARD_DEFAULT_ORIGIN;
-  return new URL(assetPath, `${publicBaseUrl}/`).toString();
-}
-
 function getMurphContactCardImageUrl(): string | null {
   const publicBaseUrl = getHostedOnboardingEnvironment().publicBaseUrl;
   if (!publicBaseUrl) {
@@ -448,6 +435,23 @@ export type MurphHostedLinqContactCardVcfPhoto = {
   base64: string;
   type: "JPEG" | "PNG";
 };
+
+export function encodeMurphHostedLinqContactCardVcfPhoto(input: {
+  bytes: Uint8Array;
+  type: MurphHostedLinqContactCardVcfPhoto["type"];
+}): MurphHostedLinqContactCardVcfPhoto | null {
+  if (
+    input.bytes.byteLength === 0
+    || input.bytes.byteLength > MURPH_CONTACT_CARD_VCF_PHOTO_MAX_BYTES
+  ) {
+    return null;
+  }
+
+  return {
+    base64: Buffer.from(input.bytes).toString("base64"),
+    type: input.type,
+  };
+}
 
 /**
  * vCard 3.0 with CRLF line endings and 75-char folding so iMessage renders it
@@ -576,14 +580,10 @@ export async function fetchMurphHostedLinqContactCardVcfPhoto(input: {
     if (!type) {
       return null;
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength === 0 || bytes.byteLength > MURPH_CONTACT_CARD_VCF_PHOTO_MAX_BYTES) {
-      return null;
-    }
-    return {
-      base64: Buffer.from(bytes).toString("base64"),
+    return encodeMurphHostedLinqContactCardVcfPhoto({
+      bytes: new Uint8Array(await response.arrayBuffer()),
       type,
-    };
+    });
   } catch {
     return null;
   }

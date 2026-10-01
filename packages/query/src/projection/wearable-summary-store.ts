@@ -13,6 +13,11 @@ import {
   normalizeWearableProviders,
   wearableProviderRowKeys,
 } from "./provider-scope.ts";
+import {
+  createWearableSummaryEncoder,
+  decodeWearableSummaryJson,
+  readWearableSummaryShapes,
+} from "./wearable-summary-shapes.ts";
 
 export const QUERY_WEARABLE_SUMMARY_KINDS = [
   "activity",
@@ -51,6 +56,7 @@ export function insertWearableSummaryRows(
   database: DatabaseSync,
   wearableSummaries: readonly QueryWearableSummaryRow[],
 ): void {
+  const encode = createWearableSummaryEncoder(database);
   const insertWearableSummary = database.prepare(`
     INSERT INTO query_wearable_summaries (
       id,
@@ -71,7 +77,7 @@ export function insertWearableSummaryRows(
       row.summaryKind,
       row.summaryDate,
       row.sortRank,
-      row.summaryJson,
+      encode(row.summaryJson),
     );
   });
 }
@@ -103,7 +109,10 @@ export function readWearableSummaryRows(
   });
 
   try {
-    assertQueryProjectionTables(database, location);
+    // Dictionary and rows belong to one generation, even during a concurrent
+    // publication. Closing this read-only connection ends its read transaction.
+    database.exec("BEGIN");
+    assertQueryProjectionTables(database, location, "wearable");
 
     return {
       providerFilterWasProvided,
@@ -161,6 +170,7 @@ function readRows(
     );
   }
 
+  const shapes = readWearableSummaryShapes(database);
   const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
 
   return database.prepare(`
@@ -175,7 +185,10 @@ function readRows(
     FROM query_wearable_summaries
     ${whereSql}
     ORDER BY summary_kind ASC, summary_date DESC, sort_rank ASC
-  `).all(...parameters).map(decodeQueryWearableSummaryRow);
+  `).all(...parameters).map((row) => {
+    const decoded = decodeQueryWearableSummaryRow(row);
+    return { ...decoded, summaryJson: decodeWearableSummaryJson(decoded.summaryJson, shapes) };
+  });
 }
 
 function decodeQueryWearableSummaryRow(row: SqliteRow): QueryWearableSummaryRow {

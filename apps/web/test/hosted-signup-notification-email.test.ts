@@ -10,6 +10,18 @@ const nextServerMocks = vi.hoisted(() => ({
   after: vi.fn<(task: () => Promise<void>) => void>(),
 }));
 
+// Row fixtures retain their state-based access decisions; the PostgreSQL
+// proof exercises the database-filtered boolean gate.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
+
 vi.mock("next/server", () => ({
   after: nextServerMocks.after,
 }));
@@ -22,9 +34,15 @@ const mocks = vi.hoisted(() => ({
       findUnique: vi.fn(),
     },
   },
+  readHostedLinqProductionCanaryMemberId: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberSignupNotificationContext: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-production-canary", () => ({
+  readHostedLinqProductionCanaryMemberId:
+    mocks.readHostedLinqProductionCanaryMemberId,
 }));
 
 vi.mock("@/src/lib/prisma", async () => {
@@ -65,6 +83,7 @@ describe("hosted signup notification email", () => {
       suspendedAt: null,
       threadContainer: null,
     });
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: "active",
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -180,6 +199,36 @@ describe("hosted signup notification email", () => {
     });
   });
 
+  it("skips the configured production canary before claiming or sending", async () => {
+    const fetchMock: typeof fetch = async () => {
+      throw new Error("fetch should not be called");
+    };
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue("member_123");
+    const env = {
+      HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER: "+15551234567",
+      HOSTED_SIGNUP_NOTIFICATION_EMAILS: "founder@example.com",
+      HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph <welcome@example.com>",
+      RESEND_API_KEY: "re_test",
+    };
+
+    await expect(sendHostedSignupNotificationEmailForMember({
+      env,
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      reason: "production_canary",
+      status: "skipped",
+    });
+
+    expect(mocks.readHostedLinqProductionCanaryMemberId).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
+      source: env,
+    });
+    expect(mocks.prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).not.toHaveBeenCalled();
+  });
+
   it("dedupes repeated recipient emails", async () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
@@ -246,7 +295,6 @@ describe("hosted signup notification email", () => {
         status: "skipped",
       });
 
-      expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
       expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).not.toHaveBeenCalled();
     },
   );
@@ -351,48 +399,11 @@ describe("hosted signup notification email", () => {
     expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).toHaveBeenCalledOnce();
   });
 
-  it("claims and sends the fallback when optional email authorization is unreadable", async () => {
-    mocks.readHostedMemberSignupNotificationContext.mockResolvedValue({
-      context: null,
-      createdAt: new Date("2026-05-01T00:00:00.000Z"),
-    });
-    mocks.readHostedMemberEmailAuthorization.mockRejectedValue(
-      new Error("synthetic email authorization decrypt failure"),
-    );
-    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
-      const payload = JSON.parse(String(init?.body));
-      expect(payload.text).toBe([
-        "New Murph signup.",
-        "",
-        "Signed up: May 1, 2026, 12:00 AM (UTC)",
-        "Activated via: Telegram",
-      ].join("\n"));
-      expect(payload.text).not.toContain("Email:");
-
-      return new Response(JSON.stringify({ id: "resend_email_123" }), {
-        status: 200,
-      });
-    });
-
-    await expect(sendHostedSignupNotificationEmailForMember({
-      activationSurface: "telegram",
-      env: {
-        HOSTED_SIGNUP_NOTIFICATION_EMAILS: "founder@example.com",
-        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph <welcome@example.com>",
-        RESEND_API_KEY: "re_test",
-      },
-      fetchImpl: fetchMock,
-      memberId: "member_123",
-    })).resolves.toMatchObject({ status: "sent" });
-    expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledOnce();
-  });
-
-  it("includes verified email when available", async () => {
+  it("does not read or include member contact details", async () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
-      expect(payload.text).toContain("Email: verified@example.com");
-      expect(payload.text).not.toContain("payer@example.com");
+      expect(payload.text).not.toMatch(/^(?:Email|Phone):/mu);
+      expect(payload.text).not.toContain("member-contact@example.test");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
@@ -403,11 +414,11 @@ describe("hosted signup notification email", () => {
       directPublicSender: null,
       memberId: "member_123",
       stripeCheckoutEmail: {
-        address: "payer@example.com",
+        address: "checkout-contact@example.test",
         collectedAt: new Date("2026-05-01T00:00:00.000Z"),
       },
       verifiedEmail: {
-        address: "verified@example.com",
+        address: "member-contact@example.test",
         lookupKey: "lookup",
         verifiedAt: new Date("2026-05-02T00:00:00.000Z"),
       },
@@ -424,39 +435,7 @@ describe("hosted signup notification email", () => {
     })).resolves.toMatchObject({
       status: "sent",
     });
-  });
-
-  it("falls back to Stripe checkout email", async () => {
-    const fetchMock: typeof fetch = async (_input, init) => {
-      const payload = JSON.parse(String(init?.body));
-      expect(payload.text).toContain("Email: payer@example.com");
-
-      return new Response(JSON.stringify({ id: "resend_email_123" }), {
-        status: 200,
-      });
-    };
-
-    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
-      directPublicSender: null,
-      memberId: "member_123",
-      stripeCheckoutEmail: {
-        address: "payer@example.com",
-        collectedAt: new Date("2026-05-01T00:00:00.000Z"),
-      },
-      verifiedEmail: null,
-    });
-
-    await expect(sendHostedSignupNotificationEmailForMember({
-      env: {
-        HOSTED_SIGNUP_NOTIFICATION_EMAILS: "founder@example.com",
-        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph <welcome@example.com>",
-        RESEND_API_KEY: "re_test",
-      },
-      fetchImpl: fetchMock,
-      memberId: "member_123",
-    })).resolves.toMatchObject({
-      status: "sent",
-    });
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
   });
 
   it("does not throw from the best-effort wrapper when Resend fails", async () => {

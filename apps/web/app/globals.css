@@ -256,6 +256,7 @@
   --color-secondary-hover: var(--secondary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-sage-soft: var(--sage-soft);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -280,6 +281,7 @@
   --popover-foreground: #2d3436;
   --primary: #5a6e32;
   --primary-foreground: #ffffff;
+  --sage-soft: #e5e8da;
   --secondary: #d4c4a8;
   --secondary-hover: #c7b89e;
   --secondary-foreground: #2d3436;
@@ -316,6 +318,7 @@
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
+  --sage-soft: oklch(0.269 0.02 115);
   --secondary: oklch(0.269 0 0);
   --secondary-hover: oklch(0.245 0 0);
   --secondary-foreground: oklch(0.985 0 0);

@@ -13,8 +13,6 @@ export const HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH =
   "/telegram/files/get";
 export const HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH =
   "/telegram/files/download";
-export const HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH =
-  "/generated-images";
 export const HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH =
   "/private-image-urls";
 

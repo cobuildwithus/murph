@@ -1,4 +1,4 @@
-import { rawImportManifestSchema } from '@murphai/contracts'
+import { assessmentResponseSchema, rawImportManifestSchema } from '@murphai/contracts'
 import { Cli, z } from 'incur'
 import { requestIdFromOptions, withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
@@ -10,9 +10,11 @@ import {
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
+import { toAssessmentImportVaultCliError } from '@murphai/vault-usecases/helpers'
 import { loadImportersRuntimeModule } from '@murphai/vault-usecases/runtime'
 import { showAssessmentManifest } from './export-intake-read-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import { assertOrderedDateRange } from './command-factory-primitives.js'
 
 const payloadSchema = z.record(z.string(), z.unknown())
 const intakeSourceSchema = z.enum(['import', 'manual', 'derived'])
@@ -69,6 +71,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
         title: z
           .string()
           .min(1)
+          .max(160)
           .optional()
           .describe('Optional assessment title stored on the imported record.'),
         occurredAt: occurredAtOptionSchema
@@ -80,31 +83,44 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
         source: intakeSourceSchema
           .optional()
           .describe('Optional source label (`import`, `manual`, or `derived`).'),
+        assessmentType: assessmentResponseSchema.shape.assessmentType.optional()
+          .describe('Assessment category, such as clinical-observation or condition-history. Defaults to intake.'),
+        questionnaireSlug: assessmentResponseSchema.shape.questionnaireSlug
+          .describe('Optional stable questionnaire slug.'),
+        relatedId: assessmentResponseSchema.shape.relatedIds
+          .describe('Optional related canonical record id, such as the source event. Repeat --related-id for multiple records.'),
       }),
       output: intakeImportResultSchema,
       async run({ args, options }) {
-        const importers = (await loadImportersRuntimeModule()).createImporters()
-        const result = await importers.importAssessmentResponse({
-          filePath: args.file,
-          vaultRoot: options.vault,
-          title: options.title,
-          occurredAt: await normalizeOccurredAtOption({
-            vault: options.vault,
-            occurredAt: options.occurredAt,
-          }),
-          importedAt: options.importedAt,
-          source: options.source,
-          requestId: requestIdFromOptions(options),
-        })
+        try {
+          const importers = (await loadImportersRuntimeModule()).createImporters()
+          const result = await importers.importAssessmentResponse({
+            filePath: args.file,
+            vaultRoot: options.vault,
+            title: options.title,
+            occurredAt: await normalizeOccurredAtOption({
+              vault: options.vault,
+              occurredAt: options.occurredAt,
+            }),
+            importedAt: options.importedAt,
+            source: options.source,
+            assessmentType: options.assessmentType,
+            questionnaireSlug: options.questionnaireSlug,
+            relatedIds: options.relatedId,
+            requestId: requestIdFromOptions(options),
+          })
 
-        return {
-          vault: options.vault,
-          sourceFile: args.file,
-          rawFile: result.raw.relativePath,
-          manifestFile: result.manifestPath,
-          assessmentId: result.assessment.id,
-          lookupId: result.assessment.id,
-          ledgerFile: result.ledgerPath,
+          return {
+            vault: options.vault,
+            sourceFile: args.file,
+            rawFile: result.raw.relativePath,
+            manifestFile: result.manifestPath,
+            assessmentId: result.assessment.id,
+            lookupId: result.assessment.id,
+            ledgerFile: result.ledgerPath,
+          }
+        } catch (error) {
+          throw toAssessmentImportVaultCliError(error, args.file)
         }
       },
     },
@@ -144,6 +160,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
       }),
       output: listResultSchema,
       async run({ options }) {
+        assertOrderedDateRange(options.from, options.to)
         return healthServices.query.list({
           kind: 'assessment',
           from: options.from,

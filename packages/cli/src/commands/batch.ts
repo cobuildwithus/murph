@@ -1,46 +1,30 @@
 import { Buffer } from 'node:buffer'
 
-import { Cli, z } from 'incur'
+import { Cli, Formatter, z } from 'incur'
 import {
   emptyArgsSchema,
   resolveVaultCliCommandPath,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import {
-  pathSchema,
-  VAULT_CLI_BATCH_MAX_COMMANDS,
   VAULT_CLI_BATCH_RESULT_SCHEMA,
+  VAULT_CLI_BATCH_MAX_COMMANDS,
+  vaultCliBatchCommandErrorSchema,
+  vaultCliBatchCommandResultEnvelopeSchema,
+  vaultCliBatchResultEnvelopeSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
+import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const batchCommandOptionSchema = z.string().min(1)
 
-const batchCommandResultSchema = z.object({
-  index: z.number().int().nonnegative(),
-  argv: z.array(z.string().min(1)),
-  durationMs: z.number().int().nonnegative(),
-  ok: z.boolean(),
-  outputBytes: z.number().int().nonnegative().describe(
-    'UTF-8 byte length of captured child stdout before compact mode may clear stdout.',
-  ),
-  outputChars: z.number().int().nonnegative().describe(
-    'Legacy UTF-16 code-unit length of captured child stdout before compact mode may clear stdout.',
-  ),
-  stdout: z.string(),
-  data: z.unknown().optional(),
-  error: z.object({
-    message: z.string().min(1),
-  }).optional(),
-})
+export const batchRunResultSchema = vaultCliBatchResultEnvelopeSchema
 
-export const batchRunResultSchema = z.object({
-  schema: z.string().min(1),
-  vault: pathSchema,
-  count: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-  commands: z.array(batchCommandResultSchema),
-})
-
-type BatchCommandResult = z.output<typeof batchCommandResultSchema>
+type BatchCommandResult = z.output<
+  typeof vaultCliBatchCommandResultEnvelopeSchema
+>
+type BatchCommandError = z.output<typeof vaultCliBatchCommandErrorSchema>
+type BatchChildRenderedFormat = 'md' | 'toon' | 'yaml'
 
 export function registerBatchCommands(cli: Cli.Cli) {
   cli.command('batch', {
@@ -75,9 +59,14 @@ export function registerBatchCommands(cli: Cli.Cli) {
       }
 
       return {
-        schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
+        schema:
+          VAULT_CLI_BATCH_RESULT_SCHEMA as typeof VAULT_CLI_BATCH_RESULT_SCHEMA,
         vault: options.vault,
         count: commands.length,
+        requested: options.command.length,
+        executed: commands.length,
+        succeeded: commands.filter((command) => command.ok).length,
+        stoppedEarly: commands.length < options.command.length,
         failed: commands.filter((command) => !command.ok).length,
         commands,
       }
@@ -90,7 +79,7 @@ function parseBatchCommandOption(value: string): string[] {
   try {
     parsed = JSON.parse(value)
   } catch {
-    throw new Error('Each --command value must be a JSON array of argv tokens.')
+    return invalidBatchCommand('Each --command value must be a JSON array of argv tokens.')
   }
 
   if (
@@ -98,7 +87,7 @@ function parseBatchCommandOption(value: string): string[] {
     parsed.length === 0 ||
     parsed.some((token) => typeof token !== 'string' || token.length === 0)
   ) {
-    throw new Error(
+    return invalidBatchCommand(
       'Each --command value must be a non-empty JSON array of non-empty string argv tokens.',
     )
   }
@@ -123,29 +112,33 @@ function prepareBatchCommandArgv(argv: readonly string[], vault: string): string
 
 function assertBatchCommandAllowed(argv: readonly string[]) {
   if (hasToken(argv, '--mcp')) {
-    throw new Error('Batch commands cannot run MCP server mode.')
+    return invalidBatchCommand('Batch commands cannot run MCP server mode.')
   }
 
   const commandPath = resolveVaultCliCommandPath(argv)
   const [root, subcommand] = commandPath
 
   if (root === 'batch') {
-    throw new Error('Nested batch commands are not supported.')
+    return invalidBatchCommand('Nested batch commands are not supported.')
   }
 
   if (root === 'onboard') {
-    throw new Error('Batch commands cannot run onboarding setup.')
-  }
-
-  if (root === 'chat' || (root === 'assistant' && subcommand === 'chat')) {
-    throw new Error('Batch commands cannot run interactive assistant chat.')
+    return invalidBatchCommand('Batch commands cannot run onboarding setup.')
   }
 
   const isAssistantRun =
     root === 'run' || (root === 'assistant' && subcommand === 'run')
   if (isAssistantRun) {
-    throw new Error('Batch commands cannot run assistant automation.')
+    return invalidBatchCommand('Batch commands cannot run assistant automation.')
   }
+}
+
+function invalidBatchCommand(message: string): never {
+  throw new VaultCliError('invalid_option', message, {
+    retryable: false,
+    issues: [{ code: 'custom', publicPath: ['command'] }],
+    stage: 'validation',
+  })
 }
 
 async function runBatchCommand(input: {
@@ -158,12 +151,17 @@ async function runBatchCommand(input: {
   const stdout: string[] = []
   const previousExitCode = process.exitCode
   let argv: string[] = []
+  let renderedFormat: BatchChildRenderedFormat | null = null
 
   try {
     argv = prepareBatchCommandArgv(parseBatchCommandOption(input.command), input.vault)
+    renderedFormat = resolveBatchChildRenderedFormat(argv)
+    const executionArgv = renderedFormat
+      ? forceBatchChildJsonOutput(argv)
+      : argv
     process.exitCode = undefined
     const { runMurphCliAction } = await import('../cli-entry.js')
-    await runMurphCliAction(argv, {
+    await runMurphCliAction(executionArgv, {
       argv0: 'vault-cli',
       exit(code) {
         if (code && code !== 0) {
@@ -179,7 +177,11 @@ async function runBatchCommand(input: {
       throw new Error(`Command exited with status ${process.exitCode}.`)
     }
 
-    const output = stdout.join('')
+    const internalOutput = stdout.join('')
+    const parsedInternalOutput = parseJsonOutput(internalOutput)
+    const output = renderedFormat && parsedInternalOutput.ok
+      ? formatBatchChildOutput(parsedInternalOutput.data, renderedFormat)
+      : internalOutput
     const parsedOutput = parseJsonOutput(output)
     return {
       index: input.index,
@@ -192,7 +194,14 @@ async function runBatchCommand(input: {
       ...(parsedOutput.ok ? { data: parsedOutput.data } : {}),
     }
   } catch (error) {
-    const output = stdout.join('')
+    const internalOutput = stdout.join('')
+    const parsedInternalOutput = parseJsonOutput(internalOutput)
+    const output = renderedFormat && parsedInternalOutput.ok
+      ? formatBatchChildOutput(parsedInternalOutput.data, renderedFormat)
+      : internalOutput
+    const parsedOutput = parseJsonOutput(output)
+    const parsedChildError = parseChildCommandError(internalOutput)
+    const childError = parsedChildError?.error ?? projectBatchCommandError(error)
     return {
       index: input.index,
       argv,
@@ -200,14 +209,223 @@ async function runBatchCommand(input: {
       ok: false,
       outputBytes: Buffer.byteLength(output, 'utf8'),
       outputChars: output.length,
-      stdout: output,
-      error: {
-        message: error instanceof Error ? error.message : 'Batch command failed.',
-      },
+      stdout:
+        input.compact && parsedOutput.ok && parsedChildError?.direct === true
+          ? ''
+          : output,
+      error: childError,
     }
   } finally {
     process.exitCode = previousExitCode
   }
+}
+
+function resolveBatchChildRenderedFormat(
+  argv: readonly string[],
+): BatchChildRenderedFormat | null {
+  if (hasBatchChildPresentationMode(argv)) {
+    return null
+  }
+
+  let format: BatchChildRenderedFormat | null = null
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (token === '--') {
+      break
+    }
+    if (token === '--json') {
+      format = null
+      continue
+    }
+    if (token === '--format') {
+      format = batchChildRenderedFormat(argv[index + 1])
+      index += 1
+      continue
+    }
+    if (token?.startsWith('--format=')) {
+      format = batchChildRenderedFormat(token.slice('--format='.length))
+    }
+  }
+
+  return format
+}
+
+function batchChildRenderedFormat(
+  value: string | undefined,
+): BatchChildRenderedFormat | null {
+  return value === 'md' || value === 'toon' || value === 'yaml'
+    ? value
+    : null
+}
+
+function hasBatchChildPresentationMode(argv: readonly string[]): boolean {
+  return (
+    hasToken(argv, '--help') ||
+    hasToken(argv, '-h') ||
+    hasToken(argv, '--llms') ||
+    hasToken(argv, '--llms-full') ||
+    hasToken(argv, '--schema')
+  )
+}
+
+function forceBatchChildJsonOutput(argv: readonly string[]): string[] {
+  const normalizedArgv: string[] = []
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (token === '--') {
+      normalizedArgv.push(...argv.slice(index))
+      break
+    }
+    if (token === '--json' || token?.startsWith('--format=')) {
+      continue
+    }
+    if (token === '--format') {
+      index += 1
+      continue
+    }
+    if (token !== undefined) {
+      normalizedArgv.push(token)
+    }
+  }
+
+  insertDefaultOption(normalizedArgv, ['--format', 'json'])
+  return normalizedArgv
+}
+
+function formatBatchChildOutput(
+  output: unknown,
+  format: BatchChildRenderedFormat,
+): string {
+  const rendered = Formatter.format(output, format)
+  return rendered.endsWith('\n') ? rendered : `${rendered}\n`
+}
+
+function parseChildCommandError(
+  stdout: string,
+): { direct: boolean; error: BatchCommandError } | null {
+  const parsedOutput = parseJsonOutput(stdout)
+  if (!parsedOutput.ok || !parsedOutput.data || typeof parsedOutput.data !== 'object') {
+    return null
+  }
+
+  const record = parsedOutput.data as Record<string, unknown>
+  const childError = record.error ?? record
+  const nativeValidationError = projectNativeValidationError(childError)
+  if (nativeValidationError !== null) {
+    return {
+      direct: childError === record,
+      error: nativeValidationError,
+    }
+  }
+
+  const parsedError = vaultCliBatchCommandErrorSchema.safeParse(childError)
+  return parsedError.success
+    ? {
+        direct: childError === record,
+        error: parsedError.data,
+      }
+    : null
+}
+
+function projectNativeValidationError(
+  value: unknown,
+): BatchCommandError | null {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('code' in value) ||
+    value.code !== 'VALIDATION_ERROR' ||
+    !('fieldErrors' in value) ||
+    !Array.isArray(value.fieldErrors)
+  ) {
+    return null
+  }
+
+  const fieldErrors = value.fieldErrors
+    .flatMap(normalizeNativeValidationFieldError)
+    .slice(0, 12)
+  const omittedFieldCount = value.fieldErrors.length - fieldErrors.length
+  if (omittedFieldCount > 0) {
+    fieldErrors.push({
+      code: 'issues_omitted',
+      message: `${omittedFieldCount} additional validation ${omittedFieldCount === 1 ? 'issue was' : 'issues were'} omitted.`,
+      missing: false,
+      path: '$',
+      received: 'invalid',
+    })
+  }
+
+  const projected = vaultCliBatchCommandErrorSchema.safeParse({
+    code: 'VALIDATION_ERROR',
+    message: 'Invalid command option.',
+    retryable: false,
+    stage: 'validation',
+    ...(fieldErrors.length === 0 ? {} : { fieldErrors }),
+  })
+  return projected.success ? projected.data : null
+}
+
+function normalizeNativeValidationFieldError(
+  value: unknown,
+): Array<{
+  code?: string
+  expected?: string
+  message: string
+  missing: boolean
+  path: string
+  received: 'invalid' | 'missing'
+}> {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('path' in value) ||
+    typeof value.path !== 'string' ||
+    value.path.length === 0 ||
+    value.path.length > 160 ||
+    !/^(?:\$|(?:[A-Za-z_][A-Za-z0-9_-]*|\d+)(?:\.(?:[A-Za-z_][A-Za-z0-9_-]*|\d+))*)$/u.test(value.path)
+  ) {
+    return []
+  }
+
+  const code =
+    'code' in value &&
+    typeof value.code === 'string' &&
+    /^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u.test(value.code)
+      ? value.code
+      : undefined
+  const expected =
+    'expected' in value &&
+    typeof value.expected === 'string' &&
+    /^(?:array|boolean|null|number|object|string|undefined)$/u.test(value.expected)
+      ? value.expected
+      : undefined
+  const missing = 'missing' in value && value.missing === true
+
+  return [{
+    ...(code === undefined ? {} : { code }),
+    ...(expected === undefined ? {} : { expected }),
+    message: missing
+      ? 'Required command option is missing.'
+      : 'Invalid value for this option.',
+    missing,
+    path: value.path,
+    received: missing ? 'missing' : 'invalid',
+  }]
+}
+
+function projectBatchCommandError(
+  error: unknown,
+): BatchCommandError {
+  const projected = vaultCliBatchCommandErrorSchema.safeParse(projectVaultCliError(error))
+  return projected.success
+    ? projected.data
+    : {
+        code: 'UNKNOWN',
+        message: 'The command failed without a safe recoverable detail.',
+        retryable: false,
+        stage: 'command',
+      }
 }
 
 function elapsedMs(startedAt: number): number {

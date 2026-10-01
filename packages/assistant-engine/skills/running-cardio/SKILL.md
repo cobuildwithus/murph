@@ -1,9 +1,9 @@
 ---
 name: running-cardio
 description: >-
-  Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning,
+  Use for running, structured walking workouts, cycling, aerobic-base or Zone 2 work, cardio conditioning,
   low-impact conditioning, cardio around strength or sport, limited-time maintenance,
-  and non-event speed development. For a named event, date, competition category,
+  and non-event speed development. Use daily-activity for ordinary walking breaks and everyday movement targets. For a named event, date, competition category,
   qualifying target, concrete benchmark, or event-specific performance goal, use
   competition-training when registered; otherwise keep support bounded to general
   capacity and preparation rather than event-specific tapering, peaking, race rules,

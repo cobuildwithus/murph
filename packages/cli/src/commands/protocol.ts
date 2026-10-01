@@ -2,6 +2,7 @@ import { Cli, z } from "incur";
 import {
   REGIMEN_KINDS,
   REGIMEN_STATUSES,
+  PROTOCOL_STATUSES,
   type FrontmatterObject,
   type FrontmatterValue,
 } from "@murphai/contracts";
@@ -28,6 +29,7 @@ const protocolSlugSchema = z
 
 const regimenKindSchema = z.enum(REGIMEN_KINDS);
 const regimenStatusSchema = z.enum(REGIMEN_STATUSES);
+const protocolStatusSchema = z.enum(PROTOCOL_STATUSES);
 
 const regimenImportJsonResultSchema = z.object({
   vault: pathSchema,
@@ -220,7 +222,7 @@ export function registerProtocolCommands(
     args: z.object({}),
     description: "List private regimen records.",
     options: withBaseOptions({
-      status: z.string().min(1).optional().describe("Optional regimen status to filter by."),
+      status: regimenStatusSchema.optional().describe("Optional regimen status to filter by."),
       limit: z.number().int().positive().max(200).default(10),
     }),
     output: healthListResultSchema,
@@ -446,6 +448,7 @@ export function registerProtocolCommands(
         manufacturer: context.options.manufacturer,
         note: context.options.note,
         regimenId: context.options.id,
+        requireExistingRegimenId: context.options.id !== undefined,
         relatedConditionId: context.options.relatedConditionId,
         relatedGoalId: context.options.relatedGoalId,
         relatedRegimenId: context.options.relatedRegimenId,
@@ -603,7 +606,7 @@ export function registerProtocolCommands(
     args: z.object({}),
     description: "List private Health Commons-backed protocol adaptations.",
     options: withBaseOptions({
-      status: z.string().min(1).optional().describe("Optional private protocol status to filter by."),
+      status: protocolStatusSchema.optional().describe("Optional private protocol status to filter by."),
       commonsProtocol: z
         .string()
         .min(1)

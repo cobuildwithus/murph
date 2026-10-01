@@ -14,7 +14,6 @@ const SOURCE_ROOTS = [
   'apps/web/app',
   'apps/web/src',
   'packages/assistant-engine/src',
-  'packages/assistantd/src',
   'packages/assistant-runtime/src',
   'packages/cli/src',
   'packages/device-syncd/src',

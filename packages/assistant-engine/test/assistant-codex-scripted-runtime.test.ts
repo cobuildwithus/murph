@@ -1,6 +1,6 @@
+import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createServer, type Server, type ServerResponse } from 'node:http'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -11,6 +11,7 @@ import { crc32, deflateSync } from 'node:zlib'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
+import { buildCalendarEventUrl, compactTableCardV1Bounds, goalMetricTargetSchema } from '@murphai/contracts'
 import {
   listHostedBundleInlineFiles,
   snapshotHostedExecutionContext,
@@ -27,7 +28,8 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
-import { readMemoryDocument } from '@murphai/core'
+import { readMemoryDocument, upsertMemory } from '@murphai/core'
+import { readAssistantCurrentStatePrompt } from '../src/assistant/current-state.ts'
 import {
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
@@ -36,6 +38,26 @@ import type {
   AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+
+import * as codexToolInputContract from '../src/assistant-codex/tool-input-contract.ts'
+import type { AssistantProviderDynamicTool } from '../src/assistant/providers/types.ts'
+import {
+  assertModelVisibleToolContract,
+  CONTRACT_CAPTURE_DONE,
+  queueCodeMetadataCapture,
+  readProviderNativeTools,
+  readVisibleCanonicalSchema,
+} from './support/codex-tool-contract-proof.ts'
+import {
+  delay,
+  prepareScriptedTurnScenario as prepareSharedScriptedTurnScenario,
+  readRecord,
+  readString,
+  SCRIPTED_MODEL,
+  startScriptedResponsesStub,
+  type ScriptedResponse,
+  type ScriptedStub,
+} from './support/codex-scripted-provider.ts'
 
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
@@ -54,13 +76,19 @@ import {
   MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
-  MURPH_GROUP_TOOL,
   MURPH_MEMBER_MEMORY_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL,
+  MURPH_GROUP_FAMILY_TOOLS,
+  MURPH_GROUP_DATA_TOOL,
+  MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
+import {
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+} from '../src/assistant-codex/dynamic-tools/physical-notes.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
@@ -80,6 +108,9 @@ import type {
 import {
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
 } from '../src/assistant/onboarding-first-personal-read-automation.ts'
+import {
+  writeHostedOpenAiMixedModeModelCatalogJson,
+} from './support/codex-model-catalog.ts'
 import { sendAssistantAskContinuationLocal } from '../src/assistant/ask-continuation.ts'
 import { conversationRefFromBinding } from '../src/assistant/conversation-ref.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
@@ -93,7 +124,9 @@ import {
 } from '../src/assistant/group-challenge-response-card-schema.ts'
 import {
   buildAssistantSystemPrompt,
+  buildAssistantSystemPromptLayers,
 } from '../src/assistant/system-prompt.ts'
+import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
 import {
   ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
 } from '../src/assistant/first-contact-welcome.ts'
@@ -110,12 +143,9 @@ import {
 // against a local scripted Responses API stub. Deterministic and free: this is
 // the default-on protocol-contract lane that replaces the deleted
 // MockChildProcess happy-path fakes. Adversarial process behavior (malformed
-// events, stale ids, poisoning) stays in assistant-codex-runtime.test.ts where
-// a scriptable fake child process is the right tool.
+// events, stale ids, poisoning) stays in the assistant-codex-runtime-*.test.ts
+// behavior files where a scriptable fake child process is the right tool.
 
-const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
-const SCRIPTED_MODEL = 'gpt-5.6-terra'
-const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
 const WORKOUT_CSV_ATTEMPT_RELATIVE_PATH =
   '.runtime/tmp/workout-csv-import/attempt-scripted'
@@ -152,18 +182,15 @@ const SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES = [
   'include_only = ["HOME", "PATH", "TMPDIR", "VAULT"]',
   '',
 ] as const
-// GitHub's restricted Linux runner cannot create the uid map required by
-// Codex's named-permission bubblewrap shell. Exact-profile startup still runs
-// there below; only the shell execution proof uses a capable host.
+// Workspace-installed Codex lives outside the named-permission bubblewrap
+// filesystem on Linux. The production runner image proves native Linux
+// confinement separately; exact-profile startup still runs here below.
 const scriptedPermissionShellIt =
-  process.env.GITHUB_ACTIONS === 'true'
-    && process.env.RUNNER_OS === 'Linux'
-    ? it.skip
-    : it
+  process.platform === 'linux' ? it.skip : it
 
-function buildTestAutomationLocalAtRecoveryKey(identity: string): string {
+function buildTestAutomationLocalAtRecoveryKey(request: unknown): string {
   return createHash('sha256')
-    .update(JSON.stringify(identity))
+    .update(JSON.stringify(request))
     .digest('hex')
 }
 
@@ -275,47 +302,6 @@ async function prepareGroupChallengeVault(
   return vaultRoot
 }
 
-interface ScriptedResponseRoute {
-  completionLabel?: string
-  delayMs?: number
-  requestExcludes?: readonly string[]
-  requestIncludes?: readonly string[]
-  usageInputTokens?: number
-}
-
-type ScriptedResponse = ScriptedResponseRoute & (
-  | { text: string }
-  | {
-      commentaryAndFunctionCall: {
-        commentary: string
-        functionCall: {
-          arguments: Record<string, unknown>
-          name: string
-          namespace?: string
-        }
-      }
-    }
-  | {
-      customToolCall: {
-        input: string
-        name: string
-      }
-    }
-  | {
-      toolSearchCall: {
-        limit?: number
-        query: string
-      }
-    }
-  | {
-      functionCall: {
-        arguments: Record<string, unknown>
-        name: string
-        namespace?: string
-      }
-    }
-)
-
 function waitForDeferredExecResponses(): ScriptedResponse[] {
   return ['1', '2', '3'].flatMap((cellId) =>
     Array.from({ length: 4 }, () => ({
@@ -329,44 +315,6 @@ function waitForDeferredExecResponses(): ScriptedResponse[] {
       requestIncludes: [`Script running with cell ID ${cellId}`],
     })))
 }
-
-interface ScriptedStub {
-  baseUrl: string
-  captureProviderRequestDiagnostics(): void
-  close(): Promise<void>
-  completedResponseLabelsSinceBaseline(): string[]
-  markRequestBaseline(): void
-  queue(...responses: readonly ScriptedResponse[]): void
-  resetQueue(): void
-  requestCountSinceBaseline(): number
-  requestSummariesSinceBaseline(): ScriptedProviderRequestSummary[]
-}
-
-interface ScriptedProviderRequestSummary {
-  customToolCallOutputs?: string[]
-  functionCallOutputs?: string[]
-  imageWidths?: number[]
-  model: string | null
-  providerRequestDiagnostics?: {
-    bytes: number
-    includesAllTools: boolean
-    includesExecCommand: boolean
-    includesAutomation: boolean
-    includesGroup: boolean
-    includesReadShared: boolean
-    includesResponseCardCompactTableShape: boolean
-    includesResponseCardNutritionV2Shape: boolean
-    includesGroupEmail: boolean
-    includesToolSearch: boolean
-  }
-  serviceTier: string | null
-  toolSearchOutputTools?: unknown[]
-}
-
-const codexCommand = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../node_modules/.bin/codex',
-)
 
 let stub: ScriptedStub | null = null
 const temporaryPaths: string[] = []
@@ -596,6 +544,7 @@ async function requireScriptedStub(): Promise<ScriptedStub> {
 
 afterEach(async () => {
   await stopWarmCodexAppServer().catch(() => {})
+  stub?.resetQueue()
 })
 
 afterAll(async () => {
@@ -609,6 +558,21 @@ afterAll(async () => {
 }, 180_000)
 
 describe('real codex app-server with scripted provider', () => {
+  it.each([true, false])('enforces follow-up attachment authority through real App Server (%s)', async (allowed) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const request = { action: 'attach_follow_up', afterMinutes: 20, instructions: 'Check the pending choice; skip if resolved.' }
+    scenario.stub.queue({ functionCall: { name: 'automation', namespace: 'murph', arguments: request } }, { text: 'Which arrival window works?' })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput, dynamicTools: [MURPH_ATTACH_FOLLOW_UP_TOOL],
+      followUpAttachmentAllowed: allowed, groupConversation: false,
+      prompt: 'Ask the pending arrival-window question.',
+    })
+    expect(result.followUpRequest).toEqual(allowed
+      ? { afterMinutes: 20, instructions: request.instructions } : null)
+    expect(result.finalMessage).toBe('Which arrival window works?')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('streams a scripted turn through the real app-server protocol', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -625,6 +589,42 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('preserves native Astra async-question text and additive app-server fields', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({ model: 'gpt-6-astra' })
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      astraAllowed: true,
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    const questions = [{ title: 'Which day works?', options: ['Monday', 'Tuesday'] }]
+    scenario.stub.queue(
+      { functionCall: { name: 'request_user_input_async', arguments: { questions } } },
+      { text: '' },
+    )
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [],
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Ask which day works using the asynchronous question tool.',
+    })
+    expect(result.finalMessage).toBe('Which day works?\n- Monday\n- Tuesday')
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.jsonEvents).toContainEqual(expect.objectContaining({
+      method: 'item/completed',
+      params: expect.objectContaining({
+        item: expect.objectContaining({
+          type: 'agentMessage', delivery: 'async', questions,
+        }),
+      }),
+    }))
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
   it('executes the unfamiliar workout CSV skill with exact-byte batch safety', {
@@ -1729,18 +1729,31 @@ text(result.output);
         skillSlug: 'daily-activity',
       },
       {
-        answer: 'Your connected device recorded a 48-minute workout on July 12.',
-        command: 'measurement entry list --metric workout_duration --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        answer: 'Your connected device recorded one workout totaling 48 minutes on July 12.',
+        command: 'wearables activity list --date 2026-07-12 --format json',
         evidence: {
           count: 1,
           items: [{
-            eventId: 'evt_workout_duration_summary',
-            metric: 'workout-minutes',
-            occurredAt: '2026-07-12T15:00:00.000Z',
-            recordKind: 'observation',
-            source: 'device',
-            unit: 'minutes',
-            value: 48,
+            activityTypes: ['running'],
+            date: '2026-07-12',
+            sessionCount: {
+              confidence: 'high',
+              metric: 'sessionCount',
+              provider: 'garmin',
+              unit: 'count',
+              value: 1,
+            },
+            sessionMinutes: {
+              confidence: 'high',
+              metric: 'sessionMinutes',
+              provider: 'garmin',
+              unit: 'minutes',
+              value: 48,
+            },
+            summaryConfidence: {
+              level: 'high',
+              selectedProviders: ['garmin'],
+            },
           }],
         },
         prompt: 'How long was my workout on July 12?',
@@ -1749,7 +1762,7 @@ text(result.output);
       },
       {
         answer: 'Your morning run averaged 142 bpm and its corrected record has no retained splits. Your evening ride averaged 150 bpm with 90 rpm cadence, 5 m/s speed, and 220 W power; its first 1 km split took 300 seconds at 225 W.',
-        command: 'wearables activity list --date 2026-07-12 --format json',
+        command: 'wearables activity list --date 2026-07-12 --include-workout-details --format json',
         evidence: {
           count: 1,
           items: [{
@@ -2435,6 +2448,9 @@ text(result.output);
         },
       },
       {
+        requestIncludes: [
+          'accept any self-description, partial answer, or skip without pressing or inferring missing details.',
+        ],
         text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
       },
     )
@@ -2460,7 +2476,7 @@ text(result.output);
       .join('\n')
     expect(toolOutputs).toContain('## Progressive disclosure')
     expect(toolOutputs).toContain(
-      'Never re-ask solely for optional demographics.',
+      'The injected onboarding instructions own the visible opening exchanges:',
     )
     expect(toolOutputs).toContain('"hasPriorSetupContext":false')
     expect(toolOutputs).not.toContain(laterStageMarker)
@@ -2694,11 +2710,13 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'onboarding-first-personal-read',
-              nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-06T21:00:00.000Z',
             }
           },
@@ -2912,7 +2930,7 @@ esac
         customToolCall: {
           input: `
 const result = await tools.exec_command({
-  cmd: "sed -n '1,150p' skills/food-journal/SKILL.md",
+  cmd: "sed -n '1,/^## Bounded observation runs/p' skills/food-journal/SKILL.md",
 });
 text(result.output);
 `,
@@ -3097,9 +3115,7 @@ esac
         return { kind: 'sent' as const, source: 'model' as const }
       },
     }
-    const directGuidance = buildAssistantResearchScoutCapabilityText({
-      progressUpdateMode: 'direct',
-    })
+    const directGuidance = buildAssistantResearchScoutCapabilityText()
 
     scenario.stub.queue(
       {
@@ -3357,12 +3373,21 @@ text(result.output);
     expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
 
-  it.each(['direct', 'group'] as const)(
-    'carries a delayed V2 child completion into a later %s root turn without waiting',
+  it.each([
+    ['direct', 'gpt-5.6-luna', false],
+    ['group', 'gpt-5.6-luna', false],
+    ['direct', 'gpt-6-astra', true],
+  ] as const)(
+    'carries a delayed V2 %s %s child completion into a later root turn without waiting',
     { timeout: TURN_TIMEOUT_MS },
-    async (conversationScope) => {
+    async (conversationScope, childModel, astraAllowed) => {
       const scenario = await prepareScriptedTurnScenario({
         multiAgentV2: true,
+      })
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand,
+        directory: scenario.turnInput.codexHome,
+        astraAllowed,
       })
       const scopeLabel = conversationScope.toUpperCase()
       const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
@@ -3374,6 +3399,7 @@ text(result.output);
             arguments: {
               fork_turns: 'none',
               message: `Return exactly ${childResult}.`,
+              model: childModel,
               task_name: `late_child_${conversationScope}`,
             },
             name: 'spawn_agent',
@@ -3400,6 +3426,10 @@ text(result.output);
       const first = await executeCodexAppServerTurn({
         ...scenario.turnInput,
         baseInstructions: buildScriptedHostedSystemPrompt(conversationScope),
+        env: {
+          ...scenario.turnInput.env,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+        },
         groupConversation: conversationScope === 'group',
         prompt: firstPrompt,
       })
@@ -3420,6 +3450,9 @@ text(result.output);
       expect(
         scenario.stub.completedResponseLabelsSinceBaseline(),
       ).toContain(childResult)
+      expect(
+        scenario.stub.requestSummariesSinceBaseline().map(({ model }) => model),
+      ).toContain(childModel)
       await delay(100)
 
       scenario.stub.queue({
@@ -3431,6 +3464,10 @@ text(result.output);
       })
       const later = await executeCodexAppServerTurn({
         ...scenario.turnInput,
+        env: {
+          ...scenario.turnInput.env,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+        },
         groupConversation: conversationScope === 'group',
         prompt: laterPrompt,
         resumeSessionId: first.sessionId,
@@ -3441,6 +3478,55 @@ text(result.output);
       expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
     },
   )
+
+  it.each(['gpt-5.5', 'gpt-6-astra'])('rejects an unavailable child model %s before a provider request', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async (model) => {
+    const scenario = await prepareScriptedTurnScenario({
+      multiAgentV2: true,
+    })
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            fork_turns: 'none',
+            message: 'Return exactly NON_PRODUCT_CHILD_SHOULD_NOT_RUN.',
+            model,
+            task_name: 'non_product_child',
+          },
+          name: 'spawn_agent',
+          namespace: 'collaboration',
+        },
+      },
+      { text: 'NON_PRODUCT_CHILD_REJECTED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Try to spawn the requested non-product child model.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(result.finalMessage).toBe('NON_PRODUCT_CHILD_REJECTED')
+    expect(summaries.map(({ model }) => model)).toEqual([
+      SCRIPTED_MODEL,
+      SCRIPTED_MODEL,
+    ])
+    expect(summaries.flatMap(
+      (summary) => summary.functionCallOutputs ?? [],
+    )).toEqual([
+      `Unknown model \`${model}\` for spawn_agent. Available models: gpt-6.1-sol, gpt-6-sol, gpt-6-luna, gpt-5.6-sol, gpt-5.6-luna`,
+    ])
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
 
   it('composes a reviewed group continuation through the real provider and queues one reply', {
     timeout: TURN_TIMEOUT_MS,
@@ -3482,12 +3568,19 @@ text(result.output);
     })
     expect(currentSpeaker.session.sessionId).toBe(resolved.session.sessionId)
     expect(currentSpeaker.session.binding.actorId).toBe(laterParticipantId)
+    const canCommit = vi.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false)
+    const canFinalize = vi.fn(() => true)
 
     const result = await sendAssistantAskContinuationLocal({
       actorId: currentSpeaker.session.binding.actorId,
       answeredMailboxItemIds: ['aask_done_reviewed_continuation'],
       bindingDeliveryTarget: threadId,
-      canCommit: () => true,
+      canCommit,
+      canFinalize,
       channel: 'telegram',
       conversation: conversationRefFromBinding(currentSpeaker.session.binding),
       deliveryIdempotencyKey: 'assistant-ask-reviewed-continuation',
@@ -3521,6 +3614,8 @@ text(result.output);
       response: 'First reviewed fact.\n---\nSecond reviewed fact.',
       status: 'completed',
     })
+    expect(canCommit).toHaveBeenCalledTimes(3)
+    expect(canFinalize).toHaveBeenCalledOnce()
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
     expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
       expect.objectContaining({
@@ -3548,35 +3643,580 @@ text(result.output);
     ])
   })
 
-  it('defers broad Murph schemas through native Codex code-mode discovery', {
+  it.each(['native', 'code-only'] as const)(
+    'compact-table debug: provider-visible bounds (%s)',
+    { timeout: TURN_TIMEOUT_MS },
+    async (toolMode) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand,
+        directory: scenario.turnInput.codexHome,
+        ...(toolMode === 'code-only' ? { toolMode: 'code_mode_only' } : {}),
+      })
+      scenario.stub.captureProviderRequestDiagnostics()
+      const codeMetadata = toolMode === 'code-only'
+        ? queueCodeMetadataCapture(scenario.stub, [MURPH_ATTACH_RESPONSE_CARD_TOOL])
+        : null
+      if (toolMode === 'native') {
+        scenario.stub.queue(
+          { toolSearchCall: { query: 'murph attach_response_card compact_table', limit: 1 } },
+          { text: CONTRACT_CAPTURE_DONE },
+        )
+      }
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        env: {
+          ...scenario.turnInput.env,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+        },
+        groupConversation: false,
+        prompt: 'Inspect the available response-card contract without attaching a card.',
+      })
+      const summaries = scenario.stub.requestSummariesSinceBaseline()
+      if (toolMode === 'native') expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+      else expect(scenario.stub.requestCountSinceBaseline()).toBeGreaterThan(1)
+      expect(result.finalMessage).toBe(CONTRACT_CAPTURE_DONE)
+      expect(result.responseCard).toBeNull()
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(result.jsonEvents.filter((event) =>
+        readRecord(event)?.method === 'item/tool/call'
+      )).toEqual([])
+      expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+        includesToolSearch: toolMode === 'native',
+        includesResponseCardCompactTableShape: false,
+      })
+
+      // The fix exposes existing bounds; it must not relax their real owner.
+      expect(compactTableCardV1Bounds).toMatchObject({ rows: 8, columns: 4, cellValue: 32 })
+      const nominal = MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema.properties.card.anyOf[1]
+      expect(nominal.properties.rows.maxItems).toBe(compactTableCardV1Bounds.rows)
+      expect(nominal.properties.columns.maxItems).toBe(compactTableCardV1Bounds.columns)
+      expect(nominal.properties.rows.items.properties.values.maxItems).toBe(compactTableCardV1Bounds.columns)
+      expect(nominal.properties.rows.items.properties.values.items.maxLength).toBe(compactTableCardV1Bounds.cellValue)
+      let providerText: string
+      let providerSchemaText: string
+      let providerEvidence: Record<string, unknown>
+      if (toolMode === 'native') {
+        // Read AFTER real App Server discovery/serialization, not thread/start
+        // input or a test-owned schema/TypeScript converter.
+        const tool = (summaries[1]?.toolSearchOutputTools ?? [])
+          .flatMap((candidate) => {
+            const record = readRecord(candidate)
+            return Array.isArray(record?.tools)
+              ? record.tools.map(readRecord)
+              : [record]
+          })
+          .find((record) => record?.name === 'attach_response_card')
+        expect(tool).toBeDefined()
+        const card = readRecord(readRecord(readRecord(tool?.parameters)?.properties)?.card)
+        const generic = (Array.isArray(card?.anyOf) ? card.anyOf : [])
+          .map(readRecord)
+          .find((variant) => {
+            const properties = readRecord(variant?.properties)
+            return readRecord(properties?.rowHeader) !== null
+              && readRecord(properties?.rows) !== null
+          })
+        expect(generic, 'provider-visible generic table branch').toBeDefined()
+        const properties = readRecord(generic?.properties)
+        const rows = readRecord(properties?.rows)
+        const columns = readRecord(properties?.columns)
+        const rowProperties = readRecord(readRecord(rows?.items)?.properties)
+        const cell = readRecord(readRecord(rowProperties?.values)?.items)
+        expect(rows?.type).toBe('array')
+        expect(columns?.type).toBe('array')
+        expect(cell?.type).toBe('string')
+        providerText = readString(tool?.description) ?? ''
+        providerSchemaText = JSON.stringify(generic)
+        providerEvidence = {
+          source: 'provider input.tool_search_output.tools',
+          rowMaxItems: rows?.maxItems ?? null,
+          columnMaxItems: columns?.maxItems ?? null,
+          cellMaxLength: cell?.maxLength ?? null,
+          descriptionLength: providerText.length,
+        }
+      } else {
+        expect(codeMetadata).toHaveLength(1)
+        const observed = codeMetadata![0]!
+        assertModelVisibleToolContract(MURPH_ATTACH_RESPONSE_CARD_TOOL, observed)
+        providerText = observed.description
+        providerSchemaText = JSON.stringify(readVisibleCanonicalSchema(providerText))
+        providerEvidence = {
+          source: 'provider input.custom_tool_call_output: complete ALL_TOOLS.description',
+          metadataLength: providerText.length,
+          canonicalSchemaLength: providerSchemaText.length,
+          canonicalSchemaSha256: createHash('sha256').update(providerSchemaText).digest('hex'),
+        }
+      }
+      // Scope the proof to this tool's generic-table guidance, not unrelated
+      // nutrition/workout numerals or a bare 8/32 elsewhere in the declaration.
+      const guidance = /For generic compact_table only \([^)]*\): .*?Never claim attachment without success\./u.exec(providerText.replace(/\s+/gu, ' '))?.[0] ?? ''
+      const clauses = {
+        genericOnly: guidance.includes('rowHeader/columns/rows, not structured workouts'),
+        rows: guidance.includes(`card.rows has at most ${compactTableCardV1Bounds.rows} rows`),
+        columns: guidance.includes(`card.columns at most ${compactTableCardV1Bounds.columns} columns`),
+        cells: guidance.includes(`each card.rows[].values[] string at most ${compactTableCardV1Bounds.cellValue} characters`),
+        preserveMeaning: /Before calling, use concise labels and cells only when they preserve all meaning/u.test(guidance),
+        completeTextFallback: /if required rows or exact wording cannot fit, give complete ordinary text and no card/u.test(guidance),
+        noLossOrInvention: /Never omit or invent rows, merge explicitly separate items, or truncate meaning to fit/u.test(guidance),
+        correctedRetryOnly: /retry only with a fixable field corrected; never repeat identical invalid arguments/u.test(guidance),
+        truthfulAttachment: /Never claim attachment without success/u.test(guidance),
+      }
+      const evidence = JSON.stringify({
+        toolMode,
+        nominalBounds: { rows: nominal.properties.rows.maxItems, columns: nominal.properties.columns.maxItems, cellValue: nominal.properties.rows.items.properties.values.items.maxLength },
+        providerEvidence,
+        schemaKeywordsPresent: { maxItems: providerSchemaText.includes('maxItems'), maxLength: providerSchemaText.includes('maxLength') },
+        clauses,
+      })
+      // Keep full synthetic metadata in memory only; print finite facts even on
+      // the red baseline. Do not dump the long nutrition/workout description.
+      expect(Buffer.byteLength(evidence, 'utf8')).toBeLessThan(2_500)
+      process.stdout.write(`[compact-table-debug-provider] ${evidence}\n`)
+      expect(clauses).toEqual(Object.fromEntries(Object.keys(clauses).map((key) => [key, true])))
+    },
+  )
+
+  // Equality projection for this opt-in measurement only. These exact paths
+  // differed in all four pinned-App-Server fixture pairs; never scrub metadata
+  // wholesale or alter the raw capture used for byte counts and digests.
+  function normalizeSharedSchemaFirstInputForEquality(json: string): {
+    json: string
+    normalizedFields: string[]
+  } {
+    const body = readRecord(JSON.parse(json))
+    const input = body?.input
+    const metadata = readRecord(body?.client_metadata)
+    const encodedTurnMetadata = metadata?.['x-codex-turn-metadata']
+    if (!body || !Array.isArray(input) || !metadata || typeof encodedTurnMetadata !== 'string') {
+      throw new Error('Unexpected shared-schema first-input metadata shape.')
+    }
+    const turnMetadataPath = 'client_metadata["x-codex-turn-metadata"]'
+    let turnMetadata: Record<string, unknown> | null
+    try {
+      turnMetadata = readRecord(JSON.parse(encodedTurnMetadata))
+    } catch {
+      throw new Error(`Expected a JSON object at ${turnMetadataPath}.`)
+    }
+    if (!turnMetadata || !Number.isSafeInteger(turnMetadata.turn_started_at_unix_ms)) {
+      throw new Error(`Expected an object with an integer timestamp at ${turnMetadataPath}.`)
+    }
+    const identities = [
+      ...Array.from({ length: 7 }, (_, index) =>
+        [readRecord(input[index]), 'id', `input[${index}].id`] as const),
+      ...['session_id', 'thread_id', 'turn_id', 'root_turn_id', 'x-codex-window-id'].map((key) =>
+        [metadata, key, `client_metadata.${key}`] as const),
+      ...['session_id', 'thread_id', 'turn_id', 'window_id', 'context_window_id', 'root_turn_id'].map((key) =>
+        [turnMetadata, key, `${turnMetadataPath}.${key}`] as const),
+    ]
+    for (const [record, key, field] of identities) {
+      const value = record?.[key]
+      if (!record || typeof value !== 'string' || value.length === 0) {
+        throw new Error(`Expected a nonempty identity string at ${field}.`)
+      }
+      record[key] = '<generated-identity>'
+    }
+    turnMetadata.turn_started_at_unix_ms = 0
+    // Decode only in the equality projection; retain every static nested field.
+    metadata['x-codex-turn-metadata'] = turnMetadata
+    return {
+      json: JSON.stringify(body, (_key, value: unknown) => {
+        const record = readRecord(value)
+        return record
+          ? Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]))
+          : value
+      }),
+      normalizedFields: [...identities.map(([, , field]) => field), `${turnMetadataPath}.turn_started_at_unix_ms`],
+    }
+  }
+
+  it('shared schema: first-input identity normalization preserves meaningful differences', () => {
+    const fixture = (identity: string) => ({
+      instructions: 'SYNTHETIC complete comparison.',
+      input: Array.from({ length: 8 }, (_, index) => ({
+        id: index < 7 ? `msg_${identity.repeat(36)}` : 'unchanged-eighth-item-id',
+        type: 'message',
+        role: index === 0 ? 'developer' : 'user',
+        content: [{ type: 'input_text', text: `SYNTHETIC item ${index}` }],
+      })),
+      tools: [{ type: 'function', name: 'synthetic_tool', parameters: { type: 'object' } }],
+      client_metadata: {
+        session_id: identity, thread_id: identity, turn_id: identity,
+        root_turn_id: identity, 'x-codex-window-id': identity,
+        static_client: 'synthetic',
+        'x-codex-turn-metadata': JSON.stringify({
+          session_id: identity, thread_id: identity, turn_id: identity,
+          window_id: identity, context_window_id: identity, root_turn_id: identity,
+          turn_started_at_unix_ms: identity === 'a' ? 1 : 2,
+          static_route: { mode: 'synthetic' },
+        }),
+      },
+    })
+    const baseline = JSON.stringify(fixture('a'))
+    const candidate = JSON.stringify(fixture('b'))
+    expect(Buffer.byteLength(candidate)).toBe(Buffer.byteLength(baseline))
+    expect(candidate === baseline).toBe(false)
+    const normalized = normalizeSharedSchemaFirstInputForEquality(baseline)
+    expect(normalizeSharedSchemaFirstInputForEquality(candidate)).toEqual(normalized)
+    const changes: Array<(body: ReturnType<typeof fixture>) => void> = [
+      (body) => { body.instructions += ' Changed.' },
+      (body) => { body.tools[0]!.parameters.type = 'string' },
+      (body) => { body.input[0]!.content[0]!.text += ' Changed.' },
+      (body) => { body.input[0]!.role = 'system' },
+      (body) => { body.input.reverse() },
+      (body) => { body.input[7]!.id = 'changed-eighth-item-id' },
+      (body) => { body.client_metadata.static_client = 'changed' },
+      (body) => {
+        body.client_metadata['x-codex-turn-metadata'] = body.client_metadata['x-codex-turn-metadata']
+          .replace('"synthetic"', '"changed"')
+      },
+    ]
+    for (const change of changes) {
+      const body = fixture('b')
+      change(body)
+      expect(normalizeSharedSchemaFirstInputForEquality(JSON.stringify(body)).json === normalized.json).toBe(false)
+    }
+    for (const invalidMetadata of ['not-json', '[]', '{}']) {
+      const body = fixture('b')
+      body.client_metadata['x-codex-turn-metadata'] = invalidMetadata
+      expect(() => normalizeSharedSchemaFirstInputForEquality(JSON.stringify(body))).toThrow()
+    }
+  })
+
+  it.skipIf(process.env.MURPH_MEASURE_MEMORY_INPUT !== '1').each(['direct', 'group'] as const)(
+    'memory profile complete provider input (%s)', { timeout: TURN_TIMEOUT_MS }, async (scope) => {
+      const groupConversation = scope === 'group'
+      const scenario = await prepareScriptedTurnScenario()
+      for (let index = 0; index < 8; index += 1) {
+        await upsertMemory(scenario.turnInput.workingDirectory, {
+          now: new Date(Date.UTC(2030, 0, 1, 12, index)), section: 'Preferences',
+          text: `For synthetic activity ${index}, prefers brief suggestions with one optional next step.`,
+        })
+      }
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, assistantConfigurationAvailable: !groupConversation,
+        automationAvailable: true, groupAssistantConfigurationAvailable: groupConversation,
+        groupAvailable: !groupConversation, groupChallengeResponseCardsAvailable: groupConversation,
+        groupSharedReadAvailable: groupConversation, imageGenerationAvailable: false,
+        progressUpdatesAvailable: false, responseCardsAvailable: !groupConversation,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: groupConversation ? 'shared_read' : 'families',
+        assistantProgressUpdatesAvailable: false, assistantStyleSettingsAvailable: false,
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2030-01-10',
+        currentInstant: '2030-01-10T16:00:00.000Z', currentTimeZone: 'UTC',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      const memory = groupConversation ? null : await readAssistantCurrentStatePrompt({ vaultRoot: scenario.turnInput.workingDirectory })
+      const prompt = [layers.dynamicTurnContextPrompt, memory, 'Suggest a brief reset for this evening.'].filter(Boolean).join('\n\n')
+      scenario.stub.markRequestBaseline()
+      scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
+      scenario.stub.queue({ text: 'SYNTHETIC_MEMORY_INPUT_CAPTURED' })
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        developerInstructions, dynamicTools: tools, groupConversation, prompt,
+      })
+      expect(result.finalMessage).toBe('SYNTHETIC_MEMORY_INPUT_CAPTURED')
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+      const capture = scenario.stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      if (!capture) throw new Error('Missing complete provider input')
+      const normalized = normalizeSharedSchemaFirstInputForEquality(capture.json)
+      const directory = process.env.MURPH_MEMORY_INPUT_OUTPUT_DIR
+      if (directory) {
+        await mkdir(directory, { recursive: true })
+        await writeFile(path.join(directory, `${scope}.json`), normalized.json)
+      }
+      process.stdout.write(`[memory-input] ${JSON.stringify({ scope, bytes: Buffer.byteLength(normalized.json), instructionsBytes: Buffer.byteLength(developerInstructions), memoryBytes: Buffer.byteLength(memory ?? ''), toolBytes: Buffer.byteLength(JSON.stringify(tools)) })}\n`)
+    },
+  )
+
+  // Optional, synthetic, free measurement against the supplied PR3059 baseline.
+  // Both phases retain its card recovery paragraph and identical canonical tools.
+  // The test-only ablation removes ONLY the shared adapter, not Codex conversion.
+  // There is deliberately no production bypass, flag, alternative CLI, or proxy.
+  it.skipIf(process.env.MURPH_MEASURE_SHARED_SCHEMA_INPUT !== '1').each([
+    { scope: 'direct', toolMode: 'native' },
+    { scope: 'direct', toolMode: 'code-only' },
+    { scope: 'group', toolMode: 'native' },
+    { scope: 'group', toolMode: 'code-only' },
+  ] as const)('shared schema: complete first provider input ($scope, $toolMode)', {
+    timeout: TURN_TIMEOUT_MS * 2,
+  }, async ({ scope, toolMode }) => {
+    const groupConversation = scope === 'group'
+    const tools: readonly AssistantProviderDynamicTool[] = resolveMurphDynamicTools({
+      allowFinishWithoutReply: true,
+      assistantConfigurationAvailable: !groupConversation,
+      automationAvailable: true,
+      groupAssistantConfigurationAvailable: groupConversation,
+      groupAvailable: !groupConversation,
+      groupChallengeResponseCardsAvailable: groupConversation,
+      groupSharedReadAvailable: groupConversation,
+      imageGenerationAvailable: false,
+      progressUpdatesAvailable: false,
+      responseCardsAvailable: !groupConversation,
+    })
+    expect(tools.includes(MURPH_ATTACH_RESPONSE_CARD_TOOL)).toBe(!groupConversation)
+    if (groupConversation) expect(tools.includes(MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL)).toBe(true)
+    const supplementedTools = tools.map(codexToolInputContract.withCodexToolInputContract)
+    const registrationBytes = {
+      baseline: Buffer.byteLength(JSON.stringify(tools)),
+      candidate: Buffer.byteLength(JSON.stringify(supplementedTools)),
+    }
+    const layers = buildAssistantSystemPromptLayers({
+      assistantCliContract: null,
+      assistantHostedAutomationAvailable: true,
+      assistantHostedGroupToolSurface: groupConversation ? 'shared_read' : 'families',
+      assistantProgressUpdatesAvailable: false,
+      assistantStyleSettingsAvailable: false,
+      channel: 'linq',
+      cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      conversationScope: scope,
+      currentLocalDate: '2026-09-08',
+      currentInstant: '2026-09-08T16:00:00.000Z',
+      currentTimeZone: 'America/New_York',
+      hostedRuntime: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: false,
+      ordinaryInboundTurn: true,
+    })
+    const developerInstructions = [
+      layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt,
+    ].join('\n\n')
+    const prompt = [
+      layers.dynamicTurnContextPrompt, 'Compare two synthetic routes: Amber takes ten minutes; Birch takes twenty minutes.',
+    ].join('\n\n')
+    const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+      ...(toolMode === 'code-only' ? { toolMode: 'code_mode_only' } : {}),
+    })
+    const captures = []
+    for (const phase of ['baseline', 'candidate'] as const) {
+      await stopWarmCodexAppServer()
+      scenario.stub.markRequestBaseline()
+      scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
+      scenario.stub.queue({ text: 'SYNTHETIC_FIRST_INPUT_CAPTURED' })
+      const ablation = phase === 'baseline'
+        ? vi.spyOn(codexToolInputContract, 'withCodexToolInputContract').mockImplementation((tool) => tool)
+        : null
+      let result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
+      try {
+        result = await executeCodexAppServerTurn({
+          ...scenario.turnInput,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          developerInstructions,
+          dynamicTools: tools,
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
+          groupConversation,
+          prompt,
+        })
+      } finally {
+        ablation?.mockRestore()
+      }
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+      expect(result.finalMessage).toBe('SYNTHETIC_FIRST_INPUT_CAPTURED')
+      expect(result.responseCard).toBeNull()
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(result.jsonEvents.filter((event) => readRecord(event)?.method === 'item/tool/call')).toEqual([])
+      const summary = scenario.stub.requestSummariesSinceBaseline()[0]
+      const capture = summary?.completeProviderInput
+      const wire = summary?.providerRequestDiagnostics
+      if (!capture || !wire) throw new Error('Missing complete first provider input and raw wire diagnostics.')
+      // Inspect actual input, not only the supplied thread/start parameters.
+      for (const text of [MURPH_CODEX_BASE_INSTRUCTIONS, developerInstructions, prompt]) {
+        expect(capture.json.includes(JSON.stringify(text.trim()).slice(1, -1))).toBe(true)
+      }
+      const body = readRecord(JSON.parse(capture.json))
+      expect(body?.model).toBe(SCRIPTED_MODEL)
+      expect(Array.isArray(body?.input)).toBe(true)
+      const directTools = Array.isArray(body?.tools)
+        ? body.tools.map(readRecord)
+        : []
+      const additionalTools = Array.isArray(body?.input)
+        ? body.input
+          .map(readRecord)
+          .filter((item) => item?.type === 'additional_tools')
+          .flatMap((item) =>
+            Array.isArray(item?.tools) ? item.tools.map(readRecord) : []
+          )
+        : []
+      const visibleTools = [...directTools, ...additionalTools]
+      if (visibleTools.length === 0) {
+        throw new Error('Expected the complete provider tool array.')
+      }
+      const visibleMurphTools = readProviderNativeTools(capture.json).filter((tool) => tool.namespace === 'murph')
+      const eagerTools = toolMode === 'native' ? tools.filter((tool) => tool.deferLoading !== true) : []
+      expect(visibleMurphTools.map((tool) => tool.name).sort()).toEqual(eagerTools.map((tool) => tool.name).sort())
+      if (phase === 'candidate') {
+        for (const tool of eagerTools) {
+          const observed = visibleMurphTools.find((candidate) => candidate.name === tool.name)
+          if (!observed) throw new Error(`Missing eager ${tool.name} on provider wire.`)
+          assertModelVisibleToolContract(tool, observed)
+        }
+      } else {
+        expect(capture.json).not.toContain('MURPH_INPUT_SCHEMA_JSON:')
+      }
+      captures.push({
+        ...capture,
+        phase,
+        wireUtf8Bytes: wire.bytes,
+        wireSha256: wire.sha256,
+        visibleMurphToolCount: visibleMurphTools.length,
+        bytes: Buffer.byteLength(capture.json, 'utf8'),
+        sha256: createHash('sha256').update(capture.json).digest('hex'),
+        equalityInput: normalizeSharedSchemaFirstInputForEquality(capture.json),
+      })
+    }
+    const [baseline, candidate] = captures
+    if (!baseline || !candidate) throw new Error('Expected both complete first-input captures.')
+    // Print counts/digests only, including on mismatch; never dump full prompts,
+    // instructions, tool descriptions, workspace paths, or transport identities.
+    process.stdout.write(`[shared-schema-first-input] ${JSON.stringify({
+      scope, toolMode, model: SCRIPTED_MODEL,
+      registeredToolCount: tools.length,
+      registeredDeferredCount: tools.filter((tool) => tool.deferLoading === true).length,
+      firstRequestVisibleMurphToolCount: candidate.visibleMurphToolCount,
+      registrationJsonUtf8Bytes: { ...registrationBytes, delta: registrationBytes.candidate - registrationBytes.baseline },
+      completeWire: {
+        baseline: { utf8Bytes: baseline.wireUtf8Bytes, sha256: baseline.wireSha256 },
+        candidate: { utf8Bytes: candidate.wireUtf8Bytes, sha256: candidate.wireSha256 },
+        utf8ByteDelta: candidate.wireUtf8Bytes - baseline.wireUtf8Bytes,
+      },
+      raw: {
+        method: 'Complete decoded provider request, recursively sorted JSON keys; only top-level prompt_cache_key omitted. All other identities/timestamps retained.',
+        baseline: { utf8Bytes: baseline.bytes, sha256: baseline.sha256 },
+        candidate: { utf8Bytes: candidate.bytes, sha256: candidate.sha256 },
+        utf8ByteDelta: candidate.bytes - baseline.bytes,
+        identical: candidate.json === baseline.json,
+        excludedTransportFields: candidate.excludedTransportFields,
+      },
+      equality: {
+        method: 'Decode x-codex-turn-metadata; normalize only the listed identity/timestamp fields. Preserve every other property/value and array order.',
+        normalizedFields: candidate.equalityInput.normalizedFields,
+        baselineSha256: createHash('sha256').update(baseline.equalityInput.json).digest('hex'),
+        candidateSha256: createHash('sha256').update(candidate.equalityInput.json).digest('hex'),
+        identical: candidate.equalityInput.json === baseline.equalityInput.json,
+      },
+      targetTokenizer: { countBaseline: null, countCandidate: null, delta: null, reason: 'No exact Sol tokenizer is configured for this measurement; synthetic provider usage is not tokenization.' },
+    })}\n`)
+    expect(candidate.excludedTransportFields).toEqual(baseline.excludedTransportFields)
+    // Remove only the exact added suffixes, after validating actual native
+    // descriptions above. Preserve all other request fields and meaningful text.
+    let withoutSupplements = candidate.equalityInput.json
+    for (let index = 0; index < tools.length; index += 1) {
+      const suffix = supplementedTools[index]!.description.slice(tools[index]!.description.length)
+      withoutSupplements = withoutSupplements.replaceAll(JSON.stringify(suffix).slice(1, -1), '')
+    }
+    expect(withoutSupplements, 'whole first request differs only by derived supplements and listed transport identities').toBe(baseline.equalityInput.json)
+    expect(registrationBytes.candidate).toBeGreaterThan(registrationBytes.baseline)
+  })
+
+  it('preserves the complete automation contract in actual code-only generated metadata', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+      toolMode: 'code_mode_only',
+    })
+    scenario.stub.captureProviderRequestDiagnostics()
+    const captured = queueCodeMetadataCapture(scenario.stub, [MURPH_AUTOMATION_TOOL])
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
+      prompt: 'Inspect the automation contract without calling automation.',
+    })
+    expect(result.finalMessage).toBe(CONTRACT_CAPTURE_DONE)
+    expect(captured).toHaveLength(1)
+    assertModelVisibleToolContract(MURPH_AUTOMATION_TOOL, captured[0]!)
+    expect(result.jsonEvents.filter((event) => readRecord(event)?.method === 'item/tool/call')).toEqual([])
+    expect(scenario.stub.requestSummariesSinceBaseline()[0]?.providerRequestDiagnostics).toMatchObject({
+      includesAutomation: false,
+      includesToolSearch: false,
+    })
+  })
+
+  it('uses exact GPT-6 Sol mixed mode to discover a condition reminder schema before one save', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
+    const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
     scenario.stub.captureProviderRequestDiagnostics()
+    const conditionId = 'condition_rehabilitation_knee'
+    await writeFile(
+      path.join(scenario.turnInput.workingDirectory, 'vault-cli'),
+      [
+        '#!/bin/sh',
+        'set -eu',
+        `if [ "$*" != "condition show ${conditionId} --format json" ]; then`,
+        '  printf \'unsupported canonical read: %s\\n\' "$*" >&2',
+        '  exit 64',
+        'fi',
+        `printf '%s\\n' '${JSON.stringify({
+          entity: {
+            data: { clinicalStatus: 'active' },
+            id: conditionId,
+            kind: 'condition',
+            title: 'Knee rehabilitation',
+          },
+          vault: 'synthetic-vault',
+        })}'`,
+        '',
+      ].join('\n'),
+      { encoding: 'utf8', mode: 0o755 },
+    )
     const automationRequests: unknown[] = []
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
-const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group");
-if (!tool) {
-  text(JSON.stringify({ found: false, foundGroup: Boolean(groupTool) }));
-} else {
-  const result = await tools.murph__automation({
-    action: "save",
-    instructions: "Send a short reminder.",
-    schedule: { kind: "dailyLocal", localTime: "09:00" },
-    title: "Morning reminder",
-  });
-  text(JSON.stringify({ found: true, foundGroup: Boolean(groupTool), result }));
+const result = await tools.exec_command({
+  cmd: "./vault-cli condition show ${conditionId} --format json",
+});
+if (result.exit_code !== 0) {
+  throw new Error("Canonical condition read failed: " + JSON.stringify({
+    exitCode: result.exit_code,
+    output: result.output,
+  }));
 }
+text(result.output);
 `,
           name: 'exec',
+        },
+      },
+      {
+        toolSearchCall: {
+          limit: 8,
+          query: 'Murph automation save reminder contextReferences entityKind entityId',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'save',
+            assistantTargetOverride: { model: 'gpt-5.6-luna' },
+            contextReferences: [{
+              entityId: conditionId,
+              entityKind: 'condition',
+            }],
+            instructions:
+              'Send a short reminder to complete the knee rehabilitation exercises.',
+            schedule: { kind: 'dailyLocal', localTime: '09:00' },
+            title: 'Knee rehabilitation reminder',
+          },
+          name: 'automation',
+          namespace: 'murph',
         },
       },
       { text: 'NATIVE_DEFERRED_TOOL_OK' },
@@ -3584,7 +4224,8 @@ if (!tool) {
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      model: 'gpt-6-sol',
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...scenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -3602,11 +4243,13 @@ if (!tool) {
               created: true,
               effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
-              nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
@@ -3619,33 +4262,102 @@ if (!tool) {
         },
         vaultFileSendAvailable: false,
       },
-      prompt: 'Save the reminder, then reply exactly NATIVE_DEFERRED_TOOL_OK.',
+      prompt: [
+        `Read condition ${conditionId} with vault-cli.`,
+        'Use native tool search to discover the exact deferred automation schema.',
+        'Then save one daily 9:00 AM knee rehabilitation reminder with that exact condition reference.',
+        'Reply exactly NATIVE_DEFERRED_TOOL_OK after the save succeeds.',
+      ].join(' '),
+      // This proof intentionally executes a staged fake vault CLI. Match the
+      // existing scripted exec lane because GitHub's restricted Linux runner
+      // cannot let nested bubblewrap configure loopback.
+      sandbox: 'danger-full-access',
     })
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(summaries[0]).toMatchObject({
+      model: 'gpt-6-sol',
       providerRequestDiagnostics: {
         includesAllTools: true,
         includesAutomation: false,
         includesGroup: false,
         includesGroupEmail: false,
+        includesToolSearch: true,
       },
     })
     expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
-    const automationOutput =
+    const conditionReadOutput =
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
-    expect(automationOutput).toContain('"foundGroup":true')
-    expect(automationOutput).toContain('automation-native-deferred')
-    expect(automationOutput).toContain('morning-reminder')
-    expect(automationOutput).toContain('active')
+    expect(conditionReadOutput).toContain(conditionId)
+    expect(conditionReadOutput).toContain('"kind":"condition"')
+    const automationSearchTools = summaries[2]?.toolSearchOutputTools ?? []
+    const automationSearchTool = automationSearchTools
+      .flatMap((candidate) => {
+        const tool = readRecord(candidate)
+        if (tool?.name === 'automation') {
+          return [tool]
+        }
+        return Array.isArray(tool?.tools)
+          ? tool.tools.map(readRecord).filter((item) => item !== null)
+          : []
+      })
+      .find((tool) => tool.name === 'automation')
+    expect(automationSearchTool).not.toBeUndefined()
+    const automationParameters = readRecord(automationSearchTool?.parameters)
+    const automationSaveContract = Array.isArray(automationParameters?.oneOf)
+      ? automationParameters.oneOf.map(readRecord).find((branch) => {
+          // Native discovery normalizes const to a single-value enum.
+          const action = readRecord(readRecord(branch?.properties)?.action)
+          return Array.isArray(action?.enum)
+            && action.enum.length === 1 && action.enum[0] === 'save'
+        })
+      : null
+    expect(automationSaveContract).toBeTruthy()
+    expect(readRecord(automationSaveContract?.properties)?.contextReferences)
+      .toMatchObject({ type: 'array' })
+    // Codex shortens deep native parameters too; the complete description is authoritative.
+    const canonicalSchema = readRecord(readVisibleCanonicalSchema(
+      typeof automationSearchTool?.description === 'string' ? automationSearchTool.description : '',
+    ))
+    expect(canonicalSchema).toEqual(MURPH_AUTOMATION_TOOL.inputSchema)
+    const canonicalSaveContract = Array.isArray(canonicalSchema?.oneOf)
+      ? canonicalSchema.oneOf.map(readRecord).find((branch) =>
+          readRecord(readRecord(branch?.properties)?.action)?.const === 'save')
+      : null
+    const automationProperties = readRecord(canonicalSaveContract?.properties)
+    const contextReferences = readRecord(
+      automationProperties?.contextReferences,
+    )
+    const contextReferenceItem = readRecord(contextReferences?.items)
+    const contextReferenceProperties = readRecord(
+      contextReferenceItem?.properties,
+    )
+    expect(contextReferences).toMatchObject({
+      items: {
+        additionalProperties: false,
+        required: expect.arrayContaining(['entityKind', 'entityId']),
+        type: 'object',
+      },
+      type: 'array',
+    })
+    expect(contextReferenceProperties).toMatchObject({
+      entityId: { type: 'string' },
+      entityKind: { type: 'string' },
+    })
     expect(automationRequests).toEqual([{
       action: 'save',
-      instructions: 'Send a short reminder.',
+      assistantTargetOverride: { model: 'gpt-5.6-luna' },
+      contextReferences: [{
+        entityId: conditionId,
+        entityKind: 'condition',
+      }],
+      instructions:
+        'Send a short reminder to complete the knee rehabilitation exercises.',
       schedule: { kind: 'dailyLocal', localTime: '09:00' },
-      title: 'Morning reminder',
+      title: 'Knee rehabilitation reminder',
     }])
     expect(result.finalMessage).toBe('NATIVE_DEFERRED_TOOL_OK')
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
 
     const deferredRequestBytes =
       summaries[0]?.providerRequestDiagnostics?.bytes ?? 0
@@ -3658,7 +4370,7 @@ if (!tool) {
       configOverrides: [
         'features.code_mode.direct_only_tool_namespaces=["murph"]',
       ],
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...directScenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -3672,7 +4384,7 @@ if (!tool) {
     expect(directSummary).toMatchObject({
       providerRequestDiagnostics: {
         includesAutomation: true,
-        includesGroup: true,
+        includesGroup: false,
         includesGroupEmail: true,
       },
     })
@@ -3722,7 +4434,10 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: 'America/Chicago',
               lookupId: 'evening-reminder',
-              nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: {
                 kind: 'dailyLocal',
@@ -3730,7 +4445,6 @@ text(JSON.stringify(result));
                 timeZone: 'America/Chicago',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
@@ -3799,7 +4513,10 @@ text(JSON.stringify(result));
               automationId: 'automation-central-evening',
               effectiveTimeZone: 'America/Chicago',
               lookupId: 'evening-reminder',
-              nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: {
                 kind: 'dailyLocal',
@@ -3807,7 +4524,6 @@ text(JSON.stringify(result));
                 timeZone: 'America/Chicago',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-10T00:00:00.000Z',
             }
           },
@@ -3910,7 +4626,7 @@ text(JSON.stringify(result));
               action: 'offer_access',
               projectionScopes: [{ projectionKind: 'steps-days.v0' }],
             },
-            name: 'group',
+            name: 'group_data',
             namespace: 'murph',
           },
         })
@@ -3949,11 +4665,13 @@ text(JSON.stringify(result));
                 created: true,
                 effectiveTimeZone: 'America/New_York',
                 lookupId: 'weekly-movement-check-in',
-                nextOccurrenceAt: '2026-08-24T13:00:00.000Z',
+                occurrenceProjection: {
+                  nextOccurrenceAt: '2026-08-24T13:00:00.000Z',
+                  status: 'resolved' as const,
+                },
                 routeBinding: 'current_conversation',
                 schedule: request.schedule,
                 status: 'active',
-                timingVerified: true,
                 updatedAt: '2026-08-17T13:00:00.000Z',
               }
             },
@@ -4063,14 +4781,16 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'group-one-shot-reminder',
-              nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: {
                 at: '2031-02-15T09:20:00.000Z',
                 kind: 'at',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2031-02-14T12:00:00.000Z',
             }
           },
@@ -4099,7 +4819,7 @@ text(JSON.stringify(result));
       .flatMap((summary) => summary.customToolCallOutputs ?? [])
       .join('\n')
       .replace(/\\"/gu, '"')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(toolOutputs).toContain('"effectiveTimeZone":null')
     expect(toolOutputs).toContain('"nextOccurrenceAt":"2031-02-15T09:20:00.000Z"')
     expect(result.finalMessage).toBe(
@@ -4196,9 +4916,7 @@ text(JSON.stringify(result));
       expectedAt: '2026-03-08T07:30:00.000Z',
       failedTime: '02:30',
       finalMessage: 'Done — your reminder is set for 3:30 AM on March 8.',
-      initialSlug: null,
       kind: 'gap',
-      retrySlug: 'morning-meds',
       retryTitle: 'Morning meds',
       referenceAt: '2026-03-08T04:59:00.000Z',
       retryLocalAt: {
@@ -4217,9 +4935,7 @@ text(JSON.stringify(result));
       failedTime: '01:30',
       finalMessage:
         'Done — your reminder is set for the earlier 1:30 AM on November 1.',
-      initialSlug: 'fall-reminder',
       kind: 'fold',
-      retrySlug: null,
       retryTitle: 'Evening meds',
       referenceAt: '2026-11-01T03:59:00.000Z',
       retryLocalAt: {
@@ -4229,21 +4945,19 @@ text(JSON.stringify(result));
         timeZone: 'America/New_York',
       },
       staleClarification:
-        'For reminder "Fall reminder (fall-reminder)", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+        'For reminder "Fall reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
       steerAt: '2026-11-01T04:01:00.000Z',
       steerPrompt: 'Use the earlier occurrence.',
       title: 'Fall reminder',
     },
-  ])('clears a $kind clarification after a renamed live-steered save retry', {
+  ])('clears a $kind clarification after a retitled live-steered save retry', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({
     expectedAt,
     failedTime,
     finalMessage,
-    initialSlug,
     referenceAt,
     retryLocalAt,
-    retrySlug,
     retryTitle,
     staleClarification,
     steerAt,
@@ -4264,20 +4978,16 @@ text(JSON.stringify(result));
           timeZone: 'America/New_York',
         },
       },
-      ...(initialSlug ? { slug: initialSlug } : {}),
       title,
     }
     const retryRequest = {
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-        initialSlug ?? title.toLowerCase().replace(/\s+/gu, '-'),
-      ),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
       schedule: {
         kind: 'at',
         localAt: retryLocalAt,
       },
-      ...(retrySlug ? { slug: retrySlug } : {}),
       title: retryTitle,
     }
     scenario.stub.queue(
@@ -4326,13 +5036,15 @@ text(JSON.stringify(result));
                 `automation-${retryTitle.toLowerCase().replace(/\s+/gu, '-')}`,
               created: true,
               effectiveTimeZone: null,
-              lookupId: retrySlug
-                ?? retryTitle.toLowerCase().replace(/\s+/gu, '-'),
-              nextOccurrenceAt: expectedAt,
+              lookupId:
+                `automation-${retryTitle.toLowerCase().replace(/\s+/gu, '-')}`,
+              occurrenceProjection: {
+                nextOccurrenceAt: expectedAt,
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: steerAt,
             }
           },
@@ -4364,7 +5076,6 @@ text(JSON.stringify(result));
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
       schedule: { at: expectedAt, kind: 'at' },
-      ...(retrySlug ? { slug: retrySlug } : {}),
       title: retryTitle,
     }])
     expect(result.finalMessage).toBe(finalMessage)
@@ -4377,24 +5088,25 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder tomorrow.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4455,32 +5167,44 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
+    let markResponseStarted!: () => void
+    const responseStarted = new Promise<void>((resolve) => {
+      markResponseStarted = resolve
+    })
+    let releaseResponse!: () => void
+    const responseReleased = new Promise<void>((resolve) => {
+      releaseResponse = resolve
+    })
     let steered: Promise<void> | null = null
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder tomorrow.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
         },
       },
       {
-        delayMs: 4_000,
+        beforeRespond: async () => {
+          markResponseStarted()
+          await responseReleased
+        },
         text: 'That time does not exist on March 8. What should I do?',
       },
       {
@@ -4521,14 +5245,19 @@ text(JSON.stringify(result));
         vaultFileSendAvailable: false,
       },
       onLiveTurn: (turn: CodexAppServerLiveTurn) => {
-        steered = delay(1_000).then(() =>
-          turn.steer({
-            prompt: 'Never mind. Do not create that reminder.',
-            relativeDateReferenceWindow: {
-              earliestAt: '2026-03-08T05:01:00.000Z',
-              latestAt: '2026-03-08T05:01:00.000Z',
-            },
-          }))
+        steered = responseStarted.then(async () => {
+          try {
+            await turn.steer({
+              prompt: 'Never mind. Do not create that reminder.',
+              relativeDateReferenceWindow: {
+                earliestAt: '2026-03-08T05:01:00.000Z',
+                latestAt: '2026-03-08T05:01:00.000Z',
+              },
+            })
+          } finally {
+            releaseResponse()
+          }
+        })
       },
       prompt: 'Remind me tomorrow at 2:30 AM in New York.',
     })
@@ -4548,24 +5277,25 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const result = await tools.murph__automation({
-  action: "save",
-  instructions: "Send the reminder.",
-  schedule: {
-    kind: "at",
-    localAt: {
-      relativeDay: "tomorrow",
-      time: "02:30",
-      timeZone: "America/New_York",
-    },
-  },
-  title: "Gap reminder",
-});
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4620,11 +5350,13 @@ text(JSON.stringify(result));
         created: true,
         effectiveTimeZone: 'America/New_York',
         lookupId: 'replacement-reminder',
-        nextOccurrenceAt: '2026-03-09T07:30:00.000Z',
+        occurrenceProjection: {
+          nextOccurrenceAt: '2026-03-09T07:30:00.000Z',
+          status: 'resolved' as const,
+        },
         routeBinding: 'current_conversation' as const,
         schedule: request.schedule,
         status: 'active' as const,
-        timingVerified: true,
         updatedAt: '2026-03-08T05:01:00.000Z',
       }
     })
@@ -4666,70 +5398,32 @@ text(JSON.stringify(result));
   it.each([
     {
       expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'medication-reminder',
       failedTime: '02:30',
       referenceAt: '2026-03-08T04:59:00.000Z',
-      responseLookup: 'medication-reminder',
       retryLocalAt: {
         date: '2026-03-08',
         time: '03:30',
         timeZone: 'America/New_York',
       },
-      retryLookup: 'automation-medication-reminder',
-    },
-    {
-      expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'automation-medication-reminder',
-      failedTime: '02:30',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      responseLookup: 'medication-reminder',
-      retryLocalAt: {
-        date: '2026-03-08',
-        time: '03:30',
-        timeZone: 'America/New_York',
-      },
-      retryLookup: 'medication-reminder',
-    },
-    {
-      expectedAt: '2026-03-08T07:30:00.000Z',
-      failedLookup: 'medication-reminder',
-      failedTime: '02:30',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      requestedSlug: 'morning-meds',
-      responseLookup: 'morning-meds',
-      retryLocalAt: {
-        date: '2026-03-08',
-        time: '03:30',
-        timeZone: 'America/New_York',
-      },
-      retryLookup: 'medication-reminder',
     },
     {
       expectedAt: '2026-11-01T06:30:00.000Z',
-      failedLookup: 'medication-reminder',
       failedTime: '01:30',
       referenceAt: '2026-11-01T03:59:00.000Z',
-      requestedSlug: 'evening-meds',
-      responseLookup: 'evening-meds',
       retryLocalAt: {
         date: '2026-11-01',
         fold: 'later' as const,
         time: '01:30',
         timeZone: 'America/New_York',
       },
-      retryLookup: 'medication-reminder',
     },
-  ])('clears a patch clarification across canonical and renamed aliases', {
+  ])('clears a patch clarification using one exact automation id', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({
     expectedAt,
-    failedLookup,
     failedTime,
     referenceAt,
-    requestedSlug,
-    responseLookup,
     retryLocalAt,
-    retryLookup,
   }) => {
     const scenario = await prepareScriptedTurnScenario()
     const responseCard = {
@@ -4743,11 +5437,11 @@ text(JSON.stringify(result));
       footer: null,
       tracking: null,
     } satisfies AssistantResponseCard
+    const automationId = 'automation-medication-reminder'
     const failedRequest = {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      lookup: failedLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      lookup: automationId,
       schedule: {
         kind: 'at',
         localAt: {
@@ -4760,9 +5454,8 @@ text(JSON.stringify(result));
     const retryRequest = {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedLookup),
-      lookup: retryLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
+      lookup: automationId,
       schedule: {
         kind: 'at',
         localAt: retryLocalAt,
@@ -4805,18 +5498,20 @@ text(JSON.stringify(result));
       }
       return {
         action: 'patch' as const,
-        automationId: 'automation-medication-reminder',
+        automationId,
         created: false,
         effectiveTimeZone: 'America/New_York',
-        lookupId: responseLookup,
-        nextOccurrenceAt: expectedAt,
+        lookupId: automationId,
+        occurrenceProjection: {
+          nextOccurrenceAt: expectedAt,
+          status: 'resolved' as const,
+        },
         routeBinding: 'current_conversation' as const,
         schedule: request.schedule ?? {
           at: expectedAt,
           kind: 'at' as const,
         },
         status: 'active' as const,
-        timingVerified: true,
         updatedAt: '2026-03-08T05:01:00.000Z',
       }
     })
@@ -4848,8 +5543,7 @@ text(JSON.stringify(result));
     expect(automationRequest).toHaveBeenCalledWith({
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
-      lookup: retryLookup,
-      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      lookup: automationId,
       schedule: { at: expectedAt, kind: 'at' },
     }, expect.anything())
     expect(result.responseCard).toEqual(responseCard)
@@ -4857,7 +5551,7 @@ text(JSON.stringify(result));
     expect(result.transcriptMessage).not.toContain('the trusted date is')
   })
 
-  it('contains local one-shot slug failures and accepts a corrected retry', {
+  it('saves a localized one-shot title without a separate slug', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -4874,24 +5568,11 @@ text(JSON.stringify(result));
       },
       title: '薬を飲む',
     }
-    const correctedRequest = {
-      ...localizedRequest,
-      slug: 'take-medicine',
-    }
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
 const result = await tools.murph__automation(${JSON.stringify(localizedRequest)});
-text(JSON.stringify(result));
-`,
-          name: 'exec',
-        },
-      },
-      {
-        customToolCall: {
-          input: `
-const result = await tools.murph__automation(${JSON.stringify(correctedRequest)});
 text(JSON.stringify(result));
 `,
           name: 'exec',
@@ -4908,13 +5589,15 @@ text(JSON.stringify(result));
       created: true,
       effectiveTimeZone: 'America/New_York',
       lookupId: 'take-medicine',
-      nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+        status: 'resolved' as const,
+      },
       routeBinding: 'current_conversation' as const,
       schedule: request.action === 'save'
         ? request.schedule
         : { at: '2026-03-08T07:30:00.000Z', kind: 'at' as const },
       status: 'active' as const,
-      timingVerified: true,
       updatedAt: '2026-03-08T05:01:00.000Z',
     }))
     const result = await executeCodexAppServerTurn({
@@ -5013,11 +5696,13 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'breakfast-reminder',
-              nextOccurrenceAt: '2026-03-08T08:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-03-08T08:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-03-08T05:01:00.000Z',
             }
           },
@@ -5051,7 +5736,6 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const slug = 'medication-reminder'
     const failedRequest = {
       action: 'save',
       instructions: 'Send the medication reminder tomorrow.',
@@ -5063,12 +5747,11 @@ text(JSON.stringify(result));
           timeZone: 'America/New_York',
         },
       },
-      slug,
       title: 'Medication reminder',
     }
     const retryRequest = {
       ...failedRequest,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedRequest),
       schedule: {
         kind: 'at',
         localAt: {
@@ -5117,7 +5800,7 @@ text(JSON.stringify(result));
     })
 
     const question =
-      'For reminder "Medication reminder (medication-reminder)", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+      'For reminder "Medication reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
     expect(automationRequest).toHaveBeenCalledTimes(1)
     expect(result.finalMessage).toContain(question)
     expect(result.transcriptMessage).toContain(question)
@@ -5172,9 +5855,6 @@ text(JSON.stringify(result));
     resolvedAt,
     resolvedLocalAt,
   }) => {
-    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(
-      'medication-reminder',
-    )
     const failedRequest = {
       action: 'save',
       instructions: 'Send the medication reminder tomorrow.',
@@ -5188,6 +5868,7 @@ text(JSON.stringify(result));
       },
       title: 'Medication reminder',
     }
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
     const matchingInvalidRetry = {
       ...failedRequest,
       instructions: 'Send the renamed medication reminder.',
@@ -5239,11 +5920,13 @@ text(JSON.stringify(result));
           created: true,
           effectiveTimeZone: 'America/New_York',
           lookupId: 'medication-reminder',
-          nextOccurrenceAt: resolvedAt,
+          occurrenceProjection: {
+            nextOccurrenceAt: resolvedAt,
+            status: 'resolved' as const,
+          },
           routeBinding: 'current_conversation' as const,
           schedule: request.schedule,
           status: 'active' as const,
-          timingVerified: true,
           updatedAt: '2026-03-08T05:01:00.000Z',
         }
       })
@@ -5416,14 +6099,12 @@ text(JSON.stringify(result));
     }
     const successA = {
       ...failureA,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-        'medication-reminder',
-      ),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureA),
       schedule: { kind: 'at', localAt: recoveryA },
     }
     const successB = {
       ...failureB,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey('call-reminder'),
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureB),
       schedule: { kind: 'at', localAt: recoveryB },
     }
     const responseCard = {
@@ -5516,7 +6197,7 @@ text(JSON.stringify(result));
               input: `
 const result = await tools.murph__automation({
   action: "dismiss_local_at_recovery",
-  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey(failureA)}",
   resolvedLocalDate: "${date}",
 });
 text(JSON.stringify(result));
@@ -5542,9 +6223,7 @@ text(JSON.stringify(result));
         }
         const mismatchedA = {
           ...failureA,
-          localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
-            'medication-reminder',
-          ),
+          localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failureA),
           schedule: {
             kind: 'at',
             localAt: {
@@ -5621,7 +6300,7 @@ text(JSON.stringify(result));
             input: `
 const result = await tools.murph__automation({
   action: "dismiss_local_at_recovery",
-  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey(failureA)}",
   resolvedLocalDate: "${mismatchDate}",
 });
 text(JSON.stringify(result));
@@ -5703,11 +6382,13 @@ text(JSON.stringify(result));
                 created: true,
                 effectiveTimeZone: 'America/New_York',
                 lookupId,
-                nextOccurrenceAt: request.schedule.at,
+                occurrenceProjection: {
+                  nextOccurrenceAt: request.schedule.at,
+                  status: 'resolved' as const,
+                },
                 routeBinding: 'current_conversation',
                 schedule: request.schedule,
                 status: 'active',
-                timingVerified: true,
                 updatedAt: '2026-03-08T05:01:00.000Z',
               }
             },
@@ -5780,268 +6461,6 @@ text(JSON.stringify(result));
     }
   })
 
-  it.each([
-    {
-      date: '2026-03-08',
-      failedTime: '02:30',
-      fold: null,
-      newSlug: 'morning-meds',
-      patchLookup: 'medication-reminder',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      resolvedAt: '2026-03-08T07:30:00.000Z',
-      resolvedTime: '03:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-03-08',
-      failedTime: '02:30',
-      fold: null,
-      newSlug: null,
-      patchLookup: 'automation-medication-reminder',
-      referenceAt: '2026-03-08T04:59:00.000Z',
-      resolvedAt: '2026-03-08T07:30:00.000Z',
-      resolvedTime: '03:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-11-01',
-      failedTime: '01:30',
-      fold: 'later' as const,
-      newSlug: null,
-      patchLookup: 'medication-reminder',
-      referenceAt: '2026-11-01T03:59:00.000Z',
-      resolvedAt: '2026-11-01T06:30:00.000Z',
-      resolvedTime: '01:30',
-      secondPending: false,
-    },
-    {
-      date: '2026-11-01',
-      failedTime: '01:30',
-      fold: 'earlier' as const,
-      newSlug: 'evening-meds',
-      patchLookup: 'automation-medication-reminder',
-      referenceAt: '2026-11-01T03:59:00.000Z',
-      resolvedAt: '2026-11-01T05:30:00.000Z',
-      resolvedTime: '01:30',
-      secondPending: true,
-    },
-  ])('settles $date save recovery through create conflict and versioned patch', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async ({
-    date,
-    failedTime,
-    fold,
-    newSlug,
-    patchLookup,
-    referenceAt,
-    resolvedAt,
-    resolvedTime,
-    secondPending,
-  }) => {
-    const scenario = await prepareScriptedTurnScenario()
-    const slug = 'medication-reminder'
-    const automationId = 'automation-medication-reminder'
-    const updatedAt = '2026-03-07T20:00:00.000Z'
-    const failedSave = {
-      action: 'save',
-      instructions: 'Send the medication reminder tomorrow.',
-      schedule: {
-        kind: 'at',
-        localAt: {
-          relativeDay: 'tomorrow',
-          time: failedTime,
-          timeZone: 'America/New_York',
-        },
-      },
-      slug,
-      title: 'Medication reminder',
-    }
-    const recoveryLocalAt = {
-      date,
-      ...(fold ? { fold } : {}),
-      time: resolvedTime,
-      timeZone: 'America/New_York',
-    }
-    const retrySave = {
-      ...failedSave,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
-      schedule: { kind: 'at', localAt: recoveryLocalAt },
-    }
-    const inspect = { action: 'inspect', lookup: slug }
-    const patch = {
-      action: 'patch',
-      expectedUpdatedAt: updatedAt,
-      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
-      lookup: patchLookup,
-      ...(newSlug ? { slug: newSlug } : {}),
-      schedule: { kind: 'at', localAt: recoveryLocalAt },
-    }
-    const secondFailure = {
-      action: 'save',
-      instructions: 'Send the call reminder tomorrow.',
-      schedule: {
-        kind: 'at',
-        localAt: {
-          relativeDay: 'tomorrow',
-          time: failedTime,
-          timeZone: 'America/New_York',
-        },
-      },
-      slug: 'call-reminder',
-      title: 'Call reminder',
-    }
-    const responseCard = {
-      kind: 'compact_table',
-      version: 1,
-      title: 'Medication reminder',
-      subtitle: `${date} at ${resolvedTime}`,
-      rowHeader: 'Status',
-      columns: ['Schedule'],
-      rows: [{ label: 'Active', values: [resolvedTime] }],
-      footer: null,
-      tracking: null,
-    } satisfies AssistantResponseCard
-    const calls = [
-      failedSave,
-      ...(secondPending ? [secondFailure] : []),
-      retrySave,
-      inspect,
-      patch,
-    ]
-    for (const request of calls) {
-      scenario.stub.queue({
-        customToolCall: {
-          input: `
-const result = await tools.murph__automation(${JSON.stringify(request)});
-text(JSON.stringify(result));
-`,
-          name: 'exec',
-        },
-      })
-    }
-    scenario.stub.queue({
-      functionCall: {
-        arguments: { card: responseCard },
-        name: 'attach_response_card',
-        namespace: 'murph',
-      },
-    })
-    if (secondPending) {
-      scenario.stub.queue(
-        {
-          functionCall: {
-            arguments: {},
-            name: 'finish_without_reply',
-            namespace: 'murph',
-          },
-        },
-        { text: '' },
-      )
-    } else {
-      scenario.stub.queue({ text: 'CARD_ATTACHED' })
-    }
-
-    const ownerRequests: AssistantHostedAutomationToolRequest[] = []
-    const result = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      allowFinishWithoutReply: true,
-      automationRelativeDateReferenceWindow: {
-        earliestAt: referenceAt,
-        latestAt: referenceAt,
-      },
-      dynamicTools: [
-        MURPH_AUTOMATION_TOOL,
-        MURPH_ATTACH_RESPONSE_CARD_TOOL,
-        MURPH_FINISH_WITHOUT_REPLY_TOOL,
-      ],
-      groupConversation: false,
-      hostedToolContext: {
-        automationTool: {
-          request: async (request) => {
-            ownerRequests.push(request)
-            if (request.action === 'save') {
-              throw Object.assign(new Error('automation already exists'), {
-                code: 'VAULT_AUTOMATION_CONFLICT' as const,
-              })
-            }
-            if (request.action === 'inspect') {
-              return {
-                action: 'inspect',
-                automationId,
-                effectiveTimeZone: 'America/New_York',
-                lookupId: slug,
-                nextOccurrenceAt: '2026-03-07T21:00:00.000Z',
-                routeBinding: 'preserved',
-                schedule: {
-                  at: '2026-03-07T21:00:00.000Z',
-                  kind: 'at',
-                },
-                status: 'active',
-                timingVerified: true,
-                updatedAt,
-              }
-            }
-            if (request.action !== 'patch') {
-              throw new Error('Expected a versioned patch request.')
-            }
-            return {
-              action: 'patch',
-              automationId,
-              created: false,
-              effectiveTimeZone: 'America/New_York',
-              lookupId: newSlug ?? slug,
-              nextOccurrenceAt: resolvedAt,
-              routeBinding: 'current_conversation',
-              schedule: request.schedule ?? { at: resolvedAt, kind: 'at' },
-              status: 'active',
-              timingVerified: true,
-              updatedAt: '2026-03-08T05:01:00.000Z',
-            }
-          },
-        },
-        computerToolsAvailable: false,
-        currentHostedDeliveryContext: () => null,
-        currentHostedMailboxItemIds: () => [],
-        sendVaultFile: async () => {
-          throw new Error('Vault file sends are unavailable in this test.')
-        },
-        vaultFileSendAvailable: false,
-      },
-      prompt: 'Set or update my medication reminder for tomorrow.',
-    })
-
-    expect(ownerRequests.map((request) => request.action)).toEqual([
-      'save',
-      'inspect',
-      'patch',
-    ])
-    for (const request of ownerRequests) {
-      expect(request).not.toHaveProperty('localAtRecoveryKey')
-    }
-    expect(ownerRequests[2]).toMatchObject({
-      action: 'patch',
-      expectedUpdatedAt: updatedAt,
-      lookup: patchLookup,
-      ...(newSlug ? { slug: newSlug } : {}),
-      schedule: { at: resolvedAt, kind: 'at' },
-    })
-    const medicationQuestion =
-      `For reminder "Medication reminder (${slug})", the trusted date is ${date}.`
-    expect(result.finalMessage).not.toContain(medicationQuestion)
-    expect(result.transcriptMessage).not.toContain(medicationQuestion)
-    if (secondPending) {
-      const callQuestion =
-        `For reminder "Call reminder (call-reminder)", the trusted date is ${date}.`
-      expect(result.finalAction).toBeNull()
-      expect(result.responseCard).toBeNull()
-      expect(result.finalMessage).toContain(callQuestion)
-      expect(result.transcriptMessage).toContain(callQuestion)
-    } else {
-      expect(result.responseCard).toEqual(responseCard)
-      expect(result.finalMessage).not.toContain('the trusted date is')
-      expect(result.transcriptMessage).not.toContain('the trusted date is')
-    }
-  })
 
   it('suppresses a response card until the trusted DST clarification is delivered', {
     timeout: TURN_TIMEOUT_MS,
@@ -6263,14 +6682,16 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'steered-one-shot-reminder',
-              nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: {
                 at: '2031-02-15T09:20:00.000Z',
                 kind: 'at',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2031-02-15T09:59:59.950Z',
             }
           },
@@ -6433,14 +6854,16 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: null,
               lookupId: 'one-time-evening-reminder',
-              nextOccurrenceAt: null,
+              occurrenceProjection: {
+                nextOccurrenceAt: null,
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: {
                 at: '2026-08-01T13:00:00.000Z',
                 kind: 'at',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
@@ -6468,7 +6891,7 @@ text(JSON.stringify(result));
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"kind":"at"')
     expect(toolOutputs).toContain('"nextOccurrenceAt":null')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(result.finalMessage).toMatch(/already passed|no longer deliverable/iu)
     expect(result.finalMessage).toMatch(/new time|reschedule/iu)
   })
@@ -6515,12 +6938,13 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: null,
               lookupId: 'daily-interval-reminder',
-              nextOccurrenceAt: '2026-08-11T00:01:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T00:01:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: { everyMs: 86_400_000, kind: 'every' },
               status: 'active',
-              timingVerified: true,
-              timingVerificationIssues: [],
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
@@ -6542,7 +6966,7 @@ text(JSON.stringify(result));
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"kind":"every"')
     expect(toolOutputs).toContain('"nextOccurrenceAt":"2026-08-11T00:01:00.000Z"')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(automationRequests).toEqual([
       {
         action: 'patch',
@@ -6556,7 +6980,7 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
-  it('reports persistent timing uncertainty without offering more inspection', {
+  it('confirms an active reminder while its occurrence projection is pending', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -6577,7 +7001,7 @@ text(JSON.stringify(result));
         },
       },
       {
-        text: 'The reminder wording is updated and the daily schedule remains active. The scheduler is still finishing existing work, so the next run is not confirmed yet.',
+        text: 'I updated your reminder. It is still active on its daily schedule.',
       },
     )
 
@@ -6593,12 +7017,10 @@ text(JSON.stringify(result));
               automationId: 'automation-daily-interval',
               effectiveTimeZone: null,
               lookupId: 'daily-interval-reminder',
-              nextOccurrenceAt: null,
+              occurrenceProjection: { status: 'pending' as const },
               routeBinding: 'preserved' as const,
               schedule: { everyMs: 86_400_000, kind: 'every' as const },
               status: 'active' as const,
-              timingVerified: false,
-              timingVerificationIssues: ['runtime_state_pending'] as const,
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
             if (request.action !== 'patch') {
@@ -6630,9 +7052,263 @@ text(JSON.stringify(result));
         lookup: 'daily-interval-reminder',
       },
     ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain(
+      '"occurrenceProjection":{"status":"pending"}',
+    )
+    expect(toolOutputs).not.toContain('"timingVerified"')
     expect(result.finalMessage).toMatch(/updated|active/iu)
-    expect(result.finalMessage).toMatch(/next run is not confirmed yet/iu)
-    expect(result.finalMessage).not.toMatch(/if you want|inspect|10:30|tomorrow/iu)
+    expect(result.finalMessage).toMatch(/daily/iu)
+    expect(result.finalMessage).not.toMatch(/scheduler|projection|occurrence|processing/iu)
+    expect(result.finalMessage).not.toMatch(
+      /if you want|inspect|10:30|tomorrow|unconfirmed|not confirmed|could not verify/iu,
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it.each([
+    {
+      action: 'inspect' as const,
+      audience: 'direct' as const,
+      expectedRequest: {
+        action: 'inspect',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The daily reminder remains active, but its occurrence is overdue and I couldn't confirm the next occurrence.",
+      prompt: 'Is my daily interval reminder still scheduled?',
+      title: 'reports an overdue recurring reminder inspection',
+    },
+    {
+      action: 'patch' as const,
+      audience: 'direct' as const,
+      expectedRequest: {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        instructions: 'Send the revised daily interval reminder.',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The edit was saved, and the daily reminder remains active on its daily schedule. Its occurrence is overdue, and I couldn't confirm the next occurrence.",
+      prompt: 'Update my daily interval reminder now.',
+      title: 'reports an overdue recurring reminder edit',
+    },
+    {
+      action: 'inspect' as const,
+      audience: 'group' as const,
+      expectedRequest: {
+        action: 'inspect',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The room's daily reminder remains active, but its occurrence is overdue and the next occurrence couldn't be confirmed.",
+      prompt: 'Is this room\'s daily interval reminder still scheduled?',
+      title: 'reports an overdue recurring reminder inspection to its group',
+    },
+  ])('$title without promising automatic recovery', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    action,
+    audience,
+    expectedRequest,
+    finalMessage,
+    prompt,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    const toolInput = action === 'patch'
+      ? `
+const result = await tools.murph__automation({
+  action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
+  instructions: "Send the revised daily interval reminder.",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`
+      : `
+const result = await tools.murph__automation({
+  action: "inspect",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: toolInput,
+          name: 'exec',
+        },
+      },
+      { text: finalMessage },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt(audience, true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== action) {
+              throw new Error(`Expected an automation ${action} request.`)
+            }
+            const response = {
+              automationId: 'automation-daily-interval',
+              effectiveTimeZone: null,
+              lookupId: 'daily-interval-reminder',
+              occurrenceProjection: {
+                issues: ['stale_recurring_occurrence'] as const,
+                status: 'unavailable' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: { everyMs: 86_400_000, kind: 'every' as const },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:01:00.000Z',
+            }
+            if (request.action === 'patch') {
+              return {
+                action: 'patch' as const,
+                ...response,
+                created: false,
+              }
+            }
+            return {
+              action: 'inspect' as const,
+              ...response,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt,
+    })
+
+    expect(automationRequests).toEqual([expectedRequest])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain(
+      '"issues":["stale_recurring_occurrence"]',
+    )
+    expect(toolOutputs).toContain('"status":"unavailable"')
+    expect(result.finalMessage).toBe(finalMessage)
+    expect(result.finalMessage).toMatch(/active/iu)
+    expect(result.finalMessage).toMatch(/overdue/iu)
+    expect(result.finalMessage).toMatch(
+      /could(?:n't| not)(?: be)? confirm(?:ed)?/iu,
+    )
+    if (action === 'patch') {
+      expect(result.finalMessage).toMatch(/edit .*saved/iu)
+      expect(result.finalMessage).toMatch(/daily schedule/iu)
+    }
+    if (audience === 'group') {
+      expect(result.finalMessage).toMatch(/room/iu)
+      expect(result.finalMessage).not.toMatch(/\bI\b|\bmy\b|\byou(?:r)?\b/iu)
+    }
+    expect(result.finalMessage).not.toMatch(
+      /automatically|no action|nothing .*need|current .*work/iu,
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('does not promise delivery for an in-flight one-shot edit', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  expectedUpdatedAt: "2026-08-10T14:29:00.000Z",
+  instructions: "Send the revised one-time reminder.",
+  lookup: "one-time-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "The edit was saved and the reminder is still active. Because its 10:30 occurrence was already in progress, the edit may not affect that delivery. If it doesn't arrive, I can reschedule it.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            return {
+              action: 'patch' as const,
+              automationId: 'automation-one-time-reminder',
+              created: false,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'one-time-reminder',
+              occurrenceProjection: { status: 'pending' as const },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                at: '2026-08-10T14:30:00.000Z',
+                kind: 'at' as const,
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T14:30:01.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Update the wording of my one-time reminder now.',
+    })
+
+    expect(automationRequests).toEqual([
+      {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T14:29:00.000Z',
+        instructions: 'Send the revised one-time reminder.',
+        lookup: 'one-time-reminder',
+      },
+    ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"at"')
+    expect(toolOutputs).toContain(
+      '"occurrenceProjection":{"status":"pending"}',
+    )
+    expect(result.finalMessage).toMatch(/saved|active/iu)
+    expect(result.finalMessage).toMatch(/may not affect|already in progress/iu)
+    expect(result.finalMessage).toMatch(/reschedule/iu)
+    expect(result.finalMessage).not.toMatch(
+      /will (?:deliver|arrive)|automatically|no action|nothing .*need/iu,
+    )
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
@@ -6689,11 +7365,13 @@ if (!tool) {
               created: true,
               effectiveTimeZone: null,
               lookupId: 'next-workout-check-in',
-              nextOccurrenceAt: null,
+              occurrenceProjection: {
+                nextOccurrenceAt: null,
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
@@ -6726,12 +7404,12 @@ if (!tool) {
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"kind":"deviceActivity"')
     expect(toolOutputs).toContain('"nextOccurrenceAt":null')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(result.finalMessage).toContain('after your next workout')
     expect(result.finalMessage).not.toMatch(/no (?:future|later) delivery/iu)
   })
 
-  it('preserves current response-card shapes and rejects legacy-only nutrition authoring through the real App Server boundary', {
+  it('preserves current response-card shapes and rejects unverified workouts and legacy-only nutrition authoring through the real App Server boundary', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const completedWorkoutCard = {
@@ -6743,7 +7421,6 @@ if (!tool) {
       tracking: {
         kind: 'workout',
         entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
-        snapshotAt: '2026-08-09T19:45:00.000Z',
       },
       workout: {
         version: 1,
@@ -6769,7 +7446,7 @@ if (!tool) {
           })),
         })),
       },
-    } satisfies AssistantResponseCard
+    } as const
     const cards = [
       {
         kind: 'compact_table',
@@ -6809,10 +7486,14 @@ if (!tool) {
     ] as const
     const completeNutritionCard = cards[2]
 
-    for (const card of cards) {
+    for (const card of [...cards, {
+      ...completeNutritionCard,
+      goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null },
+    }]) {
       const scenario = await prepareScriptedTurnScenario()
       scenario.stub.captureProviderRequestDiagnostics()
       scenario.stub.queue(
+        { toolSearchCall: { query: 'murph attach_response_card private structured compact_table daily_nutrition', limit: 1 } },
         {
           functionCall: {
             arguments: { card },
@@ -6820,7 +7501,7 @@ if (!tool) {
             namespace: 'murph',
           },
         },
-        { text: 'CARD_ATTACHED' },
+        { text: 'workout' in card ? 'WORKOUT_CARD_UNAVAILABLE' : 'CARD_ATTACHED' },
       )
 
       const result = await executeCodexAppServerTurn({
@@ -6834,11 +7515,33 @@ if (!tool) {
         scenario.stub.requestSummariesSinceBaseline()[0]
           ?.providerRequestDiagnostics,
       ).toMatchObject({
-        includesResponseCardCompactTableShape: true,
-        includesResponseCardNutritionV2Shape: true,
+        includesResponseCardCompactTableShape: false,
+        includesResponseCardNutritionV2Shape: false,
       })
-      expect(result.runtimeIssueInputs).toEqual([])
-      expect(result.responseCard).toEqual(card)
+      const discovered = scenario.stub.requestSummariesSinceBaseline()[1]?.toolSearchOutputTools
+      expect(JSON.stringify(discovered)).toContain('compact_table')
+      expect(JSON.stringify(discovered)).toContain('daily_nutrition')
+      expect(JSON.stringify(discovered)).toContain(
+        'meal totals --from <date> --to <same-date> --resolve-goals --format json',
+      )
+      expect(JSON.stringify(discovered)).not.toContain('goal list --status active')
+      if ('workout' in card) {
+        expect(result.responseCard).toBeNull()
+        expect(result.runtimeIssueInputs).toEqual([
+          expect.objectContaining({
+            component: 'assistant.workout-card-editor',
+            errorCode: 'WORKOUT_CARD_EDITOR_UNAVAILABLE',
+          }),
+          expect.objectContaining({
+            component: 'assistant.codex-action',
+            errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+          }),
+        ])
+        expect(result.finalMessage).toBe('WORKOUT_CARD_UNAVAILABLE')
+      } else {
+        expect(result.runtimeIssueInputs).toEqual([])
+        expect(result.responseCard).toEqual(card)
+      }
     }
 
     const incompleteNutritionCards = [
@@ -6851,16 +7554,6 @@ if (!tool) {
           proteinGrams: { total: 70, mealCount: 2 },
           carbsGrams: { total: 80, mealCount: 2 },
           fatGrams: { total: 30, mealCount: 2 },
-        },
-      },
-      {
-        ...completeNutritionCard,
-        goals: {
-          calories: null,
-          proteinGrams: null,
-          carbsGrams: null,
-          fatGrams: null,
-          fiberGrams: null,
         },
       },
       ...([
@@ -6978,10 +7671,10 @@ if (!tool) {
     const invalidOutput = summaries[1]?.functionCallOutputs?.join('\n') ?? ''
     expect(invalidOutput).toContain('invalid_response_card_arguments')
     expect(invalidOutput).toContain(
-      '"field":"card.totals.proteinGrams.mealCount"',
+      '"path":["card","totals","proteinGrams","mealCount"]',
     )
     expect(invalidOutput).toContain(
-      '"expected":"zero_iff_total_null"',
+      '"murphExpectedShape":"zero_iff_total_null"',
     )
     expect(invalidOutput).not.toContain('challengeSlug')
     expect(summaries[2]?.functionCallOutputs?.join('\n')).toContain(
@@ -6992,6 +7685,54 @@ if (!tool) {
     expect(result.finalMessage).toContain('100g protein (status unavailable)')
     expect(result.finalMessage).not.toBe('CARD_REPAIRED')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
+  it('records focused group-family schema rejections through the standard diagnostic', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            action: 'read_shared',
+            projectionScopes: [],
+          },
+          name: 'group_data',
+          namespace: 'murph',
+        },
+      },
+      { text: 'GROUP_DATA_REJECTED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_GROUP_DATA_TOOL],
+      groupConversation: true,
+      prompt: 'Try the requested synthetic group data read.',
+    })
+
+    const invalidOutput = scenario.stub.requestSummariesSinceBaseline()[1]
+      ?.functionCallOutputs?.join('\n') ?? ''
+    expect(invalidOutput).toContain('invalid_group_arguments')
+    expect(invalidOutput).toContain('projectionScopes')
+    expect(result.runtimeIssueInputs).toEqual([
+      expect.objectContaining({
+        component: 'assistant.tool-validation',
+        errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
+        issueKind: 'schema_rejection',
+        operation: 'murph.group_data',
+      }),
+      expect.objectContaining({
+        component: 'assistant.codex-action',
+        errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+        issueKind: 'tool_error',
+        operation: 'dynamic.tool.call',
+      }),
+    ])
+    expect(JSON.stringify(result.runtimeIssueInputs))
+      .not.toContain('validationIssues')
+    expect(result.finalMessage).toBe('GROUP_DATA_REJECTED')
   })
 
   it('keeps malformed group-card repair feedback on the group contract', {
@@ -7019,2216 +7760,12 @@ if (!tool) {
     const invalidOutput = scenario.stub.requestSummariesSinceBaseline()[1]
       ?.functionCallOutputs?.join('\n') ?? ''
     expect(invalidOutput).toContain('invalid_response_card_arguments')
-    expect(invalidOutput).toContain('"field":"challengeSlug"')
-    expect(invalidOutput).toContain('"field":"pageRevisionDigest"')
-    expect(invalidOutput).not.toContain('"field":"card"')
+    expect(invalidOutput).toContain('"path":["challengeSlug"]')
+    expect(invalidOutput).toContain('"path":["pageRevisionDigest"]')
+    expect(invalidOutput).not.toContain('"path":["card"]')
     expect(result.responseCard).toBeNull()
     expect(result.finalMessage).toBe('GROUP_CARD_REJECTED')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
-  })
-
-  it('proves complete Goal and safety discovery before nutrition targets and cards', {
-    timeout: 720_000,
-  }, async () => {
-    const activeListCommand =
-      'goal list --status active --limit 200 --format json'
-    const visibleGoalShowCommand =
-      'goal show goal_visible_bundle --format json'
-    const hiddenGoalShowCommand =
-      'goal show goal_hidden_conflict --format json'
-    const memoryCommand = 'memory show --format json'
-    const conditionListCommand =
-      'condition list --status active --limit 200 --format json'
-    const regimenListCommand =
-      'regimen list --status active --limit 200 --format json'
-    const measurementCommand =
-      'measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from 2026-06-15 --to 2026-07-30 --limit 200 --format json'
-    const pregnancyMeasurementCommand =
-      'measurement entry list --metric pregnancy-test --from 2025-10-03 --to 2026-07-30 --limit 200 --format json'
-    const testEventListCommand =
-      'event list --kind test --from 2025-10-03 --to 2026-07-30 --limit 200 --format json'
-    const procedureListCommand =
-      'event list --kind procedure --limit 200 --format json'
-    const encounterListCommand =
-      'event list --kind encounter --limit 200 --format json'
-    const totalsCommand =
-      'meal totals --from 2026-07-30 --to 2026-07-30 --format json'
-
-    const pointTarget = (
-      id: string,
-      metric: string,
-      unit: string,
-      value: number,
-    ) => ({
-      evaluation: {
-        comparator: 'between',
-        highValue: value,
-        kind: 'selected-value',
-        value,
-      },
-      id,
-      kind: 'metric',
-      metric,
-      unit,
-    })
-    const completeTargets = [
-      pointTarget('target_calories', 'dietary-calories', 'kcal', 1_800),
-      pointTarget('target_protein', 'protein-grams', 'g', 140),
-      pointTarget('target_carbs', 'carbs-grams', 'g', 190),
-      pointTarget('target_fat', 'fat-grams', 'g', 55),
-      pointTarget('target_fiber', 'fiber-grams', 'g', 25),
-    ]
-    const visibleGoal = {
-      entity: {
-        data: {
-          metricTargets: completeTargets,
-          status: 'active',
-          windowStartAt: '2026-07-01',
-        },
-        id: 'goal_visible_bundle',
-        kind: 'goal',
-        title: 'Plan A',
-      },
-      vault: 'synthetic-vault',
-    }
-    const hiddenGoal = {
-      entity: {
-        data: {
-          metricTargets: [
-            pointTarget(
-              'target_hidden_calories',
-              'dietary-calories',
-              'kcal',
-              1_100,
-            ),
-          ],
-          status: 'active',
-          windowStartAt: '2026-07-01',
-        },
-        id: 'goal_hidden_conflict',
-        kind: 'goal',
-        title: 'Plan L',
-      },
-      vault: 'synthetic-vault',
-    }
-    const conflictItems = Array.from({ length: 12 }, (_, index) => {
-      const itemNumber = index + 1
-      const id = index === 0
-        ? 'goal_visible_bundle'
-        : index === 11
-          ? 'goal_hidden_conflict'
-          : `goal_opaque_${itemNumber}`
-      return {
-        data: {
-          metricTargetsCount: index === 0 ? 5 : index === 11 ? 1 : 0,
-          status: 'active',
-        },
-        id,
-        kind: 'goal',
-        title: `Plan ${itemNumber}`,
-      }
-    })
-    const conflictList = {
-      count: conflictItems.length,
-      filters: { limit: 200, status: 'active' },
-      items: conflictItems,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const saturatedItems = Array.from({ length: 200 }, (_, index) => ({
-      data: {
-        metricTargetsCount: index % 17 === 0 ? 1 : 0,
-        status: 'active',
-      },
-      id: `goal_saturated_${index + 1}`,
-      kind: 'goal',
-      title: `Plan ${index + 1}`,
-    }))
-    const saturatedList = {
-      count: saturatedItems.length,
-      filters: { limit: 200, status: 'active' },
-      items: saturatedItems,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const completeList = {
-      count: 1,
-      filters: { limit: 200, status: 'active' },
-      items: [conflictItems[0]],
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const safeMeasurements = {
-      count: 0,
-      filters: {
-        from: '2026-06-15',
-        limit: 200,
-        metric: ['bmi', 'height', 'weight', 'body-weight'],
-        to: '2026-07-30',
-      },
-      items: [],
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const memoryResult = (
-      records: readonly { section: string; text: string }[],
-    ) => ({
-      document: {
-        records: records.map((record, index) => ({
-          ...record,
-          id: `memory_record_${index + 1}`,
-          updatedAt: '2026-07-29T12:00:00.000Z',
-        })),
-      },
-      memory: null,
-      vault: 'synthetic-vault',
-    })
-    const adultMemory = memoryResult([{
-      section: 'Identity',
-      text: 'Age: 34',
-    }])
-    const minorMemory = memoryResult([{
-      section: 'Identity',
-      text: 'Age: 16',
-    }])
-    const numberSensitiveMemory = memoryResult([{
-      section: 'Preferences',
-      text: 'Avoid calorie and macro numbers; use an intuitive-eating approach.',
-    }])
-    const measurementResult = (
-      items: readonly Record<string, unknown>[],
-    ) => ({
-      count: items.length,
-      filters: {
-        from: '2026-06-15',
-        limit: 200,
-        metric: ['bmi', 'height', 'weight', 'body-weight'],
-        to: '2026-07-30',
-      },
-      items,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const pregnancyMeasurementResult = (
-      items: readonly Record<string, unknown>[],
-    ) => ({
-      count: items.length,
-      filters: {
-        from: '2025-10-03',
-        limit: 200,
-        metric: ['pregnancy-test'],
-        to: '2026-07-30',
-      },
-      items,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const lowBmiMeasurements = measurementResult([{
-      eventId: 'event_low_bmi',
-      metric: 'bmi',
-      occurredAt: '2026-07-29T12:00:00.000Z',
-      unit: 'kg/m^2',
-      value: 16.8,
-    }])
-    const lowSameEventMeasurements = measurementResult([
-      {
-        eventId: 'event_low_pair',
-        metric: 'height',
-        occurredAt: '2026-07-29T12:00:00.000Z',
-        unit: 'cm',
-        value: 180,
-      },
-      {
-        eventId: 'event_low_pair',
-        metric: 'weight',
-        occurredAt: '2026-07-29T12:00:00.000Z',
-        unit: 'kg',
-        value: 54,
-      },
-    ])
-    const normalBmiMeasurements = measurementResult([{
-      eventId: 'event_normal_bmi',
-      metric: 'bmi',
-      occurredAt: '2026-07-29T12:00:00.000Z',
-      unit: 'kg/m^2',
-      value: 22.1,
-    }])
-    const saturatedMeasurements = measurementResult(
-      Array.from({ length: 200 }, (_, index) => ({
-        eventId: `event_height_only_${index + 1}`,
-        metric: 'height',
-        occurredAt: `2026-07-${String(29 - (index % 20)).padStart(2, '0')}T12:00:00.000Z`,
-        unit: 'cm',
-        value: 180,
-      })),
-    )
-    const noPregnancyMeasurements = pregnancyMeasurementResult([])
-    const negativePregnancyMeasurements = pregnancyMeasurementResult([{
-      eventId: 'event_negative_pregnancy_test',
-      measurementIndex: 0,
-      metric: 'pregnancy-test',
-      occurredAt: '2026-07-29T12:00:00.000Z',
-      qualifiers: { result: 'negative' },
-      recordKind: 'measurement',
-      source: 'device',
-      unit: 'result',
-      value: 0,
-    }])
-    const ambiguousPregnancyMeasurements = pregnancyMeasurementResult([{
-      eventId: 'event_ambiguous_pregnancy_test',
-      measurementIndex: 0,
-      metric: 'pregnancy-test',
-      occurredAt: '2026-07-29T12:00:00.000Z',
-      qualifiers: { result: 'indeterminate' },
-      recordKind: 'measurement',
-      source: 'device',
-      unit: 'result',
-      value: 1,
-    }])
-    const positivePregnancyMeasurements = pregnancyMeasurementResult([{
-      eventId: 'event_positive_pregnancy_test',
-      measurementIndex: 0,
-      metric: 'pregnancy-test',
-      occurredAt: '2026-07-28T12:00:00.000Z',
-      qualifiers: { result: 'positive' },
-      recordKind: 'measurement',
-      source: 'device',
-      unit: 'result',
-      value: 1,
-    }])
-    const laterNegativeAfterPositiveMeasurements = pregnancyMeasurementResult([
-      {
-        eventId: 'event_later_negative_pregnancy_test',
-        measurementIndex: 0,
-        metric: 'pregnancy-test',
-        occurredAt: '2026-07-29T12:00:00.000Z',
-        qualifiers: { result: 'negative' },
-        recordKind: 'measurement',
-        source: 'device',
-        unit: 'result',
-        value: 0,
-      },
-      positivePregnancyMeasurements.items[0]!,
-    ])
-    const saturatedPregnancyMeasurements = pregnancyMeasurementResult(
-      Array.from({ length: 200 }, (_, index) => ({
-        eventId: `event_negative_pregnancy_test_${index + 1}`,
-        measurementIndex: 0,
-        metric: 'pregnancy-test',
-        occurredAt: `2026-07-${String(29 - (index % 20)).padStart(2, '0')}T12:00:00.000Z`,
-        qualifiers: { result: 'negative' },
-        recordKind: 'measurement',
-        source: 'device',
-        unit: 'result',
-        value: 0,
-      })),
-    )
-    const testEventListResult = (
-      items: readonly Record<string, unknown>[],
-    ) => ({
-      count: items.length,
-      filters: {
-        experiment: null,
-        from: '2025-10-03',
-        kind: 'test',
-        limit: 200,
-        tag: [],
-        to: '2026-07-30',
-      },
-      items,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const testEventItem = (
-      id: string,
-      testName: string,
-      resultStatus: string,
-      resultsCount: number,
-    ) => ({
-      data: {
-        resultStatus,
-        ...(resultsCount === 0 ? {} : { resultsCount }),
-        testName,
-      },
-      id,
-      kind: 'blood_test',
-      occurredAt: '2026-07-28T12:00:00.000Z',
-      title: 'Structured clinical result',
-    })
-    const testEventDetail = (input: {
-      id: string
-      resultStatus: string
-      results?: readonly Record<string, unknown>[]
-      summary?: string
-      testName: string
-    }) => ({
-      entity: {
-        data: {
-          resultStatus: input.resultStatus,
-          ...(input.results ? { results: input.results } : {}),
-          ...(input.summary ? { summary: input.summary } : {}),
-          testName: input.testName,
-        },
-        id: input.id,
-        kind: 'blood_test',
-        occurredAt: '2026-07-28T12:00:00.000Z',
-        title: 'Structured clinical result',
-      },
-      vault: 'synthetic-vault',
-    })
-    const noTestEvents = testEventListResult([])
-    const positivePregnancyTestEventId =
-      'event_positive_structured_pregnancy_test'
-    const positivePregnancyTestEvents = testEventListResult([
-      testEventItem(
-        positivePregnancyTestEventId,
-        'serum_hcg_qualitative',
-        'unknown',
-        0,
-      ),
-    ])
-    const positivePregnancyTestEventDetail = testEventDetail({
-      id: positivePregnancyTestEventId,
-      resultStatus: 'unknown',
-      summary: 'Pregnancy test: positive',
-      testName: 'serum_hcg_qualitative',
-    })
-    const negativePregnancyTestEventId =
-      'event_negative_structured_pregnancy_test'
-    const negativePregnancyTestEvents = testEventListResult([
-      testEventItem(
-        negativePregnancyTestEventId,
-        'urine_pregnancy_test',
-        'normal',
-        1,
-      ),
-    ])
-    const negativePregnancyTestEventDetail = testEventDetail({
-      id: negativePregnancyTestEventId,
-      resultStatus: 'normal',
-      results: [{ analyte: 'Pregnancy test', textValue: 'Negative' }],
-      summary: 'Pregnancy test: negative',
-      testName: 'urine_pregnancy_test',
-    })
-    const pendingPregnancyTestEventId =
-      'event_pending_structured_pregnancy_test'
-    const pendingPregnancyTestEvents = testEventListResult([
-      testEventItem(
-        pendingPregnancyTestEventId,
-        'urine_pregnancy_test',
-        'pending',
-        1,
-      ),
-    ])
-    const pendingPregnancyTestEventDetail = testEventDetail({
-      id: pendingPregnancyTestEventId,
-      resultStatus: 'pending',
-      results: [{ analyte: 'Pregnancy test', textValue: 'Positive' }],
-      summary: 'Preliminary pregnancy test: positive',
-      testName: 'urine_pregnancy_test',
-    })
-    const numericHcgTestEventId = 'event_numeric_hcg_result'
-    const unrelatedTestEventId = 'event_unrelated_strep_result'
-    const ambiguousHcgTestEventId = 'event_ambiguous_hcg_result'
-    const negatedHcgTestEventId = 'event_negated_hcg_result'
-    const numericAndUnrelatedTestEvents = testEventListResult([
-      testEventItem(
-        numericHcgTestEventId,
-        'quantitative_hcg',
-        'unknown',
-        1,
-      ),
-      testEventItem(
-        unrelatedTestEventId,
-        'rapid_strep_test',
-        'unknown',
-        1,
-      ),
-      testEventItem(
-        ambiguousHcgTestEventId,
-        'serum_hcg_qualitative',
-        'unknown',
-        1,
-      ),
-      testEventItem(
-        negatedHcgTestEventId,
-        'serum_hcg_qualitative',
-        'unknown',
-        1,
-      ),
-    ])
-    const numericHcgTestEventDetail = testEventDetail({
-      id: numericHcgTestEventId,
-      resultStatus: 'unknown',
-      results: [{
-        analyte: 'beta hCG',
-        unit: 'mIU/mL',
-        value: 86,
-      }],
-      summary: 'Quantitative result available',
-      testName: 'quantitative_hcg',
-    })
-    const unrelatedTestEventDetail = testEventDetail({
-      id: unrelatedTestEventId,
-      resultStatus: 'unknown',
-      results: [{ analyte: 'Strep A', textValue: 'Negative' }],
-      summary: 'No strep detected',
-      testName: 'rapid_strep_test',
-    })
-    const ambiguousHcgTestEventDetail = testEventDetail({
-      id: ambiguousHcgTestEventId,
-      resultStatus: 'unknown',
-      results: [{ analyte: 'hCG qualitative', textValue: 'Equivocal' }],
-      summary: 'Pregnancy status cannot be determined',
-      testName: 'serum_hcg_qualitative',
-    })
-    const negatedHcgTestEventDetail = testEventDetail({
-      id: negatedHcgTestEventId,
-      resultStatus: 'unknown',
-      results: [{ analyte: 'hCG qualitative', textValue: 'Not detected' }],
-      summary: 'Pregnancy test: not detected',
-      testName: 'serum_hcg_qualitative',
-    })
-    const saturatedTestEvents = testEventListResult(
-      Array.from({ length: 200 }, (_, index) =>
-        testEventItem(
-          `event_unrelated_test_${index + 1}`,
-          `unrelated_test_${index + 1}`,
-          'normal',
-          0,
-        )),
-    )
-    const procedureListResult = (
-      items: readonly Record<string, unknown>[],
-    ) => ({
-      count: items.length,
-      filters: {
-        experiment: null,
-        from: null,
-        kind: 'procedure',
-        limit: 200,
-        tag: [],
-        to: null,
-      },
-      items,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const procedureItem = (
-      id: string,
-      procedure: string,
-      status: string,
-    ) => ({
-      data: { procedure, status },
-      id,
-      kind: 'procedure',
-      occurredAt: '2024-03-14T10:00:00.000Z',
-      title: procedure,
-    })
-    const noProcedures = procedureListResult([])
-    const completedBariatricProcedures = procedureListResult([
-      procedureItem(
-        'event_completed_bariatric_procedure',
-        'Roux-en-Y gastric bypass',
-        'completed',
-      ),
-    ])
-    const plannedBariatricProcedureWithoutListStatus = procedureListResult([{
-      data: { procedure: 'gastric sleeve' },
-      id: 'event_planned_bariatric_procedure',
-      kind: 'procedure',
-      occurredAt: '2026-09-14T10:00:00.000Z',
-      title: 'Planned gastric sleeve',
-    }])
-    const plannedBariatricProcedureDetail = {
-      entity: {
-        data: {
-          procedure: 'gastric sleeve',
-          status: 'planned',
-        },
-        id: 'event_planned_bariatric_procedure',
-        kind: 'procedure',
-        occurredAt: '2026-09-14T10:00:00.000Z',
-        title: 'Planned gastric sleeve',
-      },
-      vault: 'synthetic-vault',
-    }
-    const saturatedProcedures = procedureListResult(
-      Array.from({ length: 200 }, (_, index) =>
-        procedureItem(
-          `event_procedure_${index + 1}`,
-          `Unrelated procedure ${index + 1}`,
-          'completed',
-        )),
-    )
-    const encounterListResult = (
-      items: readonly Record<string, unknown>[],
-    ) => ({
-      count: items.length,
-      filters: {
-        experiment: null,
-        from: null,
-        kind: 'encounter',
-        limit: 200,
-        tag: [],
-        to: null,
-      },
-      items,
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const encounterItem = (
-      id: string,
-      diagnosesCount: number,
-    ) => ({
-      data: {
-        encounterType: 'office_visit',
-        ...(diagnosesCount === 0 ? {} : { diagnosesCount }),
-      },
-      id,
-      kind: 'encounter',
-      occurredAt: '2026-07-14T10:00:00.000Z',
-      title: 'Clinical visit',
-    })
-    const encounterDetail = (
-      id: string,
-      diagnoses: readonly Record<string, unknown>[],
-    ) => ({
-      entity: {
-        data: {
-          diagnoses,
-          encounterType: 'office_visit',
-        },
-        id,
-        kind: 'encounter',
-        occurredAt: '2026-07-14T10:00:00.000Z',
-        title: 'Clinical visit',
-      },
-      vault: 'synthetic-vault',
-    })
-    const noEncounters = encounterListResult([])
-    const encountersWithoutDiagnoses = encounterListResult([
-      encounterItem('event_encounter_without_diagnoses', 0),
-    ])
-    const activeKidneyEncounterId = 'event_encounter_active_kidney_diagnosis'
-    const activeKidneyEncounters = encounterListResult([
-      encounterItem(activeKidneyEncounterId, 1),
-    ])
-    const activeKidneyEncounterDetail = encounterDetail(
-      activeKidneyEncounterId,
-      [{
-        certainty: 'documented',
-        code: 'N18.30',
-        codeSystem: 'ICD-10-CM',
-        status: 'active',
-        text: 'Chronic kidney disease stage 3',
-      }],
-    )
-    const unresolvedKidneyEncounterId =
-      'event_encounter_unresolved_kidney_diagnosis'
-    const unresolvedKidneyEncounters = encounterListResult([
-      encounterItem(unresolvedKidneyEncounterId, 1),
-    ])
-    const unresolvedKidneyEncounterDetail = encounterDetail(
-      unresolvedKidneyEncounterId,
-      [{
-        certainty: 'unknown',
-        status: 'unknown',
-        text: 'Chronic kidney disease',
-      }],
-    )
-    const nonCurrentEncounterId = 'event_encounter_non_current_diagnoses'
-    const nonCurrentEncounters = encounterListResult([
-      encounterItem(nonCurrentEncounterId, 6),
-    ])
-    const nonCurrentEncounterDetail = encounterDetail(
-      nonCurrentEncounterId,
-      [
-        {
-          certainty: 'documented',
-          status: 'inactive',
-          text: 'Chronic kidney disease',
-        },
-        {
-          certainty: 'documented',
-          status: 'resolved',
-          text: 'Heart disease',
-        },
-        {
-          certainty: 'documented',
-          status: 'history',
-          text: 'Liver disease',
-        },
-        {
-          certainty: 'suspected',
-          status: 'rule_out',
-          text: 'Endocrine disease',
-        },
-        {
-          certainty: 'ruled_out',
-          status: 'active',
-          text: 'Eating disorder',
-        },
-        {
-          certainty: 'documented',
-          status: 'active',
-          text: 'Seasonal allergies',
-        },
-      ],
-    )
-    const saturatedEncounters = encounterListResult(
-      Array.from({ length: 200 }, (_, index) =>
-        encounterItem(`event_encounter_${index + 1}`, 0)),
-    )
-    const canonicalTotals = {
-      from: '2026-07-30',
-      mealCount: 3,
-      metrics: {
-        calories: { mealCount: 3, total: 1_760 },
-        carbsGrams: { mealCount: 3, total: 185 },
-        fatGrams: { mealCount: 3, total: 54 },
-        fiberGrams: { mealCount: 3, total: 24 },
-        proteinGrams: { mealCount: 3, total: 137 },
-      },
-      to: '2026-07-30',
-      vault: 'synthetic-vault',
-    }
-    const eligibleCard = {
-      goals: {
-        calories: { status: 'on_target', target: 1_800 },
-        carbsGrams: { status: 'on_target', target: 190 },
-        fatGrams: { status: 'on_target', target: 55 },
-        fiberGrams: { status: 'on_target', target: 25 },
-        proteinGrams: { status: 'on_target', target: 140 },
-      },
-      kind: 'daily_nutrition',
-      localDate: '2026-07-30',
-      mealCount: 3,
-      totals: canonicalTotals.metrics,
-      version: 2,
-    }
-
-    const runCase = async (input: {
-      card?: Record<string, unknown>
-      commandOutputs: readonly (readonly [string, unknown])[]
-      expectedCommands: readonly string[]
-      failedCommands?: readonly string[]
-      finalMessage: string
-      prompt: string
-      scheduled: boolean
-      snapshotPrompt?: string
-      skillReadCommands: readonly string[]
-      skillSlugs: readonly string[]
-    }) => {
-      const scenario = await prepareScriptedTurnScenario()
-      scenario.stub.resetQueue()
-      const skillsRoot = path.join(
-        scenario.turnInput.workingDirectory,
-        'skills',
-      )
-      await mkdir(skillsRoot, { recursive: true })
-      await Promise.all(input.skillSlugs.map((slug) =>
-        cp(
-          path.join(resolveAssistantSkillsRoot(), slug),
-          path.join(skillsRoot, slug),
-          { recursive: true },
-        )))
-      const commandLog = path.join(
-        scenario.turnInput.workingDirectory,
-        'nutrition-goal-discovery-commands.log',
-      )
-      await writeFile(commandLog, '', 'utf8')
-      const scriptedCommands = new Set([
-        ...input.commandOutputs.map(([command]) => command),
-        ...(input.failedCommands ?? []),
-      ])
-      for (const command of input.expectedCommands) {
-        if (!scriptedCommands.has(command)) {
-          throw new Error(`Missing scripted fixture for ${command}.`)
-        }
-      }
-      await writeFile(
-        path.join(
-          scenario.turnInput.workingDirectory,
-          'run-nutrition-discovery',
-        ),
-        [
-          '#!/bin/sh',
-          'set -eu',
-          ...input.expectedCommands.map(
-            (command) =>
-              `printf '%s\\n' ${quotePosixShellLiteral(command)} >> ${quotePosixShellLiteral(commandLog)}`,
-          ),
-          '',
-        ].join('\n'),
-        { encoding: 'utf8', mode: 0o755 },
-      )
-
-      const responses: ScriptedResponse[] = []
-      if (input.expectedCommands.length > 0) {
-        responses.push({
-          customToolCall: {
-            input: `
-const result = await tools.exec_command({
-  cmd: "./run-nutrition-discovery",
-  yield_time_ms: 30000,
-});
-text(result.output);
-`,
-            name: 'exec',
-          },
-        })
-        for (let waitAttempt = 0; waitAttempt < 4; waitAttempt += 1) {
-          responses.push({
-            functionCall: {
-              arguments: {
-                cell_id: '1',
-                yield_time_ms: 30_000,
-              },
-              name: 'wait',
-            },
-            requestIncludes: ['Script running with cell ID 1'],
-          })
-        }
-      }
-      if (input.card) {
-        responses.push({
-          functionCall: {
-            arguments: { card: input.card },
-            name: 'attach_response_card',
-            namespace: 'murph',
-          },
-        })
-      }
-      responses.push({ text: input.finalMessage })
-      scenario.stub.queue(...responses)
-
-      try {
-        const result = await executeCodexAppServerTurn({
-          ...scenario.turnInput,
-          baseInstructions: buildScriptedHostedSystemPrompt(
-            'direct',
-            false,
-            input.scheduled ? '2026-07-30T21:00:00.000-04:00' : undefined,
-            input.snapshotPrompt,
-          ),
-          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
-          env: {
-            ...scenario.turnInput.env,
-            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
-          },
-          groupConversation: false,
-          prompt: input.prompt,
-          sandbox: 'danger-full-access',
-        })
-        const commandLogText = (await readFile(commandLog, 'utf8')).trim()
-        const commands = commandLogText === '' ? [] : commandLogText.split('\n')
-        expect(commands).toEqual(input.expectedCommands)
-        expect(result.responseCard).toEqual(input.card ?? null)
-        if (input.card) {
-          expect(result.finalMessage).toContain(
-            'Targets: 1,800 calories (on target)',
-          )
-          expect(result.finalMessage).toContain('25g fiber (on target).')
-          expect(result.finalMessage).not.toContain(input.finalMessage)
-        } else {
-          expect(result.finalMessage).toBe(input.finalMessage)
-        }
-      } finally {
-        await stopWarmCodexAppServer()
-      }
-    }
-
-    const scheduledSkillReads = [
-      "sed -n '1,320p' skills/automatic-meal-capture/SKILL.md",
-      "sed -n '1,280p' skills/nutrition-strategy/references/daily-nutrition-card-safety.md",
-    ]
-    const scheduledProposalSkillReads = [
-      ...scheduledSkillReads,
-      "sed -n '1,320p' skills/nutrition-strategy/references/daily-nutrition-card-goals.md",
-    ]
-    const interactiveSkillReads = [
-      "sed -n '1,180p' skills/food-journal/SKILL.md",
-      "sed -n '1,280p' skills/nutrition-strategy/references/daily-nutrition-card-safety.md",
-      "sed -n '1,320p' skills/nutrition-strategy/references/daily-nutrition-card-goals.md",
-    ]
-    const conflictOutputs = [
-      [activeListCommand, conflictList],
-      [visibleGoalShowCommand, visibleGoal],
-      [hiddenGoalShowCommand, hiddenGoal],
-    ] as const
-    const conflictCommands = [
-      activeListCommand,
-      visibleGoalShowCommand,
-      hiddenGoalShowCommand,
-    ]
-
-    await runCase({
-      commandOutputs: conflictOutputs,
-      expectedCommands: conflictCommands,
-      finalMessage: 'Closeout saved without a goal card because active targets conflict.',
-      prompt: [
-        'Scheduled automatic meal closeout for the 2026-07-30 occurrence.',
-        'The visible context suggests one complete bundle, but canonical state has more than ten active Goals.',
-        'Follow the scheduled skill, resolve card authority, and fail closed on any hidden conflict.',
-      ].join(' '),
-      scheduled: true,
-      skillReadCommands: scheduledSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-    })
-    await runCase({
-      commandOutputs: conflictOutputs,
-      expectedCommands: conflictCommands,
-      finalMessage: 'I found conflicting active targets, so I did not attach a card.',
-      prompt: [
-        'Show my daily nutrition card for 2026-07-30.',
-        'The visible context suggests one complete bundle, but canonical state has more than ten active Goals.',
-      ].join(' '),
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-    await runCase({
-      commandOutputs: [[activeListCommand, saturatedList]],
-      expectedCommands: [activeListCommand],
-      finalMessage: 'Closeout saved without a goal card because the active Goal read was saturated.',
-      prompt: [
-        'Scheduled automatic meal closeout for the 2026-07-30 occurrence.',
-        'Resolve the requested goal-aware card, but fail closed if canonical Goal discovery is saturated.',
-      ].join(' '),
-      scheduled: true,
-      skillReadCommands: scheduledSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-    })
-
-    const controlOutputs = [
-      [activeListCommand, completeList],
-      [visibleGoalShowCommand, visibleGoal],
-      [memoryCommand, adultMemory],
-      [conditionListCommand, {
-        count: 0,
-        filters: { limit: 200, status: 'active' },
-        items: [],
-        nextCursor: null,
-        vault: 'synthetic-vault',
-      }],
-      [regimenListCommand, {
-        count: 0,
-        filters: { limit: 200, status: 'active' },
-        items: [],
-        nextCursor: null,
-        vault: 'synthetic-vault',
-      }],
-      [procedureListCommand, noProcedures],
-      [encounterListCommand, noEncounters],
-      [measurementCommand, safeMeasurements],
-      [pregnancyMeasurementCommand, noPregnancyMeasurements],
-      [testEventListCommand, noTestEvents],
-      [totalsCommand, canonicalTotals],
-    ] as const
-    const controlCommands = [
-      activeListCommand,
-      visibleGoalShowCommand,
-      memoryCommand,
-      conditionListCommand,
-      regimenListCommand,
-      procedureListCommand,
-      encounterListCommand,
-      measurementCommand,
-      pregnancyMeasurementCommand,
-      testEventListCommand,
-      totalsCommand,
-    ]
-    for (const control of [
-      {
-        prompt: 'Run the scheduled automatic meal closeout and attach the eligible 2026-07-30 goal-aware card.',
-        scheduled: true,
-        skillReadCommands: scheduledSkillReads,
-        skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-      },
-      {
-        prompt: 'Show my eligible daily nutrition card for 2026-07-30.',
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      },
-    ]) {
-      await runCase({
-        card: eligibleCard,
-        commandOutputs: controlOutputs,
-        expectedCommands: controlCommands,
-        finalMessage: 'CARD_ATTACHED_AFTER_COMPLETE_GOAL_READ',
-        ...control,
-      })
-    }
-
-    const listResult = (
-      kind: 'condition' | 'regimen',
-      ids: readonly string[],
-    ) => ({
-      count: ids.length,
-      filters: { limit: 200, status: 'active' },
-      items: ids.map((id, index) => ({
-        data: kind === 'condition'
-          ? { clinicalStatus: 'active' }
-          : { status: 'active' },
-        id,
-        kind,
-        title: `${kind === 'condition' ? 'Condition' : 'Regimen'} ${index + 1}`,
-      })),
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    })
-    const detailResult = (input: {
-      contraindication?: 'glucose-lowering-medication' | 'kidney-disease'
-      id: string
-      kind: 'condition' | 'regimen'
-    }) => ({
-      entity: {
-        data: input.kind === 'condition'
-          ? {
-              clinicalStatus: 'active',
-              slug: input.contraindication === 'kidney-disease'
-                ? 'chronic-kidney-disease'
-                : `benign-condition-${input.id}`,
-            }
-          : {
-              kind: 'medication',
-              status: 'active',
-              substance: input.contraindication === 'glucose-lowering-medication'
-                ? 'insulin'
-                : `benign-medication-${input.id}`,
-            },
-        id: input.id,
-        kind: input.kind,
-        title: input.contraindication === 'kidney-disease'
-          ? 'Chronic kidney disease'
-          : input.contraindication === 'glucose-lowering-medication'
-            ? 'Basal insulin'
-            : `Benign ${input.kind}`,
-      },
-      vault: 'synthetic-vault',
-    })
-    const conditionIds = Array.from(
-      { length: 6 },
-      (_, index) => `condition_active_${index + 1}`,
-    )
-    const regimenIds = Array.from(
-      { length: 6 },
-      (_, index) => `regimen_active_${index + 1}`,
-    )
-    const completeSafetyOutputs = (input: {
-      hiddenCondition?: boolean
-      hiddenRegimen?: boolean
-    }): readonly (readonly [string, unknown])[] => [
-      [conditionListCommand, listResult('condition', conditionIds)],
-      [regimenListCommand, listResult('regimen', regimenIds)],
-      ...conditionIds.map((id, index) => [
-        `condition show ${id} --format json`,
-        detailResult({
-          contraindication: input.hiddenCondition && index === 5
-            ? 'kidney-disease'
-            : undefined,
-          id,
-          kind: 'condition',
-        }),
-      ] as const),
-      ...regimenIds.map((id, index) => [
-        `regimen show ${id} --format json`,
-        detailResult({
-          contraindication: input.hiddenRegimen && index === 5
-            ? 'glucose-lowering-medication'
-            : undefined,
-          id,
-          kind: 'regimen',
-        }),
-      ] as const),
-    ]
-    const completeSafetyCommands = [
-      conditionListCommand,
-      regimenListCommand,
-      ...conditionIds.map((id) => `condition show ${id} --format json`),
-      ...regimenIds.map((id) => `regimen show ${id} --format json`),
-    ]
-    const emptySafetyOutputs = [
-      [conditionListCommand, listResult('condition', [])],
-      [regimenListCommand, listResult('regimen', [])],
-    ] as const
-    const emptySafetyCommands = [conditionListCommand, regimenListCommand]
-    const hiddenSnapshot = (kind: 'condition' | 'regimen') => [
-      'Current canonical context snapshot (current and readable):',
-      kind === 'condition'
-        ? '- Active conditions: Condition 1; Condition 2; Condition 3; Condition 4; Condition 5. 1 additional active condition is omitted.'
-        : '- Active medication regimens: Regimen 1; Regimen 2; Regimen 3; Regimen 4; Regimen 5. 1 additional active medication regimen is omitted.',
-    ].join('\n')
-
-    const runHiddenSafetyCase = async (input: {
-      deriveTargets?: boolean
-      finalMessage: string
-      kind: 'condition' | 'regimen'
-      prompt: string
-      scheduled: boolean
-    }) => {
-      const goalOutputs: readonly (readonly [string, unknown])[] =
-        input.deriveTargets
-          ? []
-          : [
-              [activeListCommand, completeList],
-              [visibleGoalShowCommand, visibleGoal],
-            ]
-      const goalCommands = input.deriveTargets
-        ? []
-        : [activeListCommand, visibleGoalShowCommand]
-
-      await runCase({
-        commandOutputs: [
-          ...goalOutputs,
-          [memoryCommand, adultMemory],
-          ...completeSafetyOutputs({
-            hiddenCondition: input.kind === 'condition',
-            hiddenRegimen: input.kind === 'regimen',
-          }),
-        ],
-        expectedCommands: [
-          ...goalCommands,
-          memoryCommand,
-          ...completeSafetyCommands,
-        ],
-        finalMessage: input.finalMessage,
-        prompt: input.prompt,
-        scheduled: input.scheduled,
-        skillReadCommands: input.scheduled
-          ? scheduledSkillReads
-          : interactiveSkillReads,
-        skillSlugs: input.scheduled
-          ? ['automatic-meal-capture', 'nutrition-strategy']
-          : ['food-journal', 'nutrition-strategy'],
-        snapshotPrompt: hiddenSnapshot(input.kind),
-      })
-    }
-
-    await runHiddenSafetyCase({
-      finalMessage: 'Closeout saved without numeric feedback because current medication context needs the non-numeric path.',
-      kind: 'regimen',
-      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-      scheduled: true,
-    })
-    await runHiddenSafetyCase({
-      finalMessage: 'Closeout saved without numeric feedback because current health context needs the non-numeric path.',
-      kind: 'condition',
-      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-      scheduled: true,
-    })
-    await runHiddenSafetyCase({
-      finalMessage: 'I kept this non-numeric because your current medication context makes target feedback inappropriate.',
-      kind: 'regimen',
-      prompt: 'Show my daily nutrition card for 2026-07-30.',
-      scheduled: false,
-    })
-    await runHiddenSafetyCase({
-      deriveTargets: true,
-      finalMessage: 'I kept this non-numeric because your current health context makes self-directed targets inappropriate.',
-      kind: 'condition',
-      prompt: 'Set any missing daily nutrition targets for me.',
-      scheduled: false,
-    })
-
-    const saturatedSafetyIds = Array.from(
-      { length: 200 },
-      (_, index) => `safety_saturated_${index + 1}`,
-    )
-    for (const saturation of [
-      {
-        conditionIds: saturatedSafetyIds,
-        finalMessage: 'Closeout saved without a card because active-condition discovery was saturated.',
-        regimenIds: [] as readonly string[],
-      },
-      {
-        conditionIds: [] as readonly string[],
-        finalMessage: 'Closeout saved without a card because active-regimen discovery was saturated.',
-        regimenIds: saturatedSafetyIds,
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [activeListCommand, completeList],
-          [visibleGoalShowCommand, visibleGoal],
-          [memoryCommand, adultMemory],
-          [conditionListCommand, listResult('condition', saturation.conditionIds)],
-          [regimenListCommand, listResult('regimen', saturation.regimenIds)],
-        ],
-        expectedCommands: [
-          activeListCommand,
-          visibleGoalShowCommand,
-          memoryCommand,
-          conditionListCommand,
-          regimenListCommand,
-        ],
-        finalMessage: saturation.finalMessage,
-        prompt: 'Run the scheduled closeout and fail closed if canonical safety discovery is saturated.',
-        scheduled: true,
-        skillReadCommands: scheduledSkillReads,
-        skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-      })
-    }
-
-    const noActiveGoalsList = {
-      count: 0,
-      filters: { limit: 200, status: 'active' },
-      items: [],
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const allStatusGoalListCommand = 'goal list --limit 200 --format json'
-    const proposalImportCommand = 'goal import-json --input - --format json'
-    const pausedGoalShowCommand = 'goal show goal_paused_bundle --format json'
-    const activateGoalCommand =
-      'goal save Daily nutrition targets --id goal_paused_bundle --status active --format json'
-    const pausedGoal = {
-      entity: {
-        data: {
-          metricTargets: completeTargets,
-          slug: 'murph-daily-nutrition-starting-targets',
-          status: 'paused',
-          windowStartAt: '2026-07-30',
-        },
-        id: 'goal_paused_bundle',
-        kind: 'goal',
-        title: 'Daily nutrition targets',
-      },
-      vault: 'synthetic-vault',
-    }
-    const activeManagedGoal = {
-      ...pausedGoal,
-      entity: {
-        ...pausedGoal.entity,
-        data: { ...pausedGoal.entity.data, status: 'active' },
-      },
-    }
-    const noManagedGoalsList = {
-      count: 0,
-      filters: { limit: 200 },
-      items: [],
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-    const pausedManagedGoalList = {
-      count: 1,
-      filters: { limit: 200 },
-      items: [{
-        data: {
-          metricTargetsCount: 5,
-          slug: 'murph-daily-nutrition-starting-targets',
-          status: 'paused',
-        },
-        id: 'goal_paused_bundle',
-        kind: 'goal',
-        title: 'Daily nutrition targets',
-      }],
-      nextCursor: null,
-      vault: 'synthetic-vault',
-    }
-
-    await runCase({
-      commandOutputs: [
-        [activeListCommand, noActiveGoalsList],
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, noTestEvents],
-        [allStatusGoalListCommand, noManagedGoalsList],
-        [proposalImportCommand, pausedGoal],
-        [pausedGoalShowCommand, pausedGoal],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
-        allStatusGoalListCommand,
-        proposalImportCommand,
-        pausedGoalShowCommand,
-      ],
-      finalMessage: 'For your first managed closeout, I proposed 1,800 calories, 140g protein, 190g carbs, 55g fat, and 25g fiber starting 2026-07-30, based on your saved adult maintenance context. The proposal is paused until you choose to accept it.',
-      prompt: 'Run the first managed automatic meal closeout for 2026-07-30. Use only already-known responsible inputs, and follow the one-time paused-proposal path when canonical safety and Goal discovery permit it.',
-      scheduled: true,
-      skillReadCommands: scheduledProposalSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-    })
-
-    await runCase({
-      commandOutputs: [
-        [activeListCommand, noActiveGoalsList],
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, noTestEvents],
-        [allStatusGoalListCommand, pausedManagedGoalList],
-        [pausedGoalShowCommand, pausedGoal],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
-        allStatusGoalListCommand,
-        pausedGoalShowCommand,
-      ],
-      finalMessage: 'Meal closeout saved. Your earlier paused nutrition proposal is unchanged.',
-      prompt: 'Run a later managed automatic meal closeout for 2026-07-31. Do not create, change, or repeat a proposal once the canonical managed Goal already exists in any status.',
-      scheduled: true,
-      skillReadCommands: scheduledProposalSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-    })
-
-    await runCase({
-      commandOutputs: [],
-      expectedCommands: [memoryCommand],
-      failedCommands: [memoryCommand],
-      finalMessage: 'I could not complete the current memory safety check, so I left target setup unchanged.',
-      prompt: 'Set daily nutrition targets for me, but do not proceed if canonical memory is unavailable.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: 'The context snapshot does not contain the complete canonical memory document.',
-    })
-
-    await runCase({
-      commandOutputs: [[memoryCommand, minorMemory]],
-      expectedCommands: [memoryCommand],
-      finalMessage: 'I kept this non-numeric because self-directed nutrition targets are not available for someone under 18.',
-      prompt: 'Set daily nutrition targets for me using what I shared during onboarding.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: 'The current context snapshot contains no onboarding age text and does not inject canonical memory.',
-    })
-
-    for (const acceptance of [
-      {
-        finalMessage: 'I left the proposal paused because numeric nutrition targets are not available for someone under 18.',
-        prompt: 'Yes, accept those nutrition targets.',
-      },
-      {
-        finalMessage: 'I left the proposal paused and did not attach the pending card because numeric nutrition guidance is not available for someone under 18.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [[memoryCommand, minorMemory]],
-        expectedCommands: [memoryCommand],
-        finalMessage: acceptance.finalMessage,
-        prompt: acceptance.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-        snapshotPrompt: [
-          'A paused five-target Daily nutrition targets proposal is awaiting this member reply.',
-          'The current context snapshot contains no onboarding age text and does not inject canonical memory.',
-        ].join(' '),
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [activeListCommand, completeList],
-        [visibleGoalShowCommand, visibleGoal],
-        [memoryCommand, minorMemory],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        visibleGoalShowCommand,
-        memoryCommand,
-      ],
-      finalMessage: 'Closeout saved without numeric feedback because numeric nutrition guidance is not available for someone under 18.',
-      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-      scheduled: true,
-      skillReadCommands: scheduledSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-      snapshotPrompt: 'The current context snapshot contains no onboarding age text and does not inject canonical memory.',
-    })
-
-    await runCase({
-      commandOutputs: [
-        [activeListCommand, completeList],
-        [visibleGoalShowCommand, visibleGoal],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        visibleGoalShowCommand,
-        memoryCommand,
-      ],
-      failedCommands: [memoryCommand],
-      finalMessage: 'Closeout saved without a goal card because canonical memory was unavailable.',
-      prompt: 'Run the scheduled closeout and fail closed if canonical memory is unavailable.',
-      scheduled: true,
-      skillReadCommands: scheduledSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-      snapshotPrompt: 'The context snapshot does not contain the complete canonical memory document.',
-    })
-
-    await runCase({
-      commandOutputs: [[memoryCommand, numberSensitiveMemory]],
-      expectedCommands: [memoryCommand],
-      finalMessage: 'I kept this non-numeric to respect your saved preference to avoid calorie and macro numbers.',
-      prompt: 'Set daily nutrition targets for me using my saved preferences.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: 'The context snapshot does not inject the canonical Preferences memory section.',
-    })
-
-    for (const unavailableProcedureRead of [
-      {
-        failed: true,
-        finalMessage: 'I could not complete the current procedure-history safety check, so I left target setup unchanged.',
-        output: noProcedures,
-        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical procedure history is unavailable.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not safely complete the procedure-history check, so I left target setup unchanged.',
-        output: saturatedProcedures,
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical procedure discovery is saturated.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          ...(unavailableProcedureRead.failed
-            ? []
-            : [[procedureListCommand, unavailableProcedureRead.output] as const]),
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-        ],
-        ...(unavailableProcedureRead.failed
-          ? { failedCommands: [procedureListCommand] }
-          : {}),
-        finalMessage: unavailableProcedureRead.finalMessage,
-        prompt: unavailableProcedureRead.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-
-    for (const blockedProcedureCase of [
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I kept this non-numeric because completed bariatric surgery makes self-directed targets inappropriate.',
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused because completed bariatric surgery requires the qualified-care path.',
-        prompt: 'Yes, accept those nutrition targets.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused and did not attach the pending card because completed bariatric surgery requires the qualified-care path.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [
-          [activeListCommand, completeList],
-          [visibleGoalShowCommand, visibleGoal],
-        ] as const,
-        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
-        finalMessage: 'Closeout saved without numeric feedback because completed bariatric surgery requires the non-numeric path.',
-        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-        scheduled: true,
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          ...blockedProcedureCase.commandPrefix,
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, completedBariatricProcedures],
-        ],
-        expectedCommands: [
-          ...blockedProcedureCase.expectedPrefix,
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-        ],
-        finalMessage: blockedProcedureCase.finalMessage,
-        prompt: blockedProcedureCase.prompt,
-        scheduled: blockedProcedureCase.scheduled,
-        skillReadCommands: blockedProcedureCase.scheduled
-          ? scheduledSkillReads
-          : interactiveSkillReads,
-        skillSlugs: blockedProcedureCase.scheduled
-          ? ['automatic-meal-capture', 'nutrition-strategy']
-          : ['food-journal', 'nutrition-strategy'],
-        ...(!blockedProcedureCase.scheduled && blockedProcedureCase.prompt.startsWith('Yes')
-          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
-          : {}),
-      })
-    }
-
-    for (const unavailableEncounterRead of [
-      {
-        failed: true,
-        finalMessage: 'I could not complete the current encounter-diagnosis safety check, so I left target setup unchanged.',
-        output: noEncounters,
-        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical encounter history is unavailable.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not safely complete the encounter-diagnosis check, so I left target setup unchanged.',
-        output: saturatedEncounters,
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical encounter discovery is saturated.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not read the canonical encounter-diagnosis result, so I left target setup unchanged.',
-        output: { unexpected: 'unreadable encounter list' },
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical encounter discovery is unreadable.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          ...(unavailableEncounterRead.failed
-            ? []
-            : [[encounterListCommand, unavailableEncounterRead.output] as const]),
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-        ],
-        ...(unavailableEncounterRead.failed
-          ? { failedCommands: [encounterListCommand] }
-          : {}),
-        finalMessage: unavailableEncounterRead.finalMessage,
-        prompt: unavailableEncounterRead.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, activeKidneyEncounters],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        `event show ${activeKidneyEncounterId} --format json`,
-      ],
-      failedCommands: [`event show ${activeKidneyEncounterId} --format json`],
-      finalMessage: 'I could not complete the encounter-diagnosis detail check, so I left target setup unchanged.',
-      prompt: 'Set daily nutrition targets for me, but do not proceed if a required encounter detail read fails.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-
-    for (const blockedEncounterCase of [
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I kept this non-numeric because an active documented kidney diagnosis requires the qualified-care path.',
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused because an active documented kidney diagnosis requires the qualified-care path.',
-        prompt: 'Yes, accept those nutrition targets.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused and did not attach the pending card because an active documented kidney diagnosis requires the qualified-care path.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [
-          [activeListCommand, completeList],
-          [visibleGoalShowCommand, visibleGoal],
-        ] as const,
-        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
-        finalMessage: 'Closeout saved without numeric feedback because an active documented kidney diagnosis requires the non-numeric path.',
-        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-        scheduled: true,
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          ...blockedEncounterCase.commandPrefix,
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, activeKidneyEncounters],
-          [`event show ${activeKidneyEncounterId} --format json`, activeKidneyEncounterDetail],
-        ],
-        expectedCommands: [
-          ...blockedEncounterCase.expectedPrefix,
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          `event show ${activeKidneyEncounterId} --format json`,
-        ],
-        finalMessage: blockedEncounterCase.finalMessage,
-        prompt: blockedEncounterCase.prompt,
-        scheduled: blockedEncounterCase.scheduled,
-        skillReadCommands: blockedEncounterCase.scheduled
-          ? scheduledSkillReads
-          : interactiveSkillReads,
-        skillSlugs: blockedEncounterCase.scheduled
-          ? ['automatic-meal-capture', 'nutrition-strategy']
-          : ['food-journal', 'nutrition-strategy'],
-        ...(!blockedEncounterCase.scheduled && blockedEncounterCase.prompt.startsWith('Yes')
-          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
-          : {}),
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, unresolvedKidneyEncounters],
-        [`event show ${unresolvedKidneyEncounterId} --format json`, unresolvedKidneyEncounterDetail],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        `event show ${unresolvedKidneyEncounterId} --format json`,
-      ],
-      finalMessage: 'I kept this non-numeric because a safety-relevant encounter diagnosis has unresolved current status.',
-      prompt: 'Set daily nutrition targets for me, but fail closed on unresolved safety-relevant encounter diagnoses.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-
-    for (const blockedProposal of [
-      {
-        finalMessage: 'I kept this non-numeric because your current measurements make self-directed targets inappropriate.',
-        measurements: lowBmiMeasurements,
-        prompt: 'Set daily nutrition targets for me using the context I already provided.',
-      },
-      {
-        finalMessage: 'I kept this non-numeric because the current same-event measurements make self-directed targets inappropriate.',
-        measurements: lowSameEventMeasurements,
-        prompt: 'Set daily nutrition targets for me using the context I already provided.',
-      },
-      {
-        finalMessage: 'I could not safely complete the measurement check, so I left target setup unchanged.',
-        measurements: saturatedMeasurements,
-        prompt: 'Set daily nutrition targets for me, but fail closed if the canonical measurement read is saturated.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, blockedProposal.measurements],
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-        ],
-        finalMessage: blockedProposal.finalMessage,
-        prompt: blockedProposal.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-    await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-      ],
-      failedCommands: [measurementCommand],
-      finalMessage: 'I could not complete the current measurement safety check, so I left target setup unchanged.',
-      prompt: 'Set daily nutrition targets for me, but do not proceed if the canonical measurement read fails.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-
-    for (const unavailablePregnancyRead of [
-      {
-        failed: true,
-        finalMessage: 'I could not complete the current pregnancy-test safety check, so I left target setup unchanged.',
-        output: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me, but do not proceed if the canonical pregnancy-test read fails.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not safely complete the pregnancy-test check, so I left target setup unchanged.',
-        output: saturatedPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical pregnancy-test discovery is saturated.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, normalBmiMeasurements],
-          ...(unavailablePregnancyRead.failed
-            ? []
-            : [[pregnancyMeasurementCommand, unavailablePregnancyRead.output] as const]),
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-          pregnancyMeasurementCommand,
-        ],
-        ...(unavailablePregnancyRead.failed
-          ? { failedCommands: [pregnancyMeasurementCommand] }
-          : {}),
-        finalMessage: unavailablePregnancyRead.finalMessage,
-        prompt: unavailablePregnancyRead.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-
-    for (const unavailableTestEventRead of [
-      {
-        failed: true,
-        finalMessage: 'I could not complete the current structured pregnancy-result safety check, so I left target setup unchanged.',
-        output: noTestEvents,
-        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical test-event discovery fails.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not safely complete the structured pregnancy-result check, so I left target setup unchanged.',
-        output: saturatedTestEvents,
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical test-event discovery is saturated.',
-      },
-      {
-        failed: false,
-        finalMessage: 'I could not read the canonical structured test result, so I left target setup unchanged.',
-        output: { unexpected: 'unreadable test-event list' },
-        prompt: 'Set daily nutrition targets for me, but fail closed if canonical test-event discovery is unreadable.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, normalBmiMeasurements],
-          [pregnancyMeasurementCommand, noPregnancyMeasurements],
-          ...(unavailableTestEventRead.failed
-            ? []
-            : [[testEventListCommand, unavailableTestEventRead.output] as const]),
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-          pregnancyMeasurementCommand,
-          testEventListCommand,
-        ],
-        ...(unavailableTestEventRead.failed
-          ? { failedCommands: [testEventListCommand] }
-          : {}),
-        finalMessage: unavailableTestEventRead.finalMessage,
-        prompt: unavailableTestEventRead.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, positivePregnancyTestEvents],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
-        `event show ${positivePregnancyTestEventId} --format json`,
-      ],
-      failedCommands: [
-        `event show ${positivePregnancyTestEventId} --format json`,
-      ],
-      finalMessage: 'I could not complete the structured pregnancy-result detail check, so I left target setup unchanged.',
-      prompt: 'Set daily nutrition targets for me, but do not proceed if a required test-event detail read fails.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-
-    for (const blockedTestEventCase of [
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I kept this non-numeric because a recent explicit positive structured pregnancy result keeps self-directed targets outside this path.',
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused because of a recent explicit positive structured pregnancy result.',
-        prompt: 'Yes, accept those nutrition targets.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [] as readonly (readonly [string, unknown])[],
-        expectedPrefix: [] as readonly string[],
-        finalMessage: 'I left the proposal paused and did not attach the pending card because of a recent explicit positive structured pregnancy result.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-        scheduled: false,
-      },
-      {
-        commandPrefix: [
-          [activeListCommand, completeList],
-          [visibleGoalShowCommand, visibleGoal],
-        ] as const,
-        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
-        finalMessage: 'Closeout saved without numeric feedback because a recent explicit positive structured pregnancy result requires the non-numeric path.',
-        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-        scheduled: true,
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          ...blockedTestEventCase.commandPrefix,
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, normalBmiMeasurements],
-          [pregnancyMeasurementCommand, noPregnancyMeasurements],
-          [testEventListCommand, positivePregnancyTestEvents],
-          [`event show ${positivePregnancyTestEventId} --format json`, positivePregnancyTestEventDetail],
-        ],
-        expectedCommands: [
-          ...blockedTestEventCase.expectedPrefix,
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-          pregnancyMeasurementCommand,
-          testEventListCommand,
-          `event show ${positivePregnancyTestEventId} --format json`,
-        ],
-        finalMessage: blockedTestEventCase.finalMessage,
-        prompt: blockedTestEventCase.prompt,
-        scheduled: blockedTestEventCase.scheduled,
-        skillReadCommands: blockedTestEventCase.scheduled
-          ? scheduledSkillReads
-          : interactiveSkillReads,
-        skillSlugs: blockedTestEventCase.scheduled
-          ? ['automatic-meal-capture', 'nutrition-strategy']
-          : ['food-journal', 'nutrition-strategy'],
-        ...(!blockedTestEventCase.scheduled && blockedTestEventCase.prompt.startsWith('Yes')
-          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
-          : {}),
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, laterNegativeAfterPositiveMeasurements],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-      ],
-      finalMessage: 'I kept this non-numeric because a recent explicit positive pregnancy test keeps self-directed targets outside this path.',
-      prompt: 'Set daily nutrition targets for me. A later negative result must not erase a recent explicit positive result.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
-
-    for (const acceptance of [
-      {
-        finalMessage: 'I left the proposal paused and kept this non-numeric because of a recent explicit positive pregnancy test.',
-        prompt: 'Yes, accept those nutrition targets.',
-      },
-      {
-        finalMessage: 'I left the proposal paused and did not attach the pending card because of a recent explicit positive pregnancy test.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, normalBmiMeasurements],
-          [pregnancyMeasurementCommand, positivePregnancyMeasurements],
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-          pregnancyMeasurementCommand,
-        ],
-        finalMessage: acceptance.finalMessage,
-        prompt: acceptance.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-        snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.',
-      })
-    }
-
-    await runCase({
-      commandOutputs: [
-        [activeListCommand, completeList],
-        [visibleGoalShowCommand, visibleGoal],
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, positivePregnancyMeasurements],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        visibleGoalShowCommand,
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-      ],
-      finalMessage: 'Closeout saved without numeric feedback because a recent explicit positive pregnancy test requires the non-numeric path.',
-      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
-      scheduled: true,
-      skillReadCommands: scheduledSkillReads,
-      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
-    })
-
-    for (const acceptance of [
-      {
-        finalMessage: 'I left the proposal paused and kept this non-numeric because your current measurements make these targets inappropriate.',
-        prompt: 'Yes, accept those nutrition targets.',
-      },
-      {
-        finalMessage: 'I left the proposal paused and did not attach the pending card because your current measurements make numeric guidance inappropriate.',
-        prompt: 'Yes, accept those targets and show the daily card I requested.',
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          [procedureListCommand, noProcedures],
-          [encounterListCommand, noEncounters],
-          [measurementCommand, lowBmiMeasurements],
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          procedureListCommand,
-          encounterListCommand,
-          measurementCommand,
-        ],
-        finalMessage: acceptance.finalMessage,
-        prompt: acceptance.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-        snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.',
-      })
-    }
-
-    for (const allowedPregnancyEvidence of [
-      {
-        encounterCommands: [encounterListCommand],
-        encounterOutputs: [[encounterListCommand, encountersWithoutDiagnoses]] as const,
-        measurements: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile and representative maintenance context; no pregnancy measurements or structured test events exist.',
-        procedureCommands: [procedureListCommand],
-        procedureOutputs: [[procedureListCommand, noProcedures]] as const,
-        testEventCommands: [testEventListCommand],
-        testEventOutputs: [[testEventListCommand, noTestEvents]] as const,
-      },
-      {
-        encounterCommands: [
-          encounterListCommand,
-          `event show ${nonCurrentEncounterId} --format json`,
-        ],
-        encounterOutputs: [
-          [encounterListCommand, nonCurrentEncounters],
-          [`event show ${nonCurrentEncounterId} --format json`, nonCurrentEncounterDetail],
-        ] as const,
-        measurements: negativePregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a planned gastric sleeve plus exact negative measurement and structured pregnancy tests do not prove a current exclusion.',
-        procedureCommands: [
-          procedureListCommand,
-          'event show event_planned_bariatric_procedure --format json',
-        ],
-        procedureOutputs: [
-          [procedureListCommand, plannedBariatricProcedureWithoutListStatus],
-          ['event show event_planned_bariatric_procedure --format json', plannedBariatricProcedureDetail],
-        ] as const,
-        testEventCommands: [
-          testEventListCommand,
-          `event show ${negativePregnancyTestEventId} --format json`,
-        ],
-        testEventOutputs: [
-          [testEventListCommand, negativePregnancyTestEvents],
-          [`event show ${negativePregnancyTestEventId} --format json`, negativePregnancyTestEventDetail],
-        ] as const,
-      },
-      {
-        encounterCommands: [encounterListCommand],
-        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
-        measurements: ambiguousPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a cancelled gastric bypass, conflicting pregnancy-test measurement, and pending structured test do not prove current exclusions.',
-        procedureCommands: [procedureListCommand],
-        procedureOutputs: [[procedureListCommand, procedureListResult([
-          procedureItem('event_cancelled_bariatric_procedure', 'gastric bypass', 'cancelled'),
-        ])]] as const,
-        testEventCommands: [
-          testEventListCommand,
-          `event show ${pendingPregnancyTestEventId} --format json`,
-        ],
-        testEventOutputs: [
-          [testEventListCommand, pendingPregnancyTestEvents],
-          [`event show ${pendingPregnancyTestEventId} --format json`, pendingPregnancyTestEventDetail],
-        ] as const,
-      },
-      {
-        encounterCommands: [encounterListCommand],
-        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
-        measurements: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a completed appendectomy is unrelated and an old positive pregnancy test is stale.',
-        procedureCommands: [procedureListCommand],
-        procedureOutputs: [[procedureListCommand, procedureListResult([
-          procedureItem('event_completed_appendectomy', 'appendectomy', 'completed'),
-        ])]] as const,
-        testEventCommands: [testEventListCommand],
-        testEventOutputs: [[testEventListCommand, noTestEvents]] as const,
-      },
-      {
-        encounterCommands: [encounterListCommand],
-        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
-        measurements: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; an ambiguous gastric procedure plus unknown-status numeric-only, unrelated, ambiguous, and negated tests do not prove current exclusions.',
-        procedureCommands: [procedureListCommand],
-        procedureOutputs: [[procedureListCommand, procedureListResult([
-          procedureItem('event_ambiguous_gastric_procedure', 'gastric procedure', 'unknown'),
-        ])]] as const,
-        testEventCommands: [
-          testEventListCommand,
-          `event show ${numericHcgTestEventId} --format json`,
-          `event show ${unrelatedTestEventId} --format json`,
-          `event show ${ambiguousHcgTestEventId} --format json`,
-          `event show ${negatedHcgTestEventId} --format json`,
-        ],
-        testEventOutputs: [
-          [testEventListCommand, numericAndUnrelatedTestEvents],
-          [`event show ${numericHcgTestEventId} --format json`, numericHcgTestEventDetail],
-          [`event show ${unrelatedTestEventId} --format json`, unrelatedTestEventDetail],
-          [`event show ${ambiguousHcgTestEventId} --format json`, ambiguousHcgTestEventDetail],
-          [`event show ${negatedHcgTestEventId} --format json`, negatedHcgTestEventDetail],
-        ] as const,
-      },
-    ]) {
-      await runCase({
-        commandOutputs: [
-          [memoryCommand, adultMemory],
-          ...emptySafetyOutputs,
-          ...allowedPregnancyEvidence.procedureOutputs,
-          ...allowedPregnancyEvidence.encounterOutputs,
-          [measurementCommand, normalBmiMeasurements],
-          [pregnancyMeasurementCommand, allowedPregnancyEvidence.measurements],
-          ...allowedPregnancyEvidence.testEventOutputs,
-          [activeListCommand, noActiveGoalsList],
-          [allStatusGoalListCommand, noManagedGoalsList],
-          [proposalImportCommand, pausedGoal],
-          [pausedGoalShowCommand, pausedGoal],
-        ],
-        expectedCommands: [
-          memoryCommand,
-          ...emptySafetyCommands,
-          ...allowedPregnancyEvidence.procedureCommands,
-          ...allowedPregnancyEvidence.encounterCommands,
-          measurementCommand,
-          pregnancyMeasurementCommand,
-          ...allowedPregnancyEvidence.testEventCommands,
-          activeListCommand,
-          allStatusGoalListCommand,
-          proposalImportCommand,
-          pausedGoalShowCommand,
-        ],
-        finalMessage: 'Proposed for 2026-07-30: 1,800 calories, 140g protein, 190g carbs, 55g fat, and 25g fiber. These are paused until you accept them.',
-        prompt: allowedPregnancyEvidence.prompt,
-        scheduled: false,
-        skillReadCommands: interactiveSkillReads,
-        skillSlugs: ['food-journal', 'nutrition-strategy'],
-      })
-    }
-
-    await runCase({
-      card: eligibleCard,
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, noTestEvents],
-        [activeListCommand, noActiveGoalsList],
-        [allStatusGoalListCommand, pausedManagedGoalList],
-        [activateGoalCommand, activeManagedGoal],
-        [pausedGoalShowCommand, activeManagedGoal],
-        [totalsCommand, canonicalTotals],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
-        activeListCommand,
-        allStatusGoalListCommand,
-        activateGoalCommand,
-        pausedGoalShowCommand,
-        totalsCommand,
-      ],
-      finalMessage: 'CARD_ATTACHED_AFTER_PRE_ACTIVATION_SAFETY',
-      prompt: 'Yes, accept the paused nutrition proposal and show the daily card I requested.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting acceptance for the pending 2026-07-30 card request.',
-    })
-
-    await runCase({
-      card: eligibleCard,
-      commandOutputs: [
-        [activeListCommand, completeList],
-        [visibleGoalShowCommand, visibleGoal],
-        [memoryCommand, adultMemory],
-        ...completeSafetyOutputs({}),
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, safeMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, noTestEvents],
-        [totalsCommand, canonicalTotals],
-      ],
-      expectedCommands: [
-        activeListCommand,
-        visibleGoalShowCommand,
-        memoryCommand,
-        ...completeSafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
-        totalsCommand,
-      ],
-      finalMessage: 'CARD_ATTACHED_AFTER_COMPLETE_SAFETY_READ',
-      prompt: 'Show my eligible daily nutrition card after checking all six benign active conditions and regimens.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: [
-        hiddenSnapshot('condition'),
-        hiddenSnapshot('regimen'),
-      ].join('\n'),
-    })
   })
 
   it('scores page-authorized group challenge observations through the code-mode App Server boundary', {
@@ -9463,6 +8000,10 @@ text(result.output);
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
     scenario.stub.captureProviderRequestDiagnostics()
     const automationRequests: unknown[] = []
     scenario.stub.queue(
@@ -9495,7 +8036,7 @@ text(result.output);
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
@@ -9509,11 +8050,13 @@ text(result.output);
               created: true,
               effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
-              nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
@@ -9526,15 +8069,18 @@ text(result.output);
         },
         vaultFileSendAvailable: false,
       },
-      model: 'gpt-5.4',
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
       prompt: 'Discover the supported group-avatar path, save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
     })
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(summaries[0]).toMatchObject({
-      model: 'gpt-5.4',
+      model: SCRIPTED_MODEL,
       providerRequestDiagnostics: {
-        includesAllTools: false,
+        includesAllTools: true,
         includesAutomation: false,
         includesGroup: false,
         includesGroupEmail: false,
@@ -9542,7 +8088,7 @@ text(result.output);
       },
     })
     expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
-      '"name":"group"',
+      '"name":"group_chat"',
     )
     expect(JSON.stringify(summaries[2]?.toolSearchOutputTools)).toContain(
       '"name":"automation"',
@@ -9557,11 +8103,263 @@ text(result.output);
     expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
-  it('keeps narrow group reads eager beside deferred Terra tools', {
+  it('discovers a group handoff and reports accepted as queued', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const groupRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        toolSearchCall: {
+          limit: 8,
+          query: 'Murph hand off verified context to a joined group',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'list_memberships',
+          },
+          name: 'group_membership',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'handoff',
+            context: 'I finished the race.',
+            membershipId: 'membership_running_club',
+          },
+          name: 'group_consult',
+          namespace: 'murph',
+        },
+      },
+      { text: 'I queued that for Running Club; it has not been sent yet.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [...MURPH_GROUP_FAMILY_TOOLS],
+      hostedToolContext: {
+        ...createScriptedGroupToolContext(async (request) => {
+          groupRequests.push(request)
+          if (request.action === 'list_memberships') {
+            return {
+              action: 'list_memberships',
+              result: {
+                disclosureGrants: [],
+                memberships: [{
+                  displayName: 'Running Club',
+                  grantedVaultShareProjectionScopes: [],
+                  kind: 'friends',
+                  memberCount: 2,
+                  membershipId: 'membership_running_club',
+                  participantRoster: {
+                    participantCount: 3,
+                    participantLabels: [{ displayName: 'Taylor' }, { phoneHint: { areaCode: '415', lastFour: '9876' } }],
+                    status: 'available',
+                  },
+                  permissionsUrl: null,
+                  requestedVaultShareProjectionScopes: [],
+                  role: 'member',
+                  sponsorshipUrl: null,
+                }],
+                status: 'ok',
+                truncated: false,
+              },
+            }
+          }
+          return {
+            action: 'handoff',
+            result: { status: 'accepted', targetLabel: 'Running Club' },
+          }
+        }),
+        currentUserActionScope: () => ({
+          acceptedInputIds: [`ain_${'a'.repeat(32)}`],
+          conversationId: 'conversation-handoff',
+          conversationScope: 'direct',
+          inboundMailboxItemIds: ['mailbox-handoff'],
+          originSessionId: 'session-handoff',
+          recipientKey: 'member:current',
+        }),
+      },
+      prompt: 'Tell my running group that I finished the race.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
+      '"name":"group_consult"',
+    )
+    expect(groupRequests).toEqual([
+      { action: 'list_memberships' },
+      expect.objectContaining({
+        action: 'handoff',
+        context: 'I finished the race.',
+        membershipId: 'membership_running_club',
+      }),
+    ])
+    expect(result.finalMessage).toBe(
+      'I queued that for Running Club; it has not been sent yet.',
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
+  })
+
+  it('keeps physical-note recovery deferred until an explicit request discovers it', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const messageRef = `ain_${'e'.repeat(32)}`
+    const recoveryRequests: unknown[] = []
+    const createHostedToolContext = (): AssistantHostedToolContext => ({
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: [messageRef],
+        conversationId: 'conversation-physical-note-recovery',
+        conversationScope: 'direct',
+        inboundMailboxItemIds: ['mailbox-physical-note-recovery'],
+        originSessionId: 'session-physical-note-recovery',
+        recipientKey: 'member:current',
+      }),
+      physicalNotes: {
+        resolve: async (request) => {
+          recoveryRequests.push(request)
+          return {
+            remainingUnresolved: false,
+            retryAfter: null,
+            settledUsageCostUsdMicros: null,
+            status: 'clear',
+          }
+        },
+        send: async () => {
+          throw new Error('Physical-note sending is unavailable in this test.')
+        },
+      },
+      sendVaultFile: async () => {
+        throw new Error('Vault-file sending is unavailable in this test.')
+      },
+      vaultFileSendAvailable: false,
+    })
+    const authorizeAcceptedMessageTarget = async (input: {
+      messageRef: string
+    }) => input.messageRef === messageRef
+      ? { targetInputId: messageRef }
+      : null
+
+    const ordinaryScenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: ordinaryScenario.turnInput.codexCommand,
+      directory: ordinaryScenario.turnInput.codexHome,
+    })
+    ordinaryScenario.stub.captureProviderRequestDiagnostics()
+    ordinaryScenario.stub.queue({ text: 'ORDINARY_TURN_OK' })
+    const ordinaryResult = await executeCodexAppServerTurn({
+      ...ordinaryScenario.turnInput,
+      authorizeAcceptedMessageTarget,
+      dynamicTools: [
+        ...MURPH_GROUP_FAMILY_TOOLS,
+        MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+      ],
+      env: {
+        ...ordinaryScenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: createHostedToolContext(),
+      prompt: 'What can you help me with today?',
+    })
+    const ordinarySummaries =
+      ordinaryScenario.stub.requestSummariesSinceBaseline()
+    expect(ordinarySummaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesAllTools: true,
+      includesPhysicalNoteRecovery: false,
+    })
+    expect(ordinaryResult.finalMessage).toBe('ORDINARY_TURN_OK')
+    expect(recoveryRequests).toHaveLength(0)
+
+    await stopWarmCodexAppServer()
+    const baselineScenario = await prepareScriptedTurnScenario()
+    baselineScenario.stub.captureProviderRequestDiagnostics()
+    baselineScenario.stub.queue({ text: 'ORDINARY_TURN_OK' })
+    const baselineResult = await executeCodexAppServerTurn({
+      ...baselineScenario.turnInput,
+      authorizeAcceptedMessageTarget,
+      dynamicTools: [...MURPH_GROUP_FAMILY_TOOLS],
+      env: {
+        ...baselineScenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: createHostedToolContext(),
+      prompt: 'What can you help me with today?',
+    })
+    const baselineSummary =
+      baselineScenario.stub.requestSummariesSinceBaseline()[0]
+    expect(baselineResult.finalMessage).toBe('ORDINARY_TURN_OK')
+    const deferredDiscoveryOverheadBytes =
+      (ordinarySummaries[0]?.providerRequestDiagnostics?.bytes ?? 0)
+      - (baselineSummary?.providerRequestDiagnostics?.bytes ?? 0)
+    expect(deferredDiscoveryOverheadBytes).toBe(0)
+    expect(recoveryRequests).toHaveLength(0)
+
+    await stopWarmCodexAppServer()
+    const recoveryScenario = await prepareScriptedTurnScenario()
+    recoveryScenario.stub.captureProviderRequestDiagnostics()
+    recoveryScenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const tool = ALL_TOOLS.find(
+  ({ name }) => name === "murph__resolve_physical_note",
+);
+if (!tool) {
+  text(JSON.stringify({ found: false }));
+} else {
+  const result = await tools.murph__resolve_physical_note({
+    message_ref: ${JSON.stringify(messageRef)},
+  });
+  text(JSON.stringify({ found: true, result }));
+}
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'PHYSICAL_NOTE_RECOVERY_OK' },
+    )
+    const recoveryResult = await executeCodexAppServerTurn({
+      ...recoveryScenario.turnInput,
+      authorizeAcceptedMessageTarget,
+      dynamicTools: [
+        ...MURPH_GROUP_FAMILY_TOOLS,
+        MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+      ],
+      env: {
+        ...recoveryScenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: createHostedToolContext(),
+      prompt: 'Clear my earlier unresolved physical note.',
+    })
+    const recoverySummaries =
+      recoveryScenario.stub.requestSummariesSinceBaseline()
+    expect(recoverySummaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesAllTools: true,
+      includesPhysicalNoteRecovery: false,
+    })
+    const recoveryOutput =
+      recoverySummaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(recoveryOutput).toContain('"found":true')
+    expect(recoveryOutput).toContain('No unresolved physical-note submission')
+    expect(recoveryRequests).toEqual([{
+      originAssistantInputId: messageRef,
+    }])
+    expect(recoveryResult.finalMessage).toBe('PHYSICAL_NOTE_RECOVERY_OK')
+  })
+
+  it('keeps narrow group reads eager beside deferred Sol tools', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -9620,7 +8418,7 @@ text(JSON.stringify(result));
       providerRequestDiagnostics: {
         includesAllTools: true,
         includesAutomation: false,
-        includesGroup: false,
+        includesGroup: true,
         includesReadShared: true,
         includesGroupEmail: false,
       },
@@ -9643,11 +8441,11 @@ text(JSON.stringify(result));
     const assistantInputId = `ain_${'g'.repeat(32)}`
     const configurationRequests: unknown[] = []
     const groupSnapshot = (
-      model: 'gpt-5.6-sol' | 'gpt-5.6-terra',
+      model: 'gpt-5.6-sol' | 'gpt-6-sol',
     ): HostedRuntimeAssistantConfigurationSnapshot => ({
       availableModels: [
         'gpt-5.6-luna',
-        'gpt-5.6-terra',
+        'gpt-6-sol',
         'gpt-5.6-sol',
       ],
       availableProviders: ['openai'],
@@ -9660,7 +8458,7 @@ text(JSON.stringify(result));
       solAvailable: true,
     })
     const currentSnapshot = groupSnapshot('gpt-5.6-sol')
-    const updatedSnapshot = groupSnapshot('gpt-5.6-terra')
+    const updatedSnapshot = groupSnapshot('gpt-6-sol')
     const groupDeveloperInstructions = buildAssistantSystemPrompt({
       assistantCliContract: null,
       assistantContextSnapshotPrompt: null,
@@ -9681,7 +8479,10 @@ text(JSON.stringify(result));
       turnTrigger: null,
     })
     expect(groupDeveloperInstructions).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'reads or changes the future room model only',
+    )
+    expect(groupDeveloperInstructions).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(groupDeveloperInstructions).not.toContain(
       'Do not use or offer `murph.assistant_configuration` here',
@@ -9693,7 +8494,7 @@ text(JSON.stringify(result));
           input: `
 const result = await tools.murph__assistant_configuration({
   action: "update",
-  model: "gpt-5.6-terra",
+  model: "gpt-6-sol",
 });
 text(JSON.stringify(result));
 `,
@@ -9748,14 +8549,14 @@ text(JSON.stringify(result));
       },
       model: 'gpt-5.6-sol',
       prompt:
-        'Use the current group room request to switch this room to Terra, then reply exactly GROUP_MODEL_SWITCH_OK.',
+        'Use the current group room request to switch this room to GPT-6 Sol, then reply exactly GROUP_MODEL_SWITCH_OK.',
     })
 
     expect(configurationRequests).toEqual([
       {
         action: 'update',
         assistantInputId,
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6-sol',
       },
     ])
     const summaries = scenario.stub.requestSummariesSinceBaseline()
@@ -9767,7 +8568,7 @@ text(JSON.stringify(result));
     const groupConfigurationOutput =
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
     expect(groupConfigurationOutput).toContain('gpt-5.6-sol')
-    expect(groupConfigurationOutput).toContain('gpt-5.6-terra')
+    expect(groupConfigurationOutput).toContain('gpt-6-sol')
     expect(groupConfigurationOutput).toContain('next_turn')
     expect(groupConfigurationOutput).toContain('updated')
     expect(result.finalMessage).toBe('GROUP_MODEL_SWITCH_OK')
@@ -9783,7 +8584,7 @@ text(JSON.stringify(result));
     })
 
     expect(scenario.stub.requestSummariesSinceBaseline()[2]?.model).toBe(
-      'gpt-5.6-terra',
+      'gpt-6-sol',
     )
     expect(nextTurn.finalMessage).toBe('GROUP_MODEL_NEXT_TURN_OK')
     expect(nextTurn.sessionId).toBe(result.sessionId)
@@ -9794,7 +8595,7 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -9819,7 +8620,85 @@ text(JSON.stringify(result));
     ])
   })
 
-  it('compacts a 95k personal warm thread off-turn and keeps its task resumable', {
+  it('cold-resumes a skipped 49,999-token group thread with its task context', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const goalSentinel = 'IDLE_COMPACTION_GOAL'
+    const constraintSentinel = 'IDLE_COMPACTION_CONSTRAINT'
+    const toolResultSentinel = 'IDLE_COMPACTION_TOOL_RESULT'
+    const skippedResumeReply = [
+      'POST_SKIP_OK',
+      goalSentinel,
+      constraintSentinel,
+      toolResultSentinel,
+    ].join(' ')
+    scenario.stub.queue({ text: 'SKIP_SEED_OK' })
+    const seeded = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: 'Reply exactly SKIP_SEED_OK.',
+      serviceTier: 'flex',
+    })
+    expect(seeded.finalMessage).toBe('SKIP_SEED_OK')
+
+    scenario.stub.queue({
+      text: 'SKIP_STANDARD_OK',
+      usageInputTokens: 49_999,
+    })
+    const standard = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: [
+        'Preserve this task across the next idle checkpoint.',
+        `Goal: ${goalSentinel}`,
+        `Constraint: ${constraintSentinel}`,
+        `Completed tool result: ${toolResultSentinel}`,
+        'Reply exactly SKIP_STANDARD_OK.',
+      ].join('\n'),
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(standard.finalMessage).toBe('SKIP_STANDARD_OK')
+    expect(standard.threadId).toBe(seeded.threadId)
+
+    // Below threshold: no provider traffic, warm process untouched. The
+    // reported size must be the real observed thread context from the latest
+    // turn's tokenUsage events, not a placeholder.
+    scenario.stub.markRequestBaseline()
+    const skipped = await compactWarmCodexThread({
+      groupMinThreadTokens: 50_000,
+      minThreadTokens: 90_000,
+      timeoutMs: 30_000,
+    })
+    expect(skipped).toMatchObject({
+      kind: 'skipped',
+      reason: 'below_threshold',
+    })
+    expect(
+      skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
+        && skipped.threadContextTokensBefore === 49_999,
+    ).toBe(true)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
+
+    // Changed-path proof: kill the warm process after the below-threshold skip
+    // so the next turn must reconstruct the uncompacted thread from disk and
+    // continue from the provider response that received the task sentinels.
+    await stopWarmCodexAppServer('post-skip-cold-resume')
+    scenario.stub.queue({
+      requestIncludes: [goalSentinel, constraintSentinel, toolResultSentinel],
+      text: skippedResumeReply,
+    })
+    const resumedAfterSkip = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: 'Continue the preserved task after the skipped idle checkpoint.',
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(resumedAfterSkip.finalMessage).toBe(skippedResumeReply)
+    expect(resumedAfterSkip.threadId).toBe(seeded.threadId)
+  })
+
+  it('compacts a 50k group warm thread off-turn and keeps its task resumable', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -9832,7 +8711,7 @@ text(JSON.stringify(result));
       constraintSentinel,
       toolResultSentinel,
     ].join(' ')
-    const resumedReply = [
+    const compactedResumeReply = [
       'POST_COMPACT_OK',
       goalSentinel,
       constraintSentinel,
@@ -9841,6 +8720,7 @@ text(JSON.stringify(result));
     scenario.stub.queue({ text: 'COMPACT_SEED_OK' })
     const seeded = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: 'Reply exactly COMPACT_SEED_OK.',
       serviceTier: 'flex',
     })
@@ -9848,10 +8728,11 @@ text(JSON.stringify(result));
 
     scenario.stub.queue({
       text: 'COMPACT_STANDARD_OK',
-      usageInputTokens: 95_000,
+      usageInputTokens: 50_000,
     })
     const standard = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: [
         'Preserve this task across the next idle checkpoint.',
         `Goal: ${goalSentinel}`,
@@ -9864,28 +8745,11 @@ text(JSON.stringify(result));
     expect(standard.finalMessage).toBe('COMPACT_STANDARD_OK')
     expect(standard.threadId).toBe(seeded.threadId)
 
-    // Below threshold: no provider traffic, warm process untouched. The
-    // reported size must be the real observed thread context from the latest
-    // turn's tokenUsage events, not a placeholder.
-    scenario.stub.markRequestBaseline()
-    const skipped = await compactWarmCodexThread({
-      minThreadTokens: 100_000,
-      timeoutMs: 30_000,
-    })
-    expect(skipped).toMatchObject({
-      kind: 'skipped',
-      reason: 'below_threshold',
-    })
-    expect(
-      skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
-        && skipped.threadContextTokensBefore === 95_000,
-    ).toBe(true)
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
-
-    // Above threshold: the local-provider compaction summarization request is
+    // Exact boundary: the local-provider compaction summarization request is
     // served by the stub and the thread reports compacted.
     scenario.stub.queue({ text: compactedSummary })
     const compacted = await compactWarmCodexThread({
+      groupMinThreadTokens: 50_000,
       minThreadTokens: 90_000,
       timeoutMs: 60_000,
     })
@@ -9895,22 +8759,19 @@ text(JSON.stringify(result));
       serviceTier: null,
       threadId: seeded.threadId,
     })
-    // Usage attribution must never regress to the zero-row production failure:
-    // Codex 0.135 does not expose a compact-specific usage event, so the engine
-    // records a nonzero lower-bound estimate from the pre-compact thread size.
+    // The pinned runtime exposes the scripted provider's exact usage through
+    // raw completion events for this opted-in warm thread.
     expect(compacted.kind).toBe('compacted')
     if (compacted.kind !== 'compacted') {
       throw new Error('Expected idle compaction to complete.')
     }
     expect(compacted.usage).toMatchObject({
-      cachedInputTokens: null,
-      inputTokens: expect.any(Number),
-      outputTokens: null,
-      source: 'estimated',
-      totalTokens: expect.any(Number),
+      cachedInputTokens: 0,
+      inputTokens: 12,
+      outputTokens: 7,
+      source: 'measured',
+      totalTokens: 19,
     })
-    expect(compacted.usage.inputTokens).toBeGreaterThan(0)
-    expect(compacted.usage.totalTokens).toBeGreaterThan(0)
 
     // Repeat guard: a successful compact clears the thread vitals, so an
     // immediate second idle pass must skip without provider traffic instead
@@ -9918,6 +8779,7 @@ text(JSON.stringify(result));
     scenario.stub.markRequestBaseline()
     expect(
       await compactWarmCodexThread({
+        groupMinThreadTokens: 1,
         minThreadTokens: 1,
         timeoutMs: 30_000,
       }),
@@ -9935,15 +8797,16 @@ text(JSON.stringify(result));
     await stopWarmCodexAppServer('post-compact-cold-resume')
     scenario.stub.queue({
       requestIncludes: [goalSentinel, constraintSentinel, toolResultSentinel],
-      text: resumedReply,
+      text: compactedResumeReply,
     })
-    const resumed = await executeCodexAppServerTurn({
+    const resumedAfterCompact = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: 'Finish the preserved task after the idle checkpoint.',
       resumeSessionId: seeded.sessionId,
     })
-    expect(resumed.finalMessage).toBe(resumedReply)
-    expect(resumed.threadId).toBe(seeded.threadId)
+    expect(resumedAfterCompact.finalMessage).toBe(compactedResumeReply)
+    expect(resumedAfterCompact.threadId).toBe(seeded.threadId)
   })
 
   it('keeps a warm thread reusable when its model cannot be accounted', {
@@ -10238,6 +9101,171 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it('delivers the exact runtime-owned calendar link instead of model-copied text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const event = {
+      title: 'Care appointment',
+      startsAt: '2026-10-14T14:30:00-04:00',
+      endsAt: '2026-10-14T15:15:00-04:00',
+      location: 'Downtown Clinic',
+    } as const
+    const exactUrl = buildCalendarEventUrl(event)
+    const modelCopiedUrl = `${exactUrl.slice(0, -1)}A`
+    const modelFinalMessage = `The details are ready.\n${modelCopiedUrl}`
+    const exactFinalMessage = `The details are ready.\n${exactUrl}`
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: event,
+          name: 'create_calendar_link',
+          namespace: 'murph',
+        },
+      },
+      {
+        text: modelFinalMessage,
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        calendarLinkAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      prompt: 'Prepare my exact appointment as a calendar link.',
+    })
+
+    expect(result.providerAuthoredFinalMessage).toBe(modelFinalMessage)
+    expect(result.finalMessage).toBe(exactFinalMessage)
+    expect(result.transcriptMessage).toBe(exactFinalMessage)
+    expect(result.finalMessage).not.toContain(modelCopiedUrl)
+  })
+
+  it.each([
+    {
+      calendarFirst: true,
+      name: 'calendar link first with resolved reminder timing',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2026-10-14T12:00:00.000Z',
+        status: 'resolved' as const,
+      },
+      reminderMessage: 'I set your appointment reminder for 8:00 AM Eastern.',
+    },
+    {
+      calendarFirst: false,
+      name: 'pending reminder first',
+      occurrenceProjection: { status: 'pending' as const },
+      reminderMessage:
+        'I saved your appointment reminder for 8:00 AM Eastern. Its timing is still being confirmed.',
+    },
+  ])('preserves the semantic reminder result and exact calendar suffix with $name', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ calendarFirst, occurrenceProjection, reminderMessage }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const event = {
+      title: 'Care appointment',
+      startsAt: '2026-10-14T14:30:00-04:00',
+      endsAt: '2026-10-14T15:15:00-04:00',
+      location: 'Downtown Clinic',
+    } as const
+    const exactUrl = buildCalendarEventUrl(event)
+    const modelCopiedUrl = `${exactUrl.slice(0, -1)}A`
+    const modelFinalMessage = `${reminderMessage}\n${modelCopiedUrl}`
+    const exactFinalMessage = `${reminderMessage}\n${exactUrl}`
+    const providerReminderRequest = {
+      action: 'save' as const,
+      instructions: 'Remind me about my care appointment.',
+      schedule: {
+        kind: 'at' as const,
+        localAt: {
+          date: '2026-10-14',
+          time: '08:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Care appointment reminder',
+    }
+    const calendarCall = {
+      functionCall: {
+        arguments: event,
+        name: 'create_calendar_link',
+        namespace: 'murph',
+      },
+    }
+    const reminderCall = {
+      customToolCall: {
+        input: `
+const result = await tools.murph__automation(${JSON.stringify(providerReminderRequest)});
+text(JSON.stringify(result));
+`,
+        name: 'exec',
+      },
+    }
+    if (calendarFirst) {
+      scenario.stub.queue(calendarCall, reminderCall, { text: modelFinalMessage })
+    } else {
+      scenario.stub.queue(reminderCall, calendarCall, { text: modelFinalMessage })
+    }
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        automationAvailable: true,
+        calendarLinkAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            return {
+              action: 'save',
+              automationId: 'automation-care-appointment',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'care-appointment-reminder',
+              occurrenceProjection,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              updatedAt: '2026-10-01T16:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Prepare my appointment reminder and calendar link.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: providerReminderRequest.instructions,
+      schedule: { at: '2026-10-14T12:00:00.000Z', kind: 'at' },
+      title: providerReminderRequest.title,
+    }])
+    expect(result.providerAuthoredFinalMessage).toBe(modelFinalMessage)
+    expect(result.finalMessage).toBe(exactFinalMessage)
+    expect(result.transcriptMessage).toBe(exactFinalMessage)
+    expect(result.finalMessage).not.toContain(modelCopiedUrl)
+    expect(result.finalMessage.match(
+      /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/gu,
+    )).toEqual([exactUrl])
+    expect(result.finalMessage.endsWith(exactUrl)).toBe(true)
+  })
+
   it.each([
     {
       expectedFinalMessage:
@@ -10248,7 +9276,7 @@ text(JSON.stringify(result));
     },
     {
       expectedFinalMessage:
-        'I could not analyze that video because the provider is rate-limited right now. Please try again later.',
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
       expectedToolOutput:
         'Video analysis was rate-limited; no analysis was retrieved',
       geminiStatus: 429,
@@ -10338,11 +9366,17 @@ text(JSON.stringify(result));
   it.each([
     {
       allowFinishWithoutReply: false,
+      expectedFallback:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+      geminiStatus: 429,
       name: 'the model returns empty text',
       providerResponses: [{ text: '' }],
     },
     {
       allowFinishWithoutReply: true,
+      expectedFallback:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+      geminiStatus: 429,
       name: 'the model explicitly selects no reply',
       providerResponses: [
         {
@@ -10355,25 +9389,53 @@ text(JSON.stringify(result));
         { text: '' },
       ],
     },
+    {
+      allowFinishWithoutReply: false,
+      expectedFallback:
+        'Video analysis returned no usable answer. Please try again later.',
+      expectedFinalMessage:
+        'I could not analyze that video because no result returned.',
+      expectedProviderMessage:
+        'I could not analyze that video because no result returned.',
+      geminiStatus: 200,
+      name: 'Gemini returns no usable observation and the model claims no result returned',
+      providerResponses: [{
+        text: 'I could not analyze that video because no result returned.',
+      }],
+    },
   ] satisfies readonly {
     allowFinishWithoutReply: boolean
+    expectedFallback: string
+    expectedFinalMessage?: string
+    expectedProviderMessage?: string
+    geminiStatus: 200 | 429
     name: string
     providerResponses: readonly ScriptedResponse[]
   }[])(
     'delivers the trusted video-analysis failure fallback when $name',
     { timeout: TURN_TIMEOUT_MS },
-    async ({ allowFinishWithoutReply, providerResponses }) => {
+    async ({
+      allowFinishWithoutReply,
+      expectedFallback,
+      expectedFinalMessage,
+      expectedProviderMessage,
+      geminiStatus,
+      providerResponses,
+    }) => {
       const scenario = await prepareScriptedTurnScenario()
       const fixture = await prepareScriptedAnalyzeVideoFixture(
         scenario.turnInput.workingDirectory,
       )
-      const expectedFallback =
-        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.'
       const geminiFetch = vi.fn<typeof fetch>(async () =>
-        new Response(JSON.stringify({ error: 'rate limited' }), {
-          headers: { 'content-type': 'application/json' },
-          status: 429,
-        }),
+        geminiStatus === 200
+          ? Response.json({
+              candidates: [],
+              usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+            })
+          : new Response(JSON.stringify({ error: 'rate limited' }), {
+              headers: { 'content-type': 'application/json' },
+              status: geminiStatus,
+            }),
       )
       scenario.stub.queue(
         {
@@ -10410,14 +9472,132 @@ text(JSON.stringify(result));
       expect(geminiFetch).toHaveBeenCalledOnce()
       expect(result.finalAction).toBeNull()
       expect(result.finalActionExplicit).toBe(false)
-      expect(result.finalMessage).toBe(expectedFallback)
-      expect(result.providerAuthoredFinalMessage).toBe('')
-      expect(result.transcriptMessage).toBe(expectedFallback)
+      expect(result.finalMessage).toBe(
+        expectedFinalMessage ?? expectedFallback,
+      )
+      expect(result.providerAuthoredFinalMessage).toBe(
+        expectedProviderMessage ?? '',
+      )
+      expect(result.transcriptMessage).toBe(result.finalMessage)
       expect(scenario.stub.requestCountSinceBaseline()).toBe(
         allowFinishWithoutReply ? 3 : 2,
       )
     },
   )
+
+  it.each([
+    {
+      name: 'completion first',
+      providerMessage:
+        'The push-up reminder is set for tomorrow. Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+    },
+    {
+      name: 'video status first',
+      providerMessage:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later. The push-up reminder is set for tomorrow.',
+    },
+  ])('preserves a completed reminder and exact video status with $name', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ providerMessage }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const fixture = await prepareScriptedAnalyzeVideoFixture(
+      scenario.turnInput.workingDirectory,
+    )
+    const providerReminderRequest = {
+      action: 'save' as const,
+      instructions: 'Send the push-up reminder.',
+      schedule: {
+        kind: 'at' as const,
+        localAt: {
+          date: '2026-08-28',
+          time: '09:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Push-up reminder',
+    }
+    const expectedReminderAt = '2026-08-28T13:00:00.000Z'
+    const reminderRequest: AssistantHostedAutomationToolRequest = {
+      action: 'save',
+      instructions: providerReminderRequest.instructions,
+      schedule: {
+        at: expectedReminderAt,
+        kind: 'at',
+      },
+      title: providerReminderRequest.title,
+    }
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            message_ref: fixture.inputId,
+            question: 'Count the visible push-ups and describe the form.',
+          },
+          name: 'analyze_video',
+          namespace: 'murph',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(providerReminderRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: providerMessage },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      analyzeVideoRuntime: {
+        apiKey: 'scripted-gemini-key',
+        fetchImpl: vi.fn<typeof fetch>(async () =>
+          new Response(JSON.stringify({ error: 'rate limited' }), {
+            headers: { 'content-type': 'application/json' },
+            status: 429,
+          })),
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        analyzeVideoAvailable: true,
+        automationAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: {
+        ...fixture.hostedToolContext,
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-push-up-reminder',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'push-up-reminder',
+              occurrenceProjection: {
+                nextOccurrenceAt: expectedReminderAt,
+                status: 'resolved',
+              },
+              routeBinding: 'current_conversation',
+              schedule: reminderRequest.schedule,
+              status: 'active',
+              updatedAt: '2026-08-27T20:00:00.000Z',
+            }
+          },
+        },
+      },
+      prompt: 'Analyze my push-ups and remind me tomorrow.',
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    expect(automationRequests).toEqual([reminderRequest])
+    expect(result.providerAuthoredFinalMessage).toBe(providerMessage)
+    expect(result.finalMessage).toBe(providerMessage)
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+  })
 
   it.each([
     {
@@ -10439,14 +9619,44 @@ text(JSON.stringify(result));
         { text: '' },
       ],
     },
+    {
+      allowFinishWithoutReply: false,
+      expectedProviderMessage:
+        'I could not retrieve a usable analysis of the video.',
+      expectedFinalMessage:
+        'I could not retrieve a usable analysis of the video.',
+      name: 'the model falsely claims the successful result was unavailable',
+      providerResponses: [{
+        text: 'I could not retrieve a usable analysis of the video.',
+      }],
+    },
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalMessage:
+        'This video cannot establish a diagnosis. I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      expectedProviderMessage:
+        'This video cannot establish a diagnosis. I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      name: 'the model preserves health and camera limits around the observation',
+      providerResponses: [{
+        text:
+          'This video cannot establish a diagnosis. I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      }],
+    },
   ] satisfies readonly {
     allowFinishWithoutReply: boolean
+    expectedFinalMessage?: string
+    expectedProviderMessage?: string
     name: string
     providerResponses: readonly ScriptedResponse[]
   }[])(
     'delivers the trusted video-analysis success fallback when $name',
     { timeout: TURN_TIMEOUT_MS },
-    async ({ allowFinishWithoutReply, providerResponses }) => {
+    async ({
+      allowFinishWithoutReply,
+      expectedFinalMessage,
+      expectedProviderMessage,
+      providerResponses,
+    }) => {
       const scenario = await prepareScriptedTurnScenario()
       const fixture = await prepareScriptedAnalyzeVideoFixture(
         scenario.turnInput.workingDirectory,
@@ -10500,25 +9710,29 @@ text(JSON.stringify(result));
       expect(geminiFetch).toHaveBeenCalledOnce()
       expect(result.finalAction).toBeNull()
       expect(result.finalActionExplicit).toBe(false)
-      expect(result.finalMessage).toContain('Eight visible push-ups')
-      expect(result.finalMessage).toContain('Gemini video analysis below')
-      expect(result.providerAuthoredFinalMessage).toBe('')
-      expect(result.transcriptMessage).toContain('Eight visible push-ups')
+      expect(result.finalMessage).toBe(
+        expectedFinalMessage ??
+          'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+      )
+      expect(result.finalMessage).not.toContain('Gemini video observation below')
+      expect(result.providerAuthoredFinalMessage).toBe(
+        expectedProviderMessage ?? '',
+      )
+      expect(result.transcriptMessage).toBe(result.finalMessage)
       expect(scenario.stub.requestCountSinceBaseline()).toBe(
         allowFinishWithoutReply ? 3 : 2,
       )
     },
   )
 
-  it('preserves the first successful video-analysis fallback after a later limit failure', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario()
-    const fixture = await prepareScriptedAnalyzeVideoFixture(
-      scenario.turnInput.workingDirectory,
-    )
-    const geminiFetch = vi.fn<typeof fetch>(async () =>
-      Response.json({
+  it.each([
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalFallback:
+        'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+      expectedFirstFallback: 'Eight visible push-ups',
+      expectedSecondToolOutput: 'Eight visible push-ups',
+      geminiPayload: {
         candidates: [{
           content: {
             parts: [{
@@ -10529,7 +9743,89 @@ text(JSON.stringify(result));
           },
           finishReason: 'STOP',
         }],
-      }),
+      },
+      name: 'successful observation after an exact repeat',
+      providerResponses: [{ text: '' }],
+      secondQuestion: 'Count the visible push-ups and describe the form.',
+    },
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalFallback:
+        'Video analysis returned no usable answer. Please try again later.',
+      expectedFirstFallback: 'Video analysis returned no usable answer',
+      expectedSecondToolOutput: 'Video analysis returned no usable answer',
+      geminiPayload: {
+        candidates: [],
+        usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+      },
+      name: 'failure status after an exact repeat',
+      providerResponses: [{ text: '' }],
+      secondQuestion: 'Count the visible push-ups and describe the form.',
+    },
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalFallback:
+        'Eight visible push-ups. The hips rise before the shoulders on the last two reps.\n\nI did not analyze the later video request.',
+      expectedFirstFallback: 'Eight visible push-ups',
+      expectedSecondToolOutput:
+        'later video request was not analyzed because this turn already used its one video-analysis attempt',
+      geminiPayload: {
+        candidates: [{
+          content: {
+            parts: [{
+              text:
+                'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+            }],
+            role: 'model',
+          },
+          finishReason: 'STOP',
+        }],
+      },
+      name: 'successful observation plus a distinct unanalyzed request',
+      providerResponses: [{ text: '' }],
+      secondQuestion: 'Check whether the hips rise before the shoulders.',
+    },
+    {
+      allowFinishWithoutReply: true,
+      expectedFinalFallback:
+        'Video analysis returned no usable answer. Please try again later.\n\nThe later video request was not analyzed.',
+      expectedFirstFallback: 'Video analysis returned no usable answer',
+      expectedSecondToolOutput:
+        'later video request was not analyzed because this turn already used its one video-analysis attempt',
+      geminiPayload: {
+        candidates: [],
+        usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+      },
+      name: 'failure status plus a distinct unanalyzed request after no reply',
+      providerResponses: [
+        {
+          functionCall: {
+            arguments: {},
+            name: 'finish_without_reply',
+            namespace: 'murph',
+          },
+        },
+        { text: '' },
+      ],
+      secondQuestion: 'Check whether the hips rise before the shoulders.',
+    },
+  ])('recovers the first video-analysis $name', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    allowFinishWithoutReply,
+    expectedFinalFallback,
+    expectedFirstFallback,
+    expectedSecondToolOutput,
+    geminiPayload,
+    providerResponses,
+    secondQuestion,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const fixture = await prepareScriptedAnalyzeVideoFixture(
+      scenario.turnInput.workingDirectory,
+    )
+    const geminiFetch = vi.fn<typeof fetch>(async () =>
+      Response.json(geminiPayload),
     )
     const analyzeCall = {
       functionCall: {
@@ -10543,17 +9839,27 @@ text(JSON.stringify(result));
     } satisfies ScriptedResponse
     scenario.stub.queue(
       analyzeCall,
-      analyzeCall,
-      { text: '' },
+      {
+        functionCall: {
+          ...analyzeCall.functionCall,
+          arguments: {
+            ...analyzeCall.functionCall.arguments,
+            question: secondQuestion,
+          },
+        },
+      },
+      ...providerResponses,
     )
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      allowFinishWithoutReply,
       analyzeVideoRuntime: {
         apiKey: 'scripted-gemini-key',
         fetchImpl: geminiFetch,
       },
       dynamicTools: resolveMurphDynamicTools({
+        allowFinishWithoutReply,
         analyzeVideoAvailable: true,
         progressUpdatesAvailable: false,
       }),
@@ -10564,17 +9870,18 @@ text(JSON.stringify(result));
     })
 
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
-      .flatMap((summary) => summary.functionCallOutputs ?? [])
-    expect(toolOutputs).toEqual(expect.arrayContaining([
-      expect.stringContaining('Eight visible push-ups'),
-      expect.stringContaining('Video analysis limit reached for this turn'),
-    ]))
+      .find((summary) => (summary.functionCallOutputs?.length ?? 0) >= 2)
+      ?.functionCallOutputs ?? []
+    expect(toolOutputs).toHaveLength(2)
+    expect(toolOutputs[0]).toContain(expectedFirstFallback)
+    expect(toolOutputs[1]).toContain(expectedSecondToolOutput)
     expect(geminiFetch).toHaveBeenCalledOnce()
-    expect(result.finalMessage).toContain('Eight visible push-ups')
-    expect(result.finalMessage).not.toContain('Video analysis limit reached')
+    expect(result.finalMessage).toBe(expectedFinalFallback)
     expect(result.providerAuthoredFinalMessage).toBe('')
-    expect(result.transcriptMessage).toContain('Eight visible push-ups')
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(result.transcriptMessage).toBe(expectedFinalFallback)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(
+      allowFinishWithoutReply ? 4 : 3,
+    )
   })
 
   it('ends an accepted group email effect without another provider request', {
@@ -10594,7 +9901,7 @@ text(JSON.stringify(result));
             subject: 'Scheduled update',
             text: 'Scheduled update',
           },
-          name: 'group',
+          name: 'group_email',
           namespace: 'murph',
         },
       },
@@ -10672,7 +9979,7 @@ text(JSON.stringify(result));
         {
           functionCall: {
             arguments: { action: 'share_contact_card' },
-            name: 'group',
+            name: 'group_chat',
             namespace: 'murph',
           },
         },
@@ -10753,7 +10060,7 @@ text(JSON.stringify(result));
       {
         functionCall: {
           arguments: { action: 'read_chat_participants' },
-          name: 'group',
+          name: 'group_chat',
           namespace: 'murph',
         },
       },
@@ -10850,7 +10157,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: messageRef,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },
@@ -10880,7 +10187,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: `ain_${'f'.repeat(32)}`,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },
@@ -10957,7 +10264,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: messageRef,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },
@@ -11268,6 +10575,7 @@ function buildScriptedHostedSystemPrompt(
   onboardingGuidance = false,
   scheduledOccurrenceAt?: string,
   assistantContextSnapshotPrompt?: string,
+  assistantProgressUpdatesAvailable = true,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: 'Stable CLI contract for scripted hosted proof.',
@@ -11275,6 +10583,7 @@ function buildScriptedHostedSystemPrompt(
     assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: true,
+    assistantProgressUpdatesAvailable,
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -11295,154 +10604,11 @@ function buildScriptedHostedSystemPrompt(
 }
 
 async function prepareScriptedTurnScenario(
-  options: {
-    additionalTomlLines?: readonly string[]
-    model?: string
-    modelProvider?: string
-    multiAgentV2?: boolean
-  } = {},
-): Promise<{
-  stub: ScriptedStub
-  turnInput: {
-    codexCommand: string
-    codexHome: string
-    env: NodeJS.ProcessEnv
-    model: string
-    modelProvider: string
-    reasoningEffort: string
-    sandbox: 'workspace-write'
-    workingDirectory: string
-  }
-}> {
-  const scriptedStub = await requireScriptedStub()
-  scriptedStub.markRequestBaseline()
-  const modelProvider = options.modelProvider ?? SCRIPTED_MODEL_PROVIDER
-  const codexHome = await mkdtemp(path.join(tmpdir(), 'murph-codex-scripted-home-'))
-  temporaryPaths.push(codexHome)
-  const workingDirectory = await mkdtemp(
-    path.join(tmpdir(), 'murph-codex-scripted-workspace-'),
+  options: Parameters<typeof prepareSharedScriptedTurnScenario>[2] = {},
+) {
+  return await prepareSharedScriptedTurnScenario(
+    await requireScriptedStub(), temporaryPaths, options,
   )
-  temporaryPaths.push(workingDirectory)
-  await writeFile(
-    path.join(codexHome, 'config.toml'),
-    buildScriptedCodexConfigToml(scriptedStub.baseUrl, {
-      ...options,
-      modelProvider,
-    }),
-    {
-      encoding: 'utf8',
-      mode: 0o600,
-    },
-  )
-
-  return {
-    stub: scriptedStub,
-    turnInput: {
-      codexCommand,
-      codexHome,
-      env: {
-        [SCRIPTED_STUB_KEY_ENV]: 'scripted-local-key',
-        HOME: process.env.HOME,
-        PATH: process.env.PATH,
-        TMPDIR: process.env.TMPDIR,
-      },
-      model: options.model ?? SCRIPTED_MODEL,
-      modelProvider,
-      reasoningEffort: 'low',
-      sandbox: 'workspace-write',
-      workingDirectory,
-    },
-  }
-}
-
-async function writeOpenAiFlexModelCatalogJson(input: {
-  codexCommand: string
-  directory: string
-}): Promise<string> {
-  const { stdout } = await execFileAsync(
-    input.codexCommand,
-    ['debug', 'models', '--bundled'],
-    {
-      encoding: 'utf8',
-      maxBuffer: 10 * 1024 * 1024,
-    },
-  )
-  const catalog = readRecord(JSON.parse(stdout))
-  const models = Array.isArray(catalog?.models) ? catalog.models : []
-  const targetModel = models
-    .map(readRecord)
-    .find((model) => model?.slug === SCRIPTED_MODEL)
-  if (!targetModel) {
-    throw new Error(`Bundled Codex model catalog did not include ${SCRIPTED_MODEL}.`)
-  }
-
-  const serviceTiers = Array.isArray(targetModel.service_tiers)
-    ? targetModel.service_tiers
-    : []
-  const hasFlex = serviceTiers
-    .map(readRecord)
-    .some((tier) => tier?.id === 'flex')
-  if (!hasFlex) {
-    targetModel.service_tiers = [
-      ...serviceTiers,
-      {
-        description: 'Lower-cost flexible processing',
-        id: 'flex',
-        name: 'Flex',
-      },
-    ]
-  }
-
-  const modelCatalogJson = path.join(
-    input.directory,
-    'codex-model-catalog.openai-flex.json',
-  )
-  await writeFile(modelCatalogJson, `${JSON.stringify(catalog)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-  })
-  return modelCatalogJson
-}
-
-function buildScriptedCodexConfigToml(
-  baseUrl: string,
-  options: {
-    additionalTomlLines?: readonly string[]
-    modelProvider?: string
-    multiAgentV2?: boolean
-  } = {},
-): string {
-  const modelProvider = options.modelProvider ?? SCRIPTED_MODEL_PROVIDER
-  return [
-    `model = "${SCRIPTED_MODEL}"`,
-    `model_provider = "${modelProvider}"`,
-    'model_reasoning_effort = "low"',
-    'approval_policy = "never"',
-    'sandbox_mode = "workspace-write"',
-    'check_for_update_on_startup = false',
-    '',
-    '[history]',
-    'persistence = "none"',
-    '',
-    `[model_providers."${modelProvider}"]`,
-    'name = "Local scripted stub"',
-    `base_url = "${baseUrl}"`,
-    `env_key = "${SCRIPTED_STUB_KEY_ENV}"`,
-    'wire_api = "responses"',
-    'requires_openai_auth = false',
-    'request_max_retries = 4',
-    'stream_max_retries = 5',
-    '',
-    ...(options.multiAgentV2
-      ? [
-          '[features.multi_agent_v2]',
-          'enabled = true',
-          'max_concurrent_threads_per_session = 4',
-          '',
-        ]
-      : []),
-    ...(options.additionalTomlLines ?? []),
-  ].join('\n')
 }
 
 function createDeterministicPng(width: number, height: number): Buffer {
@@ -11479,392 +10645,4 @@ function createPngChunk(type: string, data: Buffer): Buffer {
   data.copy(chunk, 8)
   chunk.writeUInt32BE(crc32(Buffer.concat([typeBytes, data])), data.length + 8)
   return chunk
-}
-
-async function startScriptedResponsesStub(): Promise<ScriptedStub> {
-  const queuedResponses: ScriptedResponse[] = []
-  const requestSummaries: ScriptedProviderRequestSummary[] = []
-  const completedResponseLabels: string[] = []
-  let responseSequence = 0
-  let responsesRequestCount = 0
-  let requestBaseline = 0
-  let requestSummaryBaseline = 0
-  let providerRequestDiagnosticsEnabled = false
-
-  const server: Server = createServer(async (request, response) => {
-    if (request.method !== 'POST' || request.url !== '/v1/responses') {
-      response.statusCode = 404
-      response.end(JSON.stringify({ error: `unhandled ${request.method} ${request.url}` }))
-      return
-    }
-
-    let requestBody = ''
-    for await (const chunk of request) {
-      requestBody += typeof chunk === 'string'
-        ? chunk
-        : Buffer.from(chunk).toString('utf8')
-    }
-    responsesRequestCount += 1
-    requestSummaries.push(readScriptedProviderRequestSummary(
-      requestBody,
-      providerRequestDiagnosticsEnabled,
-    ))
-    const scriptedResponseIndex = queuedResponses.findIndex((candidate) =>
-      scriptedResponseMatchesRequest(candidate, requestBody)
-    )
-    const scripted = scriptedResponseIndex >= 0
-      ? queuedResponses.splice(scriptedResponseIndex, 1)[0]
-      : undefined
-    if (!scripted) {
-      response.statusCode = 500
-      response.end(JSON.stringify({
-        error: 'scripted responses stub received a request without a queued response',
-      }))
-      return
-    }
-
-    if (scripted.delayMs) {
-      await new Promise((resolve) => {
-        setTimeout(resolve, scripted.delayMs)
-      })
-    }
-
-    responseSequence += 1
-    const responseId = `resp_scripted_${responseSequence}`
-    const outputItems = 'commentaryAndFunctionCall' in scripted
-      ? [
-          {
-            content: [
-              {
-                annotations: [],
-                text: scripted.commentaryAndFunctionCall.commentary,
-                type: 'output_text',
-              },
-            ],
-            id: `msg_${responseId}_commentary`,
-            phase: 'commentary',
-            role: 'assistant',
-            status: 'completed',
-            type: 'message',
-          },
-          {
-            arguments: JSON.stringify(
-              scripted.commentaryAndFunctionCall.functionCall.arguments,
-            ),
-            call_id: `call_${responseId}_group_email`,
-            id: `fcall_${responseId}_group_email`,
-            name: scripted.commentaryAndFunctionCall.functionCall.name,
-            ...(scripted.commentaryAndFunctionCall.functionCall.namespace
-              ? {
-                  namespace:
-                    scripted.commentaryAndFunctionCall.functionCall.namespace,
-                }
-              : {}),
-            status: 'completed',
-            type: 'function_call',
-          },
-        ]
-      : [
-          'toolSearchCall' in scripted
-            ? {
-                arguments: {
-                  query: scripted.toolSearchCall.query,
-                  ...(scripted.toolSearchCall.limit === undefined
-                    ? {}
-                    : { limit: scripted.toolSearchCall.limit }),
-                },
-                call_id: `call_${responseId}`,
-                execution: 'client',
-                id: `tsearch_${responseId}`,
-                status: 'completed',
-                type: 'tool_search_call',
-              }
-            : 'customToolCall' in scripted
-              ? {
-                  call_id: `call_${responseId}`,
-                  id: `ctcall_${responseId}`,
-                  input: scripted.customToolCall.input,
-                  name: scripted.customToolCall.name,
-                  status: 'completed',
-                  type: 'custom_tool_call',
-                }
-              : 'functionCall' in scripted
-                ? {
-                    arguments: JSON.stringify(scripted.functionCall.arguments),
-                    call_id: `call_${responseId}`,
-                    id: `fcall_${responseId}`,
-                    name: scripted.functionCall.name,
-                    ...(scripted.functionCall.namespace
-                      ? { namespace: scripted.functionCall.namespace }
-                      : {}),
-                    status: 'completed',
-                    type: 'function_call',
-                  }
-                : {
-                    content: [
-                      {
-                        annotations: [],
-                        text: scripted.text,
-                        type: 'output_text',
-                      },
-                    ],
-                    id: `msg_${responseId}`,
-                    role: 'assistant',
-                    status: 'completed',
-                    type: 'message',
-                  },
-        ]
-    writeScriptedSseResponse({
-      outputItems,
-      response,
-      responseId,
-      usageInputTokens: scripted.usageInputTokens,
-    })
-    if (scripted.completionLabel) {
-      completedResponseLabels.push(scripted.completionLabel)
-    }
-  })
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => resolve())
-  })
-  const address = server.address()
-  if (!address || typeof address === 'string') {
-    throw new Error('Expected the scripted responses stub to bind a TCP port.')
-  }
-
-  return {
-    baseUrl: `http://127.0.0.1:${address.port}/v1`,
-    captureProviderRequestDiagnostics: () => {
-      providerRequestDiagnosticsEnabled = true
-    },
-    close: async () => {
-      await new Promise<void>((resolve) => {
-        server.close(() => resolve())
-        server.closeAllConnections()
-      })
-    },
-    completedResponseLabelsSinceBaseline: () => [...completedResponseLabels],
-    markRequestBaseline: () => {
-      completedResponseLabels.splice(0)
-      providerRequestDiagnosticsEnabled = false
-      requestBaseline = responsesRequestCount
-      requestSummaryBaseline = requestSummaries.length
-    },
-    queue: (...responses) => {
-      queuedResponses.push(...responses)
-    },
-    resetQueue: () => {
-      queuedResponses.splice(0)
-    },
-    requestCountSinceBaseline: () => responsesRequestCount - requestBaseline,
-    requestSummariesSinceBaseline: () =>
-      requestSummaries.slice(requestSummaryBaseline),
-  }
-}
-
-function scriptedResponseMatchesRequest(
-  response: ScriptedResponse,
-  requestBody: string,
-): boolean {
-  return (response.requestIncludes ?? []).every((value) =>
-    requestBody.includes(value)
-  ) && (response.requestExcludes ?? []).every((value) =>
-    !requestBody.includes(value)
-  )
-}
-
-function readScriptedProviderRequestSummary(
-  requestBody: string,
-  includeDiagnostics: boolean,
-): ScriptedProviderRequestSummary {
-  const body = readRecord(JSON.parse(requestBody))
-  const customToolCallOutputs = Array.isArray(body?.input)
-    ? body.input
-      .map(readRecord)
-      .filter((item) => item?.type === 'custom_tool_call_output')
-      .map((item) => readProviderToolOutputText(item?.output))
-      .filter((output): output is string => output !== null)
-    : []
-  const functionCallOutputs = Array.isArray(body?.input)
-    ? body.input
-      .map(readRecord)
-      .filter((item) => item?.type === 'function_call_output')
-      .map((item) => readString(item?.output))
-      .filter((output): output is string => output !== null)
-    : []
-  const toolSearchOutputTools = Array.isArray(body?.input)
-    ? body.input
-      .map(readRecord)
-      .filter((item) => item?.type === 'tool_search_output')
-      .flatMap((item) => Array.isArray(item?.tools) ? item.tools : [])
-    : []
-  const imageWidths = Array.isArray(body?.input)
-    ? body.input.flatMap((inputItem) => {
-        const content = readRecord(inputItem)?.content
-        if (!Array.isArray(content)) {
-          return []
-        }
-        return content
-          .map(readRecord)
-          .filter((item) => item?.type === 'input_image')
-          .map((item) => readString(item?.image_url))
-          .filter((imageUrl): imageUrl is string => imageUrl !== null)
-          .map(readPngDataUrlWidth)
-          .filter((width): width is number => width !== null)
-      })
-    : []
-  const tools = Array.isArray(body?.tools)
-    ? body.tools.map(readRecord)
-    : []
-  return {
-    ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
-    ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
-    ...(imageWidths.length > 0 ? { imageWidths } : {}),
-    model: readString(body?.model),
-    ...(includeDiagnostics
-      ? {
-          providerRequestDiagnostics: {
-            bytes: Buffer.byteLength(requestBody),
-            includesAllTools: requestBody.includes('ALL_TOOLS'),
-            includesExecCommand: requestBody.includes('exec_command'),
-            includesAutomation: requestBody.includes('"name":"automation"'),
-            includesGroup: requestBody.includes('"name":"group"'),
-            includesReadShared: requestBody.includes('read_shared'),
-            includesResponseCardCompactTableShape: [
-              'compact_table',
-              'columns',
-              'rowHeader',
-              'rows',
-              'values',
-              'tracking',
-              'snapshotAt',
-            ].every((field) => requestBody.includes(field)),
-            includesResponseCardNutritionV2Shape: [
-              'daily_nutrition',
-              'fiberGrams',
-              'goals',
-              'status',
-              'target',
-              'totals',
-            ].every((field) => requestBody.includes(field)),
-            includesGroupEmail: requestBody.includes('send_email'),
-            includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
-          },
-        }
-      : {}),
-    serviceTier: readString(body?.service_tier),
-    ...(toolSearchOutputTools.length > 0 ? { toolSearchOutputTools } : {}),
-  }
-}
-
-function readRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null
-  }
-
-  return value as Record<string, unknown>
-}
-
-function readString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null
-}
-
-function readPngDataUrlWidth(value: string): number | null {
-  const match = /^data:image\/png;base64,(.+)$/su.exec(value)
-  if (!match?.[1]) {
-    return null
-  }
-  const image = Buffer.from(match[1], 'base64')
-  return image.length >= 24 && image.subarray(12, 16).toString('ascii') === 'IHDR'
-    ? image.readUInt32BE(16)
-    : null
-}
-
-function readProviderToolOutputText(value: unknown): string | null {
-  if (typeof value === 'string') {
-    return value
-  }
-  if (!Array.isArray(value)) {
-    return null
-  }
-
-  const textItems = value
-    .map(readRecord)
-    .map((item) => readString(item?.text))
-    .filter((text): text is string => text !== null)
-  return textItems.length > 0 ? textItems.join('\n') : null
-}
-
-function writeScriptedSseResponse(input: {
-  outputItems: readonly Record<string, unknown>[]
-  response: ServerResponse
-  responseId: string
-  usageInputTokens?: number
-}): void {
-  const inputTokens = input.usageInputTokens ?? 12
-  const usage = {
-    input_tokens: inputTokens,
-    input_tokens_details: { cached_tokens: 0 },
-    output_tokens: 7,
-    output_tokens_details: { reasoning_tokens: 0 },
-    total_tokens: inputTokens + 7,
-  }
-  const completedResponse = {
-    created_at: Math.floor(Date.now() / 1000),
-    id: input.responseId,
-    model: SCRIPTED_MODEL,
-    output: input.outputItems,
-    status: 'completed',
-    usage,
-  }
-
-  input.response.statusCode = 200
-  input.response.setHeader('cache-control', 'no-cache')
-  input.response.setHeader('content-type', 'text/event-stream; charset=utf-8')
-  writeScriptedSseEvent(input.response, 'response.created', {
-    response: {
-      ...completedResponse,
-      output: [],
-      status: 'in_progress',
-    },
-    type: 'response.created',
-  })
-  for (const [outputIndex, outputItem] of input.outputItems.entries()) {
-    writeScriptedSseEvent(input.response, 'response.output_item.added', {
-      item: {
-        ...outputItem,
-        status: 'in_progress',
-      },
-      output_index: outputIndex,
-      type: 'response.output_item.added',
-    })
-    writeScriptedSseEvent(input.response, 'response.output_item.done', {
-      item: outputItem,
-      output_index: outputIndex,
-      type: 'response.output_item.done',
-    })
-  }
-  writeScriptedSseEvent(input.response, 'response.completed', {
-    response: completedResponse,
-    type: 'response.completed',
-  })
-  input.response.write('data: [DONE]\n\n')
-  input.response.end()
-}
-
-function writeScriptedSseEvent(
-  response: ServerResponse,
-  event: string,
-  payload: Record<string, unknown>,
-): void {
-  response.write(`event: ${event}\n`)
-  response.write(`data: ${JSON.stringify(payload)}\n\n`)
-}
-
-async function delay(milliseconds: number): Promise<void> {
-  await new Promise((resolve) => {
-    setTimeout(resolve, milliseconds)
-  })
 }

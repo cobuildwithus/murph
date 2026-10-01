@@ -1,3 +1,5 @@
+import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
+import { toolTextResult as assistantStyleTextResult } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import {
@@ -25,11 +27,13 @@ const assistantStyleArgumentsSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('show') }).strict(),
   z.object({
     action: z.literal('set'),
+    message_ref: z.string().regex(/^ain_[0-9a-f]{32}$/u).optional(),
     setting: assistantPersonalitySettingSchema,
     value: assistantPersonalityScoreSchema,
   }).strict(),
   z.object({
     action: z.literal('reset'),
+    message_ref: z.string().regex(/^ain_[0-9a-f]{32}$/u).optional(),
     setting: z.union([
       assistantPersonalitySettingSchema,
       z.literal('all'),
@@ -41,7 +45,7 @@ export const MURPH_ASSISTANT_STYLE_TOOL = {
   namespace: 'murph',
   name: 'assistant_style',
   description:
-    'Read or update the current conversation runtime\'s Humor, Push, Detail, and Unhinged settings. In a private chat these belong to the member; in a group chat they belong to the synthetic room Murph and never to a participant. Use show to read scores and sources; set only for an explicit ongoing preference; reset one setting or all settings to product defaults. For a bare directional request ("more"/"less") show first, then set a bounded step from the reported score; otherwise set only the exact score the member stated or agreed to. Never silently clamp an out-of-range value.',
+    'Read or update the current conversation runtime\'s Humor, Push, Detail, and Unhinged settings. In a private chat these belong to the member; in a group chat they belong to the synthetic room Murph and never to a participant. Use show to read scores and sources; set only for an explicit ongoing preference; reset one setting or all settings to product defaults. For a bare directional request ("more"/"less") show first, then set a bounded step from the reported score; otherwise set only the exact score the member stated or agreed to. Never silently clamp an out-of-range value. For set or reset in a conversation, pass message_ref from the accepted message requesting that change; never borrow a later message\'s ref. Omit it for local or scheduled actions.',
   inputSchema: z.toJSONSchema(assistantStyleArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -51,6 +55,7 @@ export type AssistantStyleDynamicToolRequest =
   | {
       args: AssistantStyleArguments
       kind: 'assistant-style'
+      messageRef?: string
       toolCallId?: string
     }
   | {
@@ -73,7 +78,7 @@ export function readAssistantStyleDynamicToolRequest(input: {
 
   const parsed = parseDynamicToolArguments({
     schema: assistantStyleArgumentsSchema,
-    schemaRootKeys: ['action', 'setting', 'value'],
+    schemaRootKeys: ['action', 'message_ref', 'setting', 'value'],
     toolName: 'murph.assistant_style',
     value: input.arguments,
   })
@@ -82,6 +87,9 @@ export function readAssistantStyleDynamicToolRequest(input: {
     ? {
         args: parsed.args,
         kind: 'assistant-style',
+        ...('message_ref' in parsed.args && parsed.args.message_ref
+          ? { messageRef: parsed.args.message_ref }
+          : {}),
         ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
       }
     : {
@@ -92,7 +100,6 @@ export function readAssistantStyleDynamicToolRequest(input: {
 
 export async function executeAssistantStyleDynamicTool(input: {
   authority: HostedRuntimeAssistantPersonalizationToolAuthority | null
-  available: boolean
   hosted: boolean
   hostedPersonalizationTool: {
     request(
@@ -103,25 +110,14 @@ export async function executeAssistantStyleDynamicTool(input: {
   hostedSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
   request: Extract<AssistantStyleDynamicToolRequest, { kind: 'assistant-style' }>
   vaultRoot: string | null
-}): Promise<{
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-}> {
-  if (!input.available) {
-    return assistantStyleTextResult(
-      false,
-      'assistant style settings are unavailable for this conversation',
-    )
-  }
-
+}): Promise<MurphDynamicToolExecutionResult> {
   try {
     const { args } = input.request
     if (!input.vaultRoot) {
       return assistantStyleTextResult(
         false,
         'assistant style settings require a vault',
+        'unavailable',
       )
     }
     const usecases = await import('@murphai/vault-usecases/preferences')
@@ -142,6 +138,7 @@ export async function executeAssistantStyleDynamicTool(input: {
         return assistantStyleTextResult(
           false,
           'assistant style settings could not be updated',
+          'authority_rejected',
         )
       }
 
@@ -221,8 +218,8 @@ export async function executeAssistantStyleDynamicTool(input: {
             })
 
     return assistantStyleTextResult(true, JSON.stringify(result))
-  } catch {
-    return assistantStyleTextResult(false, 'assistant style settings could not be updated')
+  } catch (error) {
+    return assistantStyleTextResult(false, 'assistant style settings could not be updated', 'handler_exception', error)
   }
 }
 
@@ -307,18 +304,4 @@ function haveSameKeys(
   const rightKeys = Object.keys(right).sort()
   return leftKeys.length === rightKeys.length &&
     leftKeys.every((key, index) => key === rightKeys[index])
-}
-
-function assistantStyleTextResult(success: boolean, text: string): {
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-} {
-  return {
-    rpcResult: {
-      contentItems: [{ text, type: 'inputText' }],
-      success,
-    },
-  }
 }

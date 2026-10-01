@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-16",
+  "order": 100,
+  "item": {
+    "id": "device-sync-single-recording-isolation",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "One unreadable recording no longer holds up a device sync",
+    "summary": "When a single device reading, such as an ECG recording, cannot be matched to its data, Murph now skips that reading and keeps importing the rest of the day.",
+    "details": "The skipped reading is fetched again on the next scheduled sync instead of stopping the whole connection after repeated retries. Nothing partial is recorded for it in the meantime.",
+    "relevanceTags": [
+      "devices",
+      "sync"
+    ],
+    "sourcePullRequests": [
+      3506
+    ]
+  }
+}

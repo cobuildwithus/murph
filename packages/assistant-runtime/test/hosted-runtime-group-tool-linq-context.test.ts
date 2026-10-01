@@ -7,7 +7,7 @@ import type {
 
 import {
   createHostedGroupToolWithCurrentTurnContext,
-} from "../src/hosted-runtime/workspace-assistant-phase.ts";
+} from "../src/hosted-runtime/group-tool-context.ts";
 import type { HostedAssistantLinqDeliveryContext } from "../src/hosted-runtime/linq-delivery-context.ts";
 import type { HostedAssistantEmailDeliveryContext } from "../src/hosted-runtime/email-delivery-context.ts";
 
@@ -253,6 +253,18 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])("forwards freshness only for authenticated conversation ingress (email=%s)", async (groupEmailIngress) => {
+    const request = vi.fn().mockResolvedValue({ action: "read_shared", result: { status: "ok" } });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request }, linqDeliveryContexts: [], groupEmailIngress });
+    const freshness = [{ projectionScopeKey: "sleep-duration-days.v0", date: "2026-08-04" }];
+    const projectionScopes = [{ projectionKind: "sleep-duration-days.v0" as const }];
+    const signal = new AbortController().signal;
+    await groupTool.request({ action: "read_shared", projectionScopes, freshness }, { signal });
+    expect(request).toHaveBeenCalledExactlyOnceWith({ action: "read_shared", projectionScopes,
+      ...(groupEmailIngress ? {} : { freshness }),
+    }, { signal });
+  });
+
   it("forwards telegram current-turn sender evidence channel-qualified", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "read_shared",
@@ -436,12 +448,12 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     await groupTool.request({
       action: "set_chat_avatar",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "set_chat_avatar",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
       linqThread: {
         authority: ROUTE_AUTHORITY,
         chatId: "chat_group_1",
@@ -464,6 +476,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
       },
+      repostOriginAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "post_join_offer",
@@ -472,6 +485,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
       },
+      repostOriginAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       linqThread: {
         authority: ROUTE_AUTHORITY,
         chatId: "chat_group_1",
@@ -515,14 +529,14 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "ask",
-      groupLabel: "Morning Movers",
+      membershipId: "hgm_private_member",
       originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       originSessionId: "session_private",
       question: "What exercises are assigned today?",
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "ask",
-      groupLabel: "Morning Movers",
+      membershipId: "hgm_private_member",
       originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       originSessionId: "session_private",
       question: "What exercises are assigned today?",
@@ -881,7 +895,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     await expect(groupTool.request({
       action: "set_chat_avatar",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     })).resolves.toMatchObject({
       result: { unavailableReason: "sms_chat_customization_unsupported" },
     });
@@ -1094,12 +1108,12 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     await groupTool.request({
       action: "set_chat_avatar",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "set_chat_avatar",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
 
     await groupTool.request({ action: "preflight_set_chat_avatar" });
@@ -1180,6 +1194,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await expect(groupTool.request({
       action: "ask",
+      membershipId: "hgm_private_member",
       originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       originSessionId: "session_private",
       question: "What exercises are assigned today?",

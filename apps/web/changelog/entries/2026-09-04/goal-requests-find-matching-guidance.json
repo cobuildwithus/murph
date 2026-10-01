@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "goal-requests-find-matching-guidance",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Goal requests find the matching guidance",
+    "summary": "When you ask Murph to help with a concrete health outcome, it now checks for matching public Goal guidance before beginning the setup conversation.",
+    "details": "Informational questions remain ordinary health Q&A, and Murph does not save a Goal or ongoing support until you accept the proposed plan.",
+    "relevanceTags": ["goals", "health-commons", "conversation"],
+    "sourcePullRequests": [2814],
+    "tryIt": {
+      "label": "Work on a sleep goal",
+      "prompt": "Hey Murph, help me sleep through the night."
+    }
+  }
+}

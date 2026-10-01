@@ -1,3 +1,5 @@
+import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
+import { toolTextResult as pendingVaultFilesTextResult } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import {
@@ -120,12 +122,7 @@ export async function executePendingVaultFilesDynamicTool(input: {
   >
   userActionScope: AssistantHostedUserActionScope | null
   vaultRoot: string | null
-}): Promise<{
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-}> {
+}): Promise<MurphDynamicToolExecutionResult> {
   if (
     !input.vaultRoot
     || !input.userActionScope
@@ -134,6 +131,7 @@ export async function executePendingVaultFilesDynamicTool(input: {
     return pendingVaultFilesTextResult(
       false,
       'pending vault-file management requires current user input in a direct conversation',
+      'authority_rejected',
     )
   }
 
@@ -149,10 +147,11 @@ export async function executePendingVaultFilesDynamicTool(input: {
           vault: input.vaultRoot,
         })
     return pendingVaultFilesTextResult(true, JSON.stringify(result))
-  } catch {
+  } catch (error) {
     return pendingVaultFilesTextResult(
       false,
       'pending vault-file management is temporarily unavailable',
+      'handler_exception', error,
     )
   }
 }
@@ -334,18 +333,4 @@ function nextCancellationTimestamp(current: string, now: Date): string {
       ? Math.max(now.getTime(), currentMs + 1)
       : now.getTime(),
   ).toISOString()
-}
-
-function pendingVaultFilesTextResult(success: boolean, text: string): {
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-} {
-  return {
-    rpcResult: {
-      contentItems: [{ text, type: 'inputText' }],
-      success,
-    },
-  }
 }

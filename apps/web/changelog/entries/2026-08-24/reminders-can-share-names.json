@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-24",
+  "order": 100,
+  "item": {
+    "id": "reminders-can-share-names",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Reminder names can repeat",
+    "summary": "Setting a reminder no longer fails because an older reminder has the same name.",
+    "details": "Each new reminder now gets its own stable identity, while existing reminders remain editable by their exact identity.",
+    "relevanceTags": ["reminders", "reliability"],
+    "sourcePullRequests": [2216]
+  }
+}

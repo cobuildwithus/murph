@@ -6,7 +6,7 @@ Status: frozen baseline plus health extension fence for `murph` and `vault-cli`
 
 - `murph` is the product CLI. It uses the selected active vault for normal commands, `murph onboard --vault <path>` creates or selects one during setup, and `murph use <path>` selects an existing vault for future product commands.
 - `vault-cli` is the raw explicit-vault and operator surface. The command synopses below list that explicit-vault contract because every canonical vault command names its target with `--vault <path>`.
-- `murph` and `vault-cli` are two UX layers over the same command graph; product aliases such as `murph chat`, `murph run`, `murph status`, `murph doctor`, and `murph stop` must stay discovery-compatible with their explicit-vault equivalents.
+- `murph` and `vault-cli` are two UX layers over the same command graph; product aliases such as `murph run`, `murph status`, `murph doctor`, and `murph stop` must stay discovery-compatible with their explicit-vault equivalents.
 - `packages/cli` owns command registration, schema validation, and delegation into `core`, `importers`, and `query`.
 - `device` commands delegate to the local `@murphai/device-syncd` control plane for provider OAuth/account actions while leaving canonical health writes behind the existing importer/core boundary, and the CLI may start or reuse that local daemon for the selected vault when no explicit control-plane target is provided.
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
@@ -30,10 +30,10 @@ vault-cli vault repair-inbox-envelopes --vault <path> [--dry-run] [--apply] [--m
 vault-cli vault compact-inbox-parser-attempts --vault <path> [--dry-run] [--apply] [--max-attempts <count>] [--request-id <id>]
 vault-cli vault repair-junction-hr-zones --vault <path> [--dry-run] [--apply] [--request-id <id>]
 vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--request-id <id>]
+vault-cli audit receipt <xfm_id> --vault <path> [--request-id <id>]
 vault-cli audit show <id> --vault <path> [--request-id <id>]
 vault-cli audit list --vault <path> [--action <action>] [--actor <actor>] [--status <status>] [--from <date>] [--to <date>] [--sort asc|desc] [--limit <n>] [--request-id <id>]
 vault-cli audit tail --vault <path> [--limit <n>] [--request-id <id>]
-vault-cli chat [prompt] --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--thread <id>] [--codexCommand <path>] [--codexHome <path>] [--model <model>] [--modelProvider <id>] [--reasoningEffort low|medium|high|xhigh] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy never] [--profile <name>] [--request-id <id>]
 vault-cli run --vault <path> [--maxPerScan <n>] [--allowSelfAuthored] [--sessionRolloverHours <hours>] [--once] [--request-id <id>]
 vault-cli knowledge upsert --vault <path> --body <markdown> [--title <title>] [--slug <slug>] [--page-type <type>] [--status <status>] [--clear-library-links] [--library-slug <slug> ...] [--related-slug <slug> ...] [--source-path <path> ...] [--request-id <id>]
 vault-cli knowledge append-section <slug> <heading> --vault <path> --body <markdown> [--title <title>] [--position prepend|append] [--source-path <path> ...] [--request-id <id>]
@@ -44,7 +44,6 @@ vault-cli knowledge lint --vault <path> [--request-id <id>]
 vault-cli knowledge log tail --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli knowledge index rebuild --vault <path> [--request-id <id>]
 vault-cli assistant ask <prompt> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--thread <id>] [--codexCommand <path>] [--codexHome <path>] [--model <model>] [--modelProvider <id>] [--reasoningEffort low|medium|high|xhigh] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy never] [--profile <name>] [--deliverResponse] [--deliveryTarget <target>] [--request-id <id>]
-vault-cli assistant chat [prompt] --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--thread <id>] [--codexCommand <path>] [--codexHome <path>] [--model <model>] [--modelProvider <id>] [--reasoningEffort low|medium|high|xhigh] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy never] [--profile <name>] [--request-id <id>]
 vault-cli assistant deliver <message> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--thread <id>] [--deliveryTarget <target>] [--request-id <id>]
 vault-cli assistant status --vault <path> [--session <id>] [--limit <n>] [--request-id <id>]
 vault-cli assistant doctor --vault <path> [--repair] [--request-id <id>]
@@ -55,11 +54,11 @@ vault-cli doctor --vault <path> [--repair] [--request-id <id>]
 vault-cli stop --vault <path> [--request-id <id>]
 vault-cli assistant session list --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
-vault-cli memory show [memoryId] --vault <path>
-vault-cli memory set-name <displayName> --vault <path>
-vault-cli memory upsert <text> --vault <path> --section <section>
-vault-cli memory update <memoryId> <text> --vault <path> [--section <section>]
-vault-cli memory forget <memoryId> --vault <path>
+vault-cli memory show [memoryId] --vault <path> [--compact] [--record-only]
+vault-cli memory set-name <displayName> --vault <path> [--compact]
+vault-cli memory upsert <text> --vault <path> [--compact] --section <section>
+vault-cli memory update <memoryId> <text> --vault <path> [--compact] [--section <section>]
+vault-cli memory forget <memoryId> --vault <path> [--compact]
 vault-cli automation scaffold --vault <path>
 vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> [--channel <channel>] [...]
 vault-cli automation show <lookup> --vault <path>
@@ -296,7 +295,18 @@ completed source import.
 any verified exact identity is deleted, it fences the complete byte-equivalent
 set and fails with a typed conflict without writing, minting, or adopting a
 replacement raw identity. Ordinary document import without `--reuse-exact`
-retains its explicit create-new behavior.
+retains its explicit create-new behavior except for an option-free save of one
+exact current `raw/inbox/**` document attachment. That explicit save resolves
+the source argument with the importer's existing path convention (absolute as
+given, relative to the process working directory), then resolves the capture
+and attachment internally. It preserves only the selected attachment with its
+default capture metadata and records the IDs-only promotion correlation used
+by inbox retention. A matching retry resolves that stable correlation before
+expiring capture text, so it remains idempotent after text retention. A stale,
+ambiguous, non-document, symlink-escaped, damaged, or deleted-owner inbox path
+fails closed before another import; any explicit title, occurrence time, note,
+source, or `--reuse-exact` keeps the generic import behavior and does not claim
+default-promotion correlation.
 
 Read-only vault metadata and audit commands require an initialized vault root and fail with `invalid_vault` before query reads when `vault.json` is missing. Missing default-vault routing failures use `missing_vault`; typed CLI errors include a boolean `retryable` field in the JSON error envelope.
 
@@ -345,10 +355,9 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `vault` exposes `show | stats | repair | update`.
 - `export` exposes `create | show | list | materialize | prune`.
 - `audit` exposes `show | list | tail`.
-- `assistant` is a Codex App Server-backed orchestration noun for local chat turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, coalesces adjacent pending inbound messages from the same conversation lane into one auto-reply turn before advancing the reply cursor, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
+- `assistant` is a Codex App Server-backed orchestration noun for local turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, coalesces adjacent pending inbound messages from the same conversation lane into one auto-reply turn before advancing the reply cursor, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
 - `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show`, save the user's preferred display name with the typed `set-name` command, and mutate individual records with `upsert`, `update`, or `forget`. `memoryId` arguments use `mem_<ULID>` ids. Group runtimes receive the preferred display name through the consented `profile-name.v0` vault-share projection from memory.
 - `automation` is a canonical product noun backed by `bank/automations/*.md` and exposes typed `save`, explicit `import-json`, readable/list, and scaffold surfaces.
-- Top-level `chat` is a shorthand alias for `assistant chat`; it shares the same prompt/options/output contract so installed `murph chat` discovery stays truthful.
 - Top-level `status` is a shorthand alias for `assistant status`; it shares the same option/output contract so installed `murph status` discovery stays truthful.
 - Top-level `doctor` is a shorthand alias for `assistant doctor`; it shares the same option/output contract so installed `murph doctor` discovery stays truthful.
 - Top-level `run` is a shorthand alias for `assistant run`; it shares the same option/output contract so installed `murph run` discovery stays truthful while keeping automation explicit.
@@ -494,7 +503,14 @@ instead hashes the source and reuses one prior live document only after its raw
 artifact and manifest independently verify the same bytes. A reuse returns
 `created: false` and writes no document event, raw artifact, manifest, or audit
 row. Deleted documents are never revived or reused; different bytes create a
-new document normally.
+new document normally. The sole default-create exception is an option-free
+explicit save of an exact current `raw/inbox/**` document attachment: it routes
+through the existing Inbox Services preservation owner, writes the stable
+promotion correlation, and reuses its verified live canonical owner on retry,
+including after inbox text retention. The ordinary source-path convention is
+unchanged: relative paths resolve from the process working directory. A prior
+correlation whose owner is deleted or damaged fails before creating a new
+document.
 
 ```json
 {
@@ -572,8 +588,7 @@ new document normally.
 }
 ```
 
-The freeform note is preserved verbatim in `note`. Top-level `activityType`, optional `durationMinutes`, and optional `distanceKm` stay as summary fields, while all rich workout detail lives under the canonical nested `workout` payload.
-For freeform capture, Murph only infers `durationMinutes` when the note states one clear total workout duration. Mixed-activity notes, segmented notes, or notes without a clear total duration must pass `--duration`.
+Positional workout text is preserved verbatim as `note` and is never parsed into structured fields. Duration, activity type, distance, and exercises must come from typed flags or structured payloads; an applicable saved capture default may supply an omitted duration. All rich workout detail lives under the canonical nested `workout` payload. This keeps the CLI deterministic while the assistant translates member language into typed arguments.
 
 For structured agent writes, `workout payload-schema --format json` emits the import file-body contract used by `workout import-json --input @file.json|-`. Its `strengthExercises` form is the compact path for repeated strength sets such as `setCount` plus `repsPerSet`; ambiguous load text belongs in `loadDescription` so the note is preserved without inventing a numeric weight.
 
@@ -613,7 +628,7 @@ The generic transform does not invent `externalRef` identity. Exact-artifact com
 }
 ```
 
-Saved workout formats are vault-local Markdown docs only. They store a reusable workout template plus optional duration, type, and distance summaries, and they are validated up front by the same inference rules that power `workout add`.
+Saved workout formats are vault-local Markdown docs only. They store a reusable workout template plus optional typed duration, type, and distance summaries. Positional template text is preserved as text and is not parsed into those summaries.
 
 ### `workout format log`
 

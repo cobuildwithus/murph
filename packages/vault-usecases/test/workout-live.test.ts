@@ -6,6 +6,7 @@ import {
   workoutTemplateSchema,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 import {
   deriveWorkoutActionBinding,
   deriveWorkoutSetRemovalBinding,
@@ -14,6 +15,7 @@ import {
 import {
   buildLiveWorkoutSessionFromTemplate,
   buildLiveWorkoutCardEditor,
+  buildLiveWorkoutCardSnapshot,
   hasCompletedFiniteLiveWorkoutPlan,
   hasFiniteLiveWorkoutPlan,
   hasLoggedWorkoutSet,
@@ -28,6 +30,227 @@ import {
 } from '../src/usecases/workout-live-state.js'
 
 describe('live workout model', () => {
+  test('keeps the resistance unit hint when every editor row is still empty', () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-26T05:31:00.000Z',
+      exercises: [{
+        name: 'Chest-supported row',
+        order: 1,
+        mode: 'weight_reps',
+        unitOverride: 'kg',
+        setPlanIsFinite: true,
+        sets: [{ order: 1 }, { order: 2 }],
+      }],
+    })
+    const projected = buildLiveWorkoutCardEditor({
+      workout,
+      workoutId: 'evt_test_workout',
+      presentation: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Chest-supported row',
+          sets: Array.from({ length: 2 }, () => ({
+            status: 'pending' as const,
+            target: null,
+            actual: null,
+          })),
+        }],
+      },
+    })
+
+    assert.equal(projected?.editor.exercises[0]?.unitOverride, 'kg')
+    assert.deepEqual(
+      projected?.editor.exercises[0]?.sets,
+      Array.from({ length: 2 }, () => ({ logged: false, result: null })),
+    )
+  })
+
+  test.each([8, null])('projects ad-hoc repetition state (%s) into every pending editor row', (memberRepsPerSet) => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-26T05:31:00.000Z',
+      exercises: [{
+        name: 'Bench press',
+        order: 1,
+        mode: 'weight_reps',
+        unitOverride: 'lb',
+        memberRepsPerSet,
+        targetWeightPerSet: 135,
+        targetWeightUnit: 'lb',
+        setPlanIsFinite: true,
+        sets: [{ order: 1 }, { order: 2 }, { order: 3 }],
+      }],
+    })
+    const projected = buildLiveWorkoutCardEditor({
+      workout,
+      workoutId: 'evt_test_workout',
+      presentation: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Bench press',
+          sets: Array.from({ length: 3 }, () => ({
+            status: 'pending' as const,
+            target: null,
+            actual: null,
+          })),
+        }],
+      },
+    })
+
+    assert.deepEqual(
+      projected?.workout.exercises[0]?.sets,
+      Array.from({ length: 3 }, () => ({
+        status: 'pending',
+        target: memberRepsPerSet === null ? '135 lb' : '135 lb × 8',
+        actual: null,
+      })),
+    )
+    assert.deepEqual(
+      projected?.editor.exercises[0]?.sets,
+      Array.from({ length: 3 }, () => ({
+        logged: false,
+        result: null,
+      })),
+    )
+
+    const decimalWorkout = workoutSessionSchema.parse({
+      ...workout,
+      exercises: [{
+        ...workout.exercises[0],
+        targetWeightPerSet: 72.6,
+        targetWeightUnit: 'kg',
+        unitOverride: 'kg',
+      }],
+    })
+    const decimalProjection = buildLiveWorkoutCardEditor({
+      workout: decimalWorkout,
+      workoutId: 'evt_decimal_workout',
+      presentation: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Bench press',
+          sets: Array.from({ length: 3 }, () => ({
+            status: 'pending' as const,
+            target: null,
+            actual: null,
+          })),
+        }],
+      },
+    })
+    assert.equal(
+      decimalProjection?.workout.exercises[0]?.sets[0]?.target,
+      memberRepsPerSet === null ? '72.6 kg' : '72.6 kg × 8',
+    )
+  })
+
+  test('preserves saved-routine targets when member repetitions are present', () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-26T05:31:00.000Z',
+      routineId: 'wfmt_01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      exercises: [{
+        name: 'Bench press',
+        order: 1,
+        mode: 'weight_reps',
+        unitOverride: 'lb',
+        memberRepsPerSet: 8,
+        sets: [{ order: 1 }, { order: 2 }, { order: 3 }],
+      }],
+    })
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Bench press',
+        sets: Array.from({ length: 3 }, () => ({
+          status: 'pending' as const,
+          target: '95 lb × 10',
+          actual: null,
+        })),
+      }],
+    }
+
+    const projected = buildLiveWorkoutCardEditor({
+      workout,
+      workoutId: 'evt_routine_workout',
+      presentation,
+    })
+
+    assert.deepEqual(projected?.workout.exercises, presentation.exercises)
+  })
+
+  test('refreshes stale progress while retaining positional targets', () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [{
+        name: 'Bench press',
+        order: 1,
+        mode: 'weight_reps',
+        unitOverride: 'lb',
+        sets: [
+          { order: 1, reps: 8, weight: 135, weightUnit: 'lb' },
+          { order: 2, reps: 8, weight: 135, weightUnit: 'lb' },
+          { order: 3 },
+        ],
+      }],
+    })
+    const snapshot = buildLiveWorkoutCardSnapshot({
+      presentation: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Bench press',
+          sets: [1, 2, 3].map(() => ({
+            actual: null,
+            status: 'pending' as const,
+            target: '135 lb × 8',
+          })),
+        }],
+      },
+      workout,
+      workoutId: 'evt_test_workout',
+    })
+
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Bench press',
+          sets: [1, 2, 3].map(() => ({
+            actual: null,
+            status: 'pending' as const,
+            target: '135 lb × 8',
+          })),
+        }],
+      },
+      workout,
+      workoutId: 'evt_test_workout',
+    }), null)
+
+    assert.equal(snapshot?.workout.exercises[0]?.sets[0]?.actual, '135 lb × 8')
+    assert.equal(snapshot?.workout.exercises[0]?.sets[1]?.status, 'completed')
+    assert.equal(snapshot?.workout.exercises[0]?.sets[2]?.status, 'pending')
+    assert.equal(
+      snapshot?.workout.exercises[0]?.sets[2]?.target,
+      '135 lb × 8',
+    )
+
+    const completed = buildLiveWorkoutCardSnapshot({
+      presentation: snapshot!.workout,
+      workout: { ...workout, endedAt: '2026-08-09T19:00:00.000Z' },
+      workoutId: 'evt_test_workout',
+    })
+    assert.equal(completed?.workout.state, 'completed')
+    assert.equal(completed?.workout.exercises[0]?.sets[2]?.status, 'skipped')
+    assert.match(completed!.editor.actionBinding, /^[a-f0-9]{64}$/u)
+  })
+
   test('projects exact editable field families from canonical set state', () => {
     const workout = workoutSessionSchema.parse({
       sourceApp: LIVE_WORKOUT_SOURCE_APP,
@@ -219,7 +442,7 @@ describe('live workout model', () => {
     )
   })
 
-  test('keeps coordinate-indistinguishable duplicate exercises on the read-only card', () => {
+  test('rejects coordinate-indistinguishable duplicate exercises', () => {
     const presentation = {
       version: 1 as const,
       state: 'active' as const,
@@ -272,7 +495,7 @@ describe('live workout model', () => {
     { label: 'reps with note', set: { note: 'Slow tempo', reps: 8 } },
     { label: 'note with set unit', set: { note: 'Slow tempo', weightUnit: 'kg' as const } },
     { label: 'weight and reps with RPE', set: { reps: 8, rpe: 8, weight: 100 } },
-  ])('keeps a canonical $label result on the read-only card', ({ set }) => {
+  ])('rejects an unsupported canonical $label result', ({ set }) => {
     const presentation = {
       version: 1 as const,
       state: 'active' as const,
@@ -299,7 +522,7 @@ describe('live workout model', () => {
     assert.equal(presentation.exercises[0]?.sets[0]?.actual, 'Exact result')
   })
 
-  test('keeps a pending set with an unprojected unit on the read-only card', () => {
+  test('rejects a pending set with an unprojected unit', () => {
     const presentation = {
       version: 1 as const,
       state: 'active' as const,
@@ -330,7 +553,7 @@ describe('live workout model', () => {
     'weighted_bodyweight',
     'duration',
     'cardio',
-  ] as const)('keeps a pending %s exercise on the read-only card', (mode) => {
+  ] as const)('rejects an unsupported pending %s exercise', (mode) => {
     const presentation = {
       version: 1 as const,
       state: 'active' as const,
@@ -542,13 +765,16 @@ describe('live workout model', () => {
       ],
     })
     assert.throws(
-      () =>
-        assertTargetableLiveWorkout(
-          duplicateExerciseOrders,
-          'Workout test',
-        ),
-      (error: unknown) =>
-        error instanceof VaultCliError && error.code === 'contract_invalid',
+      () => assertTargetableLiveWorkout(duplicateExerciseOrders),
+      (error: unknown) => {
+        if (!(error instanceof VaultCliError)) return false
+        const projection = projectVaultCliError(error)
+        return error.code === 'contract_invalid'
+          && error.context === undefined
+          && projection.message === 'The workout contains duplicate exercise orders. Repair the workout structure before using targeted live commands.'
+          && projection.fieldErrors === undefined
+          && projection.stage === undefined
+      },
     )
 
     const duplicateSetOrders = workoutSessionSchema.parse({
@@ -556,20 +782,24 @@ describe('live workout model', () => {
       startedAt: '2026-08-09T18:00:00.000Z',
       exercises: [
         {
-          name: 'Bench press',
+          name: 'private-stored-exercise-name',
           order: 1,
           sets: [{ order: 1 }, { order: 1 }],
         },
       ],
     })
     assert.throws(
-      () =>
-        assertTargetableLiveWorkout(
-          duplicateSetOrders,
-          'Workout test',
-        ),
-      (error: unknown) =>
-        error instanceof VaultCliError && error.code === 'contract_invalid',
+      () => assertTargetableLiveWorkout(duplicateSetOrders),
+      (error: unknown) => {
+        if (!(error instanceof VaultCliError)) return false
+        const projection = projectVaultCliError(error)
+        return error.code === 'contract_invalid'
+          && error.context === undefined
+          && projection.message === 'The workout contains duplicate set orders. Repair the workout structure before using targeted live commands.'
+          && projection.fieldErrors === undefined
+          && projection.stage === undefined
+          && !JSON.stringify(projection).includes('private-stored-exercise-name')
+      },
     )
   })
 })

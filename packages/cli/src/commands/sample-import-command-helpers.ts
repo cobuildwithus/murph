@@ -2,6 +2,15 @@ import {
   createRuntimeUnavailableError,
   loadRuntimeModule,
 } from '@murphai/vault-usecases/runtime'
+import { sampleImportIssue } from '@murphai/vault-usecases/records'
+import {
+  VaultCliError,
+} from '@murphai/operator-config/vault-cli-errors'
+
+type CsvSampleCommandName =
+  | 'samples import-csv'
+  | 'samples csv import'
+  | 'samples csv profile'
 
 interface ImportCsvSamplesRuntimeInput {
   delimiter?: string
@@ -62,6 +71,7 @@ interface ImportersRuntimeModule {
 }
 
 export interface ImportCsvSamplesOptions {
+  commandName?: CsvSampleCommandName
   delimiter?: string
   file: string
   gapSeconds?: number
@@ -82,19 +92,25 @@ export interface ImportCsvSamplesOptions {
 let importersRuntimePromise: Promise<ImportersRuntimeModule> | null = null
 
 export async function importCsvSamples(options: ImportCsvSamplesOptions) {
-  const importers = await loadImportersRuntime()
+  const commandName = options.commandName ?? 'samples import-csv'
+  const importers = await loadImportersRuntimeForCommand(commandName)
   const runtimeInput = createImportCsvSamplesRuntimeInput(options)
   const runtime = importers.createImporters()
 
   if (!runtime || typeof runtime.importCsvSamples !== 'function') {
     importersRuntimePromise = null
     throw createRuntimeUnavailableError(
-      'samples import-csv',
+      commandName,
       new TypeError('Importer runtime package did not match the expected module shape.'),
     )
   }
 
-  const result = await runtime.importCsvSamples(runtimeInput)
+  let result
+  try {
+    result = await runtime.importCsvSamples(runtimeInput)
+  } catch (error) {
+    throw toCsvSampleCliError(error)
+  }
 
   return {
     vault: options.vault,
@@ -140,7 +156,8 @@ export async function profileCsvSampleFile(
   summaries?: unknown
   vault: string
 }> {
-  const importers = await loadImportersRuntime()
+  const commandName = options.commandName ?? 'samples csv profile'
+  const importers = await loadImportersRuntimeForCommand(commandName)
   const runtimeInput = createImportCsvSamplesRuntimeInput(options)
   const runtime = importers.createImporters()
 
@@ -152,7 +169,12 @@ export async function profileCsvSampleFile(
     )
   }
 
-  const result = await runtime.profileCsvSampleFile(runtimeInput)
+  let result
+  try {
+    result = await runtime.profileCsvSampleFile(runtimeInput)
+  } catch (error) {
+    throw toCsvSampleCliError(error)
+  }
 
   return {
     vault: options.vault,
@@ -195,9 +217,157 @@ async function loadImportersRuntime(): Promise<ImportersRuntimeModule> {
       return runtime
     } catch (error) {
       importersRuntimePromise = null
-      throw createRuntimeUnavailableError('samples import-csv', error)
+      throw error
     }
   })()
 
   return importersRuntimePromise
+}
+
+async function loadImportersRuntimeForCommand(
+  commandName: CsvSampleCommandName,
+): Promise<ImportersRuntimeModule> {
+  try {
+    return await loadImportersRuntime()
+  } catch (error) {
+    throw createRuntimeUnavailableError(commandName, error)
+  }
+}
+
+type CsvSampleFailure =
+  | { code: 'timestamp_column_inference_failed' }
+  | { code: 'value_column_inference_failed' }
+  | {
+    code: 'no_importable_rows'
+    importIndexes: readonly number[]
+  }
+  | {
+    code: 'invalid_sample'
+    importIndex: number
+    sampleField: string
+    stream: string
+  }
+
+function toCsvSampleCliError(error: unknown): unknown {
+  const failure = readCsvSampleFailure(error)
+  if (!failure) {
+    return error
+  }
+
+  switch (failure.code) {
+    case 'timestamp_column_inference_failed': {
+      return new VaultCliError(
+        'invalid_payload',
+        'Sample CSV column inference failed. Check --delimiter, then retry with --ts-column set to the exact timestamp column name.',
+        {
+          issues: [{ code: 'custom', expected: 'string', publicPath: ['tsColumn'] }],
+          stage: 'validation',
+        },
+      )
+    }
+    case 'value_column_inference_failed': {
+      return new VaultCliError(
+        'invalid_payload',
+        'Sample CSV column inference failed. Check --delimiter, then retry with --value-column set to the exact sample value column name and --stream set to its sample stream.',
+        {
+          issues: [{ code: 'custom', expected: 'string', publicPath: ['valueColumn'] }],
+          stage: 'validation',
+        },
+      )
+    }
+    case 'no_importable_rows': {
+      return new VaultCliError(
+        'invalid_payload',
+        'Sample CSV did not contain any importable rows. Correct invalid timestamp or numeric value cells, then retry.',
+        {
+          issues: failure.importIndexes.map((importIndex) => ({
+            code: 'custom',
+            expected: 'array',
+            publicPath: ['imports', importIndex, 'samples'],
+          })),
+          stage: 'validation',
+        },
+      )
+    }
+    case 'invalid_sample': {
+      const issue = sampleImportIssue(failure.sampleField, failure.stream)
+      if (!issue) {
+        return error
+      }
+
+      const { hint, ...fieldIssue } = issue
+      return new VaultCliError(
+        'invalid_payload',
+        'Sample CSV contains an invalid sample field.',
+        {
+          issues: [{
+            publicPath: ['imports', failure.importIndex, 'samples'],
+            ...fieldIssue,
+          }],
+          stage: 'validation',
+          ...(hint ? { hint } : {}),
+        },
+      )
+    }
+  }
+
+  const exhaustive: never = failure
+  return exhaustive
+}
+
+function readCsvSampleFailure(error: unknown): CsvSampleFailure | null {
+  if (
+    !isRecord(error)
+    || error.name !== 'CsvSampleImportError'
+    || !isRecord(error.failure)
+    || typeof error.failure.code !== 'string'
+  ) {
+    return null
+  }
+
+  const failure = error.failure
+  if (
+    failure.code === 'timestamp_column_inference_failed'
+    || failure.code === 'value_column_inference_failed'
+  ) {
+    return { code: failure.code }
+  }
+
+  if (failure.code === 'no_importable_rows') {
+    if (
+      !Array.isArray(failure.importIndexes)
+      || failure.importIndexes.length === 0
+      || failure.importIndexes.some((value) =>
+        typeof value !== 'number'
+        || !Number.isSafeInteger(value)
+        || value < 0
+      )
+      || new Set(failure.importIndexes).size !== failure.importIndexes.length
+    ) {
+      return null
+    }
+    return { code: failure.code, importIndexes: failure.importIndexes }
+  }
+
+  if (
+    failure.code === 'invalid_sample'
+    && typeof failure.importIndex === 'number'
+    && Number.isSafeInteger(failure.importIndex)
+    && failure.importIndex >= 0
+    && typeof failure.sampleField === 'string'
+    && typeof failure.stream === 'string'
+  ) {
+    return {
+      code: failure.code,
+      importIndex: failure.importIndex,
+      sampleField: failure.sampleField,
+      stream: failure.stream,
+    }
+  }
+
+  return null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

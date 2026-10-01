@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedDeviceSyncCallbackProof,
   readHostedDeviceSyncCallbackState,
-  verifyHostedDeviceSyncCallbackProof,
+  readHostedDeviceSyncCallbackProofError,
 } from "@/src/lib/device-sync/browser-callback-proof";
 
 vi.mock("server-only", () => ({}));
@@ -35,23 +35,23 @@ describe("hosted device-sync browser callback proof", () => {
     };
 
     expect(expiresAt.toISOString()).toBe("2026-07-28T12:15:00.000Z");
-    expect(verifyHostedDeviceSyncCallbackProof(common)).toBe(true);
-    expect(verifyHostedDeviceSyncCallbackProof({
+    expect(readHostedDeviceSyncCallbackProofError(common)).toBeNull();
+    expect(readHostedDeviceSyncCallbackProofError({
       ...common,
       memberId: "member_b",
-    })).toBe(false);
-    expect(verifyHostedDeviceSyncCallbackProof({
+    })).toBe("CALLBACK_PROOF_MISMATCH");
+    expect(readHostedDeviceSyncCallbackProofError({
       ...common,
       sessionId: "session_b",
-    })).toBe(false);
-    expect(verifyHostedDeviceSyncCallbackProof({
+    })).toBe("CALLBACK_PROOF_MISMATCH");
+    expect(readHostedDeviceSyncCallbackProofError({
       ...common,
       provider: "whoop",
-    })).toBe(false);
-    expect(verifyHostedDeviceSyncCallbackProof({
+    })).toBe("CALLBACK_PROOF_MISSING");
+    expect(readHostedDeviceSyncCallbackProofError({
       ...common,
       state: "different_state_12345678",
-    })).toBe(false);
+    })).toBe("CALLBACK_PROOF_MISMATCH");
   });
 
   it("keeps concurrent browser sessions bound to their independent callback states", () => {
@@ -70,22 +70,22 @@ describe("hosted device-sync browser callback proof", () => {
       state: "callback_state_session_b",
     });
 
-    expect(verifyHostedDeviceSyncCallbackProof({
+    expect(readHostedDeviceSyncCallbackProofError({
       memberId: "member_a",
       now: NOW,
       provider: "junction",
       request: requestWithCookie(sessionA.cookie),
       sessionId: "session_a",
       state: "callback_state_session_a",
-    })).toBe(true);
-    expect(verifyHostedDeviceSyncCallbackProof({
+    })).toBeNull();
+    expect(readHostedDeviceSyncCallbackProofError({
       memberId: "member_a",
       now: NOW,
       provider: "junction",
       request: requestWithCookie(sessionB.cookie),
       sessionId: "session_b",
       state: "callback_state_session_b",
-    })).toBe(true);
+    })).toBeNull();
   });
 
   it("rejects expired and tampered proofs", () => {
@@ -105,17 +105,31 @@ describe("hosted device-sync browser callback proof", () => {
       state: STATE,
     };
 
-    expect(verifyHostedDeviceSyncCallbackProof({
+    expect(readHostedDeviceSyncCallbackProofError({
       ...input,
       now: new Date("2026-07-28T12:15:00.000Z"),
-    })).toBe(false);
-    expect(verifyHostedDeviceSyncCallbackProof({
+    })).toBe("CALLBACK_PROOF_EXPIRED");
+    expect(readHostedDeviceSyncCallbackProofError({
       ...input,
       now: new Date("2026-07-28T12:01:00.000Z"),
       request: requestWithCookie(
         `${cookie.split(";", 1)[0]?.slice(0, -1) ?? ""}x`,
       ),
-    })).toBe(false);
+    })).toBe("CALLBACK_PROOF_MISMATCH");
+  });
+
+  it("classifies rejected proof without returning browser secrets", () => {
+    const { cookie } = buildHostedDeviceSyncCallbackProof({
+      memberId: "member_a", provider: "junction", sessionId: "session_a", state: STATE, now: NOW,
+    });
+    const input = { memberId: "member_a", provider: "junction", sessionId: "session_a",
+      state: STATE, now: NOW, request: requestWithCookie(cookie) };
+    expect(readHostedDeviceSyncCallbackProofError({ ...input, state: null })).toBe("CALLBACK_STATE_INVALID");
+    expect(readHostedDeviceSyncCallbackProofError({ ...input, request: new Request("https://app.example.test") })).toBe("CALLBACK_PROOF_MISSING");
+    expect(readHostedDeviceSyncCallbackProofError({ ...input, request: requestWithCookie("murph-device-sync-junction=malformed") })).toBe("CALLBACK_PROOF_MALFORMED");
+    expect(readHostedDeviceSyncCallbackProofError({ ...input, now: new Date(NOW.getTime() + 15 * 60_000) })).toBe("CALLBACK_PROOF_EXPIRED");
+    expect(readHostedDeviceSyncCallbackProofError({ ...input, state: "other_callback_state_123456" })).toBe("CALLBACK_PROOF_MISMATCH");
+    expect(readHostedDeviceSyncCallbackProofError({ ...input, now: new Date(NOW.getTime() - 1) })).toBe("CALLBACK_PROOF_MALFORMED");
   });
 
   it("uses a secure host-only production cookie and clears the same provider slot", () => {

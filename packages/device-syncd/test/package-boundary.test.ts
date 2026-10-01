@@ -171,7 +171,7 @@ test("Junction provider imports SDK resource subpaths without the aggregate root
   assert.equal(sdkSpecifiers.includes("@junction-api/sdk"), false);
 });
 
-test("hosted web-safe device-sync graph stays out of provider runtime modules", async () => {
+test("hosted device-sync graph confines provider reads to the scheduled preflight", async () => {
   const failures = await Promise.all(
     WEB_SAFE_DEVICE_SYNC_GRAPH_ROOTS.map(async (root) => {
       const path = await findDeniedDeviceSyncGraphPath(root);
@@ -266,6 +266,12 @@ async function findDeniedDeviceSyncGraphPath(root: string): Promise<string[] | n
 
     const source = await readFile(current.file, "utf8");
     for (const specifier of readModuleSpecifiers(source)) {
+      // The recovery sweep now intentionally reads provider content to avoid
+      // waking an unchanged member runtime. Permit only its preflight-to-registry
+      // edge; all other control routes and recovery-sweep paths stay provider-free.
+      if (root === "apps/web/app/api/internal/device-sync/recovery-sweep/route.ts"
+        && toRepoPath(current.file) === "apps/web/src/lib/device-sync/scheduled-reconcile-preflight.ts"
+        && specifier === "./providers") continue;
       const resolvedModule = resolveLocalModule(current.file, specifier);
       if (!resolvedModule || visited.has(resolvedModule)) {
         continue;

@@ -48,6 +48,20 @@ const mocks = vi.hoisted(() => ({
 
 const fakeTx = {
   $executeRaw: vi.fn(async () => 0),
+  hostedMailboxItem: {
+    update: vi.fn(async ({ data, where }: {
+      data: { retentionDisposition: string | null };
+      where: { id: string };
+    }) => {
+      const item = storedItems.get(where.id);
+      if (!item) {
+        throw new Error(`Missing mailbox item: ${where.id}`);
+      }
+      const updated = { ...item, ...data };
+      storedItems.set(where.id, updated);
+      return updated;
+    }),
+  },
   hostedThreadContainer: {
     findUnique: mocks.hostedThreadContainerFindUnique,
   },
@@ -69,6 +83,8 @@ function asPrismaTransactionClient(
 }
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION:
+    "assistant_ask.current_sender_pending",
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx:
     mocks.appendHostedMailboxEnvelopeWithIdentityTx,
@@ -137,6 +153,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE: "launch.health-data",
   readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
 }));
 
@@ -172,6 +189,7 @@ import {
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
   assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx,
+  isHostedGroupCurrentSenderPrivateLinqCompletionTx,
   createHostedGroupCurrentSenderAssistantAskRequestId,
   createHostedGroupCurrentSenderPrivateDeliveryId,
   createHostedGroupCurrentSenderLegacyAssistantAskRequestId,
@@ -207,10 +225,12 @@ const DIRECT_ROUTE = {
 };
 
 interface StoredMailboxItem {
+  contentRetiredAt: Date | null;
   dedupeKey: string;
   expiresAt: string | null;
   id: string;
   kind: string;
+  retentionDisposition: string | null;
   userId: string;
 }
 
@@ -382,10 +402,12 @@ function storeLegacyRequest(input: {
     occurredAt: NOW.toISOString(),
   });
   storedItems.set(requestId, {
+    contentRetiredAt: null,
     dedupeKey: requestId,
     expiresAt,
     id: requestId,
     kind: wake.kind,
+    retentionDisposition: null,
     userId: wake.userId,
   });
   storedWakes.set(requestId, wake);
@@ -537,10 +559,12 @@ describe("hosted current-sender Assistant Ask authority", () => {
           return { dedupeConflict: true, item: existing };
         }
         const item = {
+          contentRetiredAt: null,
           dedupeKey: itemId,
           expiresAt: input.expiresAt ?? null,
           id: itemId,
           kind: input.envelope.kind,
+          retentionDisposition: null,
           userId: input.envelope.userId,
         } satisfies StoredMailboxItem;
         storedItems.set(itemId, item);
@@ -1268,17 +1292,32 @@ describe("hosted current-sender Assistant Ask authority", () => {
     })).resolves.toMatchObject({
       response: { action: "complete", status: "already_completed" },
     });
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      now: NOW,
+      request: { action: "prepare", requestId },
+    })).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: GROUP_RUNTIME_MEMBER_ID,
+        mailboxItemId: completionId,
+      },
+      response: { action: "prepare", status: "already_completed" },
+    });
     expect(storedItems.size).toBe(2);
   });
 
-  it("requires the fixed fallback when personal access is lost after group completion", async () => {
+  it.each([
+    { resultKind: "answer", supportsSafeFallback: false },
+    { resultKind: "answer", supportsSafeFallback: true },
+    { resultKind: "fixed fallback", supportsSafeFallback: false },
+    { resultKind: "fixed fallback", supportsSafeFallback: true },
+  ])("preserves $resultKind delivery after personal access loss with fallback support $supportsSafeFallback", async ({ resultKind, supportsSafeFallback }) => {
     const { requestId } = await admit({
       text: "Murph, ask my Murph how my synthetic activity has changed?",
     });
-    const result = {
-      answer: "Synthetic activity increased.",
-      outcome: "answered" as const,
-    };
+    const result = resultKind === "answer"
+      ? { answer: "Synthetic activity increased.", outcome: "answered" as const }
+      : { answer: null, outcome: "cannot_answer" as const };
     await handleHostedRuntimeAssistantAskControl({
       boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
       now: NOW,
@@ -1297,20 +1336,31 @@ describe("hosted current-sender Assistant Ask authority", () => {
       },
     );
 
-    await expect(
-      assertHostedAssistantAskCompletionDeliveryAuthorityTx({
-        answeredMailboxItemIds: [completionId],
+    const delivery = assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      answeredMailboxItemIds: [completionId],
+      ...(supportsSafeFallback ? {
         assistantAskCompletionExpiresAt: completionWake.ask.expiresAt,
         assistantAskFallback: false,
-        boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-        idempotencyKey:
-          createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
-            completionId,
-          ),
-        now: new Date(NOW.getTime() + 1_000),
-        tx: asPrismaTransactionClient(fakeTx),
-      }),
-    ).resolves.toEqual({ assistantAskFallbackRequired: true });
+      } : {}),
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionId,
+        ),
+      now: new Date(NOW.getTime() + 1_000),
+      tx: asPrismaTransactionClient(fakeTx),
+    });
+    if (resultKind === "fixed fallback") {
+      await expect(delivery).resolves.toBeUndefined();
+    } else if (supportsSafeFallback) {
+      await expect(delivery).resolves.toEqual({ assistantAskFallbackRequired: true });
+    } else {
+      await expect(delivery).rejects.toMatchObject({
+        code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+        httpStatus: 403,
+        retryable: false,
+      });
+    }
   });
 
   it.each([
@@ -1553,6 +1603,23 @@ describe("hosted current-sender Assistant Ask authority", () => {
     const privateDeliveryId =
       createHostedGroupCurrentSenderPrivateDeliveryId(requestId);
     const requestWake = requireRequestedWake(requestId);
+    const privateProof = {
+      answeredMailboxItemIds: [privateDeliveryId],
+      assistantAskCompletionExpiresAt: requestWake.ask.expiresAt,
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      idempotencyKey: createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(privateDeliveryId),
+      now: new Date(NOW.getTime() + 1_000),
+      responseTextDigest: createHash("sha256").update(answer).digest("hex"),
+      route: DIRECT_ROUTE,
+      tx: asPrismaTransactionClient(fakeTx),
+    };
+    // The real private validator succeeds with void. The canonical completion
+    // remains a requested reply even when personal engagement is stale.
+    await expect(assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx(privateProof))
+      .resolves.toBeUndefined();
+    await expect(isHostedGroupCurrentSenderPrivateLinqCompletionTx({
+      ...privateProof, target: DIRECT_ROUTE.delivery.target, targetKind: "thread",
+    })).resolves.toBe(true);
     directRouteAvailable = false;
 
     await expect(

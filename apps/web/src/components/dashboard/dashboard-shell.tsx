@@ -27,11 +27,11 @@ export function DashboardShell({
     <SidebarProvider>
       <Sidebar
         initialAuth={sidebarAuth}
-        chatAction={(
+        chatAction={
           <Suspense fallback={<SidebarChatWithMurphFallback />}>
             <SidebarChatWithMurphAction />
           </Suspense>
-        )}
+        }
       />
       <SidebarInset className="bg-background">
         <header className="grid lg:hidden grid-cols-[auto_1fr_auto] items-center bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-4 py-3">
@@ -48,14 +48,9 @@ export function DashboardShell({
           </div>
           <div className="size-7" aria-hidden="true" />
         </header>
-        <main
-          className={cn(
-            "flex-1",
-            padded && "px-4 py-8 md:px-14 md:py-10",
-          )}
-        >
+        <div className={cn("flex-1", padded && "px-4 py-8 md:px-14 md:py-10")}>
           {children}
-        </main>
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );

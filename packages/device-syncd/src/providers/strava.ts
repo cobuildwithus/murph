@@ -2,7 +2,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import {
   resolveDeviceProviderDescriptor,
-  requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
   requireDeviceProviderWebhookDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
@@ -86,7 +85,6 @@ const STRAVA_PROVIDER_DESCRIPTOR =
   (() => {
     throw new TypeError("Strava provider descriptor is not registered.");
   })();
-const STRAVA_OAUTH = requireDeviceProviderOAuthDescriptor(STRAVA_PROVIDER_DESCRIPTOR);
 const STRAVA_WEBHOOK = requireDeviceProviderWebhookDescriptor(STRAVA_PROVIDER_DESCRIPTOR);
 const STRAVA_SYNC = requireDeviceProviderSyncDescriptor(STRAVA_PROVIDER_DESCRIPTOR);
 const STRAVA_WEBHOOK_PATH = STRAVA_WEBHOOK.path;

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 100,
+  "item": {
+    "id": "group-private-handoffs-keep-context",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Group handoffs keep their context",
+    "summary": "When you ask Murph to bring a private analysis into a group, the shared update can use your group name and stays available for the room's follow-up questions.",
+    "details": "Murph uses only the group-safe name and private context you chose to share. If the consultation cannot finish, its response stays tied to the earlier question instead of arriving as an unexplained message.",
+    "relevanceTags": ["assistant", "groups", "privacy", "reliability"],
+    "sourcePullRequests": [2452]
+  }
+}

@@ -1,9 +1,9 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { parseHostedRuntimeIssueRecordResponse } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import { HOSTED_RUNTIME_ISSUE_RECORD_PATH } from "@murphai/hosted-execution/routes";
 
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -22,7 +22,7 @@ export function createHostedRuntimeIssueExportPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted assistant runtime issue export",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_ISSUE_RECORD_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.assistantRuntimeIssueExport,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

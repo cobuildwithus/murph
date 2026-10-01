@@ -110,7 +110,7 @@ describe("device-sync providers", () => {
   });
 
   it("applies Oura runtime overrides onto the shared descriptor shape", () => {
-    const baselineScopes = [...OURA_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes ?? []];
+    const baselineScopes = [...OURA_DEVICE_PROVIDER_DESCRIPTOR.connection.defaultScopes];
     const baselineWindows = { ...OURA_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows };
     const provider = createOuraDeviceSyncProvider({
       clientId: "oura-client",
@@ -124,7 +124,7 @@ describe("device-sync providers", () => {
     expect(provider.provider).toBe(OURA_DEVICE_PROVIDER_DESCRIPTOR.provider);
     expect(provider.descriptor.displayName).toBe(OURA_DEVICE_PROVIDER_DESCRIPTOR.displayName);
     expect(provider.descriptor.webhook?.path).toBe(OURA_DEVICE_PROVIDER_DESCRIPTOR.webhook?.path);
-    expect(provider.descriptor.oauth?.defaultScopes).toContain("custom-scope");
+    expect(provider.descriptor.connection?.defaultScopes).toContain("custom-scope");
     expect(provider.descriptor.sync?.windows).toEqual({
       backfillDays: 14,
       reconcileDays: 5,
@@ -133,12 +133,12 @@ describe("device-sync providers", () => {
     expect(Boolean(provider.connectionHandler.revokeAccess)).toBe(
       OURA_DEVICE_PROVIDER_DESCRIPTOR.sync?.supportsRemoteDisconnect,
     );
-    expect(OURA_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes).toEqual(baselineScopes);
+    expect(OURA_DEVICE_PROVIDER_DESCRIPTOR.connection.defaultScopes).toEqual(baselineScopes);
     expect(OURA_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows).toEqual(baselineWindows);
   });
 
   it("applies WHOOP runtime overrides onto the shared descriptor shape", () => {
-    const baselineScopes = [...WHOOP_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes ?? []];
+    const baselineScopes = [...WHOOP_DEVICE_PROVIDER_DESCRIPTOR.connection.defaultScopes];
     const baselineWindows = { ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows };
     const provider = createWhoopDeviceSyncProvider({
       clientId: "whoop-client",
@@ -152,7 +152,7 @@ describe("device-sync providers", () => {
     expect(provider.provider).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.provider);
     expect(provider.descriptor.displayName).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.displayName);
     expect(provider.descriptor.webhook?.path).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.webhook?.path);
-    expect(provider.descriptor.oauth?.defaultScopes).toEqual(["offline", "read:profile", "read:team"]);
+    expect(provider.descriptor.connection?.defaultScopes).toEqual(["offline", "read:profile", "read:team"]);
     expect(provider.descriptor.sync?.windows).toEqual({
       backfillDays: 11,
       reconcileDays: 4,
@@ -161,7 +161,7 @@ describe("device-sync providers", () => {
     expect(Boolean(provider.connectionHandler.revokeAccess)).toBe(
       WHOOP_DEVICE_PROVIDER_DESCRIPTOR.sync?.supportsRemoteDisconnect,
     );
-    expect(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes).toEqual(baselineScopes);
+    expect(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.connection.defaultScopes).toEqual(baselineScopes);
     expect(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows).toEqual(baselineWindows);
   });
 
@@ -172,11 +172,11 @@ describe("device-sync providers", () => {
       scopes: [],
     });
 
-    expect(provider.descriptor.oauth?.defaultScopes).toEqual(["offline", "read:profile"]);
+    expect(provider.descriptor.connection?.defaultScopes).toEqual(["offline", "read:profile"]);
   });
 
   it("applies Strava runtime overrides onto the shared descriptor shape", () => {
-    const baselineScopes = [...STRAVA_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes ?? []];
+    const baselineScopes = [...STRAVA_DEVICE_PROVIDER_DESCRIPTOR.connection.defaultScopes];
     const baselineWindows = { ...STRAVA_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows };
     const provider = createStravaDeviceSyncProvider({
       clientId: "strava-client",
@@ -190,7 +190,7 @@ describe("device-sync providers", () => {
     expect(provider.provider).toBe(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.provider);
     expect(provider.descriptor.displayName).toBe(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.displayName);
     expect(provider.descriptor.webhook?.path).toBe(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.webhook?.path);
-    expect(provider.descriptor.oauth?.defaultScopes).toEqual(["activity:read", "activity:read_all"]);
+    expect(provider.descriptor.connection?.defaultScopes).toEqual(["activity:read", "activity:read_all"]);
     expect(provider.descriptor.sync?.windows).toEqual({
       backfillDays: 18,
       reconcileDays: 6,
@@ -199,7 +199,7 @@ describe("device-sync providers", () => {
     expect(Boolean(provider.connectionHandler.revokeAccess)).toBe(
       STRAVA_DEVICE_PROVIDER_DESCRIPTOR.sync?.supportsRemoteDisconnect,
     );
-    expect(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes).toEqual(baselineScopes);
+    expect(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.connection.defaultScopes).toEqual(baselineScopes);
     expect(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows).toEqual(baselineWindows);
   });
 });

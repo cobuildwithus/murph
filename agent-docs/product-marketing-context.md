@@ -1,6 +1,6 @@
 # Product Marketing Context
 
-*Last updated: 2026-07-29*
+*Last updated: 2026-08-30*
 
 This doc separates **facts** (true today), **strategy decisions** (chosen
 product direction), **hypotheses** (beliefs still to validate), and **target
@@ -230,6 +230,32 @@ the relationship forward.
 **Single-purpose health apps narrow the problem.** Wearable dashboards,
 trackers, experiment tools, and challenge apps can each be useful, but the
 member still has to decide which tool owns the moment and connect the context.
+
+### Public comparison guides
+
+The canonical comparison library lives at `/compare`. Each guide compares one
+named product with Murph using visible desk research from official first-party
+sources, an explicit review date, a semantic side-by-side table, material
+tradeoffs, fit guidance, and three visible questions and answers. Pages must
+state when products are complementary or serve different jobs instead of
+manufacturing a universal winner. Reversed pairs and thin alias pages are not
+separate indexable URLs.
+
+Comparison copy shares one centrally owned Murph profile so product claims do
+not drift from page to page. A competitor record may describe only the inputs,
+hardware, platforms, pricing, product role, and limitations its cited sources
+support. Do not turn data portability into a claimed native Murph integration,
+describe desk research as hands-on testing, or imply that either consumer
+product supplies diagnosis, treatment, or emergency care.
+
+Write each guide for a visitor who already understands the named competitor but
+is meeting Murph for the first time. Name the competitor's genuine advantage,
+then give a concrete keep, add, or switch decision. Murph should earn the sale
+through specific contrasts: connecting otherwise separate context, remembering
+what matters later, preparing a better decision, or carrying an agreed plan
+into ordinary life. Credible boundaries and cases where the competitor wins are
+part of the persuasion; generic superlatives, manufactured shortcomings, and a
+forced universal-winner verdict are not.
 
 ## Objections
 

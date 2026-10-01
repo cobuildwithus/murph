@@ -23,6 +23,7 @@ import {
 } from './conversation-ref.js'
 import {
   compareAssistantTimestampsAscending,
+  ensureAssistantStateDirectory,
   normalizeNullableString,
   resolveTimestamp,
 } from './shared.js'
@@ -31,7 +32,7 @@ import {
   ensureAssistantState,
   appendTranscriptEntries,
   inspectAssistantSessionStorage,
-  loadAndPersistResolvedSession,
+  loadResolvedSession,
   readAssistantRecentSessionIds,
   readAssistantSession,
   readAssistantSessionRouting,
@@ -115,8 +116,30 @@ export async function runAssistantTranscriptContentRetention(input: {
 export async function resolveAssistantSession(
   input: ResolveAssistantSessionInput,
 ): Promise<ResolvedAssistantSession> {
+  return resolveAssistantSessionWithPersistence(input, true)
+}
+
+// Preflight observes the same candidate and routing validation as admission,
+// without committing speculative binding changes. The lock still protects
+// routing-projection recovery and corrupt-session quarantine during reads.
+export async function lookupAssistantSession(
+  input: Omit<ResolveAssistantSessionInput, 'createIfMissing'>,
+): Promise<ResolvedAssistantSession> {
+  return resolveAssistantSessionWithPersistence({
+    ...input,
+    createIfMissing: false,
+  }, false)
+}
+
+async function resolveAssistantSessionWithPersistence(
+  input: ResolveAssistantSessionInput,
+  persistBinding: boolean,
+): Promise<ResolvedAssistantSession> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await Promise.all([
+      ensureAssistantStateDirectory(paths.sessionsDirectory),
+      ensureAssistantStateDirectory(paths.stateDirectory),
+    ])
     const requestedProviderOptions =
       resolveAssistantSessionRequestedProviderOptions(input)
     const requestedContinuityFingerprint =
@@ -138,7 +161,8 @@ export async function resolveAssistantSession(
       resolveLegacyAssistantConversationLookupKeyEntries(input)
 
     if (sessionId) {
-      const resolved = await loadAndPersistResolvedSession({
+      const resolved = await loadResolvedSession({
+        persistBinding,
         paths,
         persistenceInput: {
           ...persistenceInput,
@@ -179,7 +203,8 @@ export async function resolveAssistantSession(
     if (manualAlias) {
       const sessionId = routing.aliasSessionId
       if (sessionId) {
-        const resolved = await loadAndPersistResolvedSession({
+        const resolved = await loadResolvedSession({
+          persistBinding,
           expectedAlias: manualAlias,
           paths,
           sessionId,
@@ -204,7 +229,8 @@ export async function resolveAssistantSession(
       const sessionId =
         routing.conversationKeySessionIds.get(conversationLookupEntry.key)
       if (sessionId) {
-        const resolved = await loadAndPersistResolvedSession({
+        const resolved = await loadResolvedSession({
+          persistBinding,
           expectedConversationKey: conversationLookupEntry.key,
           paths,
           sessionId,
@@ -250,7 +276,8 @@ export async function resolveAssistantSession(
         bindingPatch,
         session: legacySession,
       })) {
-        const resolved = await loadAndPersistResolvedSession({
+        const resolved = await loadResolvedSession({
+          persistBinding,
           expectedConversationKey: legacyLookupEntry.key,
           paths,
           sessionId,
@@ -533,7 +560,7 @@ export async function getAssistantSessionLocal(
   sessionId: string,
 ): Promise<AssistantSession> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await ensureAssistantStateDirectory(paths.sessionsDirectory)
 
     const session = await readAssistantSession({ paths, sessionId })
     if (!session) {
@@ -587,7 +614,7 @@ export async function listAssistantTranscriptEntries(
   sessionId: string,
 ): Promise<AssistantTranscriptEntry[]> {
   const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
+  await ensureAssistantStateDirectory(paths.transcriptsDirectory)
   return readAssistantTranscriptEntries(paths, sessionId)
 }
 
@@ -597,7 +624,7 @@ export async function listAssistantTranscriptTailEntries(
   options: { maxBytes: number },
 ): Promise<AssistantTranscriptEntry[]> {
   const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
+  await ensureAssistantStateDirectory(paths.transcriptsDirectory)
   return readAssistantTranscriptTailEntries(paths, sessionId, options.maxBytes)
 }
 
@@ -623,8 +650,6 @@ export async function appendAssistantTranscriptEntriesWithRefs(
   refs: AssistantTranscriptEntryRef[]
 }> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
-
     if (entries.length === 0) {
       return {
         entries: [],
@@ -632,6 +657,7 @@ export async function appendAssistantTranscriptEntriesWithRefs(
       }
     }
 
+    await ensureAssistantStateDirectory(paths.transcriptsDirectory)
     const existingEntries = await readAssistantTranscriptEntries(paths, sessionId)
     const firstEntryIndex = existingEntries.length
     const parsed = entries.map((entry) => {
@@ -674,6 +700,7 @@ async function createAssistantSessionNotFoundError(input: {
   paths: AssistantStatePaths
   sessionId: string
 }): Promise<VaultCliError> {
+  await ensureAssistantStateDirectory(input.paths.transcriptsDirectory)
   const diagnosis = await inspectAssistantSessionStorage(input)
   const message = [
     'Assistant session was not found in the current vault assistant state.',
@@ -697,7 +724,7 @@ export async function readAssistantAutomationState(
   vault: string,
 ): Promise<AssistantAutomationState> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await ensureAssistantStateDirectory(paths.assistantStateRoot)
     return readAutomationState(paths)
   })
 }

@@ -17,11 +17,6 @@ fi
 readonly shared_host_mode
 export MURPH_VERIFY_SHARED_HOST="$shared_host_mode"
 
-if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
-  exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "apps/cloudflare verify" -- \
-    bash "$script_dir/verify-fast.sh" "$@"
-fi
-
 if [[ "$shared_host_mode" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]]; then
   exec node "$repo_root/scripts/run-with-host-verification-slot.mjs" "apps/cloudflare verify" -- \
     bash "$script_dir/verify-fast.sh" "$@"
@@ -187,3 +182,14 @@ workers_pid="$!"
 register_background_pid "$workers_pid"
 
 wait_for_background_jobs "$node_pid" "$workers_pid"
+
+# The helper project bundles the real Cloudflare package with a dedicated
+# cloudflare:workers shim. Keep that one-second harness out of the heavy mixed
+# project process so Vitest can deterministically release every worker.
+pnpm --dir "$repo_root" exec vitest run \
+  --config apps/cloudflare/vitest.containers-helper.config.ts \
+  --no-coverage \
+  --cache=false &
+helper_pid="$!"
+register_background_pid "$helper_pid"
+wait_for_background_jobs "$helper_pid"

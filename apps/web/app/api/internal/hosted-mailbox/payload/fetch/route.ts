@@ -1,3 +1,7 @@
+import type { Prisma } from "@prisma/client";
+import { getPrisma } from "@/src/lib/prisma";
+import { requireHostedRuntimeCallbackTx } from "@/src/lib/hosted-execution/runtime-owner";
+import { readHostedRuntimeCallbackAuthority } from "@/src/lib/hosted-execution/runtime-write-fence";
 import {
   parseHostedMailboxPayloadFetchRequest,
   parseHostedMailboxPayloadFetchResponse,
@@ -39,27 +43,34 @@ type HostedRuntimeMailboxPayloadAiUsageItem = {
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
+    runtimeAuthority: "caller_transaction",
     maxBodyBytes: HOSTED_MAILBOX_PAYLOAD_FETCH_CALLBACK_BODY_LIMIT_BYTES,
   });
-  await requireHostedRuntimeMailboxActiveAccess(userId, {
-    code: "HOSTED_RUNTIME_MAILBOX_PAYLOAD_USER_INACTIVE",
-    message: "Hosted runtime mailbox payload access is not active.",
-  });
   const body = parseHostedMailboxPayloadFetchRequest(await readOptionalJsonObject(request));
-  const mailboxItem = await readHostedMailboxItemByDedupeKey({
-    dedupeKey: body.dedupeKey,
-    userId,
-  });
-  await requireHostedRuntimeMailboxPayloadAiUsageAccess({
-    item: mailboxItem?.id === body.mailboxItemId ? mailboxItem : null,
-    userId,
-  });
-  const response = await fetchHostedMailboxPayload({
-    dedupeKey: body.dedupeKey,
-    mailboxItemId: body.mailboxItemId,
-    ...("payloadRef" in body ? { payloadRef: body.payloadRef } : {}),
-    requestId: body.requestId,
-    userId,
+  const authority = readHostedRuntimeCallbackAuthority(request);
+  const response = await getPrisma().$transaction(async (tx) => {
+    await requireHostedRuntimeCallbackTx(tx, userId, authority ? { ...authority, userId } : null);
+    await requireHostedRuntimeMailboxActiveAccess(userId, {
+      prisma: tx,
+      code: "HOSTED_RUNTIME_MAILBOX_PAYLOAD_USER_INACTIVE",
+      message: "Hosted runtime mailbox payload access is not active.",
+    });
+    const mailboxItem = await readHostedMailboxItemByDedupeKey({
+      prisma: tx,
+      dedupeKey: body.dedupeKey,
+      userId,
+    });
+    const item = mailboxItem?.id === body.mailboxItemId ? mailboxItem : null;
+    await requireHostedRuntimeMailboxPayloadAiUsageAccess({
+      item,
+      prisma: tx,
+      userId,
+    });
+    return fetchHostedMailboxPayload({
+      prisma: tx,
+      item,
+      ...("payloadRef" in body ? { payloadRef: body.payloadRef } : {}),
+    });
   });
 
   return jsonOk(parseHostedMailboxPayloadFetchResponse(response));
@@ -67,6 +78,7 @@ export const POST = withJsonError(async (request: Request) => {
 
 async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
   item: HostedRuntimeMailboxPayloadAiUsageItem | null;
+  prisma: Prisma.TransactionClient;
   userId: string;
 }): Promise<void> {
   if (
@@ -77,6 +89,7 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
     return;
   }
   const consumedSeqByLane = await readHostedMailboxConsumedSeqByLane({
+    prisma: input.prisma,
     lanes: [input.item.lane],
     userId: input.userId,
   });
@@ -102,6 +115,7 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
 
   const gate = await resolveHostedRuntimeAiUsageGate({
     mode: "read_first",
+    prisma: input.prisma,
     userId: input.userId,
   });
 

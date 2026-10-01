@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionRuntimeTimerWake,
+  buildHostedMemberChannelWelcomeDeliveryIdentity,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
@@ -961,7 +962,9 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("pre-claims non-idempotent signup welcome delivery effects before provider dispatch", async () => {
+  it.each(["signup-welcome:member_placeholder", "signup-welcome:member_placeholder:linq", buildHostedMemberChannelWelcomeDeliveryIdentity({
+    memberId: "member_placeholder", channel: "linq", destinationLookupKey: "synthetic-phone-identity",
+  })])("pre-claims non-idempotent signup welcome delivery effects before provider dispatch: %s", async (welcomeKey) => {
     const previousDispatchState = createPreparedPreviousDispatchState();
     mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValueOnce({
       intent: {
@@ -979,7 +982,7 @@ describe("hosted runtime callbacks", () => {
     const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: [
         createEffect({
-          idempotencyKey: "signup-welcome:member_placeholder",
+          idempotencyKey: welcomeKey,
           message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
           transportIdempotent: false,
         }),
@@ -989,7 +992,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).toHaveBeenCalledWith({
-      deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+      deliveryIdempotencyKey: welcomeKey,
       deliveryTransportIdempotent: false,
       intentId: "intent_123",
       startedAt: "2026-04-08T00:00:05.000Z",
@@ -2354,7 +2357,9 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
-  it("abandons a queued signup welcome when a foreground reply targets the same route", async () => {
+  it.each(["signup-welcome:member_placeholder", "signup-welcome:member_placeholder:linq", buildHostedMemberChannelWelcomeDeliveryIdentity({
+    memberId: "member_placeholder", channel: "linq", destinationLookupKey: "synthetic-phone-identity",
+  })])("abandons a queued signup welcome when a foreground reply targets the same route: %s", async (welcomeKey) => {
     mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue({
       status: "abandoned",
     });
@@ -2362,10 +2367,10 @@ describe("hosted runtime callbacks", () => {
       {
         actorId: null,
         bindingDelivery: { kind: "thread", target: "thread_1" },
-        channel: "telegram",
+        channel: welcomeKey.endsWith(":linq") ? "linq" : "telegram",
         createdAt: "2026-04-08T00:00:00.000Z",
         dedupeKey: "dedupe_signup_welcome",
-        deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+        deliveryIdempotencyKey: welcomeKey,
         deliveryTransportIdempotent: false,
         explicitTarget: null,
         identityId: null,
@@ -2385,7 +2390,7 @@ describe("hosted runtime callbacks", () => {
       {
         actorId: null,
         bindingDelivery: { kind: "thread", target: "thread_1" },
-        channel: "telegram",
+        channel: welcomeKey.endsWith(":linq") ? "linq" : "telegram",
         createdAt: "2026-04-08T00:00:05.000Z",
         dedupeKey: "dedupe_foreground",
         deliveryIdempotencyKey: null,
@@ -2504,6 +2509,165 @@ describe("hosted runtime callbacks", () => {
       });
     },
   );
+
+  it.each([
+    { label: "abandons a legacy email welcome after earlier direct-email first contact", destinationScoped: false, welcomeTarget: "member@example.test", suppressed: true },
+    { label: "abandons a destination email welcome after first contact at that address", destinationScoped: true, welcomeTarget: "MEMBER@example.test", suppressed: true },
+    { label: "keeps a new email destination welcome after first contact at an old address", destinationScoped: true, welcomeTarget: "new-member@example.test", suppressed: false },
+  ])("$label", async ({ destinationScoped, welcomeTarget, suppressed }) => {
+    const earlierReplyTarget = serializeHostedEmailThreadTarget({
+      cc: [],
+      lastMessageId: "<message_earlier@example.test>",
+      references: [],
+      subject: "Earlier conversation",
+      to: ["member@example.test"],
+    });
+    const welcome = createPendingHostedDeliveryIntent({
+      actorId: null,
+      bindingDelivery: null,
+      channel: "email",
+      createdAt: "2026-04-08T00:10:00.000Z",
+      deliveryIdempotencyKey: destinationScoped ? buildHostedMemberChannelWelcomeDeliveryIdentity({
+        memberId: "member_placeholder", channel: "email", destinationLookupKey: "synthetic-email-identity",
+      }) : "signup-welcome:member_placeholder",
+      explicitTarget: welcomeTarget,
+      identityId: "assistant@example.test",
+      intentId: "intent_recovered_email_signup_welcome",
+      lastError: {
+        code: "ASSISTANT_AUDIENCE_UNVERIFIED",
+        message: "Audience authority was unavailable.",
+      },
+      media: [],
+      nextAttemptAt: "2026-04-08T00:30:00.000Z",
+      replyToMessageId: null,
+      status: "retryable",
+      threadId: null,
+      threadIsDirect: true,
+      turnId: "turn_recovered_email_signup_welcome",
+    });
+    const earlierAutoReply = createPendingHostedDeliveryIntent({
+      actorId: null,
+      bindingDelivery: { kind: "thread", target: earlierReplyTarget },
+      channel: "email",
+      createdAt: "2026-04-08T00:05:00.000Z",
+      deliveryIdempotencyKey: "reply_delivery_key",
+      explicitTarget: earlierReplyTarget,
+      identityId: "assistant@example.test",
+      intentId: "intent_earlier_direct_email_reply",
+      media: [],
+      nextAttemptAt: null,
+      replyToMessageId: "<message_earlier@example.test>",
+      status: "sent",
+      threadId: "hid_direct_email_thread",
+      threadIsDirect: true,
+      turnId: "turn_earlier_direct_email_reply",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      earlierAutoReply,
+      welcome,
+    ]);
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(
+      new Set([earlierAutoReply.intentId]),
+    );
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) => intent.status !== "sent",
+    );
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue({
+      ...welcome,
+      lastError: {
+        code: "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
+        message: "Stale signup welcome suppressed.",
+      },
+      status: "abandoned",
+    });
+
+    const effects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+    expect(effects).toHaveLength(suppressed ? 0 : 1);
+    if (!suppressed) {
+      expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
+      return;
+    }
+
+    expect(mocks.findAssistantAutoReplyDeliveryIntentIds).toHaveBeenCalledWith({
+      intents: [earlierAutoReply],
+      vault: "/tmp/vault",
+    });
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
+      }),
+      intentId: welcome.intentId,
+      onlyCurrentStatuses: ["pending", "retryable"],
+      status: "abandoned",
+      vault: "/tmp/vault",
+    });
+  });
+
+  it("keeps a recovered direct-email signup welcome after an earlier group-email reply", async () => {
+    const earlierGroupReplyTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_placeholder",
+      recipientMemberId: "member_placeholder",
+      subject: "Group conversation",
+      targetKind: "group",
+    });
+    const welcome = createPendingHostedDeliveryIntent({
+      actorId: null,
+      bindingDelivery: null,
+      channel: "email",
+      createdAt: "2026-04-08T00:10:00.000Z",
+      deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+      explicitTarget: "member@example.test",
+      identityId: "assistant@example.test",
+      intentId: "intent_recovered_email_signup_welcome",
+      media: [],
+      nextAttemptAt: "2026-04-08T00:30:00.000Z",
+      replyToMessageId: null,
+      status: "retryable",
+      threadId: null,
+      threadIsDirect: true,
+      turnId: "turn_recovered_email_signup_welcome",
+    });
+    const earlierGroupReply = createPendingHostedDeliveryIntent({
+      actorId: null,
+      bindingDelivery: { kind: "thread", target: earlierGroupReplyTarget },
+      channel: "email",
+      createdAt: "2026-04-08T00:05:00.000Z",
+      deliveryIdempotencyKey: "group_reply_delivery_key",
+      explicitTarget: earlierGroupReplyTarget,
+      identityId: "assistant@example.test",
+      intentId: "intent_earlier_group_email_reply",
+      media: [],
+      nextAttemptAt: null,
+      replyToMessageId: "<message_group@example.test>",
+      status: "sent",
+      threadId: "hid_group_email_thread",
+      threadIsDirect: false,
+      turnId: "turn_earlier_group_email_reply",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      earlierGroupReply,
+      welcome,
+    ]);
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) => intent.status !== "sent",
+    );
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      welcome.intentId,
+    ]);
+    expect(mocks.findAssistantAutoReplyDeliveryIntentIds).not.toHaveBeenCalled();
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
+  });
 
   it("keeps a signup welcome when its supersession claim loses to dispatch", async () => {
     const welcome = createPendingHostedDeliveryIntent({
@@ -5099,6 +5263,65 @@ describe("hosted runtime callbacks", () => {
 
     expect(wakeAt).toBe("2026-04-08T00:11:00.000Z");
     vi.useRealTimers();
+  });
+
+  it("forwards selected voice delivery through the invocation port and liveness fence", async () => {
+    const effect = createEffect({
+      channel: "voice", bindingDeliveryKind: "thread", bindingDeliveryTarget: "call_synthetic",
+      explicitTarget: "call_synthetic", answeredMailboxItemIds: ["accepted_one", "accepted_two"],
+    });
+    const order: string[] = [];
+    const speak = vi.fn(async () => { order.push("speech"); });
+    const assertLiveness = vi.fn(async () => { order.push("fence"); });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendVoice({
+        callId: "call_synthetic", message: effect.payload.message,
+        answeredMailboxItemIds: effect.payload.answeredMailboxItemIds,
+      });
+      return createDispatchResult({ delivery: createDelivery({ channel: "voice" }), intentId: effect.effectId, status: "sent" });
+    });
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect], wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(), vaultRoot: HOSTED_WAKE.vaultRoot,
+      platform: { voicePort: { speak } }, assertLiveness,
+    });
+    expect(speak).toHaveBeenCalledExactlyOnceWith({
+      callId: "call_synthetic", message: effect.payload.message,
+      answeredMailboxItemIds: ["accepted_one", "accepted_two"],
+    });
+    expect(order.slice(-3)).toEqual(["fence", "speech", "fence"]);
+  });
+
+  it.each(["missing-call", "revoked-owner"] as const)("refuses voice provider entry for %s", async (reason) => {
+    const speak = vi.fn(async () => {});
+    const abort = new AbortController();
+    const failure = new Error("Synthetic runtime owner revoked");
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      if (reason === "revoked-owner") abort.abort(failure);
+      const result = dependencies.sendVoice({ callId: "call_synthetic", message: "Selected result", answeredMailboxItemIds: ["accepted_one"] });
+      if (reason === "missing-call") {
+        await expect(result).rejects.toMatchObject({
+          code: "ASSISTANT_VOICE_DELIVERY_UNAVAILABLE", deliveryMayHaveSucceeded: false, retryable: false,
+        });
+      } else {
+        await expect(result).rejects.toBe(failure);
+      }
+      return createDispatchResult({ delivery: null, intentId: "intent_123", status: "failed" });
+    });
+    const drain = drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [createEffect({ channel: "voice" })], wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(), vaultRoot: HOSTED_WAKE.vaultRoot,
+      platform: reason === "missing-call" ? null : { voicePort: { speak } }, signal: abort.signal,
+    });
+    if (reason === "revoked-owner") await expect(drain).rejects.toBe(failure);
+    else await drain;
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledOnce();
+    expect(speak).not.toHaveBeenCalled();
+  });
+
+  it("does not expose speech on hosted progress delivery", () => {
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({});
+    expect(dependencies).not.toHaveProperty("sendVoice");
   });
 
   it("returns sent without re-dispatching when the outbox mirror already has a sent record", async () => {
@@ -11798,8 +12021,12 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
-  it("fails closed before capability or provider access when Web lacks the canonical-route protocol", async () => {
-    const assertRecentInbound = vi.fn(async () => ({}));
+  it.each([undefined, {
+    conversationThreadId: null, directRecipientPhoneNumber: "+15550100001",
+    fromPhoneNumber: null, target: "chat_group", targetKind: "thread" as const,
+    threadIsDirect: false,
+  }])("fails closed before capability or provider access for missing or contradictory route %#", async (resolvedRoute) => {
+    const assertRecentInbound = vi.fn(async () => resolvedRoute ? { resolvedRoute } : {});
     const persistAppCardTextFallback = vi.fn(async () => undefined);
     const providerFetch = vi.fn<typeof fetch>();
     const recordDeliveryOutcome = vi.fn(async () => undefined);
@@ -11842,7 +12069,7 @@ describe("hosted runtime callbacks", () => {
     expect(recordDeliveryOutcome).not.toHaveBeenCalled();
   });
 
-  it("blocks changed Linq health at provider entry before any provider message request", async () => {
+  it.each(["chat_critical", "automation_engagement_paused"] as const)("blocks %s at provider entry before any provider message request", async (deliveryBlockCode) => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
@@ -11866,7 +12093,7 @@ describe("hosted runtime callbacks", () => {
     }) => request.authorityCheckOnly
       ? { resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request) }
       : {
-          deliveryBlockCode: "chat_critical" as const,
+          deliveryBlockCode,
           resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request),
         });
     const providerFetch = vi.fn<typeof fetch>();
@@ -11898,7 +12125,12 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     })).rejects.toMatchObject({
-      code: "ASSISTANT_LINQ_EGRESS_CHAT_CRITICAL",
+      code: `ASSISTANT_LINQ_EGRESS_${deliveryBlockCode.toUpperCase()}`,
+      context: {
+        assistantDeliveryFailureClass: "blocked",
+        assistantDeliveryResumeTrigger: "recipient_inbound",
+        blockKind: deliveryBlockCode,
+      },
     });
 
     expect(assertRecentInbound.mock.calls.map(([request]) =>
@@ -14005,13 +14237,15 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
   });
 
-  it("sends signup welcome Linq egress authority with participant context", async () => {
+  it.each(["signup-welcome:member_123", "signup-welcome:member_123:linq", buildHostedMemberChannelWelcomeDeliveryIdentity({
+    memberId: "member_123", channel: "linq", destinationLookupKey: "synthetic-phone-identity",
+  })])("sends signup welcome Linq egress authority with participant context: %s", async (welcomeKey) => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
       answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
       bindingDeliveryTarget: "+15550100001",
       channel: "linq",
-      idempotencyKey: "signup-welcome:member_123",
+      idempotencyKey: welcomeKey,
       message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
       transportIdempotent: false,
     });
@@ -14033,7 +14267,7 @@ describe("hosted runtime callbacks", () => {
         answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
         directRecipientPhoneNumber: null,
         fromPhoneNumber: "+15550100099",
-        idempotencyKey: "signup-welcome:member_123",
+        idempotencyKey: welcomeKey,
         message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
         replyToMessageId: null,
         target: "+15550100001",
@@ -14043,7 +14277,7 @@ describe("hosted runtime callbacks", () => {
       return createDispatchResult({
         delivery: createDelivery({
           channel: "linq",
-          idempotencyKey: "signup-welcome:member_123",
+          idempotencyKey: welcomeKey,
           providerMessageId: delivery.providerMessageId,
           providerMessageIds: delivery.providerMessageIds,
           providerThreadId: delivery.providerThreadId,
@@ -14081,7 +14315,7 @@ describe("hosted runtime callbacks", () => {
           threadIsDirect: true,
         }),
         fromPhoneNumber: "+15550100099",
-        idempotencyKey: "signup-welcome:member_123",
+        idempotencyKey: welcomeKey,
         target: "+15550100001",
         targetKind: "participant",
       }),
@@ -14996,6 +15230,27 @@ describe("hosted runtime callbacks", () => {
       method: "POST",
       path: "/attachments",
       status: 400,
+    },
+    {
+      ambiguous: true,
+      failureStage: "http",
+      method: "POST",
+      path: "/attachments",
+      status: 299,
+    },
+    {
+      ambiguous: true,
+      failureStage: "http",
+      method: "POST",
+      path: "/attachments",
+      status: 408,
+    },
+    {
+      ambiguous: false,
+      failureStage: "http",
+      method: "POST",
+      path: "/attachments",
+      status: 499,
     },
     {
       ambiguous: false,
@@ -16886,6 +17141,106 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
+  it.each(["approved", "denied", "changed-file", "wrong-target", "stale-before-upload"] as const)(
+    "handles %s Telegram file delivery through the approval and provider boundaries",
+    async (scenario) => {
+      const bytes = new Uint8Array([1, 2, 3]);
+      const vaultFile = {
+        approvalGeneration: "b".repeat(64),
+        approvalId: `haa_${"a".repeat(32)}`,
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: bytes.length,
+      };
+      const effect = createEffect({
+        bindingDeliveryKind: "thread", bindingDeliveryTarget: "123",
+        channel: "telegram", media: [vaultFile], transportIdempotent: false,
+      });
+      const intent = createPendingHostedDeliveryIntent({
+        bindingDelivery: { kind: "thread", target: "123" },
+        dedupeKey: effect.fingerprint,
+        deliveryIdempotencyKey: "assistant-outbox:intent_123",
+        explicitTarget: null,
+        intentId: "intent_123",
+        media: [vaultFile], operation: null,
+      });
+      mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(createMirrorState(intent));
+      mocks.readAssistantOutboxIntent.mockResolvedValue(intent);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+      if (scenario === "changed-file") {
+        mocks.readVerifiedAssistantVaultFileBytes.mockRejectedValueOnce(
+          Object.assign(new Error("File changed"), { code: "ASSISTANT_VAULT_FILE_CHANGED" }),
+        );
+      }
+      let fileRead = false;
+      if (scenario === "stale-before-upload") {
+        mocks.readVerifiedAssistantVaultFileBytes.mockImplementationOnce(async () => {
+          fileRead = true;
+          return bytes;
+        });
+      }
+      const actionApprovalPort = {
+        consume: vi.fn(async () => ({
+          approvalGeneration: vaultFile.approvalGeneration,
+          approvalId: vaultFile.approvalId,
+          status: scenario === "denied" ? "denied" as const : "approved" as const,
+        })),
+        read: vi.fn(), request: vi.fn(),
+      };
+      const providerFetch = vi.fn<typeof fetch>(async () => Response.json({ ok: true, result: { message_id: 7 } }));
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        const delivery = await dependencies.sendTelegramFile({
+          file: vaultFile, target: scenario === "wrong-target" ? "456" : "123",
+        });
+        return createDispatchResult({
+          delivery: createDelivery({ channel: "telegram", providerMessageId: delivery.providerMessageId, target: delivery.target }),
+          status: "sent",
+        });
+      });
+      const result = drainHostedPreparedAssistantDeliveries({
+        actionApprovalPort, assistantDeliveryEffects: [effect],
+        assertLiveness: async () => {
+          if (fileRead) {
+            throw Object.assign(new Error("Delivery authority expired"), {
+              code: "SYNTHETIC_DELIVERY_AUTHORITY_EXPIRED",
+            });
+          }
+        },
+        effectsPort: createHostedRuntimeEffectsPortStub(), providerFetch,
+        platformEnv: { TELEGRAM_BOT_TOKEN: "telegram-token" },
+        vaultRoot: HOSTED_WAKE.vaultRoot, wake: HOSTED_WAKE.wake,
+      });
+      if (scenario !== "approved") {
+        if (scenario === "stale-before-upload") {
+          await expect(result).rejects.toMatchObject({
+            code: "SYNTHETIC_DELIVERY_AUTHORITY_EXPIRED",
+            deliveryMayHaveSucceeded: false,
+          });
+        } else {
+          await expect(result).rejects.toThrow();
+        }
+        expect(providerFetch).not.toHaveBeenCalled();
+        if (scenario === "wrong-target") expect(actionApprovalPort.consume).not.toHaveBeenCalled();
+        return;
+      }
+      expect(await result).toEqual([expect.objectContaining({
+        deliveryChannel: "telegram", deliveryStatus: "sent", providerMessageId: "7",
+      })]);
+      expect(actionApprovalPort.consume).toHaveBeenCalledTimes(1);
+      expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith({ file: vaultFile, vaultRoot: HOSTED_WAKE.vaultRoot });
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+      expect(actionApprovalPort.consume.mock.invocationCallOrder[0]).toBeLessThan(providerFetch.mock.invocationCallOrder[0]!);
+      const [url, init] = providerFetch.mock.calls[0]!;
+      expect(String(url)).toContain("/sendDocument");
+      const body = init!.body as FormData;
+      expect(body.get("chat_id")).toBe("123");
+      expect(new Uint8Array(await (body.get("document") as File).arrayBuffer())).toEqual(bytes);
+    },
+  );
+
   it("consumes approved vault-file actions before hosted Linq delivery", async () => {
     const vaultFile = {
       approvalGeneration: "b".repeat(64),
@@ -18371,17 +18726,47 @@ describe("hosted runtime callbacks", () => {
     {
       currentTarget: "previous@example.test",
       label: "keeps an unchanged address",
+      destinationScoped: false,
+      legacyWelcome: false,
+      blocked: false,
     },
     {
       currentTarget: "current@example.test",
       label: "replaces a changed address",
+      destinationScoped: false,
+      legacyWelcome: false,
+      blocked: false,
     },
-  ])("$label at direct email provider entry", async ({ currentTarget }) => {
+    {
+      currentTarget: "PREVIOUS@example.test",
+      label: "keeps an unchanged destination welcome with email case normalization",
+      destinationScoped: true,
+      legacyWelcome: false,
+      blocked: false,
+    },
+    {
+      currentTarget: "current@example.test",
+      label: "blocks a stale destination welcome instead of retargeting to a new address",
+      destinationScoped: true,
+      legacyWelcome: false,
+      blocked: true,
+    },
+    {
+      currentTarget: "current@example.test",
+      label: "blocks a stale legacy welcome instead of duplicating a new destination welcome",
+      destinationScoped: false,
+      legacyWelcome: true,
+      blocked: true,
+    },
+  ])("$label at direct email provider entry", async ({ currentTarget, destinationScoped, legacyWelcome, blocked }) => {
     const effect = createEffect({
       bindingDeliveryKind: null,
       bindingDeliveryTarget: null,
       channel: "email",
       explicitTarget: "previous@example.test",
+      ...(destinationScoped ? { idempotencyKey: buildHostedMemberChannelWelcomeDeliveryIdentity({
+        memberId: "member_placeholder", channel: "email", destinationLookupKey: "synthetic-email-identity",
+      }) } : legacyWelcome ? { idempotencyKey: "signup-welcome:member_placeholder" } : {}),
       threadId: null,
       threadIsDirect: true,
     });
@@ -18395,6 +18780,7 @@ describe("hosted runtime callbacks", () => {
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendEmail({
         message: "Private meal closeout",
+        ...(destinationScoped ? { idempotencyKey: effect.payload.idempotencyKey } : {}),
         target: "previous@example.test",
         targetKind: "explicit",
       });
@@ -18404,7 +18790,7 @@ describe("hosted runtime callbacks", () => {
       });
     });
 
-    const outcomes = await drainHostedPreparedAssistantDeliveries({
+    const pending = drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
         resolveCurrentVerifiedEmailRecipient,
@@ -18413,6 +18799,17 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+
+    if (blocked) {
+      await expect(pending).rejects.toMatchObject({
+        code: "ASSISTANT_CHANNEL_WELCOME_DESTINATION_CHANGED",
+        deliveryMayHaveSucceeded: false,
+        retryable: false,
+      });
+      expect(sendEmail).not.toHaveBeenCalled();
+      return;
+    }
+    const outcomes = await pending;
 
     expect(resolveCurrentVerifiedEmailRecipient).toHaveBeenCalledWith({
       signal: null,
@@ -18485,6 +18882,35 @@ describe("hosted runtime callbacks", () => {
       retryable: true,
     });
     expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it.each(["sent", "pending", "failed"])("records exact email completion only after a sent delivery: %s", async (status) => {
+    const record = vi.fn(async () => ({ matchedCount: 1, recorded: true, unmatchedCount: 0 }));
+    const sentAt = "2026-04-08T00:01:00.000Z";
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(createDispatchResult({
+      status,
+      delivery: createDelivery({ channel: "email" }),
+      sentAt,
+      answeredMailboxItemIds: ["mailbox_answered"],
+    }));
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [createEffect({ channel: "email", explicitTarget: "member@example.test", bindingDeliveryKind: null, bindingDeliveryTarget: null })],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      deliveryTraceContext: {
+        latencyTracePort: { record }, runtimeAttemptId: "attempt_email_reply", runnerIdleTtlMs: 180_000,
+      },
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    if (status === "sent") {
+      expect(record).toHaveBeenCalledExactlyOnceWith({ event: {
+        type: "delivery_committed", source: "email", runtimeAttemptId: "attempt_email_reply",
+        mailboxItemIds: ["mailbox_answered"], at: sentAt,
+        checkpointPublicationExpectedBy: "2026-04-08T00:28:00.000Z",
+      } });
+    } else {
+      expect(record).not.toHaveBeenCalled();
+    }
   });
 
   it("persists one privacy-blind outbox child per planned group email recipient", async () => {

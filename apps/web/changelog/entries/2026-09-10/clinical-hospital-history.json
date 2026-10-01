@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 80,
+  "item": {
+    "id": "clinical-hospital-history",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More hospital history for Murph",
+    "summary": "Murph can read more diagnoses, allergies, medication history, visits and care records from connected hospitals.",
+    "details": "Records keep their source dates and statuses, including stopped prescriptions. Longer inline notes retain their full text in ordered sections. Hospital records stay distinct from what you have confirmed about your current health.",
+    "relevanceTags": ["medical-records"],
+    "sourcePullRequests": [3200],
+    "tryIt": {
+      "label": "View connected records",
+      "href": "/records"
+    }
+  }
+}

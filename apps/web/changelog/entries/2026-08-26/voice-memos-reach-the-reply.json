@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "voice-memos-reach-the-reply",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Voice memos reach the reply",
+    "summary": "Murph now lets voice-memo processing settle before answering, so an available transcript reaches the reply instead of racing it.",
+    "details": "Text-only messages keep their fast path. If attachment processing needs another attempt, Murph waits; a confirmed failure remains explicit instead of being guessed.",
+    "relevanceTags": ["assistant", "voice-memos", "reliability"],
+    "sourcePullRequests": [2413]
+  }
+}

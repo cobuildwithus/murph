@@ -237,6 +237,125 @@ test('food search-labels calls the hosted data API with the hosted provider cred
   }
 })
 
+test('food search-labels named query uses the same compact request as a positional query', async () => {
+  const restoreEnv = setHostedDataApiEnv()
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [] })))
+  vi.stubGlobal('fetch', fetchMock)
+  try {
+    for (const argv of [['rolled oats'], ['--query', ' rolled oats '], ['--query=rolled oats']]) {
+      const result = await runInProcessJsonCli(createFoodCli(), ['food', 'search-labels', ...argv, '--generic'])
+      assert.equal(result.exitCode, null)
+      assert.equal(result.envelope.ok, true)
+    }
+    assert.equal(fetchMock.mock.calls.length, 3)
+    assert.equal(new Set(fetchMock.mock.calls.map(([url]) => String(url))).size, 1)
+    assert.equal(String(fetchMock.mock.calls[0]?.[0]),
+      'http://murph-data-api.worker/api/foods?q=rolled+oats&limit=1&genericOnly=true&nutritionOnly=true')
+  } finally {
+    vi.unstubAllGlobals()
+    restoreEnv()
+  }
+})
+
+test('food search-labels rejects missing or conflicting queries with a bounded repair before provider access', async () => {
+  const fetchMock = vi.fn<typeof fetch>(async () => { throw new Error('Unexpected provider request') })
+  vi.stubGlobal('fetch', fetchMock)
+  try {
+    for (const argv of [[], ['SyntheticPrivateQuery', '--query', 'SyntheticOtherQuery']]) {
+      const result = await runInProcessJsonCli(createFoodCli(), ['food', 'search-labels', ...argv])
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (result.envelope.ok) throw new Error('Expected a validation failure')
+      assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
+      assert.equal(result.envelope.error.stage, 'validation')
+      assert.match(result.envelope.error.hint ?? '', /food search-labels "rolled oats"/u)
+      assert.match(result.envelope.error.hint ?? '', /food search-labels-batch/u)
+      assert.ok(Buffer.byteLength(JSON.stringify(result.envelope)) < 1_000)
+      assert.doesNotMatch(JSON.stringify(result.envelope), /SyntheticPrivateQuery|SyntheticOtherQuery/u)
+    }
+    for (const query of ['', ' ', 'x'.repeat(257)]) {
+      const result = await runInProcessJsonCli(createFoodCli(), ['food', 'search-labels', '--query', query])
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+    }
+    assert.equal(fetchMock.mock.calls.length, 0)
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+test('food search-labels accepts a trimmed query at the provider length boundary', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const normalizedQuery = 'x'.repeat(256)
+  const submittedQuery = ` ${normalizedQuery} `
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+    items: [],
+  }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    status: 200,
+  }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli<{
+      query: string
+      items: unknown[]
+    }>(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, null)
+    assert.equal(requireData(result.envelope).query, normalizedQuery)
+    assert.deepEqual(requireData(result.envelope).items, [])
+    assert.equal(fetchMock.mock.calls.length, 1)
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.searchParams.get('q'), normalizedQuery)
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
+test('food search-labels rejects 257 characters locally without echoing the query', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const sentinel = 'PrivateFoodQuerySentinel'
+  const submittedQuery = `${sentinel}${'x'.repeat(257 - sentinel.length)}`
+  const fetchMock = vi.fn<typeof fetch>(async () => {
+    throw new Error('fetch should not run for an invalid query')
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    assert.equal(submittedQuery.length, 257)
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
+      assert.deepEqual(
+        result.envelope.error.fieldErrors?.map(({ code, path }) => ({ code, path })),
+        [{ code: 'too_big', path: 'query' }],
+      )
+    }
+    assert.equal(fetchMock.mock.calls.length, 0)
+    const serialized = JSON.stringify(result.envelope)
+    assert.equal(serialized.includes(sentinel), false)
+    assert.equal(serialized.includes(submittedQuery), false)
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
 test('food search-labels --generic requests USDA generic food rows', async () => {
   const restoreHostedDataApiEnv = setHostedDataApiEnv()
   const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
@@ -481,6 +600,256 @@ test('food search-labels-batch rejects oversized multibyte payloads before fetch
     },
   )
   assert.equal(fetchMock.mock.calls.length, 0)
+})
+
+test('food label provider classification survives the final machine envelope without echoes', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const providerBody = 'private-provider-response-body'
+  const submittedQuery = 'private-submitted-food-query'
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+    JSON.stringify({ error: providerBody }),
+    { status: 429 },
+  ))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'food_labels_api_rate_limited')
+      assert.equal(result.envelope.error.retryable, true)
+      assert.equal(result.envelope.error.stage, 'response')
+      assert.match(result.envelope.error.message ?? '', /HTTP 429/u)
+      assert.equal(result.envelope.error.hint, undefined)
+    }
+    const serialized = JSON.stringify(result.envelope)
+    assert.doesNotMatch(
+      serialized,
+      /private-provider-response-body|private-submitted-food-query|signed-murph-data-api-credential/u,
+    )
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
+test('food label transport classification survives the final machine envelope without echoes', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const submittedQuery = 'private-transport-food-query'
+  const fetchMock = vi.fn<typeof fetch>(async () => {
+    throw Object.assign(new TypeError('private transport cause'), {
+      code: 'UND_ERR_CONNECT_TIMEOUT',
+    })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'food_labels_api_request_failed')
+      assert.equal(result.envelope.error.retryable, true)
+      assert.equal(result.envelope.error.stage, 'transport')
+      assert.match(
+        result.envelope.error.message ?? '',
+        /Transport classification: name=TypeError, code=UND_ERR_CONNECT_TIMEOUT/u,
+      )
+    }
+    assert.doesNotMatch(
+      JSON.stringify(result.envelope),
+      /private transport cause|private-transport-food-query|signed-murph-data-api-credential/u,
+    )
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
+test('food label response-body transport recovery survives the final machine envelope', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const submittedQuery = 'private-response-body-food-query'
+  const response = new Response('{}', { status: 200 })
+  vi.spyOn(response, 'json').mockRejectedValue(Object.assign(
+    new TypeError('private response body transport cause'),
+    { code: 'UND_ERR_SOCKET' },
+  ))
+  const fetchMock = vi.fn<typeof fetch>(async () => response)
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'food_labels_api_response_body_failed')
+      assert.equal(result.envelope.error.retryable, true)
+      assert.equal(result.envelope.error.stage, 'response')
+      assert.match(
+        result.envelope.error.message ?? '',
+        /HTTP 200.*Transport classification: name=TypeError, code=UND_ERR_SOCKET/u,
+      )
+      assert.equal(result.envelope.error.hint, undefined)
+    }
+    assert.doesNotMatch(
+      JSON.stringify(result.envelope),
+      /private response body transport cause|private-response-body-food-query/u,
+    )
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
+test('food label schema failures stay fieldless without echoes', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const providerBody = 'private-schema-provider-body'
+  const submittedQuery = 'private-schema-food-query'
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+    JSON.stringify({ items: providerBody }),
+    { status: 200 },
+  ))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'food_labels_api_invalid_response')
+      assert.equal(result.envelope.error.retryable, false)
+      assert.equal(result.envelope.error.stage, 'response')
+      assert.match(
+        result.envelope.error.message ?? '',
+        /expected label schema.*HTTP 200/u,
+      )
+      assert.equal(result.envelope.error.fieldErrors, undefined)
+    }
+    assert.doesNotMatch(
+      JSON.stringify(result.envelope),
+      /private-schema-provider-body|private-schema-food-query|signed-murph-data-api-credential/u,
+    )
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
+test('food save validation exposes a repair field without echoing the submitted value', async () => {
+  const privateTitle = 'Private Food Title'
+  const privateTag = 'PrivateTagSentinel'
+  const result = await runInProcessJsonCli(createFoodCli(), [
+    'food',
+    'save',
+    privateTitle,
+    '--tag',
+    privateTag,
+    '--vault',
+    './vault',
+  ])
+
+  assert.equal(result.exitCode, 1)
+  assert.equal(result.envelope.ok, false)
+  if (!result.envelope.ok) {
+    assert.equal(result.envelope.error.code, 'contract_invalid')
+    assert.equal(result.envelope.error.retryable, false)
+    assert.equal(result.envelope.error.stage, 'validation')
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+    assert.equal(result.envelope.error.hint, undefined)
+  }
+  assert.doesNotMatch(JSON.stringify(result.envelope), /Private Food Title|PrivateTagSentinel/u)
+})
+
+test('food import-json validation preserves nested repair fields without payload echoes', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-cli-food-import-repair-',
+  )
+  const payloadPath = path.join(parentRoot, 'private-food-payload.json')
+
+  try {
+    await writeFile(payloadPath, JSON.stringify({
+      title: 'Private Imported Food',
+      tags: ['PrivateImportedTag'],
+    }))
+
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'contract_invalid')
+      assert.equal(result.envelope.error.stage, 'validation')
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+      assert.equal(result.envelope.error.hint, undefined)
+    }
+    const serialized = JSON.stringify(result.envelope)
+    assert.doesNotMatch(serialized, /Private Imported Food|PrivateImportedTag/u)
+    assert.equal(serialized.includes(payloadPath), false)
+
+    const cli = createFoodCli()
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      'init',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initResult.exitCode, null)
+    const saved = requireData((await runInProcessJsonCli<FoodSaveResult>(cli, [
+      'food',
+      'save',
+      'Repairable Food',
+      '--slug',
+      'repairable-food',
+      '--vault',
+      vaultRoot,
+    ])).envelope)
+    const editResult = await runInProcessJsonCli(cli, [
+      'food',
+      'edit',
+      saved.foodId,
+      '--tag',
+      'PrivateEditedFoodTag',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(editResult.exitCode, 1)
+    assert.equal(editResult.envelope.ok, false)
+    if (!editResult.envelope.ok) {
+      assert.equal(editResult.envelope.error.code, 'contract_invalid')
+      assert.equal(editResult.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+    }
+    assert.doesNotMatch(JSON.stringify(editResult.envelope), /PrivateEditedFoodTag/u)
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true })
+  }
 })
 
 test('food save payload builder maps every raw food import-json payload field', () => {

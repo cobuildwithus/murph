@@ -1,4 +1,5 @@
 import * as z from "./zod-runtime.ts";
+import { clinicalFactSchema } from "./clinical-fact.ts";
 
 import { withContractMetadata } from "./schema-metadata.ts";
 import {
@@ -82,6 +83,7 @@ import {
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
   healthCommonsActivitySessionEvidenceSchema,
+  healthCommonsGoalTemplateKeySchema,
   healthCommonsKeySchema,
   healthCommonsStableIdSchema,
 } from "./health-commons.ts";
@@ -670,11 +672,50 @@ export const workoutExerciseSchema = z
     mode: workoutExerciseModeSchema.optional(),
     unitOverride: workoutLoadUnitSchema.optional(),
     note: boundedString(1, 4000).optional(),
-    memberRepsPerSet: integerSchema(1, 999).optional(),
+    // Omitted means unestablished; null records an explicit member withdrawal.
+    memberRepsPerSet: integerSchema(1, 999).nullable().optional(),
+    targetWeightPerSet: numberSchema(0.01, 9999).multipleOf(0.01).optional(),
+    targetWeightUnit: workoutLoadUnitSchema.optional(),
     setPlanIsFinite: z.boolean().optional(),
     sets: z.array(workoutSetSchema).min(1).max(150),
   })
-  .strict();
+  .strict()
+  .superRefine((exercise, context) => {
+    if (
+      (exercise.targetWeightPerSet === undefined)
+      !== (exercise.targetWeightUnit === undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A planned per-set weight requires its unit.",
+        path: exercise.targetWeightPerSet === undefined
+          ? ["targetWeightPerSet"]
+          : ["targetWeightUnit"],
+      });
+    }
+    if (
+      exercise.targetWeightPerSet !== undefined
+      && exercise.mode !== undefined
+      && exercise.mode !== "weight_reps"
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A planned per-set weight requires weight/reps exercise mode.",
+        path: ["mode"],
+      });
+    }
+    if (
+      exercise.targetWeightUnit !== undefined
+      && exercise.unitOverride !== undefined
+      && exercise.targetWeightUnit !== exercise.unitOverride
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A planned per-set weight must use the exercise weight unit.",
+        path: ["targetWeightUnit"],
+      });
+    }
+  });
 
 export const workoutSessionMetricsSchema = z
   .object({
@@ -1064,6 +1105,29 @@ export const bloodTestImportPayloadSchema = withContractMetadata(
   "Murph Blood Test Import Payload",
 );
 
+export const immunizationImportPayloadSchema = withContractMetadata(
+  z
+    .object({
+      ...writableEventCommonPayloadShape,
+      evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
+      vaccineName: boundedString(1, 160),
+      manufacturer: optionalWritableTextSchema(160),
+      lotNumber: optionalWritableTextSchema(120),
+      route: optionalWritableTextSchema(80),
+      site: optionalWritableTextSchema(80),
+      series: optionalWritableTextSchema(120),
+      targetDiseases: z
+        .union([
+          z.array(boundedString(1, 120)).max(25),
+          z.null(),
+        ])
+        .optional(),
+    })
+    .strict(),
+  "@murphai/contracts/immunization-import-payload.schema.json",
+  "Murph Immunization Import Payload",
+);
+
 const workoutImportPayloadBaseShape = {
   kind: z.literal("activity_session").optional(),
   title: boundedString(1, 240).optional(),
@@ -1217,8 +1281,16 @@ const symptomEventFieldsShape = {
 
 const noteEventFieldsShape = {
   ...experimentLinkShape,
+  clinicalFact: clinicalFactSchema.optional(),
   note: boundedString(1, 4000),
   noteType: boundedString(1, 120).optional(),
+  plan: z.object({
+    endsAt: isoDateTimeString(),
+    status: z.enum(["planned", "tentative", "canceled"]),
+    lastVerifiedAt: isoDateTimeString(),
+    accountId: boundedString(1, 200).optional(),
+    category: patternedString(SLUG_PATTERN),
+  }).strict().optional(),
   authoredAt: isoDateTimeString().optional(),
   signedAt: isoDateTimeString().optional(),
   author: boundedString(1, 160).optional(),
@@ -1321,11 +1393,22 @@ const bodyMeasurementEventFieldsShape = {
   media: z.array(storedMediaSchema).max(10).optional(),
 } satisfies z.ZodRawShape;
 
+export const sleepSessionTypeSchema = z.enum(["main_sleep", "short_sleep", "nap", "unknown"]);
+export const sleepSessionStateSchema = z.enum(["tentative", "confirmed"]);
+
+/** Short or tentative sessions are partial sleep evidence, not a confirmed complete night. */
+export function isShortOrTentativeSleepSession(
+  session: Pick<SleepSessionEventRecord, "sleepType" | "sleepState">,
+): boolean {
+  return session.sleepType === "short_sleep" || session.sleepState === "tentative";
+}
+
 const sleepSessionEventFieldsShape = {
   startAt: isoDateTimeString(),
   endAt: isoDateTimeString(),
   durationMinutes: integerSchema(1),
-  sleepType: z.enum(["main_sleep", "nap"]).optional(),
+  sleepType: sleepSessionTypeSchema.optional(),
+  sleepState: sleepSessionStateSchema.optional(),
 } satisfies z.ZodRawShape;
 
 const interventionSessionEventFieldsShape = {
@@ -1477,6 +1560,8 @@ export const eventImportUpsertDecisionSchema = z
     action: z.literal("upsert"),
     payload: eventImportDecisionPayloadSchema,
     expectedLatest: expectedLatestEventSchema.optional(),
+    sourceParent: versionedExternalRefSchema.optional(),
+    invalidateFacetPrefixes: z.array(patternedString(SLUG_PATTERN)).min(1).max(8).optional(),
   })
   .strict();
 
@@ -1486,6 +1571,7 @@ export const eventImportRetractionDecisionSchema = z
     externalRef: versionedExternalRefSchema,
     reason: boundedString(1, 240),
     evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
+    retractFacetPrefixes: z.array(patternedString(SLUG_PATTERN)).min(1).max(8).optional(),
   })
   .strict();
 
@@ -1715,8 +1801,8 @@ export const auditRecordSchema = withContractMetadata(
   "Murph Audit Record",
 );
 
-const INBOX_CAPTURE_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
-const INBOX_ATTACHMENT_ID_PATTERN = "^att_[A-Za-z0-9][A-Za-z0-9_-]*_[0-9]{2}$";
+export const INBOX_CAPTURE_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
+export const INBOX_ATTACHMENT_ID_PATTERN = "^att_[A-Za-z0-9][A-Za-z0-9_-]*_[0-9]{2}$";
 const INBOX_CAPTURE_ATTACHMENT_KIND_VALUES = ["image", "audio", "video", "document", "other"] as const;
 const INBOX_RETENTION_ATTACHMENT_KIND_VALUES = ["image", "audio", "video"] as const;
 const HEX_SHA256_PATTERN = "^[a-f0-9]{64}$";
@@ -1819,28 +1905,47 @@ export const inboxCaptureRecordSchema = withContractMetadata(
 );
 
 export const inboxAttachmentRetentionRecordSchema = withContractMetadata(
-  z
-    .object({
-      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxAttachmentRetention),
-      captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
-      attachmentId: patternedString(INBOX_ATTACHMENT_ID_PATTERN),
-      ordinal: integerSchema(1),
-      kind: z.enum(INBOX_RETENTION_ATTACHMENT_KIND_VALUES),
-      mime: boundedString(1, 255).nullable().optional(),
-      fileName: boundedString(1, 255).nullable().optional(),
-      byteSize: integerSchema(0).nullable().optional(),
-      storedPath: patternedString(RELATIVE_PATH_PATTERN),
-      sha256: patternedString(HEX_SHA256_PATTERN),
-      captureOccurredAt: isoDateTimeString(),
-      recordedAt: isoDateTimeString(),
-      purgedAt: isoDateTimeString(),
-      reason: z.literal("inbox_media_retention"),
-    })
-    .strict(),
+  z.discriminatedUnion("schemaVersion", [
+    z
+      .object({
+        schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxAttachmentRetention),
+        captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
+        attachmentId: patternedString(INBOX_ATTACHMENT_ID_PATTERN),
+        ordinal: integerSchema(1),
+        kind: z.enum(INBOX_RETENTION_ATTACHMENT_KIND_VALUES),
+        mime: boundedString(1, 255).nullable().optional(),
+        fileName: boundedString(1, 255).nullable().optional(),
+        byteSize: integerSchema(0).nullable().optional(),
+        storedPath: patternedString(RELATIVE_PATH_PATTERN),
+        sha256: patternedString(HEX_SHA256_PATTERN),
+        captureOccurredAt: isoDateTimeString(),
+        recordedAt: isoDateTimeString(),
+        purgedAt: isoDateTimeString(),
+        reason: z.literal("inbox_media_retention"),
+      })
+      .strict(),
+    z
+      .object({
+        schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxDocumentRetention),
+        captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
+        attachmentId: patternedString(INBOX_ATTACHMENT_ID_PATTERN),
+        ordinal: integerSchema(1),
+        kind: z.literal("document"),
+        mime: boundedString(1, 255).nullable().optional(),
+        fileName: boundedString(1, 255).nullable().optional(),
+        byteSize: integerSchema(0),
+        storedPath: patternedString(RELATIVE_PATH_PATTERN),
+        sha256: patternedString(HEX_SHA256_PATTERN),
+        captureOccurredAt: isoDateTimeString(),
+        recordedAt: isoDateTimeString(),
+        purgedAt: isoDateTimeString(),
+        reason: z.literal("inbox_document_copy_retention"),
+      })
+      .strict(),
+  ]),
   "@murphai/contracts/inbox-attachment-retention-record.schema.json",
   "Murph Inbox Attachment Retention Record",
 );
-
 
 export const coreFrontmatterSchema = withContractMetadata(
   z
@@ -1882,6 +1987,14 @@ export const commonsProtocolRefSchema = z
   .strict();
 
 const sha256DigestSchema = patternedString(SHA256_DIGEST_PATTERN);
+
+export const commonsGoalRefSchema = z
+  .object({
+    key: healthCommonsGoalTemplateKeySchema,
+    pageRevisionId: sha256DigestSchema,
+    workflowSpecRevisionId: sha256DigestSchema,
+  })
+  .strict();
 
 export const protocolRefSchema = z
   .object({
@@ -3408,6 +3521,7 @@ export const goalFrontmatterSchema = withContractMetadata(
       parentGoalId: z.union([idSchema(ID_PREFIXES.goal), z.null()]).optional(),
       relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
       relatedExperimentIds: uniqueArray(idSchema(ID_PREFIXES.experiment), { uniqueItems: true }).optional(),
+      commonsGoalRef: commonsGoalRefSchema.optional(),
       links: uniqueArray(goalRelationLinkSchema, { uniqueItems: true }).optional(),
       domains: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
       metricTargets: uniqueArray(goalMetricTargetSchema, { maxItems: 20, uniqueItems: true }).optional(),
@@ -3616,6 +3730,7 @@ export type WorkoutTemplate = z.infer<typeof workoutTemplateSchema>;
 export type BloodTestReferenceRange = z.infer<typeof bloodTestReferenceRangeSchema>;
 export type BloodTestResultRecord = z.infer<typeof bloodTestResultSchema>;
 export type BloodTestImportPayload = z.infer<typeof bloodTestImportPayloadSchema>;
+export type ImmunizationImportPayload = z.infer<typeof immunizationImportPayloadSchema>;
 export type VaultMetadata = z.infer<typeof vaultMetadataSchema>;
 export type DocumentEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "document" }>;
 export type MealEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "meal" }>;
@@ -3660,6 +3775,7 @@ export type InboxAttachmentRetentionRecord = z.infer<typeof inboxAttachmentReten
 export type CoreFrontmatter = z.infer<typeof coreFrontmatterSchema>;
 export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
 export type CommonsProtocolRef = z.infer<typeof commonsProtocolRefSchema>;
+export type CommonsGoalRef = z.infer<typeof commonsGoalRefSchema>;
 export type ProtocolRef = z.infer<typeof protocolRefSchema>;
 export type ProtocolActivitySessionEvidence = z.infer<
   typeof protocolActivitySessionEvidenceSchema

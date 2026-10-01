@@ -219,7 +219,24 @@ describe('assistant cron output history', () => {
     expect(forwarded.instructions).not.toContain('Previous revision output.')
     expect(forwarded.instructions).not.toContain('Another automation output.')
     expect(forwarded.instructions).not.toContain('Prior session cadence question.')
+    expect(forwarded.instructions).not.toContain(
+      'Confirmed-output reminder cadence policy',
+    )
     expect(input.instructions).toBe('Send a different Stoic quote every day.')
+
+    const reminderForwarded = await prepareAssistantCronNotificationInput(
+      {
+        ...input,
+        recurringReminderConversation: true,
+      },
+      { sessionId: 'session-current' },
+    )
+    expect(reminderForwarded.instructions).toContain(
+      'Confirmed-output reminder cadence policy',
+    )
+    expect(reminderForwarded.instructions).toContain(
+      'keep, change, or pause these interruptions',
+    )
   })
 
   it('uses a normal turn after retention retires the prior confirmed output', async () => {

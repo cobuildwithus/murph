@@ -40,7 +40,7 @@ export const privateMediaRoutes: readonly DeclarativeRoute<{
       const extension = hostedPrivateMediaExtensionForContentType(
         media.contentType,
       );
-      if (params.extension && params.extension !== extension) {
+      if (params.extension !== extension) {
         return privateMediaNotFound();
       }
 
@@ -66,13 +66,10 @@ export const privateMediaRoutes: readonly DeclarativeRoute<{
       if (!matched) {
         return null;
       }
-      const params: Record<string, string> = {
+      return {
         capability: matched.capability,
+        extension: matched.extension,
       };
-      if (matched.extension) {
-        params.extension = matched.extension;
-      }
-      return params;
     },
     methods: ["GET", "HEAD"],
     name: "private-media-delivery",

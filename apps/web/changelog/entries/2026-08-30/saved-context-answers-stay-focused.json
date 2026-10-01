@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "saved-context-answers-stay-focused",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Saved-context answers stay focused",
+    "summary": "Murph keeps private replies focused by bringing in a small set of relevant saved facts and naming the exact target in suitability answers.",
+    "details": "Your latest message and the current saved record still win. Background cleanup reads accepted voice-note transcripts like ordinary conversation, leaves newer corrections untouched, and retires a saved fact when your recent conversation makes clear it no longer applies; full detail remains available on demand.",
+    "relevanceTags": ["assistant", "context", "reliability"],
+    "sourcePullRequests": [2578, 2621]
+  }
+}

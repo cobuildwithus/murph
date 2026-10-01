@@ -1,6 +1,6 @@
 # Data Model Seams
 
-Last verified: 2026-04-20
+Last verified: 2026-09-10
 
 ## Implemented in this patch
 
@@ -46,8 +46,7 @@ This patch aliases the core type to the contract type instead of keeping a secon
 
 **Why this is simpler:** the write model no longer has two nominal owners for the same persisted record shape.
 
-**Main refactor risk:** `packages/core/src/assessment/storage.ts` still partially reconstructs the record around `assessmentResponseSchema` instead of letting the contract parser own the full persisted object.
-If that cleanup is attempted later, do it after confirming there is no persisted data depending on the looser `relatedIds` handling there.
+New assessment writes now validate the complete normalized record through `assessmentResponseSchema`, including related IDs. Historical ledger reads use a schema-derived read profile that retains the previously accepted arbitrary string links and ignores unknown fields; that profile never authorizes new writes or rewrites append-only evidence. Both paths retain the same core-owned validation error. Tests cover strict writes, raw/manifest/audit roundtrips, and historical read compatibility.
 
 
 ### 4. Keep assistant CLI contract ownership in operator-config
@@ -299,7 +298,7 @@ The seam stays healthy only if the lookup result remains nested and privacy-mini
 
 ### 17. Keep hosted execution status centered on mailbox and workspace truth
 
-**Seam:** `apps/web/src/lib/hosted-mailbox/store.ts`, `apps/web/src/lib/hosted-workspace/store.ts`, `packages/hosted-execution/src/runtime-control.ts`, `apps/cloudflare/src/user-runner.ts`
+**Seam:** `apps/web/src/lib/hosted-mailbox/store.ts`, `apps/web/src/lib/hosted-workspace/store.ts`, `packages/hosted-execution/src/runtime-control.ts`, `apps/cloudflare/src/runtime-processing.ts`
 
 Hosted execution now translates across two web-owned primitives: append-only
 mailbox items for producer input and versioned hosted workspace checkpoints for
@@ -496,9 +495,9 @@ Canonical recurring vault automations follow the vault timezone when their sched
 **Seam:** `packages/contracts/src/preferences.ts`, `packages/core/src/preferences.ts`, `packages/vault-usecases/src/usecases/workout-measurement.ts`
 
 This seam stays intentionally narrow after the profile hard cut.
-Contracts own the canonical `bank/preferences.json` document contract, core owns reading and updating that singleton, and workout-oriented usecases adapt those machine-facing defaults into unit-selection behavior.
+Contracts own the canonical `bank/preferences.json` document contract, core owns reading and updating that singleton, and workout-oriented usecases adapt those machine-facing defaults into capture-duration and unit-selection behavior. The capture default applies only to ordinary `workout add` when current input omits duration; explicit or ambiguous current input and structured imports retain their own resolution rules. As a bounded compatibility bridge, that write path can promote exactly one explicit, unambiguous legacy workout-default record from the Preferences section of memory when typed state is still unset; conflicts or malformed candidates are ignored.
 
-**Why keep it:** the write boundary stays explicit and typed, while memory and wiki remain freeform human-facing surfaces instead of becoming machine-facing settings stores.
+**Why keep it:** the write boundary and durable owner stay explicit and typed. Memory and wiki remain freeform human-facing surfaces; the legacy read is migration-only and immediately promotes a recognized value into the typed owner.
 
 **Main failure mode if changed poorly:** widening preferences into a narrative profile replacement would blur the boundary between operator-readable context and programmatic defaults and re-create the same mixed-responsibility surface the hard cut removed.
 
@@ -514,3 +513,10 @@ Web composes event ids or source-specific reason mapping around those builders, 
 The event model is not being restated independently in web, Cloudflare, and assistant-runtime.
 
 **Main failure mode if changed poorly:** moving event construction or parsing back into web or assistant-runtime would recreate the exact parallel-representation drift that other review findings are trying to remove.
+
+
+### 25. Keep goal target interpretation with the canonical schema
+
+`packages/query/src/metrics/goals.ts` uses the contracts-owned `goalMetricTargetSchema` for complete target, evaluation, and selection-policy parsing. The adapter only supplies omitted legacy identity/kind fields and normalizes metric aliases; invalid targets are omitted without silently replacing their evaluation or policy. SQLite target extraction and browser progress use that same adapter. Health metrics retains its dependency-free computation interface.
+
+The existing SQLite projection version and browser replica generation advance when interpretation changes so unchanged canonical goals can rebuild stale results. No canonical schema migration or new persistence owner is required. Focused proof covers policy/default parity, invalid bounds and policies, legacy adaptation, SQLite/browser target parity, and rebuilding carried SQLite targets without changing the goal document.

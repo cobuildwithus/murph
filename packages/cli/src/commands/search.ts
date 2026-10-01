@@ -13,6 +13,7 @@ import {
   normalizeRepeatableEnumFlagOption,
   normalizeRepeatableFlagOption,
 } from '@murphai/vault-usecases'
+import { assertOrderedDateRange } from './command-factory-primitives.js'
 
 const recordTypeValues = ALL_QUERY_ENTITY_FAMILIES
 const recordTypeDescription =
@@ -238,6 +239,7 @@ export function registerSearchCommands(cli: Cli.Cli) {
       'Use `search query <query>` for direct fuzzy recall, or `search query --text "<query>"` for explicit machine-oriented calls. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology.',
     output: searchResultSchema,
     async run({ args, options }) {
+      assertOrderedDateRange(options.from, options.to)
       const query = await loadQueryRuntime()
       const text = normalizeSearchQueryInput({
         positionalQuery: args.query,
@@ -393,6 +395,7 @@ export function registerSearchCommands(cli: Cli.Cli) {
         'Use `timeline` when you need chronology across journals, events, assessments, and sample summaries. Drill into `show` or family-specific reads after you find the relevant entries.',
       output: timelineResultSchema,
       async run({ options }) {
+        assertOrderedDateRange(options.from, options.to)
         const kinds = normalizeRepeatableFlagOption(options.kind, 'kind') ?? []
         const streams = normalizeRepeatableFlagOption(options.stream, 'stream') ?? []
         const entryTypes =

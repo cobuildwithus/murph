@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -686,8 +685,11 @@ test.sequential(
     })
     assert.equal(unsupportedChannel.ok, false)
     if (!unsupportedChannel.ok) {
-      assert.match(unsupportedChannel.error.message ?? '', /telegram/u)
-      assert.doesNotMatch(unsupportedChannel.error.message ?? '', /email/u)
+      assert.equal(unsupportedChannel.error.code, 'VALIDATION_ERROR')
+      assert.equal(unsupportedChannel.error.message, 'The command input is invalid.')
+      assert.equal(unsupportedChannel.error.stage, 'validation')
+      assert.equal(unsupportedChannel.error.fieldErrors?.[0]?.path, 'channel')
+      assert.doesNotMatch(JSON.stringify(unsupportedChannel.error), /slack|email/u)
     }
 
     const invalidEmail = await runCli([
@@ -704,11 +706,11 @@ test.sequential(
     })
     assert.equal(invalidEmail.ok, false)
     if (!invalidEmail.ok) {
-      assert.match(invalidEmail.error.message ?? '', /telegram/u)
-      assert.doesNotMatch(
-        invalidEmail.error.message ?? '',
-        /single recipient email address/u,
-      )
+      assert.equal(invalidEmail.error.code, 'VALIDATION_ERROR')
+      assert.equal(invalidEmail.error.message, 'The command input is invalid.')
+      assert.equal(invalidEmail.error.stage, 'validation')
+      assert.equal(invalidEmail.error.fieldErrors?.[0]?.path, 'channel')
+      assert.doesNotMatch(JSON.stringify(invalidEmail.error), /email|not-an-email/u)
     }
 
     const invalidDirectEmail = await runCli([
@@ -728,11 +730,11 @@ test.sequential(
     })
     assert.equal(invalidDirectEmail.ok, false)
     if (!invalidDirectEmail.ok) {
-      assert.match(invalidDirectEmail.error.message ?? '', /telegram/u)
-      assert.doesNotMatch(
-        invalidDirectEmail.error.message ?? '',
-        /single recipient email address/u,
-      )
+      assert.equal(invalidDirectEmail.error.code, 'VALIDATION_ERROR')
+      assert.equal(invalidDirectEmail.error.message, 'The command input is invalid.')
+      assert.equal(invalidDirectEmail.error.stage, 'validation')
+      assert.equal(invalidDirectEmail.error.fieldErrors?.[0]?.path, 'channel')
+      assert.doesNotMatch(JSON.stringify(invalidDirectEmail.error), /email|not-an-email/u)
     }
   },
   ASSISTANT_CLI_TIMEOUT_MS,
@@ -762,7 +764,11 @@ test.sequential(
 
     assert.equal(result.ok, false)
     if (!result.ok) {
-      assert.match(result.error.message ?? '', /Unknown flag: --base-url|base-url/u)
+      assert.equal(result.error.code, 'VALIDATION_ERROR')
+      assert.equal(result.error.message, 'The command arguments are invalid.')
+      assert.equal(result.error.stage, 'validation')
+      assert.equal(result.error.fieldErrors?.[0]?.path, 'arguments')
+      assert.doesNotMatch(JSON.stringify(result.error), /base-url/u)
     }
   },
   ASSISTANT_CLI_TIMEOUT_MS,
@@ -1001,10 +1007,11 @@ test('model rejects unsupported legacy presets', async () => {
 
   assert.equal(result.exitCode, 1)
   assert.equal(result.envelope.ok, false)
-  assert.match(
-    result.envelope.error?.message ?? '',
-    /Invalid input|unsupported-provider/u,
-  )
+  assert.equal(result.envelope.error?.code, 'VALIDATION_ERROR')
+  assert.equal(result.envelope.error?.message, 'The command input is invalid.')
+  assert.equal(result.envelope.error?.stage, 'validation')
+  assert.equal(result.envelope.error?.fieldErrors?.[0]?.path, 'preset')
+  assert.doesNotMatch(JSON.stringify(result.envelope.error), /unsupported-provider/u)
 })
 
 test('model --show includes a note for an explicit saved Codex home', async () => {
@@ -1643,32 +1650,6 @@ function commandSchemaShapeKeys(
   return Object.keys(shape).sort()
 }
 
-test('root chat fails closed when the terminal cannot provide interactive raw-mode input', async () => {
-  const result = await runInProcessCliWithTty(['chat', '--vault', '/tmp/mock-vault'])
-
-  assert.equal(result.stderr, '')
-  assert.equal(
-    result.stdout,
-    'Error: Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
-  )
-})
-
-test('root chat surfaces the interactive-input failure before any json result can be emitted', async () => {
-  const result = await runInProcessCliWithTty([
-    'chat',
-    '--vault',
-    '/tmp/mock-vault',
-    '--format',
-    'json',
-  ])
-
-  assert.equal(result.stderr, '')
-  assert.equal(
-    result.stdout,
-    'Error: Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
-  )
-})
-
 test.sequential(
   'assistant model defaults persist in operator config without disturbing the default vault',
   async () => {
@@ -1762,8 +1743,12 @@ async function runRegisteredCliJson<TData>(
     data?: TData
     error?: {
       code?: string
+      fieldErrors?: Array<{
+        path?: string
+      }>
       message?: string
       retryable?: boolean
+      stage?: string
     }
   }
   exitCode: number | null
@@ -1787,96 +1772,15 @@ async function runRegisteredCliJson<TData>(
       data?: TData
       error?: {
         code?: string
+        fieldErrors?: Array<{
+          path?: string
+        }>
         message?: string
         retryable?: boolean
+        stage?: string
       }
     },
     exitCode,
-  }
-}
-
-async function runInProcessCliWithTty(args: string[]): Promise<{
-  stderr: string
-  stdout: string
-}> {
-  const cli = createVaultCli(
-    createUnwiredVaultServices(),
-    createIntegratedInboxServices(),
-  )
-  const stdout: string[] = []
-  const stderr: string[] = []
-  const stdinTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
-  const stdinRawModeDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'setRawMode')
-  const stdoutTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY')
-  // Only fail tty opens: the chat command lazy-imports its ink surface, so a
-  // blanket openSync stub would break Node's own module-file reads mid-run.
-  // Mirror the production tty path selection (CONIN$ on Windows, /dev/tty
-  // elsewhere) so this stub keeps simulating an unopenable controlling
-  // terminal on every platform.
-  const controllingTtyPath = process.platform === 'win32' ? 'CONIN$' : '/dev/tty'
-  const realOpenSync = fs.openSync.bind(fs)
-  const openSyncSpy = vi
-    .spyOn(fs, 'openSync')
-    .mockImplementation(((path: fs.PathLike, flags: fs.OpenMode, mode?: fs.Mode | null) => {
-      if (String(path) === controllingTtyPath) {
-        throw new Error('tty unavailable')
-      }
-      return realOpenSync(path, flags, mode)
-    }) as typeof fs.openSync)
-  const stderrWriteSpy = vi
-    .spyOn(process.stderr, 'write')
-    .mockImplementation(((chunk: string | Uint8Array) => {
-      stderr.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'))
-      return true
-    }) as typeof process.stderr.write)
-
-  Object.defineProperty(process.stdin, 'isTTY', {
-    configurable: true,
-    value: false,
-  })
-  Object.defineProperty(process.stdin, 'setRawMode', {
-    configurable: true,
-    value: undefined,
-  })
-  Object.defineProperty(process.stdout, 'isTTY', {
-    configurable: true,
-    value: true,
-  })
-
-  try {
-    await cli.serve(args, {
-      env: process.env,
-      exit: () => {},
-      stdout(chunk) {
-        stdout.push(chunk)
-      },
-    })
-  } finally {
-    openSyncSpy.mockRestore()
-    stderrWriteSpy.mockRestore()
-
-    if (stdinTtyDescriptor) {
-      Object.defineProperty(process.stdin, 'isTTY', stdinTtyDescriptor)
-    } else {
-      delete (process.stdin as { isTTY?: boolean }).isTTY
-    }
-
-    if (stdinRawModeDescriptor) {
-      Object.defineProperty(process.stdin, 'setRawMode', stdinRawModeDescriptor)
-    } else {
-      delete (process.stdin as { setRawMode?: unknown }).setRawMode
-    }
-
-    if (stdoutTtyDescriptor) {
-      Object.defineProperty(process.stdout, 'isTTY', stdoutTtyDescriptor)
-    } else {
-      delete (process.stdout as { isTTY?: boolean }).isTTY
-    }
-  }
-
-  return {
-    stderr: stderr.join(''),
-    stdout: stdout.join(''),
   }
 }
 

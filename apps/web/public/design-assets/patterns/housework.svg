@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">
+<!-- Murph Quiver-style housework illustration. -->
+  <style>
+    .outline { fill: none; stroke: #285747; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .paper { fill: #f1e8dc; }
+    .sand { fill: #ddd0bf; }
+    .sage { fill: #6b9485; }
+    .sage-dark { fill: #285747; }
+    .sienna { fill: #c3714b; }
+  </style>
+  <path class="paper" d="M61 77h59c5 0 9 4 9 9v39H52V86c0-5 4-9 9-9Z"/>
+  <path class="sand" d="M52 112h77v13H52z"/>
+  <path class="outline" d="M61 77h59c5 0 9 4 9 9v39H52V86c0-5 4-9 9-9Z"/>
+  <path class="outline" d="M72 77c1-11 8-18 18-18s17 7 18 18"/>
+  <path class="sage" d="m22 29 7-4 48 82-8 5z"/>
+  <path class="outline" d="m22 29 7-4 48 82-8 5z"/>
+  <path class="sienna" d="m61 105 20-12 13 24-25 15-15-12z"/>
+  <path class="sand" d="m58 122 27-16 9 11-25 15z"/>
+  <path class="outline" d="m61 105 20-12 13 24-25 15-15-12z"/>
+  <path class="outline" d="m58 122 27-16"/>
+  <path class="paper" d="M100 43h15l4 34H96z"/>
+  <path class="sage" d="M103 54h13l3 23H99z"/>
+  <path class="outline" d="M100 43h15l4 34H96z"/>
+  <path class="outline" d="M103 43v-8h15"/>
+  <path class="outline" d="M118 35h8"/>
+  <path class="sage-dark" d="M109 61a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/>
+</svg>

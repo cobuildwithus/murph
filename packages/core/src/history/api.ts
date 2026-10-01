@@ -27,18 +27,18 @@ import {
 } from "../event-links.ts";
 import { VaultError } from "../errors.ts";
 import {
-  readJsonlRecords,
+  listEventLedgerShardPaths,
+  listEventLedgerShardPathsInterruptible,
+  readEventLedgerShardRecords,
+  readEventLedgerShardText,
+  visitEventLedgerShardRecordsInterruptible,
+} from "../event-ledger-storage.ts";
+import {
   toMonthlyShardRelativePath,
-  visitJsonlRecordsInterruptible,
 } from "../jsonl.ts";
 import { generateRecordId } from "../ids.ts";
 import { runCanonicalWrite } from "../operations/index.ts";
 import { normalizeTimeZone, toDateOnly } from "../time.ts";
-import {
-  readUtf8File,
-  walkVaultFiles,
-  walkVaultFilesInterruptible,
-} from "../fs.ts";
 import { loadVault } from "../vault.ts";
 import { buildMeasurementEventDraft } from "../domains/events.ts";
 import { buildTypedEventRecord } from "../domains/events/drafts.ts";
@@ -871,13 +871,11 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
 }
 
 async function loadStoredHistoryEntries(vaultRoot: string): Promise<StoredHistoryEventEntry[]> {
-  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const shardPaths = await listEventLedgerShardPaths(vaultRoot);
   const entries: StoredHistoryEventEntry[] = [];
 
   for (const relativePath of shardPaths) {
-    const shardRecords = await readJsonlRecords({ vaultRoot, relativePath });
+    const shardRecords = await readEventLedgerShardRecords({ vaultRoot, relativePath });
 
     for (const shardRecord of shardRecords) {
       const parsed = parseStoredHistoryEvent(shardRecord);
@@ -896,12 +894,12 @@ async function loadStoredHistoryEntries(vaultRoot: string): Promise<StoredHistor
 }
 
 async function historyEventIdExists(vaultRoot: string, eventId: string): Promise<boolean> {
-  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const shardPaths = await listEventLedgerShardPaths(vaultRoot);
 
   for (const relativePath of shardPaths) {
-    const lines = (await readUtf8File(vaultRoot, relativePath)).split("\n").filter(Boolean);
+    const lines = (await readEventLedgerShardText({ vaultRoot, relativePath }))
+      .split("\n")
+      .filter(Boolean);
 
     for (const line of lines) {
       let parsed: unknown;
@@ -1195,11 +1193,9 @@ async function assertBundleEventIdsAreAvailable(
     requestedIds.add(record.id);
   }
 
-  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const shardPaths = await listEventLedgerShardPaths(vaultRoot);
   for (const relativePath of shardPaths) {
-    const storedRecords = await readJsonlRecords({ vaultRoot, relativePath });
+    const storedRecords = await readEventLedgerShardRecords({ vaultRoot, relativePath });
     for (const storedRecord of storedRecords) {
       if (
         isPlainRecord(storedRecord)
@@ -1354,36 +1350,33 @@ export async function readCanonicalEventAvailabilityInterruptible(
 ): Promise<CanonicalEventAvailabilitySummary> {
   const shouldContinue = () =>
     !input.signal?.aborted && input.shouldContinue?.() !== false;
-  const walked = await walkVaultFilesInterruptible(
-    input.vaultRoot,
-    VAULT_LAYOUT.eventLedgerDirectory,
-    {
-      extension: ".jsonl",
-      shouldContinue,
-    },
-  );
+  const walked = await listEventLedgerShardPathsInterruptible({
+    shouldContinue,
+    signal: input.signal,
+    vaultRoot: input.vaultRoot,
+  });
   if (walked.interrupted) {
     return interruptedCanonicalEventAvailability();
   }
 
   const latestByEventId = new Map<string, StoredAvailabilityEventEntry>();
   for (const relativePath of walked.relativePaths) {
-    const read = await visitJsonlRecordsInterruptible({
+    const read = await visitEventLedgerShardRecordsInterruptible({
       relativePath,
       shouldContinue,
       signal: input.signal,
       vaultRoot: input.vaultRoot,
       visit: (shardRecord) => {
-        let spineRecord: StoredAvailabilitySpineRecord | null;
+        let candidate: StoredAvailabilityEventEntry | null;
         try {
-          spineRecord = parseStoredAvailabilitySpineRecord(shardRecord);
+          candidate = parseStoredAvailabilityEventEntry(shardRecord, relativePath);
         } catch (error) {
           if (storedEventMayContributeToCanonicalAvailability(shardRecord)) {
             throw error;
           }
           return;
         }
-        if (!spineRecord) {
+        if (!candidate) {
           if (storedEventMayContributeToCanonicalAvailability(shardRecord)) {
             throw new VaultError(
               "EVENT_CONTRACT_INVALID",
@@ -1393,14 +1386,9 @@ export async function readCanonicalEventAvailabilityInterruptible(
           return;
         }
 
-        const candidate = {
-          relativePath,
-          record: spineRecord,
-          value: shardRecord,
-        };
-        const current = latestByEventId.get(spineRecord.id);
+        const current = latestByEventId.get(candidate.record.id);
         if (!current || compareEventSpineEntries(current, candidate) < 0) {
-          latestByEventId.set(spineRecord.id, candidate);
+          latestByEventId.set(candidate.record.id, candidate);
         }
       },
     });
@@ -1418,7 +1406,7 @@ export async function readCanonicalEventAvailabilityInterruptible(
     if (!shouldContinue()) {
       return interruptedCanonicalEventAvailability();
     }
-    if (isDeletedEventSpineRecord(candidate.record)) {
+    if (candidate.value === null || isDeletedEventSpineRecord(candidate.record)) {
       continue;
     }
 
@@ -1434,8 +1422,6 @@ export async function readCanonicalEventAvailabilityInterruptible(
       const parsed = safeParseContract(eventRecordSchema, normalizedStoredRecord);
       if (parsed.success) {
         record = parsed.data;
-        providerBodyObservation = record.kind === "observation"
-          && record.externalRef !== undefined;
       } else {
         const legacyBodyObservation =
           parseStoredProviderBodyAvailabilityEvent(normalizedStoredRecord);
@@ -1570,9 +1556,10 @@ function isLaterCanonicalAvailabilityEvent(
     );
 }
 
-function parseStoredAvailabilitySpineRecord(
+function parseStoredAvailabilityEventEntry(
   value: unknown,
-): StoredAvailabilitySpineRecord | null {
+  relativePath: string,
+): StoredAvailabilityEventEntry | null {
   if (
     !isPlainRecord(value)
     || typeof value.id !== "string"
@@ -1583,14 +1570,23 @@ function parseStoredAvailabilitySpineRecord(
   }
 
   return {
-    id: value.id,
-    occurredAt: value.occurredAt,
-    recordedAt: value.recordedAt,
-    lifecycle: parseStoredEventSpineLifecycle(
-      value.lifecycle,
-      "EVENT_CONTRACT_INVALID",
-      "Stored availability event record has an invalid lifecycle.",
-    ),
+    relativePath,
+    record: {
+      id: value.id,
+      occurredAt: value.occurredAt,
+      recordedAt: value.recordedAt,
+      lifecycle: parseStoredEventSpineLifecycle(
+        value.lifecycle,
+        "EVENT_CONTRACT_INVALID",
+        "Stored availability event record has an invalid lifecycle.",
+      ),
+    },
+    // Every revision still participates in ordering. Unrelated observations
+    // need only their spine, so large payloads can be collected during scanning.
+    // History kinds retain their existing validation even when unrelated.
+    value: value.kind === "observation" && !storedEventMayContributeToCanonicalAvailability(value)
+      ? null
+      : value,
   };
 }
 

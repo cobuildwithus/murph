@@ -1,6 +1,6 @@
 {
   "id": "memory-set-name",
-  "command": "vault-cli memory set-name <displayName> --vault <path>",
+  "command": "vault-cli memory set-name <displayName> --vault <path> [--compact]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

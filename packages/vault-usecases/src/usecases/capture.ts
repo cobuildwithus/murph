@@ -697,8 +697,8 @@ async function loadCaptureRecord(vault: string, lookup: string): Promise<QueryRe
   }
 
   const query = await loadQueryRuntime('capture query reads')
-  const readModel = await query.readVault(vault)
-  const record = query.lookupEntityById(readModel, normalizedLookup)
+  const eventRecords = await query.readCanonicalEntityFamilySource(vault, 'event')
+  const record = query.lookupCanonicalEntityById(eventRecords, normalizedLookup)
 
   if (record && isCaptureRecord(record)) {
     return record
@@ -706,11 +706,8 @@ async function loadCaptureRecord(vault: string, lookup: string): Promise<QueryRe
 
   const labelTag = captureSlugOrNull(normalizedLookup)
   if (labelTag) {
-    const latestLabelMatch = query
-      .listEntities(readModel, {
-        families: ['event'],
-        kinds: ['note'],
-      })
+    const latestLabelMatch = eventRecords
+      .filter((candidate: QueryRecord) => candidate.kind === 'note')
       .filter((candidate: QueryRecord) => isCaptureRecord(candidate) && candidate.tags.includes(labelTag))
       .sort(compareByLatest)[0]
 
@@ -742,19 +739,19 @@ export async function listCaptureRecords(input: {
   limit?: number
 }) {
   const query = await loadQueryRuntime('capture query reads')
-  const readModel = await query.readVault(input.vault)
   const limit =
     typeof input.limit === 'number' && Number.isFinite(input.limit)
       ? Math.max(1, Math.min(DEFAULT_LIST_LIMIT * 4, Math.round(input.limit)))
       : DEFAULT_LIST_LIMIT
   const requiredTags = requestedCaptureTags(input)
-  const items = query
-    .listEntities(readModel, {
-      families: ['event'],
-      kinds: ['note'],
-      from: input.from,
-      to: input.to,
-    })
+  const records = await query.listCanonicalEntities(input.vault, {
+    family: 'event',
+    kinds: ['note'],
+    from: input.from,
+    to: input.to,
+    limit: null,
+  })
+  const items = records
     .filter((record: QueryRecord) => isCaptureRecord(record))
     .filter((record: QueryRecord) => recordMatchesAllTags(record, requiredTags))
     .sort(compareByLatest)

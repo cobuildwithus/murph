@@ -61,16 +61,6 @@ export function normalizeIdentifier(value: unknown): string | undefined {
   return normalizeString(value);
 }
 
-export function normalizeStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((entry) => normalizeString(entry))
-    .filter((entry): entry is string => typeof entry === "string");
-}
-
 export function splitScopeList(value: unknown): string[] {
   if (typeof value !== "string") {
     return [];

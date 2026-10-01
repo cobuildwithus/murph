@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "active-conversation-wake",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable follow-up messages",
+    "summary": "Murph can keep handling follow-up messages in an active conversation even when a background status check is out of date.",
+    "details": "This improvement applies to private conversations and group chats.",
+    "relevanceTags": ["conversations", "performance"],
+    "sourcePullRequests": [3474]
+  }
+}

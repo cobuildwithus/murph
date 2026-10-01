@@ -1,6 +1,9 @@
+import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type {
   HostedClinicalRecordsConnectLinkRequest,
   HostedClinicalRecordsConnectLinkResponse,
+  HostedClinicalRecordsFetchDocumentRequest,
+  HostedClinicalRecordsFetchDocumentResponse,
   HostedClinicalRecordsFetchPageRequest,
   HostedClinicalRecordsFetchPageResponse,
   HostedClinicalRecordsRecordOutcomeRequest,
@@ -22,6 +25,8 @@ import type {
   HostedMailboxFetchResponse,
   HostedMailboxPayloadFetchRequest,
   HostedMailboxPayloadFetchResponse,
+  HostedRuntimeLatencyTraceBatchRequest,
+  HostedRuntimeLatencyTraceBatchResponse,
   HostedRuntimeLatencyTraceRequest,
   HostedRuntimeLatencyTraceResponse,
   HostedRuntimeLogRequest,
@@ -51,6 +56,7 @@ import type {
 import type {
   AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import type { AssistantChannelDependencies } from "@murphai/assistant-engine/assistant-runtime";
 import type {
   HostedRuntimeAssistantPersonalizationToolAuthority,
   HostedRuntimeAssistantPersonalizationToolRequest,
@@ -66,11 +72,14 @@ import type {
 import type { MemberActionOutcomeV1 } from "@murphai/contracts";
 import type {
   HostedBrowserVaultReplicaRef,
+  HostedExecutionAssistantNotificationRoute,
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
+  HostedOperatorTaskControlRequest,
+  HostedOperatorTaskControlResponse,
 } from "@murphai/hosted-execution";
 import type {
   HostedVaultShareDeliverRequest,
@@ -96,6 +105,8 @@ import type {
   HostedPhoneCallStopResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
+  HostedPhysicalNoteRecoveryRequest,
+  HostedPhysicalNoteRecoveryResponse,
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
@@ -118,6 +129,8 @@ import type {
   HostedExecutionDeviceSyncDirtyAckResponse,
   HostedExecutionDeviceSyncDirtyPendingRequest,
   HostedExecutionDeviceSyncDirtyPendingResponse,
+  HostedExecutionDeviceSyncNoDataOutreachRequest,
+  HostedExecutionDeviceSyncNoDataOutreachResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncReconcileResponse,
@@ -146,8 +159,20 @@ export const HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES = [
 export type HostedRuntimeArtifactReadPurpose =
   typeof HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES[number];
 
+export const HOSTED_RUNTIME_MEDIA_READ_PURPOSES = [
+  "workspace_media_materialization",
+] as const;
+
+export type HostedRuntimeMediaReadPurpose =
+  typeof HOSTED_RUNTIME_MEDIA_READ_PURPOSES[number];
+
 export interface HostedRuntimeArtifactReadContext {
   purpose: HostedRuntimeArtifactReadPurpose;
+  signal?: AbortSignal | null;
+}
+
+export interface HostedRuntimeMediaReadContext {
+  purpose: HostedRuntimeMediaReadPurpose;
   signal?: AbortSignal | null;
 }
 
@@ -155,6 +180,22 @@ export interface HostedRuntimeArtifactReader {
   get(
     sha256: string,
     context: HostedRuntimeArtifactReadContext,
+  ): Promise<Uint8Array | null>;
+}
+
+export type HostedRuntimeMediaKind = "image" | "video";
+
+export interface HostedRuntimeMediaDescriptor {
+  byteSize: number;
+  mediaId: string;
+  mediaKind: HostedRuntimeMediaKind;
+  sha256: string;
+}
+
+export interface HostedRuntimeMediaReader {
+  get(
+    input: HostedRuntimeMediaDescriptor,
+    context: HostedRuntimeMediaReadContext,
   ): Promise<Uint8Array | null>;
 }
 
@@ -184,6 +225,36 @@ export class HostedRuntimeArtifactWriteError extends Error {
       { cause: input.cause },
     );
     this.name = "HostedRuntimeArtifactWriteError";
+    this.retryable = input.retryable;
+  }
+}
+
+export class HostedRuntimeMediaReadError extends Error {
+  readonly retryable: boolean;
+
+  constructor(input: { cause: unknown; retryable: boolean }) {
+    super(
+      input.cause instanceof Error
+        ? input.cause.message
+        : "Hosted runtime media read failed.",
+      { cause: input.cause },
+    );
+    this.name = "HostedRuntimeMediaReadError";
+    this.retryable = input.retryable;
+  }
+}
+
+export class HostedRuntimeMediaWriteError extends Error {
+  readonly retryable: boolean;
+
+  constructor(input: { cause: unknown; retryable: boolean }) {
+    super(
+      input.cause instanceof Error
+        ? input.cause.message
+        : "Hosted runtime media write failed.",
+      { cause: input.cause },
+    );
+    this.name = "HostedRuntimeMediaWriteError";
     this.retryable = input.retryable;
   }
 }
@@ -225,6 +296,21 @@ export interface HostedRuntimeArtifactWriter {
 export interface HostedRuntimeArtifactStore extends
   HostedRuntimeArtifactReader,
   HostedRuntimeArtifactWriter {}
+
+export interface HostedRuntimeMediaWriter {
+  delete?(input: Pick<HostedRuntimeMediaDescriptor, "mediaId">): Promise<void>;
+  record?(input: HostedRuntimeMediaDescriptor & {
+    expiresAt?: string | null;
+  }): Promise<void>;
+  put(input: HostedRuntimeMediaDescriptor & {
+    bytes: Uint8Array;
+    expiresAt?: string | null;
+  }): Promise<void>;
+}
+
+export interface HostedRuntimeMediaStore extends
+  HostedRuntimeMediaReader,
+  HostedRuntimeMediaWriter {}
 
 export interface HostedRuntimeBrowserVaultReplicaPort {
   publishRef?(input: {
@@ -373,6 +459,7 @@ export interface HostedRuntimeAssistantAskPrivateCompletionAuthorityResult {
 
 export interface HostedRuntimeExternalThreadRouteAuthorityResult {
   assistantAskFallbackRequired?: boolean | null;
+  threadIsDirect?: boolean;
 }
 
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {
@@ -410,6 +497,9 @@ export interface HostedRuntimeLinqDeleteMessagesRequest {
 }
 
 type HostedRuntimeEffectsPortBase = {
+  resolveMemberNotificationRoute?(
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedExecutionAssistantNotificationRoute | null>;
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<void>;
@@ -440,6 +530,10 @@ type HostedRuntimeEffectsPortBase = {
       signal?: AbortSignal | null;
     },
   ): Promise<HostedRuntimeExternalThreadRouteAuthorityResult | void>;
+  controlOperatorTask?(
+    request: HostedOperatorTaskControlRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedOperatorTaskControlResponse>;
   assertAssistantAskPrivateCompletionAuthority?(
     authority: HostedRuntimeAssistantAskPrivateCompletionAuthority,
     context?: { signal?: AbortSignal | null },
@@ -479,6 +573,9 @@ export interface HostedRuntimeDeviceSyncPort {
     connectTarget: string;
     messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
+  configureNoDataOutreach?(input: HostedExecutionDeviceSyncNoDataOutreachRequest & {
+    signal?: AbortSignal | null;
+  }): Promise<HostedExecutionDeviceSyncNoDataOutreachResponse>;
   completeFitbitMigration?(input: {
     connectionId: string;
     signal?: AbortSignal | null;
@@ -512,6 +609,10 @@ export interface HostedRuntimeClinicalRecordsPort {
       signal?: AbortSignal | null
     },
   ): Promise<HostedClinicalRecordsConnectLinkResponse>;
+  fetchDocument?(
+    request: HostedClinicalRecordsFetchDocumentRequest,
+    options?: { signal?: AbortSignal | null },
+  ): Promise<HostedClinicalRecordsFetchDocumentResponse>;
   fetchPage(
     request: HostedClinicalRecordsFetchPageRequest,
     options?: { signal?: AbortSignal | null },
@@ -620,6 +721,12 @@ export interface HostedRuntimePhoneCallPort {
 }
 
 export interface HostedRuntimePhysicalNotePort {
+  resolve?(
+    request: HostedPhysicalNoteRecoveryRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhysicalNoteRecoveryResponse>;
   send(
     request: HostedPhysicalNoteSendRequest,
     context?: {
@@ -629,6 +736,9 @@ export interface HostedRuntimePhysicalNotePort {
 }
 
 export interface HostedRuntimeMailboxPort {
+  admitVoiceInput?(
+    request: import("@murphai/hosted-execution").HostedVoiceInputRequest,
+  ): Promise<{ mailboxItemId: string }>;
   fetch(
     request: HostedMailboxFetchRequest,
     context?: { signal?: AbortSignal | null },
@@ -716,9 +826,12 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     durableRoot: string;
     ref: HostedWorkspaceSnapshotV2Ref;
     signal?: AbortSignal | null;
+    /** Later checkpoint readers obtain fresh authorization instead of launch preparation. */
+    usePreparedRestore?: boolean;
   }): Promise<HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | void>;
   startSnapshotSession(input: {
     expectedWorkspaceVersion: string;
+    replacedSnapshotRef?: HostedWorkspaceSnapshotV2Ref | null;
     inboxMediaRetentionWakeAt?: string | null;
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
@@ -735,6 +848,7 @@ export interface HostedRuntimeLogPort {
 }
 
 export interface HostedRuntimeLatencyTracePort {
+  recordBatch?(request: HostedRuntimeLatencyTraceBatchRequest): Promise<HostedRuntimeLatencyTraceBatchResponse>;
   record(request: HostedRuntimeLatencyTraceRequest): Promise<HostedRuntimeLatencyTraceResponse>;
 }
 
@@ -754,6 +868,7 @@ export interface HostedRuntimeVaultSharePort {
   listActiveProjectionScopes(input?: {
     projectionMode?: HostedVaultShareProjectionMode;
     signal?: AbortSignal | null;
+    sourceWorkspaceVersion?: string;
   }): Promise<HostedVaultShareActiveProjectionKindsResponse>;
   deliver(
     request: HostedVaultShareDeliverRequest,
@@ -773,6 +888,7 @@ export interface HostedRuntimePlatform {
   assistantPersonalizationToolPort?: HostedRuntimeAssistantPersonalizationToolPort | null;
   assistantConfigurationToolPort?: HostedRuntimeAssistantConfigurationToolPort | null;
   artifactStore: HostedRuntimeArtifactStore;
+  mediaStore?: HostedRuntimeMediaStore | null;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   codexAuthPort?: HostedRuntimeCodexAuthPort | null;
   clinicalRecordsPort?: HostedRuntimeClinicalRecordsPort | null;
@@ -784,6 +900,7 @@ export interface HostedRuntimePlatform {
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
+  pollToolPort?: ConversationPollTool | null;
   imessageContactToolPort?: HostedRuntimeIMessageContactToolPort | null;
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   labsToolPort?: HostedRuntimeLabsToolPort | null;
@@ -799,6 +916,8 @@ export interface HostedRuntimePlatform {
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
+  /** Ephemeral, invocation-bound speech; never an independently retried effect. */
+  voicePort?: { speak: NonNullable<AssistantChannelDependencies["sendVoice"]> } | null;
   vaultSharePort?: HostedRuntimeVaultSharePort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimeWorkspaceSnapshotPort | null;

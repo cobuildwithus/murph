@@ -6,15 +6,16 @@ const mocks = vi.hoisted(() => ({
   issueMurphContactCardHandoffClaim: vi.fn(),
   parseHostedInitialOnboardingCompletionRequest: vi.fn(),
   readHostedInitialOnboardingState: vi.fn(),
+  readHostedMemberMessagingSetupState: vi.fn(),
   readHostedMurphContactContextForMember: vi.fn(),
-  requireActivePrivyMemberAuthFromBearerToken: vi.fn(),
+  requireActiveHostedMemberAuthFromBearerToken: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   transaction: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireActivePrivyMemberAuthFromBearerToken:
-    mocks.requireActivePrivyMemberAuthFromBearerToken,
+  requireActiveHostedMemberAuthFromBearerToken:
+    mocks.requireActiveHostedMemberAuthFromBearerToken,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/initial-onboarding", () => ({
@@ -29,6 +30,11 @@ vi.mock("@/src/lib/hosted-onboarding/initial-onboarding", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
   readHostedMurphContactContextForMember:
     mocks.readHostedMurphContactContextForMember,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberMessagingSetupState:
+    mocks.readHostedMemberMessagingSetupState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/contact-card-handoff", () => ({
@@ -67,12 +73,16 @@ describe("companion initial onboarding routes", () => {
     mocks.transaction.mockImplementation(async (
       callback: (tx: unknown) => Promise<unknown>,
     ) => callback({ tx: true }));
-    mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireActiveHostedMemberAuthFromBearerToken.mockResolvedValue({
       member: { id: "member_123" },
     });
     mocks.readHostedInitialOnboardingState.mockResolvedValue({
       preferences: { persona: null, tone: null, voice: null },
       status: "pending",
+    });
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: "hbidx:phone:v1:member" },
+      routing: null,
     });
     mocks.readHostedMurphContactContextForMember.mockResolvedValue({
       initialContactChannels: { email: false, telegram: false, text: true },
@@ -103,6 +113,7 @@ describe("companion initial onboarding routes", () => {
     expect(payload).toMatchObject({
       schema: "murph.companion.initial-onboarding.v1",
       status: "pending",
+      messagingSetupRequired: false,
       preferences: { persona: null, tone: null, voice: null },
       contactAction: { kind: "text" },
       contactCard: { defaultAvatarId: "classic" },
@@ -110,9 +121,9 @@ describe("companion initial onboarding routes", () => {
     expect(payload.catalog.personas).toHaveLength(6);
     expect(payload.catalog.voices.length).toBeGreaterThan(10);
     expect(payload.catalog.voices[0].previewURL).toMatch(
-      /^https:\/\/app\.example\.test\/audio\//u,
+      /^https:\/\/www\.withmurph\.ai\/audio\//u,
     );
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken)
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken)
       .toHaveBeenCalledWith(request, expect.anything());
   });
 
@@ -142,6 +153,27 @@ describe("companion initial onboarding routes", () => {
     );
   });
 
+  it("projects required messaging setup independently of onboarding completion", async () => {
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: null },
+      routing: null,
+    });
+    mocks.readHostedInitialOnboardingState.mockResolvedValue({
+      completedAt: new Date("2026-08-04T12:00:00.000Z"),
+      preferences: { persona: "classic", tone: "formal", voice: "murph" },
+      status: "completed",
+    });
+    const response = await route.GET(new Request(
+      "https://app.example.test/api/device-sync/companion/initial-onboarding",
+      { headers: { authorization: "Bearer identity-token" } },
+    ));
+
+    await expect(response.json()).resolves.toMatchObject({
+      messagingSetupRequired: true,
+      status: "completed",
+    });
+  });
+
   it("short-circuits completed onboarding before optional contact projection", async () => {
     mocks.readHostedInitialOnboardingState.mockResolvedValue({
       completedAt: new Date("2026-08-04T12:00:00.000Z"),
@@ -168,7 +200,7 @@ describe("companion initial onboarding routes", () => {
   it("keeps bearer authentication and canonical state reads fail-closed", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     const authFailure = new Error("auth failed");
-    mocks.requireActivePrivyMemberAuthFromBearerToken.mockRejectedValue(authFailure);
+    mocks.requireActiveHostedMemberAuthFromBearerToken.mockRejectedValue(authFailure);
     const request = new Request(
       "https://app.example.test/api/device-sync/companion/initial-onboarding",
       { headers: { authorization: "Bearer identity-token" } },
@@ -179,7 +211,7 @@ describe("companion initial onboarding routes", () => {
     expect(authResponse.status).toBe(500);
     expect(mocks.readHostedInitialOnboardingState).not.toHaveBeenCalled();
 
-    mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireActiveHostedMemberAuthFromBearerToken.mockResolvedValue({
       member: { id: "member_123" },
     });
     const stateFailure = new Error("state failed");

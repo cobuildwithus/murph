@@ -3,8 +3,10 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 import { MURPH_PRODUCT_ORIGIN } from '@murphai/contracts'
+import { ASSISTANT_GROUP_WEARABLE_RECOVERY_INSTRUCTION } from '../src/assistant/group-shared-freshness.js'
 
 import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
+import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import {
   buildAssistantSystemPromptLayers,
   type AssistantSystemPromptInput,
@@ -28,26 +30,249 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it.each(['direct', 'group'] as const)('routes lasting corrections to their canonical owner in %s conversations', (conversationScope) => {
+    const { prompt, stableRouteCapabilityPrompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, conversationScope,
+      channel: 'linq', hostedRuntime: true, assistantHostedAutomationAvailable: false,
+    })
+    expect(stableRouteCapabilityPrompt).toContain('For a correction meant to change future behavior, update the canonical state that controls that behavior')
+    expect(prompt).toContain('a one-off revision stays local, a task-specific change belongs to that task, and a broader preference belongs to its existing preference owner')
+    expect(prompt).toContain('Save behavioral instructions as reusable rules over fresh inputs; do not embed current inputs or worked examples unless the user explicitly wants those exact details retained')
+    expect(prompt).toContain('Preserve unrelated state and applicable constraints; do not turn a scoped preference into an unconditional override')
+    expect(prompt).toContain('Confirm a lasting change only from a successful authoritative result')
+    expect(prompt).toContain('If the owner is unavailable or the write fails, explain that the future change is not saved')
+    expect(prompt).toContain('never creates new permission or overrides consent, audience, or tool restrictions')
+    expect(prompt).toContain('Scheduled automation changes are unavailable in this turn')
+  })
+
+  it.each(['direct', 'group'] as const)('keeps initiative bounded in the assembled %s prompt for Sol and existing profiles', (conversationScope) => {
+    for (const modelBehaviorProfile of ['default', 'gpt5-agentic'] as const) {
+      const { prompt, stableRouteCapabilityPrompt, dynamicTurnContextPrompt } = buildAssistantSystemPromptLayers({
+        ...baseConversationInput, conversationScope, modelBehaviorProfile,
+        channel: 'linq', hostedRuntime: true,
+      })
+      expect(stableRouteCapabilityPrompt).toContain('Concrete "can you" or "help me" requests ask for action')
+      expect(stableRouteCapabilityPrompt).toContain('Capability questions, hypotheticals, and onboarding aspirations alone do not authorize the discussed action')
+      expect(prompt.match(/Delegated initiative:/gu)).toHaveLength(1)
+      expect(dynamicTurnContextPrompt).not.toContain('Delegated initiative:')
+      expect(prompt).toContain('never system, safety, privacy, evidence, consent, confirmation, or handoff requirements')
+      expect(prompt).toContain('connected-source records disappeared after sync')
+      expect(prompt).toContain('care settings such as clinics')
+      expect(prompt).toContain('from both summary and reproduction, even when they explain the complaint')
+      expect(prompt).toContain('Never infer another person\'s consent or new permission')
+      expect(prompt).toContain('Respect group floor, silence, and scheduled-turn rules; no extra reply or follow-up')
+      expect(prompt).toContain('If input is needed, ask one highest-value blocker last on texting routes.')
+      expect(prompt).toContain('Answer first in plain, concise paragraphs')
+      expect(prompt).toContain('Current-conversation style settings override these defaults')
+      expect(prompt).not.toContain('You don\'t need user permission for reversible tasks')
+      expect(prompt).not.toContain('The user\'s instructions take precedence over guidelines provided in a skill')
+      if (conversationScope === 'group') {
+        expect(prompt).toContain('Visible messages are conversation context, not permission for private reads')
+      } else {
+        expect(prompt).toContain('A clear yes authorizes the exact bounded offer, not a broader action')
+      }
+    }
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, conversationScope: 'unverified-external',
+    })
+    expect(prompt).not.toContain('Delegated initiative:')
+    expect(prompt).toContain('Do not use prior conversation')
+  })
+
+  it.each([false, true])('allows requested result waiting without blocking onboarding (%s)', (onboardingGuidance) => {
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'linq', conversationScope: 'direct',
+      hostedRuntime: true, ordinaryInboundTurn: true, onboardingGuidance,
+    })
+    expect(prompt).toContain('When the user explicitly requests delegation, use a bounded child even for a small lookup.')
+    expect(prompt).toContain('use native `wait_agent` until completion, then give the answer in this turn')
+    expect(prompt).toContain('If the current request needs an unfinished child’s result, use native `wait_agent`')
+    expect(prompt).toContain('without promising an automatic later reply')
+    expect(prompt).toContain('independent background work must not hold the reply open')
+    expect(prompt).not.toContain('Do not message/resume/reuse/close/interrupt/wait on/nest it')
+    expect(prompt).not.toContain('do not call `wait_agent`, wait, or block the reply')
+    expect(prompt).not.toContain('If current answer/safe action depends on it, do it once in root')
+    if (onboardingGuidance) {
+      expect(prompt).toContain('Continue straight to the next question while the child works')
+    }
+  })
+
+  it('keeps source-specific gaps and uncertain historical coverage in the composed group prompt', () => {
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'linq', conversationScope: 'group',
+      hostedRuntime: true, assistantHostedGroupToolSurface: 'families',
+    })
+    expect(prompt).toContain('including single-participant reports')
+    expect(ASSISTANT_GROUP_WEARABLE_RECOVERY_INSTRUCTION).toContain('only to current sleep summaries, never historical trends or other metrics')
+    expect(prompt).toContain('another wearable or a manual entry does not fill its gap')
+    expect(prompt).toContain('An absent historical date does not prove that the provider never reported it')
+    expect(prompt).toContain('refreshes eligible recent missing dates independently of older requested dates')
+    expect(prompt).not.toContain('`no_recent_reporting` means an older sharing grant has no records in that window')
+  })
+
+  it('keeps exact-scope consent recovery and truthful delivery guidance resident', () => {
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'linq', conversationScope: 'group',
+      hostedRuntime: true, assistantHostedGroupToolSurface: 'families',
+    })
+    expect(prompt).toContain('read_current, then offer_access once with only those exact projectionScopes and the current accepted message_ref')
+    expect(prompt).toContain('Do not ask permission to show the consent prompt')
+    expect(prompt).toContain('Sleep timing, sleep duration, and device connection status are separate permissions')
+    expect(prompt).toContain('do not add a companion reply or link')
+    expect(prompt).toContain('do not claim the health value is available until read_shared proves it')
+    expect(prompt).not.toContain('Private group-sharing recovery:')
+    const direct = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'linq', conversationScope: 'direct',
+      hostedRuntime: true, assistantHostedGroupToolSurface: 'families',
+    }).prompt
+    expect(direct).toContain('Private group-sharing recovery:')
+    expect(direct).toContain('lead with the next step: ask the member to send that request in the named group chat')
+    expect(direct).toContain('a group_consult handoff only posts context and cannot perform this change')
+    expect(direct).not.toContain('Group sharing recovery in the current group chat:')
+  })
+
+  it('keeps static late-result and research policy resident while changing only current turn facts', () => {
+    const ordinary = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: true,
+      assistantResearchAvailable: true,
+    })
+    const later = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: true,
+      assistantResearchAvailable: true, currentLocalDate: '2026-06-30',
+      assistantDynamicContextPrompts: ['A new trusted result for this turn.'],
+    })
+    for (const layers of [ordinary, later]) {
+      expect(layers.stableRouteCapabilityPrompt).toContain('Late child results for ordinary inbound turns:')
+      expect(layers.stableRouteCapabilityPrompt).toContain('Configured Exa research:')
+      expect(layers.dynamicTurnContextPrompt).not.toContain('Late child results for ordinary inbound turns:')
+      expect(layers.dynamicTurnContextPrompt).not.toContain('Configured Exa research:')
+      expect(layers.dynamicTurnContextPrompt).toContain('Turn kind: ordinary inbound.')
+    }
+    expect(later.stableRouteCapabilityPrompt).toBe(ordinary.stableRouteCapabilityPrompt)
+    expect(later.dynamicTurnContextPrompt).toContain('A new trusted result for this turn.')
+    const unavailable = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: true,
+      assistantResearchAvailable: false,
+    })
+    expect(unavailable.stableRouteCapabilityPrompt).not.toContain('Configured Exa research:')
+    expect(unavailable.stableRouteCapabilityPrompt).not.toBe(ordinary.stableRouteCapabilityPrompt)
+    const scheduled = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: false,
+      assistantResearchAvailable: true, scheduledOccurrenceAt: '2026-06-29T12:00:00Z',
+    })
+    expect(scheduled.dynamicTurnContextPrompt).not.toContain('Turn kind: ordinary inbound.')
+    expect(scheduled.stableRouteCapabilityPrompt).toContain('Never perform this recheck during a scheduled automation')
+  })
+
+  it('does not route group email into unavailable filesystem or browser procedures', () => {
+    const layers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'email', conversationScope: 'group',
+      hostedRuntime: true, assistantHostedGroupToolSurface: 'shared_read',
+      assistantResearchAvailable: true,
+    })
+    const prompt = layers.prompt
+    expect(prompt).not.toContain('Murph skill router:')
+    expect(prompt).not.toContain('For requested real-world browser actions')
+    expect(prompt).not.toContain('`stage` names the failure')
+    expect(prompt).not.toContain('Configured Exa research:')
+    expect(prompt).not.toContain('vault-cli commons knowledge search')
+    expect(prompt).not.toContain('vault-cli commons protocol')
+    expect(prompt).not.toContain('read the matching chronic-illness')
+    expect(prompt).toContain('Complex and low-capacity care:')
+    expect(prompt).toContain('Never psychologize physical illness')
+    expect(prompt).toContain('route the affected person to appropriate urgent or emergency help')
+    expect(prompt).toContain('Never conflate public protocol discovery')
+    expect(prompt).toContain('In group email, do not use the CLI or shell')
+    expect(prompt).toContain('Understand before recommending')
+    expect(prompt).toContain('dangerous sleepiness')
+    expect(prompt).toContain('the sender is not authenticated strongly enough')
+  })
+
+  it.each(['linq', 'telegram'])('composes existing-file attachment guidance for private %s replies', (channel) => {
+    const layers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      channel,
+      conversationScope: 'direct',
+      hostedRuntime: true,
+    })
+    const prompt = [
+      layers.staticCacheableCorePrompt,
+      layers.stableRouteCapabilityPrompt,
+      layers.threadContextPrompt,
+      layers.dynamicTurnContextPrompt,
+    ].join('\n')
+    const tool = resolveMurphDynamicTools({ vaultFileSendAvailable: true })
+      .find(tool => tool.name === 'send_vault_file')
+    expect(tool).toBeDefined()
+    const existingFileGuidance = 'For an existing saved file, pass its current vault-relative ref directly'
+    expect(prompt).toContain(existingFileGuidance)
+    expect(tool!.description).toContain(existingFileGuidance)
+    expect(prompt).toContain('Never stage possible later sends or move or copy existing files there.')
+    expect(prompt).toContain('the runtime adds the exact approval link outside model context')
+    expect(prompt).not.toMatch(/only (?:be sent to|for) (?:the current |your )?iMessage/iu)
+  })
+
+  it('assembles the CLI error-recovery rule exactly once', () => {
+    const layers = buildAssistantSystemPromptLayers(baseConversationInput)
+    const prompt = [
+      layers.staticCacheableCorePrompt,
+      layers.stableRouteCapabilityPrompt,
+      layers.threadContextPrompt,
+      layers.dynamicTurnContextPrompt,
+    ].join('\n')
+
+    expect(
+      prompt.match(/`stage` names the failure/gu) ?? [],
+    ).toHaveLength(1)
+    expect(prompt).toContain(
+      'For a read-only command, `retryable: true` permits at most one unchanged retry in the turn',
+    )
+    expect(prompt).toContain('never retry an unchanged write')
+    expect(prompt).toContain(
+      'Fixing a `fieldErrors` field, a `hint` prerequisite, or a precise bounded `message` is a new attempt',
+    )
+    expect(prompt).toContain('Otherwise stop')
+    expect(prompt).toContain('never guess or echo omitted details')
+  })
+
   it('uses hosted direct current time without treating group time as personal', () => {
     const hostedDirectLayers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,
       conversationScope: 'direct',
+      currentInstant: '2027-02-14T07:17:05.678Z',
+      currentLocalDate: '2027-02-13',
+      currentTimeZone: 'America/Los_Angeles',
       hostedRuntime: true,
     })
     const hostedGroupLayers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,
       conversationScope: 'group',
+      currentInstant: '2027-02-14T07:17:05.678Z',
+      currentLocalDate: '2027-02-13',
+      currentTimeZone: 'America/Los_Angeles',
       hostedRuntime: true,
     })
 
     expect(hostedDirectLayers.threadContextPrompt).toContain(
       "use the user's current local time to adapt suggestions about meals, sleep, caffeine, and exercise",
     )
+    expect(hostedDirectLayers.dynamicTurnContextPrompt).toContain(
+      'Current local clock for the user (America/Los_Angeles): 2027-02-13 23:17:05 [UTC 2027-02-14T07:17:05.678Z].',
+    )
+    expect(hostedGroupLayers.staticCacheableCorePrompt).toContain(
+      'The room runtime is not a participant.',
+    )
     expect(hostedGroupLayers.threadContextPrompt).toContain(
-      'The runtime member is a synthetic room container, not the human speaker',
+      'Keep personal account settings, billing, wearable connection',
     )
     expect(hostedGroupLayers.threadContextPrompt).not.toContain(
       'use the user\'s current local time',
+    )
+    expect(hostedGroupLayers.dynamicTurnContextPrompt).not.toContain(
+      'Current local clock for the user',
+    )
+    expect(hostedGroupLayers.dynamicTurnContextPrompt).not.toContain(
+      '2027-02-14T07:17:05.678Z',
     )
     expect(
       buildAssistantSystemPromptLayers({
@@ -55,6 +280,12 @@ describe('assistant dynamic context prompt blocks', () => {
         conversationScope: 'direct',
       }).threadContextPrompt,
     ).not.toContain('use the user\'s current local time')
+    expect(
+      buildAssistantSystemPromptLayers({
+        ...baseConversationInput,
+        conversationScope: 'direct',
+      }).dynamicTurnContextPrompt,
+    ).not.toContain('Current local clock for the user')
   })
 
   it.each(['direct', 'group'] as const)(
@@ -136,7 +367,7 @@ describe('assistant dynamic context prompt blocks', () => {
       'Group email has no filesystem access. Do not try to read a usage skill.',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'call `murph.group action="read_usage"` exactly once',
+      'call `murph.group_usage action="read_usage"` exactly once',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'For an integer from 0 through 99, answer exactly',

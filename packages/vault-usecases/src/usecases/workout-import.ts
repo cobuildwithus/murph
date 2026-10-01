@@ -737,6 +737,190 @@ async function loadPriorWorkoutSnapshotEvidence(input: {
   return { files, matchesByFile }
 }
 
+function admitPriorSnapshot(input: {
+  importers: WorkoutImportersRuntime
+  candidate: PriorRawWorkoutFile
+  matches: readonly WorkoutRawRefMatch[]
+  currentSource: WorkoutCsvSource
+  currentIndexesByKey: ReadonlyMap<string, number>
+}): WorkoutCsvImportPlan | undefined {
+  const { candidate, matches, currentIndexesByKey } = input
+  const recordTimeZones = new Set(matches
+    .map((match) => match.attachment.timeZone)
+    .filter((timeZone): timeZone is string => typeof timeZone === 'string'))
+  const timeZone = recordTimeZones.size === 1
+    ? [...recordTimeZones][0]!
+    : candidate.timeZone
+  if (!timeZone) {
+    throw new VaultCliError(
+      'conflict',
+      'Prior workout evidence does not prove one parsing timezone; nothing was imported.',
+    )
+  }
+  let priorPlan: WorkoutCsvImportPlan
+  try {
+    priorPlan = input.importers.planWorkoutCsvImport({
+      text: candidate.text,
+      timeZone,
+      source: candidate.source,
+      delimiter: candidate.delimiter,
+      weightUnit: candidate.weightUnit ?? undefined,
+      distanceUnit: candidate.distanceUnit ?? undefined,
+    })
+  } catch {
+    throw new VaultCliError(
+      'conflict',
+      'Prior workout raw evidence cannot be parsed safely for identity reconciliation; nothing was imported.',
+    )
+  }
+  const attachedSources = new Set(matches.flatMap(({ latest }) =>
+    latest.kind === 'activity_session' && latest.workout.sourceApp
+      ? [latest.workout.sourceApp]
+      : []))
+  const hasCurrentOverlap = priorPlan.sessions.some((session) =>
+    currentIndexesByKey.has(session.sourceSessionKey))
+  const isCurrentProviderHistory = candidate.source === input.currentSource
+    || (attachedSources.size === 1
+      && attachedSources.has(input.currentSource))
+  if (!hasCurrentOverlap && !isCurrentProviderHistory) return undefined
+  if (priorPlan.sessions.some((session) =>
+    !currentIndexesByKey.has(session.sourceSessionKey))) {
+    throw new VaultCliError(
+      'conflict',
+      'A prior workout source session is missing or changed in the refreshed export; nothing was imported.',
+    )
+  }
+  return priorPlan
+}
+
+function matchSnapshotAttachments(
+  plan: WorkoutCsvImportPlan,
+  matches: readonly WorkoutRawRefMatch[],
+): Map<number, WorkoutRawRefMatch> {
+  const directMapping = mappingFromAttachedEvents(plan, matches)
+  const partialMatchesByIndex = new Map<number, WorkoutRawRefMatch>()
+  if (directMapping) {
+    directMapping.matches.forEach((match, index) => partialMatchesByIndex.set(index, match))
+    return partialMatchesByIndex
+  }
+  const indexesBySourceId = new Map(
+    plan.sessions.map((session, index) => [session.sourceWorkoutId, index]),
+  )
+  const indexesByTitleAndTime = new Map(
+    plan.sessions.map((session, index) => [`${session.title}\0${session.occurredAt}`, index]),
+  )
+  for (const match of matches) {
+    const record = match.attachment
+    const matchingIndexes = new Set<number>()
+    const nestedSourceId = record.kind === 'activity_session'
+      ? record.workout.sourceWorkoutId
+      : undefined
+    const nestedIndex = nestedSourceId
+      ? indexesBySourceId.get(nestedSourceId)
+      : undefined
+    const externalIndex = record.externalRef
+      ? indexesBySourceId.get(record.externalRef.resourceId)
+      : undefined
+    const titleTimeIndex = indexesByTitleAndTime.get(`${record.title}\0${record.occurredAt}`)
+    if (nestedIndex !== undefined) matchingIndexes.add(nestedIndex)
+    if (externalIndex !== undefined) matchingIndexes.add(externalIndex)
+    if (titleTimeIndex !== undefined) matchingIndexes.add(titleTimeIndex)
+    const matchingIndex = matchingIndexes.size === 1 ? [...matchingIndexes][0] : undefined
+    if (matchingIndex === undefined || partialMatchesByIndex.has(matchingIndex)) {
+      throw new VaultCliError(
+        'conflict',
+        'Prior workout evidence has partial or ambiguous session attachments; nothing was imported.',
+      )
+    }
+    partialMatchesByIndex.set(matchingIndex, match)
+  }
+  return partialMatchesByIndex
+}
+
+function assertPriorSnapshotUnchanged(input: {
+  importers: WorkoutImportersRuntime
+  plan: WorkoutCsvImportPlan
+  candidate: PriorRawWorkoutFile
+  priorPlan: WorkoutCsvImportPlan
+  records: readonly EventRecord[] | undefined
+  currentIndexesByKey: ReadonlyMap<string, number>
+}): void {
+  const { candidate, priorPlan, records, currentIndexesByKey } = input
+  const hasCorrection = records?.every(hasPostMappingCorrection) === true
+  const canonicalWeightInterpretation = (hasCorrection || candidate.weightUnit === undefined)
+    && records?.every((record, priorIndex) => {
+      if (record.lifecycle?.state === 'deleted') return true
+      const currentIndex = currentIndexesByKey.get(priorPlan.sessions[priorIndex]!.sourceSessionKey)
+      return currentIndex !== undefined
+        && canonicalWeightValuesMatch(record, input.plan.sessions[currentIndex])
+    }) === true
+  const canonicalDistanceInterpretation = (hasCorrection || candidate.distanceUnit === undefined)
+    && records?.every((record, priorIndex) => {
+      if (record.lifecycle?.state === 'deleted') return true
+      const currentIndex = currentIndexesByKey.get(priorPlan.sessions[priorIndex]!.sourceSessionKey)
+      return currentIndex !== undefined
+        && canonicalDistanceValuesMatch(record, input.plan.sessions[currentIndex])
+    }) === true
+  const correctedWeightInterpretation = hasCorrection && canonicalWeightInterpretation
+  const correctedDistanceInterpretation = hasCorrection && canonicalDistanceInterpretation
+  const legacyCanonicalWeightInterpretation = candidate.weightUnit === undefined
+    && canonicalWeightInterpretation
+  const legacyCanonicalDistanceInterpretation = candidate.distanceUnit === undefined
+    && canonicalDistanceInterpretation
+  if (
+    (candidate.weightUnit === undefined
+      && input.plan.weightUnit !== null
+      && !legacyCanonicalWeightInterpretation)
+    || (candidate.distanceUnit === undefined
+      && input.plan.distanceUnit !== null
+      && !legacyCanonicalDistanceInterpretation)
+  ) {
+    throw new VaultCliError(
+      'conflict',
+      'Prior workout evidence does not prove the selected units. Rerun the exact original CSV with --correct-units, then retry this expanded snapshot; nothing was imported.',
+    )
+  }
+  let comparisonPlan: WorkoutCsvImportPlan
+  try {
+    comparisonPlan = input.importers.planWorkoutCsvImport({
+      text: candidate.text,
+      timeZone: input.plan.timeZone,
+      source: input.plan.source,
+      delimiter: candidate.delimiter,
+      weightUnit: correctedWeightInterpretation || legacyCanonicalWeightInterpretation
+        ? input.plan.weightUnit ?? undefined
+        : candidate.weightUnit ?? undefined,
+      distanceUnit: correctedDistanceInterpretation || legacyCanonicalDistanceInterpretation
+        ? input.plan.distanceUnit ?? undefined
+        : candidate.distanceUnit ?? undefined,
+    })
+  } catch {
+    throw new VaultCliError(
+      'conflict',
+      'Prior workout source sessions cannot be compared safely with the current export; nothing was imported.',
+    )
+  }
+  const comparisonByKey = new Map(
+    comparisonPlan.sessions.map((session) => [session.sourceSessionKey, session]),
+  )
+  for (const priorSession of priorPlan.sessions) {
+    const currentIndex = currentIndexesByKey.get(priorSession.sourceSessionKey)
+    if (currentIndex === undefined) continue
+    const currentSession = input.plan.sessions[currentIndex]!
+    const comparablePrior = comparisonByKey.get(priorSession.sourceSessionKey)
+    if (
+      !comparablePrior
+      || JSON.stringify(comparableSourceSession(comparablePrior))
+        !== JSON.stringify(comparableSourceSession(currentSession))
+    ) {
+      throw new VaultCliError(
+        'conflict',
+        'A prior workout source session changed without an ordered source revision; nothing was imported.',
+      )
+    }
+  }
+}
+
 function resolvePriorSnapshotMatches(input: {
   importers: WorkoutImportersRuntime
   plan: WorkoutCsvImportPlan
@@ -762,88 +946,15 @@ function resolvePriorSnapshotMatches(input: {
     const matches = input.evidence.matchesByFile[candidateIndex] ?? []
     if (matches.length === 0) continue
     if (candidate.text === input.text) exactPartialEvidence = true
-    const recordTimeZones = new Set(matches
-      .map((match) => match.attachment.timeZone)
-      .filter((timeZone): timeZone is string => typeof timeZone === 'string'))
-    const timeZone = recordTimeZones.size === 1
-      ? [...recordTimeZones][0]!
-      : candidate.timeZone
-    if (!timeZone) {
-      throw new VaultCliError(
-        'conflict',
-        'Prior workout evidence does not prove one parsing timezone; nothing was imported.',
-      )
-    }
-    let priorPlan: WorkoutCsvImportPlan
-    try {
-      priorPlan = input.importers.planWorkoutCsvImport({
-        text: candidate.text,
-        timeZone,
-        source: candidate.source,
-        delimiter: candidate.delimiter,
-        weightUnit: candidate.weightUnit ?? undefined,
-        distanceUnit: candidate.distanceUnit ?? undefined,
-      })
-    } catch {
-      throw new VaultCliError(
-        'conflict',
-        'Prior workout raw evidence cannot be parsed safely for identity reconciliation; nothing was imported.',
-      )
-    }
-    const attachedSources = new Set(matches.flatMap(({ latest }) =>
-      latest.kind === 'activity_session' && latest.workout.sourceApp
-        ? [latest.workout.sourceApp]
-        : []))
-    const hasCurrentOverlap = priorPlan.sessions.some((session) =>
-      currentIndexesByKey.has(session.sourceSessionKey))
-    const isCurrentProviderHistory = candidate.source === input.plan.source
-      || (attachedSources.size === 1
-        && attachedSources.has(input.plan.source))
-    if (!hasCurrentOverlap && !isCurrentProviderHistory) continue
-    if (priorPlan.sessions.some((session) =>
-      !currentIndexesByKey.has(session.sourceSessionKey))) {
-      throw new VaultCliError(
-        'conflict',
-        'A prior workout source session is missing or changed in the refreshed export; nothing was imported.',
-      )
-    }
-    const directMapping = mappingFromAttachedEvents(priorPlan, matches)
-    const partialMatchesByIndex = new Map<number, WorkoutRawRefMatch>()
-    if (directMapping) {
-      directMapping.matches.forEach((match, index) => partialMatchesByIndex.set(index, match))
-    } else {
-      const indexesBySourceId = new Map(
-        priorPlan.sessions.map((session, index) => [session.sourceWorkoutId, index]),
-      )
-      const indexesByTitleAndTime = new Map(
-        priorPlan.sessions.map((session, index) => [`${session.title}\0${session.occurredAt}`, index]),
-      )
-      for (const match of matches) {
-        const record = match.attachment
-        const matchingIndexes = new Set<number>()
-        const nestedSourceId = record.kind === 'activity_session'
-          ? record.workout.sourceWorkoutId
-          : undefined
-        const nestedIndex = nestedSourceId
-          ? indexesBySourceId.get(nestedSourceId)
-          : undefined
-        const externalIndex = record.externalRef
-          ? indexesBySourceId.get(record.externalRef.resourceId)
-          : undefined
-        const titleTimeIndex = indexesByTitleAndTime.get(`${record.title}\0${record.occurredAt}`)
-        if (nestedIndex !== undefined) matchingIndexes.add(nestedIndex)
-        if (externalIndex !== undefined) matchingIndexes.add(externalIndex)
-        if (titleTimeIndex !== undefined) matchingIndexes.add(titleTimeIndex)
-        const matchingIndex = matchingIndexes.size === 1 ? [...matchingIndexes][0] : undefined
-        if (matchingIndex === undefined || partialMatchesByIndex.has(matchingIndex)) {
-          throw new VaultCliError(
-            'conflict',
-            'Prior workout evidence has partial or ambiguous session attachments; nothing was imported.',
-          )
-        }
-        partialMatchesByIndex.set(matchingIndex, match)
-      }
-    }
+    const priorPlan = admitPriorSnapshot({
+      importers: input.importers,
+      candidate,
+      matches,
+      currentSource: input.plan.source,
+      currentIndexesByKey,
+    })
+    if (!priorPlan) continue
+    const partialMatchesByIndex = matchSnapshotAttachments(priorPlan, matches)
     priorPlan.sessions.forEach((session, priorIndex) => {
       const currentIndex = currentIndexesByKey.get(session.sourceSessionKey)
       if (currentIndex === undefined) return
@@ -875,6 +986,8 @@ function resolvePriorSnapshotMatches(input: {
     admittedCandidates.push({ candidate, priorPlan, matches })
   }
 
+  // Later snapshots can complete earlier partial attachments. Compare only after
+  // every admitted snapshot has contributed its canonical identity matches.
   for (const { candidate, priorPlan, matches } of admittedCandidates) {
     const assembledMatches = priorPlan.sessions.map((session) => {
       const currentIndex = currentIndexesByKey.get(session.sourceSessionKey)
@@ -885,113 +998,14 @@ function resolvePriorSnapshotMatches(input: {
     )
       ? mappingFromAttachedEvents(priorPlan, assembledMatches)
       : mappingFromAttachedEvents(priorPlan, matches)
-    const hasPostMappingCorrection = fullMapping?.records.every((record) => {
-      if (record.lifecycle?.state === 'deleted') return true
-      const revision = Date.parse(record.externalRef?.version ?? '')
-      return Number.isFinite(revision) && revision > Date.parse(WORKOUT_CSV_MAPPING_REVISION)
-    }) === true
-    const correctedWeightInterpretation = hasPostMappingCorrection
-      && fullMapping!.records.every((record, priorIndex) => {
-        if (record.lifecycle?.state === 'deleted') return true
-        const currentIndex = currentIndexesByKey.get(priorPlan.sessions[priorIndex]!.sourceSessionKey)
-        return currentIndex !== undefined
-          && record.kind === 'activity_session'
-          && JSON.stringify(weightOwnedProjection(record.workout))
-            === JSON.stringify(weightOwnedProjection(input.plan.sessions[currentIndex]!.workout))
-      })
-    const correctedDistanceInterpretation = hasPostMappingCorrection
-      && fullMapping!.records.every((record, priorIndex) => {
-        if (record.lifecycle?.state === 'deleted') return true
-        const currentIndex = currentIndexesByKey.get(priorPlan.sessions[priorIndex]!.sourceSessionKey)
-        return currentIndex !== undefined
-          && record.kind === 'activity_session'
-          && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
-            === JSON.stringify(distanceOwnedProjection(
-              input.plan.sessions[currentIndex]!.workout,
-              input.plan.sessions[currentIndex]!.distanceKm,
-            ))
-      })
-    const legacyCanonicalWeightInterpretation = candidate.weightUnit === undefined
-      && fullMapping?.records.every((record, priorIndex) => {
-        if (record.lifecycle?.state === 'deleted') return true
-        const currentIndex = currentIndexesByKey.get(
-          priorPlan.sessions[priorIndex]!.sourceSessionKey,
-        )
-        return currentIndex !== undefined
-          && record.kind === 'activity_session'
-          && JSON.stringify(weightOwnedProjection(record.workout))
-            === JSON.stringify(weightOwnedProjection(input.plan.sessions[currentIndex]!.workout))
-      }) === true
-    const legacyCanonicalDistanceInterpretation = candidate.distanceUnit === undefined
-      && fullMapping?.records.every((record, priorIndex) => {
-        if (record.lifecycle?.state === 'deleted') return true
-        const currentIndex = currentIndexesByKey.get(
-          priorPlan.sessions[priorIndex]!.sourceSessionKey,
-        )
-        return currentIndex !== undefined
-          && record.kind === 'activity_session'
-          && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
-            === JSON.stringify(distanceOwnedProjection(
-              input.plan.sessions[currentIndex]!.workout,
-              input.plan.sessions[currentIndex]!.distanceKm,
-            ))
-      }) === true
-    if (
-      (candidate.weightUnit === undefined
-        && input.plan.weightUnit !== null
-        && !legacyCanonicalWeightInterpretation)
-      || (candidate.distanceUnit === undefined
-        && input.plan.distanceUnit !== null
-        && !legacyCanonicalDistanceInterpretation)
-    ) {
-      throw new VaultCliError(
-        'conflict',
-        'Prior workout evidence does not prove the selected units. Rerun the exact original CSV with --correct-units, then retry this expanded snapshot; nothing was imported.',
-      )
-    }
-    let comparisonPlan: WorkoutCsvImportPlan
-    try {
-      comparisonPlan = input.importers.planWorkoutCsvImport({
-        text: candidate.text,
-        timeZone: input.plan.timeZone,
-        source: input.plan.source,
-        delimiter: candidate.delimiter,
-        weightUnit: correctedWeightInterpretation || legacyCanonicalWeightInterpretation
-          ? input.plan.weightUnit ?? undefined
-          : candidate.weightUnit === undefined
-          ? undefined
-          : candidate.weightUnit ?? undefined,
-        distanceUnit: correctedDistanceInterpretation || legacyCanonicalDistanceInterpretation
-          ? input.plan.distanceUnit ?? undefined
-          : candidate.distanceUnit === undefined
-          ? undefined
-          : candidate.distanceUnit ?? undefined,
-      })
-    } catch {
-      throw new VaultCliError(
-        'conflict',
-        'Prior workout source sessions cannot be compared safely with the current export; nothing was imported.',
-      )
-    }
-    const comparisonByKey = new Map(
-      comparisonPlan.sessions.map((session) => [session.sourceSessionKey, session]),
-    )
-    for (const priorSession of priorPlan.sessions) {
-      const currentIndex = currentIndexesByKey.get(priorSession.sourceSessionKey)
-      if (currentIndex === undefined) continue
-      const currentSession = input.plan.sessions[currentIndex]!
-      const comparablePrior = comparisonByKey.get(priorSession.sourceSessionKey)
-      if (
-        !comparablePrior
-        || JSON.stringify(comparableSourceSession(comparablePrior))
-          !== JSON.stringify(comparableSourceSession(currentSession))
-      ) {
-        throw new VaultCliError(
-          'conflict',
-          'A prior workout source session changed without an ordered source revision; nothing was imported.',
-        )
-      }
-    }
+    assertPriorSnapshotUnchanged({
+      importers: input.importers,
+      plan: input.plan,
+      candidate,
+      priorPlan,
+      records: fullMapping?.records,
+      currentIndexesByKey,
+    })
   }
 
   if (exactPartialEvidence && alignedMatches.some((match) => match === undefined)) {
@@ -1129,18 +1143,9 @@ async function resolveExistingWorkoutEvidence(input: {
       const recordTimeZone = recordTimeZones.size === 1 ? [...recordTimeZones][0] : undefined
       const originalTimeZone = recordTimeZone ?? candidate.timeZone
       const currentWeightValuesMatch = mapping.records.every((record, sessionIndex) =>
-        record.lifecycle?.state === 'deleted'
-        || (record.kind === 'activity_session'
-          && JSON.stringify(weightOwnedProjection(record.workout))
-            === JSON.stringify(weightOwnedProjection(input.plan.sessions[sessionIndex]?.workout))))
+        canonicalWeightValuesMatch(record, input.plan.sessions[sessionIndex]))
       const currentDistanceValuesMatch = mapping.records.every((record, sessionIndex) =>
-        record.lifecycle?.state === 'deleted'
-        || (record.kind === 'activity_session'
-          && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
-            === JSON.stringify(distanceOwnedProjection(
-              input.plan.sessions[sessionIndex]?.workout,
-              input.plan.sessions[sessionIndex]?.distanceKm,
-            ))))
+        canonicalDistanceValuesMatch(record, input.plan.sessions[sessionIndex]))
       const evidence = {
         rawFile,
         ...mapping,
@@ -1149,12 +1154,7 @@ async function resolveExistingWorkoutEvidence(input: {
         currentCorrectedUnitsMatch:
           currentWeightValuesMatch
           && currentDistanceValuesMatch
-          && mapping.records.every((record) => {
-            if (record.lifecycle?.state === 'deleted') return true
-            const revision = Date.parse(record.externalRef?.version ?? '')
-            return Number.isFinite(revision)
-              && revision > Date.parse(WORKOUT_CSV_MAPPING_REVISION)
-          }),
+          && mapping.records.every(hasPostMappingCorrection),
         currentUnitsMatch:
           (candidate.weightUnit !== undefined
             ? candidate.weightUnit === input.plan.weightUnit
@@ -1241,6 +1241,32 @@ function distanceOwnedProjection(
       })),
     })),
   }
+}
+
+function hasPostMappingCorrection(record: EventRecord): boolean {
+  if (record.lifecycle?.state === 'deleted') return true
+  const revision = Date.parse(record.externalRef?.version ?? '')
+  return Number.isFinite(revision) && revision > Date.parse(WORKOUT_CSV_MAPPING_REVISION)
+}
+
+function canonicalWeightValuesMatch(
+  record: EventRecord,
+  session: PlannedWorkoutCsvSession | undefined,
+): boolean {
+  return record.lifecycle?.state === 'deleted'
+    || (record.kind === 'activity_session'
+      && JSON.stringify(weightOwnedProjection(record.workout))
+        === JSON.stringify(weightOwnedProjection(session?.workout)))
+}
+
+function canonicalDistanceValuesMatch(
+  record: EventRecord,
+  session: PlannedWorkoutCsvSession | undefined,
+): boolean {
+  return record.lifecycle?.state === 'deleted'
+    || (record.kind === 'activity_session'
+      && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
+        === JSON.stringify(distanceOwnedProjection(session?.workout, session?.distanceKm)))
 }
 
 function expectedLatestForRecord(record: EventRecord): WorkoutExpectedLatest {

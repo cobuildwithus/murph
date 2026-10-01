@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 100,
+  "item": {
+    "id": "appointment-check-ins-use-saved-details",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Appointment check-ins use saved details",
+    "summary": "Murph now checks relevant saved details before asking you to repeat them and keeps working through ordinary website controls during appointment check-in.",
+    "details": "Murph still pauses for a real consent choice, private credential, CAPTCHA, or uncertain submission, and only saves sensitive details when a proper canonical owner exists.",
+    "relevanceTags": ["assistant", "appointments", "browser", "memory", "reliability"],
+    "sourcePullRequests": [2443]
+  }
+}

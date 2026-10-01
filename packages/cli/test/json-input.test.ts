@@ -19,7 +19,7 @@ test('loadJsonInputObject surfaces the stdin hint when stdin is interactive', as
       () => loadJsonInputObject('-', 'payload'),
       (error: unknown) => {
         assert.equal(error instanceof VaultCliError, true)
-        assert.equal((error as { code?: string }).code, 'command_failed')
+        assert.equal((error as { code?: string }).code, 'invalid_payload')
         assert.equal(
           (error as { message?: string }).message,
           'No payload was piped to stdin.',
@@ -27,6 +27,14 @@ test('loadJsonInputObject surfaces the stdin hint when stdin is interactive', as
         assert.equal(
           (error as { context?: { hint?: string } }).context?.hint,
           'Pass --input @file.json or pipe a JSON object to --input -.',
+        )
+        assert.equal(
+          (error as { context?: { retryable?: boolean } }).context?.retryable,
+          false,
+        )
+        assert.equal(
+          (error as { context?: { stage?: string } }).context?.stage,
+          'validation',
         )
         return true
       },

@@ -1,7 +1,7 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 
 import { afterEach, describe, expect, test, vi } from 'vitest'
@@ -21,6 +21,7 @@ import {
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  upsertMemory,
   AVAILABILITY_CONFLICT_BLOCK_END,
   AVAILABILITY_CONFLICT_BLOCK_START,
 } from '@murphai/core'
@@ -108,6 +109,62 @@ const DAILY_NUTRITION_CARD: AssistantResponseCard = {
   },
 }
 
+const SCHEDULED_GROUP_CARD_CASES = [
+  {
+    card: {
+      entries: [{
+        coverage: 'complete',
+        detail: null,
+        label: 'Member A',
+        points: 120,
+      }],
+      footer: null,
+      format: 'individual',
+      kind: 'challenge_standings',
+      objective: { kind: 'ranking' },
+      subtitle: 'Day 4 of 7',
+      title: 'Weekly challenge',
+      version: 1,
+    } satisfies AssistantResponseCard,
+    channel: 'linq' as const,
+  },
+  {
+    card: {
+      exercises: [{
+        dose: '8 repetitions',
+        estimatedSeconds: 45,
+        images: [],
+        instructions: ['Move slowly.'],
+        name: 'Shoulder circles',
+      }],
+      footer: null,
+      intensity: 'Easy',
+      kind: 'exercise_routine',
+      labels: {
+        dose: 'Dose',
+        exercise: 'Exercise',
+        time: 'Time',
+        visualGuide: 'Visual guide',
+      },
+      safety: 'Stop if pain increases.',
+      subtitle: null,
+      title: 'Short reset',
+      totalSeconds: 60,
+      transitionSeconds: 15,
+      version: 1,
+    } satisfies AssistantResponseCard,
+    channel: 'telegram' as const,
+  },
+  {
+    card: {
+      html: '<h2>Travel prep</h2><ol><li>Pack the charger.</li></ol>',
+      kind: 'telegram_rich_content',
+      version: 1,
+    } satisfies AssistantResponseCard,
+    channel: 'telegram' as const,
+  },
+] as const
+
 const OVERSIZED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
   kind: 'compact_table',
   version: 1,
@@ -173,6 +230,104 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/response-media.js')
   vi.doUnmock('../src/assistant/first-contact.js')
   vi.doUnmock('../src/assistant/cron/output-history.js')
+  vi.doUnmock('../src/assistant/maintenance-evidence.js')
+  vi.doUnmock('../src/assistant/group-room-model.js')
+})
+
+test.each([
+  { profile: 'member-memory', status: 'empty', page: 'missing', skip: true },
+  { profile: 'member-memory', status: 'empty', page: 'present', skip: false },
+  { profile: 'member-memory', status: 'empty', page: 'unavailable', skip: false },
+  { profile: 'group-room-model', status: 'empty', page: 'missing', skip: true },
+  { profile: 'member-memory', status: 'unavailable', page: 'missing', skip: false },
+  { profile: 'member-memory', status: 'available', page: 'missing', skip: false },
+  { profile: 'group-room-model', status: 'empty', page: 'present', skip: false },
+  { profile: 'group-room-model', status: 'empty', page: 'unavailable', skip: false },
+  { profile: 'group-room-model', status: 'available', page: 'missing', skip: false },
+  { profile: 'habitat-voice', status: 'not-applicable', page: 'missing', skip: false },
+] as const)('empty maintenance admission: $profile/$status/$page', async ({ profile, status, page, skip }) => {
+  vi.doMock('../src/assistant/maintenance-evidence.js', () => ({
+    readAssistantMaintenanceConversationEvidence: vi.fn(async () => ({
+      prompt: 'Engine-supplied synthetic evidence.',
+      status,
+    })),
+  }))
+  vi.doMock('../src/assistant/group-room-model.js', async (importOriginal) => ({
+    ...await importOriginal<typeof import('../src/assistant/group-room-model.js')>(),
+    readAssistantGroupRoomModelState: vi.fn(async () => page === 'present'
+      ? { kind: page, body: '## Room guide\n'.repeat(2_000), digest: 'a'.repeat(64), status: 'active' }
+      : { kind: page, digest: 'a'.repeat(64) }),
+  }))
+  const { mocks, deliverMessage, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    providerResult: createProviderResult({
+      response: JSON.stringify({ kind: 'skip', privateSummary: 'Silent maintenance complete.' }),
+    }),
+    turnId: 'turn-empty-maintenance',
+  })
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-memory-admission-'))
+  if (profile === 'member-memory' && page === 'present') {
+    await upsertMemory(vault, { section: 'Preferences', text: 'Prefers concise comparisons.' })
+  } else if (profile === 'member-memory' && page === 'unavailable') {
+    await mkdir(path.join(vault, 'bank'), { recursive: true })
+    await writeFile(path.join(vault, 'bank/memory.md'), 'malformed memory')
+  }
+  const onProviderRequestStarted = vi.fn()
+  try {
+  const result = await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Perform the authorized silent maintenance.',
+    onProviderRequestStarted,
+    turnPolicy: {
+      kind: 'maintenance-exact-skip',
+      maintenanceProfile: profile,
+      privateSummary: 'Silent maintenance complete.',
+    },
+    vault,
+  })
+  expect(result.decision).toEqual({ kind: 'skip', privateSummary: 'Silent maintenance complete.' })
+  expect(result.response).toBeNull()
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(skip ? 0 : 1)
+  if (skip) {
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
+    expect(onProviderRequestStarted).not.toHaveBeenCalled()
+    expect(result.session.turnCount).toBe(0)
+  }
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
+test('connected-channel greeting selects isolated output-only continuation and removes exact onboarding instructions', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-greeting-policy-'))
+  try {
+    const providerResult = createProviderResult({ response: JSON.stringify({
+      kind: 'send_message', privateSummary: 'Greet the connected phone.', text: 'Hey, you can text me here now.',
+    }) })
+    const { sendAssistantNotificationLocal, deliverMessage, mocks } = await loadNotificationTurnHarness({
+      providerResult, turnId: 'turn-connected-channel-greeting',
+    })
+    await sendAssistantNotificationLocal({
+      channel: 'linq', threadIsDirect: true, connectedChannelGreeting: true,
+      executionContext: { hosted: null }, instructions: 'PREMADE_WELCOME_SENTINEL',
+      responsePolicy: { kind: 'require_send_exact_text', text: 'PREMADE_WELCOME_SENTINEL' },
+      vault,
+    })
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+    const request = mocks.executeCodexTurnWithRecovery.mock.calls[0]![0]
+    expect(request.profile).toEqual({
+      nativeResumePolicy: 'disabled', promptProfile: 'operator-message',
+      threadScope: 'isolated-thread', toolProfile: 'output-only-turn',
+    })
+    expect(request.input.prompt).toContain('Do not restart onboarding')
+    expect(request.input.prompt).not.toContain('PREMADE_WELCOME_SENTINEL')
+    expect(request.hostedToolContext).toBeNull()
+    expect(deliverMessage).toHaveBeenCalledOnce()
+    expect(mocks.applyAssistantSessionCodexResumeStateAction).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
 })
 
 test('sendAssistantNotificationLocal scopes cron output history to the resolved conversation session', async () => {
@@ -680,12 +835,11 @@ test('sendAssistantNotificationLocal rejects exact text before delivery when the
     },
     channel: 'telegram',
     deliveryPolicy: 'explicit-target-override',
-    effectiveThreadIsDirect: null,
+    threadIsDirect: null,
     explicitTarget: 'external-thread',
     identityId: 'stored-direct-identity',
     replyToMessageId: null,
     threadId: 'external-thread',
-    threadIsDirect: null,
   }
   const providerResult = createProviderResult({ session })
   const {
@@ -744,12 +898,11 @@ test('sendAssistantNotificationLocal rejects an unknown audience before provider
     },
     channel: 'linq',
     deliveryPolicy: 'explicit-target-override',
-    effectiveThreadIsDirect: null,
+    threadIsDirect: null,
     explicitTarget: 'saved-linq-chat',
     identityId: null,
     replyToMessageId: null,
     threadId: null,
-    threadIsDirect: null,
   }
   const providerResult = createProviderResult({ session })
   const {
@@ -1056,7 +1209,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   })
 })
 
-test('sendAssistantNotificationLocal rejects deferred immediate exact-text delivery but accepts queue-only deferral', async () => {
+test('sendAssistantNotificationLocal converges a deferred exact-text retry after post-queue cancellation', async () => {
   const initialSession = createAssistantSession({
     binding: {
       actorId: 'actor-exact',
@@ -1075,15 +1228,27 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   sharedPlan.conversationPolicy.audience.channel = 'telegram'
   sharedPlan.conversationPolicy.audience.threadId = 'thread-exact'
   sharedPlan.conversationPolicy.audience.threadIsDirect = true
-  const deliverMessage = vi.fn(async () => ({
-    delivery: null,
-    deliveryError: null,
-    intent: {
-      intentId: 'intent-deferred',
-    },
-    kind: 'queued',
-    session: null,
-  }))
+  const abortController = new AbortController()
+  const abortError = new VaultCliError(
+    'ASSISTANT_CRON_FOREGROUND_YIELDED',
+    'Assistant background work yielded to fresh foreground input.',
+  )
+  let deliveryAttempt = 0
+  const deliverMessage = vi.fn(async () => {
+    deliveryAttempt += 1
+    if (deliveryAttempt === 2) {
+      abortController.abort(abortError)
+    }
+    return {
+      delivery: null,
+      deliveryError: null,
+      intent: {
+        intentId: 'intent-deferred',
+      },
+      kind: 'queued' as const,
+      session: null,
+    }
+  })
   const runtimeState = {
     outbox: {
       deliverMessage,
@@ -1225,8 +1390,12 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   vi.mocked(runtimeState.sessions.save).mockClear()
   mocks.markAssistantFirstContactSeen.mockClear()
 
+  const beforeCommit = vi.fn(async () => undefined)
   const result = await sendAssistantNotificationLocal({
+    abortSignal: abortController.signal,
     answeredMailboxItemIds: ['aask_done_exact'],
+    beforeCommit,
+    deferCommitUntilDeliveryAccepted: true,
     deliveryDedupeToken: 'signup-welcome:member_exact',
     deliveryDispatchMode: 'queue-only',
     deliveryIdempotencyKey: 'signup-welcome:member_exact',
@@ -1242,6 +1411,8 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   })
 
   expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(abortController.signal.aborted).toBe(true)
+  expect(beforeCommit).toHaveBeenCalledOnce()
   expect(deliverMessage).toHaveBeenCalledWith(
     expect.objectContaining({
       answeredMailboxItemIds: ['aask_done_exact'],
@@ -2166,6 +2337,14 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
 })
 
 test('sendAssistantNotificationLocal isolates detached provider results without delivering', async () => {
+  vi.doMock('../src/assistant/maintenance-evidence.js', () => ({
+    readAssistantMaintenanceConversationEvidence: vi.fn(async (input: { profile: string }) => ({
+      prompt: input.profile === 'group-room-model'
+        ? '## Group conversation evidence (engine-supplied, bounded, last 7 days)\nSynthetic group context.'
+        : '## Conversation evidence (engine-supplied, bounded, last 7 days)\nSynthetic member context.',
+      status: 'available',
+    })),
+  }))
   const providerSession = createAssistantSession({
     binding: {
       actorId: 'actor-skip',
@@ -2481,10 +2660,6 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       input: expect.objectContaining({
-        codexConfigOverrides: [
-          'memories.use_memories=false',
-          'memories.generate_memories=false',
-        ],
         maintenanceProfile: 'member-memory',
         prompt: expect.stringContaining(
           '## Conversation evidence (engine-supplied, bounded, last 7 days)',
@@ -2514,12 +2689,11 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     bindingDelivery: null,
     channel: null,
     deliveryPolicy: 'binding-target-only',
-    effectiveThreadIsDirect: null,
+    threadIsDirect: null,
     explicitTarget: null,
     identityId: null,
     replyToMessageId: null,
     threadId: null,
-    threadIsDirect: null,
   })
   expect(resolveAssistantConversationScope(
     maintenanceRunnerCall.plan.conversationPolicy.audience,
@@ -2568,66 +2742,74 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
 
-  vi.clearAllMocks()
-  mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
-    kind: 'succeeded',
-    providerTurn: {
-      ...createProviderResult({
-        rawEvents: [
-          {
-            method: 'item/completed',
-            params: {
-              item: {
-                arguments: {
-                  action: 'upsert',
-                  section: 'Context',
-                  text: 'Prefers morning summaries.',
+  for (const action of ['upsert', 'forget'] as const) {
+    vi.clearAllMocks()
+    mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
+      kind: 'succeeded',
+      providerTurn: {
+        ...createProviderResult({
+          rawEvents: [
+            {
+              method: 'item/completed',
+              params: {
+                item: {
+                  arguments: action === 'upsert'
+                    ? {
+                        action,
+                        section: 'Context',
+                        text: 'Prefers morning summaries.',
+                      }
+                    : {
+                        action,
+                        expectedUpdatedAt: '2026-04-09T03:00:00.000Z',
+                        memoryId: 'mem_exact',
+                      },
+                  id: `member-memory-${action}`,
+                  namespace: 'murph',
+                  success: true,
+                  tool: 'member_memory',
+                  type: 'dynamicToolCall',
                 },
-                id: 'member-memory-write',
-                namespace: 'murph',
-                success: true,
-                tool: 'member_memory',
-                type: 'dynamicToolCall',
               },
             },
-          },
-        ],
-        response: JSON.stringify({
-          kind: 'send_message',
-          privateSummary: 'Should not send.',
-          text: 'Visible maintenance message.',
+          ],
+          response: JSON.stringify({
+            kind: 'send_message',
+            privateSummary: 'Should not send.',
+            text: 'Visible maintenance message.',
+          }),
+          session: providerSession,
         }),
-        session: providerSession,
-      }),
-      additionalUsages: [],
-    },
-  })
-
-  let invalidMaintenanceError: unknown
-  try {
-    await sendAssistantNotificationLocal({
-      instructions: 'Run overnight memory maintenance.',
-      turnPolicy: {
-        kind: 'maintenance-exact-skip',
-        maintenanceProfile: 'member-memory',
-        privateSummary: 'No notification required.',
+        additionalUsages: [],
       },
-      vault: '/vaults/skip',
     })
-  } catch (error) {
-    invalidMaintenanceError = error
+
+    let invalidMaintenanceError: unknown
+    try {
+      await sendAssistantNotificationLocal({
+        instructions: 'Run overnight memory maintenance.',
+        turnPolicy: {
+          kind: 'maintenance-exact-skip',
+          maintenanceProfile: 'member-memory',
+          privateSummary: 'No notification required.',
+        },
+        vault: '/vaults/skip',
+      })
+    } catch (error) {
+      invalidMaintenanceError = error
+    }
+    expect(invalidMaintenanceError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
+    })
+    expect((invalidMaintenanceError as Error & {
+      details?: Record<string, unknown>
+    }).details).toMatchObject({
+      assistantNotificationProviderNonReplayableWork: true,
+      assistantNotificationStage: 'provider',
+    })
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(deliverMessage).not.toHaveBeenCalled()
   }
-  expect(invalidMaintenanceError).toMatchObject({
-    code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
-  })
-  expect((invalidMaintenanceError as Error & {
-    details?: Record<string, unknown>
-  }).details).toMatchObject({
-    assistantNotificationProviderNonReplayableWork: true,
-    assistantNotificationStage: 'provider',
-  })
-  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
-  expect(deliverMessage).not.toHaveBeenCalled()
 
   vi.clearAllMocks()
   mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
@@ -3168,12 +3350,11 @@ test('sendAssistantNotificationLocal keeps scheduled group reads and offers mode
     bindingDelivery: null,
     channel: 'linq',
     deliveryPolicy: 'not-requested',
-    effectiveThreadIsDirect: false,
+    threadIsDirect: false,
     explicitTarget: null,
     identityId: null,
     replyToMessageId: null,
     threadId: 'family-step-challenge',
-    threadIsDirect: false,
   }
 
   const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
@@ -3310,12 +3491,11 @@ test('sendAssistantNotificationLocal forwards one hosted context and leaves audi
     bindingDelivery: null,
     channel: 'linq',
     deliveryPolicy: 'not-requested',
-    effectiveThreadIsDirect: true,
+    threadIsDirect: true,
     explicitTarget: null,
     identityId: null,
     replyToMessageId: null,
     threadId: 'direct-scheduled-thread',
-    threadIsDirect: true,
   }
 
   const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
@@ -3444,6 +3624,172 @@ test.each(['linq', 'telegram', 'email'] as const)(
     )
   },
 )
+
+test('sendAssistantNotificationLocal delivers a scheduled fitting card without a companion decision', async () => {
+  const renderedText = renderAssistantResponseCardText(DAILY_NUTRITION_CARD)
+  const providerResult = createProviderResult({
+    providerAuthoredResponse: '',
+    response: renderedText,
+    responseCard: DAILY_NUTRITION_CARD,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-daily-nutrition-card-only',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    channel: 'linq',
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryTarget: 'direct-nutrition-card-only',
+    instructions: 'Complete the automatic meal closeout.',
+    scheduledInvocationAuthority: {
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      occurrenceAt: '2026-07-28T21:00:00.000-04:00',
+    },
+    threadIsDirect: true,
+    vault: '/vaults/daily-nutrition-card-only',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'send_message',
+      text: renderedText,
+    },
+    response: renderedText,
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    card: DAILY_NUTRITION_CARD,
+    channel: 'linq',
+    media: [],
+    message: renderedText,
+  }))
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: renderedText,
+    }),
+  )
+})
+
+test.each(SCHEDULED_GROUP_CARD_CASES)(
+  'sendAssistantNotificationLocal delivers a scheduled $channel $card.kind group card after a superseded skip',
+  async ({ card, channel }) => {
+    const providerAuthoredResponse = JSON.stringify({
+      kind: 'skip',
+      privateSummary: 'The completed card is the response.',
+    })
+    const renderedText = renderAssistantResponseCardText(card)
+    const providerResult = createProviderResult({
+      providerAuthoredResponse,
+      response: renderedText,
+      responseCard: card,
+    })
+    const target = `${channel}-${card.kind}-group`
+    const sharedPlan = createSharedPlan()
+    sharedPlan.conversationPolicy.audience = {
+      actorId: null,
+      bindingDelivery: null,
+      channel,
+      deliveryPolicy: 'not-requested',
+      threadIsDirect: false,
+      explicitTarget: target,
+      identityId: null,
+      replyToMessageId: null,
+      threadId: target,
+    }
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+      await loadNotificationTurnHarness({
+        providerResult,
+        sharedPlan,
+        turnId: `turn-${target}`,
+      })
+
+    const result = await sendAssistantNotificationLocal({
+      channel,
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryTarget: target,
+      instructions: 'Send the scheduled group card.',
+      scheduledInvocationAuthority: {
+        automationId: `scheduled-${card.kind}`,
+        occurrenceAt: '2026-08-25T09:00:00.000-04:00',
+      },
+      threadIsDirect: false,
+      vault: `/vaults/${target}`,
+    })
+
+    expect(result).toMatchObject({
+      decision: {
+        kind: 'send_message',
+        text: renderedText,
+      },
+      response: renderedText,
+    })
+    expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+      card,
+      channel,
+      explicitTarget: target,
+      message: renderedText,
+      threadId: target,
+      threadIsDirect: false,
+    }))
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+      expect.objectContaining({ assistantTranscriptText: renderedText }),
+    )
+    expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+      providerAuthoredResponse,
+    )
+  },
+)
+
+test('sendAssistantNotificationLocal keeps a scheduled workout decision structured and delivers only its text', async () => {
+  const decision = JSON.stringify({
+    kind: 'send_message',
+    privateSummary: 'Prepared the exact workout check-in.',
+    text: 'How did the next set go?',
+  })
+  const providerResult = createProviderResult({
+    providerAuthoredResponse: decision,
+    response: decision,
+    transcriptResponse: decision,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-scheduled-workout-check-in',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    channel: 'linq',
+    deliveryTarget: 'direct-workout-check-in',
+    instructions: 'Ask how the next set in the exact workout went.',
+    scheduledInvocationAuthority: {
+      automationId: 'scheduled-workout-check-in',
+      occurrenceAt: '2026-08-09T19:45:00.000-04:00',
+    },
+    threadIsDirect: true,
+    vault: '/vaults/scheduled-workout-check-in',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Prepared the exact workout check-in.',
+      text: 'How did the next set go?',
+    },
+    response: 'How did the next set go?',
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    message: 'How did the next set go?',
+  }))
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: 'How did the next set go?',
+    }),
+  )
+  expect(JSON.stringify(deliverMessage.mock.calls)).not.toMatch(
+    /privateSummary|evt_/u,
+  )
+})
 
 test.each(
   (['linq', 'telegram', 'email'] as const).flatMap((channel) => [
@@ -3600,8 +3946,52 @@ test.each([
   },
 )
 
+test('sendAssistantNotificationLocal rejects an append-only clarification after a skip decision', async () => {
+  const providerAuthoredResponse = JSON.stringify({
+    kind: 'skip',
+    privateSummary: 'Nothing should be sent.',
+  })
+  const clarification =
+    'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+  const runtimeResponse = `${providerAuthoredResponse}\n\n${clarification}`
+  const providerResult = createProviderResult({
+    providerAuthoredResponse,
+    response: runtimeResponse,
+    transcriptResponse: runtimeResponse,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-scheduled-local-time-clarification-skip',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    channel: 'linq',
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryTarget: 'direct-scheduled-local-time-clarification-skip',
+    instructions: 'Create the requested local-time reminder or ask for correction.',
+    scheduledInvocationAuthority: {
+      automationId: 'scheduled-local-time-clarification-skip',
+      occurrenceAt: '2026-03-01T14:00:00.000-05:00',
+    },
+    threadIsDirect: true,
+    vault: '/vaults/scheduled-local-time-clarification-skip',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    context: {
+      assistantNotificationValidationFailureReason:
+        'runtime_presentation_non_send_decision',
+    },
+    message:
+      'A runtime-owned notification presentation requires a send_message decision.',
+  })
+
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+})
+
 test.each(['linq', 'telegram', 'email'] as const)(
-  'sendAssistantNotificationLocal rejects a $channel skip after cardless recovery',
+  'sendAssistantNotificationLocal delivers a $channel cardless recovery despite a superseded skip',
   async (channel) => {
     const providerResult = createProviderResult({
       providerAuthoredResponse: JSON.stringify({
@@ -3613,13 +4003,13 @@ test.each(['linq', 'telegram', 'email'] as const)(
         'Full workout recovery\n\nFirst exercise\nLast exercise\n\n' +
         '[Murph tracked workout source: evt_test; snapshot: 2026-08-09T19:45:00.000Z]',
     })
-    const { deliverMessage, sendAssistantNotificationLocal } =
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } =
       await loadNotificationTurnHarness({
         providerResult,
         turnId: 'turn-scheduled-workout-overflow-skip',
       })
 
-    await expect(sendAssistantNotificationLocal({
+    const result = await sendAssistantNotificationLocal({
       channel,
       instructions: 'Send the complete current tracked workout.',
       scheduledInvocationAuthority: {
@@ -3628,38 +4018,120 @@ test.each(['linq', 'telegram', 'email'] as const)(
       },
       threadIsDirect: true,
       vault: '/vaults/scheduled-workout-overflow-skip',
-    })).rejects.toMatchObject({
-      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
     })
-    expect(deliverMessage).not.toHaveBeenCalled()
+
+    const expectedText = 'Full workout recovery\n\nFirst exercise\nLast exercise'
+    expect(result).toMatchObject({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Delivered the runtime-owned notification presentation.',
+        text: expectedText,
+      },
+      response: expectedText,
+    })
+    expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+      channel,
+      message: expectedText,
+    }))
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantTranscriptText:
+          `${expectedText}\n\n` +
+          '[Murph tracked workout source: evt_test; snapshot: 2026-08-09T19:45:00.000Z]',
+      }),
+    )
+    expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+      'Nothing to send.',
+    )
   },
 )
 
-test('sendAssistantNotificationLocal maps context handoff to a conversation-shaped output-only turn', async () => {
-  const providerResult = createProviderResult({
-    response: JSON.stringify({
-      kind: 'send_message',
-      privateSummary: 'Share the bounded context in the room.',
-      text: 'Sunny just pulled 405. Huge day.',
-    }),
+test('manual meal estimation has isolated vault tools and one private reply', async () => {
+  const response = JSON.stringify({
+    kind: 'send_message', text: 'About how large was the serving?',
+    privateSummary: 'Asked for the missing portion.',
   })
-  const { mocks, sendAssistantNotificationLocal } =
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult: createProviderResult({ response }),
+      turnId: 'turn-manual-meal-estimation',
+    })
+  await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Complete the already saved meal from its photo.',
+    manualMealEstimation: true,
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: true,
+    vault: '/vaults/manual-meal',
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      profile: {
+        nativeResumePolicy: 'disabled', promptProfile: 'conversation',
+        threadScope: 'isolated-thread', toolProfile: 'provider-turn',
+      },
+    }),
+  )
+  expect(deliverMessage).toHaveBeenCalledTimes(1)
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    message: 'About how large was the serving?',
+  }))
+})
+
+test('manual meal estimation cannot enable tools in a group', async () => {
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult: createProviderResult({ response: '{}' }),
+      turnId: 'turn-manual-meal-group-denied',
+    })
+  await expect(sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Complete the already saved meal.',
+    manualMealEstimation: true,
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: false,
+    vault: '/vaults/manual-meal',
+  })).rejects.toThrow('Manual meal estimation requires a private direct route')
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal delivers ordinary context handoff text through the existing output-only path', async () => {
+  const response = 'The final round stayed controlled. Nice work.'
+  const providerResult = createProviderResult({
+    response,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
     await loadNotificationTurnHarness({
       providerResult,
       turnId: 'turn-context-handoff',
     })
 
-  await sendAssistantNotificationLocal({
+  const result = await sendAssistantNotificationLocal({
     executionContext: { hosted: null },
     instructions: 'Use the bounded handoff context in this group.',
     notificationPromptProfile: 'context-handoff',
     responsePolicy: { kind: 'require_send' },
+    sandbox: 'danger-full-access',
     threadIsDirect: false,
     vault: '/vaults/context-handoff',
   })
 
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Required context handoff message.',
+      text: response,
+    },
+    response,
+  })
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
+      allowFinishWithoutReply: false,
+      input: expect.objectContaining({
+        sandbox: 'danger-full-access',
+      }),
       profile: {
         nativeResumePolicy: 'disabled',
         promptProfile: 'conversation',
@@ -3668,20 +4140,101 @@ test('sendAssistantNotificationLocal maps context handoff to a conversation-shap
       },
     }),
   )
+  expect(deliverMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: response,
+    }),
+  )
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: response,
+      providerResumeStateAction: 'clear',
+    }),
+  )
+  expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledTimes(1)
+  expect(mocks.recordAdditionalAssistantUsageEvents).toHaveBeenCalledTimes(1)
+})
+
+test('sendAssistantNotificationLocal does not interpret context handoff text as a skip decision', async () => {
+  const response = JSON.stringify({
+    kind: 'skip',
+    privateSummary: 'Do not post an update.',
+  })
+  const providerResult = createProviderResult({ response })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-context-handoff-skip-shaped-text',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Use the bounded handoff context in this group.',
+    notificationPromptProfile: 'context-handoff',
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: false,
+    vault: '/vaults/context-handoff-skip-shaped-text',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Required context handoff message.',
+      text: response,
+    },
+    response,
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: response,
+    }),
+  )
+})
+
+test('sendAssistantNotificationLocal rejects an empty context handoff response before delivery', async () => {
+  const providerResult = createProviderResult({ response: '   ' })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-context-handoff-empty-response',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Use the bounded handoff context in this group.',
+    notificationPromptProfile: 'context-handoff',
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: false,
+    vault: '/vaults/context-handoff-empty-response',
+  })).rejects.toMatchObject({
+    code: 'invalid_payload',
+    context: { retryable: false },
+    message: 'notification response must be a non-empty string.',
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
 })
 
 test.each([
   {
+    expectedPromptProfile: 'creative-notification',
     expectedToolProfile: 'provider-turn',
     profile: 'creative-response' as const,
   },
   {
+    expectedPromptProfile: 'creative-notification',
     expectedToolProfile: 'output-only-turn',
     profile: 'creative-response-text' as const,
   },
+  {
+    expectedPromptProfile: 'operator-message',
+    expectedToolProfile: 'output-only-turn',
+    profile: 'operator-message' as const,
+  },
 ])(
-  'sendAssistantNotificationLocal maps $profile to $expectedToolProfile',
-  async ({ expectedToolProfile, profile }) => {
+  'sendAssistantNotificationLocal maps $profile to its isolated prompt and tool profile',
+  async ({ expectedPromptProfile, expectedToolProfile, profile }) => {
     const providerResult = createProviderResult({
       response: JSON.stringify({
         kind: 'send_message',
@@ -3717,7 +4270,7 @@ test.each([
     expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
       expect.objectContaining({
         profile: expect.objectContaining({
-          promptProfile: 'creative-notification',
+          promptProfile: expectedPromptProfile,
           threadScope: 'isolated-thread',
           toolProfile: expectedToolProfile,
         }),
@@ -3755,9 +4308,14 @@ test('sendAssistantNotificationLocal rejects a selected song without generated m
     vault: '/vaults/group-sponsorship-text',
   })).rejects.toMatchObject({
     code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    context: {
+      assistantNotificationValidationFailureReason:
+        'creative_response_media_invalid',
+    },
     details: expect.objectContaining({
       assistantNotificationProviderNonReplayableWork: false,
     }),
+    message: 'A song notification requires exactly one generated song attachment.',
   })
 
   expect(observedProviderInputs[0]).toMatchObject({
@@ -5087,31 +5645,63 @@ describe('parseAssistantNotificationDecision', () => {
     const { parseAssistantNotificationDecision } = await import(
       '../src/assistant/notification-turn.ts'
     )
+    const captureDecisionError = (value: string): unknown => {
+      try {
+        parseAssistantNotificationDecision(value)
+      } catch (error) {
+        return error
+      }
+      throw new Error('Expected assistant notification decision parsing to fail.')
+    }
+    const hostilePrivateResponse =
+      'HOSTILE_PRIVATE_PROVIDER_RESPONSE_DO_NOT_EMIT_7f3b2f'
 
-    expect(() => parseAssistantNotificationDecision('not json at all')).toThrowError(
-      new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    const unparseableError = captureDecisionError(hostilePrivateResponse)
+    expect(unparseableError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_json_unparseable',
+      },
+      message:
         'Assistant notification turn must return a single valid JSON decision object.',
-      ),
+    })
+    expect(JSON.stringify(unparseableError)).not.toContain(hostilePrivateResponse)
+
+    const malformedJsonError = captureDecisionError(
+      `{"kind":"send_message","text":${hostilePrivateResponse}}`,
     )
-    expect(() =>
-      parseAssistantNotificationDecision('{"kind":"send_message","privateSummary":"brief"}'),
-    ).toThrowError(
-      new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
-        'Assistant notification turn returned an invalid decision object.',
-      ),
-    )
-    expect(() =>
-      parseAssistantNotificationDecision(
-        '{"kind":"skip","unexpected":"value","privateSummary":"No action"}',
-      ),
-    ).toThrowError(
-      new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
-        'Assistant notification turn returned an invalid decision object.',
-      ),
-    )
+    expect(malformedJsonError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_json_unparseable',
+      },
+      message: 'Assistant notification turn returned an invalid decision object.',
+    })
+    expect(JSON.stringify(malformedJsonError)).not.toContain(hostilePrivateResponse)
+
+    const schemaPrivateResponse =
+      'PRIVATE_SCHEMA_RESPONSE_DO_NOT_EMIT_902c45'
+    const schemaError = captureDecisionError(JSON.stringify({
+      kind: 'send_message',
+      privateSummary: schemaPrivateResponse,
+    }))
+    expect(schemaError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_schema_invalid',
+      },
+      message: 'Assistant notification turn returned an invalid decision object.',
+    })
+    expect(JSON.stringify(schemaError)).not.toContain(schemaPrivateResponse)
+    expect(captureDecisionError(
+      '{"kind":"skip","unexpected":"value","privateSummary":"No action"}',
+    )).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_schema_invalid',
+      },
+      message: 'Assistant notification turn returned an invalid decision object.',
+    })
   })
 })
 
@@ -5160,7 +5750,7 @@ function isTraceEventWithRawType(
   )
 }
 
-test('sendAssistantNotificationLocal treats a background skip as an ordinary notification decision', async () => {
+test('sendAssistantNotificationLocal keeps generic background skip decision parsing unchanged', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-completion-'))
   try {
     const providerResult = createProviderResult({
@@ -5190,6 +5780,7 @@ test('sendAssistantNotificationLocal treats a background skip as an ordinary not
     })).resolves.toMatchObject({
       decision: {
         kind: 'skip',
+        privateSummary: 'Onboarding completion was attempted.',
       },
       response: null,
     })
@@ -5547,12 +6138,11 @@ function createSharedPlan(): AssistantTurnSharedPlan {
         bindingDelivery: null,
         channel: null,
         deliveryPolicy: 'not-requested',
-        effectiveThreadIsDirect: true,
+        threadIsDirect: true,
         explicitTarget: null,
         identityId: null,
         replyToMessageId: null,
         threadId: null,
-        threadIsDirect: null,
       },
       operatorAuthority: 'direct-operator',
     },

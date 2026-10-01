@@ -1,25 +1,22 @@
+import { createHash } from "node:crypto";
 import type {
   HostedExecutionClinicalRecordsSyncRequestedWake,
 } from "@murphai/hosted-execution/contracts";
 import {
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
-  CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
-  clinicalFhirRetrievalScopeSchema,
   clinicalFhirRetrievalSliceSchema,
   clinicalSourceSystemSchema,
   countClinicalFhirPageResources,
-  type ClinicalFhirRetrievalScope,
+  clinicalFhirPageHasIncompleteSearchOutcome,
 } from "@murphai/clinical-records";
 import {
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
-  HOSTED_CLINICAL_RECORDS_MAX_PAGES,
-  HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES,
   parseHostedClinicalRecordsFetchPageResponse,
   parseHostedClinicalRecordsReadRunResponse,
   type HostedClinicalRecordsOutcomeCounts,
   type HostedClinicalRecordsRecordOutcomeRequest,
-  type HostedClinicalRecordsAnyRunDescriptor,
+  type HostedClinicalRecordsRunDescriptor,
   type HostedClinicalRecordsRetrievalSlice,
 } from "@murphai/hosted-execution/clinical-records";
 import type {
@@ -37,12 +34,13 @@ import {
   createHostedBackgroundMaintenanceCancellation,
 } from "./background-maintenance-cancellation.ts";
 
+import { fetchPendingClinicalDocuments, stageClinicalPageDocuments } from "./clinical-records-maintenance-documents.ts";
+import { admitHostedClinicalEnrichmentWake } from "./clinical-enrichment-wake.ts";
+
 const CLINICAL_RECORDS_VAULT_MODULE_SPECIFIER =
   "@murphai/vault-usecases/clinical-records";
 
-type ClinicalFhirRetrievalWork =
-  | ClinicalFhirRetrievalScope
-  | HostedClinicalRecordsRetrievalSlice;
+type ClinicalFhirRetrievalWork = HostedClinicalRecordsRetrievalSlice;
 
 type ClinicalRecordsVaultModule = {
   clearClinicalFhirRetrievalCheckpoint(input: {
@@ -133,10 +131,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
   let checkpointIdentity: ClinicalFhirRetrievalCheckpointIdentity;
   let recoveringAuthorizationRequired = false;
   if (readResponse.status === "unavailable") {
-    if (
-      readResponse.errorCode
-      !== HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE
-    ) {
+    if (readResponse.errorCode !== HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE) {
       await vaultModule.clearClinicalFhirRetrievalCheckpoint({
         identity: input.wake,
         vaultRoot: input.vaultRoot,
@@ -169,27 +164,25 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         : {}),
       requestedScopes: run.requestedScopes,
       retrievalJobId: run.retrievalJobId,
-      retrievalScopes: readRunRetrievalScopes(run),
-      ...("retrievalProtocol" in run
-        ? {
-            retrievalProtocol: run.retrievalProtocol,
-            retrievalSlices: run.retrievalSlices.map((slice) =>
-              clinicalFhirRetrievalSliceSchema.parse(slice)
-            ),
-          }
-        : {}),
+      retrievalProtocol: run.retrievalProtocol,
+      retrievalSlices: run.retrievalSlices,
       runId: run.runId,
       sourceSystem: clinicalSourceSystemSchema.parse(run.sourceSystem),
     };
-    checkpoint = await vaultModule.readClinicalFhirRetrievalCheckpoint({
-      identity: checkpointIdentity,
-      vaultRoot: input.vaultRoot,
-    }) ?? emptyRetrievalCheckpoint(
-      checkpointIdentity.retrievalProtocol === "query-slices-v2",
-    );
+    checkpoint =
+      (await vaultModule.readClinicalFhirRetrievalCheckpoint({
+        identity: checkpointIdentity,
+        vaultRoot: input.vaultRoot,
+      })) ?? emptyRetrievalCheckpoint();
   }
 
-  const retrievalWork = readCheckpointRetrievalWork(checkpointIdentity);
+  await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
+  const fetchDocuments = () => fetchPendingClinicalDocuments({
+    checkpoint, generation: checkpointIdentity.generation, runId: checkpointIdentity.runId, port, signal: input.signal,
+    persist: () => persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule }),
+    throwIfPreempted: () => throwIfPreempted(input),
+  });
+  const retrievalWork = checkpointIdentity.retrievalSlices;
   const sourceSystem = clinicalSourceSystemSchema.parse(checkpointIdentity.sourceSystem);
   if (checkpoint.currentResourceIndex > retrievalWork.length) {
     throw new HostedClinicalRecordsRuntimeError(
@@ -206,7 +199,79 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
     throwIfPreempted(input);
   }
 
-  for (
+  const flushBatch = async () => {
+    if (checkpoint.pages.length === 0) return;
+    await fetchDocuments();
+    const page = checkpoint.pages[0]!;
+    const scope = retrievalWork.find((slice) => slice.queryScopeId === page.queryScopeId && slice.sliceId === page.sliceId);
+    if (!scope) throw new HostedClinicalRecordsRuntimeError("CLINICAL_RECORDS_SCOPE_UNAVAILABLE", "Clinical page scope is unavailable.");
+    const nextPageUrlHash = clinicalPageNextUrlHash(page.content);
+    const result = await (input.importSnapshot ?? vaultModule.importClinicalFhirSnapshot)({
+      assertCurrent: () => assertClinicalRecordsRunCurrent({ allowAuthorizationRequired: checkpoint.authorizationRequired, input, port }),
+      attachments: checkpoint.attachments,
+      documentAttachments: checkpoint.documentAttachments,
+      batch: {
+        runId: checkpointIdentity.retrievalJobId,
+        index: checkpoint.batchIndex,
+        ...(checkpoint.previousBatch ? { previous: checkpoint.previousBatch } : {}),
+        ...(nextPageUrlHash ? { continuesWith: { queryScopeId: page.queryScopeId, sliceId: page.sliceId, pageUrlHash: nextPageUrlHash } } : {}),
+      },
+      completedRetrievalSlices: [],
+      connectionId: checkpointIdentity.connectionId,
+      fetchedAt: checkpointIdentity.fetchedAt,
+      fhirBaseUrlHash: checkpointIdentity.fhirBaseUrlHash,
+      grantedScopes: checkpointIdentity.grantedScopes,
+      pages: checkpoint.pages,
+      patientIdHash: checkpointIdentity.patientIdHash,
+      ...(checkpointIdentity.providerDirectoryEntryId ? { providerDirectoryEntryId: checkpointIdentity.providerDirectoryEntryId } : {}),
+      requestedScopes: checkpointIdentity.requestedScopes,
+      retrievalJobId: `${checkpointIdentity.retrievalJobId}-batch-${checkpoint.batchIndex}`,
+      retrievalProtocol: checkpointIdentity.retrievalProtocol,
+      retrievalSlices: [scope],
+      signal: input.signal,
+      sourceSystem,
+      vaultRoot: input.vaultRoot,
+    });
+    if (checkpoint.documentAttachments.some((attachment) => attachment.status === "downloaded") || result.structuredEnrichmentSources?.length) {
+      const { enqueueClinicalEnrichment } = await import("@murphai/vault-usecases/clinical-enrichment");
+      const { jobId } = await enqueueClinicalEnrichment({
+        vaultRoot: input.vaultRoot,
+        manifestPath: result.manifestPath,
+        manifestSha256: result.manifestSha256,
+        structuredSources: result.structuredEnrichmentSources,
+      });
+      // Publish durable work before advancing the retrieval cursor. Replaying a
+      // saved batch therefore repairs a crash between evidence and admission.
+      await admitHostedClinicalEnrichmentWake({
+        vaultRoot: input.vaultRoot,
+        userId: input.wake.userId,
+        jobId,
+        occurredAt: input.wake.occurredAt,
+      });
+    }
+    checkpoint.importedCounts.createdCount += result.canonical.createdCount;
+    checkpoint.importedCounts.retractedCount += result.canonical.retractedCount;
+    checkpoint.importedCounts.skippedExistingCount += result.canonical.skippedExistingCount;
+    checkpoint.importedCounts.supersededCount += result.canonical.supersededCount;
+    checkpoint.importedCounts.executableDecisionCount += result.executableDecisionCount;
+    checkpoint.importedCounts.labResultCount += result.labResultCount;
+    checkpoint.importedCounts.rawFileCount += result.rawFileCount;
+    checkpoint.importedCounts.reviewDecisionCount += result.reviewDecisionCount;
+    checkpoint.importedCounts.incompleteRevisionCount += result.incompleteRevisionCount;
+    checkpoint.previousBatch = { manifestPath: result.manifestPath, sha256: result.manifestSha256 };
+    checkpoint.batchIndex += 1;
+    checkpoint.pages = [];
+    checkpoint.attachments = [];
+    checkpoint.documentAttachments = [];
+    checkpoint.totalBodyBytes = 0;
+    checkpoint.totalResourceCount = 0;
+    checkpoint.resourcePageStartIndex = 0;
+    await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
+    throwIfPreempted(input);
+  };
+  try {
+    await flushBatch();
+  retrieval: for (
     let resourceIndex = checkpoint.currentResourceIndex;
     resourceIndex < retrievalWork.length;
     resourceIndex += 1
@@ -226,19 +291,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
 
     while (!completed) {
       throwIfPreempted(input);
-      if (checkpoint.pageFetchCount >= HOSTED_CLINICAL_RECORDS_MAX_PAGES) {
-        return await terminalFailureAfterClearingCheckpoint({
-          checkpoint,
-          checkpointIdentity,
-          errorCode: "page_limit_exceeded",
-          input,
-          vaultModule,
-        });
-      }
-      if (
-        checkpoint.cursor
-        && checkpoint.seenCursors.includes(checkpoint.cursor)
-      ) {
+      if (checkpoint.cursor && checkpoint.seenCursors.includes(checkpoint.cursor)) {
         return await terminalFailureAfterClearingCheckpoint({
           checkpoint,
           checkpointIdentity,
@@ -254,14 +307,10 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
           cursor: checkpoint.cursor,
           generation: checkpointIdentity.generation,
           requestId: `cr-${checkpointIdentity.generation}-${resourceIndex + 1}-${checkpoint.pageFetchCount + 1}`,
-          ...(checkpointIdentity.retrievalProtocol === "query-slices-v2"
-            ? {
-                queryFingerprint: requireQueryRetrievalSlice(scope).queryFingerprint,
-                queryScopeId: requireQueryRetrievalSlice(scope).queryScopeId,
-                retrievalProtocol: checkpointIdentity.retrievalProtocol,
-                sliceId: requireQueryRetrievalSlice(scope).sliceId,
-              }
-            : {}),
+          queryFingerprint: scope.queryFingerprint,
+          queryScopeId: scope.queryScopeId,
+          retrievalProtocol: checkpointIdentity.retrievalProtocol,
+          sliceId: scope.sliceId,
           resourceType: scope.resourceType,
           runId: checkpointIdentity.runId,
         },
@@ -282,10 +331,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
             "Hosted clinical records page is temporarily unavailable.",
           );
         }
-        if (
-          response.errorCode
-          === HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE
-        ) {
+        if (response.errorCode === HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE) {
           finalizeAuthorizationRequiredCheckpoint({ checkpoint, retrievalWork });
         } else {
           checkpoint.errors.push({
@@ -309,13 +355,9 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
 
       const pageBodyBytes = Buffer.byteLength(response.body, "utf8");
       if (pageBodyBytes > CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES) {
-        return await terminalFailureAfterClearingCheckpoint({
-          checkpoint,
-          checkpointIdentity,
-          errorCode: "page_size_exceeded",
-          input,
-          vaultModule,
-        });
+        finishIncompleteRetrieval({ checkpoint, retrievalWork, code: "page_size_exceeded" });
+        await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
+        break retrieval;
       }
       let pageResourceCount: number;
       try {
@@ -330,30 +372,15 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         });
       }
       if (pageResourceCount > CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE) {
-        return await terminalFailureAfterClearingCheckpoint({
+        finishIncompleteRetrieval({
           checkpoint,
-          checkpointIdentity,
-          errorCode: "page_resource_limit_exceeded",
-          input,
-          vaultModule,
+          retrievalWork,
+          code: "page_resource_limit_exceeded",
         });
+        await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
+        break retrieval;
       }
-      if (
-        checkpoint.totalResourceCount + pageResourceCount
-        > CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES
-      ) {
-        return await terminalFailureAfterClearingCheckpoint({
-          checkpoint,
-          checkpointIdentity,
-          errorCode: "snapshot_resource_limit_exceeded",
-          input,
-          vaultModule,
-        });
-      }
-      if (
-        response.pageUrlHash
-        && checkpoint.seenPageUrlHashes.includes(response.pageUrlHash)
-      ) {
+      if (response.pageUrlHash && checkpoint.seenPageUrlHashes.includes(response.pageUrlHash)) {
         return await terminalFailureAfterClearingCheckpoint({
           checkpoint,
           checkpointIdentity,
@@ -362,63 +389,49 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
           vaultModule,
         });
       }
-      checkpoint.totalResourceCount += pageResourceCount;
-      checkpoint.totalBodyBytes += pageBodyBytes;
-      if (checkpoint.totalBodyBytes > HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES) {
-        return await terminalFailureAfterClearingCheckpoint({
-          checkpoint,
-          checkpointIdentity,
-          errorCode: "snapshot_size_exceeded",
-          input,
-          vaultModule,
+      if (
+        clinicalFhirPageHasIncompleteSearchOutcome(response.body, { ignorePatientAccessNotices: true }) &&
+        !checkpoint.errors.some(
+          (error) =>
+            error.code === "provider-search-incomplete" &&
+            error.resourceType === scope.resourceType &&
+            error.queryScopeId === retrievalIdentityFields(scope).queryScopeId &&
+            error.sliceId === retrievalIdentityFields(scope).sliceId,
+        )
+      ) {
+        checkpoint.errors.push({
+          code: "provider-search-incomplete",
+          message: "The provider reported incomplete search results.",
+          ...retrievalIdentityFields(scope),
+          resourceType: scope.resourceType,
         });
       }
+      checkpoint.totalResourceCount += pageResourceCount;
+      checkpoint.totalBodyBytes += pageBodyBytes;
       checkpoint.pages.push({
         content: response.body,
-        ...(response.nextPageUrlHash
-          ? { nextPageUrlHash: response.nextPageUrlHash }
-          : {}),
         ...(response.pageUrlHash ? { pageUrlHash: response.pageUrlHash } : {}),
         ...retrievalIdentityFields(scope),
         resourceType: scope.resourceType,
       });
+      stageClinicalPageDocuments({ body: response.body, checkpoint, documents: response.documents });
       if (requestedCursor) {
         checkpoint.seenCursors.push(requestedCursor);
       }
       if (response.pageUrlHash) {
         checkpoint.seenPageUrlHashes.push(response.pageUrlHash);
       }
-      if (
-        response.nextPageUrlHash
-        && checkpoint.seenPageUrlHashes.includes(response.nextPageUrlHash)
-      ) {
-        return await terminalFailureAfterClearingCheckpoint({
-          checkpoint,
-          checkpointIdentity,
-          errorCode: "cursor_cycle",
-          input,
-          vaultModule,
-        });
-      }
       checkpoint.cursor = response.nextCursor;
       completed = checkpoint.cursor === null;
       if (completed) {
-        if (!checkpoint.completedResourceTypes.includes(scope.resourceType)) {
-          checkpoint.completedResourceTypes.push(scope.resourceType);
-        }
-        if (checkpoint.completedRetrievalSlices) {
-          const slice = requireQueryRetrievalSlice(scope);
-          checkpoint.completedRetrievalSlices.push({
-            queryScopeId: slice.queryScopeId,
-            sliceId: slice.sliceId,
-          });
-        }
+        checkpoint.completedRetrievalSlices.push(retrievalIdentityFields(scope));
         checkpoint.currentResourceIndex = resourceIndex + 1;
         checkpoint.resourcePageStartIndex = checkpoint.pages.length;
         checkpoint.seenCursors = [];
         checkpoint.seenPageUrlHashes = [];
       }
       await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
+      await flushBatch();
       throwIfPreempted(input);
     }
 
@@ -427,59 +440,15 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
     }
   }
 
-  throwIfPreempted(input);
-  const importSnapshot = input.importSnapshot ?? vaultModule.importClinicalFhirSnapshot;
-  let result: ClinicalFhirSnapshotImportResult;
-  try {
-    result = await importSnapshot({
-      assertCurrent: async () => {
-        await assertClinicalRecordsRunCurrent({
-          allowAuthorizationRequired: checkpoint.authorizationRequired,
-          input,
-          port,
-        });
-      },
-      completedResourceTypes: checkpoint.completedResourceTypes,
-      ...(checkpoint.completedRetrievalSlices
-        ? { completedRetrievalSlices: checkpoint.completedRetrievalSlices }
-        : {}),
-      connectionId: checkpointIdentity.connectionId,
-      ...(checkpoint.errors.length > 0 ? { errors: checkpoint.errors } : {}),
-      fetchedAt: checkpointIdentity.fetchedAt,
-      fhirBaseUrlHash: checkpointIdentity.fhirBaseUrlHash,
-      grantedScopes: checkpointIdentity.grantedScopes,
-      pages: checkpoint.pages,
-      patientIdHash: checkpointIdentity.patientIdHash,
-      ...(checkpointIdentity.providerDirectoryEntryId
-        ? { providerDirectoryEntryId: checkpointIdentity.providerDirectoryEntryId }
-        : {}),
-      requestedScopes: checkpointIdentity.requestedScopes,
-      retrievalJobId: checkpointIdentity.retrievalJobId,
-      retrievalScopes: retrievalWork,
-      ...(checkpointIdentity.retrievalProtocol === "query-slices-v2"
-        ? {
-            retrievalProtocol: checkpointIdentity.retrievalProtocol,
-            retrievalSlices: checkpointIdentity.retrievalSlices,
-          }
-        : {}),
-      signal: input.signal,
-      sourceSystem,
-      vaultRoot: input.vaultRoot,
-    });
   } catch (error) {
     if (isClinicalFhirSnapshotRejectedError(error)) {
       await clearRetrievalCheckpoint({ checkpointIdentity, input, vaultModule });
       const failure = terminalFailure({
-        counts: fetchCounts(
-          checkpoint.successfulPageCount,
-          checkpoint.completedResourceTypes.length,
-        ),
+        counts: checkpointOutcomeCounts(checkpoint, checkpointIdentity),
         checkpointIdentity,
         errorCode: "snapshot_rejected",
       });
-      return checkpoint.authorizationRequired
-        ? { ...failure, outcome: null }
-        : failure;
+      return failure;
     }
     if (error instanceof HostedClinicalRecordsRunNoLongerCurrentError) {
       await clearRetrievalCheckpoint({ checkpointIdentity, input, vaultModule });
@@ -492,28 +461,30 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
     throw error;
   }
   await clearRetrievalCheckpoint({ checkpointIdentity, input, vaultModule });
+  const { incompleteRevisionCount, ...importedCounts } = checkpoint.importedCounts;
   const counts: HostedClinicalRecordsOutcomeCounts = {
-    createdCount: result.canonical.createdCount,
-    executableDecisionCount: result.executableDecisionCount,
+    ...importedCounts,
     fetchedPageCount: checkpoint.successfulPageCount,
-    fetchedResourceFamilyCount: checkpoint.completedResourceTypes.length,
-    rawFileCount: result.rawFileCount,
-    retractedCount: result.canonical.retractedCount,
-    reviewDecisionCount: result.reviewDecisionCount,
-    skippedExistingCount: result.canonical.skippedExistingCount,
-    supersededCount: result.canonical.supersededCount,
+    fetchedResourceFamilyCount: completedResourceFamilyCount(checkpoint, checkpointIdentity),
   };
-  const status = checkpoint.errors.length > 0 ? "partial" : "completed";
-  const outcome = checkpoint.authorizationRequired
-    ? null
-    : {
-      counts,
-      ...(checkpoint.errors[0] ? { errorCode: checkpoint.errors[0].code } : {}),
-      generation: checkpointIdentity.generation,
-      ...retrievalOutcomeIdentity(checkpointIdentity),
-      runId: checkpointIdentity.runId,
-      status,
-    } satisfies HostedClinicalRecordsRecordOutcomeRequest;
+  const status =
+    checkpoint.errors.length > 0 || incompleteRevisionCount > 0
+      ? "partial"
+      : "completed";
+  const outcome = {
+    counts,
+    ...(checkpoint.authorizationRequired
+      ? { errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE }
+      : checkpoint.errors[0]
+        ? { errorCode: checkpoint.errors[0].code }
+        : incompleteRevisionCount > 0
+          ? { errorCode: "incomplete-source-revision" }
+          : {}),
+    generation: checkpointIdentity.generation,
+    ...retrievalOutcomeIdentity(checkpointIdentity),
+    runId: checkpointIdentity.runId,
+    status,
+  } satisfies HostedClinicalRecordsRecordOutcomeRequest;
   return { counts, outcome, status };
 }
 
@@ -523,13 +494,15 @@ async function loadClinicalRecordsVaultModule(): Promise<ClinicalRecordsVaultMod
   );
 }
 
-function emptyRetrievalCheckpoint(
-  queryAware: boolean,
-): ClinicalFhirRetrievalCheckpoint {
+function emptyRetrievalCheckpoint(): ClinicalFhirRetrievalCheckpoint {
   return {
+    batchIndex: 0,
+    importedCounts: { createdCount: 0, executableDecisionCount: 0, labResultCount: 0, rawFileCount: 0, retractedCount: 0, reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0, incompleteRevisionCount: 0 },
+    attachments: [],
+    documentAttachments: [],
+    pendingDocuments: [],
     authorizationRequired: false,
-    completedResourceTypes: [],
-    ...(queryAware ? { completedRetrievalSlices: [] } : {}),
+    completedRetrievalSlices: [],
     currentResourceIndex: 0,
     cursor: null,
     errors: [],
@@ -551,78 +524,39 @@ function finalizeAuthorizationRequiredCheckpoint(input: {
   if (input.checkpoint.authorizationRequired) {
     return;
   }
-  const currentResourceIndex = input.checkpoint.currentResourceIndex;
-  const currentScope = input.retrievalWork[currentResourceIndex];
-  input.checkpoint.pages.splice(input.checkpoint.resourcePageStartIndex);
   input.checkpoint.authorizationRequired = true;
+  finishIncompleteRetrieval({ ...input, code: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE });
+}
+
+function finishIncompleteRetrieval(input: {
+  checkpoint: ClinicalFhirRetrievalCheckpoint;
+  retrievalWork: readonly ClinicalFhirRetrievalWork[];
+  code: string;
+}): void {
+  const remaining = input.retrievalWork.slice(input.checkpoint.currentResourceIndex);
+
   input.checkpoint.currentResourceIndex = input.retrievalWork.length;
   input.checkpoint.cursor = null;
   input.checkpoint.resourcePageStartIndex = input.checkpoint.pages.length;
   input.checkpoint.seenCursors = [];
   input.checkpoint.seenPageUrlHashes = [];
-  if (!currentScope) {
-    return;
-  }
-  input.checkpoint.errors.push({
-    code: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
-    message: "Provider did not return this FHIR resource family.",
-    ...retrievalIdentityFields(currentScope),
-    resourceType: currentScope.resourceType,
-  });
-  for (
-    const remainingScope of input.retrievalWork.slice(currentResourceIndex + 1)
-  ) {
+  for (const [index, scope] of remaining.entries()) {
     input.checkpoint.errors.push({
-      code: "not-attempted",
-      message: "Retrieval was not attempted after provider authorization ended.",
-      ...retrievalIdentityFields(remainingScope),
-      resourceType: remainingScope.resourceType,
+      code: index === 0 ? input.code : "not-attempted",
+      message: index === 0 ? "Provider retrieval could not finish this query." : "Retrieval stopped before this query.",
+      ...retrievalIdentityFields(scope),
+      resourceType: scope.resourceType,
     });
   }
 }
 
-function readRunRetrievalScopes(
-  run: HostedClinicalRecordsAnyRunDescriptor,
-): ClinicalFhirRetrievalScope[] {
-  const scopes = "retrievalProtocol" in run
-    ? run.retrievalSlices.map((slice) => {
-        const { queryScopeId: _queryScopeId, sliceId: _sliceId, ...scope } = slice;
-        return scope;
-      })
-    : run.retrievalScopes;
-  return scopes.map((scope) => clinicalFhirRetrievalScopeSchema.parse(scope));
+function retrievalIdentityFields(scope: ClinicalFhirRetrievalWork): { queryScopeId: string; sliceId: string } {
+  return { queryScopeId: scope.queryScopeId, sliceId: scope.sliceId };
 }
 
-function readCheckpointRetrievalWork(
-  identity: ClinicalFhirRetrievalCheckpointIdentity,
-): ClinicalFhirRetrievalWork[] {
-  return identity.retrievalProtocol === "query-slices-v2"
-    ? (identity.retrievalSlices ?? []).map((slice) =>
-        clinicalFhirRetrievalSliceSchema.parse(slice)
-      )
-    : identity.retrievalScopes.map((scope) =>
-        clinicalFhirRetrievalScopeSchema.parse(scope)
-      );
-}
-
-function requireQueryRetrievalSlice(
-  scope: ClinicalFhirRetrievalWork,
-): HostedClinicalRecordsRetrievalSlice {
-  if (!("queryScopeId" in scope)) {
-    throw new HostedClinicalRecordsRuntimeError(
-      "CLINICAL_RECORDS_QUERY_SCOPE_MISSING",
-      "Hosted clinical records query-aware retrieval identity is unavailable.",
-    );
-  }
-  return scope;
-}
-
-function retrievalIdentityFields(
-  scope: ClinicalFhirRetrievalWork,
-): { queryScopeId: string; sliceId: string } | Record<string, never> {
-  return "queryScopeId" in scope
-    ? { queryScopeId: scope.queryScopeId, sliceId: scope.sliceId }
-    : {};
+function completedResourceFamilyCount(checkpoint: ClinicalFhirRetrievalCheckpoint, identity: ClinicalFhirRetrievalCheckpointIdentity): number {
+  const completed = new Set(checkpoint.completedRetrievalSlices.map((slice) => `${slice.queryScopeId}\n${slice.sliceId}`));
+  return new Set(identity.retrievalSlices.filter((slice) => completed.has(`${slice.queryScopeId}\n${slice.sliceId}`)).map((slice) => slice.resourceType)).size;
 }
 
 function unavailableClinicalRecordsSync(): HostedClinicalRecordsSyncMetrics {
@@ -669,10 +603,7 @@ async function terminalFailureAfterClearingCheckpoint(input: {
 }): Promise<HostedClinicalRecordsSyncMetrics> {
   await clearRetrievalCheckpoint(input);
   return terminalFailure({
-    counts: fetchCounts(
-      input.checkpoint.successfulPageCount,
-      input.checkpoint.completedResourceTypes.length,
-    ),
+    counts: checkpointOutcomeCounts(input.checkpoint, input.checkpointIdentity),
     checkpointIdentity: input.checkpointIdentity,
     errorCode: input.errorCode,
   });
@@ -724,7 +655,7 @@ class HostedClinicalRecordsRunNoLongerCurrentError extends Error {
 }
 
 function assertRunMatchesWake(
-  run: HostedClinicalRecordsAnyRunDescriptor,
+  run: HostedClinicalRecordsRunDescriptor,
   wake: HostedExecutionClinicalRecordsSyncRequestedWake,
 ): void {
   if (run.runId !== wake.runId || run.generation !== wake.generation) {
@@ -739,14 +670,13 @@ function throwIfPreempted(input: {
   signal: AbortSignal | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
 }): void {
-  input.signal?.throwIfAborted();
-  if (input.shouldYieldClinicalRecords?.() !== true) {
-    return;
+  if (input.shouldYieldClinicalRecords?.() === true) {
+    throw new HostedClinicalRecordsRuntimeError(
+      "CLINICAL_RECORDS_FOREGROUND_PREEMPTED",
+      "Hosted clinical records sync yielded to foreground work.",
+    );
   }
-  throw new HostedClinicalRecordsRuntimeError(
-    "CLINICAL_RECORDS_FOREGROUND_PREEMPTED",
-    "Hosted clinical records sync yielded to foreground work.",
-  );
+  input.signal?.throwIfAborted();
 }
 
 function terminalFailure(input: {
@@ -754,6 +684,7 @@ function terminalFailure(input: {
   counts: HostedClinicalRecordsOutcomeCounts;
   errorCode: string;
 }): HostedClinicalRecordsSyncMetrics {
+  const status = input.counts.rawFileCount > 0 ? "partial" : "failed";
   return {
     counts: input.counts,
     outcome: {
@@ -762,9 +693,9 @@ function terminalFailure(input: {
       generation: input.checkpointIdentity.generation,
       ...retrievalOutcomeIdentity(input.checkpointIdentity),
       runId: input.checkpointIdentity.runId,
-      status: "failed",
+      status,
     },
-    status: "failed",
+    status,
   };
 }
 
@@ -773,14 +704,7 @@ function retrievalOutcomeIdentity(
 ): {
   retrievalProtocol: "query-slices-v2";
   retrievalSlices: Array<{ queryScopeId: string; sliceId: string }>;
-} | Record<string, never> {
-  if (identity.retrievalProtocol !== "query-slices-v2") return {};
-  if (!identity.retrievalSlices || identity.retrievalSlices.length === 0) {
-    throw new HostedClinicalRecordsRuntimeError(
-      "CLINICAL_RECORDS_QUERY_SCOPE_MISSING",
-      "Hosted clinical records query-aware retrieval identity is unavailable.",
-    );
-  }
+} {
   return {
     retrievalProtocol: identity.retrievalProtocol,
     retrievalSlices: identity.retrievalSlices.map((slice) => ({
@@ -798,14 +722,12 @@ function isClinicalFhirSnapshotRejectedError(error: unknown): error is Error & {
     && error.code === "CLINICAL_FHIR_SNAPSHOT_REJECTED";
 }
 
-function fetchCounts(
-  fetchedPageCount: number,
-  fetchedResourceFamilyCount: number,
-): HostedClinicalRecordsOutcomeCounts {
+function checkpointOutcomeCounts(checkpoint: ClinicalFhirRetrievalCheckpoint, identity: ClinicalFhirRetrievalCheckpointIdentity): HostedClinicalRecordsOutcomeCounts {
+  const { incompleteRevisionCount: _incompleteRevisionCount, ...counts } = checkpoint.importedCounts;
   return {
-    ...emptyCounts(),
-    fetchedPageCount,
-    fetchedResourceFamilyCount,
+    ...counts,
+    fetchedPageCount: checkpoint.successfulPageCount,
+    fetchedResourceFamilyCount: completedResourceFamilyCount(checkpoint, identity),
   };
 }
 
@@ -835,4 +757,15 @@ class HostedClinicalRecordsRuntimeError extends Error {
     this.code = code;
     this.name = "HostedClinicalRecordsRuntimeError";
   }
+}
+
+function clinicalPageNextUrlHash(content: string): string | undefined {
+  const page: unknown = JSON.parse(content);
+  if (!page || typeof page !== "object" || !("link" in page) || !Array.isArray(page.link)) return undefined;
+  for (const link of page.link) {
+    if (link && typeof link === "object" && "relation" in link && link.relation === "next" && "url" in link && typeof link.url === "string") {
+      return createHash("sha256").update(link.url, "utf8").digest("hex");
+    }
+  }
+  return undefined;
 }

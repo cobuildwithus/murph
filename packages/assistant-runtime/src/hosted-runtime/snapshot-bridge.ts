@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
+import { resolveWorkspaceDurableRoot, resolveWorkspaceScratchRoot } from "./workspace-paths.ts";
 
 import {
   HostedRuntimeCheckpointInterruptedByWakeError,
@@ -11,8 +12,10 @@ import {
   withCanonicalWriteLock,
 } from "@murphai/core";
 import {
+  AssistantGeneratedDeliveryResiduePruneError,
   pruneAssistantGeneratedDeliveryResidue,
   pruneAssistantRuntimeResidue,
+  type AssistantGeneratedDeliveryResiduePruneErrorCode,
   type AssistantGeneratedDeliveryResiduePruneResult,
   type AssistantRuntimeResiduePruneResult,
 } from "@murphai/assistant-engine/assistant-runtime-residue";
@@ -20,7 +23,6 @@ import {
   collectHostedWorkspaceSnapshotArchivePlan,
   createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics,
   type HostedWorkspaceSnapshotArchiveEntry,
-  type HostedWorkspaceSnapshotArchiveExtraPath,
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 import {
@@ -39,6 +41,7 @@ import {
 import {
   type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
+import { isHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointRequest,
@@ -75,11 +78,12 @@ import {
   pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks,
 } from "./snapshot-cleanup.ts";
 import {
-  clearLegacyWorkspaceRefsForV2SnapshotMaterialization,
-  materializeLegacyWorkspaceRefsForV2Snapshot,
-  prepareLegacyWorkspaceRefsForV2SnapshotMaterialization,
-  type LegacyWorkspaceRefsForV2SnapshotMaterializationPlan,
-} from "./legacy-snapshot-materialization.ts";
+  publishHostedWorkspaceMediaReferencesForSnapshot,
+  type PublishHostedWorkspaceMediaReferencesResult,
+} from "./media-references.ts";
+import type {
+  HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+} from "./workspace-runner.ts";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
@@ -161,6 +165,10 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
     createCheckpointSnapshot: async (checkpointInput, context) => {
       await input.waitForBackgroundAssistantWork(context?.signal ?? null);
       return await createHostedWorkspaceBridgeCheckpointSnapshot({
+        currentSnapshotRef: resolveHostedWorkspaceBridgeCurrentSnapshotRef(
+          checkpointInput,
+          input.request,
+        ),
         platform: input.platform,
         readCurrentLease,
         request: {
@@ -183,6 +191,16 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
             ? checkpointInput.inboxMediaRetentionWakeAt ?? null
             : input.request.workspace?.inboxMediaRetentionWakeAt ?? null,
           leaseGeneration: input.request.leaseGeneration,
+          ...(checkpointInput.systemMailboxProgressGeneration === undefined
+            ? {}
+            : {
+                nextDefaultProcessingWakeAt:
+                  checkpointInput.nextDefaultProcessingWakeAt ?? null,
+                nextDefaultProcessingWakeReason:
+                  checkpointInput.nextDefaultProcessingWakeReason ?? null,
+                systemMailboxProgressGeneration:
+                  checkpointInput.systemMailboxProgressGeneration,
+              }),
           nextWakeAt: Object.hasOwn(checkpointInput, "nextWakeAt")
             ? checkpointInput.nextWakeAt ?? null
             : null,
@@ -235,7 +253,18 @@ export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
   };
 }
 
+function resolveHostedWorkspaceBridgeCurrentSnapshotRef(
+  checkpointInput: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+  request: HostedWorkspaceInvocationRequest,
+): HostedExecutionSnapshotRef | null {
+  if (Object.hasOwn(checkpointInput, "currentSnapshotRef")) {
+    return checkpointInput.currentSnapshotRef ?? null;
+  }
+  return request.workspace?.snapshotRef ?? null;
+}
+
 async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
+  currentSnapshotRef: HostedExecutionSnapshotRef | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
@@ -252,6 +281,9 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
   const request = requireHostedWorkspaceBridgeSnapshotCheckpointRequest(input.request);
+  if (input.currentSnapshotRef !== null && !isHostedWorkspaceSnapshotV2Ref(input.currentSnapshotRef)) {
+    throw new Error("Hosted workspace checkpoint requires a v2 snapshot reference.");
+  }
   return await withCanonicalWriteLock(input.vaultRoot, async () => {
     return await createHostedWorkspaceV2Snapshot({
       ...input,
@@ -289,6 +321,7 @@ type HostedWorkspaceSnapshotStage =
   "plan" | "session" | "archive" | "upload" | "checkpoint";
 
 interface HostedWorkspaceBridgeV2SnapshotInput {
+  currentSnapshotRef: HostedExecutionSnapshotRef | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
@@ -314,7 +347,6 @@ async function createHostedWorkspaceV2Snapshot(
 
   let snapshotRef: HostedWorkspaceSnapshotV2Ref;
   let checkpoint: HostedWorkspaceCheckpointResponse | undefined;
-  let legacyMaterialization: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan | null = null;
   let encryptedByteSize = 0;
   let workspaceSnapshotFileCount = 0;
   let workspaceSnapshotPlainBytes = 0;
@@ -330,18 +362,13 @@ async function createHostedWorkspaceV2Snapshot(
     | null = null;
   let assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null = null;
   let assistantRuntimeGeneratedDeliveryPruneFailed = false;
+  let assistantRuntimeGeneratedDeliveryPruneErrorCode:
+    | AssistantGeneratedDeliveryResiduePruneErrorCode
+    | "unknown"
+    | null = null;
   let snapshotFailureObserved = false;
   const snapshotTimings: HostedWorkspaceSnapshotTimingDetails = {};
   try {
-    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-    const legacyMaterializationPlan =
-      await prepareLegacyWorkspaceRefsForV2SnapshotMaterialization({
-        artifactStore: input.platform.artifactStore,
-        platform: input.platform,
-        signal: input.signal,
-        vaultRoot: input.vaultRoot,
-      });
-    legacyMaterialization = legacyMaterializationPlan;
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     startedAt = Date.now();
     snapshotStage = "session";
@@ -363,6 +390,9 @@ async function createHostedWorkspaceV2Snapshot(
       key: "snapshotSessionStartElapsedMs",
       run: async () => await workspaceSnapshotPort.startSnapshotSession({
         expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
+        ...(input.currentSnapshotRef === null || isHostedWorkspaceSnapshotV2Ref(input.currentSnapshotRef)
+          ? { replacedSnapshotRef: input.currentSnapshotRef }
+          : {}),
         inboxMediaRetentionWakeAt: input.request.inboxMediaRetentionWakeAt,
         nextWakeAt: input.request.nextWakeAt,
         nextWakeReason: input.request.nextWakeReason,
@@ -394,14 +424,6 @@ async function createHostedWorkspaceV2Snapshot(
       });
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-    await materializeLegacyWorkspaceRefsForV2Snapshot({
-      artifactStore: input.platform.artifactStore,
-      operatorHomeRoot,
-      plan: legacyMaterializationPlan,
-      scratchRoot: resolveWorkspaceScratchRoot(input.vaultRoot),
-      signal: input.signal,
-      vaultRoot: input.vaultRoot,
-    });
     try {
       terminalWriteOperationPruneResult = await pruneTerminalWriteOperationRecords({
         checkpointedAfter: input.previousWorkspaceCheckpointedAt,
@@ -449,11 +471,21 @@ async function createHostedWorkspaceV2Snapshot(
         assistantGeneratedDeliveryPruneResult.generatedDeliveryFilesPruned >
           0 ||
         assistantGeneratedDeliveryPruneResult
+          .generatedDeliveryActiveFilesMissing > 0 ||
+        assistantGeneratedDeliveryPruneResult
+          .generatedDeliveryNestedEntriesRetained > 0 ||
+        assistantGeneratedDeliveryPruneResult
           .generatedDeliveryCleanupSkippedUntrustedOutbox
       ) {
         const generatedDeliveryCleanupSkipped =
           assistantGeneratedDeliveryPruneResult
             .generatedDeliveryCleanupSkippedUntrustedOutbox;
+        const generatedDeliveryActiveFilesMissing =
+          assistantGeneratedDeliveryPruneResult
+            .generatedDeliveryActiveFilesMissing > 0;
+        const generatedDeliveryNestedEntriesRetained =
+          assistantGeneratedDeliveryPruneResult
+            .generatedDeliveryNestedEntriesRetained > 0;
         emitHostedExecutionStructuredLog({
           component: "runner",
           details: {
@@ -462,10 +494,19 @@ async function createHostedWorkspaceV2Snapshot(
             ),
             snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
           },
-          level: generatedDeliveryCleanupSkipped ? "warn" : "info",
+          level:
+            generatedDeliveryCleanupSkipped ||
+            generatedDeliveryActiveFilesMissing ||
+            generatedDeliveryNestedEntriesRetained
+              ? "warn"
+              : "info",
           message: generatedDeliveryCleanupSkipped
             ? "Hosted workspace generated-delivery cleanup retained files because outbox inventory was untrusted."
-            : "Hosted workspace snapshot pruned assistant generated-delivery residue.",
+            : generatedDeliveryActiveFilesMissing
+              ? "Hosted workspace generated-delivery cleanup found active references without staging files."
+              : generatedDeliveryNestedEntriesRetained
+                ? "Hosted workspace generated-delivery cleanup retained legacy nested entries."
+                : "Hosted workspace snapshot pruned assistant generated-delivery residue.",
           phase: "checkpoint",
           userId: input.userId,
         });
@@ -473,10 +514,15 @@ async function createHostedWorkspaceV2Snapshot(
     } catch (cleanupError) {
       assertHostedWorkspaceSnapshotConstructionLive(input.signal);
       assistantRuntimeGeneratedDeliveryPruneFailed = true;
+      assistantRuntimeGeneratedDeliveryPruneErrorCode =
+        cleanupError instanceof AssistantGeneratedDeliveryResiduePruneError
+          ? cleanupError.code
+          : "unknown";
       emitHostedExecutionStructuredLog({
         component: "runner",
         details: {
           assistantRuntimeGeneratedDeliveryPruneFailed: true,
+          assistantRuntimeGeneratedDeliveryPruneErrorCode,
           snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
         },
         error: cleanupError,
@@ -536,27 +582,37 @@ async function createHostedWorkspaceV2Snapshot(
       });
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-    const legacySnapshotExtraFiles: HostedWorkspaceSnapshotArchiveExtraPath[] = [];
-    for (const file of legacyMaterializationPlan.skippedInlineFiles) {
-      if (file.root === "operator-home" || file.root === "vault") {
-        legacySnapshotExtraFiles.push({
-          path: file.path,
-          root: file.root,
-        });
-      }
-    }
+    const mediaReferences =
+      await publishHostedWorkspaceMediaReferencesForLoggedSnapshot({
+        platform: input.platform,
+        signal: input.signal,
+        userId: input.userId,
+        vaultRoot: input.vaultRoot,
+      });
     const encrypted = await runHostedWorkspaceSnapshotMeasuredStep({
       key: "snapshotArchiveBuildElapsedMs",
       run: async () => {
+        assertHostedWorkspaceSnapshotConstructionLive(input.signal);
         const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
           codexHomeSnapshotHashSecret: input.snapshotDiagnosticsHashSecret,
           durableRoot,
-          extraFiles: legacySnapshotExtraFiles,
+          excludedVaultPaths: mediaReferences.excludedVaultPaths,
           operatorHomeRoot,
           signal: input.signal,
           vaultRoot: input.vaultRoot,
         });
         assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+        // A replacement must retain the canonical vault, even if a future
+        // inventory regression returns a structurally valid operator-only plan.
+        // A first bootstrap has no prior snapshot to destroy.
+        if (input.currentSnapshotRef !== null && !archivePlan.entries.some((entry) =>
+          entry.root === "vault" && entry.relativePath === "vault.json"
+          && entry.kind === "file" && (entry.size ?? 0) > 0
+        )) {
+          throw Object.assign(new Error("Hosted workspace replacement snapshot is missing canonical vault metadata."), {
+            code: "workspace_snapshot_vault_missing",
+          });
+        }
         workspaceSnapshotSizeDiagnostics =
           createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics({
             archivePlan,
@@ -688,26 +744,7 @@ async function createHostedWorkspaceV2Snapshot(
     });
     snapshotRef = completed.snapshotRef;
     checkpoint = completed.checkpoint;
-    try {
-      await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
-        plan: legacyMaterializationPlan,
-        vaultRoot: input.vaultRoot,
-      });
-      localWorkspaceCleanForWarmReuse = true;
-    } catch (clearError) {
-      localWorkspaceCleanForWarmReuse = false;
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
-        },
-        error: clearError,
-        level: "warn",
-        message: "Hosted workspace legacy snapshot manifest cleanup failed.",
-        phase: "checkpoint",
-        userId: input.userId,
-      });
-    }
+    localWorkspaceCleanForWarmReuse = true;
   } catch (error) {
     snapshotFailureObserved = true;
     const activeInterruptionError = input.signal?.aborted === true
@@ -785,7 +822,6 @@ async function createHostedWorkspaceV2Snapshot(
         ...createAssistantRuntimeResiduePruneLogDetails(
           assistantRuntimeResiduePruneResult,
         ),
-        ...createHostedWorkspaceSnapshotPlanLogDetails(legacyMaterialization),
         ...snapshotTimings,
         ...(workspaceSnapshotFileCount > 0
           ? { workspaceSnapshotFileCount }
@@ -867,11 +903,11 @@ async function createHostedWorkspaceV2Snapshot(
 
   await writeHostedCheckpointSnapshotFinishedLog({
     assistantGeneratedDeliveryPruneResult,
+    assistantRuntimeGeneratedDeliveryPruneErrorCode,
     assistantRuntimeGeneratedDeliveryPruneFailed,
     assistantRuntimeResiduePruneResult,
     encryptedByteSize,
     fileCount: workspaceSnapshotFileCount,
-    legacyMaterialization,
     leaseCheckCount,
     plainByteSize: workspaceSnapshotPlainBytes,
     platform: input.platform,
@@ -1012,6 +1048,9 @@ function recordHostedWorkspaceSnapshotOptionalTiming(
 function createHostedCheckpointSnapshotRequestLogDetails(
   request: HostedWorkspaceSnapshotCheckpointRequest,
 ): HostedRuntimeRedactedJson {
+  const nowMs = Date.now();
+  const wake = describeHostedCheckpointWake(request.nextWakeAt, nowMs);
+  const defaultWake = describeHostedCheckpointWake(request.nextDefaultProcessingWakeAt, nowMs);
   return {
     checkpointReason: request.reason,
     handledConversationFrontierSelected:
@@ -1023,6 +1062,12 @@ function createHostedCheckpointSnapshotRequestLogDetails(
       : {}),
     nextWakeAtPresent: request.nextWakeAt != null,
     nextWakeReasonPresent: request.nextWakeReason != null,
+    nextWakeState: wake.state,
+    nextWakeOffsetMs: wake.offsetMs,
+    nextDefaultProcessingWakeState: defaultWake.state,
+    nextDefaultProcessingWakeOffsetMs: defaultWake.offsetMs,
+    nextDefaultProcessingWakeReasonPresent: request.nextDefaultProcessingWakeReason != null,
+    systemMailboxProgressGenerationPresent: request.systemMailboxProgressGeneration != null,
     redactedStatusPresent: request.redactedStatus !== null,
     ...(request.runtimeWakePendingAtCheckpoint === undefined
       ? {}
@@ -1030,6 +1075,23 @@ function createHostedCheckpointSnapshotRequestLogDetails(
           runtimeWakePendingAtCheckpoint:
             request.runtimeWakePendingAtCheckpoint,
         }),
+  };
+}
+
+function describeHostedCheckpointWake(
+  wakeAt: string | null | undefined,
+  nowMs: number,
+): {
+  state: "omitted" | "none" | "invalid" | "due" | "future";
+  offsetMs: number | null;
+} {
+  if (wakeAt === undefined) return { state: "omitted", offsetMs: null };
+  if (wakeAt === null) return { state: "none", offsetMs: null };
+  const wakeMs = Date.parse(wakeAt);
+  if (!Number.isFinite(wakeMs)) return { state: "invalid", offsetMs: null };
+  return {
+    state: wakeMs <= nowMs ? "due" : "future",
+    offsetMs: wakeMs - nowMs,
   };
 }
 
@@ -1231,21 +1293,6 @@ function createHostedWorkspaceSnapshotSizeDiagnosticLogDetails(
   };
 }
 
-function createHostedWorkspaceSnapshotPlanLogDetails(
-  plan: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan | null,
-): HostedRuntimeRedactedJson {
-  if (!plan) {
-    return {};
-  }
-
-  return {
-    currentSnapshotRefPresent: plan.currentSnapshotRefPresent,
-    legacyBundleRefPresent: plan.legacyBundleRefPresent,
-    preservedInlineFileCount: plan.preservedInlineFileCount,
-    skippedInlineFileCount: plan.skippedInlineFileCount,
-  };
-}
-
 function createTerminalWriteOperationPruneLogDetails(
   result: PruneTerminalWriteOperationRecordsResult | null,
 ): HostedRuntimeRedactedJson {
@@ -1329,14 +1376,27 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
     !result ||
     (
       result.generatedDeliveryFilesPruned === 0 &&
+      result.generatedDeliveryFilesScanned === 0 &&
+      result.generatedDeliveryActiveFilesMissing === 0 &&
+      result.generatedDeliveryNestedEntriesRetained === 0 &&
       !result.generatedDeliveryCleanupSkippedUntrustedOutbox
     )
   ) {
     return {};
   }
   return {
+    assistantRuntimeGeneratedDeliveryActiveFilesMissing:
+      result.generatedDeliveryActiveFilesMissing,
+    assistantRuntimeGeneratedDeliveryActiveFilesRetained:
+      result.generatedDeliveryActiveFilesRetained,
+    assistantRuntimeGeneratedDeliveryBytesScanned:
+      result.generatedDeliveryBytesScanned,
     prunedAssistantRuntimeGeneratedDeliveryBytes:
       result.generatedDeliveryBytesPruned,
+    assistantRuntimeGeneratedDeliveryFilesScanned:
+      result.generatedDeliveryFilesScanned,
+    assistantRuntimeGeneratedDeliveryNestedEntriesRetained:
+      result.generatedDeliveryNestedEntriesRetained,
     prunedAssistantRuntimeGeneratedDeliveryFileCount:
       result.generatedDeliveryFilesPruned,
     assistantRuntimeGeneratedDeliveryCleanupSkippedUntrustedOutbox:
@@ -1346,15 +1406,56 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
   };
 }
 
+async function publishHostedWorkspaceMediaReferencesForLoggedSnapshot(input: {
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  signal: AbortSignal | null;
+  userId: string;
+  vaultRoot: string;
+}): Promise<PublishHostedWorkspaceMediaReferencesResult> {
+  const mediaReferences = await publishHostedWorkspaceMediaReferencesForSnapshot({
+    mediaStore: input.platform.mediaStore ?? null,
+    signal: input.signal,
+    vaultRoot: input.vaultRoot,
+  });
+  if (shouldLogHostedWorkspaceMediaReferencePublication(mediaReferences)) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        excludedVaultPathCount: mediaReferences.excludedVaultPaths.length,
+        mediaReferenceCount: mediaReferences.referenceCount,
+        prunedMediaCount: mediaReferences.prunedMediaCount,
+        snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+        uploadedMediaCount: mediaReferences.uploadedMediaCount,
+      },
+      level: "info",
+      message: "Hosted workspace snapshot published media references.",
+      phase: "checkpoint",
+      userId: input.userId,
+    });
+  }
+  return mediaReferences;
+}
+
+function shouldLogHostedWorkspaceMediaReferencePublication(
+  mediaReferences: PublishHostedWorkspaceMediaReferencesResult,
+): boolean {
+  return mediaReferences.referenceCount > 0
+    || mediaReferences.uploadedMediaCount > 0
+    || mediaReferences.prunedMediaCount > 0;
+}
+
 async function writeHostedCheckpointSnapshotFinishedLog(input: {
   assistantGeneratedDeliveryPruneResult:
     | AssistantGeneratedDeliveryResiduePruneResult
     | null;
   assistantRuntimeGeneratedDeliveryPruneFailed: boolean;
+  assistantRuntimeGeneratedDeliveryPruneErrorCode:
+    | AssistantGeneratedDeliveryResiduePruneErrorCode
+    | "unknown"
+    | null;
   assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null;
   encryptedByteSize: number;
   fileCount: number;
-  legacyMaterialization: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan | null;
   leaseCheckCount: number;
   plainByteSize: number;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
@@ -1370,7 +1471,11 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
   const redactedJson: HostedRuntimeRedactedJson = {
     ...createHostedCheckpointSnapshotRequestLogDetails(input.request),
     ...(input.assistantRuntimeGeneratedDeliveryPruneFailed
-      ? { assistantRuntimeGeneratedDeliveryPruneFailed: true }
+      ? {
+          assistantRuntimeGeneratedDeliveryPruneErrorCode:
+            input.assistantRuntimeGeneratedDeliveryPruneErrorCode ?? "unknown",
+          assistantRuntimeGeneratedDeliveryPruneFailed: true,
+        }
       : {}),
     browserVaultReplicaState: "omitted",
     leaseCheckCount: input.leaseCheckCount,
@@ -1405,7 +1510,6 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
           }
         : {}
     ),
-    ...createHostedWorkspaceSnapshotPlanLogDetails(input.legacyMaterialization),
     ...input.timingDetails,
     snapshotElapsedMs: input.snapshotElapsedMs,
     workspaceSnapshotEncryptedBytes: input.encryptedByteSize,
@@ -1453,22 +1557,6 @@ function assertHostedWorkspaceBridgeCheckpointLease(input: {
   if (input.lease.workspaceVersion !== input.request.expectedWorkspaceVersion) {
     throw new HostedRuntimeBridgeCheckpointLeaseError("stale_workspace_version", stage);
   }
-}
-
-function resolveWorkspaceDurableRoot(vaultRoot: string): string {
-  const resolvedVaultRoot = path.resolve(vaultRoot);
-  if (path.basename(resolvedVaultRoot) === "vault") {
-    return path.dirname(resolvedVaultRoot);
-  }
-  return resolvedVaultRoot;
-}
-
-function resolveWorkspaceScratchRoot(vaultRoot: string): string {
-  const durableRoot = resolveWorkspaceDurableRoot(vaultRoot);
-  if (path.basename(durableRoot) === "durable") {
-    return path.join(path.dirname(durableRoot), "scratch");
-  }
-  return path.join(path.dirname(durableRoot), `${path.basename(durableRoot)}-scratch`);
 }
 
 function resolveWorkspaceOperatorHomeRoot(vaultRoot: string): string {

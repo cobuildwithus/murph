@@ -48,13 +48,18 @@ import {
 } from '../automation/shared.js'
 import {
   appendAssistantHostedDynamicContextPrompt,
+  scopeAssistantAutomationToolToRoute,
   type AssistantExecutionContext,
 } from '../execution-context.js'
 import {
+  buildMurphManagedJournalCalendarWindowInstructions,
   isRetiredMurphManagedAutomationId,
   isRecognizedMurphOnboardingFollowupAutomation,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedMaintenancePolicy,
@@ -70,6 +75,8 @@ import {
 import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
+import { canSkipManagedPersonalPatterns } from '../personal-patterns-eligibility.js'
+import { canSkipManagedAutomaticMealCloseout } from '../automatic-meal-closeout-eligibility.js'
 import {
   buildAssistantLinqDeliveryPosturePrompt,
 } from '../linq-delivery-posture.js'
@@ -83,6 +90,7 @@ import {
 import {
   assistantDeliveryErrorPreventsFreshIntentRetry,
   isAssistantOutboxRetryableError,
+  normalizeAssistantDeliveryError,
   markAssistantOutboxIntentMirrorTerminalById,
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
@@ -92,11 +100,7 @@ import type {
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
-import {
-  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
-  errorMessage,
-  normalizeNullableString,
-} from '../shared.js'
+import { errorMessage, normalizeNullableString } from '../shared.js'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
@@ -106,6 +110,10 @@ import {
   buildAssistantCronHostedDeliveryIdempotency,
   buildAssistantCronNotificationDedupeToken,
 } from './notification-delivery.js'
+import {
+  ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+  buildAssistantCronRecurringReminderConversationInstructions as buildAssistantCronRecurringReminderConversationPrompt,
+} from './recurring-reminder-conversation.js'
 import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
@@ -117,6 +125,7 @@ import {
   type AssistantCronCanonicalRuntimeStore,
 } from './runtime-state.js'
 import { runScheduledLogCronJob } from './scheduled-log.js'
+import { assistantCronScheduleHasSingleDailyTime } from './schedule.js'
 import {
   assistantDeviceActivityAuthorityKeyMatches,
   buildAssistantDeviceActivityDeliveryIdempotencyKey,
@@ -198,7 +207,8 @@ export const ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS = [
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
-// normal cron backoff (30s first retry), and that retry runs at standard tier.
+// normal cron backoff (30s first retry). Maintenance stays on Flex; ordinary
+// reminders may retry at standard tier to bound delivery lateness.
 
 interface DueAssistantCronCandidate {
   canonicalEntry?: {
@@ -477,6 +487,28 @@ export function buildRunnableAssistantCronJobProjection(input: {
   }
 }
 
+export async function resolveAssistantCronWakeEntries(input: {
+  entries: readonly RunnableAssistantCronCanonicalEntry[]
+  vault: string
+}): Promise<readonly RunnableAssistantCronCanonicalEntry[]> {
+  const blockedCandidates = new Set(input.entries.filter((entry) =>
+    entry.job.enabled
+    && entry.runtimeState.state.runningAt === null
+    && entry.runtimeState.state.pendingDeliveryIntentId === null
+    && entry.runtimeState.state.retryAfterAt === null
+    && isResearchOrientedManagedAutomationCronJob({ kind: 'canonical', ...entry })
+  ))
+  if (blockedCandidates.size === 0) return input.entries
+
+  // Suppression is derived from onboarding, never a persisted pause. Hosted
+  // foreground completion refreshes the projection after delivery. Uncertain reads
+  // keep the ordinary timer so a transient failure cannot strand future work.
+  const onboarding = await readAssistantOnboardingState(input.vault).catch(() => null)
+  return onboarding?.status === 'open'
+    ? input.entries.filter((entry) => !blockedCandidates.has(entry))
+    : input.entries
+}
+
 export function isAssistantCronBackgroundMaintenanceYieldError(
   error: unknown,
 ): error is VaultCliError {
@@ -500,6 +532,7 @@ interface ExecuteClaimedAssistantCronJobInput {
 }
 
 interface AssistantCronRunExecutionResult {
+  automationSlug: string | null
   job: AssistantCronJob
   removedAfterRun: boolean
   run: AssistantCronRunRecord
@@ -564,7 +597,7 @@ export async function executeClaimedAssistantCronJob(
     ...rawInput,
     job: preparedJob,
   }
-  let claimedJob = input.job.job
+  const claimedJob = input.job.job
   const startedAt = new Date().toISOString()
   let finishedAt = startedAt
   let sessionId: string | null = null
@@ -723,28 +756,17 @@ export async function executeClaimedAssistantCronJob(
             ASSISTANT_CRON_ONBOARDING_FOLLOWUP_COMPLETED_ERROR
         }
       }
-      // Route on the immutable automationId so a user-edited slug cannot
-      // silently bypass the precondition.
-      const onboardingAuthority =
-        await runOnboardingGoalCheckinAuthorityPrecondition({
-          automationId: input.job.source.automationId,
-          occurrenceAt,
-          vault: input.vault,
-        })
-      if (onboardingAuthority.kind === 'skip') {
-        lifecycleSkipReason = onboardingAuthority.reason
-      }
-      const lifecycleResult =
-        lifecycleSkipReason === null
-          ? await runExperimentLifecycleOutcomePrecondition({
-              automationId: input.job.source.automationId,
-              tags: input.job.source.tags,
-              vault: input.vault,
-            })
-          : null
-      if (lifecycleResult?.kind === 'skip') {
-        lifecycleSkipReason = lifecycleResult.reason
-      }
+      lifecycleSkipReason = await runAssistantCronAutomationPreconditions({
+        trigger: input.trigger,
+        consecutiveFailures: claimedJob.state.consecutiveFailures,
+        nowIso: startedAt,
+        source: input.job.source,
+        occurrenceAt,
+        vault: input.vault,
+        executionContext: input.executionContext ?? null,
+        signal: yieldCancellation.signal,
+        skipReason: lifecycleSkipReason,
+      })
     }
 
     const staleError =
@@ -783,6 +805,7 @@ export async function executeClaimedAssistantCronJob(
         job: input.job,
         latenessMinutes: staleError.latenessMinutes,
         onEvent: input.onEvent,
+        occurrenceAt,
       })
     } else {
       const onboardingSkipError =
@@ -834,6 +857,7 @@ export async function executeClaimedAssistantCronJob(
         const serviceTier = resolveAssistantCronTurnServiceTier({
           executionContext: input.executionContext ?? null,
           job: claimedJob,
+          backgroundMaintenance: assistantCronJobPrefersFlexRetries(input.job),
         })
         const scheduledInvocationAuthority =
           resolveAssistantCronScheduledInvocationAuthority({
@@ -893,7 +917,7 @@ export async function executeClaimedAssistantCronJob(
                 authorizedDelivery.deliveryPosture,
               ),
             })
-          const notificationExecutionContext =
+          const groupScopedExecutionContext =
             scopeAssistantCronScheduledGroupTools({
               channel: claimedJob.target.channel,
               executionContext: postureExecutionContext,
@@ -901,6 +925,12 @@ export async function executeClaimedAssistantCronJob(
               routeAuthorityVerified: !maintenanceJob,
               scheduledInvocationAuthority,
             })
+          const notificationExecutionContext = scopeAssistantCronAutomationTool({
+            executionContext: groupScopedExecutionContext,
+            target: claimedJob.target,
+            authorizedDelivery,
+            routeAuthorityVerified: !maintenanceJob,
+          })
           const assertNotificationStillAuthorized = async (
             authorityGate: AssistantCronOnboardingFollowupDiagnostic['authorityGate'],
           ): Promise<void> => {
@@ -1013,63 +1043,27 @@ export async function executeClaimedAssistantCronJob(
             instructions: buildAssistantCronExecutionInstructions(
               input.job,
               deviceActivityAuthority,
+              occurrenceAt,
             ),
+            recurringReminderConversation:
+              assistantCronUsesRecurringReminderConversation(input.job),
             scheduledAutomationScheduleKind:
               input.job.kind === 'canonical'
                 && input.job.source.kind === 'automation'
                 ? input.job.source.schedule.kind
                 : null,
-            deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
-              job: claimedJob,
+            ...buildAssistantCronNotificationDeliveryInput({
+              authorizedDelivery,
+              deliveryDispatchMode: input.deliveryDispatchMode,
+              deviceActivityAuthority,
+              job: input.job,
+              occurrenceAt,
               trigger: input.trigger,
             }),
-            deliveryIdempotencyKey: buildAssistantCronDeviceActivityDeliveryIdempotencyKey({
-              job: claimedJob,
-              trigger: input.trigger,
-            }),
-            hostedDeliveryIdempotency: buildAssistantCronHostedDeliveryIdempotency({
-              job: claimedJob,
-              trigger: input.trigger,
-            }),
-            sessionId: claimedJob.target.sessionId,
-            alias: claimedJob.target.alias,
-            allowBindingRebind: claimedJob.target.sessionId !== null,
-            channel: claimedJob.target.channel,
-            identityId: claimedJob.target.identityId,
             onTraceEvent: input.onTraceEvent,
             onGroupEmailPendingDeliveryIntentId: (intentId) => {
               pendingDeliveryIntentId = intentId
             },
-            outboxAutomationAuthority:
-              resolveAssistantCronOutboxAutomationAuthority(input.job),
-            outboxAutomationContextReferences:
-              resolveAssistantCronOutboxAutomationContextReferences(
-                input.job,
-                deviceActivityAuthority,
-              ),
-            outboxPlannedOccurrenceAt:
-              resolveAssistantCronOutboxPlannedOccurrenceAt({
-                job: input.job,
-                occurrenceAt,
-              }),
-            outboxExternalThreadRouteAuthority:
-              authorizedDelivery.externalThreadRouteAuthority,
-            participantId: claimedJob.target.participantId,
-            turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
-            responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
-            threadId:
-              authorizedDelivery.conversationThreadId ??
-              claimedJob.target.threadId,
-            bindingDeliveryTarget:
-              deliveryRoute.bindingDelivery?.target ??
-              deliveryRoute.deliveryTarget ??
-              undefined,
-            deferCommitUntilDeliveryAccepted:
-              input.deliveryDispatchMode === 'queue-only',
-            deliveryKind: deliveryRoute.bindingDelivery?.kind ?? undefined,
-            deliverySource: claimedJob.target.deliverySource,
-            deliveryTarget: deliveryRoute.deliveryTarget,
-            threadIsDirect: deliveryRoute.threadIsDirect,
             operatorAuthority: 'direct-operator',
             workingDirectory: input.vault,
           }
@@ -1085,48 +1079,18 @@ export async function executeClaimedAssistantCronJob(
             !maintenanceJob &&
             (foregroundPreemption.wasForegroundYielded() ||
               input.shouldYield?.() === true)
-          const deviceActivitySkipConsumedOccurrence =
-            assistantCronDeviceActivitySkipConsumesOccurrence({
-              decision: result.decision,
-              deliveryOutcome: result.deliveryOutcome ?? null,
-              job: input.job,
-            })
-          const groupEmailPendingDeliveryIntentId =
-            resolveAssistantCronGroupEmailPendingDeliveryIntentId(result)
-          if (assistantCronGroupEmailAttemptFailed(result)) {
-            throw new VaultCliError(
-              'ASSISTANT_GROUP_EMAIL_DELIVERY_FAILED',
-              'Group email delivery did not complete.',
-            )
+          const notificationOutcome = resolveAssistantCronNotificationOutcome({
+            foregroundYielded: foregroundYieldedAfterNotification,
+            job: input.job,
+            result,
+          })
+          // A result can omit a parent already accepted through the callback.
+          // Keep that partial delivery evidence when classification adds no id.
+          if (notificationOutcome.pendingDeliveryIntentId !== undefined) {
+            pendingDeliveryIntentId = notificationOutcome.pendingDeliveryIntentId
           }
-          if (groupEmailPendingDeliveryIntentId) {
-            pendingDeliveryIntentId = groupEmailPendingDeliveryIntentId
-            outcome = 'delivery_pending'
-            reason = 'delivery_pending'
-          } else if (result.deliveryOutcome?.kind === 'queued') {
-            pendingDeliveryIntentId = result.deliveryOutcome.intentId
-            outcome = 'delivery_pending'
-            reason = 'delivery_pending'
-          } else {
-            outcome = result.deliveryOutcome?.kind === 'sent'
-              ? 'delivered'
-              : 'no_op'
-            reason = result.deliveryOutcome?.kind === 'sent'
-              ? 'sent'
-              : 'no_delivery'
-            // Background maintenance success is terminal even when foreground
-            // input arrived during the turn: the provider work (including any
-            // memory writes) already happened, so treating it as yielded would
-            // replay a completed occurrence. Preemption for maintenance only
-            // applies before or during provider work.
-            if (
-              foregroundYieldedAfterNotification &&
-              result.deliveryOutcome?.kind !== 'sent' &&
-              !deviceActivitySkipConsumedOccurrence
-            ) {
-              throw buildAssistantCronForegroundYieldedError(claimedJob.name)
-            }
-          }
+          outcome = notificationOutcome.outcome
+          reason = notificationOutcome.reason
         }
       }
     }
@@ -1377,7 +1341,7 @@ export async function executeClaimedAssistantCronJob(
     ) {
       if (input.job.source.kind === 'automation') {
         await upsertAutomation(
-          buildCanonicalAutomationUpsertInput({
+          { ...buildCanonicalAutomationUpsertInput({
             vault: input.vault,
             automationId: input.job.source.automationId,
             automation: input.job.source,
@@ -1386,7 +1350,7 @@ export async function executeClaimedAssistantCronJob(
             schedule: input.job.source.schedule,
             route: input.job.source.route,
             instructions: input.job.source.instructions,
-          }),
+          }), completedOccurrence: true },
         )
       } else if (input.job.source.kind === 'scheduledLog') {
         await setScheduledLogStatus({
@@ -1427,12 +1391,130 @@ export async function executeClaimedAssistantCronJob(
   })
 
   return {
+    automationSlug: resolveAssistantCronAutomationSlug(input.job),
     job: finalized.job,
     removedAfterRun: finalized.removedAfterRun,
     run,
     // Typed failure class (e.g. ASSISTANT_CODEX_USAGE_LIMIT) for runtime-log
     // observability; the persisted run record keeps only the error text.
     runErrorCode: errorCode,
+  }
+}
+
+function buildAssistantCronNotificationDeliveryInput(input: Pick<
+  ExecuteClaimedAssistantCronJobInput,
+  'deliveryDispatchMode' | 'job' | 'trigger'
+> & {
+  authorizedDelivery: Awaited<
+    ReturnType<typeof resolveAssistantCronAuthorizedNotificationDeliveryRoute>
+  >
+  deviceActivityAuthority: DeviceActivityParentAuthority
+  occurrenceAt: string
+}) {
+  const claimedJob = input.job.job
+  const deliveryRoute = input.authorizedDelivery.route
+  return {
+    deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
+      job: claimedJob,
+      trigger: input.trigger,
+    }),
+    deliveryIdempotencyKey: buildAssistantCronDeviceActivityDeliveryIdempotencyKey({
+      job: claimedJob,
+      trigger: input.trigger,
+    }),
+    hostedDeliveryIdempotency: buildAssistantCronHostedDeliveryIdempotency({
+      job: claimedJob,
+      trigger: input.trigger,
+    }),
+    sessionId: claimedJob.target.sessionId,
+    alias: claimedJob.target.alias,
+    allowBindingRebind: claimedJob.target.sessionId !== null,
+    channel: claimedJob.target.channel,
+    identityId: claimedJob.target.identityId,
+    outboxAutomationAuthority:
+      resolveAssistantCronOutboxAutomationAuthority(input.job),
+    outboxAutomationContextReferences:
+      resolveAssistantCronOutboxAutomationContextReferences(
+        input.job,
+        input.deviceActivityAuthority,
+      ),
+    outboxPlannedOccurrenceAt:
+      resolveAssistantCronOutboxPlannedOccurrenceAt({
+        job: input.job,
+        occurrenceAt: input.occurrenceAt,
+      }),
+    outboxExternalThreadRouteAuthority:
+      input.authorizedDelivery.externalThreadRouteAuthority,
+    participantId: claimedJob.target.participantId,
+    turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
+    responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
+    threadId:
+      input.authorizedDelivery.conversationThreadId ??
+      claimedJob.target.threadId,
+    bindingDeliveryTarget:
+      deliveryRoute.bindingDelivery?.target ??
+      deliveryRoute.deliveryTarget ??
+      undefined,
+    deferCommitUntilDeliveryAccepted:
+      input.deliveryDispatchMode === 'queue-only',
+    deliveryKind: deliveryRoute.bindingDelivery?.kind ?? undefined,
+    deliverySource: claimedJob.target.deliverySource,
+    deliveryTarget: deliveryRoute.deliveryTarget,
+    threadIsDirect: deliveryRoute.threadIsDirect,
+  }
+}
+
+function resolveAssistantCronNotificationOutcome(input: {
+  foregroundYielded: boolean
+  job: ResolvedAssistantCronJob
+  result: AssistantNotificationResult
+}): {
+  outcome: 'delivered' | 'delivery_pending' | 'no_op'
+  reason: string
+  pendingDeliveryIntentId?: string
+} {
+  const { result } = input
+  const deviceActivitySkipConsumedOccurrence =
+    assistantCronDeviceActivitySkipConsumesOccurrence({
+      decision: result.decision,
+      deliveryOutcome: result.deliveryOutcome ?? null,
+      job: input.job,
+    })
+  const groupEmailPendingDeliveryIntentId =
+    resolveAssistantCronGroupEmailPendingDeliveryIntentId(result)
+  if (assistantCronGroupEmailAttemptFailed(result)) {
+    throw new VaultCliError(
+      'ASSISTANT_GROUP_EMAIL_DELIVERY_FAILED',
+      'Group email delivery did not complete.',
+    )
+  }
+  if (groupEmailPendingDeliveryIntentId) {
+    return {
+      outcome: 'delivery_pending',
+      reason: 'delivery_pending',
+      pendingDeliveryIntentId: groupEmailPendingDeliveryIntentId,
+    }
+  }
+  if (result.deliveryOutcome?.kind === 'queued') {
+    return {
+      outcome: 'delivery_pending',
+      reason: 'delivery_pending',
+      pendingDeliveryIntentId: result.deliveryOutcome.intentId,
+    }
+  }
+  // Completed maintenance and accepted delivery are terminal even when
+  // foreground input arrived during the turn. The coordinator excludes
+  // maintenance from foreground yield before classifying this result.
+  if (
+    input.foregroundYielded &&
+    result.deliveryOutcome?.kind !== 'sent' &&
+    !deviceActivitySkipConsumedOccurrence
+  ) {
+    throw buildAssistantCronForegroundYieldedError(input.job.job.name)
+  }
+  return {
+    outcome: result.deliveryOutcome?.kind === 'sent' ? 'delivered' : 'no_op',
+    reason: result.deliveryOutcome?.kind === 'sent' ? 'sent' : 'no_delivery',
   }
 }
 
@@ -1748,14 +1830,15 @@ function resolveAssistantCronOutboxAutomationAuthority(
 function resolveAssistantCronOutboxAutomationContextReferences(
   job: ResolvedAssistantCronJob,
   deviceActivityAuthority: DeviceActivityParentAuthority,
-): AssistantOutboxIntent['automationContextReferences'] | undefined {
-  if (job.kind === 'canonical' && job.source.kind === 'automation') {
-    return [...job.source.contextReferences]
-  }
+): AssistantOutboxIntent['automationContextReferences'] {
+  const contextReferences =
+    job.kind === 'canonical' && job.source.kind === 'automation'
+      ? job.source.contextReferences
+      : deviceActivityAuthority.automationId === null
+        ? []
+        : deviceActivityAuthority.contextReferences
 
-  return deviceActivityAuthority.automationId === null
-    ? undefined
-    : [...deviceActivityAuthority.contextReferences]
+  return contextReferences.length === 0 ? null : [...contextReferences]
 }
 
 function resolveAssistantCronOutboxPlannedOccurrenceAt(input: {
@@ -1790,9 +1873,13 @@ function resolveAssistantCronOutboxSupportSeriesId(
   return supportSeriesIds.length === 1 ? supportSeriesIds[0]! : null
 }
 
-function buildAssistantCronExecutionInstructions(
+export function buildAssistantCronExecutionInstructions(
   job: ResolvedAssistantCronJob,
-  deviceActivityAuthority: DeviceActivityParentAuthority,
+  deviceActivityAuthority: {
+    automationId: string | null
+    contextReferences: readonly AutomationContextReference[]
+  },
+  occurrenceAt: string | null = null,
 ): string {
   const lastFailedAt = job.job.state.lastFailedAt
   const retryEvidence =
@@ -1813,14 +1900,23 @@ function buildAssistantCronExecutionInstructions(
   const supportScope = buildAssistantCronSupportScopeInstructions(job)
   const independentAuthority =
     buildAssistantCronIndependentAutomationAuthorityInstructions(job)
+  const exerciseCue = buildAssistantCronExerciseCueInstructions(
+    job,
+    independentAuthority !== null,
+  )
   const recurringReminderConversation =
     buildAssistantCronRecurringReminderConversationInstructions(job)
   const overlays = [
+    buildMurphManagedJournalCalendarWindowInstructions(
+      job.kind === 'canonical' && job.source.kind === 'automation' ? job.source.automationId : null,
+      occurrenceAt,
+    ),
     retryEvidence,
     automationContext,
     independentAuthority,
     recurringReminderConversation,
     supportScope,
+    exerciseCue,
   ]
     .filter((section): section is string => section !== null)
   const providerSafeBase =
@@ -1843,7 +1939,10 @@ function buildAssistantCronExecutionInstructions(
 
 function buildAssistantCronAutomationContextInstructions(
   job: ResolvedAssistantCronJob,
-  deviceActivityAuthority: DeviceActivityParentAuthority,
+  deviceActivityAuthority: {
+    automationId: string | null
+    contextReferences: readonly AutomationContextReference[]
+  },
 ): string | null {
   const context =
     job.kind === 'canonical'
@@ -1870,6 +1969,9 @@ function buildAssistantCronAutomationContextInstructions(
       ? '- contextReferences: none supplied; do not guess a canonical record'
       : `- contextReferences: ${JSON.stringify(context.contextReferences)}`,
     '- Inspect each exact reference through the ordinary canonical read surface before relying on it, and use only the ordinary domain mutation tools for any write.',
+    '- For a cue whose action depends on a linked plan, read the full current canonical owner before composing it. The canonical plan owns the target; copied anchors, rotation rules, or target names in automation titles/instructions, earlier cues, and conversation summaries cannot override it.',
+    '- Resolve a changing target from the scheduled occurrence’s local calendar date in the canonical timezone and the plan’s saved anchor and rotation, not the retry/delivery date or the automation schedule anchor. Apply explicit date-scoped target exceptions from the plan and honor saved pause/skip conditions; do not reset the rotation because of a one-day repeat, correction, or missed cue. A permanent change requires an explicitly authorized canonical plan update.',
+    '- If that target-dependent cue lacks a readable canonical owner or its current plan cannot resolve one target, skip the cue; do not guess a target or silently repair state. Fixed cues that do not depend on a plan keep their ordinary reminder and skip rules.',
   ].join('\n')
 }
 
@@ -1893,10 +1995,13 @@ function buildAssistantCronIndependentAutomationAuthorityInstructions(
 function buildAssistantCronSupportScopeInstructions(
   job: ResolvedAssistantCronJob,
 ): string | null {
+  // Weekly-digest metadata still participates in plan consent checks, but the
+  // saved automation instructions own the provider-visible task.
   if (
     job.kind !== 'canonical' ||
     job.source.kind !== 'automation' ||
-    job.source.supportKind === null
+    job.source.supportKind === null ||
+    job.source.supportKind === 'weekly_digest'
   ) {
     return null
   }
@@ -1905,9 +2010,7 @@ function buildAssistantCronSupportScopeInstructions(
     ? 'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so, plus any necessary skip or invalid-state note. For a recurring reminder, the engine-supplied cadence-administration question is the sole allowed exception to cue-only delivery. Do not ask whether the action was completed or add a proactive repair, accountability, or reflection question.'
     : job.source.supportKind === 'check_in'
       ? 'Ask at most one narrow check-in or repair question about the current plan. Do not expand into a review, digest, or new coaching agenda.'
-      : job.source.supportKind === 'review'
-        ? "Conduct only the bounded review and ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
-        : 'Provide only the agreed weekly summary shape from current evidence. Do not append a surprise accountability, repair, or coaching question.'
+      : "Conduct only the bounded review and ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
 
   return [
     'Accepted support scope (engine-supplied; this overrides any broader repair or follow-up option above):',
@@ -1916,21 +2019,38 @@ function buildAssistantCronSupportScopeInstructions(
   ].join('\n')
 }
 
-export const ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS = [
-  'Recurring reminder conversation (engine-supplied; apply only when the saved request is an ordinary reminder):',
-  '- This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders. For those reminders, send the saved cue normally unless the member explicitly changes or pauses it or an existing authoritative owner supplies a valid skip condition.',
-  '- Apply a silence-based cadence question or skip only when the immediately prior confirmed output appears in this request\'s engine-supplied automation-output history. If that output is unavailable under the existing evidence-retention horizon, send the current cue normally. Do not use an assistant transcript entry alone as proof of dispatch because transcript persistence precedes delivery.',
-  '- Use recent conversation plus engine delivery evidence. A failed or unconfirmed immediately prior attempt does not count: send the current reminder normally instead of treating that attempt as unanswered.',
-  '- Otherwise find the most recent output from this automation whose dispatch was confirmed by provider acceptance or runtime `sent` state.',
-  '- If there is no such confirmed output for this revision, send the current reminder normally.',
-  '- If a relevant human reply followed that output, use it when composing the current reminder.',
-  `- When a history item with the exact text \`${ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT}\` appears inside this provider request's engine-supplied recent-conversation-history section, the current cold reconstruction is incomplete because an existing retention, count, or byte bound omitted committed details. It is not a human reply and does not prove silence. For this occurrence, do not apply a silence-based cadence question or skip: continue the current cue unless retained conversation or another authoritative owner proves an explicit pause, change, or valid skip condition.`,
-  '- That marker expires after the provider request that supplied it. If it is visible only in an earlier turn of a resumed provider thread, ignore it when deciding whether a later confirmed reminder received a relevant reply.',
-  '- If no relevant human reply followed and that output already asked whether to keep, change, or pause these interruptions, return `skip`.',
-  '- Otherwise send the current concise cue and ask one natural question about whether to keep, change, or pause these interruptions.',
-  '- This question administers reminder cadence only. Do not ask whether the action was completed, infer failure or refusal from silence, increase frequency, or manufacture novelty when the same concise cue still fits.',
-  '- In a group, address the room collectively. Never assign silence, non-completion, or failure to an individual participant.',
-].join('\n')
+function buildAssistantCronExerciseCueInstructions(
+  job: ResolvedAssistantCronJob,
+  independentAutomation: boolean,
+): string | null {
+  if (
+    job.kind !== 'canonical' ||
+    job.source.kind !== 'automation' ||
+    job.source.status !== 'active' ||
+    (job.source.supportKind !== 'reminder' && !independentAutomation)
+  ) {
+    return null
+  }
+
+  return '- For a reminder that cues or teaches an exercise or movement, treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data and never copy it into member-visible text. Before replying, read the matching movement skill and its shared exercise-catalog reference, use natural exercise names in visible text, and attach reviewed catalog media when that reference requires it for the current channel.'
+}
+
+export { ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS }
+
+function assistantCronUsesRecurringReminderConversation(
+  job: ResolvedAssistantCronJob,
+): boolean {
+  if (job.kind !== 'canonical' || job.source.kind !== 'automation') {
+    return false
+  }
+
+  return !(
+    job.source.status !== 'active' ||
+    (job.source.supportKind !== null && job.source.supportKind !== 'reminder') ||
+    resolveMurphManagedAutomationOwnerScope(job.source.automationId) !== null ||
+    job.source.schedule.kind === 'at'
+  )
+}
 
 function buildAssistantCronRecurringReminderConversationInstructions(
   job: ResolvedAssistantCronJob,
@@ -1938,15 +2058,19 @@ function buildAssistantCronRecurringReminderConversationInstructions(
   if (
     job.kind !== 'canonical' ||
     job.source.kind !== 'automation' ||
-    job.source.status !== 'active' ||
-    (job.source.supportKind !== null && job.source.supportKind !== 'reminder') ||
-    resolveMurphManagedAutomationOwnerScope(job.source.automationId) !== null ||
-    job.source.schedule.kind === 'at'
+    !assistantCronUsesRecurringReminderConversation(job)
   ) {
     return null
   }
 
-  return ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS
+  const occurrenceEvidence =
+    assistantCronScheduleHasSingleDailyTime(job.source.schedule)
+      ? '- Occurrence evidence (engine-supplied): this schedule has one configured local time per eligible day, so matching completion on the occurrence local date is in-window. For medication, prescribed treatment, clinical monitoring, or safety-critical reminders, also require the current time, dose, or sequence.'
+      : '- Occurrence evidence (engine-supplied): do not assume this schedule fires only once per local day. Local-date coincidence alone is insufficient; require the evidence to identify the current time, dose, or sequence.'
+
+  return buildAssistantCronRecurringReminderConversationPrompt(
+    occurrenceEvidence,
+  )
 }
 
 function assistantCronTimestampIsLater(
@@ -1958,7 +2082,84 @@ function assistantCronTimestampIsLater(
   return Number.isFinite(candidateMs) && candidateMs > referenceMs
 }
 
+async function runAssistantCronAutomationPreconditions(input: {
+  trigger: AssistantCronTrigger
+  consecutiveFailures: number
+  nowIso: string
+  source: CanonicalAutomationAssistantCronJobRecord
+  occurrenceAt: string
+  vault: string
+  executionContext: AssistantExecutionContext | null
+  signal: AbortSignal
+  skipReason: string | null
+}): Promise<string | null> {
+  let lifecycleSkipReason = input.skipReason
+  // Route on the immutable automationId so a user-edited slug cannot
+  // silently bypass the precondition.
+  const onboardingAuthority =
+    await runOnboardingGoalCheckinAuthorityPrecondition({
+      automationId: input.source.automationId,
+      occurrenceAt: input.occurrenceAt,
+      vault: input.vault,
+    })
+  if (onboardingAuthority.kind === 'skip') {
+    lifecycleSkipReason = onboardingAuthority.reason
+  }
+  const lifecycleResult =
+    lifecycleSkipReason === null
+      ? await runExperimentLifecycleOutcomePrecondition({
+          automationId: input.source.automationId,
+          tags: input.source.tags,
+          vault: input.vault,
+        })
+      : null
+  if (lifecycleResult?.kind === 'skip') {
+    lifecycleSkipReason = lifecycleResult.reason
+  }
+  if (lifecycleSkipReason === null
+    && input.trigger === 'scheduled' && input.consecutiveFailures === 0
+    && await canSkipManagedPersonalPatterns({
+      automationId: input.source.automationId,
+      instructions: input.source.instructions,
+      nowIso: input.nowIso,
+      signal: input.signal,
+      timeZone: input.source.timeZone,
+      vaultRoot: input.vault,
+    })) {
+    lifecycleSkipReason = 'Personal Patterns factors, results, and grades are already reviewed.'
+  }
+  if (lifecycleSkipReason === null && input.trigger === 'scheduled'
+    && await canSkipManagedAutomaticMealCloseout({
+      automationId: input.source.automationId,
+      occurrenceAt: input.occurrenceAt,
+      signal: input.signal,
+      timeZone: input.source.timeZone,
+      vaultRoot: input.vault,
+    })) {
+    lifecycleSkipReason = 'No captured meals are awaiting closeout.'
+  }
+  return lifecycleSkipReason
+}
+
+// These managed jobs have no user-promised delivery minute. Timed reminders,
+// meal closeouts and independent follow-ups retain standard-tier recovery.
+const FLEX_RETRY_AUTOMATION_IDS = new Set([
+  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+])
+
+function assistantCronJobPrefersFlexRetries(job: ResolvedAssistantCronJob): boolean {
+  return assistantCronJobIsPreemptibleBackgroundMaintenance(job)
+    || (job.kind === 'canonical' && job.source.kind === 'automation'
+      && FLEX_RETRY_AUTOMATION_IDS.has(job.source.automationId))
+}
+
 function resolveAssistantCronTurnServiceTier(input: {
+  backgroundMaintenance: boolean
   executionContext: AssistantExecutionContext | null
   job: AssistantCronJob
 }): AssistantProviderServiceTier | null {
@@ -1967,9 +2168,11 @@ function resolveAssistantCronTurnServiceTier(input: {
     return null
   }
 
-  // Retries after a failed (or deadline-aborted) flex run use the standard
-  // tier so the existing 30s failure backoff bounds reminder lateness.
-  return input.job.state.consecutiveFailures === 0 ? 'flex' : null
+  // Maintenance tolerates capacity delays and retains Flex pricing on retries.
+  // Ordinary reminders retain the standard-tier fallback after their first failure.
+  return input.backgroundMaintenance || input.job.state.consecutiveFailures === 0
+    ? 'flex'
+    : null
 }
 
 function resolveAssistantCronAutomationTargetOverride(
@@ -2159,7 +2362,7 @@ function finalizeAssistantCronJobAfterRun(input: {
       new Date(input.finishedAt),
     )
 
-    if (input.run.outcome === 'failed') {
+    if (input.run.outcome === 'failed' || input.run.outcome === 'expired') {
       return assistantCronJobSchema.parse({
         ...input.job,
         enabled:
@@ -2289,6 +2492,10 @@ function assistantCronDeliveryFailureConsumesOccurrence(
   if (!assistantCronErrorHasNotificationDeliveryStage(error)) {
     return false
   }
+  if (normalizeAssistantDeliveryError(error).code === 'ASSISTANT_FOLLOW_UP_CONTEXT_CHANGED'
+    && job.kind === 'canonical' && job.source.kind === 'automation'
+    && job.source.followUpSourceIntentId && job.source.activeUntil
+    && Date.now() < Date.parse(job.source.activeUntil)) return false
   if (assistantDeliveryErrorPreventsFreshIntentRetry(error)) {
     return true
   }
@@ -2378,7 +2585,7 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
       input.failureConsumesOccurrence,
     )
   ) {
-    if (input.run.outcome === 'failed') {
+    if (input.run.outcome === 'failed' || input.run.outcome === 'expired') {
       return {
         ...input.runtimeState,
         sessionId: input.responseSessionId ?? input.runtimeState.sessionId,
@@ -2642,6 +2849,7 @@ function emitAssistantCronOccurrenceExpiredEvent(input: {
   job: ResolvedAssistantCronJob
   latenessMinutes: number
   onEvent?: (event: AssistantRunEvent) => void
+  occurrenceAt: string
 }): void {
   const automationSlug = resolveAssistantCronAutomationSlug(input.job)
   if (!automationSlug) {
@@ -2655,6 +2863,8 @@ function emitAssistantCronOccurrenceExpiredEvent(input: {
     failureContext: {
       automationSlug,
       latenessMinutes: input.latenessMinutes,
+      occurrenceAt: input.occurrenceAt,
+      priorFailureCount: input.job.job.state.consecutiveFailures,
     },
     providerKind: 'status',
     providerState: 'completed',
@@ -2688,6 +2898,29 @@ function assistantCronExecutionDeliveryTargetProfile(input: {
   const isHostedExecution =
     normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
   return isHostedExecution ? 'hosted' : 'local'
+}
+
+function scopeAssistantCronAutomationTool(input: {
+  executionContext: AssistantExecutionContext | null | undefined
+  target: AssistantCronJob['target']
+  authorizedDelivery: AssistantCronAuthorizedNotificationDelivery
+  routeAuthorityVerified: boolean
+}): AssistantExecutionContext {
+  const { route, conversationThreadId } = input.authorizedDelivery
+  const deliveryTarget = route.bindingDelivery?.target ?? route.deliveryTarget
+  return scopeAssistantAutomationToolToRoute({
+    executionContext: input.executionContext ?? { hosted: null },
+    route: input.routeAuthorityVerified && input.target.channel && deliveryTarget
+      ? {
+          channel: input.target.channel,
+          deliveryTarget,
+          identityId: input.target.identityId,
+          participantId: input.target.participantId,
+          threadId: conversationThreadId ?? input.target.threadId,
+          threadIsDirect: route.threadIsDirect,
+        }
+      : null,
+  })
 }
 
 function scopeAssistantCronScheduledGroupTools(input: {
@@ -2940,7 +3173,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     }
   }
 
-  if (input.target.channel === 'telegram' && route.threadIsDirect === false) {
+  if (input.target.channel === 'telegram') {
     const target = normalizeNullableString(
       route.deliveryTarget ?? route.bindingDelivery?.target,
     )
@@ -2955,23 +3188,24 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     if (!resolveScheduledExternalThreadRoute) {
       throw new VaultCliError(
         'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE',
-        'Hosted group delivery requires live thread route authority before provider work.',
+        'Hosted scheduled delivery requires live thread route authority before provider work.',
         { retryable: true },
       )
     }
-    const authority = await resolveScheduledExternalThreadRoute({
+    const { threadIsDirect, ...authority } = await resolveScheduledExternalThreadRoute({
       channel: 'telegram',
       signal: input.signal,
       target,
     })
     if (
       authority.channel !== 'telegram'
+      || typeof threadIsDirect !== 'boolean'
       || normalizeNullableString(authority.containerMemberId) === null
       || normalizeNullableString(authority.threadId) !== target
     ) {
       throw new VaultCliError(
         'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE',
-        'Hosted group delivery requires exact thread route authority before provider work.',
+        'Hosted scheduled delivery requires exact thread route authority before provider work.',
         { retryable: true },
       )
     }
@@ -2979,7 +3213,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
       conversationThreadId: null,
       deliveryPosture: null,
       externalThreadRouteAuthority: authority,
-      route,
+      route: { ...route, threadIsDirect },
     }
   }
 
@@ -3075,7 +3309,7 @@ class AssistantCronLinqHealthPreflightBlockedError extends VaultCliError {
   constructor(blockCode: HostedRuntimeLinqDeliveryBlockCode) {
     super(
       `ASSISTANT_LINQ_EGRESS_${blockCode.toUpperCase()}`,
-      'Scheduled Linq delivery skipped by current line or chat health.',
+      'Scheduled Linq delivery skipped by current outreach or delivery policy.',
     )
   }
 }

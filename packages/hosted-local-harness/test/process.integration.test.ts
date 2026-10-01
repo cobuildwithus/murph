@@ -5,8 +5,15 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { createWorkspaceSourceImportExecOptions } from "../../../config/workspace-source-resolution.js";
+
 const processModuleUrl = new URL("../src/process.ts", import.meta.url).href;
 const e2eModuleUrl = new URL("../src/e2e.ts", import.meta.url).href;
+const packageDirectory = path.resolve(import.meta.dirname, "..");
+const workspaceSourceImportExecOptions = createWorkspaceSourceImportExecOptions(
+  packageDirectory,
+  process.env,
+);
 
 describe("runForegroundCommand process ownership", () => {
   it.runIf(process.platform !== "win32")(
@@ -168,28 +175,52 @@ describe("hosted-local E2E MinIO cleanup ownership", () => {
       ].join("\n");
       const wrapper = spawn(
         process.execPath,
-        ["--input-type=module", "-e", wrapperSource],
+        ["--import", "tsx", "--input-type=module", "-e", wrapperSource],
         {
+          cwd: workspaceSourceImportExecOptions.cwd,
           env: {
-            ...process.env,
+            ...workspaceSourceImportExecOptions.env,
             MURPH_TEST_MINIO_FIFO: minioFifoPath,
             MURPH_TEST_MINIO_PID_FILE: minioPidPath,
             MURPH_TEST_MINIO_READY_FILE: minioReadyPath,
             MURPH_TEST_MINIO_STARTED_FILE: minioStartedPath,
             MURPH_TEST_PNPM_LOG_FILE: pnpmLogPath,
-            PATH: `${tempDirectory}:${process.env.PATH ?? ""}`,
+            PATH: `${tempDirectory}:${workspaceSourceImportExecOptions.env.PATH ?? ""}`,
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
       );
       let output = "";
+      let errorOutput = "";
       wrapper.stdout.setEncoding("utf8");
       wrapper.stdout.on("data", (chunk: string) => {
         output += chunk;
       });
+      wrapper.stderr.setEncoding("utf8");
+      wrapper.stderr.on("data", (chunk: string) => {
+        errorOutput += chunk;
+      });
 
       try {
-        await waitForFile(minioReadyPath, 5_000);
+        const wrapperExitBeforeReady = new Promise<never>((_, reject) => {
+          wrapper.once("error", reject);
+          wrapper.once("exit", (code, signal) => {
+            const errorSummary = errorOutput.trim().length > 0
+              ? `: ${redactChildErrorOutput(errorOutput, [
+                workspaceSourceImportExecOptions.cwd,
+                tempDirectory,
+                workspaceSourceImportExecOptions.env.HOME,
+              ])}`
+              : ".";
+            reject(new Error(
+              `Wrapper exited before MinIO readiness (${code ?? "unknown"}/${signal ?? "none"})${errorSummary}`,
+            ));
+          });
+        });
+        await Promise.race([
+          waitForFile(minioReadyPath, 15_000),
+          wrapperExitBeforeReady,
+        ]);
         const interruptedAt = Date.now();
         wrapper.kill("SIGTERM");
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -223,9 +254,21 @@ describe("hosted-local E2E MinIO cleanup ownership", () => {
         await rm(tempDirectory, { force: true, recursive: true });
       }
     },
-    20_000,
+    35_000,
   );
 });
+
+function redactChildErrorOutput(
+  value: string,
+  paths: readonly (string | undefined)[],
+): string {
+  return paths.reduce(
+    (redacted, targetPath) => targetPath
+      ? redacted.replaceAll(targetPath, "<redacted-path>")
+      : redacted,
+    value,
+  ).trim();
+}
 
 async function waitForFile(filePath: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;

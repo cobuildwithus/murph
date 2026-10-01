@@ -5,7 +5,11 @@ export class VaultCliError extends Error {
   readonly context: VaultCliErrorDetails
   override readonly message: string
 
-  constructor(code: string, message: string, details?: VaultCliErrorDetails) {
+  constructor(
+    code: string,
+    message: string,
+    details?: VaultCliErrorDetails,
+  ) {
     super(message)
     this.code = code
     this.name = 'VaultCliError'

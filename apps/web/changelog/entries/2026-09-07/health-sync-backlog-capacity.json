@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-07",
+  "order": 100,
+  "item": {
+    "id": "health-sync-backlog-capacity",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More room for health uploads",
+    "summary": "Companion health uploads can wait in a larger queue while background imports catch up.",
+    "details": "Up to 500 pending uploads can now be accepted before the companion is asked to retry later.",
+    "relevanceTags": [
+      "wearables",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3020
+    ]
+  }
+}

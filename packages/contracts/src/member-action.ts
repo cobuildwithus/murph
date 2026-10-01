@@ -1,18 +1,36 @@
 import * as z from "./zod-runtime.ts";
+import {
+  workoutSessionPresentationV1Schema,
+  workoutSessionCardV1Bounds,
+  parseWorkoutSessionAppCardEnvelopeV4,
+  type WorkoutSessionAppCardEnvelopeV6,
+} from "./workout-session-card.ts";
+import {
+  workoutMemberActionExpectedSetResultV1Schema,
+  type WorkoutMemberActionExpectedSetResultV1,
+} from "./workout-member-action-result.ts";
+
+export {
+  workoutMemberActionExpectedSetResultV1Schema,
+  type WorkoutMemberActionExpectedSetResultV1,
+} from "./workout-member-action-result.ts";
 
 export const memberActionV1Bounds = {
   actionId: 36,
   exerciseName: 60,
-  exercises: 8,
+  exercises: workoutSessionCardV1Bounds.exercises,
   expectedFreeformResult: 400,
   freeformResult: 200,
-  mutations: 72,
-  setsPerExercise: 8,
+  mutations: 2 * workoutSessionCardV1Bounds.exercises
+    * workoutSessionCardV1Bounds.setsPerExercise,
+  setsPerExercise: workoutSessionCardV1Bounds.setsPerExercise,
 } as const;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SINGLE_LINE_PATTERN = /^[^\u0000-\u001F\u007F\u2028\u2029\r\n]+$/u;
+const WORKOUT_APP_CARD_URL_PATTERN =
+  /^https:\/\/www\.withmurph\.ai\/#murph-card=[A-Za-z0-9_-]+$/u;
 
 function singleLineText(maxLength: number) {
   return z
@@ -36,12 +54,6 @@ const workoutSetPositionSchema = z
   .int()
   .min(1)
   .max(memberActionV1Bounds.setsPerExercise);
-
-const canonicalNonnegativeIntegerSchema = z
-  .number()
-  .finite()
-  .min(0)
-  .refine((value) => Number.isInteger(value), "Expected an integer.");
 
 export const workoutMemberActionSetResultV1Schema = z.discriminatedUnion(
   "kind",
@@ -71,38 +83,6 @@ export const workoutMemberActionSetResultV1Schema = z.discriminatedUnion(
 
 export type WorkoutMemberActionSetResultV1 = z.infer<
   typeof workoutMemberActionSetResultV1Schema
->;
-
-export const workoutMemberActionExpectedSetResultV1Schema = z.discriminatedUnion(
-  "kind",
-  [
-    z
-      .object({
-        kind: z.literal("note"),
-        note: singleLineText(
-          memberActionV1Bounds.expectedFreeformResult,
-        ).nullable(),
-      })
-      .strict(),
-    z
-      .object({
-        kind: z.literal("reps"),
-        reps: canonicalNonnegativeIntegerSchema.nullable(),
-      })
-      .strict(),
-    z
-      .object({
-        kind: z.literal("weight_reps"),
-        reps: canonicalNonnegativeIntegerSchema.nullable(),
-        weight: z.number().finite().min(0).nullable(),
-        weightUnit: z.enum(["lb", "kg"]).nullable(),
-      })
-      .strict(),
-  ],
-);
-
-export type WorkoutMemberActionExpectedSetResultV1 = z.infer<
-  typeof workoutMemberActionExpectedSetResultV1Schema
 >;
 
 export const workoutMemberActionExpectedSetStateV1Schema = z
@@ -156,6 +136,13 @@ export const workoutMemberActionMutationV1Schema = z.discriminatedUnion(
           .min(1)
           .max(memberActionV1Bounds.setsPerExercise),
         unitOverride: z.enum(["lb", "kg"]).nullable(),
+      })
+      .strict(),
+    z
+      .object({
+        exercisePosition: workoutExercisePositionSchema,
+        kind: z.literal("exercise.rename"),
+        name: singleLineText(memberActionV1Bounds.exerciseName),
       })
       .strict(),
     z
@@ -296,12 +283,24 @@ export const workoutLiveApplyMemberActionV1Schema = z
     kind: z.literal("workout.live.apply"),
     mutations: z
       .array(workoutMemberActionMutationV1Schema)
-      .min(1)
+      .min(0)
       .max(memberActionV1Bounds.mutations),
+    presentation: workoutSessionPresentationV1Schema.optional(),
+    weightUnitPreference: z.enum(["lb", "kg"]).optional(),
     version: z.literal(1),
   })
   .strict()
   .superRefine((action, context) => {
+    if (
+      action.mutations.length === 0
+      && action.weightUnitPreference === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A workout action requires a mutation or unit preference.",
+        path: ["mutations"],
+      });
+    }
     const targets = new Map<string, WorkoutMemberActionMutationV1>();
     const removalSnapshots = new Map<
       number,
@@ -309,6 +308,7 @@ export const workoutLiveApplyMemberActionV1Schema = z
     >();
     action.mutations.forEach((mutation, index) => {
       const target = mutation.kind === "exercise.append"
+          || mutation.kind === "exercise.rename"
         ? `exercise:${mutation.exercisePosition}`
         : mutation.kind === "set.append"
           ? `set-append:${mutation.exercisePosition}:${mutation.setPosition}`
@@ -323,6 +323,25 @@ export const workoutLiveApplyMemberActionV1Schema = z
         return;
       }
       targets.set(target, mutation);
+
+      if (mutation.kind === "exercise.rename") {
+        const expectedExercise = action.expectedWorkout.exercises[
+          mutation.exercisePosition - 1
+        ];
+        if (expectedExercise === undefined) {
+          context.addIssue({
+            code: "custom",
+            message: "An exercise rename must target an expected exercise.",
+            path: ["mutations", index],
+          });
+        } else if (expectedExercise.name === mutation.name) {
+          context.addIssue({
+            code: "custom",
+            message: "An exercise rename must change the visible name.",
+            path: ["mutations", index, "name"],
+          });
+        }
+      }
 
       if (mutation.kind === "set.remove") {
         const snapshot = {
@@ -443,8 +462,22 @@ export type WorkoutLiveApplyMemberActionV1 = z.infer<
   typeof workoutLiveApplyMemberActionV1Schema
 >;
 
+export const workoutLiveSnapshotMemberActionV1Schema = z
+  .object({
+    kind: z.literal("workout.live.snapshot"),
+    presentation: workoutSessionPresentationV1Schema,
+    version: z.literal(1),
+    workoutBinding: z.string().regex(/^[0-9a-f]{64}$/u),
+  })
+  .strict();
+
+export type WorkoutLiveSnapshotMemberActionV1 = z.infer<
+  typeof workoutLiveSnapshotMemberActionV1Schema
+>;
+
 export const memberActionV1Schema = z.discriminatedUnion("kind", [
   workoutLiveApplyMemberActionV1Schema,
+  workoutLiveSnapshotMemberActionV1Schema,
 ]);
 
 export type MemberActionV1 = z.infer<typeof memberActionV1Schema>;
@@ -477,11 +510,56 @@ export type MemberActionRejectionReasonV1 = z.infer<
   typeof memberActionRejectionReasonV1Schema
 >;
 
+const workoutLiveCardResultShape = {
+  card: z.custom<WorkoutSessionAppCardEnvelopeV6>((value) =>
+    value !== null && typeof value === "object" && "schemaVersion" in value
+    && value.schemaVersion === 6 && parseWorkoutSessionAppCardEnvelopeV4(value) !== null,
+  ).optional(),
+  // Read compatibility for already persisted results from the URL-based producer.
+  cardUrl: z.string().max(2_047).regex(WORKOUT_APP_CARD_URL_PATTERN).optional(),
+};
+
+function hasExactlyOneWorkoutCard(value: { card?: unknown; cardUrl?: string }): boolean {
+  return (value.card !== undefined) !== (value.cardUrl !== undefined);
+}
+
+export const workoutLiveSnapshotMemberActionResultV1Schema = z
+  .object({
+    ...workoutLiveCardResultShape,
+    kind: z.literal("workout.live.snapshot"),
+    version: z.literal(1),
+  })
+  .strict().refine(hasExactlyOneWorkoutCard, "Expected exactly one authoritative workout card.");
+
+export type WorkoutLiveSnapshotMemberActionResultV1 = z.infer<
+  typeof workoutLiveSnapshotMemberActionResultV1Schema
+>;
+
+export const workoutLiveApplyMemberActionResultV1Schema = z
+  .object({
+    ...workoutLiveCardResultShape,
+    kind: z.literal("workout.live.apply"),
+    version: z.literal(1),
+  })
+  .strict().refine(hasExactlyOneWorkoutCard, "Expected exactly one authoritative workout card.");
+
+export type WorkoutLiveApplyMemberActionResultV1 = z.infer<
+  typeof workoutLiveApplyMemberActionResultV1Schema
+>;
+
+export const memberActionResultV1Schema = z.discriminatedUnion("kind", [
+  workoutLiveApplyMemberActionResultV1Schema,
+  workoutLiveSnapshotMemberActionResultV1Schema,
+]);
+
+export type MemberActionResultV1 = z.infer<typeof memberActionResultV1Schema>;
+
 export const memberActionOutcomeV1Schema = z
   .object({
     actionId: memberActionIdV1Schema,
     completedAt: z.string().datetime({ offset: true }),
     reason: memberActionRejectionReasonV1Schema.nullable(),
+    result: memberActionResultV1Schema.optional(),
     schemaVersion: z.literal(1),
     status: z.enum(["applied", "rejected", "unchanged"]),
   })
@@ -492,6 +570,22 @@ export const memberActionOutcomeV1Schema = z
         code: "custom",
         message: "Only a rejected member action carries a reason.",
         path: ["reason"],
+      });
+    }
+    if (
+      outcome.result !== undefined
+      && (
+        outcome.status === "rejected"
+        || (
+          outcome.result.kind === "workout.live.snapshot"
+          && outcome.status !== "unchanged"
+        )
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "The member-action result is not valid for this terminal status.",
+        path: ["result"],
       });
     }
   });

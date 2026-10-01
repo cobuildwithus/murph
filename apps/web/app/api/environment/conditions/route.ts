@@ -30,7 +30,7 @@ export async function GET(): Promise<Response> {
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
-  const session = await requireActiveHostedAppSessionFromRequest(request);
+  await requireActiveHostedAppSessionFromRequest(request);
   const payload = await readJsonObject(request, {
     limitBytes: BODY_LIMIT_BYTES,
   });
@@ -51,7 +51,6 @@ export const POST = withJsonError(async (request: Request) => {
   return jsonOk(
     await loadEnvironmentConditions({
       location,
-      memberId: session.member.id,
     }),
   );
 });

@@ -3,7 +3,15 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 
-import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
+import type { HostedAssistantProvider } from "@murphai/hosted-execution/assistant-model";
+
+import {
+  readActiveHostedMemberAccess,
+  readActiveHostedMemberAccessState,
+} from "../hosted-onboarding/member-access";
+import {
+  resolveHostedMemberAssistantProvider,
+} from "../hosted-onboarding/assistant-model-preference";
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
@@ -183,9 +191,29 @@ export function isHostedRuntimeInactiveAccessError(error: unknown): boolean {
 
 export async function requireHostedRuntimeMailboxActiveAccess(
   userId: string,
-  options: HostedRuntimeActiveAccessOptions = {},
-): Promise<void> {
-  await requireHostedRuntimeActiveAccess(userId, options);
+  options: HostedRuntimeActiveAccessOptions & {
+    memberState?: Parameters<typeof readActiveHostedMemberAccessState>[0]["memberState"];
+  } = {},
+): Promise<{
+  assistantProvider: HostedAssistantProvider;
+  isThreadContainer: boolean;
+}> {
+  const member = await readActiveHostedMemberAccessState({
+    memberId: userId,
+    memberState: options.memberState,
+    prisma: options.prisma ?? getPrisma(),
+  });
+  if (!member) {
+    throw hostedOnboardingError({
+      code: options.code ?? "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
+      httpStatus: 403,
+      message: options.message ?? "Hosted runtime mailbox access is not active.",
+    });
+  }
+  return {
+    assistantProvider: resolveHostedMemberAssistantProvider(member),
+    isThreadContainer: member.threadContainer != null,
+  };
 }
 
 export async function hasHostedRuntimeActiveAccess(

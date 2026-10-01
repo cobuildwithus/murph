@@ -117,7 +117,7 @@ async function createFixture(): Promise<Fixture> {
     resourceCategory: "sleep",
     resources: [{
       count: 1,
-      jobKind: "delete",
+      jobKind: "resource",
       payload: { objectId: "sleep-deleted" },
       resource: "sleep",
       resourceCategory: "sleep",
@@ -127,10 +127,6 @@ async function createFixture(): Promise<Fixture> {
     }],
     traceId: "trace_reconnect_consent",
     userId,
-  });
-  await observer.deviceSyncDirtyPayload.updateMany({
-    data: { credentialIndependent: null },
-    where: { connectionId: connection.id },
   });
 
   return {
@@ -237,7 +233,7 @@ describe.skipIf(!runPostgresProof)(
         await expect(fixture.observer.deviceSyncDirtyPayload.findFirstOrThrow({
           select: { credentialIndependent: true },
           where: { connectionId: fixture.connectionId },
-        })).resolves.toEqual({ credentialIndependent: null });
+        })).resolves.toEqual({ credentialIndependent: false });
       } finally {
         allowWithdrawalCommit.resolve();
         await Promise.allSettled([
@@ -248,15 +244,11 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("finishes consent-ordered classification before a waiting withdrawal", async () => {
+    it("finishes consent-ordered reconnect cleanup before a waiting withdrawal", async () => {
       const fixture = await createFixture();
-      const decryptStarted = createDeferred();
       const payloadLocked = createDeferred();
       const releasePayload = createDeferred();
-      const decrypt = vi.fn((input: { value: string }) => {
-        decryptStarted.resolve();
-        return input.value;
-      });
+      const decrypt = vi.fn((input: { value: string }) => input.value);
       let holderTransaction: Promise<void> | null = null;
       let reconnectOutcome: Promise<unknown> | null = null;
       let withdrawalOutcome: Promise<unknown> | null = null;
@@ -277,13 +269,17 @@ describe.skipIf(!runPostgresProof)(
           await releasePayload.promise;
         }, transactionOptions);
         await payloadLocked.promise;
+        const reconnectPid = await readBackendPid(fixture.reconnect);
 
         reconnectOutcome = fixture.store.upsertConnection(buildConnectionInput({
           connectedAt: "2026-07-16T12:03:00.000Z",
           externalAccountId: fixture.externalAccountId,
           userId: fixture.userId,
         }));
-        await decryptStarted.promise;
+        await waitForBlockedBackend({
+          observer: fixture.observer,
+          pid: reconnectPid,
+        });
 
         const withdrawalPid = await readBackendPid(fixture.withdrawal);
         withdrawalOutcome = revokeHostedConsentScope({
@@ -304,7 +300,7 @@ describe.skipIf(!runPostgresProof)(
           id: fixture.connectionId,
         });
         await expect(withdrawalOutcome).resolves.toMatchObject({ ok: true });
-        expect(decrypt).toHaveBeenCalledTimes(1);
+        expect(decrypt).not.toHaveBeenCalled();
         await expect(fixture.observer.hostedConsentGrant.findUniqueOrThrow({
           select: { status: true },
           where: {
@@ -314,10 +310,9 @@ describe.skipIf(!runPostgresProof)(
             },
           },
         })).resolves.toEqual({ status: "revoked" });
-        await expect(fixture.observer.deviceSyncDirtyPayload.findFirstOrThrow({
-          select: { credentialIndependent: true },
+        await expect(fixture.observer.deviceSyncDirtyPayload.count({
           where: { connectionId: fixture.connectionId },
-        })).resolves.toEqual({ credentialIndependent: true });
+        })).resolves.toBe(0);
       } finally {
         releasePayload.resolve();
         await Promise.allSettled([

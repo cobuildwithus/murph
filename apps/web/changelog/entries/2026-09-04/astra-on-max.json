@@ -1,0 +1,22 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "astra-on-max",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Choose Astra on Edge and Max",
+    "summary": "Edge and Max members can choose GPT-6 Astra for their conversations with Murph.",
+    "details": "Available on individual and Family Edge or Max seats through OpenAI. Choose Astra in Settings or ask Murph to use it for future queries. Astra uses your AI allowance faster than the other models.",
+    "relevanceTags": [
+      "assistant"
+    ],
+    "sourcePullRequests": [
+      2823
+    ],
+    "tryIt": {
+      "label": "Choose your model",
+      "href": "/settings"
+    }
+  }
+}

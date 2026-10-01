@@ -30,8 +30,6 @@ const hostedRuntimeConnectionRecordSelect = {
   metadataJson: true,
   nextReconcileAt: true,
   provider: true,
-  providerApplicationId: true,
-  providerApplicationRevision: true,
   providerConfigKey: true,
   refreshLeaseExpiresAt: true,
   refreshLeaseOwner: true,
@@ -110,11 +108,6 @@ function mapHostedRuntimeConnectionRecord(
     nextReconcileAt: maybeIsoTimestamp(record.nextReconcileAt),
     provider: record.provider,
     providerConfigKey: normalizeNullableString(record.providerConfigKey),
-    providerApplicationId: normalizeNullableString(record.providerApplicationId),
-    providerApplicationRevision: normalizeProviderApplicationRevision(
-      record.providerApplicationId,
-      record.providerApplicationRevision,
-    ),
     scopes: readStoredScopes(record.scopesJson),
     setupExpiresAt: maybeIsoTimestamp(record.setupExpiresAt),
     setupPhase: normalizeHostedDeviceSyncSetupPhase(record.setupPhase),
@@ -122,26 +115,6 @@ function mapHostedRuntimeConnectionRecord(
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
   } satisfies HostedStaticDeviceSyncConnectionRecord;
-}
-
-function normalizeProviderApplicationRevision(
-  applicationId: string | null | undefined,
-  revision: number | null | undefined,
-): number | null {
-  const normalizedApplicationId = normalizeNullableString(applicationId);
-  if (!normalizedApplicationId && revision == null) {
-    return null;
-  }
-  if (
-    !normalizedApplicationId
-    || !Number.isSafeInteger(revision)
-    || (revision as number) <= 0
-  ) {
-    throw new TypeError(
-      "Hosted device-sync provider application binding is invalid.",
-    );
-  }
-  return revision as number;
 }
 
 export function normalizeStoredScopes(value: readonly string[] | null | undefined): string[] {

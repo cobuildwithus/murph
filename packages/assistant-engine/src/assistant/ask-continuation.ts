@@ -96,6 +96,7 @@ export interface AssistantAskContinuationInput
     | 'workingDirectory'
   > {
   canCommit?: (() => boolean | Promise<boolean>) | null
+  canFinalize?: (() => boolean | Promise<boolean>) | null
   expectedConversationScope?: Extract<AssistantConversationScope, 'direct' | 'group'>
   instructions: string
   originAssistantInputId: string
@@ -175,7 +176,6 @@ export function buildAssistantAskContinuationMessageInput(
     ...(input.reviewedAssistantAskCompletionExpiresAt
       ? { reviewedAssistantAskCompletionExpiresAt: input.reviewedAssistantAskCompletionExpiresAt }
       : {}),
-    sandbox: 'read-only',
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,
@@ -337,6 +337,7 @@ export async function sendAssistantAskContinuationLocal(
       }
 
       const deliveryOutcome = await deliverAssistantReply({
+        followUpRequest: providerResult.followUpRequest,
         dedupeToken: input.deliveryIdempotencyKey,
         input: messageInput,
         media: [],
@@ -345,11 +346,14 @@ export async function sendAssistantAskContinuationLocal(
         sharedPlan,
         turnId,
       })
-      if (!await guardAssistantAskContinuationDeliveryCommit({
-        canCommit: () => assistantAskContinuationCanCommit(input),
-        deliveryOutcome,
-        vault: input.vault,
-      })) {
+      if (
+        input.canFinalize
+        && !await guardAssistantAskContinuationDeliveryCommit({
+          canCommit: input.canFinalize,
+          deliveryOutcome,
+          vault: input.vault,
+        })
+      ) {
         return {
           session: resolved.session,
           status: 'expired',

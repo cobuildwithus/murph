@@ -189,7 +189,15 @@ test.sequential(
         /How should Murph answer\?/u,
       )
       await writeInput('\u001B[B')
+      assert.match(
+        await waitForRenderedText(flush, readOutput, /› ○ Codex local model/u),
+        /› ○ Codex local model/u,
+      )
       await writeInput('\u001B[B')
+      assert.match(
+        await waitForRenderedText(flush, readOutput, /› ○ Venice\.ai/u),
+        /› ○ Venice\.ai/u,
+      )
       await writeInput('\r')
       const reviewOutput = await waitForRenderedText(
         flush,

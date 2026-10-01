@@ -2,15 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   CLINICAL_FHIR_RESOURCE_TYPES,
-  clinicalFhirRetrievalScopeSchema,
+  clinicalFhirRetrievalSliceSchema,
 } from "@murphai/clinical-records";
 import {
   HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES,
   HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
   hostedClinicalRecordsConnectLinkRequestSchema,
+  hostedClinicalRecordsFetchDocumentRequestSchema,
+  parseHostedClinicalRecordsFetchDocumentResponse,
   hostedClinicalRecordsFetchPageRequestSchema,
-  hostedClinicalRecordsRetrievalScopeSchema,
+  hostedClinicalRecordsRetrievalSliceSchema,
   parseHostedClinicalRecordsFetchPageResponse,
   parseHostedClinicalRecordsConnectLinkResponse,
   parseHostedClinicalRecordsReadRunResponse,
@@ -18,6 +20,12 @@ import {
   parseHostedClinicalRecordsRunDescriptor,
   parseHostedClinicalRecordsSyncRequestedWake,
 } from "../src/clinical-records.ts";
+import {
+  HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
+  HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
+} from "../src/clinical-records-boundary.ts";
 import {
   HOSTED_EXECUTION_EVENT_KINDS,
   HOSTED_EXECUTION_WAKE_KINDS,
@@ -33,6 +41,33 @@ import {
 const HASH = "a".repeat(64);
 
 describe("clinical records hosted execution contracts", () => {
+  it("bounds JSON-escaped pages plus the maximum attachment ticket envelope", () => {
+    const descriptor = { parentPageSha256: HASH, resourceType: "DocumentReference", resourceId: "a".repeat(200),
+      attachmentIndex: 1_999, ticket: "\u0000".repeat(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS), errorCode: "a".repeat(80) };
+    const descriptorBytes = Buffer.byteLength(JSON.stringify(descriptor));
+    // Count exact serialized components without materializing an eighty-MiB test object.
+    const fixed = Buffer.byteLength(JSON.stringify({ status: "page", body: "", nextCursor: "a".repeat(2_048),
+      pageUrlHash: HASH, documents: [] }));
+    const total = fixed + 6 * HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS
+      + HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS * descriptorBytes
+      + HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS - 1;
+    expect(total).toBeLessThanOrEqual(HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES);
+  });
+
+  it("keeps linked document requests credential-free and bodies separate from FHIR pages", () => {
+    const request = { runId: "run-1", generation: 1, ticket: "opaque-ticket" };
+    expect(hostedClinicalRecordsFetchDocumentRequestSchema.parse(request)).toEqual(request);
+    for (const extra of [{ url: "https://outside.example.test" }, { accessToken: "secret" }, { memberId: "other" }]) {
+      expect(() => hostedClinicalRecordsFetchDocumentRequestSchema.parse({ ...request, ...extra })).toThrow();
+    }
+    const response = { status: "document", contentBase64: "aGk=", mediaType: "text/plain", byteLength: 2, sha256: HASH };
+    expect(parseHostedClinicalRecordsFetchDocumentResponse(response)).toEqual(response);
+    expect(() => parseHostedClinicalRecordsFetchDocumentResponse({ ...response, byteLength: 21 * 1024 * 1024 })).toThrow();
+    expect(parseHostedClinicalRecordsFetchPageResponse({ status: "page", body: "{}", nextCursor: null, documents: [{
+      parentPageSha256: HASH, resourceType: "DocumentReference", resourceId: "doc-1", attachmentIndex: 0, ticket: "opaque-ticket",
+    }] })).toMatchObject({ documents: [{ resourceId: "doc-1" }] });
+  });
+
   it("accepts only the bounded first-party connect-link shape", () => {
     const claim = `cr_${"a".repeat(32)}`;
     const response = {
@@ -144,7 +179,10 @@ describe("clinical records hosted execution contracts", () => {
       patientIdHash: HASH,
       requestedScopes: ["patient/*.read"],
       retrievalJobId: "job_1",
-      retrievalScopes: [{
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [{
+        queryScopeId: "observations",
+        sliceId: "whole",
         coverage: "bounded-window",
         from: "2025-07-10T12:00:00.000Z",
         queryFingerprint: HASH,
@@ -162,7 +200,10 @@ describe("clinical records hosted execution contracts", () => {
     });
     expect(() => parseHostedClinicalRecordsRunDescriptor({
       ...descriptor,
-      retrievalScopes: [{
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [{
+        queryScopeId: "observations",
+        sliceId: "whole",
         coverage: "whole-family",
         queryFingerprint: HASH,
         resourceType: "UnsupportedResource",
@@ -211,6 +252,7 @@ describe("clinical records hosted execution contracts", () => {
       cursor: null,
       generation: 1,
       queryScopeId: "observation-vitals",
+      queryFingerprint: "2".repeat(64),
       requestId: "request_from_prior_runner",
       resourceType: "Observation",
       retrievalProtocol: "query-slices-v2",
@@ -231,8 +273,8 @@ describe("clinical records hosted execution contracts", () => {
   });
 
   it("reuses canonical clinical domain validation at the hosted boundary", () => {
-    expect(hostedClinicalRecordsRetrievalScopeSchema)
-      .toBe(clinicalFhirRetrievalScopeSchema);
+    expect(hostedClinicalRecordsRetrievalSliceSchema)
+      .toBe(clinicalFhirRetrievalSliceSchema);
     expect(HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES)
       .toBe(CLINICAL_FHIR_RESOURCE_TYPES.length);
 
@@ -245,7 +287,10 @@ describe("clinical records hosted execution contracts", () => {
       patientIdHash: HASH,
       requestedScopes: ["patient/*.read"],
       retrievalJobId: "job_1",
-      retrievalScopes: [{
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [{
+        queryScopeId: "observations",
+        sliceId: "whole",
         coverage: "whole-family",
         queryFingerprint: HASH,
         resourceType: "Observation",
@@ -260,8 +305,9 @@ describe("clinical records hosted execution contracts", () => {
     })).toThrow();
     expect(() => parseHostedClinicalRecordsRunDescriptor({
       ...descriptor,
-      retrievalScopes: [{
-        ...descriptor.retrievalScopes[0],
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [{
+        ...descriptor.retrievalSlices[0],
         resourceType: "Medication",
       }],
     })).toThrow();
@@ -282,7 +328,10 @@ describe("clinical records hosted execution contracts", () => {
       patientIdHash: HASH,
       requestedScopes: [],
       retrievalJobId: "job_1",
-      retrievalScopes: [{
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [{
+        queryScopeId: "observations",
+        sliceId: "whole",
         coverage: "whole-family",
         queryFingerprint: HASH,
         resourceType: "Patient",
@@ -319,6 +368,8 @@ describe("clinical records hosted execution contracts", () => {
 
   it("parses a bounded durable outcome and rejects extra or oversized fields", () => {
     const request = {
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [{ queryScopeId: "laboratory-observations", sliceId: "whole" }],
       counts: {
         createdCount: 1,
         executableDecisionCount: 1,
@@ -364,14 +415,11 @@ describe("clinical records hosted execution contracts", () => {
     });
     expect(() => parseHostedClinicalRecordsRecordOutcomeRequest({
       ...request,
-      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: undefined,
     })).toThrow("retrieval identity is invalid");
     expect(() => parseHostedClinicalRecordsRecordOutcomeRequest({
       ...request,
-      retrievalSlices: [{
-        queryScopeId: "laboratory-observations",
-        sliceId: "whole",
-      }],
+      retrievalProtocol: undefined,
     })).toThrow("retrieval identity is invalid");
 
     const maximumQueryOutcome = {

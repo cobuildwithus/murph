@@ -1,34 +1,35 @@
 import { writeFile } from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import {
-  assistantCliSurfacePrebuiltArtifactFileName,
   assistantCliSurfacePrebuiltSchemaVersion,
   buildAssistantCliSurfaceContract,
   type AssistantCliSurfacePrebuiltArtifact,
 } from './cli-surface-bootstrap.js'
-import { readAssistantCliLlmsFullManifest } from './cli-surface-manifest.js'
+import { readAssistantCliLlmsFullManifestFromCliEntry } from './cli-surface-manifest.js'
 
-const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
-const workspaceRoot = path.resolve(moduleDirectory, '../../../..')
-const artifactPath = path.join(
-  moduleDirectory,
-  assistantCliSurfacePrebuiltArtifactFileName,
-)
+export async function generateAssistantCliSurfaceContract(input: {
+  artifactPath: string
+  cliEntryPath: string
+  workingDirectory: string
+}): Promise<void> {
+  const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: input.cliEntryPath,
+    workingDirectory: input.workingDirectory,
+  })
+  const contract = buildAssistantCliSurfaceContract(manifest)
 
-const manifest = await readAssistantCliLlmsFullManifest({
-  workingDirectory: workspaceRoot,
-})
-const contract = buildAssistantCliSurfaceContract(manifest)
+  if (!contract) {
+    throw new Error('Could not render the assistant CLI surface contract.')
+  }
 
-if (!contract) {
-  throw new Error('Could not render the assistant CLI surface contract.')
+  const artifact: AssistantCliSurfacePrebuiltArtifact = {
+    contract,
+    schemaVersion: assistantCliSurfacePrebuiltSchemaVersion,
+  }
+
+  await writeFile(
+    input.artifactPath,
+    `${JSON.stringify(artifact, null, 2)}\n`,
+    'utf8',
+  )
 }
-
-const artifact: AssistantCliSurfacePrebuiltArtifact = {
-  contract,
-  schemaVersion: assistantCliSurfacePrebuiltSchemaVersion,
-}
-
-await writeFile(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8')

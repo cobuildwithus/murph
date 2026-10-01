@@ -1,9 +1,10 @@
 import path from "node:path";
 
+import { buildHostedExecutionRuntimeControlWake } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   collectHostedAssistantDeliverySideEffects: vi.fn(),
@@ -144,17 +145,41 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
 }));
 
 import {
-  runHostedWorkspaceAssistantPhase,
+  emitHostedAssistantProviderTraceLog,
+} from "../src/hosted-runtime/events.ts";
+import {
+  runHostedWorkspaceAssistantPhase as runHostedWorkspaceAssistantPhaseWithoutDrain,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
+
+afterEach(async () => {
+  await drainHostedRuntimeLogWritesBestEffort();
+});
+
+async function runHostedWorkspaceAssistantPhase(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+) {
+  try {
+    return await runHostedWorkspaceAssistantPhaseWithoutDrain(input);
+  } finally {
+    await drainHostedRuntimeLogWritesBestEffort();
+  }
+}
 
 function withoutAssistantTurnTimingLogs(
   logRequests: HostedRuntimeLogRequest[],
 ): HostedRuntimeLogRequest[] {
-  return logRequests.filter(
-    (request) =>
-      request.entries[0]?.redactedJson?.schema
-        !== "murph.assistant-turn-timing.v1",
+  return logRequests.flatMap((request) =>
+    request.entries
+      .filter(
+        (entry) =>
+          entry.redactedJson?.schema !== "murph.assistant-turn-timing.v1",
+      )
+      .map((entry) => ({
+        ...request,
+        entries: [entry],
+      }))
   );
 }
 
@@ -227,7 +252,7 @@ beforeEach(() => {
     if (!Number.isFinite(nextWakeMs) || nextWakeMs <= input.nowMs) {
       return input.deferDueOrInvalid
         ? mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            runnerIdleTtlMs: input.runnerIdleTtlMs,
             nowMs: input.nowMs,
           })
         : null;
@@ -263,6 +288,67 @@ beforeEach(() => {
 });
 
 describe("hosted workspace assistant diagnostics detail logs", () => {
+  it.each([
+    { systemWakeAt: "2026-04-26T23:59:00.000Z", expectedSystemOffsetMs: -60_000,
+      expectedNextOffsetMs: -60_000 },
+    { systemWakeAt: null, expectedSystemOffsetMs: null, expectedNextOffsetMs: 3_600_000 },
+  ])("attributes wake selection without logging timestamps: $systemWakeAt", async ({
+    systemWakeAt, expectedSystemOffsetMs, expectedNextOffsetMs,
+  }) => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const automationWakeAt = "2026-04-27T01:00:00.000Z";
+    mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(systemWakeAt);
+    mocks.runHostedAssistantAutomationLane.mockResolvedValue({
+      deviceSyncProcessed: 0, deviceSyncSkipped: true, nextWakeAt: automationWakeAt,
+      parserProcessed: 0, postCheckpointRecord: null, progressed: false,
+      assistantAutomationProgressed: false, redactedLogEntries: [],
+    });
+    const input = createPhaseInput({ logRequests });
+    input.now = () => "2026-04-27T00:00:00.000Z";
+    await runHostedWorkspaceAssistantPhase(input);
+    const entry = logRequests.flatMap((request) => request.entries)
+      .find((entry) => entry.eventCode === "assistant.pass_finished");
+    expect(entry?.redactedJson).toEqual(expect.objectContaining({
+      nextWakeOffsetMs: expectedNextOffsetMs,
+      systemWakeOffsetMs: expectedSystemOffsetMs,
+      workspaceWakeOffsetMs: null,
+      automationWakeOffsetMs: 3_600_000,
+      outboxWakeOffsetMs: null,
+      providerCleanupWakeOffsetMs: null,
+      wakeStateProgressed: true,
+      providerCleanupStateQueued: false,
+      providerCleanupDue: false,
+      assistantAutomationProgressed: false,
+    }));
+    expect(JSON.stringify(entry?.redactedJson)).not.toContain(automationWakeAt);
+    if (systemWakeAt) expect(JSON.stringify(entry?.redactedJson)).not.toContain(systemWakeAt);
+  });
+
+  it("preserves reply skip categories through the durable log boundary", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0, deviceSyncSkipped: true, nextWakeAt: null,
+      parserProcessed: 0, postCheckpointRecord: null, progressed: true,
+      redactedLogEntries: [{
+        component: "runtime", level: "info", phase: "wake.running",
+        message: "Hosted assistant automation event: input.reply-skipped.",
+        redacted: {
+          type: "input.reply-skipped", safeDetails: "reply_skip:unattested_reaction",
+        },
+      }],
+    });
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        eventCode: "assistant.automation_detail",
+        redactedJson: expect.objectContaining({
+          type: "input.reply-skipped", safeDetails: "reply_skip:unattested_reaction",
+        }),
+      }),
+    );
+  });
+
   it("revalidates Codex resume-failure diagnostics before durable logging", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
@@ -338,6 +424,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
@@ -432,6 +519,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
@@ -458,19 +546,18 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
 
   it("preserves bounded Codex action tool diagnostics in durable detail logs", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
-      nextWakeAt: null,
-      parserProcessed: 0,
-      postCheckpointRecord: null,
-      progressed: false,
-      redactedLogEntries: [{
-        component: "runtime.provider",
-        level: "info",
-        message: "Hosted assistant Codex action diagnostics captured.",
-        phase: "wake.running",
-        redacted: {
+    const wake = buildHostedExecutionRuntimeControlWake({
+      eventId: "evt_synthetic_action_diagnostics",
+      kind: "runtime.manual-requested",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    });
+    const providerEntry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_synthetic_phase" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-action-diagnostics.v1",
+          type: "assistant.codex.action_diagnostics",
           codexActionCachedInputUnitMax: 1000,
           codexActionCommandCount: 1,
           codexActionCompletedCount: 2,
@@ -492,6 +579,9 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
           codexActionOutputBytesTotal: 128,
           codexActionOutputItemCount: 3,
           codexActionOutputUnitMax: 1200,
+          codexActionProgressUpdateCallCount: 1,
+          codexActionProgressUpdateFirstCallElapsedMs: 2_400,
+          codexActionProgressUpdateSentCount: 1,
           codexActionProviderActionCount: 2,
           codexActionReasoningOutputUnitMax: 300,
           codexActionSlowDurationMs: [123, 60],
@@ -515,17 +605,30 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
             },
           ],
           codexActionTotalUnitMax: 82500,
-          codexActionTraceType: "action-diagnostics",
+          codexActionTurnCorrelation: 281_474_976_710_655,
           codexActionTurnIdPresent: true,
           codexActionUsageSampleCount: 1,
           codexActionWebSearchCount: 0,
-          providerTraceKind: "codex.action_diagnostics",
-          schema: "murph.assistant-codex-action-diagnostics.v1",
         },
-      }],
+      },
+      wake,
+    });
+    if (!providerEntry?.redacted) {
+      throw new Error("Expected a synthetic Codex action diagnostics entry.");
+    }
+    expect(Object.keys(providerEntry.redacted)).toHaveLength(40);
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: false,
+      redactedLogEntries: [providerEntry],
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
@@ -535,6 +638,9 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
         codexActionCommandCount: 1,
         codexActionKinds: ["dynamic.tool.call", "command.execution"],
         codexActionOutputBytesTotal: 128,
+        codexActionProgressUpdateCallCount: 1,
+        codexActionProgressUpdateFirstCallElapsedMs: 2_400,
+        codexActionProgressUpdateSentCount: 1,
         codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
         codexActionToolSummaries: [
           {
@@ -552,10 +658,17 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
             outputBytesTotal: 32,
           },
         ],
+        codexActionTurnCorrelation: 281_474_976_710_655,
         providerTraceKind: "codex.action_diagnostics",
         schema: "murph.assistant-codex-action-diagnostics.v1",
       }),
     }));
+    expect(filteredLogRequests[0]?.entries[0]?.redactedJson).not.toHaveProperty(
+      "codexActionProgressUpdateFailedCount",
+    );
+    expect(filteredLogRequests[0]?.entries[0]?.redactedJson).not.toHaveProperty(
+      "codexActionProviderRequestOrdinal",
+    );
   });
 });
 

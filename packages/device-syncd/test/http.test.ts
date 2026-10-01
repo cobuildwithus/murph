@@ -1734,7 +1734,8 @@ function createStubService(overrides: Partial<DeviceSyncService> = {}): DeviceSy
       provider: "demo",
       displayName: "Demo",
       transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
-      oauth: {
+      connection: {
+        kind: "oauth2",
         callbackPath: "/oauth/demo/callback",
         defaultScopes: ["offline", "read:data"],
       },

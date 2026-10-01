@@ -36,9 +36,13 @@ const assistantModel = "gpt-5.6-terra";
 const linqApiToken = "linq-local-analyze-video-token";
 const linqWebhookSecret = "linq-local-analyze-video-webhook-secret";
 const successQuestion = "What shape and color is centered in this video?";
+const detailedQuestion =
+  "During repetitions 3 through 5, does my left elbow flare more on the way down than on the way up?";
 const failureQuestion =
   `Try the video provider failure path ${HOSTED_LOCAL_GEMINI_VIDEO_ANALYSIS_503_MARKER}.`;
 const successReply = "I could see a blue square centered in the test video.";
+const detailedReply =
+  "The detailed pass found the same blue square while preserving the requested movement comparison.";
 const providerFailureText =
   "Video analysis is unavailable right now; no analysis was retrieved. Please try again later.";
 const runnerGeminiSentinelProof = "RUNNER_GEMINI_SENTINEL_OK";
@@ -61,8 +65,7 @@ describe("hosted local analyze-video Linq roundtrip e2e", () => {
         GEMINI_API_KEY: HOSTED_LOCAL_GEMINI_VIDEO_ANALYSIS_API_KEY,
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
@@ -152,6 +155,7 @@ describe("hosted local analyze-video Linq roundtrip e2e", () => {
     )).toBe(true);
     expectAdvertisedMurphDynamicTools(successProviderRequests, {
       analyzeVideoAvailable: true,
+      calendarLinkAvailable: true,
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
       messageTargetingAvailable: true,
@@ -162,6 +166,51 @@ describe("hosted local analyze-video Linq roundtrip e2e", () => {
       vaultFileSendAvailable: true,
     });
     await expectGeminiUsageRows(geminiUsageBaseline + 1);
+
+    const detailedProviderBaseline =
+      requireScenario().assistantProviderRequests.length;
+    const detailedReplyBaseline = requireLinqStub().countObservedSends(replyPath);
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderRequestDerivedMurphToolCall(
+        "analyze_video",
+        ({ requestMatchText }) => ({
+          message_ref: requireLatestMessageRef(requestMatchText),
+          question: detailedQuestion,
+          sampling_mode: "detailed_motion",
+        }),
+      ),
+      detailedReply,
+    ], { matchInputContains: detailedQuestion });
+
+    await postVideoWebhook({
+      eventId: `evt_analyze_video_detailed_${runNonce}`,
+      messageId: `msg_analyze_video_detailed_${runNonce}`,
+      question: detailedQuestion,
+      videoAttachmentId: `att_video_detailed_${runNonce}`,
+    });
+    await requireScenario().waitForLatestPendingWake(userId);
+    const detailedSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: detailedReplyBaseline,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(detailedSend)).toBe(
+      detailedReply,
+    );
+    await expectHealthyCompletion();
+
+    const detailedProviderRequests = requireScenario().assistantProviderRequests
+      .slice(detailedProviderBaseline);
+    const detailedToolOutputs = detailedProviderRequests
+      .flatMap(readHostedLocalAssistantProviderToolOutputs)
+      .join("\n\n");
+    expect(detailedToolOutputs).toMatch(/rpcSuccess["']?\s*:\s*true/u);
+    expect(detailedToolOutputs).toContain(
+      HOSTED_LOCAL_GEMINI_VIDEO_ANALYSIS_OBSERVATION,
+    );
+    expect(detailedToolOutputs).toContain("sampled at 5 frames per second");
+    await expectGeminiUsageRows(geminiUsageBaseline + 2);
 
     const failureProviderBaseline = requireScenario().assistantProviderRequests.length;
     const failureReplyBaseline = requireLinqStub().countObservedSends(replyPath);
@@ -202,7 +251,7 @@ describe("hosted local analyze-video Linq roundtrip e2e", () => {
       .join("\n\n");
     expect(failureToolOutputs).toMatch(/rpcSuccess["']?\s*:\s*false/u);
     expect(failureToolOutputs).toContain(providerFailureText);
-    await expectGeminiUsageRows(geminiUsageBaseline + 1);
+    await expectGeminiUsageRows(geminiUsageBaseline + 2);
   }, 420_000);
 });
 
@@ -268,7 +317,7 @@ async function expectGeminiUsageRows(expectedCount: number): Promise<void> {
         inputTokens: 320,
         outputTokens: 18,
         reasoningTokens: 7,
-        requestedModel: "gemini-3.7-flash",
+        requestedModel: "gemini-3.8-flash",
         totalTokens: 345,
         triggerKind: "analyze-video",
       });

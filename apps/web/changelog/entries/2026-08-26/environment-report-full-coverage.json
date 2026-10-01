@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "environment-report-full-coverage",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Environment reports can reach full coverage",
+    "summary": "The main Environment voice interview now asks every condition used in report coverage.",
+    "details": "A complete set of answers can now reach 100%. You can still skip a question or update an answer later.",
+    "relevanceTags": ["environment", "voice", "reports"],
+    "sourcePullRequests": [2335]
+  }
+}

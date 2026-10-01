@@ -16,11 +16,6 @@ import {
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
-  HOSTED_RUNTIME_WORKSPACE_PATH,
-} from "@murphai/hosted-execution/routes";
-
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import {
   isHostedRuntimeInternalAuthorityRejectedError,
@@ -29,9 +24,13 @@ import {
 import { readHostedRuntimeControlPlaneFetchFailureDiagnostics } from "./control-plane-fetch.ts";
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   HostedWebControlPlaneResponseError,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
+import {
+  matchesRequestedHostedSystemProgressProjection,
+} from "./workspace-progress-projection.ts";
 
 export function createHostedWebWorkspacePort(input: {
   boundUserId: string;
@@ -54,8 +53,7 @@ export function createHostedWebWorkspacePort(input: {
               ),
             }
           : {}),
-        method: "GET",
-        path: HOSTED_RUNTIME_WORKSPACE_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.workspaceRead,
         signal: context?.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
@@ -84,7 +82,7 @@ export function createHostedWebWorkspacePort(input: {
                 ),
               }
             : {}),
-          path: HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+          route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.workspaceCheckpoint,
           timeoutMs: input.timeoutMs,
           transport: input.transport,
         });
@@ -248,6 +246,10 @@ function isExactCanonicalCheckpointSuccessor(input: {
       === (input.request.inboxMediaRetentionWakeAt ?? null)
     && (workspace.nextWakeAt ?? null) === (input.request.nextWakeAt ?? null)
     && (workspace.nextWakeReason ?? null) === (input.request.nextWakeReason ?? null)
+    && matchesRequestedHostedSystemProgressProjection({
+      request: input.request,
+      workspace,
+    })
     && areJsonValuesEqual(workspace.snapshotRef, input.request.snapshotRef)
     && areJsonValuesEqual(
       workspace.redactedStatus ?? null,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createHostedPhysicalNoteRecoveryRequestFingerprint,
+  createHostedPhysicalNoteRequestKey,
+  hostedPhysicalNoteRecoveryRequestSchema,
+  hostedPhysicalNoteRecoveryResponseSchema,
   hostedPhysicalNoteSendRequestSchema,
   hostedPhysicalNoteSendResponseSchema,
   normalizeHostedPhysicalNoteRecipient,
@@ -8,6 +12,91 @@ import {
 } from "../src/physical-notes.ts";
 
 describe("hosted physical-note contracts", () => {
+  it("requires a bounded settled-usage fact on recovery results", () => {
+    expect(hostedPhysicalNoteRecoveryResponseSchema.parse({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: "250000",
+      status: "accepted",
+    })).toEqual({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: "250000",
+      status: "accepted",
+    });
+    expect(hostedPhysicalNoteRecoveryResponseSchema.parse({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: null,
+      status: "accepted",
+    })).toMatchObject({ settledUsageCostUsdMicros: null });
+    expect(() => hostedPhysicalNoteRecoveryResponseSchema.parse({
+      remainingUnresolved: false,
+      retryAfter: null,
+      status: "clear",
+    })).toThrow();
+    expect(() => hostedPhysicalNoteRecoveryResponseSchema.parse({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: "250000",
+      status: "clear",
+    })).toThrow();
+  });
+
+  it("accepts an optional bounded target on recovery requests", () => {
+    const originAssistantInputId = `ain_${"b".repeat(32)}`;
+    const targetOriginAssistantInputId = `ain_${"c".repeat(32)}`;
+
+    expect(hostedPhysicalNoteRecoveryRequestSchema.parse({
+      originAssistantInputId,
+      targetKind: "send",
+      targetOriginAssistantInputId,
+    })).toEqual({
+      originAssistantInputId,
+      targetKind: "send",
+      targetOriginAssistantInputId,
+    });
+    expect(hostedPhysicalNoteRecoveryRequestSchema.parse({
+      originAssistantInputId,
+    })).toEqual({ originAssistantInputId });
+    expect(() => hostedPhysicalNoteRecoveryRequestSchema.parse({
+      originAssistantInputId,
+      targetOriginAssistantInputId: "not-a-message-ref",
+    })).toThrow();
+    expect(() => hostedPhysicalNoteRecoveryRequestSchema.parse({
+      originAssistantInputId,
+      targetOriginAssistantInputId,
+    })).toThrow();
+    expect(() => hostedPhysicalNoteRecoveryRequestSchema.parse({
+      originAssistantInputId,
+      targetKind: "recovery",
+    })).toThrow();
+  });
+
+  it("binds recovery replay to one normalized target selector", () => {
+    const targetOriginAssistantInputId = `ain_${"c".repeat(32)}`;
+    const noTarget = createHostedPhysicalNoteRecoveryRequestFingerprint({});
+    const sendTarget = createHostedPhysicalNoteRecoveryRequestFingerprint({
+      targetKind: "send",
+      targetOriginAssistantInputId,
+    });
+
+    expect(noTarget).toMatch(/^[0-9a-f]{64}$/u);
+    expect(createHostedPhysicalNoteRecoveryRequestFingerprint({
+      targetKind: null,
+      targetOriginAssistantInputId: null,
+    })).toBe(noTarget);
+    expect(createHostedPhysicalNoteRecoveryRequestFingerprint({
+      targetKind: "send",
+      targetOriginAssistantInputId,
+    })).toBe(sendTarget);
+    expect(createHostedPhysicalNoteRecoveryRequestFingerprint({
+      targetKind: "recovery",
+      targetOriginAssistantInputId,
+    })).not.toBe(sendTarget);
+    expect(sendTarget).not.toBe(noTarget);
+  });
+
   it("normalizes one bounded US recipient", () => {
     const recipient = normalizeHostedPhysicalNoteRecipient({
       addressLine1: " 123 Main St ",
@@ -48,6 +137,21 @@ describe("hosted physical-note contracts", () => {
     })).toMatchObject({
       recipient: { state: "GA" },
     });
+  });
+
+  it("derives the hosted physical-note request key from the accepted input", () => {
+    const originAssistantInputId = `ain_${"d".repeat(32)}`;
+    const first = createHostedPhysicalNoteRequestKey({
+      originAssistantInputId,
+    });
+
+    expect(first).toMatch(/^physical_note_[0-9a-f]{64}$/u);
+    expect(createHostedPhysicalNoteRequestKey({
+      originAssistantInputId,
+    })).toBe(first);
+    expect(createHostedPhysicalNoteRequestKey({
+      originAssistantInputId: `ain_${"e".repeat(32)}`,
+    })).not.toBe(first);
   });
 
   it("rejects recipient fields that Lob cannot accept", () => {

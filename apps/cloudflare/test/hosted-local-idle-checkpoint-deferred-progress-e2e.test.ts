@@ -37,7 +37,6 @@ const firstUserText = "idle checkpoint deferred first input";
 const secondUserText = "idle checkpoint deferred second input";
 const firstReplyText = "First deferred checkpoint reply.";
 const secondReplyText = "Second deferred checkpoint reply.";
-const localRunnerIdleTtlMs = "300000";
 const linqApiToken = "linq-local-test-token";
 const idleCheckpointWaitTimeoutMs = 240_000;
 const idleCheckpointAfterDeferredProgressTimeoutMs = 180_000;
@@ -367,8 +366,7 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1000",
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,

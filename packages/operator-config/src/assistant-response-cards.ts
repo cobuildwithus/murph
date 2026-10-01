@@ -19,6 +19,7 @@ import {
   compactTableWorkoutSemanticResponseCardV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
+  isTotalsOnlyDailyNutritionResponseCard,
   exerciseRoutineResponseCardV1Schema,
   renderExerciseRoutineResponseCardTextV1,
   renderTelegramRichContentResponseCardTextV1,
@@ -45,6 +46,8 @@ import {
   type NutritionCardGoalSnapshot,
   type NutritionCardMetric,
   type WorkoutSessionDetailV1,
+  type WorkoutSessionEditorProjectionV1,
+  type WorkoutSessionPresentationV1,
 } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 
@@ -175,10 +178,12 @@ export const assistantResponseCardAuthoringSchema: z.ZodType<
 export const assistantWorkoutResponseCardSemanticSchema =
   compactTableWorkoutSemanticResponseCardV1Schema
 
+// Authoring schemas are optional for runtime consumers. These builders only
+// return schema objects, so unused exports need no initialization.
 export const assistantResponseCardJsonSchema =
-  createAssistantResponseCardJsonSchema()
+  /* @__PURE__ */ createAssistantResponseCardJsonSchema()
 export const exerciseRoutineResponseCardJsonSchema =
-  createExerciseRoutineResponseCardJsonSchema()
+  /* @__PURE__ */ createExerciseRoutineResponseCardJsonSchema()
 export const telegramRichContentResponseCardJsonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -194,7 +199,28 @@ export const telegramRichContentResponseCardJsonSchema = {
   required: ['kind', 'version', 'html'],
 } as const
 export const challengeStandingsResponseCardJsonSchema =
-  createChallengeStandingsResponseCardJsonSchema()
+  /* @__PURE__ */ createChallengeStandingsResponseCardJsonSchema()
+
+export const DAILY_NUTRITION_OPTIONAL_GOALS_INTRO =
+  'Here’s your nutrition card. If you’d like, we can set up goals too.'
+
+/** A single fixed invitation, not a general card-plus-prose escape hatch. */
+export function readDailyNutritionIntroduction(
+  card: AssistantResponseCard | null | undefined,
+  message: string | null | undefined,
+): string | null {
+  if (!card || !isTotalsOnlyDailyNutritionResponseCard(card) ||
+      card.kind !== 'daily_nutrition' ||
+      Object.values(card.totals).some((metric) =>
+        metric.total === null || metric.mealCount !== card.mealCount)) {
+    return null
+  }
+  const introduction = DAILY_NUTRITION_OPTIONAL_GOALS_INTRO
+  return message === introduction ||
+    message === `${renderDailyNutritionResponseCardText(card)}\n\n${introduction}`
+    ? introduction
+    : null
+}
 
 /**
  * User-visible semantic text used by non-native routes and definitive native
@@ -202,11 +228,14 @@ export const challengeStandingsResponseCardJsonSchema =
  */
 export function renderAssistantResponseCardText(
   card: AssistantResponseCard,
+  companionMessage?: string | null,
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
   switch (parsed.kind) {
     case 'daily_nutrition':
-      return renderDailyNutritionResponseCardText(parsed)
+      return [renderDailyNutritionResponseCardText(parsed),
+        readDailyNutritionIntroduction(parsed, companionMessage)]
+        .filter((value) => value !== null).join('\n\n')
     case 'compact_table':
       return renderCompactTableResponseCardText(parsed, false)
     case 'exercise_routine':
@@ -243,11 +272,14 @@ export function renderAssistantWorkoutResponseCardTranscriptText(
  */
 export function renderAssistantResponseCardTranscriptText(
   card: AssistantResponseCard,
+  companionMessage?: string | null,
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
   switch (parsed.kind) {
     case 'daily_nutrition':
-      return renderDailyNutritionResponseCardText(parsed)
+      return [renderDailyNutritionResponseCardText(parsed),
+        readDailyNutritionIntroduction(parsed, companionMessage)]
+        .filter((value) => value !== null).join('\n\n')
     case 'compact_table':
       return renderCompactTableResponseCardText(parsed, true)
     case 'exercise_routine':
@@ -267,11 +299,15 @@ export type TelegramRichMessage = {
 /** Build one Telegram-native rich message from a frozen response card. */
 export function buildTelegramRichMessage(
   card: AssistantResponseCard,
+  companionMessage?: string | null,
 ): TelegramRichMessage {
   const parsed = assistantResponseCardSchema.parse(card)
   switch (parsed.kind) {
-    case 'daily_nutrition':
-      return { html: renderTelegramNutritionCardHtml(parsed) }
+    case 'daily_nutrition': {
+      const introduction = readDailyNutritionIntroduction(parsed, companionMessage)
+      return { html: renderTelegramNutritionCardHtml(parsed) + (introduction
+        ? `<p>${escapeTelegramRichHtml(introduction)}</p>` : '') }
+    }
     case 'compact_table':
       return { html: renderTelegramCompactTableCardHtml(parsed) }
     case 'exercise_routine':
@@ -286,36 +322,37 @@ export function buildTelegramRichMessage(
 export function buildLinqIMessageAppFallbackText(
   card: AssistantResponseCard,
 ):
-  | 'Challenge standings. Ask Murph for this card in text'
-  | 'Exercise routine. Ask Murph for this card in text'
-  | 'Your Murph guide. Ask Murph for this card in text'
-  | 'Your daily nutrition. Ask Murph for this card in text'
-  | 'Your Murph summary. Ask Murph for this card in text'
-  | 'Your workout. Ask Murph for this card in text' {
+  | 'Challenge standings.'
+  | 'Exercise routine.'
+  | 'Your Murph guide.'
+  | 'Your daily nutrition.'
+  | 'Your Murph summary.'
+  | 'Your workout.' {
   const parsed = assistantResponseCardSchema.parse(card)
   switch (parsed.kind) {
     case 'daily_nutrition':
-      return 'Your daily nutrition. Ask Murph for this card in text'
+      return 'Your daily nutrition.'
     case 'compact_table': {
       if (parsed.tracking === null) {
-        return 'Your Murph summary. Ask Murph for this card in text'
+        return 'Your Murph summary.'
       }
       switch (parsed.tracking.kind) {
         case 'workout':
-          return 'Your workout. Ask Murph for this card in text'
+          return 'Your workout.'
       }
     }
     case 'challenge_standings':
-      return 'Challenge standings. Ask Murph for this card in text'
+      return 'Challenge standings.'
     case 'exercise_routine':
-      return 'Exercise routine. Ask Murph for this card in text'
+      return 'Exercise routine.'
     case 'telegram_rich_content':
-      return 'Your Murph guide. Ask Murph for this card in text'
+      return 'Your Murph guide.'
   }
 }
 
 export function buildLinqIMessageAppLayout(
   card: AssistantResponseCard,
+  companionMessage?: string | null,
 ): LinqIMessageAppLayout {
   const parsed = assistantResponseCardSchema.parse(card)
   if (parsed.kind === 'exercise_routine') {
@@ -338,14 +375,9 @@ export function buildLinqIMessageAppLayout(
         subcaption: `${progress.completed}/${progress.total} sets complete`,
       }
     }
-    const semantic = renderCompactTableSemanticPresentation(parsed)
     return {
-      caption: semantic.heading,
+      caption: parsed.title,
       image_url: imageUrl,
-      subcaption: semantic.detailLines.join('\n'),
-      ...(semantic.footer === null
-        ? {}
-        : { trailing_caption: semantic.footer }),
     }
   }
   if (parsed.kind === 'challenge_standings') {
@@ -357,12 +389,14 @@ export function buildLinqIMessageAppLayout(
 
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
   const partialLabel = renderPartialNutritionLabel(parsed)
+  const introduction = readDailyNutritionIntroduction(parsed, companionMessage)
+  const subcaption = introduction ?? partialLabel
   return {
     caption: `${formatNutritionCardDate(parsed.localDate)} · ${
       parsed.mealCount
     } ${mealLabel}`,
     image_url: buildLinqIMessageAppCardImageUrl(parsed),
-    ...(partialLabel === null ? {} : { subcaption: partialLabel }),
+    ...(subcaption === null ? {} : { subcaption }),
   }
 }
 
@@ -459,6 +493,16 @@ export function encodeWorkoutSessionAppCardUrl(
   return encodeAppCardEnvelopeUrl(encodeWorkoutSessionAppCardPayload(parsed, true))
 }
 
+export function encodeWorkoutSessionSnapshotAppCardUrl(
+  presentation: WorkoutSessionPresentationV1 & {
+    editor: WorkoutSessionEditorProjectionV1
+  },
+): string {
+  return encodeAppCardEnvelopeUrl(
+    encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV6(presentation)),
+  )
+}
+
 function encodeCompactTableAppCardPayload(
   card: CompactTableResponseCardV1,
   includeActionBinding: boolean,
@@ -528,23 +572,22 @@ function encodeWorkoutSessionAppCardPayload(
   card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
   includeActionBinding: boolean,
 ): string {
-  return encodeAppCardEnvelopePayload(
-    includeActionBinding
-      && card.editor !== undefined
-      ? buildWorkoutSessionAppCardEnvelopeV6({
-          editor: card.editor,
-          title: card.title,
-          subtitle: card.subtitle,
-          footer: card.footer,
-          workout: card.workout,
-        })
-      : buildWorkoutSessionAppCardEnvelopeV4({
-          title: card.title,
-          subtitle: card.subtitle,
-          footer: card.footer,
-          workout: card.workout,
-        }),
-  )
+  // Image previews carry no edit authority.
+  if (!includeActionBinding) {
+    return encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV4(card))
+  }
+  if (card.editor === undefined) {
+    throw new TypeError('A workout card requires a verified editor.')
+  }
+  // Shared Messages links must also render on installed clients that reject completed V6.
+  // Capable clients receive completed editors through authenticated refresh/save results.
+  if (card.workout.state === 'completed') {
+    return encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV4(card))
+  }
+  return encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV6({
+    ...card,
+    editor: card.editor,
+  }))
 }
 
 function encodeAppCardEnvelopePayload(
@@ -973,7 +1016,8 @@ function renderTelegramNutritionCardHtml(
   const partialHtml = partial === null
     ? ''
     : `<blockquote>${escapeTelegramRichHtml(partial)}</blockquote>`
-  const goalsHtml = !isDailyNutritionResponseCardV2(card)
+  const totalsOnly = isTotalsOnlyDailyNutritionResponseCard(card)
+  const goalsHtml = !isDailyNutritionResponseCardV2(card) || totalsOnly
     ? ''
     : `<details><summary>Daily goals</summary><table bordered><tr><th>Nutrient</th><th>Target</th><th>Status</th></tr>${[
         renderTelegramNutritionGoalRow('Calories', card.goals.calories, ' cal'),
@@ -983,8 +1027,9 @@ function renderTelegramNutritionCardHtml(
         renderTelegramNutritionGoalRow('Fiber', card.goals.fiberGrams, 'g'),
       ].join('')}</table></details>`
   return [
-    `<h2>${escapeTelegramRichHtml(formatNutritionCardDate(card.localDate))}</h2>`,
-    `<p>${card.mealCount} ${card.mealCount === 1 ? 'meal' : 'meals'}</p>`,
+    `<h2>${escapeTelegramRichHtml(totalsOnly ? card.localDate : formatNutritionCardDate(card.localDate))}</h2>`,
+    `<p>${totalsOnly ? 'Estimated · logged so far · ' : ''}${card.mealCount} ${totalsOnly ? 'logged ' : ''}${card.mealCount === 1 ? 'meal' : 'meals'}</p>`,
+    ...(totalsOnly ? ['<p>Logged records may not include everything eaten.</p>'] : []),
     `<figure><img src="${escapeTelegramRichHtmlAttribute(buildLinqIMessageAppCardImageUrl(card))}"/></figure>`,
     `<table bordered striped>${rows.map(([label, value]) => `<tr><td>${escapeTelegramRichHtml(label ?? '')}</td><td align="right"><b>${escapeTelegramRichHtml(value ?? '')}</b></td></tr>`).join('')}</table>`,
     goalsHtml,
@@ -1023,10 +1068,11 @@ function renderDailyNutritionResponseCardText(
     `about ${formatNutritionCardNumber(calorieTotal)} calories`,
     ...renderAvailableNutritionTotals(card),
   ]
-  const summary = `${formatNutritionCardDate(card.localDate)}: ${
+  const totalsOnly = isTotalsOnlyDailyNutritionResponseCard(card)
+  const summary = `${totalsOnly ? `${card.localDate} · estimated, logged so far` : formatNutritionCardDate(card.localDate)}: ${
     metrics.join(' · ')
-  } from ${card.mealCount} logged ${mealLabel}.`
-  const goals = isDailyNutritionResponseCardV2(card)
+  } from ${card.mealCount} logged ${mealLabel}.${totalsOnly ? ' Logged records may not include everything eaten.' : ''}`
+  const goals = isDailyNutritionResponseCardV2(card) && !totalsOnly
     ? `Targets: ${renderDailyNutritionGoals(card).join(' · ')}.`
     : null
   const partialLabel = renderPartialNutritionLabel(card)
@@ -1194,7 +1240,18 @@ function createExerciseRoutineResponseCardJsonSchema() {
   return {
     ...portableSchema,
     description:
-      'Exercise routine card V1 with honest timing and catalog-backed images.',
+      'Exercise routine card V1 authoring with honest timing and catalog-backed images.',
+    required: [
+      'exercises',
+      'intensity',
+      'kind',
+      'labels',
+      'safety',
+      'title',
+      'totalSeconds',
+      'transitionSeconds',
+      'version',
+    ],
   }
 }
 
@@ -1255,16 +1312,19 @@ function createAssistantResponseCardJsonSchema() {
     },
     required: ['target', 'status'],
   } as const)
+  const workoutTrackingProperties = {
+    kind: { const: 'workout' },
+    entityId: {
+      type: 'string',
+      maxLength: 30,
+      pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
+    },
+  } as const
   const tracking = {
     type: ['object', 'null'],
     additionalProperties: false,
     properties: {
-      kind: { const: 'workout' },
-      entityId: {
-        type: 'string',
-        maxLength: 30,
-        pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
-      },
+      ...workoutTrackingProperties,
       snapshotAt: {
         type: 'string',
         minLength: 24,
@@ -1274,6 +1334,12 @@ function createAssistantResponseCardJsonSchema() {
       },
     },
     required: ['kind', 'entityId', 'snapshotAt'],
+  } as const
+  const workoutTracking = {
+    type: 'object',
+    additionalProperties: false,
+    properties: workoutTrackingProperties,
+    required: ['kind', 'entityId'],
   } as const
   const workoutSet = {
     type: 'object',
@@ -1352,21 +1418,15 @@ function createAssistantResponseCardJsonSchema() {
       totals: {
         type: 'object',
         additionalProperties: false,
-        patternProperties: {
-          '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': metric(
-            assistantResponseCardV1Bounds.macroGrams,
-            false,
-          ),
-        },
         properties: {
           calories: metric(assistantResponseCardV1Bounds.calories, true),
           proteinGrams: metric(
             assistantResponseCardV1Bounds.macroGrams,
             false,
           ),
-          carbsGrams: {},
-          fatGrams: {},
-          fiberGrams: {},
+          carbsGrams: metric(assistantResponseCardV1Bounds.macroGrams, false),
+          fatGrams: metric(assistantResponseCardV1Bounds.macroGrams, false),
+          fiberGrams: metric(assistantResponseCardV1Bounds.macroGrams, false),
         },
         required: [
           'calories',
@@ -1377,19 +1437,25 @@ function createAssistantResponseCardJsonSchema() {
         ],
       },
       goals: {
+        // A flat typed object stays concrete in Codex discovery. The condition
+        // enforces the same all-null/all-five bundle as the runtime validator.
+        if: { properties: { calories: { type: 'null' } } },
+        then: { properties: {
+          proteinGrams: { type: 'null' }, carbsGrams: { type: 'null' },
+          fatGrams: { type: 'null' }, fiberGrams: { type: 'null' },
+        } },
+        else: { properties: {
+          proteinGrams: { type: 'object' }, carbsGrams: { type: 'object' },
+          fatGrams: { type: 'object' }, fiberGrams: { type: 'object' },
+        } },
         type: 'object',
         additionalProperties: false,
-        patternProperties: {
-          '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': goal(
-            assistantResponseCardV1Bounds.macroGrams,
-          ),
-        },
         properties: {
-          calories: goal(assistantResponseCardV1Bounds.calories),
-          proteinGrams: goal(assistantResponseCardV1Bounds.macroGrams),
-          carbsGrams: {},
-          fatGrams: {},
-          fiberGrams: {},
+          calories: { ...goal(assistantResponseCardV1Bounds.calories), type: ['object', 'null'] },
+          proteinGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
+          carbsGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
+          fatGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
+          fiberGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
         },
         required: [
           'calories',
@@ -1409,18 +1475,24 @@ function createAssistantResponseCardJsonSchema() {
       'goals',
     ],
   } as const
-  const compactTableFields = {
+  const compactTableProperties = {
+    kind: { const: 'compact_table' },
+    version: { const: 1 },
+    title: responseCardTextSchema(
+      compactTableCardV1Bounds.title,
+    ),
+    subtitle: responseCardNullableTextSchema(
+      compactTableCardV1Bounds.subtitle,
+    ),
+    footer: responseCardNullableTextSchema(
+      compactTableCardV1Bounds.footer,
+    ),
+  } as const
+  const compactTableGeneric = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      kind: { const: 'compact_table' },
-      version: { const: 1 },
-      title: responseCardTextSchema(
-        compactTableCardV1Bounds.title,
-      ),
-      subtitle: responseCardNullableTextSchema(
-        compactTableCardV1Bounds.subtitle,
-      ),
+      ...compactTableProperties,
       rowHeader: responseCardTextSchema(
         compactTableCardV1Bounds.rowHeader,
       ),
@@ -1438,10 +1510,27 @@ function createAssistantResponseCardJsonSchema() {
         maxItems: compactTableCardV1Bounds.rows,
         items: row,
       },
-      footer: responseCardNullableTextSchema(
-        compactTableCardV1Bounds.footer,
-      ),
       tracking,
+    },
+    required: [
+      'kind',
+      'version',
+      'title',
+      'subtitle',
+      'rowHeader',
+      'columns',
+      'rows',
+      'footer',
+      'tracking',
+    ],
+  } as const
+  const compactTableWorkout = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      ...compactTableProperties,
+      subtitle: { type: 'null' },
+      tracking: workoutTracking,
       workout,
     },
     required: [
@@ -1451,35 +1540,13 @@ function createAssistantResponseCardJsonSchema() {
       'subtitle',
       'footer',
       'tracking',
-    ],
-  } as const
-  const compactTable = {
-    allOf: [
-      compactTableFields,
-      {
-        oneOf: [
-          {
-            properties: { workout: false },
-            required: ['rowHeader', 'columns', 'rows'],
-          },
-          {
-            properties: {
-              columns: false,
-              rowHeader: false,
-              rows: false,
-              subtitle: { type: 'null' },
-              tracking: { type: 'object' },
-            },
-            required: ['workout'],
-          },
-        ],
-      },
+      'workout',
     ],
   } as const
 
   return {
     description:
       'Author daily_nutrition V2, generic compact_table V1, or compact_table workout V1.',
-    anyOf: [nutrition, compactTable],
+    anyOf: [nutrition, compactTableGeneric, compactTableWorkout],
   } as const
 }

@@ -28,13 +28,23 @@ describe("public product service", () => {
     });
     const service = createPublicProductsService(source);
     const resultPromise = service.search({
+      foodComparisonReadyOnly: true,
+      foodSearchOrder: "evidence",
       query: "example",
       kinds: ["supplement", "food"],
       limitPerKind: 6,
+      offsetPerKind: 12,
     });
 
     expect(source.searchSupplements).toHaveBeenCalledOnce();
     expect(source.searchFoods).toHaveBeenCalledOnce();
+    expect(source.searchFoods).toHaveBeenCalledWith({
+      comparisonReadyOnly: true,
+      foodSearchOrder: "evidence",
+      limit: 6,
+      offset: 12,
+      q: "example",
+    });
 
     supplements.resolve([searchItem({ id: "dsld:1", name: "Supplement first" })]);
     foods.resolve([
@@ -60,13 +70,17 @@ describe("public product service", () => {
     const service = createPublicProductsService(source);
 
     await service.search({
+      foodComparisonReadyOnly: false,
+      foodSearchOrder: "relevance",
       query: "example",
       kinds: ["supplement"],
       limitPerKind: 4,
+      offsetPerKind: 0,
     });
 
     expect(source.searchSupplements).toHaveBeenCalledWith({
       limit: 4,
+      offset: 0,
       q: "example",
     });
     expect(source.searchFoods).not.toHaveBeenCalled();
@@ -266,9 +280,12 @@ describe("public product service", () => {
     const service = createPublicProductsService(source);
 
     await expect(service.search({
+      foodComparisonReadyOnly: false,
+      foodSearchOrder: "relevance",
       query: "private input",
       kinds: ["food"],
       limitPerKind: 6,
+      offsetPerKind: 0,
     })).rejects.toEqual(expect.any(PublicProductDataUnavailableError));
   });
 });

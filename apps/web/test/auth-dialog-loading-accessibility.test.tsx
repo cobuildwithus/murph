@@ -33,10 +33,10 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", async () => {
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", async () => {
   await mocks.moduleGate;
   return {
-    HostedAuthPanelIsland(props: { phoneInputAutoFocus?: boolean }) {
+    HostedFirstPartyAuthPanel(props: { phoneInputAutoFocus?: boolean }) {
       const [panelState, setPanelState] = useState(mocks.initialPanelState);
       mocks.panelRender();
       mocks.panelAutoFocusHistory.push(props.phoneInputAutoFocus);
@@ -345,6 +345,42 @@ test("uses a panel preloaded after a closed dialog mounts without suppressing ph
   expect(focus.mock.instances).toContain(input);
   expect(rendered.window.document.activeElement).toBe(input);
   expect(rendered.container.querySelector('[aria-busy="true"]')).toBeNull();
+});
+
+test("a stale provider intent cannot reopen first-party authentication", async () => {
+  const { AuthDialog } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog"
+  );
+  const initialOpenChange = vi.fn();
+  const returnedOpenChange = vi.fn();
+  const rendered = await renderClientComponent(
+    createElement(AuthDialog, {
+      key: "before-redirect",
+      onOpenChange: initialOpenChange,
+      open: false,
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = rendered.cleanup;
+
+  rendered.window.sessionStorage.setItem(
+    "murph:telegram-oauth-dialog-intent:v1",
+    "1",
+  );
+  await rendered.rerender(
+    createElement(AuthDialog, {
+      key: "after-redirect",
+      onOpenChange: returnedOpenChange,
+      open: false,
+    }),
+  );
+
+  expect(returnedOpenChange).not.toHaveBeenCalled();
+  expect(
+    rendered.window.sessionStorage.getItem(
+      "murph:telegram-oauth-dialog-intent:v1",
+    ),
+  ).toBe("1");
 });
 
 async function renderPendingAuthDialog() {

@@ -6,11 +6,17 @@ import {
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
+  queueHostedLinqHomeContactCardAfterDelivery: vi.fn(),
   getPrisma: vi.fn(),
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(),
   materializeHostedSignupWelcomeHomeRouteTx: vi.fn(),
   recordHostedLinqRuntimeDeliveryOutcomeTx: vi.fn(),
+  retryHostedLinqTerminalSend: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-delivery", () => ({
+  queueHostedLinqHomeContactCardAfterDelivery: mocks.queueHostedLinqHomeContactCardAfterDelivery,
 }));
 
 vi.mock("next/server", async (importOriginal) => ({
@@ -33,6 +39,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq-home-routing", () => ({
     mocks.materializeHostedSignupWelcomeHomeRouteTx,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-terminal-retry", () => ({
+  retryHostedLinqTerminalSend: mocks.retryHostedLinqTerminalSend,
+}));
+
 vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery:
     mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
@@ -48,6 +58,7 @@ type RouteModule = typeof import(
 
 let route: RouteModule;
 let prisma: {
+  $queryRaw: ReturnType<typeof vi.fn>;
   $transaction: ReturnType<typeof vi.fn>;
   hostedMemberRouting: {
     findUnique: ReturnType<typeof vi.fn>;
@@ -64,6 +75,7 @@ describe("hosted runtime Linq delivery route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       $transaction: vi.fn(async (operation) => operation(prisma)),
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -101,6 +113,10 @@ describe("hosted runtime Linq delivery route", () => {
 
     expect(response.status).toBe(200);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.materializeHostedSignupWelcomeHomeRouteTx.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.materializeHostedSignupWelcomeHomeRouteTx).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550100001",
       fromPhoneNumber: "+15550100099",
@@ -274,9 +290,20 @@ describe("hosted runtime Linq delivery route", () => {
       recorded: true,
     });
     expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
-    expect(mocks.after).toHaveBeenCalledTimes(1);
+    expect(mocks.after).toHaveBeenCalledTimes(2);
 
     await runScheduledAfterTask();
+    expect(mocks.queueHostedLinqHomeContactCardAfterDelivery).toHaveBeenCalledWith({
+      chatId: "linq_chat_123",
+      expectedMemberId: "member_123",
+      messageIds: ["linq_text_message", "linq_link_message"],
+      prisma,
+    });
+    expect(mocks.retryHostedLinqTerminalSend.mock.calls).toEqual([
+      [{ chatId: "linq_chat_123", messageId: "linq_text_message", prisma }],
+      [{ chatId: "linq_chat_123", messageId: "linq_link_message", prisma }],
+    ]);
+    await runScheduledAfterTask(1);
 
     expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).toHaveBeenCalledWith({
       answeredMailboxItemIds: [
@@ -303,7 +330,11 @@ describe("hosted runtime Linq delivery route", () => {
     }, null));
 
     expect(response.status).toBe(200);
-    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+    await runScheduledAfterTask();
+    expect(mocks.retryHostedLinqTerminalSend).toHaveBeenCalledWith({
+      chatId: "linq_chat_123", messageId: "linq_message_sent", prisma,
+    });
     expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
   });
 
@@ -329,6 +360,7 @@ describe("hosted runtime Linq delivery route", () => {
       recorded: false,
     });
     expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.queueHostedLinqHomeContactCardAfterDelivery).not.toHaveBeenCalled();
     expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
   });
 
@@ -351,7 +383,7 @@ describe("hosted runtime Linq delivery route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
-    await runScheduledAfterTask();
+    await runScheduledAfterTask(1);
     expect(consoleError).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("mailbox_item_private_1");
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("runtime_attempt_123");

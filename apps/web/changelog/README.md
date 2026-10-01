@@ -23,10 +23,19 @@ when order matters, and do not renumber unrelated entries.
     "summary": "One sentence describing what changed for the member.",
     "details": "The most important boundary, limitation, or recovery behavior.",
     "relevanceTags": ["product-area"],
-    "sourcePullRequests": [1234]
+    "sourcePullRequests": [1234],
+    "tryIt": {
+      "label": "Ask about recovery",
+      "prompt": "Help me review my recovery today."
+    }
   }
 }
 ```
+
+`item.tryIt` is optional. When present, it must be an object with a `label`
+string and exactly one action: either an `href` string for a supported route or
+a `prompt` string for a supported conversation request. Those are the only
+accepted keys; a string value or any additional key is invalid.
 
 Optional edition-level title and summary live at
 `editions/YYYY-MM-DD.json`. They are not required: dates without metadata use a
@@ -44,3 +53,21 @@ builds generate an ignored TypeScript module from the fragments, avoiding both
 a committed merge hotspot and runtime filesystem reads. The loader and focused
 tests validate fragments and publish them through the existing archive, feed,
 permalink, and share-card contracts.
+
+## Review proof for content-only entries
+
+A PR whose only user-facing hosted Web changes are authored files under
+`entries/**` plus optional `editions/**` does not need a branch preview solely
+for design proof. Review the changed JSON copy directly, run
+`pnpm --dir apps/web changelog:generate` followed by
+`pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/changelog-page.test.tsx`
+from the repository root, and use
+`https://www.withmurph.ai/screenshots/ops#changelog-archive` as the
+repository-owned production presentation reference. The focused test loads every
+authored fragment and proves its visible copy and try-it affordance server-render
+through the production archive component; the synthetic archive study renders
+that same production component and therefore covers unchanged presentation.
+
+This exception is content-only. A change to changelog rendering, components,
+styles, visuals, or interaction still requires the normal current-branch design
+proof.

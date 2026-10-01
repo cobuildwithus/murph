@@ -10,6 +10,8 @@ export interface EncryptedR2ObjectBodyLike {
   arrayBuffer(): Promise<ArrayBuffer>;
   body?: ReadableStream<Uint8Array>;
   customMetadata?: Record<string, string>;
+  etag?: string;
+  httpEtag?: string;
   key?: string;
   size?: number;
   uploaded?: Date;
@@ -59,6 +61,8 @@ function describeHostedStorageEnvelopeLabel(scope: HostedStorageScope): string {
       return "Hosted environment voice envelope";
     case "meal-photo":
       return "Hosted meal photo envelope";
+    case "media":
+      return "Hosted media envelope";
     case "private-media":
       return "Hosted private media envelope";
     case "runner-secrets":

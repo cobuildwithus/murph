@@ -3,13 +3,21 @@ import {
 } from "@murphai/clinical-records/retrieval-limits";
 
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS = 5 * 1024 * 1024;
-// A JSON string can expand one UTF-16 code unit to six ASCII bytes (`\uXXXX`).
-// Keep the transport envelope broad enough for every body accepted here so
-// assistant-runtime remains the single owner of exact FHIR and raw-byte limits.
-export const HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES =
-  (6 * HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS) + (64 * 1024);
 export const HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES = 32 * 1024 * 1024;
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGES = 500;
+export const HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
+export const HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS = 4_096;
+export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS = 2_000;
+// JSON may encode each UTF-16 code unit as six ASCII bytes. Descriptor ids,
+// hashes and codes are restricted ASCII; 1 KiB covers their fields and syntax.
+export const HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES =
+  (6 * HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS) + (64 * 1024)
+  + HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS
+    * (6 * HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS + 1_024);
+export const HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES =
+  Math.ceil(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES / 3) * 4 + 64 * 1024;
+export const HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH =
+  "/api/internal/clinical-records/runtime/fetch-document";
 export const HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS = 2_048;
 export const HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS = 120;
 export const HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN = /^[A-Za-z0-9._-]+$/u;
@@ -27,9 +35,7 @@ export const HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH =
   "/api/internal/clinical-records/runtime/fetch-page";
 export const HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH =
   "/api/internal/clinical-records/runtime/record-outcome";
-// A query-aware outcome can echo up to 80 bounded slice references. Keep the
-// signed transport limit aligned with that contract instead of the smaller
-// legacy aggregate outcome.
+// Outcomes echo at most 80 bounded slice references inside the signed envelope.
 export const HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES = 32 * 1024;
 
 export interface HostedClinicalRecordsOutcomeCounts {
@@ -37,6 +43,7 @@ export interface HostedClinicalRecordsOutcomeCounts {
   executableDecisionCount: number;
   fetchedPageCount: number;
   fetchedResourceFamilyCount: number;
+  labResultCount?: number;
   rawFileCount: number;
   retractedCount: number;
   reviewDecisionCount: number;
@@ -53,8 +60,8 @@ export interface HostedClinicalRecordsRecordOutcomeRequest {
   counts: HostedClinicalRecordsOutcomeCounts;
   errorCode?: string;
   generation: number;
-  retrievalProtocol?: "query-slices-v2";
-  retrievalSlices?: HostedClinicalRecordsRetrievalSliceRef[];
+  retrievalProtocol: "query-slices-v2";
+  retrievalSlices: HostedClinicalRecordsRetrievalSliceRef[];
   runId: string;
   status: "completed" | "failed" | "partial" | "preempted";
 }
@@ -94,6 +101,7 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
       "executableDecisionCount",
       "fetchedPageCount",
       "fetchedResourceFamilyCount",
+      "labResultCount",
       "rawFileCount",
       "retractedCount",
       "reviewDecisionCount",
@@ -105,10 +113,8 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
   const errorCode = Reflect.get(record, "errorCode");
   const retrievalProtocol = Reflect.get(record, "retrievalProtocol");
   const retrievalSlices = Reflect.get(record, "retrievalSlices");
-  const queryAware = retrievalProtocol !== undefined || retrievalSlices !== undefined;
   if (
-    queryAware
-    && (
+    (
       retrievalProtocol !== "query-slices-v2"
       || !Array.isArray(retrievalSlices)
       || retrievalSlices.length < 1
@@ -127,6 +133,7 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
       fetchedResourceFamilyCount: parseNonNegativeCount(
         Reflect.get(counts, "fetchedResourceFamilyCount"),
       ),
+      ...(Reflect.get(counts, "labResultCount") === undefined ? {} : { labResultCount: parseNonNegativeCount(Reflect.get(counts, "labResultCount")) }),
       rawFileCount: parseNonNegativeCount(Reflect.get(counts, "rawFileCount")),
       retractedCount: parseNonNegativeCount(Reflect.get(counts, "retractedCount")),
       reviewDecisionCount: parseNonNegativeCount(Reflect.get(counts, "reviewDecisionCount")),
@@ -137,12 +144,8 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
     },
     ...(errorCode === undefined ? {} : { errorCode: parseErrorCode(errorCode) }),
     generation: parsePositiveSafeInteger(Reflect.get(record, "generation")),
-    ...(queryAware
-      ? {
-          retrievalProtocol: "query-slices-v2" as const,
-          retrievalSlices: retrievalSlices.map(parseRetrievalSliceRef),
-        }
-      : {}),
+    retrievalProtocol: "query-slices-v2",
+    retrievalSlices: retrievalSlices.map(parseRetrievalSliceRef),
     runId: parseHostedClinicalRecordsIdentifier(Reflect.get(record, "runId")),
     status: parseOutcomeStatus(Reflect.get(record, "status")),
   };

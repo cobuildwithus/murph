@@ -1,6 +1,7 @@
 import {
   assistantBasePersonaOptions,
   assistantVoiceOptions,
+  MURPH_PRODUCT_ORIGIN,
 } from "@murphai/contracts";
 
 import {
@@ -22,8 +23,14 @@ import {
   type HostedInitialOnboardingState,
 } from "@/src/lib/hosted-onboarding/initial-onboarding";
 import {
-  requireActivePrivyMemberAuthFromBearerToken,
+  requireActiveHostedMemberAuthFromBearerToken,
 } from "@/src/lib/hosted-onboarding/request-auth";
+import {
+  readHostedMemberMessagingSetupState,
+} from "@/src/lib/hosted-onboarding/hosted-member-store";
+import {
+  isHostedMemberMessagingSetupRequired,
+} from "@/src/lib/hosted-onboarding/messaging-state";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from
   "@/src/lib/hosted-onboarding/shared";
 import {
@@ -50,13 +57,19 @@ const INITIAL_MESSAGE = {
 
 export const GET = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
-  const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
-  const state = await readHostedInitialOnboardingState({
-    memberId: auth.member.id,
-    prisma,
-  });
+  const auth = await requireActiveHostedMemberAuthFromBearerToken(request, prisma);
+  const [state, messagingSetupRequired] = await Promise.all([
+    readHostedInitialOnboardingState({
+      memberId: auth.member.id,
+      prisma,
+    }),
+    readCompanionMessagingSetupRequired({
+      memberId: auth.member.id,
+      prisma,
+    }),
+  ]);
   if (state.status === "completed") {
-    return jsonOk(projectCompletedState(state));
+    return jsonOk(projectCompletedState(state, messagingSetupRequired));
   }
 
   let contactAction: MurphContactOption | null = null;
@@ -79,6 +92,7 @@ export const GET = withJsonError(async (request: Request) => {
 
   return jsonOk(projectPendingState({
     contactAction,
+    messagingSetupRequired,
     origin: resolveHostedPublicBaseUrl() ?? new URL(request.url).origin,
     state,
   }));
@@ -86,7 +100,7 @@ export const GET = withJsonError(async (request: Request) => {
 
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
-  const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireActiveHostedMemberAuthFromBearerToken(request, prisma);
   const completion = parseHostedInitialOnboardingCompletionRequest(
     await readJsonObject(request, {
       limitBytes: INITIAL_ONBOARDING_BODY_LIMIT_BYTES,
@@ -109,15 +123,21 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  return jsonOk(projectCompletedState(result));
+  const messagingSetupRequired = await readCompanionMessagingSetupRequired({
+    memberId: auth.member.id,
+    prisma,
+  });
+  return jsonOk(projectCompletedState(result, messagingSetupRequired));
 });
 
 function projectCompletedState(
   state: HostedInitialOnboardingState | HostedInitialOnboardingCompletionResult,
+  messagingSetupRequired: boolean,
 ) {
   return {
     schema: COMPANION_INITIAL_ONBOARDING_SCHEMA,
     status: "completed" as const,
+    messagingSetupRequired,
     ...(state.status === "completed" && "completedNow" in state
       ? { completedNow: state.completedNow }
       : {}),
@@ -130,6 +150,7 @@ function projectCompletedState(
 
 function projectPendingState(input: {
   contactAction: MurphContactOption | null;
+  messagingSetupRequired: boolean;
   origin: string;
   state: HostedInitialOnboardingState;
 }) {
@@ -137,6 +158,7 @@ function projectPendingState(input: {
   return {
     schema: COMPANION_INITIAL_ONBOARDING_SCHEMA,
     status: "pending" as const,
+    messagingSetupRequired: input.messagingSetupRequired,
     preferences: input.state.preferences,
     catalog: {
       personas: assistantBasePersonaOptions.map((option) => ({
@@ -164,7 +186,7 @@ function projectPendingState(input: {
         description: option.description,
         id: option.id,
         label: option.label,
-        previewURL: new URL(option.previewPath, input.origin).toString(),
+        previewURL: new URL(option.previewPath, MURPH_PRODUCT_ORIGIN).toString(),
       })),
     },
     contactCard: supportsContactCard
@@ -188,6 +210,17 @@ function projectPendingState(input: {
         }
       : null,
   };
+}
+
+async function readCompanionMessagingSetupRequired(input: {
+  memberId: string;
+  prisma: Parameters<typeof readHostedMemberMessagingSetupState>[0]["prisma"];
+}): Promise<boolean> {
+  const messagingState = await readHostedMemberMessagingSetupState(input);
+  return isHostedMemberMessagingSetupRequired({
+    identity: messagingState?.identity ?? null,
+    routing: messagingState?.routing ?? null,
+  });
 }
 
 async function signalHostedMailboxAppendBestEffort(input: {

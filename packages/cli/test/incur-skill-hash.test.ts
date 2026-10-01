@@ -23,9 +23,14 @@ test('canonical skill hash avoids partial-tree false positives and preserves str
     process.env.XDG_DATA_HOME = dataHome
     const fullCli = createVaultCliShell(commandName)
     fullCli.command('ping', {
-      aliases: ['p'],
       run() {
         return 'pong'
+      },
+    })
+    fullCli.command('status', {
+      description: 'Show synthetic status.',
+      run() {
+        return 'ready'
       },
     })
     const fullSkillHash = Cli.skillHash(fullCli)

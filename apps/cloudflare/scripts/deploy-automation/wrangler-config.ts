@@ -12,7 +12,8 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
   "..",
   "..",
 );
-const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
+// Connection age is not the checkpoint deadline; SIGTERM draining protects accepted work.
+const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
 const DEPLOY_SMOKE_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
 const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100] as const;
 const DEVICE_WEBHOOK_QUEUE_SUFFIX = "device-webhooks";
@@ -60,17 +61,23 @@ export function buildHostedWranglerDeployConfig(
   const deviceWebhookDlqName = `${environment.workerName}-${DEVICE_WEBHOOK_DLQ_SUFFIX}`;
   const buildRunnerContainerConfig = (input: {
     className: string;
+    constraints?: { regions: string[] };
     maxInstances: number;
     rolloutActiveGracePeriodSeconds: number;
   }): Record<string, unknown> => {
     const container: Record<string, unknown> = {
       class_name: input.className,
+      ...(input.constraints ? { constraints: input.constraints } : {}),
       image: "../../../Dockerfile.cloudflare-hosted-runner",
       image_build_context: "..",
       instance_type: environment.containerInstanceType,
       max_instances: input.maxInstances,
       rollout_active_grace_period: input.rolloutActiveGracePeriodSeconds,
-      rollout_step_percentage: resolveContainerRolloutStepPercentage(input.maxInstances),
+      // Wrangler limits the array length to max_instances. A retained zero-cap
+      // legacy application must omit this option (slice(-0) would keep all steps).
+      ...(input.maxInstances > 0
+        ? { rollout_step_percentage: resolveContainerRolloutStepPercentage(input.maxInstances) }
+        : {}),
       ssh: { enabled: false },
     };
 
@@ -82,16 +89,22 @@ export function buildHostedWranglerDeployConfig(
     name: environment.workerName,
     main: "../src/index.ts",
     compatibility_date: environment.compatibilityDate,
-    compatibility_flags: ["nodejs_compat", "containers_pid_namespace"],
+    compatibility_flags: ["nodejs_compat", "containers_pid_namespace", "enable_request_signal"],
     placement: {
       mode: "smart",
     },
     containers: [
       buildRunnerContainerConfig({
         className: "RunnerContainer",
-        maxInstances: environment.containerMaxInstances,
+        maxInstances: environment.containerMaxInstances - environment.legacyStandbyContainerMaxInstances,
         rolloutActiveGracePeriodSeconds:
           RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+      }),
+      buildRunnerContainerConfig({
+        className: "NextRunnerContainer",
+        // Staging assigns the single member budget to the live physical bank.
+        maxInstances: 0,
+        rolloutActiveGracePeriodSeconds: RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
       buildRunnerContainerConfig({
         className: "DeploySmokeRunnerContainer",
@@ -99,13 +112,24 @@ export function buildHostedWranglerDeployConfig(
         rolloutActiveGracePeriodSeconds:
           DEPLOY_SMOKE_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
+      buildRunnerContainerConfig({
+        className: "StandbyRunnerContainer",
+        // Preserve the old application's placement while it drains. New global
+        // members use RunnerContainer, which has no region constraint.
+        constraints: { regions: ["ENAM"] },
+        maxInstances: environment.legacyStandbyContainerMaxInstances,
+        rolloutActiveGracePeriodSeconds:
+          RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+      }),
+      // Existing native resources are retained by stageHostedRunnerRelease.
+      // This declaration never provisions or rolls out the retired experiment.
+      buildRunnerContainerConfig({
+        className: "SmallRunnerContainer", maxInstances: 0,
+        rolloutActiveGracePeriodSeconds: RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+      }),
     ],
     durable_objects: {
       bindings: [
-        {
-          name: "USER_RUNNER",
-          class_name: "UserRunnerDurableObject",
-        },
         {
           name: "DATABASE_HEALTH_MONITOR",
           class_name: "DatabaseHealthDurableObject",
@@ -115,13 +139,30 @@ export function buildHostedWranglerDeployConfig(
           class_name: "DeviceWebhookQueueHealthDurableObject",
         },
         {
+          name: "OPENAI_AUTHORIZATION_ALERT_MONITOR",
+          class_name: "OpenAiAuthorizationAlertDurableObject",
+        },
+        {
           name: "RUNNER_CONTAINER",
           class_name: "RunnerContainer",
+        },
+        {
+          name: "NEXT_RUNNER_CONTAINER",
+          class_name: "NextRunnerContainer",
         },
         {
           name: "RUNNER_CONTAINER_SMOKE",
           class_name: "DeploySmokeRunnerContainer",
         },
+        {
+          name: "STANDBY_COORDINATOR",
+          class_name: "StandbyRunnerCoordinatorDurableObject",
+        },
+        {
+          name: "STANDBY_RUNNER_CONTAINER",
+          class_name: "StandbyRunnerContainer",
+        },
+        { name: "SMALL_RUNNER_CONTAINER", class_name: "SmallRunnerContainer" },
       ],
     },
     version_metadata: {
@@ -148,6 +189,23 @@ export function buildHostedWranglerDeployConfig(
         tag: "v5",
         new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
       },
+      {
+        tag: "v6",
+        new_sqlite_classes: ["OpenAiAuthorizationAlertDurableObject"],
+      },
+      {
+        tag: "v7",
+        new_sqlite_classes: [
+          "StandbyRunnerCoordinatorDurableObject",
+          "StandbyRunnerContainer",
+        ],
+      },
+      {
+        tag: "v8",
+        new_sqlite_classes: ["NextRunnerContainer"],
+      },
+      { tag: "v9", new_sqlite_classes: ["SmallRunnerContainer"] },
+      { tag: "v10", deleted_classes: ["UserRunnerDurableObject"] },
     ],
     triggers: {
       crons: ["*/5 * * * *"],

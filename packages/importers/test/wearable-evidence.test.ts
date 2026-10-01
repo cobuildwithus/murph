@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 
 import { test } from "vitest";
-import { normalizeWearableMetricValue } from "../src/device-providers/metric-catalog.ts";
+import {
+  normalizeWearableMetricValue,
+  resolveWearableCanonicalMetricKey,
+  resolveWearableMetricTolerance,
+} from "@murphai/health-metrics";
 import { pushDeletionObservation } from "../src/device-providers/shared-normalization.ts";
 
 import {
   createDeviceProviderRegistry,
   prepareDeviceProviderSnapshotImport,
-  resolveWearableCanonicalMetricKey,
-  resolveWearableMetricTolerance,
   type DeviceBatchImportPayload,
   type DeviceEventPayload,
   type DeviceProviderAdapter,
@@ -294,6 +296,46 @@ test("prepareDeviceProviderSnapshotImport keeps raw receipt identity stable acro
     first.evidenceParts?.map((artifact) => artifact.fileName),
     second.evidenceParts?.map((artifact) => artifact.fileName),
   );
+});
+
+test("explicit receipt times take precedence over backfill and event timestamps", async () => {
+  const observedAt = "2026-07-18T12:00:00.000Z";
+  const request = {
+    provider: "junction",
+    observedAt,
+    windowStart: "2026-07-11T00:00:00.000Z",
+    windowEnd: observedAt,
+    snapshot: {
+      importedAt: observedAt,
+      summaries: { sleep: [{
+        id: "synthetic-receipt-sleep",
+        source: { provider: "garmin", type: "wearable" },
+        calendar_date: "2026-07-18",
+        start: "2026-07-18T05:00:00.000Z",
+        end: "2026-07-18T11:00:00.000Z",
+        total: 18_600,
+      }] },
+    },
+  };
+  const prepared = await prepareDeviceProviderSnapshotImport(request);
+  assert.equal(prepared.importedAt, observedAt);
+  assert.equal(readRawReceiptArtifact(prepared).observedAt, observedAt);
+  assert.ok(prepared.events?.length);
+
+  const replay = await prepareDeviceProviderSnapshotImport({
+    ...request, observedAt: "2026-07-18T12:05:00.000Z",
+  });
+  assert.equal(readRawReceiptArtifact(replay).id, readRawReceiptArtifact(prepared).id);
+  assert.equal(readRawReceiptArtifact(replay).payloadHash, readRawReceiptArtifact(prepared).payloadHash);
+  assert.equal(replay.importedAt, "2026-07-18T12:05:00.000Z");
+
+  for (const missingObservedAt of [undefined, "not-a-timestamp"]) {
+    const fallback = await prepareDeviceProviderSnapshotImport({
+      ...request, observedAt: missingObservedAt,
+    });
+    assert.equal(fallback.importedAt, request.windowStart);
+    assert.equal(readRawReceiptArtifact(fallback).id, readRawReceiptArtifact(prepared).id);
+  }
 });
 
 test("pushDeletionObservation bounds deletion artifact names while preserving event content", () => {

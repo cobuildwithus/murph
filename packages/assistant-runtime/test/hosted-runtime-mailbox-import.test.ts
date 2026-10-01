@@ -23,6 +23,7 @@ import {
   fetchAndProcessHostedMailboxPrefix,
   prefetchHostedMailboxPrefix,
 } from "../src/hosted-runtime/mailbox-import.ts";
+import { hostedMailboxPrefixPrefetchCoversWake } from "../src/hosted-runtime/mailbox-prefetch.ts";
 import type {
   HostedRuntimeMailboxPort,
 } from "../src/hosted-runtime-contracts.ts";
@@ -293,6 +294,54 @@ describe("hosted mailbox import loop", () => {
     assert.equal(systemResult.state.watermarks.system, "1");
   });
 
+  test("covered wake reuse preserves bounded prefix cursors and backlog continuation", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const { fetchRequests, mailboxPort } = createMailboxPort({
+      items: [1, 2, 3].map((seq) => createMailboxItem({
+        id: `mailbox_bounded_${seq}`, laneSeq: String(seq),
+      })),
+    });
+    const fetch = mailboxPort.fetch.bind(mailboxPort);
+    mailboxPort.fetch = async (request, context) => {
+      const response = await fetch(request, context);
+      return { ...response, items: response.items.slice(0, request.limitPerLane) };
+    };
+    const prefetch = prefetchHostedMailboxPrefix({
+      lanes: ["conversation", "system"], limitPerLane: 1, mailboxPort,
+      requestId: "bounded_prefetch", state,
+    });
+    assert.equal(await hostedMailboxPrefixPrefetchCoversWake(prefetch, {
+      conversation: "3", system: "0",
+    }), true);
+    const imported: string[] = [];
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) { imported.push(input.item.laneSeq); return { status: "imported" }; },
+      lanes: ["conversation"], limitPerLane: 1, mailboxPort, now: () => TEST_NOW,
+      prefetch, requestId: "bounded_import", state,
+    });
+    assert.deepEqual(imported, ["1"]);
+    assert.equal(result.state.watermarks.conversation, "1");
+    assert.equal(result.state.watermarks.system, "0");
+    assert.equal(result.nextRetryAt, TEST_NOW);
+    assert.equal(fetchRequests.length, 1);
+  });
+
+  test("coverage selection propagates an aborted speculative fetch", async () => {
+    const controller = new AbortController();
+    const aborted = new Error("Synthetic speculative fetch aborted.");
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    mailboxPort.fetch = async () => { throw aborted; };
+    controller.abort(aborted);
+    const prefetch = prefetchHostedMailboxPrefix({
+      limitPerLane: 1, mailboxPort, requestId: "aborted_prefetch", signal: controller.signal,
+      state: createEmptyHostedMailboxImportState(),
+    });
+    await assert.rejects(hostedMailboxPrefixPrefetchCoversWake(prefetch, {
+      conversation: "0", system: "0",
+    }), (error) => error === aborted);
+  });
+
   test("falls back independently by lane when the mixed prefetch rejects", async () => {
     const state = createEmptyHostedMailboxImportState();
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -312,6 +361,7 @@ describe("hosted mailbox import loop", () => {
             });
         return {
           consumedSeqByLane: [{ consumedSeq: "0", lane }],
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [{ lane, maxSeq: "1" }],
@@ -616,6 +666,60 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "2");
   });
 
+  test("imports a Web-owned first-turn pair as context and only replies to the next inbound", async () => {
+    const consumedAt = "2026-04-26T00:00:04.000Z";
+    const { mailboxPort } = createMailboxPort({
+      consumedSeqByLane: [
+        { consumedSeq: "0", lane: "conversation" },
+      ],
+      items: [
+        createMailboxItem({
+          consumedAt,
+          id: "mailbox_item_web_first_turn_inbound_001",
+          laneSeq: "1",
+        }),
+        createMailboxItem({
+          consumedAt,
+          id: "mailbox_item_web_first_turn_outbound_002",
+          laneSeq: "2",
+        }),
+        createMailboxItem({
+          id: "mailbox_item_runtime_next_inbound_003",
+          laneSeq: "3",
+        }),
+      ],
+    });
+    const durablyConsumedBySeq = new Map<string, boolean | undefined>();
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
+        return {
+          assistantInputId: `assistant_input_web_handoff_${input.item.laneSeq}`,
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_web_first_turn_handoff",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual([...durablyConsumedBySeq.entries()], [
+      ["1", true],
+      ["2", true],
+      ["3", false],
+    ]);
+    assert.deepEqual(result.assistantInputIds, [
+      "assistant_input_web_handoff_3",
+    ]);
+    assert.equal(result.importedCount, 3);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.equal(result.state.watermarks.conversation, "3");
+  });
+
   test("imports a fresh conversation tail when the consumed watermark lags local import", async () => {
     const nextItem = createMailboxItem({
       id: "mailbox_item_conversation_new_after_replay",
@@ -639,6 +743,7 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [nextItem],
           maxSeqByLane: [
@@ -724,6 +829,7 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [
@@ -789,6 +895,7 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [
@@ -905,6 +1012,7 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [replayStart, replayNext, freshItem],
           maxSeqByLane: [
@@ -1106,6 +1214,7 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [retainedStart, retainedNext],
           maxSeqByLane: [
@@ -1173,6 +1282,7 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [freshItem],
           maxSeqByLane: [
@@ -1225,6 +1335,7 @@ describe("hosted mailbox import loop", () => {
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
         return {
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [
@@ -1300,6 +1411,7 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [staleReplay, freshTail],
           maxSeqByLane: [
@@ -1363,6 +1475,7 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [
             createMailboxItem({
@@ -2239,6 +2352,7 @@ function createMailboxPort(input: {
           ...(input.groupRunningBit === undefined
             ? {}
             : { groupRunningBit: input.groupRunningBit }),
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: input.items.filter((item) =>
             request.lanes.some((lane) =>

@@ -243,7 +243,7 @@ describe("hosted member Checkout completion ownership", () => {
     expect(harness.update).toHaveBeenCalledOnce();
   });
 
-  it("lets an eligible Pulse Trial replace a stale identity only through its matching attempt", async () => {
+  it("rejects legacy Pulse Trial identity replacement even through a matching attempt", async () => {
     const harness = await createBillingRefHarness({
       checkoutSessionId: "cs_pulse_trial",
       currentStripeCustomerId: "cus_existing",
@@ -251,45 +251,10 @@ describe("hosted member Checkout completion ownership", () => {
     });
 
     await expect(acceptHostedMemberStripeCheckoutCompletionTx({
-      allowBillingIdentityReplacement: true,
       billingIdentityDisposition: "bind",
       checkoutAttemptId: "attempt_123",
       checkoutIntentHash: "intent_123",
       checkoutSessionId: "cs_pulse_trial",
-      currentCheckoutOffer: "pulse_trial_7d",
-      eventCreatedAt: new Date("2026-07-27T12:01:00.000Z"),
-      memberId: "member_123",
-      preparedCompletion: buildPreparedCompletion(
-        "cus_existing",
-        "sub_pulse_trial",
-      ),
-      tx: harness.tx as never,
-    })).resolves.toMatchObject({
-      kind: "accepted",
-    });
-
-    expect(harness.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        currentCheckoutOffer: "pulse_trial_7d",
-        stripeSubscriptionLookupKey:
-          createHostedStripeSubscriptionLookupKey("sub_pulse_trial"),
-      }),
-    }));
-  });
-
-  it("does not let Pulse Trial identity replacement bypass durable attempt ownership", async () => {
-    const harness = await createBillingRefHarness({
-      checkoutSessionId: "cs_current_attempt",
-      currentStripeCustomerId: "cus_existing",
-      currentStripeSubscriptionId: "sub_stale_incomplete",
-    });
-
-    await expect(acceptHostedMemberStripeCheckoutCompletionTx({
-      allowBillingIdentityReplacement: true,
-      billingIdentityDisposition: "bind",
-      checkoutAttemptId: "attempt_superseded",
-      checkoutIntentHash: "intent_superseded",
-      checkoutSessionId: "cs_superseded",
       currentCheckoutOffer: "pulse_trial_7d",
       eventCreatedAt: new Date("2026-07-27T12:01:00.000Z"),
       memberId: "member_123",

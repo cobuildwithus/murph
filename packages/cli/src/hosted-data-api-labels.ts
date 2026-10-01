@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 
 import { HOSTED_RUNTIME_PROCESS_ENV } from '@murphai/hosted-execution/env'
-import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import * as z from '@murphai/contracts/zod-runtime'
 
@@ -348,8 +348,13 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       url.searchParams.set('nutritionOnly', 'true')
     }
 
-    const response = await fetchLabelsApi(config, fetchImpl, url, env)
-    const payload = await parseLabelsApiPayload(response, apiResponseSchema)
+    const payload = await fetchLabelsApiPayload(
+      config,
+      fetchImpl,
+      url,
+      env,
+      apiResponseSchema,
+    )
 
     return searchResultSchema.parse({
       source: config.resultSource,
@@ -389,14 +394,20 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       )
     }
 
-    const response = await fetchLabelsApi(config, fetchImpl, url, env, {
-      body,
-      headers: {
-        'content-type': 'application/json',
+    const payload = await fetchLabelsApiPayload(
+      config,
+      fetchImpl,
+      url,
+      env,
+      batchApiResponseSchema,
+      {
+        body,
+        headers: {
+          'content-type': 'application/json',
+        },
+        method: 'POST',
       },
-      method: 'POST',
-    })
-    const payload = await parseLabelsBatchApiPayload(response, batchApiResponseSchema)
+    )
 
     return batchSearchResultSchema.parse({
       source: config.resultSource,
@@ -449,21 +460,22 @@ function assertHostedRuntime<TSource extends string>(
   throw new VaultCliError(
     `${config.errorCodePrefix}_hosted_only`,
     `${config.searchDescription} runs through the hosted Murph data API and is only available inside hosted assistant runtime.`,
+    { retryable: false, stage: 'configuration' },
   )
 }
 
-async function fetchLabelsApi<TSource extends string>(
+async function fetchLabelsApiPayload<TSource extends string, TPayload>(
   config: HostedDataApiLabelsClientConfig<TSource>,
   fetchImpl: typeof fetch,
   url: URL,
   env: NodeJS.ProcessEnv,
+  responseSchema: z.ZodType<TPayload>,
   options: {
-    allowNotFound?: boolean
     body?: BodyInit
     headers?: HeadersInit
     method?: 'GET' | 'POST'
   } = {},
-): Promise<Response> {
+): Promise<TPayload> {
   let response: Response
   const providerCredential = readHostedDataApiProviderCredential(config, env)
 
@@ -478,24 +490,32 @@ async function fetchLabelsApi<TSource extends string>(
       signal: AbortSignal.timeout(resolveLabelTimeoutMs(env)),
     })
   } catch (error) {
-    throw new VaultCliError(
-      `${config.errorCodePrefix}_request_failed`,
-      `${config.searchDescription} request failed: ${errorMessage(error)}.`,
-    )
-  }
-
-  if (response.status === 404 && options.allowNotFound === true) {
-    return response
+    throw createLabelsTransportError(config, error)
   }
 
   if (!response.ok) {
-    throw new VaultCliError(
-      `${config.errorCodePrefix}_response_failed`,
-      `${config.searchDescription} request failed (${await describeFailedLabelsResponse(response)}).`,
-    )
+    await discardLabelsResponseBody(response)
+    throw createLabelsHttpError(config, response.status)
   }
 
-  return response
+  let payload: unknown
+
+  try {
+    payload = await response.json()
+  } catch (error) {
+    if (readSafeErrorName(error) !== 'SyntaxError') {
+      throw createLabelsResponseBodyTransportError(config, response.status, error)
+    }
+
+    throw createLabelsInvalidResponseError(config, response.status, 'json')
+  }
+
+  const parsed = responseSchema.safeParse(payload)
+  if (!parsed.success) {
+    throw createLabelsInvalidResponseError(config, response.status, 'schema')
+  }
+
+  return parsed.data
 }
 
 function readHostedDataApiProviderCredential<TSource extends string>(
@@ -510,23 +530,8 @@ function readHostedDataApiProviderCredential<TSource extends string>(
   throw new VaultCliError(
     `${config.errorCodePrefix}_credential_missing`,
     `${config.searchDescription} requires the hosted Murph data API provider credential.`,
+    { retryable: false, stage: 'configuration' },
   )
-}
-
-async function parseLabelsApiPayload(
-  response: Response,
-  responseSchema: z.ZodType<{ items: HostedDataApiLabelSearchItem[] }>,
-): Promise<{ items: HostedDataApiLabelSearchItem[] }> {
-  const payload: unknown = await response.json()
-  return responseSchema.parse(payload)
-}
-
-async function parseLabelsBatchApiPayload(
-  response: Response,
-  responseSchema: z.ZodType<{ results: HostedDataApiLabelSearchResultItem[] }>,
-): Promise<{ results: HostedDataApiLabelSearchResultItem[] }> {
-  const payload: unknown = await response.json()
-  return responseSchema.parse(payload)
 }
 
 function resolveLabelTimeoutMs(env: NodeJS.ProcessEnv): number {
@@ -543,19 +548,217 @@ function resolveLabelTimeoutMs(env: NodeJS.ProcessEnv): number {
   return Math.min(parsed, MAX_HOSTED_DATA_API_LABEL_TIMEOUT_MS)
 }
 
-async function describeFailedLabelsResponse(response: Response): Promise<string> {
-  const fallback = `HTTP ${response.status}`
-
+async function discardLabelsResponseBody(response: Response): Promise<void> {
   try {
-    const payload = (await response.json()) as {
-      error?: unknown
-    }
-    const error = typeof payload.error === 'string'
-      ? normalizeNullableString(payload.error)
-      : null
-
-    return error ? `${fallback}: ${error}` : fallback
+    await response.body?.cancel()
   } catch {
-    return fallback
+    // The status is sufficient to classify the failure; body disposal is best effort.
   }
+}
+
+function createLabelsTransportError<TSource extends string>(
+  config: HostedDataApiLabelsClientConfig<TSource>,
+  error: unknown,
+): VaultCliError {
+  const transportErrorName = readSafeErrorName(error)
+  const transportErrorCode = readSafeErrorCode(error)
+  const cancelled = transportErrorName === 'AbortError'
+  const timedOut = transportErrorName === 'TimeoutError'
+  const message = cancelled
+    ? `${config.searchDescription} request was cancelled.`
+    : timedOut
+      ? `${config.searchDescription} request timed out.`
+      : `${config.searchDescription} request failed before receiving a response.`
+
+  return new VaultCliError(
+    cancelled
+      ? `${config.errorCodePrefix}_request_cancelled`
+      : timedOut
+        ? `${config.errorCodePrefix}_request_timed_out`
+        : `${config.errorCodePrefix}_request_failed`,
+    appendLabelsTransportClassification(
+      message,
+      transportErrorName,
+      transportErrorCode,
+    ),
+    {
+      failureStage: 'request',
+      retryable: !cancelled,
+      stage: 'transport',
+      timedOut,
+      transportErrorName,
+      transportErrorCode,
+    },
+  )
+}
+
+function createLabelsResponseBodyTransportError<TSource extends string>(
+  config: HostedDataApiLabelsClientConfig<TSource>,
+  status: number,
+  error: unknown,
+): VaultCliError {
+  const transportErrorName = readSafeErrorName(error)
+  const transportErrorCode = readSafeErrorCode(error)
+  const timedOut = transportErrorName === 'TimeoutError'
+    || transportErrorName === 'AbortError'
+  const message = timedOut
+    ? `${config.searchDescription} response body timed out (HTTP ${status}).`
+    : `${config.searchDescription} received a response whose body could not be read (HTTP ${status}).`
+
+  return new VaultCliError(
+    timedOut
+      ? `${config.errorCodePrefix}_response_body_timed_out`
+      : `${config.errorCodePrefix}_response_body_failed`,
+    appendLabelsTransportClassification(
+      message,
+      transportErrorName,
+      transportErrorCode,
+    ),
+    {
+      failureStage: 'response_body',
+      retryable: true,
+      stage: 'response',
+      status,
+      timedOut,
+      transportErrorName,
+      transportErrorCode,
+    },
+  )
+}
+
+function createLabelsHttpError<TSource extends string>(
+  config: HostedDataApiLabelsClientConfig<TSource>,
+  status: number,
+): VaultCliError {
+  const failure = classifyLabelsHttpFailure(config.searchDescription, status)
+
+  return new VaultCliError(
+    `${config.errorCodePrefix}_${failure.codeSuffix}`,
+    failure.message,
+    {
+      failureStage: 'response',
+      retryable: failure.retryable,
+      stage: 'response',
+      status,
+      ...(failure.timedOut === true ? { timedOut: true } : {}),
+    },
+  )
+}
+
+interface LabelsHttpFailure {
+  codeSuffix: string
+  message: string
+  retryable: boolean
+  timedOut?: true
+}
+
+function classifyLabelsHttpFailure(
+  searchDescription: string,
+  status: number,
+): LabelsHttpFailure {
+  if (status === 401 || status === 403) {
+    return {
+      codeSuffix: 'auth_failed',
+      message: `${searchDescription} authorization was rejected by the hosted data API (HTTP ${status}).`,
+      retryable: false,
+    }
+  }
+
+  if (status === 429) {
+    return {
+      codeSuffix: 'rate_limited',
+      message: `${searchDescription} was rate limited by the hosted data API (HTTP ${status}).`,
+      retryable: true,
+    }
+  }
+  if (status === 408) {
+    return {
+      codeSuffix: 'request_timed_out',
+      message: `${searchDescription} request timed out at the hosted data API (HTTP ${status}).`,
+      retryable: true,
+      timedOut: true,
+    }
+  }
+
+  if (status >= 500 && status <= 599) {
+    return {
+      codeSuffix: 'service_unavailable',
+      message: `${searchDescription} is temporarily unavailable (HTTP ${status}).`,
+      retryable: true,
+    }
+  }
+
+  return {
+    codeSuffix: 'response_failed',
+    message: `${searchDescription} request was rejected by the hosted data API (HTTP ${status}).`,
+    retryable: false,
+  }
+}
+
+function createLabelsInvalidResponseError<TSource extends string>(
+  config: HostedDataApiLabelsClientConfig<TSource>,
+  status: number,
+  responseKind: 'json' | 'schema',
+): VaultCliError {
+  return new VaultCliError(
+    `${config.errorCodePrefix}_invalid_response`,
+    responseKind === 'json'
+      ? `${config.searchDescription} received a successful response that was not valid JSON (HTTP ${status}).`
+      : `${config.searchDescription} received a successful response that did not match the expected label schema (HTTP ${status}).`,
+    {
+      failureStage: 'response_validation',
+      retryable: false,
+      stage: 'response',
+      status,
+    },
+  )
+}
+
+function appendLabelsTransportClassification(
+  message: string,
+  errorName: string | undefined,
+  errorCode: string | undefined,
+): string {
+  const classification = [
+    errorName ? `name=${errorName}` : undefined,
+    errorCode ? `code=${errorCode}` : undefined,
+  ]
+    .filter((value): value is string => value !== undefined)
+    .join(', ')
+
+  return classification
+    ? `${message} Transport classification: ${classification}.`
+    : message
+}
+
+function readSafeErrorName(error: unknown): string | undefined {
+  if (
+    typeof error !== 'object'
+    || error === null
+    || !('name' in error)
+    || typeof error.name !== 'string'
+  ) {
+    return undefined
+  }
+
+  const name = normalizeNullableString(error.name)
+  return name && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(name)
+    ? name
+    : undefined
+}
+
+function readSafeErrorCode(error: unknown): string | undefined {
+  if (
+    typeof error !== 'object'
+    || error === null
+    || !('code' in error)
+    || typeof error.code !== 'string'
+  ) {
+    return undefined
+  }
+
+  const code = normalizeNullableString(error.code)
+  return code && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u.test(code)
+    ? code
+    : undefined
 }

@@ -32,6 +32,9 @@ export interface AssistantChannelActivityStopOptions {
 }
 
 export interface AssistantChannelActivityHandle {
+  // Retained when an already provider-accepted handle is handed to a turn.
+  acceptedAt?: string
+  isActive?: () => boolean
   refreshAfterMessage?: () => Promise<void>
   refreshNow?: () => Promise<void>
   stop: (options?: AssistantChannelActivityStopOptions) => Promise<void>
@@ -44,6 +47,7 @@ export interface TelegramRuntimeDependencies {
   loadVaultImage?: (
     media: AssistantVaultImageResponseMedia,
   ) => Promise<Uint8Array>
+  loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>
   maxDeliveryAttempts?: number
   signal?: AbortSignal
 }
@@ -80,6 +84,17 @@ export interface LinqRuntimeDependencies {
 }
 
 export interface AssistantChannelDependencies {
+  /** Invocation-bound call delivery; there is no ambient provider fallback. */
+  sendVoice?: (input: {
+    callId: string
+    message: string
+    answeredMailboxItemIds: readonly string[]
+  }) => Promise<void>
+  onTypingAccepted?: (event: {
+    acceptedInputIds: readonly string[]
+    at: string
+    channel: string
+  }) => void
   signal?: AbortSignal
   startLinqTyping?: (input: {
     target: string
@@ -126,6 +141,11 @@ export interface AssistantChannelDependencies {
       }
     | void
   >
+  sendTelegramFile?: (input: {
+    file: AssistantVaultFileResponseMedia
+    replyToMessageId?: string | null
+    target: string
+  }) => Promise<{ providerMessageId: string | null; target: string }>
   sendTelegramImage?: (input: {
     idempotencyKey?: string | null
     media: readonly AssistantImageResponseMedia[]
@@ -260,7 +280,7 @@ export interface AssistantChannelAutoReplyEligibility {
 }
 
 export interface AssistantChannelAdapter {
-  channel: 'telegram' | 'linq' | 'email'
+  channel: 'telegram' | 'linq' | 'email' | 'voice'
   canAutoReply: (input: AssistantChannelAutoReplyEligibility) => string | null
   inferBindingDelivery: (input: {
     conversation: ConversationRef

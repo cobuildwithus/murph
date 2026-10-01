@@ -1,7 +1,10 @@
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  assertHostedAppSessionCurrentTx: vi.fn(),
+  queryRaw: vi.fn(),
   buildHostedActionApprovalBinding: vi.fn(),
   decideHostedActionApprovalTx: vi.fn(),
   getPrisma: vi.fn(),
@@ -28,6 +31,7 @@ vi.mock("@/src/lib/action-approvals", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  assertHostedAppSessionCurrentTx: mocks.assertHostedAppSessionCurrentTx,
   requireActiveHostedAppSessionFromRequest: mocks.requireActiveHostedAppSessionFromRequest,
 }));
 
@@ -78,6 +82,8 @@ describe("hosted action approval decision route", () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
+    mocks.assertHostedAppSessionCurrentTx.mockResolvedValue(undefined);
+    mocks.queryRaw.mockResolvedValue([]);
     mocks.buildHostedActionApprovalBinding.mockReturnValue("f".repeat(64));
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: "member_action_decision" },
@@ -87,7 +93,7 @@ describe("hosted action approval decision route", () => {
     mocks.requireHostedActionApprovalId.mockReturnValue(APPROVAL_ID);
     mocks.requirePendingHostedActionApproval.mockResolvedValue(PENDING_APPROVAL);
     mocks.transaction.mockImplementation(
-      async (callback: (tx: unknown) => Promise<unknown>) => callback({ tx: true }),
+      async (callback: (tx: unknown) => Promise<unknown>) => callback({ tx: true, $queryRaw: mocks.queryRaw }),
     );
     mocks.getPrisma.mockReturnValue({
       $transaction: mocks.transaction,
@@ -163,7 +169,7 @@ describe("hosted action approval decision route", () => {
       decision: "approved",
       memberId: "member_action_decision",
       now: NOW,
-      tx: { tx: true },
+      tx: { tx: true, $queryRaw: mocks.queryRaw },
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_action_decision",
@@ -184,6 +190,21 @@ describe("hosted action approval decision route", () => {
     );
   });
 
+  it("rejects an approval when its session is revoked before commit", async () => {
+    mocks.assertHostedAppSessionCurrentTx.mockRejectedValueOnce(hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue." }));
+    const response = await route.POST(jsonRequest({
+      authorization: { signature: `0x${"2".repeat(130)}`, token: "sac_synthetic" },
+      decision: "approved",
+    }), routeContext());
+
+    expect(response.status).toBe(401);
+    expect(mocks.assertHostedAppSessionCurrentTx).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: "member_action_decision", sessionId: "session_action_decision",
+    }));
+    expect(mocks.decideHostedActionApprovalTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("uses the same durable continuation for denial", async () => {
     const response = await route.POST(
       jsonRequest({ decision: "denied" }),
@@ -201,7 +222,7 @@ describe("hosted action approval decision route", () => {
       decision: "denied",
       memberId: "member_action_decision",
       now: NOW,
-      tx: { tx: true },
+      tx: { tx: true, $queryRaw: mocks.queryRaw },
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.resolveHostedMurphContactOption).toHaveBeenCalledWith({

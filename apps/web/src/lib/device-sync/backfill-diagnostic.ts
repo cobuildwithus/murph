@@ -1,6 +1,7 @@
 import "server-only";
 
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { isDeviceSyncSourceDisconnectFenced } from "@murphai/device-syncd/public-account";
 import type {
   DeviceSyncAccount,
   DeviceSyncProvider,
@@ -14,6 +15,7 @@ import {
 } from "./control-plane";
 import {
   toHostedBrowserDeviceSyncConnectionSource,
+  type HostedBrowserDeviceSyncConnectionSource,
 } from "./browser-connection-source";
 import {
   toHostedBrowserDeviceSyncConnection,
@@ -41,6 +43,7 @@ export interface HostedDeviceSyncBackfillDiagnosticInput {
 }
 
 export interface HostedDeviceSyncBackfillDiagnosticResponse {
+  selectedSourceLastDataAt: string | null;
   diagnostic: Record<string, unknown>;
   generatedAt: string;
   ok: true;
@@ -60,6 +63,7 @@ export interface HostedDeviceSyncBackfillDiagnosticResponse {
     result: Record<string, unknown>;
   };
   selectedConnection: {
+    id: string;
     connectionMatchCount: number;
     externalAccountIdHash: string;
     lastErrorCode: string | null;
@@ -103,38 +107,7 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
     entry.browserConnection.provider === providerName
     && (!connectionId || entry.browserConnection.id === connectionId)
   );
-  const activeCandidates = candidates.filter((entry) =>
-    entry.browserConnection.status === "active"
-  );
-
-  if (candidates.length === 0) {
-    throw deviceSyncError({
-      code: "DEVICE_SYNC_DIAGNOSTIC_CONNECTION_NOT_FOUND",
-      message: "No matching device-sync connection was found for the requested member.",
-      httpStatus: 404,
-      retryable: false,
-    });
-  }
-
-  if (activeCandidates.length === 0) {
-    throw deviceSyncError({
-      code: "DEVICE_SYNC_DIAGNOSTIC_CONNECTION_NOT_ACTIVE",
-      message: "Backfill diagnostics require an active device-sync connection.",
-      httpStatus: 409,
-      retryable: false,
-    });
-  }
-
-  if (!connectionId && activeCandidates.length > 1) {
-    throw deviceSyncError({
-      code: "DEVICE_SYNC_DIAGNOSTIC_CONNECTION_AMBIGUOUS",
-      message: "Backfill diagnostics require a connection id when multiple active connections match.",
-      httpStatus: 409,
-      retryable: false,
-    });
-  }
-
-  const selectedEntry = activeCandidates[0];
+  const selectedEntry = selectActiveDiagnosticConnection(candidates, connectionId);
   const connection = selectedEntry.browserConnection;
   const selectedSources = await input.controlPlane.store.listConnectionSources(
     selectedEntry.durableConnection.id,
@@ -143,17 +116,11 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
     toHostedBrowserDeviceSyncConnectionSource(source, connection.id)
   );
   const restProbeSourceProviderSlug = normalizeQueryString(input.restProbe?.sourceProviderSlug ?? null);
-  if (
-    restProbeSourceProviderSlug
-    && !connectionSources.some((source) => source.sourceProviderSlug === restProbeSourceProviderSlug)
-  ) {
-    throw deviceSyncError({
-      code: "DEVICE_SYNC_DIAGNOSTIC_SOURCE_PROVIDER_NOT_FOUND",
-      message: "The selected device-sync connection does not expose the requested source provider for diagnostics.",
-      httpStatus: 409,
-      retryable: false,
-    });
-  }
+  const selectedSource = selectDiagnosticSource(
+    connectionSources,
+    restProbeSourceProviderSlug,
+    input.restProbe?.endpoint,
+  );
 
   const provider = createHostedDeviceSyncRegistry(process.env).get(connection.provider);
   if (!provider) {
@@ -210,13 +177,17 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
   }
 
   const now = new Date().toISOString();
-  const diagnostic = await diagnoseBackfill({
-    account: diagnosticAccount,
-    now,
-    timeseriesProbeDays: input.timeseriesProbeDays,
-    windowStart: input.windowStart,
-    windowEnd: input.windowEnd,
-  });
+  const probeOnly = input.restProbe
+    && ["refresh", "providers", "trigger_historical_pull"].includes(input.restProbe.endpoint);
+  const diagnostic = probeOnly
+    ? { generatedAt: now, provider: providerName, result: {} }
+    : await diagnoseBackfill({
+        account: diagnosticAccount,
+        now,
+        timeseriesProbeDays: input.timeseriesProbeDays,
+        windowStart: input.windowStart,
+        windowEnd: input.windowEnd,
+      });
   const restDiagnostic = input.restProbe && probeRest
     ? await probeRest({
         account: diagnosticAccount,
@@ -231,11 +202,13 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
     : null;
 
   return {
+    selectedSourceLastDataAt: selectedSource?.lastDataAt ?? null,
     generatedAt: diagnostic.generatedAt,
     ok: true,
     provider: diagnostic.provider,
     publicIngress: describeDiagnosticPublicIngress(input.controlPlane, provider),
     selectedConnection: {
+      id: connection.id,
       connectionMatchCount: candidates.length,
       externalAccountIdHash: sha256Hex(diagnosticAccount.externalAccountId),
       lastErrorCode: connection.lastErrorCode ?? null,
@@ -341,6 +314,77 @@ export function readRestProbe(searchParams: URLSearchParams): HostedDeviceSyncBa
   };
 }
 
+interface DiagnosticConnectionEntry {
+  browserConnection: HostedBrowserDeviceSyncConnection;
+  durableConnection: PublicDeviceSyncAccount;
+}
+
+function selectActiveDiagnosticConnection(
+  candidates: DiagnosticConnectionEntry[],
+  connectionId: string | null,
+): DiagnosticConnectionEntry {
+  const activeCandidates = candidates.filter((entry) =>
+    entry.browserConnection.status === "active"
+  );
+
+  if (candidates.length === 0) {
+    throw deviceSyncError({
+      code: "DEVICE_SYNC_DIAGNOSTIC_CONNECTION_NOT_FOUND",
+      message: "No matching device-sync connection was found for the requested member.",
+      httpStatus: 404,
+      retryable: false,
+    });
+  }
+
+  if (activeCandidates.length === 0) {
+    throw deviceSyncError({
+      code: "DEVICE_SYNC_DIAGNOSTIC_CONNECTION_NOT_ACTIVE",
+      message: "Backfill diagnostics require an active device-sync connection.",
+      httpStatus: 409,
+      retryable: false,
+    });
+  }
+
+  if (!connectionId && activeCandidates.length > 1) {
+    throw deviceSyncError({
+      code: "DEVICE_SYNC_DIAGNOSTIC_CONNECTION_AMBIGUOUS",
+      message: "Backfill diagnostics require a connection id when multiple active connections match.",
+      httpStatus: 409,
+      retryable: false,
+    });
+  }
+
+  return activeCandidates[0];
+}
+
+function selectDiagnosticSource(
+  sources: HostedBrowserDeviceSyncConnectionSource[],
+  sourceProviderSlug: string | null,
+  endpoint: DeviceSyncRestDiagnosticEndpoint | undefined,
+): HostedBrowserDeviceSyncConnectionSource | undefined {
+  const matchingSources = sources.filter((candidate) => candidate.sourceProviderSlug === sourceProviderSlug);
+  const source = matchingSources[0];
+  if (sourceProviderSlug && !source) {
+    throw deviceSyncError({
+      code: "DEVICE_SYNC_DIAGNOSTIC_SOURCE_PROVIDER_NOT_FOUND",
+      message: "The selected device-sync connection does not expose the requested source provider for diagnostics.",
+      httpStatus: 409,
+      retryable: false,
+    });
+  }
+  if (endpoint === "refresh" && matchingSources.some((candidate) =>
+    candidate.status === "disconnected" || isDeviceSyncSourceDisconnectFenced(candidate)
+  )) {
+    throw deviceSyncError({
+      code: "DEVICE_SYNC_DIAGNOSTIC_SOURCE_DISCONNECTED",
+      message: "Reconnect the selected source before requesting a refresh.",
+      httpStatus: 409,
+      retryable: false,
+    });
+  }
+  return source;
+}
+
 function normalizeRestProbeEndpoint(value: string): DeviceSyncRestDiagnosticEndpoint {
   const normalized = value.trim().toLowerCase();
   if (normalized === "1" || normalized === "true" || normalized === "yes") {
@@ -440,10 +484,7 @@ function describeDiagnosticWebSourceProjection(
 async function listDiagnosticConnectionEntries(input: {
   controlPlane: HostedDeviceSyncControlPlane;
   memberId: string;
-}): Promise<Array<{
-  browserConnection: HostedBrowserDeviceSyncConnection;
-  durableConnection: PublicDeviceSyncAccount;
-}>> {
+}): Promise<DiagnosticConnectionEntry[]> {
   const durableConnections = await input.controlPlane.store.listConnectionsForUser(input.memberId);
 
   return durableConnections.map((durableConnection) => ({

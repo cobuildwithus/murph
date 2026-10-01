@@ -1,3 +1,4 @@
+import { publishPostgresRuntimePrivateMedia } from "../runtime-private-media.ts";
 import { json, jsonError, methodNotAllowed, readJsonObject, unauthorized } from "../json.ts";
 import {
   parseHostedRunnerPrivateImageUrlPublishRequest,
@@ -7,9 +8,7 @@ import {
   RunnerRuntimeWriteFenceError,
 } from "./write-fence.ts";
 import {
-  requireRunnerOutboundUserStubMethod,
-  resolveRunnerOutboundUserRunnerStub,
-  type RunnerOutboundEnvironmentSource,
+  type RunnerOutboundEnvironmentSource
 } from "./shared.ts";
 
 const PRIVATE_IMAGE_PUBLISH_BODY_LIMIT_BYTES = 14 * 1024 * 1024;
@@ -67,21 +66,9 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
   }
 
   try {
-    const stub = await resolveRunnerOutboundUserRunnerStub(
-      input.env,
-      input.userId,
-    );
-    requireRunnerOutboundUserStubMethod(
-      stub,
-      "publishHostedPrivateMedia",
-    );
-    const staged = await stub.publishHostedPrivateMedia({
-      attemptId: writeFence.attemptId,
-      bytes,
-      contentType: request.contentType,
-      generation: writeFence.generation,
-      userId: input.userId,
-    });
+    const publication = { attemptId: writeFence.attemptId, generation: writeFence.generation,
+      userId: input.userId, bytes, contentType: request.contentType };
+    const staged = await publishPostgresRuntimePrivateMedia({ ...publication, source: input.env });
     if (!staged.ok) {
       switch (staged.reason) {
         case "write-fence-rejected":

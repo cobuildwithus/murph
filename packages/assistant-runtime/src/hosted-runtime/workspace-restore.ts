@@ -1,3 +1,4 @@
+import { resolveWorkspaceDurableRoot } from "./workspace-paths.ts";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -8,18 +9,11 @@ import {
   type AssistantContextSnapshotDirtyDomain,
 } from "@murphai/assistant-engine";
 import {
-  applyHostedCanonicalWriteReceipt,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  type HostedCanonicalWriteReceiptAction,
   type HostedCanonicalWriteReceiptContentRef,
-  type HostedCanonicalWriteReceipt,
 } from "@murphai/core";
 import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
-import type {
-  HostedExecutionBundleRef,
-} from "@murphai/hosted-execution/contracts";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
 } from "@murphai/hosted-execution";
@@ -27,9 +21,6 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  readHostedExecutionSnapshotBaseRef,
-  readHostedExecutionSnapshotDeltaRef,
-  readHostedExecutionSnapshotHotRef,
   isHostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -37,17 +28,8 @@ import {
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
-  clearHostedAssistantRuntimeHotState,
-  clearHostedCodexHomeRestoreRoot,
-  createHostedPortableWorkspaceManifestFromBundle,
-  readHostedPortableWorkspaceManifestFromBundle,
   resolveAssistantStatePaths,
-  restoreHostedBundleRoots,
-  restoreHostedWorkspaceWorkingDelta,
-  readHostedWorkspaceSkippedInlineFiles,
   pruneHostedCodexHomeToSessionReferencedRollouts,
-  writeHostedWorkspaceSkippedInlineFiles,
-  type HostedWorkspaceSkippedInlineFile,
 } from "@murphai/runtime-state/node";
 import {
   normalizeCodexResumeState,
@@ -60,43 +42,33 @@ import {
 } from "./runtime-logs.ts";
 import {
   omitHostedCanonicalWriteReceiptLogStatusFields,
-  readHostedCanonicalWriteReceiptLogEntries,
+  readHostedCanonicalWriteReceiptLog,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
   type HostedCanonicalWriteReceiptLogStatusFingerprint,
 } from "./canonical-write-receipt-log.ts";
+import {
+  parseHostedCanonicalWriteReceiptArtifact,
+} from "./canonical-write-receipt.ts";
+import { applyHostedCanonicalWriteReceiptWithMedia } from "./canonical-write-media.ts";
 
 import {
   createHostedArtifactMaterializer,
-  createHostedArtifactResolver,
 } from "./artifacts.ts";
 import type {
   HostedWorkspaceArtifactMaterializer,
   HostedRestoredExecutionContext,
 } from "./models.ts";
 import {
-  readHostedMaterializedArtifactPaths,
-} from "./materialized-artifact-state.ts";
-import {
   HostedRuntimeArtifactReadError,
   type HostedRuntimePlatform,
   type HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
 } from "./platform.ts";
 
-const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
-const HOSTED_LEGACY_SHARED_PROJECTION_VAULT_PATHS = [
-  "derived/vault-share",
-  "vault-share",
-] as const;
+const HOSTED_CANONICAL_WRITE_RECEIPT_RESTORE_FETCH_CONCURRENCY = 8;
 const HOSTED_CODEX_THREAD_ID_PATTERN =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/u;
 
-// Legacy restore-only compatibility for pre-v2 workspace refs. Production v2
-// checkpoints no longer create base, hot, working, bundle, or delta refs; these
-// caches and paths are deletable after the v2 migration window.
-const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-base-restore-cache.json";
-const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-hot-restore-cache.json";
-const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-working-restore-cache.json";
 const HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME = ".hosted-workspace-live-runtime-state.json";
 const HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_FILE_NAME = ".hosted-workspace-clean-checkpoint.json";
 const HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_SCHEMA =
@@ -109,45 +81,28 @@ export interface HostedWorkspaceRuntimeRestoreResult
   canonicalWriteReceiptCount: number;
   canonicalWriteReceiptRecoveryFailed: boolean;
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
-  materializedArtifactPaths: ReadonlySet<string>;
   mode: HostedWorkspaceRuntimeRestoreMode;
   restoreWasCold: boolean;
   restoreTiming: HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | null;
 }
 
-export type HostedWorkspaceWarmIdleCheckpointOpenResult =
-  | {
-      ok: true;
-      restored: HostedRestoredExecutionContext;
-    }
-  | {
-      ok: false;
-      reason: "warm_workspace_missing" | "workspace_version_mismatch";
-    };
-
-export class HostedWorkspaceRuntimeSnapshotRestoreError extends Error {
-  readonly snapshotHash: string;
-
-  constructor(snapshotHash: string) {
-    super("Hosted workspace runtime job snapshot restore failed.");
-    this.name = "HostedWorkspaceRuntimeSnapshotRestoreError";
-    this.snapshotHash = snapshotHash;
-  }
-}
+export type HostedWorkspaceRuntimeRestorePlatform = Pick<
+  HostedRuntimePlatform,
+  "artifactStore" | "logPort" | "mediaStore" | "workspaceSnapshotPort"
+>;
 
 export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   logContext?: HostedRuntimeLogContext | null;
-  platform: HostedRuntimePlatform;
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   signal?: AbortSignal | null;
   vaultRoot: string;
   workspace: HostedWorkspaceState | null;
 }): Promise<HostedWorkspaceRuntimeRestoreResult> {
   const restored = readHostedWorkspaceRuntimeLocalRoots(input.vaultRoot);
   const snapshotRef = input.workspace?.snapshotRef ?? null;
-  const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
-  const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
-  const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
-  const materializerBundles: Array<() => Promise<Uint8Array | ArrayBuffer | null>> = [];
+  if (snapshotRef !== null && !isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
+    throw new Error("Hosted workspace restore requires a v2 snapshot reference.");
+  }
   const restoreLastKnownGoodAfterReceiptFailure = async (
     error: unknown,
   ): Promise<HostedWorkspaceRuntimeRestoreResult> => {
@@ -198,14 +153,14 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   };
   const recoverCanonicalWriteReceipts = async (
     vaultRoot: string,
-    materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null,
+    materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer,
   ) => {
     try {
       return {
         count: await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+          materializeWorkspaceArtifacts,
           platform: input.platform,
           status: input.workspace?.redactedStatus ?? null,
-          materializeWorkspaceArtifacts,
           vaultRoot,
         }),
         restored: null,
@@ -246,8 +201,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     });
     if (warmRestored) {
       const receiptRecovery = await recoverCanonicalWriteReceipts(
-        warmRestored.vaultRoot,
-        warmRestored.materializeWorkspaceArtifacts,
+        warmRestored.vaultRoot, warmRestored.materializeWorkspaceArtifacts,
       );
       if (receiptRecovery.restored) {
         return receiptRecovery.restored;
@@ -262,7 +216,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       };
     }
     const restoreTiming = await input.platform.workspaceSnapshotPort.restoreWorkspaceSnapshot({
-      durableRoot: resolveHostedWorkspaceDurableRoot(restored.vaultRoot),
+      durableRoot: resolveWorkspaceDurableRoot(restored.vaultRoot),
       ref: snapshotRef,
       signal: input.signal ?? null,
     });
@@ -273,13 +227,15 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     ]);
     await sanitizeRestoredHostedCodexResumeState({
       assistantStateRoot: restored.assistantStateRoot,
-      nativeMemoryRetention: "read-artifacts",
       operatorHomeRoot: restored.operatorHomeRoot,
     });
-    const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-      vaultRoot: restored.vaultRoot,
+    const materializeWorkspaceArtifacts = createHostedWorkspaceRuntimeArtifactMaterializer({
+      platform: input.platform,
+      restored,
     });
-    const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
+    const receiptRecovery = await recoverCanonicalWriteReceipts(
+      restored.vaultRoot, materializeWorkspaceArtifacts,
+    );
     if (receiptRecovery.restored) {
       return receiptRecovery.restored;
     }
@@ -288,147 +244,16 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       ...restored,
       canonicalWriteReceiptCount: receiptRecovery.count,
       canonicalWriteReceiptRecoveryFailed: false,
-      materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-        materializedArtifactPaths: restoredMaterializedArtifactPaths,
-        platform: input.platform,
-        restored,
-        readBundles: materializerBundles,
-      }),
-      materializedArtifactPaths: restoredMaterializedArtifactPaths,
+      materializeWorkspaceArtifacts,
       mode: "snapshot",
       restoreWasCold: true,
       restoreTiming: restoreTiming ?? null,
     };
   }
 
-  if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
-    await clearHostedWorkspaceRuntimeLocalRoots(restored);
-    await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
-    const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
-    if (receiptRecovery.restored) {
-      return receiptRecovery.restored;
-    }
-    const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-      vaultRoot: restored.vaultRoot,
-    });
-
-    return {
-      ...restored,
-      canonicalWriteReceiptCount: receiptRecovery.count,
-      canonicalWriteReceiptRecoveryFailed: false,
-      materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-        materializedArtifactPaths: restoredMaterializedArtifactPaths,
-        platform: input.platform,
-        restored,
-        readBundles: materializerBundles,
-      }),
-      materializedArtifactPaths: restoredMaterializedArtifactPaths,
-      mode: "null-bootstrap",
-      restoreWasCold: true,
-      restoreTiming: null,
-    };
-  }
-
-  // Legacy refs still restore from durable truth. Reusing local bundle restore
-  // caches would preserve cross-lease dirty state, so every pre-v2 restore starts
-  // from clean roots just like the v2 snapshot path.
   await clearHostedWorkspaceRuntimeLocalRoots(restored);
   await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
-
-  let restoreWasCold = false;
-  // Legacy restore-only compatibility for old base bundle refs. This branch is
-  // not on the v2 production checkpoint path and can be removed after migration.
-  if (baseSnapshotRef) {
-    restoreWasCold = true;
-    const baseBundle = await readHostedWorkspaceRuntimeBundle({
-      platform: input.platform,
-      ref: baseSnapshotRef,
-    });
-    materializerBundles.push(async () => baseBundle);
-    await restoreHostedWorkspaceRuntimeBundle({
-      bundle: baseBundle,
-      platform: input.platform,
-      ref: baseSnapshotRef,
-      restored,
-      trackSkippedInlineFiles: true,
-    });
-  }
-
-  // Legacy restore-only compatibility for old hot-layer bundle refs. This
-  // restores the authoritative hot state only for pre-v2 snapshots.
-  if (hotSnapshotRef) {
-    restoreWasCold = true;
-    const restoredHotBundle = await restoreHostedWorkspaceRuntimeHotLayer({
-      hotSnapshotRef,
-      input,
-      restored,
-    });
-    materializerBundles.push(async () => restoredHotBundle);
-  }
-
-  // Legacy restore-only compatibility for old working deltas. New v2 snapshots
-  // restore above and should never reach this path.
-  if (deltaSnapshotRef) {
-    restoreWasCold = true;
-    if (!baseSnapshotRef) {
-      throw new HostedWorkspaceRuntimeSnapshotRestoreError(deltaSnapshotRef.hash);
-    }
-    const baseBundle = await readHostedWorkspaceRuntimeBundle({
-      platform: input.platform,
-      ref: baseSnapshotRef,
-    });
-    const baseManifest =
-      readHostedPortableWorkspaceManifestFromBundle(baseBundle)
-        ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
-    const deltaBundle = await readHostedWorkspaceRuntimeBundle({
-      platform: input.platform,
-      ref: deltaSnapshotRef,
-    });
-    materializerBundles.push(async () => deltaBundle);
-    const skippedInlineFiles: HostedWorkspaceSkippedInlineFile[] = [];
-    await restoreHostedWorkspaceWorkingDelta({
-      artifactResolver: createHostedArtifactResolver({
-        artifactStore: input.platform.artifactStore,
-      }),
-      baseManifest,
-      baseSnapshotHash: baseSnapshotRef.hash,
-      bundle: deltaBundle,
-      onSkippedInlineFile: (file) => {
-        skippedInlineFiles.push(file);
-      },
-      roots: {
-        [HOSTED_OPERATOR_HOME_ROOT_KEY]: restored.operatorHomeRoot,
-        vault: restored.vaultRoot,
-      },
-      shouldRestoreArtifact: shouldRestoreHostedRuntimeEagerArtifact,
-      shouldRestoreInlineFile: shouldRestoreHostedRuntimeInlineFile,
-    });
-    if (skippedInlineFiles.length > 0) {
-      await appendHostedWorkspaceSkippedInlineFiles({
-        files: skippedInlineFiles,
-        vaultRoot: restored.vaultRoot,
-      });
-    }
-    await sanitizeRestoredHostedCodexResumeState({
-      assistantStateRoot: restored.assistantStateRoot,
-      nativeMemoryRetention: "none",
-      operatorHomeRoot: restored.operatorHomeRoot,
-    });
-  }
-
-  const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-    vaultRoot: restored.vaultRoot,
-  });
-  const materializeWorkspaceArtifacts = createHostedWorkspaceRuntimeArtifactMaterializer({
-    materializedArtifactPaths: restoredMaterializedArtifactPaths,
-    platform: input.platform,
-    restored,
-    readBundles: materializerBundles,
-  });
-  const receiptRecovery = await recoverCanonicalWriteReceipts(
-    restored.vaultRoot,
-    materializeWorkspaceArtifacts,
-  );
+  const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
   if (receiptRecovery.restored) {
     return receiptRecovery.restored;
   }
@@ -437,10 +262,12 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     ...restored,
     canonicalWriteReceiptCount: receiptRecovery.count,
     canonicalWriteReceiptRecoveryFailed: false,
-    materializeWorkspaceArtifacts,
-    materializedArtifactPaths: restoredMaterializedArtifactPaths,
-    mode: "snapshot",
-    restoreWasCold,
+    materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
+      platform: input.platform,
+      restored,
+    }),
+    mode: "null-bootstrap",
+    restoreWasCold: true,
     restoreTiming: null,
   };
 }
@@ -461,14 +288,13 @@ interface HostedWorkspaceCleanCheckpointReceiptMarkerFields {
 
 async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
   logContext: HostedRuntimeLogContext | null;
-  platform: HostedRuntimePlatform;
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   restored: HostedRestoredExecutionContext;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
   workspace: HostedWorkspaceState | null;
 }): Promise<
   | (HostedRestoredExecutionContext & {
       materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
-      materializedArtifactPaths: ReadonlySet<string>;
     })
   | null
 > {
@@ -507,21 +333,14 @@ async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
     await assertHostedWorkspaceWarmCleanRoots(input.restored);
     await sanitizeRestoredHostedCodexResumeState({
       assistantStateRoot: input.restored.assistantStateRoot,
-      nativeMemoryRetention: "read-artifacts",
       operatorHomeRoot: input.restored.operatorHomeRoot,
-    });
-    const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-      vaultRoot: input.restored.vaultRoot,
     });
     return {
       ...input.restored,
       materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-        materializedArtifactPaths: restoredMaterializedArtifactPaths,
         platform: input.platform,
         restored: input.restored,
-        readBundles: [],
       }),
-      materializedArtifactPaths: restoredMaterializedArtifactPaths,
     };
   } catch {
     await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.restored.vaultRoot);
@@ -708,7 +527,7 @@ async function assertHostedWorkspaceWarmCleanRoots(
   restored: HostedRestoredExecutionContext,
 ): Promise<void> {
   await Promise.all([
-    assertHostedWorkspaceWarmCleanDirectory(resolveHostedWorkspaceDurableRoot(restored.vaultRoot)),
+    assertHostedWorkspaceWarmCleanDirectory(resolveWorkspaceDurableRoot(restored.vaultRoot)),
     assertHostedWorkspaceWarmCleanDirectory(restored.vaultRoot),
     assertHostedWorkspaceWarmCleanDirectory(restored.assistantStateRoot),
     assertHostedWorkspaceWarmCleanDirectory(restored.operatorHomeRoot),
@@ -737,7 +556,6 @@ async function assertHostedWorkspaceWarmCleanFile(filePath: string): Promise<voi
 
 async function sanitizeRestoredHostedCodexResumeState(input: {
   assistantStateRoot: string;
-  nativeMemoryRetention: "none" | "read-artifacts";
   operatorHomeRoot: string;
 }): Promise<void> {
   const sessionsRoot = path.join(input.assistantStateRoot, "sessions");
@@ -773,7 +591,7 @@ async function sanitizeRestoredHostedCodexResumeState(input: {
   await visit(sessionsRoot);
   await pruneHostedCodexHomeToSessionReferencedRollouts({
     assistantStateRoot: input.assistantStateRoot,
-    nativeMemoryRetention: input.nativeMemoryRetention,
+    nativeMemoryRetention: "read-artifacts",
     operatorHomeRoot: input.operatorHomeRoot,
   });
 }
@@ -996,115 +814,91 @@ function readRecordStringProperty(
     : null;
 }
 
-export async function tryOpenExistingWarmWorkspaceForIdleCheckpoint(input: {
-  vaultRoot: string;
-  workspace: HostedWorkspaceState | null;
-}): Promise<HostedWorkspaceWarmIdleCheckpointOpenResult> {
-  void input.workspace;
-  await clearHostedWorkspaceLiveRuntimeStateBestEffort(
-    readHostedWorkspaceRuntimeLocalRoots(input.vaultRoot).vaultRoot,
-  );
-  return {
-    ok: false,
-    reason: "warm_workspace_missing",
-  };
-}
-
-// Legacy hot-layer bundle restore helper. Restore-only compatibility for
-// pre-v2 `{base, hot}` snapshots; remove with the legacy snapshot readers.
-async function restoreHostedWorkspaceRuntimeHotLayer(input: {
-  hotSnapshotRef: HostedExecutionBundleRef;
-  input: {
-    logContext?: HostedRuntimeLogContext | null;
-    platform: HostedRuntimePlatform;
-  };
-  restored: HostedRestoredExecutionContext;
-}): Promise<Uint8Array | ArrayBuffer> {
-  const hotBundle = await readHostedWorkspaceRuntimeBundle({
-    platform: input.input.platform,
-    ref: input.hotSnapshotRef,
-  });
-  await clearHostedAssistantRuntimeHotState({
-    operatorHomeRoot: input.restored.operatorHomeRoot,
-    vaultRoot: input.restored.vaultRoot,
-  });
-  await restoreHostedWorkspaceRuntimeBundle({
-    bundle: hotBundle,
-    platform: input.input.platform,
-    ref: input.hotSnapshotRef,
-    restored: input.restored,
-    appendSkippedInlineFiles: true,
-    trackSkippedInlineFiles: true,
-  });
-  return hotBundle;
-}
-
 function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
-  materializedArtifactPaths: Set<string>;
-  platform: HostedRuntimePlatform;
-  readBundles: readonly (() => Promise<Uint8Array | ArrayBuffer | null>)[];
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   restored: HostedRestoredExecutionContext;
 }): HostedWorkspaceArtifactMaterializer {
   return createHostedArtifactMaterializer({
-    artifactResolver: createHostedArtifactResolver({
-      artifactStore: input.platform.artifactStore,
-    }),
-    bundles: input.readBundles,
-    materializedArtifactPaths: input.materializedArtifactPaths,
+    mediaStore: input.platform.mediaStore ?? null,
     operatorHomeRoot: input.restored.operatorHomeRoot,
     vaultRoot: input.restored.vaultRoot,
   });
 }
 
 async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
-  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  platform: HostedRuntimePlatform;
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer;
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   status: HostedWorkspaceState["redactedStatus"] | null | undefined;
   vaultRoot: string;
 }): Promise<number> {
-  const entries = await readHostedCanonicalWriteReceiptLogEntries({
+  const receiptLog = await readHostedCanonicalWriteReceiptLog({
     artifactStore: input.platform.artifactStore,
     status: input.status,
   });
+  const { entries } = receiptLog;
   const appliedReceiptRefs = new Set<string>();
   const dirtyDomains = new Set<AssistantContextSnapshotDirtyDomain>();
-  for (const entry of entries) {
+  const uniqueEntries = entries.filter((entry) => {
     const receiptRefKey = `${entry.sha256}:${entry.byteSize}`;
     if (appliedReceiptRefs.has(receiptRefKey)) {
-      continue;
+      return false;
     }
     appliedReceiptRefs.add(receiptRefKey);
-
-    const bytes = await input.platform.artifactStore.get(entry.sha256, {
-      purpose: "canonical_write_receipt",
-    });
-    if (!bytes) {
-      throw new Error("Hosted canonical write receipt artifact is unavailable.");
-    }
-    if (bytes.byteLength !== entry.byteSize) {
-      throw new Error("Hosted canonical write receipt artifact size does not match its log ref.");
-    }
-    const parsed = parseHostedCanonicalWriteReceiptForRestore(
-      Buffer.from(bytes).toString("utf8"),
-    );
-    if (!parsed) {
-      continue;
-    }
-    for (const domain of listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(parsed)) {
-      dirtyDomains.add(domain);
-    }
-    await input.materializeWorkspaceArtifacts?.(
-      parsed.actions.map((action) => action.targetRelativePath),
-    );
-    await applyHostedCanonicalWriteReceipt({
-      readPayload: async (ref) =>
-        await readHostedCanonicalWritePayloadForRestore({
-          platform: input.platform,
-          ref,
+    return true;
+  });
+  for (
+    let offset = 0;
+    offset < uniqueEntries.length;
+    offset += HOSTED_CANONICAL_WRITE_RECEIPT_RESTORE_FETCH_CONCURRENCY
+  ) {
+    const receiptWave = await Promise.all(
+      uniqueEntries
+        .slice(
+          offset,
+          offset + HOSTED_CANONICAL_WRITE_RECEIPT_RESTORE_FETCH_CONCURRENCY,
+        )
+        .map(async (entry) => {
+          const bytes = await input.platform.artifactStore.get(entry.sha256, {
+            purpose: "canonical_write_receipt",
+          });
+          if (!bytes) {
+            throw new Error("Hosted canonical write receipt artifact is unavailable.");
+          }
+          if (bytes.byteLength !== entry.byteSize) {
+            throw new Error(
+              "Hosted canonical write receipt artifact size does not match its log ref.",
+            );
+          }
+          return parseHostedCanonicalWriteReceiptArtifact(
+            Buffer.from(bytes).toString("utf8"),
+          );
         }),
-      receipt: parsed,
-      vaultRoot: input.vaultRoot,
-    });
+    );
+    for (const parsed of receiptWave) {
+      if (!parsed) {
+        continue;
+      }
+      for (const domain of listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(parsed)) {
+        dirtyDomains.add(domain);
+      }
+      // Guarded replacements need their preimage. Ordinary media receipts only
+      // restore references and must not download their payloads.
+      const preimagePaths = parsed.actions.filter((action) =>
+        action.kind === "text_upsert" && action.expectedSha256 !== undefined
+      ).map((action) => action.targetRelativePath);
+      if (preimagePaths.length > 0) {
+        await input.materializeWorkspaceArtifacts?.(preimagePaths);
+      }
+      await applyHostedCanonicalWriteReceiptWithMedia({
+        readPayload: async (ref) =>
+          await readHostedCanonicalWritePayloadForRestore({
+            platform: input.platform,
+            ref,
+          }),
+        receipt: parsed,
+        vaultRoot: input.vaultRoot,
+      });
+    }
   }
   if (dirtyDomains.size > 0) {
     await markAssistantContextSnapshotDirty({
@@ -1112,199 +906,16 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
       vaultRoot: input.vaultRoot,
     });
   }
-  return entries.length;
+  return receiptLog.entryCount;
 }
 
 async function readHostedCanonicalWritePayloadForRestore(input: {
-  platform: HostedRuntimePlatform;
+  platform: HostedWorkspaceRuntimeRestorePlatform;
   ref: HostedCanonicalWriteReceiptContentRef;
 }): Promise<Uint8Array | ArrayBuffer | null> {
   return await input.platform.artifactStore.get(input.ref.sha256, {
     purpose: "canonical_write_receipt",
   });
-}
-
-function parseHostedCanonicalWriteReceiptForRestore(
-  raw: string,
-): HostedCanonicalWriteReceipt | null {
-  const parsed: unknown = JSON.parse(raw);
-  if (!isPlainObject(parsed)) {
-    throw new Error("Hosted canonical write receipt must be an object.");
-  }
-  if (
-    parsed.schema !== HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION &&
-    parsed.schemaVersion === HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION
-  ) {
-    return null;
-  }
-  if (parsed.schema !== HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION) {
-    throw new Error("Hosted canonical write receipt schema is invalid.");
-  }
-  if (
-    typeof parsed.operationId !== "string" ||
-    typeof parsed.operationType !== "string" ||
-    typeof parsed.summary !== "string" ||
-    typeof parsed.createdAt !== "string" ||
-    typeof parsed.updatedAt !== "string" ||
-    typeof parsed.occurredAt !== "string" ||
-    typeof parsed.committedAt !== "string" ||
-    !Array.isArray(parsed.actions)
-  ) {
-    throw new Error("Hosted canonical write receipt fields are invalid.");
-  }
-
-  const actions = parsed.actions.map(parseHostedCanonicalWriteReceiptActionForRestore);
-  return {
-    schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-    operationId: parsed.operationId,
-    operationType: parsed.operationType,
-    summary: parsed.summary,
-    createdAt: parsed.createdAt,
-    updatedAt: parsed.updatedAt,
-    occurredAt: parsed.occurredAt,
-    committedAt: parsed.committedAt,
-    actions,
-  };
-}
-
-function parseHostedCanonicalWriteReceiptActionForRestore(
-  raw: unknown,
-): HostedCanonicalWriteReceiptAction {
-  if (!isPlainObject(raw) || typeof raw.kind !== "string") {
-    throw new Error("Hosted canonical write receipt action is invalid.");
-  }
-  if (typeof raw.targetRelativePath !== "string") {
-    throw new Error("Hosted canonical write receipt action target is invalid.");
-  }
-
-  switch (raw.kind) {
-    case "text_upsert": {
-      if (
-        !isSha256(raw.sha256) ||
-        !isNonNegativeInteger(raw.byteLength) ||
-        !isTextUpsertEffect(raw.effect) ||
-        ((raw.expectedSha256 === undefined) !==
-          (raw.expectedByteLength === undefined)) ||
-        (raw.expectedSha256 !== undefined && !isSha256(raw.expectedSha256)) ||
-        (raw.expectedByteLength !== undefined &&
-          !isNonNegativeInteger(raw.expectedByteLength))
-      ) {
-        throw new Error("Hosted canonical text write receipt action is invalid.");
-      }
-      const contentRef = parseHostedCanonicalWriteReceiptContentRef(raw.contentRef);
-      return {
-        kind: "text_upsert",
-        targetRelativePath: raw.targetRelativePath,
-        sha256: raw.sha256,
-        byteLength: raw.byteLength,
-        effect: raw.effect,
-        ...(raw.allowRaw === true ? { allowRaw: true as const } : {}),
-        ...(typeof raw.expectedSha256 === "string"
-          && typeof raw.expectedByteLength === "number"
-          ? {
-              expectedSha256: raw.expectedSha256,
-              expectedByteLength: raw.expectedByteLength,
-            }
-          : {}),
-        ...(contentRef ? { contentRef } : {}),
-      };
-    }
-    case "jsonl_append": {
-      if (
-        !isSha256(raw.appendSha256) ||
-        !isNonNegativeInteger(raw.appendByteLength) ||
-        !isSha256(raw.baseSha256) ||
-        !isNonNegativeInteger(raw.baseByteLength) ||
-        (raw.originalSize !== null && !isNonNegativeInteger(raw.originalSize))
-      ) {
-        throw new Error("Hosted canonical JSONL append receipt action is invalid.");
-      }
-      const contentRef = parseHostedCanonicalWriteReceiptContentRef(raw.contentRef);
-      return {
-        kind: "jsonl_append",
-        targetRelativePath: raw.targetRelativePath,
-        appendSha256: raw.appendSha256,
-        appendByteLength: raw.appendByteLength,
-        baseSha256: raw.baseSha256,
-        baseByteLength: raw.baseByteLength,
-        originalSize: raw.originalSize,
-        ...(raw.allowArchivedIntegrationIngestAmendment === true
-          ? { allowArchivedIntegrationIngestAmendment: true as const }
-          : {}),
-        ...(contentRef ? { contentRef } : {}),
-      };
-    }
-    case "raw_upsert": {
-      if (
-        !isSha256(raw.sha256) ||
-        !isNonNegativeInteger(raw.byteLength) ||
-        typeof raw.mediaType !== "string" ||
-        typeof raw.originalFileName !== "string" ||
-        !isRawUpsertEffect(raw.effect)
-      ) {
-        throw new Error("Hosted canonical raw write receipt action is invalid.");
-      }
-      const contentRef = parseHostedCanonicalWriteReceiptContentRef(raw.contentRef);
-      if (!contentRef) {
-        throw new Error("Hosted canonical raw write receipt action is missing content.");
-      }
-      return {
-        kind: "raw_upsert",
-        targetRelativePath: raw.targetRelativePath,
-        sha256: raw.sha256,
-        byteLength: raw.byteLength,
-        mediaType: raw.mediaType,
-        originalFileName: raw.originalFileName,
-        effect: raw.effect,
-        contentRef,
-      };
-    }
-    case "delete": {
-      if (typeof raw.existedBefore !== "boolean") {
-        throw new Error("Hosted canonical delete receipt action is invalid.");
-      }
-      return {
-        kind: "delete",
-        targetRelativePath: raw.targetRelativePath,
-        existedBefore: raw.existedBefore,
-        ...(raw.allowRaw === true ? { allowRaw: true as const } : {}),
-      };
-    }
-    case "delete_if_match": {
-      if (
-        typeof raw.existedBefore !== "boolean" ||
-        !isSha256(raw.expectedSha256) ||
-        !isNonNegativeInteger(raw.expectedByteLength)
-      ) {
-        throw new Error("Hosted canonical guarded delete receipt action is invalid.");
-      }
-      return {
-        kind: "delete_if_match",
-        targetRelativePath: raw.targetRelativePath,
-        existedBefore: raw.existedBefore,
-        expectedSha256: raw.expectedSha256,
-        expectedByteLength: raw.expectedByteLength,
-        ...(raw.allowRaw === true ? { allowRaw: true as const } : {}),
-      };
-    }
-    default:
-      throw new Error("Hosted canonical write receipt action kind is invalid.");
-  }
-}
-
-function parseHostedCanonicalWriteReceiptContentRef(
-  raw: unknown,
-): HostedCanonicalWriteReceiptContentRef | undefined {
-  if (raw === undefined) {
-    return undefined;
-  }
-  if (!isPlainObject(raw) || !isSha256(raw.sha256) || !isNonNegativeInteger(raw.byteSize)) {
-    throw new Error("Hosted canonical write receipt content ref is invalid.");
-  }
-  return {
-    sha256: raw.sha256,
-    byteSize: raw.byteSize,
-  };
 }
 
 function isSha256(value: unknown): value is string {
@@ -1315,30 +926,12 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
-function isTextUpsertEffect(value: unknown): value is "create" | "update" | "reuse" {
-  return value === "create" || value === "update" || value === "reuse";
-}
-
-function isRawUpsertEffect(value: unknown): value is "copy" | "reuse" {
-  return value === "copy" || value === "reuse";
-}
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function isMissingPathError(error: unknown): boolean {
   return isPlainObject(error) && error.code === "ENOENT";
-}
-
-// Legacy restore cache cleanup helpers. The cache-hit restore paths are disabled
-// so pre-v2 refs cannot reuse cross-lease dirty local state.
-async function clearHostedWorkspaceBaseRestoreCacheBestEffort(vaultRoot: string): Promise<void> {
-  try {
-    await rm(resolveHostedWorkspaceBaseRestoreCachePath(vaultRoot), { force: true });
-  } catch {
-    // A stale base cache marker should not block cold restore from the source bundle.
-  }
 }
 
 export async function markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort(input: {
@@ -1372,43 +965,6 @@ export async function clearHostedWorkspaceCleanCheckpointMarkerBestEffort(
   }
 }
 
-async function clearHostedWorkspaceHotRestoreCacheBestEffort(vaultRoot: string): Promise<void> {
-  try {
-    await rm(resolveHostedWorkspaceHotRestoreCachePath(vaultRoot), { force: true });
-  } catch {
-    // A stale or missing cache marker only affects performance, not correctness.
-  }
-}
-
-async function clearHostedWorkspaceWorkingRestoreCacheBestEffort(vaultRoot: string): Promise<void> {
-  try {
-    await rm(resolveHostedWorkspaceWorkingRestoreCachePath(vaultRoot), { force: true });
-  } catch {
-    // A stale or missing cache marker only affects performance, not correctness.
-  }
-}
-
-function resolveHostedWorkspaceBaseRestoreCachePath(vaultRoot: string): string {
-  return path.join(
-    path.dirname(path.resolve(vaultRoot)),
-    HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME,
-  );
-}
-
-function resolveHostedWorkspaceHotRestoreCachePath(vaultRoot: string): string {
-  return path.join(
-    path.dirname(path.resolve(vaultRoot)),
-    HOSTED_WORKSPACE_HOT_RESTORE_CACHE_FILE_NAME,
-  );
-}
-
-function resolveHostedWorkspaceWorkingRestoreCachePath(vaultRoot: string): string {
-  return path.join(
-    path.dirname(path.resolve(vaultRoot)),
-    HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME,
-  );
-}
-
 function resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot: string): string {
   return path.join(
     path.dirname(path.resolve(vaultRoot)),
@@ -1423,172 +979,6 @@ function resolveHostedWorkspaceCleanCheckpointMarkerPath(vaultRoot: string): str
   );
 }
 
-// Legacy bundle restore helper for pre-v2 snapshot refs. The current v2 path
-// uses workspaceSnapshotPort.restoreWorkspaceSnapshot instead.
-async function restoreHostedWorkspaceRuntimeBundle(input: {
-  appendSkippedInlineFiles?: boolean;
-  bundle?: Uint8Array | ArrayBuffer | null;
-  platform: HostedRuntimePlatform;
-  ref: HostedExecutionBundleRef;
-  restored: HostedRestoredExecutionContext;
-  trackSkippedInlineFiles: boolean;
-}): Promise<void> {
-  const bundle = input.bundle ?? await readHostedWorkspaceRuntimeBundle({
-    platform: input.platform,
-    ref: input.ref,
-  });
-  const skippedInlineFiles: HostedWorkspaceSkippedInlineFile[] = [];
-
-  await clearHostedCodexHomeRestoreRoot(input.restored.operatorHomeRoot);
-  try {
-    await restoreHostedBundleRoots({
-      artifactResolver: createHostedArtifactResolver({
-        artifactStore: input.platform.artifactStore,
-      }),
-      bytes: bundle,
-      expectedKind: "vault",
-      roots: {
-        [HOSTED_OPERATOR_HOME_ROOT_KEY]: input.restored.operatorHomeRoot,
-        vault: input.restored.vaultRoot,
-      },
-      onSkippedInlineFile: input.trackSkippedInlineFiles
-        ? (file) => {
-            skippedInlineFiles.push(file);
-          }
-        : undefined,
-      shouldRestoreArtifact: shouldRestoreHostedRuntimeEagerArtifact,
-      shouldRestoreInlineFile: shouldRestoreHostedRuntimeInlineFile,
-    });
-    if (input.trackSkippedInlineFiles) {
-      if (input.appendSkippedInlineFiles) {
-        await appendHostedWorkspaceSkippedInlineFiles({
-          files: skippedInlineFiles,
-          vaultRoot: input.restored.vaultRoot,
-        });
-      } else {
-        await writeHostedWorkspaceSkippedInlineFiles({
-          files: skippedInlineFiles,
-          vaultRoot: input.restored.vaultRoot,
-        });
-      }
-    }
-    await sanitizeRestoredHostedCodexResumeState({
-      assistantStateRoot: input.restored.assistantStateRoot,
-      nativeMemoryRetention: "none",
-      operatorHomeRoot: input.restored.operatorHomeRoot,
-    });
-  } catch (error) {
-    await clearHostedCodexHomeRestoreRoot(input.restored.operatorHomeRoot);
-    throw error;
-  }
-}
-
-async function appendHostedWorkspaceSkippedInlineFiles(input: {
-  files: readonly HostedWorkspaceSkippedInlineFile[];
-  vaultRoot: string;
-}): Promise<void> {
-  if (input.files.length === 0) {
-    return;
-  }
-
-  let existing: HostedWorkspaceSkippedInlineFile[] = [];
-  try {
-    existing = await readHostedWorkspaceSkippedInlineFiles({
-      vaultRoot: input.vaultRoot,
-    });
-  } catch (error) {
-    if (!isMissingPathError(error)) {
-      throw error;
-    }
-  }
-
-  const files = new Map<string, HostedWorkspaceSkippedInlineFile>();
-  for (const file of existing) {
-    files.set(`${file.root}:${file.path}`, file);
-  }
-  for (const file of input.files) {
-    files.set(`${file.root}:${file.path}`, file);
-  }
-
-  await writeHostedWorkspaceSkippedInlineFiles({
-    files: [...files.values()],
-    vaultRoot: input.vaultRoot,
-  });
-}
-
-async function readHostedWorkspaceRuntimeBundle(input: {
-  platform: HostedRuntimePlatform;
-  ref: HostedExecutionBundleRef;
-}): Promise<Uint8Array | ArrayBuffer> {
-  const bundle = await input.platform.artifactStore.get(input.ref.hash, {
-    purpose: "workspace_restore",
-  });
-  if (!bundle) {
-    throw new HostedWorkspaceRuntimeSnapshotRestoreError(input.ref.hash);
-  }
-
-  return bundle;
-}
-
-function shouldRestoreHostedRuntimeEagerArtifact(input: {
-  path: string;
-  root: string;
-}): boolean {
-  if (input.root === HOSTED_OPERATOR_HOME_ROOT_KEY) {
-    return hasHostedRuntimeEagerArtifactPrefix(
-      input.path,
-      HOSTED_CODEX_HOME_RELATIVE_PATH,
-    );
-  }
-
-  if (input.root !== "vault") {
-    return false;
-  }
-
-  if (isHostedLegacySharedProjectionVaultPath(input.path)) {
-    return false;
-  }
-
-  return !isHostedRuntimeLazyVaultContentPath(input.path);
-}
-
-function shouldRestoreHostedRuntimeInlineFile(input: {
-  path: string;
-  root: string;
-}): boolean {
-  if (input.root !== "vault") {
-    return true;
-  }
-
-  if (isHostedLegacySharedProjectionVaultPath(input.path)) {
-    return false;
-  }
-
-  return !isHostedRuntimeLazyVaultContentPath(input.path);
-}
-
-function isHostedLegacySharedProjectionVaultPath(relativePath: string): boolean {
-  return HOSTED_LEGACY_SHARED_PROJECTION_VAULT_PATHS.some(
-    (excludedPath) =>
-      relativePath === excludedPath
-      || relativePath.startsWith(`${excludedPath}/`),
-  );
-}
-
-function isHostedRuntimeLazyVaultContentPath(relativePath: string): boolean {
-  return (
-    hasHostedRuntimeEagerArtifactPrefix(relativePath, "raw")
-    || hasHostedRuntimeEagerArtifactPrefix(relativePath, "derived")
-  );
-}
-
-function hasHostedRuntimeEagerArtifactPrefix(
-  relativePath: string,
-  prefix: string,
-): boolean {
-  return relativePath === prefix || relativePath.startsWith(`${prefix}/`);
-}
-
 function readHostedWorkspaceRuntimeLocalRoots(
   vaultRoot: string,
 ): HostedRestoredExecutionContext {
@@ -1601,14 +991,6 @@ function readHostedWorkspaceRuntimeLocalRoots(
     operatorHomeRoot,
     vaultRoot: resolvedVaultRoot,
   };
-}
-
-function resolveHostedWorkspaceDurableRoot(vaultRoot: string): string {
-  const resolvedVaultRoot = path.resolve(vaultRoot);
-  if (path.basename(resolvedVaultRoot) === "vault") {
-    return path.dirname(resolvedVaultRoot);
-  }
-  return resolvedVaultRoot;
 }
 
 function resolveHostedWorkspaceOperatorHomeRoot(vaultRoot: string): string {
@@ -1651,10 +1033,7 @@ async function clearHostedWorkspaceRuntimeLocalRoots(
 
 async function clearHostedWorkspaceRestoreCachesBestEffort(vaultRoot: string): Promise<void> {
   await Promise.all([
-    clearHostedWorkspaceBaseRestoreCacheBestEffort(vaultRoot),
     clearHostedWorkspaceCleanCheckpointMarkerBestEffort(vaultRoot),
-    clearHostedWorkspaceHotRestoreCacheBestEffort(vaultRoot),
-    clearHostedWorkspaceWorkingRestoreCacheBestEffort(vaultRoot),
     clearHostedWorkspaceLiveRuntimeStateBestEffort(vaultRoot),
   ]);
 }

@@ -351,24 +351,31 @@ function dedupeLookups(
 function buildSignals(results: BrowserVaultExperimentResultsView): ExperimentRunProjection["signals"] {
   return results.biomarkers
     .filter(isRenderableBiomarker)
-    .flatMap((biomarker) => {
-      if (biomarker.deltaAbs === null) {
-        return [];
-      }
-
+    .map((biomarker) => {
+      const { deltaAbs } = biomarker;
+      const latestPoint = biomarker.points.reduce(
+        (latest, point) => !latest || point.date > latest.date ? point : latest,
+        biomarker.points[0],
+      );
       const currentValue = readCurrentBiomarkerValue(biomarker);
       const unit = resolveOutcomeDisplayUnit(biomarker);
       // A day-one reading against a multi-day baseline is noise, not a change.
       // Only present the delta once the replica classifies both windows as
       // having enough days (`completeness === "good"`).
-      const showDelta = biomarker.completeness === "good";
-      const direction = showDelta ? resolveSignalDirection(biomarker.deltaAbs) : "neutral";
+      const showDelta = deltaAbs !== null && biomarker.completeness === "good";
+      const direction = showDelta ? resolveSignalDirection(deltaAbs) : "neutral";
 
-      return [{
+      return {
         label: biomarker.label,
         value: formatMetricValue(currentValue),
         unit,
-        delta: showDelta ? formatDelta(biomarker.deltaAbs, unit) : "",
+        statistic: biomarker.statistic,
+        latestResult: latestPoint ? {
+          date: latestPoint.date,
+          value: formatMetricValue(latestPoint.value),
+          unit: biomarker.statistic === "count" ? undefined : latestPoint.unit ?? undefined,
+        } : undefined,
+        delta: showDelta ? formatDelta(deltaAbs, unit) : "",
         direction,
         sentiment: showDelta
           ? resolveBiomarkerChangeSentiment(
@@ -381,7 +388,7 @@ function buildSignals(results: BrowserVaultExperimentResultsView): ExperimentRun
           : undefined,
         expected: formatExpectedSignalText(biomarker) ?? "",
         protocolProminence: "focus",
-      }];
+      };
     });
 }
 

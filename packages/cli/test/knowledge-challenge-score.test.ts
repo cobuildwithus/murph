@@ -178,5 +178,66 @@ test('knowledge score-challenge rejects unbounded or extra payload fields', asyn
 
   assert.notEqual(result.exitCode, null)
   assert.equal(result.envelope.ok, false)
+  if (result.envelope.ok) {
+    throw new Error('expected CLI error envelope')
+  }
+  assert.equal(result.envelope.error.code, 'invalid_payload')
+  assert.equal(result.envelope.error.stage, 'validation')
+  assert.equal(result.envelope.error.retryable, false)
+  assert.equal(
+    result.envelope.error.fieldErrors?.some((issue) => issue.path === '$'),
+    true,
+  )
   assert.doesNotMatch(JSON.stringify(result.envelope), /must-not-pass-through/u)
+})
+
+test('knowledge score-challenge replaces private scorer invariants with fixed guidance', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-challenge-score-inconsistent-'))
+  cleanupPaths.push(tempRoot)
+  const inputPath = path.join(tempRoot, 'scorecard.json')
+  const privateComponentId = 'private-component-id'
+  await writeFile(inputPath, JSON.stringify({
+    format: { kind: 'individual', objective: { kind: 'ranking' } },
+    participants: [{
+      participantId: 'participant_1',
+      components: [{
+        componentId: privateComponentId,
+        quantity: 1,
+        status: 'available',
+      }],
+    }],
+    scorecard: {
+      components: [
+        {
+          id: privateComponentId,
+          label: 'First component',
+          perQuantity: 1,
+          points: 1,
+          quantityUnit: 'units',
+        },
+        {
+          id: privateComponentId,
+          label: 'Duplicate component',
+          perQuantity: 1,
+          points: 1,
+          quantityUnit: 'units',
+        },
+      ],
+    },
+  }), 'utf8')
+
+  const result = await runInProcessJsonCli(
+    createVaultCli(),
+    ['knowledge', 'score-challenge', '--input', `@${inputPath}`],
+  )
+
+  assert.notEqual(result.exitCode, null)
+  assert.equal(result.envelope.ok, false)
+  if (result.envelope.ok) {
+    throw new Error('expected CLI error envelope')
+  }
+  assert.equal(result.envelope.error.code, 'invalid_payload')
+  assert.equal(result.envelope.error.stage, 'validation')
+  assert.match(result.envelope.error.hint ?? '', /unique participant and component ids/u)
+  assert.doesNotMatch(JSON.stringify(result.envelope), /private-component-id/u)
 })

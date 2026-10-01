@@ -50,6 +50,12 @@ import {
 } from './reply-bubbles.js'
 
 export interface AssistantPrecedingReplySegment {
+  followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
+  /**
+   * Per-response override: undefined inherits its ordinal; null/empty clears;
+   * non-empty replaces.
+   */
+  contextReferences?: AssistantMessageInput['outboxAutomationContextReferences']
   deliveryContextOrdinal?: number
   deliveryContext?: AssistantReplyDeliveryContext | null
   media?: readonly AssistantResponseMedia[] | null
@@ -154,6 +160,7 @@ export function dropUnsupportedAssistantResponseMediaForChannel(input: {
 }
 
 export async function deliverAssistantReply(input: {
+  followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
   card?: AssistantResponseCard | null
   dedupeToken?: string | null
   input: AssistantMessageInput
@@ -201,6 +208,7 @@ export async function deliverAssistantReply(input: {
 
   if (card !== null) {
     return await deliverAssistantCurrentAudienceMessage({
+    followUpRequest: input.followUpRequest,
       card,
       dedupeToken: baseDedupeToken,
       answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
@@ -217,6 +225,7 @@ export async function deliverAssistantReply(input: {
 
   if (!assistantChannelSupportsReplyBubbles(deliveryFields.channel)) {
     return await deliverAssistantCurrentAudienceMessage({
+    followUpRequest: input.followUpRequest,
       dedupeToken: baseDedupeToken,
       answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
@@ -236,6 +245,7 @@ export async function deliverAssistantReply(input: {
     : splitReplyBubbles
   if (replyBubbles.length <= 1) {
     return await deliverAssistantCurrentAudienceMessage({
+    followUpRequest: input.followUpRequest,
       dedupeToken: baseDedupeToken,
       answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
@@ -287,6 +297,7 @@ export async function deliverAssistantReply(input: {
   }
 
   return await deliverAssistantCurrentAudienceMessage({
+    followUpRequest: input.followUpRequest,
     dedupeToken: baseDedupeToken,
     answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
@@ -471,13 +482,19 @@ export async function deliverAssistantPrecedingReplies(input: {
         context: segment.deliveryContext ?? null,
         input: input.input,
       })
+      const referencedSegmentInput = segment.contextReferences === undefined
+        ? baseSegmentInput
+        : {
+            ...baseSegmentInput,
+            outboxAutomationContextReferences: segment.contextReferences,
+          }
       const segmentInput = input.resolveSegmentDeliveryInput
         ? await input.resolveSegmentDeliveryInput({
-            input: baseSegmentInput,
+            input: referencedSegmentInput,
             segment,
             session,
           })
-        : baseSegmentInput
+        : referencedSegmentInput
       const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
         input: segmentInput,
         session,
@@ -494,6 +511,7 @@ export async function deliverAssistantPrecedingReplies(input: {
         ? `${baseDeliveryIdempotencyKey}:segment:${ordinal}`
         : `assistant-segment:${input.turnId}:${ordinal}`
       const outcome = await deliverAssistantReply({
+        followUpRequest: segment.followUpRequest,
         dedupeToken: segmentKey,
         input: {
           ...segmentInput,
@@ -525,16 +543,9 @@ function normalizeAssistantPrecedingReplySegments(input: {
   segments?: readonly AssistantPrecedingReplySegment[]
 }): AssistantPrecedingReplySegment[] {
   return (input.segments ?? []).map((segment) => ({
-    ...(segment.deliveryContextOrdinal === undefined
-      ? {}
-      : { deliveryContextOrdinal: segment.deliveryContextOrdinal }),
+    ...segment,
     deliveryContext: segment.deliveryContext ?? null,
-    response: segment.response,
-    ...(segment.transcriptResponse === undefined
-      ? {}
-      : { transcriptResponse: segment.transcriptResponse }),
     media: normalizeAssistantResponseMediaList(segment.media ?? []),
-    ...(segment.targetInputId ? { targetInputId: segment.targetInputId } : {}),
   }))
 }
 
@@ -881,6 +892,7 @@ function resolveAssistantInputRouteBindingDelivery(input: {
 }
 
 async function deliverAssistantCurrentAudienceMessage(input: {
+  followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
   card?: AssistantResponseCard | null
   answeredMailboxItemIds?: readonly string[] | null
   dedupeToken: string | null
@@ -908,6 +920,8 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     reviewedAssistantAskCompletionExpiresAt:
       input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
+    followUpRequest: input.followUpRequest ?? undefined,
+    followUpEvaluatedThrough: input.input.outboxFollowUpEvaluatedThrough,
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
     automationContextReferences:
       input.input.outboxAutomationContextReferences ?? null,

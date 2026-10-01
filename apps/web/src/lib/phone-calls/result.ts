@@ -51,6 +51,7 @@ import type {
   PreparedRetellCallResult,
 } from "./retell-result-lifecycle";
 import { isHostedPhoneCallProviderCleanupPending } from "./authority";
+import { lockExistingHostedPhoneCallTx } from "./row-lock";
 import {
   readRetellWebhookCallTarget,
 } from "./webhook-target";
@@ -822,6 +823,9 @@ async function appendPhoneCallResultNotification(input: {
   mailboxRoot.rootKey.fill(0);
 
   const appended = await input.prisma.$transaction(async (tx) => {
+    if (!await lockExistingHostedPhoneCallTx(tx, call)) {
+      return null;
+    }
     if (trackedTelegramResult && call.resultDeliveryStatus === "pending") {
       if (deliveryGeneration === null) {
         throw hostedPhoneCallResultNotificationError(
@@ -936,12 +940,15 @@ async function appendPhoneCallStopSettlementNotification(input: {
   });
   mailboxRoot.rootKey.fill(0);
 
-  const appended = await input.prisma.$transaction((tx) =>
-    appendHostedMailboxEnvelopeTx({
-      envelope,
-      tx,
-    })
-  );
+  const appended = await input.prisma.$transaction(async (tx) => {
+    if (!await lockExistingHostedPhoneCallTx(tx, call)) {
+      return null;
+    }
+    return appendHostedMailboxEnvelopeTx({ envelope, tx });
+  });
+  if (!appended) {
+    return emptyRetellCallAnalyzedHandlingResult();
+  }
   return {
     notificationMailboxItemId: appended.item.id,
     notificationUserId: appended.item.userId,

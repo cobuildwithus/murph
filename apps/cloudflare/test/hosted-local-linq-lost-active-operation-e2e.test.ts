@@ -57,8 +57,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -79,7 +78,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
     });
   }, 300_000);
 
-  it("steers the live child after the outer runner active-operation pointer is lost", async () => {
+  it("clears the durable fence after the RunnerContainer activation loses the outer result", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
@@ -167,9 +166,9 @@ describe("hosted local Linq lost active-operation e2e", () => {
 
     await waitForCondition(
       async () => await readActiveRuntimeFenceForTest() === null,
-      "Expected the container completion receipt to clear the exact fence while the outer result remained lost.",
+      "Expected the container-origin completion receipt to clear the exact fence after the activation-owned outer result was lost.",
     );
-    await requireScenario().harness.expireRunnerActivityForTest(userId);
+    // Fence clearance is sufficient; the next inbound must acquire a fresh owner.
     const outboundCountBeforeFreshWake = requireLinqStub().countObservedSends(replyPath);
     const thirdWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,

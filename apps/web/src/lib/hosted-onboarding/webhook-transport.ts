@@ -45,6 +45,9 @@ import { normalizePhoneNumber } from "./phone";
 import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
+import type {
+  HostedLinqParticipantContact,
+} from "./linq-participant-contact";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "./linq-observability-identifiers";
@@ -173,25 +176,49 @@ type HostedLinqPersistedAiUsageQuotaClaimToken =
 type HostedLinqUsageLimitNoticeCode = HostedAiUsageGateNoticeCode;
 
 type HostedLinqAiUsageQuotaBasePayload = {
-  chatId: string;
   memberId: string;
   message: string;
   occurredAt: string;
-  replyToMessageId: string | null;
-  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   sourceEventId: string;
   template: "ai_usage_quota";
 };
 
+type HostedLinqThreadMessageTarget = {
+  chatId: string;
+  replyToMessageId: string | null;
+  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
+};
+
+type HostedLinqMemberParticipantTarget = {
+  assignedRecipientPhone: string;
+  memberId: string;
+  participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
+};
+
+type HostedLinqMemberParticipantMessageTarget =
+  HostedLinqMemberParticipantTarget & {
+    chatId: null;
+    replyToMessageId: null;
+  };
+
+type HostedLinqAiUsageQuotaParticipantPayload =
+  HostedLinqAiUsageQuotaBasePayload
+  & HostedLinqMemberParticipantMessageTarget
+  & {
+    claimToken: null;
+    noticeCode: HostedRuntimeAiAccessNoticeCode;
+  };
+
 export type HostedLinqAiUsageQuotaPayload =
-  | (HostedLinqAiUsageQuotaBasePayload & {
+  | (HostedLinqAiUsageQuotaBasePayload & HostedLinqThreadMessageTarget & {
     claimToken: HostedLinqPersistedAiUsageQuotaClaimToken;
     noticeCode: HostedLinqUsageLimitNoticeCode;
   })
-  | (HostedLinqAiUsageQuotaBasePayload & {
+  | (HostedLinqAiUsageQuotaBasePayload & HostedLinqThreadMessageTarget & {
     claimToken: null;
     noticeCode: HostedRuntimeAiAccessNoticeCode;
-  });
+  })
+  | HostedLinqAiUsageQuotaParticipantPayload;
 
 export type HostedLinqGroupSetupMessagePayload = {
   chatId: string;
@@ -230,19 +257,15 @@ export type HostedLinqInviteSignupMessagePayload = {
   template: "invite_signup";
 };
 
-export type HostedLinqInviteSignupFallbackMessagePayload = {
-  assignedRecipientPhone: string;
-  chatId: null;
-  groupJoinCode?: string | null;
-  groupJoinOutreachId?: string | null;
-  inviteId: string;
-  memberId: string;
-  memberPhone: string;
-  occurredAt: string;
-  replyToMessageId: null;
-  sourceEventId: string;
-  template: "invite_signup_fallback";
-};
+export type HostedLinqInviteSignupFallbackMessagePayload =
+  HostedLinqMemberParticipantMessageTarget & {
+    groupJoinCode?: string | null;
+    groupJoinOutreachId?: string | null;
+    inviteId: string;
+    occurredAt: string;
+    sourceEventId: string;
+    template: "invite_signup_fallback";
+  };
 
 export type HostedLinqGroupLineRecoveryMessagePayload = {
   assignedRecipientPhone: string | null;
@@ -319,6 +342,17 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       template: "ai_usage_quota";
     }
   | {
+      assignedRecipientPhone: string;
+      claimToken?: null;
+      memberId: string;
+      message: string;
+      noticeCode: HostedRuntimeAiAccessNoticeCode;
+      occurredAt: string;
+      participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
+      sourceEventId: string;
+      template: "ai_usage_quota";
+    }
+  | {
       chatId: string;
       claimToken?: null;
       message: string;
@@ -374,8 +408,8 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       groupJoinOutreachId?: string | null;
       inviteId: string;
       memberId: string;
-      memberPhone: string;
       occurredAt: string;
+      participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
       sourceEventId: string;
       template: "invite_signup_fallback";
     }
@@ -860,10 +894,7 @@ async function sendHostedLinqSideEffect(
           "Hosted Linq participant side-effect dispatch requires a sending line.",
         );
       }
-      const participantContact =
-        deliveryEffect.payload.template === "invite_signup_fallback"
-          ? deliveryEffect.payload.memberPhone
-          : deliveryEffect.payload.participantContact.value;
+      const participantContact = deliveryEffect.payload.participantContact.value;
       const message = await buildHostedLinqSideEffectMessage(
         deliveryEffect,
         options.prisma,
@@ -887,9 +918,14 @@ async function sendHostedLinqSideEffect(
         messageId: result.messageId,
         messageIds: result.providerMessageIds,
         prisma: options.prisma,
-        throwOnError: options.completeProviderOutcomeBeforeReturn,
+        throwOnError:
+          deliveryEffect.payload.template === "ai_usage_quota"
+          || options.completeProviderOutcomeBeforeReturn,
       });
-      if (options.completeProviderOutcomeBeforeReturn) {
+      if (
+        deliveryEffect.payload.template === "ai_usage_quota"
+        || options.completeProviderOutcomeBeforeReturn
+      ) {
         await deliveryAttemptTask;
         await acceptedMilestone();
       } else {
@@ -1216,6 +1252,106 @@ function buildHostedLinqContactCardShareLogDetails(
   });
 }
 
+async function isHostedLinqMemberParticipantTargetAuthorizedTx(input: {
+  prisma: Prisma.TransactionClient;
+  target:
+    | HostedLinqAiUsageQuotaParticipantPayload
+    | HostedLinqInviteSignupFallbackMessagePayload;
+}): Promise<boolean> {
+  const assignedLineLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+    input.target.assignedRecipientPhone,
+  );
+  if (assignedLineLookupKeys.length === 0) {
+    return false;
+  }
+
+  const participantOwnerMemberId = input.target.participantContact.kind === "phone"
+    ? await readHostedLinqPhoneParticipantOwnerMemberId({
+        memberId: input.target.memberId,
+        participantPhone: input.target.participantContact.value,
+        prisma: input.prisma,
+        requireVerified: input.target.template === "ai_usage_quota",
+      })
+    : await readHostedLinqVerifiedEmailParticipantOwnerMemberId({
+        participantEmail: input.target.participantContact.value,
+        prisma: input.prisma,
+      });
+  if (participantOwnerMemberId !== input.target.memberId) {
+    return false;
+  }
+
+  const routing = await input.prisma.hostedMemberRouting.findUnique({
+    select: { linqRecipientPhoneLookupKey: true },
+    where: { memberId: input.target.memberId },
+  });
+  if (
+    !routing?.linqRecipientPhoneLookupKey
+    || !assignedLineLookupKeys.includes(routing.linqRecipientPhoneLookupKey)
+  ) {
+    return false;
+  }
+
+  const lineState = await readHostedLinqIncomingLineState({
+    phoneNumberLookupKeys: assignedLineLookupKeys,
+    prisma: input.prisma,
+  });
+  return lineState.kind === "assignable" || lineState.kind === "at_risk";
+}
+
+async function readHostedLinqPhoneParticipantOwnerMemberId(input: {
+  memberId: string;
+  participantPhone: string;
+  prisma: Prisma.TransactionClient;
+  requireVerified: boolean;
+}): Promise<string | null> {
+  const participantLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+    input.participantPhone,
+  );
+  if (participantLookupKeys.length === 0) {
+    return null;
+  }
+
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    select: {
+      memberId: true,
+      phoneLookupKey: true,
+      phoneNumberVerifiedAt: true,
+    },
+    where: { memberId: input.memberId },
+  });
+  if (
+    !identity?.phoneLookupKey
+    || !participantLookupKeys.includes(identity.phoneLookupKey)
+    || (input.requireVerified && !identity.phoneNumberVerifiedAt)
+  ) {
+    return null;
+  }
+
+  return identity.memberId;
+}
+
+async function readHostedLinqVerifiedEmailParticipantOwnerMemberId(input: {
+  participantEmail: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<string | null> {
+  try {
+    const owner = await lookupHostedMemberByVerifiedEmailAddress({
+      address: input.participantEmail,
+      prisma: input.prisma,
+      projection: "core",
+    });
+    return owner?.core.id ?? null;
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS"
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function assertHostedLinqSideEffectRouteAuthority(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
@@ -1309,6 +1445,13 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
   const signupEffect = isHostedLinqSignupMessageSideEffect(input.effect)
     ? input.effect
     : null;
+  const existingSignupChatId = signupEffect?.payload.template === "invite_signup"
+    ? signupEffect.payload.chatId
+    : null;
+  const memberParticipantTarget =
+    isHostedLinqMemberParticipantTargetPayload(input.effect.payload)
+      ? input.effect.payload
+      : null;
   const groupLineRecoveryEffect =
     isHostedLinqGroupLineRecoverySideEffect(input.effect)
       ? input.effect
@@ -1327,6 +1470,15 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
     let dispatchSourceRef = input.effect.effectId;
     let recoveryCapacityClaimed = false;
     if (signupEffect) {
+      // Existing-thread dispatch composes with group ingress and edits. Take
+      // their shared chat authority before the signup member row; create-chat
+      // fallback has no chat authority and remains member-only.
+      if (existingSignupChatId) {
+        await acquireHostedLinqChatOwnershipLockTx({
+          chatId: existingSignupChatId,
+          tx: prisma,
+        });
+      }
       await lockHostedMemberRow(
         prisma,
         signupEffect.payload.memberId,
@@ -1383,6 +1535,17 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       }
       dispatchEffect = signupDispatchEffect;
       dispatchSourceRef = recoveredIntent.sourceRef;
+    }
+    if (memberParticipantTarget) {
+      if (!signupEffect) {
+        await lockHostedMemberRow(prisma, memberParticipantTarget.memberId);
+      }
+      if (!await isHostedLinqMemberParticipantTargetAuthorizedTx({
+        prisma,
+        target: memberParticipantTarget,
+      })) {
+        return { status: "target_unauthorized" };
+      }
     }
     if (groupLineRecoveryEffect) {
       const recoveredIntent =
@@ -1477,10 +1640,12 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
     const template = dispatchEffect.payload.template;
     const target = readHostedLinqSideEffectDeliveryTarget(dispatchEffect.payload);
     if (target.linqChatId) {
-      await acquireHostedLinqChatOwnershipLockTx({
-        chatId: target.linqChatId,
-        tx: prisma,
-      });
+      if (target.linqChatId !== existingSignupChatId) {
+        await acquireHostedLinqChatOwnershipLockTx({
+          chatId: target.linqChatId,
+          tx: prisma,
+        });
+      }
       await assertHostedLinqSideEffectRouteAuthority(dispatchEffect, prisma);
     }
     const groupJoinOutreachId = isHostedLinqSignupMessageSideEffect(dispatchEffect)
@@ -2281,12 +2446,26 @@ function isHostedInviteLinqMessagePayload(
 function isHostedLinqCreateChatSideEffectPayload(
   payload: HostedLinqMessagePayload,
 ): payload is
+  | HostedLinqAiUsageQuotaParticipantPayload
   | HostedLinqGroupEmailRecoveryMessagePayload
   | HostedLinqGroupLineRecoveryMessagePayload
   | HostedLinqInviteSignupFallbackMessagePayload {
-  return payload.template === "invite_signup_fallback"
+  return isHostedLinqMemberParticipantTargetPayload(payload)
     || payload.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
     || payload.template === HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE;
+}
+
+function isHostedLinqMemberParticipantTargetPayload(
+  payload: HostedLinqMessagePayload,
+): payload is
+  | HostedLinqAiUsageQuotaParticipantPayload
+  | HostedLinqInviteSignupFallbackMessagePayload {
+  return payload.template === "invite_signup_fallback"
+    || (
+      payload.template === "ai_usage_quota"
+      && payload.claimToken === null
+      && payload.chatId === null
+    );
 }
 
 async function markHostedInviteSentBestEffort(
@@ -2398,8 +2577,8 @@ function buildHostedWebhookLinqMessagePayload(
           : {}),
         inviteId: input.inviteId,
         memberId: input.memberId,
-        memberPhone: input.memberPhone,
         occurredAt: input.occurredAt,
+        participantContact: input.participantContact,
         replyToMessageId: null,
         sourceEventId: input.sourceEventId,
         template: input.template,
@@ -2425,12 +2604,9 @@ function buildHostedLinqAiUsageQuotaPayload(
   replyToMessageId: string | null,
 ): HostedLinqAiUsageQuotaPayload {
   const basePayload = {
-    chatId: input.chatId,
     memberId: input.memberId,
     message: input.message,
     occurredAt: input.occurredAt,
-    replyToMessageId,
-    ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
     sourceEventId: input.sourceEventId,
     template: input.template,
   };
@@ -2441,10 +2617,24 @@ function buildHostedLinqAiUsageQuotaPayload(
         "Hosted Linq access notices must not include AI usage claim metadata.",
       );
     }
+    if ("assignedRecipientPhone" in input) {
+      return {
+        ...basePayload,
+        assignedRecipientPhone: input.assignedRecipientPhone,
+        chatId: null,
+        claimToken: null,
+        noticeCode: input.noticeCode,
+        participantContact: input.participantContact,
+        replyToMessageId: null,
+      };
+    }
     return {
       ...basePayload,
+      chatId: input.chatId,
       claimToken: null,
       noticeCode: input.noticeCode,
+      replyToMessageId,
+      ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
     };
   }
 
@@ -2456,8 +2646,11 @@ function buildHostedLinqAiUsageQuotaPayload(
 
   return {
     ...basePayload,
+    chatId: input.chatId,
     claimToken: input.claimToken,
     noticeCode: input.noticeCode,
+    replyToMessageId,
+    ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
   };
 }
 

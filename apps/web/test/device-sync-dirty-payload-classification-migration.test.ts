@@ -17,11 +17,11 @@ const MIGRATION = readFileSync(
 );
 
 describe("device-sync dirty payload credential classification migration", () => {
-  it("adds one nullable server-owned classification bit for mixed-version rollout", () => {
+  it("preserves the nullable expansion history while requiring classification in the current schema", () => {
     const model = readPrismaModel(SCHEMA, "DeviceSyncDirtyPayload");
 
     expect(model).toMatch(
-      /credentialIndependent\s+Boolean\?\s+@map\("credential_independent"\)/u,
+      /credentialIndependent\s+Boolean\s+@map\("credential_independent"\)/u,
     );
     expect(MIGRATION).toContain(
       'ADD COLUMN "credential_independent" BOOLEAN',

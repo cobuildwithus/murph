@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-28",
+  "order": 100,
+  "item": {
+    "id": "background-save-gateway-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer delays when saving background work",
+    "summary": "Murph now retries more temporary connection failures while saving completed background work.",
+    "details": "A brief gateway failure gets one automatic retry. If it persists, the existing recovery process still handles the pending work.",
+    "relevanceTags": [
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3747
+    ]
+  }
+}

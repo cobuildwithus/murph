@@ -1,7 +1,10 @@
 export {
   KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
   KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES,
+  KERNEL_COMPUTER_LIVE_VIEW_HOST_SUFFIXES,
 } from "../../../kernel-live-view-origin";
+
+import { KERNEL_COMPUTER_LIVE_VIEW_HOST_SUFFIXES } from "../../../kernel-live-view-origin";
 
 export interface ComputerLiveViewUrlInspection {
   allowed: boolean;
@@ -33,7 +36,9 @@ export function inspectComputerLiveViewUrl(input: {
     };
   }
 
-  const hostnameAllowed = parsedUrl.hostname.endsWith(".onkernel.com");
+  const hostnameAllowed = KERNEL_COMPUTER_LIVE_VIEW_HOST_SUFFIXES.some(
+    (suffix) => parsedUrl.hostname.endsWith(`.${suffix}`),
+  );
   const portAllowed = parsedUrl.port === "8443";
   const protocolAllowed = parsedUrl.protocol === "https:";
   return {

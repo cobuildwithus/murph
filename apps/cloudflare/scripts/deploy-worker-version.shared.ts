@@ -4,10 +4,15 @@ import {
   normalizeOptionalString,
   readBooleanEnv,
 } from "./deploy-automation/shared.ts";
+import type {
+  ContainerReleaseEntry,
+  DirectDeployReleaseEvidence,
+} from "./container-release-receipt.ts";
+
+import { readContainerRolloutMode, type ContainerRolloutMode } from "./container-rollout-policy.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
-
-export type ContainerRolloutMode = "gradual" | "immediate";
+export type { ContainerRolloutMode } from "./container-rollout-policy.ts";
 
 export interface DeploymentStatusPayload {
   created_on: string;
@@ -18,6 +23,12 @@ export interface DeploymentStatusPayload {
 }
 
 export interface HostedWorkerDeploymentResult {
+  containerReleaseReceipt: {
+    containers: readonly ContainerReleaseEntry[];
+    schemaVersion: 1;
+    versionTag: string;
+    workerVersionId: string;
+  };
   finalDeploymentVersions: Array<{
     percentage: number;
     versionId: string;
@@ -35,7 +46,7 @@ export interface HostedWorkerDeploymentDependencies {
     secretsFilePath: string;
     versionTag: string;
     workerName: string;
-  }): Promise<void>;
+  }): Promise<DirectDeployReleaseEvidence>;
   mkdir(target: string, options: {
     recursive: boolean;
   }): Promise<unknown>;
@@ -67,11 +78,6 @@ interface HostedWorkerDeploymentSettings {
   includeSecrets: boolean;
   versionTag: string;
 }
-
-const DEFAULT_CONTAINER_ROLLOUT_BY_CONTEXT: Readonly<Record<string, ContainerRolloutMode>> = {
-  production: "immediate",
-};
-const DEFAULT_CONTAINER_ROLLOUT_MODE: ContainerRolloutMode = "gradual";
 
 export async function runHostedWorkerDeployment(input: {
   configPath: string;
@@ -128,7 +134,7 @@ async function runDirectDeployment(input: {
   versionTag: string;
   workerName: string;
 }): Promise<HostedWorkerDeploymentResult> {
-  await input.dependencies.deployDirect({
+  const releaseEvidence = await input.dependencies.deployDirect({
     containerRolloutMode: input.containerRolloutMode,
     configPath: input.configPath,
     deploymentMessage: input.deploymentMessage,
@@ -145,8 +151,17 @@ async function runDirectDeployment(input: {
   );
   const finalDeploymentVersions = mapDeploymentVersions(finalDeployment);
   const smokeVersionId = requireSmokeVersionId(finalDeploymentVersions);
+  if (smokeVersionId !== releaseEvidence.workerVersionId) {
+    throw new Error("Direct deploy did not converge the exact Wrangler Worker version.");
+  }
 
   return {
+    containerReleaseReceipt: {
+      containers: releaseEvidence.containers,
+      schemaVersion: 1,
+      versionTag: input.versionTag,
+      workerVersionId: releaseEvidence.workerVersionId,
+    },
     finalDeploymentVersions,
     smokeVersionId,
     workerName: input.workerName,
@@ -188,29 +203,11 @@ function resolveHostedWorkerDeploymentSettings(
   return {
     containerRolloutMode: readContainerRolloutMode(
       env.HOSTED_EXECUTION_CONTAINER_ROLLOUT,
-      DEFAULT_CONTAINER_ROLLOUT_BY_CONTEXT[deployContext] ?? DEFAULT_CONTAINER_ROLLOUT_MODE,
     ),
     deploymentMessage: deploymentMessageOverride ?? `${deployContext} direct deploy ${versionTag}`,
     includeSecrets,
     versionTag,
   };
-}
-
-function readContainerRolloutMode(
-  value: string | undefined,
-  defaultMode: ContainerRolloutMode,
-): ContainerRolloutMode {
-  const normalized = normalizeOptionalString(value);
-
-  if (!normalized) {
-    return defaultMode;
-  }
-
-  if (normalized === "gradual" || normalized === "immediate") {
-    return normalized;
-  }
-
-  throw new Error("HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual' or 'immediate'.");
 }
 
 async function requireCurrentDeployment(
@@ -261,6 +258,7 @@ async function writeGitHubOutputs(
   }
 
   const lines = [
+    `container_release_receipt=${JSON.stringify(result.containerReleaseReceipt)}`,
     `final_version_traffic=${JSON.stringify(result.finalDeploymentVersions)}`,
     `smoke_version_id=${result.smokeVersionId}`,
   ];

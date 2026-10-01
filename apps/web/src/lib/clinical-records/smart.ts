@@ -5,6 +5,8 @@ import { normalizeClinicalFhirPatientId } from "@murphai/clinical-records";
 import { clinicalRecordsError } from "./errors";
 import {
   buildEpicBetaSmartResourceScope,
+  buildEpicBinarySmartResourceScope,
+  buildEpicMediaSmartResourceScope,
   readGrantedEpicBetaResourceTypes,
 } from "./epic-policy";
 import {
@@ -26,6 +28,7 @@ export interface SmartConfiguration {
 
 export interface SmartTokenResponse {
   accessToken: string;
+  refreshToken?: string;
   expiresInSeconds: number | null;
   grantedScopes: readonly string[];
   patientId: string;
@@ -52,6 +55,7 @@ export function normalizeSmartStateHash(state: string): string | null {
 }
 
 export async function discoverSmartConfiguration(input: {
+  requestOfflineAccess?: boolean;
   fetchImpl?: typeof fetch;
   fhirBaseUrl: string;
   requestedBaseScopes: readonly string[];
@@ -78,6 +82,7 @@ export async function discoverSmartConfiguration(input: {
   const capabilities = requireStringArray(body.capabilities, "SMART capabilities", 128);
   const scopeSelection = selectSmartRequestedScopes({
     capabilities,
+    requestOfflineAccess: input.requestOfflineAccess,
     requestedBaseScopes: input.requestedBaseScopes,
     resourceTypes: input.resourceTypes,
   });
@@ -90,6 +95,7 @@ export async function discoverSmartConfiguration(input: {
 }
 
 export function selectSmartRequestedScopes(input: {
+  requestOfflineAccess?: boolean;
   capabilities: readonly string[];
   requestedBaseScopes: readonly string[];
   resourceTypes: readonly string[];
@@ -127,7 +133,14 @@ export function selectSmartRequestedScopes(input: {
     resourceTypes,
     scopes: [
       ...input.requestedBaseScopes,
+      ...(input.requestOfflineAccess && capabilities.has("permission-offline") ? ["offline_access"] : []),
       ...selected.map((selection) => selection.scope),
+      ...(resourceTypes.some((type) => type === "DocumentReference" || type === "DiagnosticReport")
+        ? [buildEpicBinarySmartResourceScope({ permissionVersion })]
+        : []),
+      ...(resourceTypes.includes("DiagnosticReport")
+        ? [buildEpicMediaSmartResourceScope({ permissionVersion })]
+        : []),
     ],
   };
 }
@@ -156,6 +169,7 @@ export function buildSmartAuthorizationUrl(input: {
 }
 
 export async function exchangeSmartAuthorizationCode(input: {
+  clientSecret?: string;
   clientId: string;
   code: string;
   fetchImpl?: typeof fetch;
@@ -166,7 +180,7 @@ export async function exchangeSmartAuthorizationCode(input: {
 }): Promise<SmartTokenResponse> {
   const response = await fetchWithTimeout(input.fetchImpl ?? fetch, new URL(input.tokenEndpoint), {
     body: new URLSearchParams({
-      client_id: input.clientId,
+      ...(!input.clientSecret ? { client_id: input.clientId } : {}),
       code: input.code,
       code_verifier: input.verifier,
       grant_type: "authorization_code",
@@ -174,6 +188,7 @@ export async function exchangeSmartAuthorizationCode(input: {
     }),
     headers: {
       Accept: "application/json",
+      ...(input.clientSecret ? { Authorization: smartClientAuthorization(input.clientId, input.clientSecret) } : {}),
       "Content-Type": "application/x-www-form-urlencoded",
     },
     method: "POST",
@@ -201,7 +216,53 @@ export async function exchangeSmartAuthorizationCode(input: {
     ? [...input.requestedScopes]
     : parseScopeString(body.scope);
   assertUsefulScopesGranted(input.requestedScopes, grantedScopes);
-  return { accessToken, expiresInSeconds, grantedScopes, patientId };
+  const refreshToken = input.requestedScopes.includes("offline_access") && grantedScopes.includes("offline_access") && body.refresh_token !== undefined
+    ? requireBoundedString(body.refresh_token, "SMART refresh token", 65_536) : undefined;
+  return { accessToken, expiresInSeconds, grantedScopes, patientId, ...(refreshToken ? { refreshToken } : {}) };
+}
+
+export async function refreshSmartAccessToken(input: {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+  tokenEndpoint: string;
+  grantedScopes: readonly string[];
+  fetchImpl?: typeof fetch;
+}): Promise<{ accessToken: string; refreshToken: string; expiresInSeconds: number; grantedScopes: readonly string[]; patientId?: string }> {
+  const response = await fetchWithTimeout(input.fetchImpl ?? fetch, new URL(input.tokenEndpoint), {
+    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: input.refreshToken }),
+    headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: smartClientAuthorization(input.clientId, input.clientSecret) },
+    method: "POST", redirect: "manual",
+  }, SMART_TOKEN_TIMEOUT_MS, "CLINICAL_RECORD_SMART_REFRESH_FAILED");
+  if (!response.ok) throw clinicalRecordsError({
+    code: response.status === 429 || response.status >= 500 ? "CLINICAL_RECORD_SMART_REFRESH_TEMPORARILY_UNAVAILABLE" : "CLINICAL_RECORD_SMART_REFRESH_REJECTED",
+    httpStatus: 503, retryable: response.status === 429 || response.status >= 500,
+    message: "The provider could not renew medical-record access.",
+  });
+  const body = requireRecord(await readBoundedJson(response), "SMART refresh response");
+  if (requireBoundedString(body.token_type, "SMART token type", 40).toLowerCase() !== "bearer") {
+    throw providerUnavailable("CLINICAL_RECORD_SMART_TOKEN_INVALID", "The provider returned an unsupported token type.");
+  }
+  const grantedScopes = body.scope === undefined ? [...input.grantedScopes] : parseScopeString(body.scope);
+  assertUsefulScopesGranted(input.grantedScopes, grantedScopes);
+  if (input.grantedScopes.some((scope) => (scope.startsWith("patient/") || scope === "offline_access") && !grantedScopes.includes(scope))) {
+    throw providerUnavailable("CLINICAL_RECORD_SMART_GRANT_CHANGED", "Reconnect to confirm the provider's changed permissions.");
+  }
+  const patientId = body.patient === undefined ? undefined : normalizeClinicalFhirPatientId(requireBoundedString(body.patient, "SMART patient context", 512));
+  if (body.patient !== undefined && !patientId) throw providerUnavailable("CLINICAL_RECORD_SMART_TOKEN_INVALID", "The provider returned an invalid patient context.");
+  const expiresInSeconds = parseExpiresIn(body.expires_in);
+  if (!expiresInSeconds) throw providerUnavailable("CLINICAL_RECORD_SMART_TOKEN_INVALID", "The provider did not return an access lifetime.");
+  return {
+    accessToken: requireBoundedString(body.access_token, "SMART access token", 65_536),
+    refreshToken: body.refresh_token === undefined ? input.refreshToken : requireBoundedString(body.refresh_token, "SMART refresh token", 65_536),
+    expiresInSeconds, grantedScopes, ...(patientId ? { patientId } : {}),
+  };
+}
+
+function smartClientAuthorization(clientId: string, clientSecret: string): string {
+  const encoded = (value: string) => new URLSearchParams({ value }).toString().slice(6);
+  return `Basic ${Buffer.from(`${encoded(clientId)}:${encoded(clientSecret)}`, "utf8").toString("base64")}`;
 }
 
 async function fetchWithTimeout(

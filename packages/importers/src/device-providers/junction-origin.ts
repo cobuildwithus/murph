@@ -132,9 +132,8 @@ export function resolveJunctionOrigin(
   const existingOpaqueSourceInstanceId =
     firstOpaqueSourceInstanceId(record)
     ?? firstOpaqueSourceInstanceId(fallbackRecord);
-  const sourceInstanceValues = resolveSourceInstanceValues(record, fallbackRecord);
   const sourceInstanceId = existingOpaqueSourceInstanceId ?? (sourceProviderSlug
-    ? buildJunctionSourceInstanceId(sourceProviderSlug, sourceInstanceValues)
+    ? buildJunctionSourceInstanceId(sourceProviderSlug, resolveSourceInstanceValues(record, fallbackRecord))
     : firstStringFromPaths(fallbackRecord, ["sourceInstanceId", "source_instance_id"]));
 
   return stripUndefined({
@@ -301,10 +300,15 @@ function readPath(source: PlainObject | undefined, path: string): unknown {
     return undefined;
   }
 
-  return path.split(".").reduce<unknown>((current, key) => {
-    const record = asPlainObject(current);
-    return record ? record[key] : undefined;
-  }, source);
+  let record = asPlainObject(source);
+  let start = 0;
+  let separator = path.indexOf(".");
+  while (record && separator !== -1) {
+    record = asPlainObject(record[path.slice(start, separator)]);
+    start = separator + 1;
+    separator = path.indexOf(".", start);
+  }
+  return record?.[path.slice(start)];
 }
 
 function firstDefined<T>(...values: Array<T | undefined>): T | undefined {

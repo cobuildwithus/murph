@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-24",
+  "order": 100,
+  "item": {
+    "id": "mixed-source-workout-sync-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Workout details keep syncing across connected apps",
+    "summary": "When several connected apps report workouts, Murph now keeps detailed workout sync moving even if one source does not provide that data.",
+    "details": "Existing workout facts from sources without that detail remain intact, while sources that support it keep adding their available workout signals.",
+    "relevanceTags": ["devices", "reliability", "workouts"],
+    "sourcePullRequests": [2243]
+  }
+}

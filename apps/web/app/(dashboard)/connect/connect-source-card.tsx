@@ -2,6 +2,7 @@ import Image from "next/image";
 
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
+import { cn } from "@/src/lib/utils";
 
 import type {
   ConnectSource,
@@ -16,8 +17,10 @@ export function SourceCard({
   source,
   onDisconnectTargetChange,
   onMigrationRetry,
+  onSignIn,
   onSetupGuideOpen,
   onStartConnection,
+  presentation = "card",
 }: {
   authenticated: boolean;
   errorMessage: string | null;
@@ -26,8 +29,10 @@ export function SourceCard({
   source: ConnectSource;
   onDisconnectTargetChange: (source: ConnectSource | null) => void;
   onMigrationRetry?: (source: ConnectSource) => void;
+  onSignIn?: () => void;
   onSetupGuideOpen?: (setupGuideId: ConnectSourceSetupGuideId) => void;
   onStartConnection: (source: ConnectSource) => Promise<void>;
+  presentation?: "card" | "dialog";
 }) {
   const setupGuideActionLabel = source.setupGuideActionLabel;
   const setupGuideId = source.setupGuideId;
@@ -36,10 +41,6 @@ export function SourceCard({
     || (source.connectionAvailable === false && Boolean(source.unavailableActionUrl));
   const isAvailable = Boolean(source.connectTarget);
   const canStart = authenticated && isAvailable;
-  const showFitbitJunctionDisclosure = source.connectTarget === "fitbit"
-    && canStart
-    && migrationState !== "verifying_successor"
-    && migrationState !== "cutover_ready";
   const canDisconnect = !setupOnly
     && authenticated
     && Boolean(source.disconnectConnectionId);
@@ -92,9 +93,22 @@ export function SourceCard({
     || Boolean(errorMessage);
 
   return (
-    <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
+    <div
+      data-connect-source={source.id}
+      className={cn(
+        "relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden",
+        presentation === "dialog"
+          ? "p-1 pr-10"
+          : "rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5",
+      )}
+    >
       {!setupOnly ? (
-        <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
+        <div
+          className={cn(
+            "absolute top-3 sm:top-4",
+            presentation === "dialog" ? "right-12" : "right-3 sm:right-4",
+          )}
+        >
           <SourceStatusDot
             connected={source.connected}
             historicalResetIncomplete={historicalResetIncomplete}
@@ -193,24 +207,11 @@ export function SourceCard({
                 {errorMessage}
               </p>
             ) : null}
-            {showFitbitJunctionDisclosure ? (
-              <p className="max-w-[22rem] text-xs leading-relaxed text-muted-foreground">
-                Google authorization is handled through{" "}
-                <a
-                  className="underline underline-offset-2 hover:text-foreground"
-                  href="https://www.junction.com"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Junction
-                </a>
-                .
-              </p>
-            ) : null}
             {!authenticated ? (
               <AuthButton
                 aria-label="Sign in to Murph"
                 className="self-end"
+                onAuthRequired={onSignIn}
               >
                 Sign in
               </AuthButton>

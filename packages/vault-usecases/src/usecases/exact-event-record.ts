@@ -1,5 +1,6 @@
 import type { EventRecord } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { isDefaultProjectedEventRecord } from '@murphai/query/query-visibility'
 
 import { toExactEventQueryRecord } from '../commands/query-record-command-helpers.js'
 import type { QueryCanonicalEntity } from '../query-runtime.js'
@@ -26,6 +27,29 @@ interface ExactEventCoreRuntime {
   }>
 }
 
+const storedEventReadErrorMappings = {
+  EVENT_CONTRACT_INVALID: {
+    code: 'contract_invalid',
+    message: 'Stored event data does not match the event contract.',
+    details: {
+      retryable: false,
+      stage: 'read',
+      hint: 'Run vault validate, then repair or restore the event ledger before retrying.',
+    },
+    preserveDetails: false,
+  },
+  VAULT_INVALID_JSONL: {
+    code: 'contract_invalid',
+    message: 'The stored event ledger is not valid JSONL.',
+    details: {
+      retryable: false,
+      stage: 'read',
+      hint: 'Run vault validate, then repair or restore the event ledger before retrying.',
+    },
+    preserveDetails: false,
+  },
+} as const
+
 export interface ExactEventRecord {
   event: EventRecord
   ledgerFile: string
@@ -34,35 +58,6 @@ export interface ExactEventRecord {
 
 export function isExactEventLookup(lookup: string): boolean {
   return /^evt_[0-9A-Za-z]+$/u.test(lookup.trim())
-}
-
-function normalizedVisibility(value: unknown): string | null {
-  return typeof value === 'string' ? value.trim().toLowerCase() : null
-}
-
-/**
- * Preserve the default query surface's visibility rule without hydrating the
- * query projection. Raw device metric observations stay available to metric
- * projections, but exact public event commands must not expose them unless
- * they were explicitly promoted to display-grade evidence.
- */
-function isDefaultVisibleEvent(event: EventRecord): boolean {
-  if (event.kind !== 'observation') {
-    return true
-  }
-
-  const attributes = event as unknown as Record<string, unknown>
-  const isMetricObservation =
-    typeof attributes.metric === 'string'
-    && typeof attributes.value === 'number'
-    && Number.isFinite(attributes.value)
-  if (!isMetricObservation) {
-    return true
-  }
-
-  return normalizedVisibility(attributes.visibility) === 'display'
-    || normalizedVisibility(attributes.queryVisibility) === 'default'
-    || attributes.canonicalFact === true
 }
 
 export async function readExactEventRecord(input: {
@@ -80,7 +75,10 @@ export async function readExactEventRecord(input: {
   try {
     const exact = await core.readEvent({ vaultRoot: input.vault, eventId })
     if (
-      !isDefaultVisibleEvent(exact.event)
+      !isDefaultProjectedEventRecord({
+        attributes: exact.event as unknown as Record<string, unknown>,
+        kind: exact.event.kind,
+      })
       || (
         input.expectedKinds
         && input.expectedKinds.length > 0
@@ -96,6 +94,7 @@ export async function readExactEventRecord(input: {
     }
   } catch (error) {
     throw toVaultCliError(error, {
+      ...storedEventReadErrorMappings,
       EVENT_MISSING: {
         code: 'not_found',
         message: `No ${input.entityLabel} found for "${input.lookup}".`,
@@ -124,6 +123,7 @@ export async function readOwnedEventRecord(input: {
     }
   } catch (error) {
     throw toVaultCliError(error, {
+      ...storedEventReadErrorMappings,
       EVENT_MISSING: {
         code: 'not_found',
         message: `No ${input.kind} found for "${input.lookup}".`,

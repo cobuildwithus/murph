@@ -50,6 +50,7 @@ Murph is for adults who want practical, ongoing help understanding their own hea
 
 - [Homepage](${MURPH_PUBLIC_SITE_URL}/): product overview and signup
 - [About Murph](${MURPH_PUBLIC_SITE_URL}/about): purpose, audience, and product boundaries
+- [Comparison guides](${MURPH_PUBLIC_SITE_URL}/compare): Murph-authored, non-affiliate desk research comparing wearables, dashboards, labs, coaching products, and health assistants with current official vendor sources; these guides do not claim hands-on testing
 - [Contact](${MURPH_PUBLIC_SITE_URL}/contact): support and privacy contact guidance
 - [Security](${MURPH_PUBLIC_SITE_URL}/security): hosted and local security model
 - [Privacy policy](${MURPH_PUBLIC_SITE_URL}/legal/privacy): data practices and rights

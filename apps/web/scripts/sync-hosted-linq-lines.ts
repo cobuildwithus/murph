@@ -21,8 +21,6 @@ export async function syncHostedLinqLines(
 
   try {
     await syncHostedLinqConfiguredLinesTx({
-      // Rollback compatibility only; weighted assignment does not read this.
-      activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
       observedAt,
       phoneNumbers: environment.linqConversationPhoneNumbers,
       prisma,

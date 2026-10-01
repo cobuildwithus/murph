@@ -1,11 +1,11 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  HOSTED_CONNECTED_APPS_PATH,
   hostedConnectedAppsResponseSchema,
 } from "@murphai/hosted-execution/connected-apps";
 
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -22,8 +22,7 @@ export function createHostedWebConnectedAppsPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted connected apps",
         fetchImpl: input.fetchImpl,
-        method: "POST",
-        path: HOSTED_CONNECTED_APPS_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.connectedApps,
         signal: options?.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,

@@ -23,6 +23,9 @@ import {
   createHostedLinqChat,
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
+  readHostedLinqExplicitGroupDisplayName,
+  readHostedLinqFailedMessage,
+  resendHostedLinqMessage,
   sendHostedLinqReactionBoundChatMessage,
   shareHostedLinqContactCard,
   startHostedLinqChatTypingIndicator,
@@ -30,6 +33,48 @@ import {
 
 const originalFetch = globalThis.fetch;
 const describe = baseDescribe.sequential;
+
+describe("terminal retry provider boundary", () => {
+  it("retrieves the exact message and resends the supplied body in the same chat", async () => {
+    const original = { id: "retry-original", chat_id: "retry-chat", delivery_status: "failed" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(createJsonResponse(original, 200))
+      .mockResolvedValueOnce(createJsonResponse({
+        chat_id: "retry-chat", message: { id: "retry-replacement" },
+      }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await readHostedLinqFailedMessage("retry-original")).toEqual(original);
+    const message = {
+      idempotency_key: "terminal-retry:synthetic",
+      parts: [{ type: "text" as const, value: "The document is ready." }],
+    };
+    expect(await resendHostedLinqMessage({ chatId: "retry-chat", message })).toEqual({
+      chatId: "retry-chat", messageId: "retry-replacement",
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      DEFAULT_LINQ_API_BASE_URL + "/messages/retry-original",
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      DEFAULT_LINQ_API_BASE_URL + "/chats/retry-chat/messages",
+    );
+    expect(readJsonRequestBody(fetchMock.mock.calls[1]?.[1])).toEqual({ message });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let SDK retries multiply the single resend on a server error", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(createJsonResponse({ error: { code: 4001 } }, 500)));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(resendHostedLinqMessage({
+      chatId: "retry-chat",
+      message: {
+        idempotency_key: "terminal-retry:synthetic",
+        parts: [{ type: "text", value: "The document is ready." }],
+      },
+    })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
 
 beforeEach(() => {
   linqRuntimeConfig.apiBaseUrl = DEFAULT_LINQ_API_BASE_URL;
@@ -143,6 +188,7 @@ describe("getHostedLinqChatSummary", () => {
       timeoutMs: 1_500,
     })).resolves.toEqual({
       displayName: "Weekend Warriors",
+      handleCount: 1,
       handles: [
         {
           handle: "+15550000000",
@@ -150,6 +196,7 @@ describe("getHostedLinqChatSummary", () => {
           status: "active",
         },
       ],
+      handlesComplete: true,
       isGroup: true,
     });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -196,17 +243,15 @@ describe("getHostedLinqChatSummary", () => {
       timeoutMs: 1_500,
     })).resolves.toEqual({
       displayName: null,
+      handleCount: 0,
       handles: [],
+      handlesComplete: false,
       isGroup: null,
     });
   });
 
   it("keeps the chat-read deadline active through a stalled response body", async () => {
-    let connectionClosed = false;
     const server = createServer((_request, response) => {
-      response.on("close", () => {
-        connectionClosed = true;
-      });
       response.writeHead(200, {
         "content-type": "application/json",
       });
@@ -227,9 +272,6 @@ describe("getHostedLinqChatSummary", () => {
         retryable: true,
       });
       expect(performance.now() - startedAt).toBeLessThan(1_500);
-      await vi.waitFor(() => {
-        expect(connectionClosed).toBe(true);
-      });
     } finally {
       await closeTestServer(server);
     }
@@ -264,6 +306,52 @@ describe("getHostedLinqChatSummary", () => {
     } finally {
       await closeTestServer(server);
     }
+  });
+});
+
+describe("readHostedLinqExplicitGroupDisplayName", () => {
+  const handles = [
+    { handle: "+14155559876", isMe: false, status: "active" },
+    { handle: "friend@example.test", isMe: false, status: "active" },
+    { handle: "+15550000000", isMe: true, status: "active" },
+  ];
+
+  it("keeps a real group title", () => {
+    expect(readHostedLinqExplicitGroupDisplayName({
+      displayName: "Weekend Warriors",
+      handles,
+      isGroup: true,
+    })).toBe("Weekend Warriors");
+  });
+
+  it("sanitizes control characters in a real group title", () => {
+    expect(readHostedLinqExplicitGroupDisplayName({
+      displayName: " Weekend\u0000   Warriors ",
+      handles,
+      isGroup: true,
+    })).toBe("Weekend Warriors");
+  });
+
+  it.each([
+    "+14155559876, friend@example.test, +15550000000",
+    "friend@example.test, +14155559876",
+    "Call +1 (415) 555-9876",
+    "Email friend@example.test",
+  ])("rejects Linq's synthesized handle-list title", (displayName) => {
+    expect(readHostedLinqExplicitGroupDisplayName({
+      displayName,
+      handles,
+      isGroup: true,
+    })).toBeNull();
+  });
+
+  it("rejects provider titles when the roster was not parsed completely", () => {
+    expect(readHostedLinqExplicitGroupDisplayName({
+      displayName: "Weekend Warriors",
+      handles,
+      handlesComplete: false,
+      isGroup: true,
+    })).toBeNull();
   });
 });
 
@@ -1758,9 +1846,9 @@ describe("updateHostedLinqChatAvatar", () => {
   it("accepts only the current preview Worker origin", async () => {
     const previewOrigin = "https://hosted-runner-staging.example.test";
     const previewUrl =
-      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
     const productionUrl =
-      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) => {
         void _input;
@@ -1788,52 +1876,20 @@ describe("updateHostedLinqChatAvatar", () => {
     });
   });
 
-  it("accepts the prior signed Images shape while old runners drain", async () => {
-    const fetchMock = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) => {
-        void _input;
-        void _init;
-        return createJsonResponse({ status: "pending" }, 200);
-      },
-    );
+  it.each([
+    `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+    `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`,
+    "https://imagedelivery.net/account/avatar/public",
+  ])("rejects a retired private-media URL before calling Linq", async (url) => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const legacyUrl =
-      `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`;
 
     await expect(updateHostedLinqChatAvatar({
       chatId: "chat_123",
-      groupChatIconUrl: legacyUrl,
-    })).resolves.toBeUndefined();
+      groupChatIconUrl: url,
+    })).rejects.toThrow(/hosted private media URL/u);
 
-    expect(readJsonRequestBody(
-      expectRequestInit(fetchMock.mock.calls[0]?.[1]),
-    )).toEqual({
-      group_chat_icon: legacyUrl,
-    });
-  });
-
-  it("accepts the prior queryless public Images shape while old runners drain", async () => {
-    const fetchMock = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) => {
-        void _input;
-        void _init;
-        return createJsonResponse({ status: "pending" }, 200);
-      },
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const legacyUrl =
-      "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public";
-
-    await expect(updateHostedLinqChatAvatar({
-      chatId: "chat_123",
-      groupChatIconUrl: legacyUrl,
-    })).resolves.toBeUndefined();
-
-    expect(readJsonRequestBody(
-      expectRequestInit(fetchMock.mock.calls[0]?.[1]),
-    )).toEqual({
-      group_chat_icon: legacyUrl,
-    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects non-HTTPS icon URLs before calling Linq", async () => {

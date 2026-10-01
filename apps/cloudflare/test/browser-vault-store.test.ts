@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
 import {
@@ -18,13 +18,14 @@ import {
   createBrowserVaultReplicaMetricBucketAadFields,
   createBrowserVaultReplicaShardAadFields,
   createHostedBrowserVaultReplicaStore,
-  HOSTED_BROWSER_VAULT_REPLICA_WRITE_CONCURRENCY,
   listHostedBrowserVaultReplicaObjectKeys,
 } from "../src/browser-vault-store.js";
 import { buildHostedStorageAad } from "../src/crypto-context.js";
 import { readEncryptedR2Payload } from "../src/crypto.js";
+import * as replicaCrypto from "../src/crypto.js";
 import { expectOpaqueStrings } from "./object-key-assertions.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
+import { createSyntheticBrowserVaultReplica } from "./fixtures/browser-vault-replica.js";
 
 describe("hosted browser vault replica store", () => {
   it("keeps hosted bucket ids exactly aligned with the query partition", () => {
@@ -378,60 +379,153 @@ describe("hosted browser vault replica store", () => {
     expect(bucket.objects.size).toBe(0);
   });
 
-  it("settles every planned write through a bounded R2 worker pool", async () => {
-    let releaseFirstBatch = (): void => {};
-    const firstBatchGate = new Promise<void>((resolve) => {
-      releaseFirstBatch = resolve;
-    });
-    class TrackingBucket extends MemoryEncryptedR2Bucket {
-      activePuts = 0;
-      peakActivePuts = 0;
-      readonly putKeys: string[] = [];
+  it.each(["none", "core", "bucket", "root", "multiple", "undefined"] as const)(
+    "bounds child concurrency, isolates the root and settles every write (%s failure)",
+    async (failure) => {
+      const admissionStarted = createWriteGate();
+      const admissionGate = createWriteGate();
+      const childrenGate = createWriteGate();
+      const lastChildGate = createWriteGate();
+      const rootStarted = createWriteGate();
+      const rootGate = createWriteGate();
+      const writeError = failure === "undefined"
+        ? undefined
+        : new Error(`synthetic ${failure} write failure`);
+      const laterWriteError = new Error("synthetic later write failure");
+      let plannedObjectKeys: string[] = [];
+      let settled = false;
+      class TrackingBucket extends MemoryEncryptedR2Bucket {
+        activePuts = 0;
+        peakActivePuts = 0;
+        settledChildPuts = 0;
+        readonly putKeys: string[] = [];
 
-      override async put(key: string, value: string): Promise<void> {
-        this.putKeys.push(key);
-        this.activePuts += 1;
-        this.peakActivePuts = Math.max(this.peakActivePuts, this.activePuts);
-        if (this.putKeys.length === HOSTED_BROWSER_VAULT_REPLICA_WRITE_CONCURRENCY) {
-          releaseFirstBatch();
-        }
-        try {
-          await firstBatchGate;
-          if (key.endsWith(".metric-bucket-00.json")) {
-            throw new Error("synthetic metric bucket write failure");
+        override async put(key: string, value: string): Promise<void> {
+          const isRoot = key === plannedObjectKeys[0];
+          this.putKeys.push(key);
+          this.activePuts += 1;
+          this.peakActivePuts = Math.max(this.peakActivePuts, this.activePuts);
+          try {
+            if (isRoot) {
+              rootStarted.resolve();
+              await rootGate.promise;
+            } else {
+              await childrenGate.promise;
+              if (key.endsWith(".labs.json")) {
+                await lastChildGate.promise;
+              }
+            }
+            if (
+              (["core", "multiple", "undefined"].includes(failure) && key.endsWith(".core.json"))
+              || (failure === "bucket" && key.endsWith(".metric-bucket-00.json"))
+              || (failure === "root" && isRoot)
+            ) {
+              throw writeError;
+            }
+            if (
+              (failure === "multiple" || failure === "undefined")
+              && (key.endsWith(".metric-bucket-1f.json") || isRoot)
+            ) {
+              throw laterWriteError;
+            }
+            await super.put(key, value);
+          } finally {
+            this.activePuts -= 1;
+            if (!isRoot) this.settledChildPuts += 1;
           }
-          await super.put(key, value);
-        } finally {
-          this.activePuts -= 1;
         }
       }
-    }
-    const bucket = new TrackingBucket();
-    const store = createHostedBrowserVaultReplicaStore({
-      bucket,
-      rootKey: createTestRootKey(52),
-      rootKeyId: "runtime-root-current",
-      userId: "user_123",
-    });
-    const replica = await createBrowserVaultReplica({
-      metricPoints: [],
-      generatedAt: "2026-04-17T00:00:00.000Z",
-      sourceBundleHash: "a".repeat(64),
-      vault: createVaultReadModel({
-        entities: [],
-        metadata: null,
-        vaultRoot: "browser://vault",
-      }),
-    });
+      const bucket = new TrackingBucket();
+      // Observe the real encryption entry, not just its eventual PUT: starting
+      // root encryption while a child is held would reintroduce memory overlap.
+      const encryptAndWrite = replicaCrypto.writeEncryptedR2Payload;
+      let rootWriteState: { activePuts: number; settledChildPuts: number } | undefined;
+      const writeSpy = vi.spyOn(replicaCrypto, "writeEncryptedR2Payload")
+        .mockImplementation((input) => {
+          if (input.key === plannedObjectKeys[0]) {
+            rootWriteState = {
+              activePuts: bucket.activePuts,
+              settledChildPuts: bucket.settledChildPuts,
+            };
+          }
+          return encryptAndWrite(input);
+        });
+      const store = createHostedBrowserVaultReplicaStore({
+        bucket,
+        rootKey: createTestRootKey(52),
+        rootKeyId: "runtime-root-current",
+        userId: "synthetic-member",
+      });
+      const outcome = store.writeBrowserVaultReplica({
+        beforeWrite: async (ref) => {
+          plannedObjectKeys = listHostedBrowserVaultReplicaObjectKeys(ref);
+          admissionStarted.resolve();
+          await admissionGate.promise;
+        },
+        replica: createSyntheticBrowserVaultReplica(4),
+        userId: "synthetic-member",
+      }).then(
+        (ref) => { settled = true; return { ref, error: null }; },
+        (error: unknown) => { settled = true; return { ref: null, error }; },
+      );
 
-    await expect(store.writeBrowserVaultReplica({ replica, userId: "user_123" }))
-      .rejects.toThrow("synthetic metric bucket write failure");
-
-    expect(bucket.putKeys).toHaveLength(36);
-    expect(new Set(bucket.putKeys).size).toBe(36);
-    expect(bucket.peakActivePuts).toBe(HOSTED_BROWSER_VAULT_REPLICA_WRITE_CONCURRENCY);
-    expect(bucket.activePuts).toBe(0);
-  });
+      try {
+        await Promise.race([
+          admissionStarted.promise,
+          outcome.then(() => { throw new Error("Publication settled before admission."); }),
+        ]);
+        expect(plannedObjectKeys).toHaveLength(36);
+        expect(bucket.putKeys).toHaveLength(0);
+        admissionGate.resolve();
+        await vi.waitFor(() => expect(bucket.activePuts).toBe(4), { timeout: 5_000 });
+        expect(bucket.putKeys).toHaveLength(4);
+        expect(rootWriteState).toBeUndefined();
+        childrenGate.resolve();
+        // One slow child must not stop the other workers from draining the
+        // remaining children, nor allow them to claim/encrypt the root early.
+        await vi.waitFor(() => expect(bucket.settledChildPuts).toBe(34), { timeout: 5_000 });
+        expect(bucket.activePuts).toBe(1);
+        expect(bucket.putKeys).toHaveLength(35);
+        expect(rootWriteState).toBeUndefined();
+        expect(settled).toBe(false);
+        lastChildGate.resolve();
+        await Promise.race([
+          rootStarted.promise,
+          outcome.then(() => { throw new Error("Publication settled before the root PUT."); }),
+        ]);
+        // A failed child must not release the deletion/publication admission
+        // while the final root can still materialize in R2.
+        expect(settled).toBe(false);
+        expect(rootWriteState).toEqual({ activePuts: 0, settledChildPuts: 35 });
+        expect(bucket.putKeys.at(-1)).toBe(plannedObjectKeys[0]);
+        expect(new Set(bucket.putKeys)).toEqual(new Set(plannedObjectKeys));
+        expect(bucket.activePuts).toBe(1);
+        expect(bucket.peakActivePuts).toBe(4);
+      } finally {
+        admissionGate.resolve();
+        childrenGate.resolve();
+        lastChildGate.resolve();
+        rootGate.resolve();
+        await outcome;
+        writeSpy.mockRestore();
+      }
+      const result = await outcome;
+      expect(bucket.activePuts).toBe(0);
+      expect(bucket.putKeys).toHaveLength(36);
+      if (failure === "none") {
+        expect(result.error).toBeNull();
+        expect(result.ref?.objectKey).toBe(plannedObjectKeys[0]);
+        expect(bucket.objects.size).toBe(36);
+      } else {
+        // Later defined failures cannot replace the first undefined rejection.
+        expect(result.error).toBe(writeError);
+        expect(result.ref).toBeNull();
+        expect(bucket.objects.size).toBe(
+          failure === "multiple" || failure === "undefined" ? 33 : 35,
+        );
+      }
+    },
+  );
 
   it("keeps legacy generations readable and rejects invalid generation metadata", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
@@ -797,4 +891,10 @@ function expectShardEncodingSizes(ref: {
   } else {
     expect(ref?.encodedByteLength).toBe(ref?.byteLength);
   }
+}
+
+function createWriteGate(): { promise: Promise<void>; resolve(): void } {
+  let resolve = (): void => {};
+  const promise = new Promise<void>((release) => { resolve = release; });
+  return { promise, resolve };
 }

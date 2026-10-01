@@ -1,3 +1,4 @@
+export { isActiveCanonicalWriteLockError } from "@murphai/core";
 export {
   importAssessmentResponse,
   prepareAssessmentResponseImport,
@@ -5,12 +6,12 @@ export {
   type AssessmentResponseImportInput,
 } from "./assessment/import-assessment-response.ts";
 export type { AssessmentImportPort, AssessmentResponseImportPayload } from "./assessment/core-port.ts";
+export { parseDelimitedRows } from "./csv-parsing.ts";
 export {
+  CsvSampleImportError,
   importCsvSamples,
-  parseDelimitedRows,
   prepareCsvSampleImport,
   profileCsvSampleFile,
-  summarizeSampleSeries,
 } from "./csv-sample-importer.ts";
 export type {
   CsvSampleFileColumnProfile,
@@ -26,13 +27,6 @@ export type {
   CsvSampleImportSkipReasonCount,
   CsvSampleImportWriteResult,
   PreparedCsvSampleImportPayload,
-  SampleSeriesInputRecord,
-  SampleSeriesSummaryInput,
-  SampleSummaryProfile,
-  SampleThresholdSummary,
-  SampleWindowGap,
-  SampleWindowScreen,
-  SampleWindowSummary,
 } from "./csv-sample-importer.ts";
 export {
   assertCanonicalWritePort,
@@ -40,6 +34,7 @@ export {
   type CanonicalWritePort,
   type SampleImportBatchProvenance,
   type DeviceBatchImportPayload,
+  type DeviceBatchImportExecutionOptions,
   type DeviceDataOrigin,
   type DeviceEventPayload,
   type DeviceExternalRefPayload,
@@ -53,7 +48,10 @@ export {
   type SampleImportRecord,
   type SampleImportSkipReasonCount,
 } from "./core-port.ts";
-export { createImporters } from "./create-importers.ts";
+export {
+  createDeviceProviderSnapshotImportSession,
+  createImporters,
+} from "./create-importers.ts";
 export { importDocument, prepareDocumentImport } from "./document-importer.ts";
 export * from "./device-providers/index.ts";
 export { addMeal, prepareMealImport } from "./meal-importer.ts";

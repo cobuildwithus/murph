@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseHostedRuntimeHealthDataAdmissionResponse } from "@murphai/hosted-execution/parsers";
 
 vi.mock("server-only", () => ({}));
 
@@ -99,7 +100,9 @@ describe("hosted runtime health-data admission route", () => {
           id: "member_123",
         },
       });
-      await expect(response.json()).resolves.toEqual({
+      const body: unknown = await response.json();
+      expect(parseHostedRuntimeHealthDataAdmissionResponse(body)).toEqual(body);
+      expect(body).toEqual({
         consentState,
         processingAllowed,
         userId: "member_123",

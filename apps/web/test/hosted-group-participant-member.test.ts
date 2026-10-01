@@ -227,6 +227,28 @@ describe("lookupHostedGroupParticipantMemberIdsByHandles", () => {
     expect(hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps ambiguous identities unresolved for presentation-only inventory", async () => {
+    vi.stubEnv(
+      "HOSTED_CONTACT_PRIVACY_KEYS",
+      `v1:${Buffer.alloc(32, 1).toString("base64")},v2:${Buffer.alloc(32, 2).toString("base64")}`,
+    );
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v2");
+    const lookupKeys = createHostedLinqParticipantContactLookupKeyReadCandidates({
+      kind: "phone",
+      value: "+15551112222",
+    });
+    hostedMemberIdentity.findMany.mockResolvedValue([
+      { memberId: "member_current", phoneLookupKey: lookupKeys[0] },
+      { memberId: "member_legacy", phoneLookupKey: lookupKeys[1] },
+    ]);
+
+    await expect(lookupHostedGroupParticipantMemberIdsByHandles({
+      ambiguityPolicy: "unresolved",
+      handles: ["+15551112222"],
+      prisma,
+    })).resolves.toEqual(new Map([["+15551112222", null]]));
+  });
+
   it("preserves verified-email ambiguity across privacy-key read versions", async () => {
     vi.stubEnv(
       "HOSTED_CONTACT_PRIVACY_KEYS",

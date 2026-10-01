@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "personal-patterns-quiet-day-savings",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Save AI usage on unchanged Patterns",
+    "summary": "Daily Personal Patterns checks can skip AI review when your factors, results, and evidence grades have already been reviewed.",
+    "details": "New factors, new results, and grade changes still receive a review. First digests and checks without reliable saved history continue as usual.",
+    "relevanceTags": ["personal-patterns"],
+    "sourcePullRequests": [3204]
+  }
+}

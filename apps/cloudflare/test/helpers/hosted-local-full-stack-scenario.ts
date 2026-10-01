@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHmac, randomUUID } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
 import { promisify } from "node:util";
+import { afterAll } from "vitest";
 
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -87,6 +88,18 @@ const execFileAsync = promisify(execFile);
 const reuseExplicitDatabaseUrlEnv = "MURPH_HOSTED_LOCAL_E2E_REUSE_DATABASE_URL";
 const maxHostedLocalFullStackStartupAttempts = 3;
 const preparedRunnerBundleCacheKeys = new Set<string>();
+const activeScenarioSetups = new Set<HostedLocalFullStackScenarioSetup>();
+
+interface HostedLocalFullStackScenarioSetup {
+  abortController: AbortController;
+  cleanupPromise: Promise<void> | null;
+  scenario: HostedLocalFullStackScenario | null;
+  startupPromise: Promise<HostedLocalFullStackScenario> | null;
+}
+
+afterAll(async () => {
+  await cleanupActiveHostedLocalFullStackScenarioSetups();
+}, 120_000);
 
 interface HostedActiveMemberSeedArgs {
   billingPlanCode?: "launch_monthly" | "launch_edge_monthly";
@@ -163,6 +176,8 @@ export interface HostedLocalFullStackScenario {
     userId: string,
     input?: {
       pollIntervalMs?: number;
+      /** Require new work since the last completion; defaults to true. */
+      requireProgress?: boolean;
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
@@ -240,24 +255,53 @@ interface HostedLocalFullStackScenarioInput {
 export async function startHostedLocalFullStackScenario(
   input: HostedLocalFullStackScenarioInput,
 ): Promise<HostedLocalFullStackScenario> {
-  for (let attempt = 1; attempt <= maxHostedLocalFullStackStartupAttempts; attempt += 1) {
-    try {
-      return await startHostedLocalFullStackScenarioAttempt(input);
-    } catch (error) {
-      if (
-        attempt === maxHostedLocalFullStackStartupAttempts
-        || !isHostedLocalPortBindCollision(error)
-      ) {
-        throw error;
+  const setup: HostedLocalFullStackScenarioSetup = {
+    abortController: new AbortController(),
+    cleanupPromise: null,
+    scenario: null,
+    startupPromise: null,
+  };
+  activeScenarioSetups.add(setup);
+  setup.startupPromise = (async () => {
+    for (let attempt = 1; attempt <= maxHostedLocalFullStackStartupAttempts; attempt += 1) {
+      try {
+        setup.abortController.signal.throwIfAborted();
+        const scenario = await startHostedLocalFullStackScenarioAttempt(
+          input,
+          setup.abortController.signal,
+        );
+        setup.scenario = scenario;
+        return scenario;
+      } catch (error) {
+        if (
+          setup.abortController.signal.aborted
+          || attempt === maxHostedLocalFullStackStartupAttempts
+          || !isHostedLocalPortBindCollision(error)
+        ) {
+          throw error;
+        }
       }
     }
-  }
+    throw new Error("Hosted local full-stack startup exhausted its bounded attempts.");
+  })();
 
-  throw new Error("Hosted local full-stack startup exhausted its bounded attempts.");
+  try {
+    const scenario = await setup.startupPromise;
+    return {
+      ...scenario,
+      stop: async (): Promise<void> => {
+        await cleanupHostedLocalFullStackScenarioSetup(setup);
+      },
+    };
+  } catch (error) {
+    activeScenarioSetups.delete(setup);
+    throw error;
+  }
 }
 
 async function startHostedLocalFullStackScenarioAttempt(
   input: HostedLocalFullStackScenarioInput,
+  abortSignal: AbortSignal,
 ): Promise<HostedLocalFullStackScenario> {
   const assistantProviderRequests: HostedLocalAssistantProviderStubRequest[] = [];
   const providerRequestBodyFingerprintSecret = randomUUID();
@@ -282,6 +326,7 @@ async function startHostedLocalFullStackScenarioAttempt(
   let harness: HostedLocalDevHarness | null = null;
 
   try {
+    abortSignal.throwIfAborted();
     if (assistantProviderMode === "stub" || input.assistantProviderRecorder === true) {
       assistantProviderServer = await startAssistantProviderStubServer({
         fallbackResponseText: input.assistantProviderRecorder === true
@@ -299,7 +344,9 @@ async function startHostedLocalFullStackScenarioAttempt(
         `${buildHostLoopbackStubBaseUrl(assistantProviderServer, "assistant provider stub")}/v1`;
     }
 
+    abortSignal.throwIfAborted();
     oidcFixture = await startHostedLocalOidcFixture();
+    abortSignal.throwIfAborted();
     const hostedAssistantDevEnv = resolveHostedAssistantLocalDevEnv(
       {
         ...baseEnvironment,
@@ -333,9 +380,8 @@ async function startHostedLocalFullStackScenarioAttempt(
       ...hostedAssistantDevEnv,
       ...buildHostedLocalDeviceSyncProviderEnvClearances(),
       ...resolveHostedLocalSmokeWebEnv(baseEnvironment),
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "125000",
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "120000",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
@@ -375,7 +421,11 @@ async function startHostedLocalFullStackScenarioAttempt(
     };
 
     harness = await startHostedLocalDevHarness({
-      env: runtimeEnv,
+      abortSignal,
+      env: {
+        ...runtimeEnv,
+        ...buildHostedLocalFullStackHostProcessEnvOverrides(runtimeEnv),
+      },
       persistDirOverride: input.persistDirOverride,
       persistDirPrefix: input.persistDirPrefix,
       resetPersistDir: input.resetPersistDir,
@@ -386,13 +436,14 @@ async function startHostedLocalFullStackScenarioAttempt(
       streamLogs: input.streamLogs,
       testControls,
       webProcessEnvOverrides: {
-        ...buildHostedLocalFullStackWebProcessEnvOverrides(runtimeEnv),
+        ...buildHostedLocalFullStackHostProcessEnvOverrides(runtimeEnv),
         ...(input.webProcessEnvOverrides ?? {}),
         HOSTED_RUNTIME_LOG_DATABASE_URL: runtimeLogDatabaseUrl,
       },
       webTemporalMailboxSignalFaultUserId:
         input.webTemporalMailboxSignalFaultUserId,
     });
+    abortSignal.throwIfAborted();
     preparedRunnerBundleCacheKeys.add(runnerBundleCacheKey);
     const scenarioHarness = harness;
     const scenarioRuntimeEnv = scenarioHarness.runtimeEnv;
@@ -441,7 +492,11 @@ async function startHostedLocalFullStackScenarioAttempt(
             request.body,
             providerRequestBodyFingerprintSecret,
           ),
+          fixtureMatch: request.fixtureMatch ?? "not_applicable",
           method: request.method,
+          queuedResponseCount: request.queuedResponseCount ?? null,
+          requestKind: request.requestKind ?? "unknown",
+          responseStatus: request.responseStatus ?? null,
           url: request.url,
         }));
         const recentLogs = status ? summarizeHostedRecentLogsForFailure(status) : [];
@@ -606,7 +661,11 @@ async function startHostedLocalFullStackScenarioAttempt(
       waitForHostedCompletion: async (userId, waitInput) => {
         const progressWasAlreadyObserved = observedProgressUsers.delete(userId);
         const previousCompletion = lastCompletedStatusByUser.get(userId);
-        if (!progressWasAlreadyObserved && previousCompletion !== undefined) {
+        if (
+          waitInput?.requireProgress !== false
+          && !progressWasAlreadyObserved
+          && previousCompletion !== undefined
+        ) {
           await scenarioHarness.waitForHostedProgress(userId, {
             afterStatus: previousCompletion,
             pollIntervalMs: waitInput?.pollIntervalMs,
@@ -646,6 +705,38 @@ async function startHostedLocalFullStackScenarioAttempt(
   }
 }
 
+export async function cleanupActiveHostedLocalFullStackScenarioSetups(): Promise<void> {
+  const results = await Promise.allSettled(
+    [...activeScenarioSetups].map(cleanupHostedLocalFullStackScenarioSetup),
+  );
+  const failures = results.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : []
+  );
+  if (failures.length === 1) {
+    throw failures[0];
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, "Hosted local scenario setup cleanup failed.");
+  }
+}
+
+async function cleanupHostedLocalFullStackScenarioSetup(
+  setup: HostedLocalFullStackScenarioSetup,
+): Promise<void> {
+  setup.cleanupPromise ??= (async () => {
+    if (setup.scenario === null) {
+      setup.abortController.abort();
+    }
+    try {
+      await setup.startupPromise?.catch(() => {});
+      await setup.scenario?.stop();
+    } finally {
+      activeScenarioSetups.delete(setup);
+    }
+  })();
+  await setup.cleanupPromise;
+}
+
 function isHostedLocalPortBindCollision(error: unknown): boolean {
   if (error instanceof AggregateError) {
     return error.errors.some(isHostedLocalPortBindCollision);
@@ -660,7 +751,7 @@ function isHostedLocalPortBindCollision(error: unknown): boolean {
     || /\bport \d+ is already in use\b/ui.test(error.message);
 }
 
-export function buildHostedLocalFullStackWebProcessEnvOverrides(
+export function buildHostedLocalFullStackHostProcessEnvOverrides(
   source: Readonly<NodeJS.ProcessEnv>,
 ): NodeJS.ProcessEnv {
   const overrides: NodeJS.ProcessEnv = {};
@@ -681,9 +772,9 @@ export function buildHostedLocalFullStackWebProcessEnvOverrides(
     return overrides;
   }
 
-  // The Linq E2E stub listens on one host port. Runner containers reach that
-  // port through Docker's host alias, while the host web process must use
-  // loopback on Linux. Keep the runner URL authoritative everywhere else.
+  // Web and Workerd run on the host and share the loopback Linq upstream.
+  // The container environment owner separately projects canonical provider
+  // HTTPS URLs so runner requests still cross production interception.
   if (linqBaseUrl.protocol !== "http:" || linqBaseUrl.hostname !== "host.docker.internal") {
     return overrides;
   }
@@ -829,8 +920,10 @@ async function resolveHostedLocalScenarioDatabase(input: {
   return await createEphemeralHostedLocalDatabase(input.scenarioPrefix);
 }
 
-function shouldReuseExplicitHostedLocalScenarioDatabaseUrl(): boolean {
-  return process.env.CI === "true" || process.env[reuseExplicitDatabaseUrlEnv] === "1";
+export function shouldReuseExplicitHostedLocalScenarioDatabaseUrl(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return environment[reuseExplicitDatabaseUrlEnv] === "1";
 }
 
 function buildHostedLocalRunnerBundleCacheKey(env: NodeJS.ProcessEnv): string {

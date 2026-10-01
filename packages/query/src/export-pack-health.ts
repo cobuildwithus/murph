@@ -6,8 +6,8 @@ import {
 
 import { type CanonicalEntity } from "./canonical-entities.ts";
 import {
-  readJsonlEntitiesStrictSync,
-  readJsonlEntitiesTolerantSync,
+  readJsonlEntitiesStrict,
+  readJsonlEntitiesTolerant,
 } from "./health/entity-slices.ts";
 import type { ParseFailure } from "./health/loaders.ts";
 import { collectCanonicalEntities } from "./health/canonical-collector.ts";
@@ -131,9 +131,9 @@ function buildHealthContext(
   };
 }
 
-function readHealthHistoryEventsStrict(vaultRoot: string): CanonicalEntity[] {
+async function readHealthHistoryEventsStrict(vaultRoot: string): Promise<CanonicalEntity[]> {
   return collapseEventLedgerEntities(
-    readJsonlEntitiesStrictSync(
+    await readJsonlEntitiesStrict(
       vaultRoot,
       VAULT_LAYOUT.eventLedgerDirectory,
       projectHistoryEntity,
@@ -141,13 +141,13 @@ function readHealthHistoryEventsStrict(vaultRoot: string): CanonicalEntity[] {
   );
 }
 
-function readHealthHistoryEventsTolerant(vaultRoot: string): CanonicalEntity[] {
+async function readHealthHistoryEventsTolerant(vaultRoot: string): Promise<CanonicalEntity[]> {
   return collapseEventLedgerEntities(
-    readJsonlEntitiesTolerantSync(
+    (await readJsonlEntitiesTolerant(
       vaultRoot,
       VAULT_LAYOUT.eventLedgerDirectory,
       projectHistoryEntity,
-    ).entities,
+    )).entities,
   );
 }
 
@@ -161,11 +161,14 @@ function healthEventsFromCollectionAndLedger(
   ]);
 }
 
-export function readHealthContext(
+export async function readHealthContext(
   vaultRoot: string,
   filters: ExportPackFilters,
-): ExportPackHealthReadResult {
-  const collected = collectCanonicalEntities(vaultRoot, { mode: "strict-sync" });
+): Promise<ExportPackHealthReadResult> {
+  const [collected, ledgerEvents] = await Promise.all([
+    collectCanonicalEntities(vaultRoot, { mode: "strict-async" }),
+    readHealthHistoryEventsStrict(vaultRoot),
+  ]);
 
   return {
     health: buildHealthContext(
@@ -173,7 +176,7 @@ export function readHealthContext(
         assessments: collected.assessments,
         healthEvents: healthEventsFromCollectionAndLedger(
           collected,
-          readHealthHistoryEventsStrict(vaultRoot),
+          ledgerEvents,
         ),
         goals: collected.goals,
         conditions: collected.conditions,
@@ -189,18 +192,21 @@ export function readHealthContext(
   };
 }
 
-export function readHealthContextTolerant(
+export async function readHealthContextTolerant(
   vaultRoot: string,
   filters: ExportPackFilters,
-): ExportPackHealthContext {
-  const collected = collectCanonicalEntities(vaultRoot, { mode: "tolerant-sync" });
+): Promise<ExportPackHealthContext> {
+  const [collected, ledgerEvents] = await Promise.all([
+    collectCanonicalEntities(vaultRoot, { mode: "tolerant-async" }),
+    readHealthHistoryEventsTolerant(vaultRoot),
+  ]);
 
   return buildHealthContext(
     {
       assessments: collected.assessments,
       healthEvents: healthEventsFromCollectionAndLedger(
         collected,
-        readHealthHistoryEventsTolerant(vaultRoot),
+        ledgerEvents,
       ),
       goals: collected.goals,
       conditions: collected.conditions,

@@ -25,8 +25,8 @@ export default async function RecordsConnectPage({
     : resolvedSearchParams.launch;
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-8">
-      <div className="space-y-6">
+    <div className="flex w-full min-w-0 flex-col gap-10">
+      <div className="flex flex-col gap-6">
         <Link
           href="/records"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
@@ -35,9 +35,8 @@ export default async function RecordsConnectPage({
           Medical records
         </Link>
         <PageHeader
-          eyebrow="Medical records"
           title="Connect medical records"
-          description="Find a hospital or clinic Murph supports. You will sign in to its patient portal, then Murph will copy available lab results and report summaries once."
+          description="Bring your available lab results, medications, and other medical records into Murph with a one-time import."
         />
       </div>
       <RecordsConnectClient

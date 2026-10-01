@@ -51,6 +51,7 @@ import {
   inboxAttachmentRetentionRecordSchema as inboxAttachmentRetentionRecordContract,
   goalFrontmatterSchema as goalFrontmatterContract,
   habitatFrontmatterSchema as habitatFrontmatterContract,
+  immunizationImportPayloadSchema as immunizationImportPayloadContract,
   inboxCaptureRecordSchema as inboxCaptureRecordContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
   metricSampleRecordSchema as metricSampleRecordContract,
@@ -87,6 +88,7 @@ import {
   inboxAttachmentRetentionRecordSchema,
   inboxCaptureRecordSchema,
   integrationIngestRecordSchema,
+  immunizationImportPayloadSchema,
   journalDayFrontmatterSchema,
   memoryDocumentFrontmatterSchema,
   metricSampleRecordSchema,
@@ -110,6 +112,7 @@ const schemaFixtures = [
   ["audit-record", auditRecordSchema, auditRecordContract],
   ["blood-test-import-payload", bloodTestImportPayloadSchema, bloodTestImportPayloadContract],
   ["condition-import-payload", conditionImportPayloadSchema, conditionImportPayloadContract],
+  ["immunization-import-payload", immunizationImportPayloadSchema, immunizationImportPayloadContract],
   ["event-record", eventRecordSchema, eventRecordContract],
   [
     "inbox-attachment-retention-record",

@@ -10,6 +10,7 @@ import {
   createMemoryRecordId,
   formatMemoryDisplayNameRecordText,
   MEMORY_DISPLAY_NAME_MAX_LENGTH,
+  MemoryDocumentParseError,
   parseMemoryDocument,
   parseCanonicalMemoryDisplayNameRecordText,
   renderMemoryDocument,
@@ -149,7 +150,7 @@ describe("memory parse and render coverage", () => {
           '{"id":}',
         ),
       }),
-    ).toThrow("Memory record metadata comment is invalid.");
+    ).toThrow("Canonical memory document vault/custom-memory.md:10 is invalid.");
 
     expect(() =>
       parseMemoryDocument({
@@ -159,7 +160,7 @@ describe("memory parse and render coverage", () => {
           "",
         ),
       }),
-    ).toThrow("Memory record metadata comment is required.");
+    ).toThrow("Canonical memory document vault/custom-memory.md:10 is invalid.");
 
     expect(() =>
       parseMemoryDocument({
@@ -169,7 +170,7 @@ describe("memory parse and render coverage", () => {
           "mem_0123456789abcdef",
         ),
       }),
-    ).toThrow("Memory record metadata comment is invalid.");
+    ).toThrow("Canonical memory document vault/custom-memory.md:10 is invalid.");
 
     expect(() =>
       parseMemoryDocument({
@@ -179,7 +180,7 @@ describe("memory parse and render coverage", () => {
           '"createdAt":null',
         ),
       }),
-    ).toThrow("Memory record metadata comment is invalid.");
+    ).toThrow("Canonical memory document vault/custom-memory.md:10 is invalid.");
 
     expect(() =>
       parseMemoryDocument({
@@ -189,7 +190,7 @@ describe("memory parse and render coverage", () => {
           "",
         ),
       }),
-    ).toThrow("Memory record metadata comment is invalid.");
+    ).toThrow("Canonical memory document vault/custom-memory.md:10 is invalid.");
 
     expect(() =>
       parseMemoryDocument({
@@ -207,7 +208,7 @@ describe("memory parse and render coverage", () => {
           "- should fail",
         ].join("\n"),
       }),
-    ).toThrow('Unknown memory section "Unknown".');
+    ).toThrow("Canonical memory document bank/memory.md:9 is invalid.");
 
     expect(() =>
       upsertMemoryRecord(createEmptyMemoryDocument(), {
@@ -230,6 +231,54 @@ describe("memory parse and render coverage", () => {
         text: 'Never preserve <!-- murph-memory:{"id":"mem_0123456789ABCDEFGHJKMNPQRS"} --> markers',
       }),
     ).toThrow("Memory text cannot contain the reserved memory metadata marker.");
+  });
+
+  it("rejects the second canonical memory record with a duplicate id", () => {
+    const first = upsertMemoryRecord(
+      createEmptyMemoryDocument(new Date("2026-08-30T16:00:00.000Z")),
+      {
+        now: new Date("2026-08-30T16:00:01.000Z"),
+        section: "Context",
+        text: "Synthetic duplicate-id fact one",
+      },
+    );
+    const second = upsertMemoryRecord(first.document, {
+      now: new Date("2026-08-30T16:00:02.000Z"),
+      section: "Context",
+      text: "Synthetic duplicate-id fact two",
+    });
+    const duplicateMarkdown = renderMemoryDocument({
+      document: second.document,
+    }).replace(second.record.id, first.record.id);
+    const duplicateLine = duplicateMarkdown
+      .split("\n")
+      .findIndex((line) => line.includes("Synthetic duplicate-id fact two")) + 1;
+
+    let thrown: unknown;
+    try {
+      parseMemoryDocument({
+        sourcePath: "bank/memory.md",
+        text: duplicateMarkdown,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(MemoryDocumentParseError);
+    if (!(thrown instanceof MemoryDocumentParseError)) {
+      throw new Error("Expected duplicate canonical memory ids to fail parsing.");
+    }
+    expect(thrown.details).toEqual({
+      field: "id",
+      issue: "record_invalid",
+      lineNumber: duplicateLine,
+      sourcePath: "bank/memory.md",
+    });
+    expect(thrown.message).toBe(
+      `Canonical memory document bank/memory.md:${duplicateLine} is invalid.`,
+    );
+    expect(thrown.message).not.toContain(first.record.id);
+    expect(thrown.message).not.toContain("Synthetic duplicate-id fact");
   });
 });
 

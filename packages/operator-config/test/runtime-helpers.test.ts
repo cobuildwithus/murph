@@ -295,11 +295,13 @@ test('startTelegramTypingSession stops a pending refresh request cleanly', async
     },
   )
 
+  assert.equal(handle.isActive?.(), true)
   await vi.advanceTimersByTimeAsync(4_000)
   assert.equal(fetchImplementation.mock.calls.length, 2)
   assert.equal(seenSignals[1]?.aborted, false)
 
   await handle.stop()
+  assert.equal(handle.isActive?.(), false)
 
   assert.equal(seenSignals[1]?.aborted, true)
 })
@@ -1155,8 +1157,10 @@ test('startTelegramTypingSession rethrows background refresh failures on stop', 
     },
   )
 
+  assert.equal(handle.isActive?.(), true)
   await vi.advanceTimersByTimeAsync(4_000)
 
+  assert.equal(handle.isActive?.(), false)
   await assert.rejects(
     () => handle.stop(),
     (error) =>
@@ -1441,8 +1445,10 @@ test('device sync client helpers trim env values, send bearer auth, and map cont
       error instanceof VaultCliError &&
       error.code === 'device_sync_invalid_response' &&
       /invalid JSON payload/u.test(error.message) &&
-      error.context?.baseUrl === 'http://127.0.0.1:8788' &&
-      error.context?.path === '/providers',
+      error.context?.retryable === false &&
+      error.context?.stage === 'response' &&
+      error.context?.baseUrl === undefined &&
+      error.context?.path === undefined,
   )
 
   assert.throws(

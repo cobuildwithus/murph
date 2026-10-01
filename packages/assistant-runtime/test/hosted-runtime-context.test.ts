@@ -5,6 +5,7 @@ import path from "node:path";
 import { beforeEach, test, vi } from "vitest";
 
 import {
+  buildHostedExecutionConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
@@ -13,6 +14,8 @@ import {
 import type {
   AssistantInputCursor,
 } from "@murphai/operator-config/assistant-cli-contracts";
+import * as operatorConfig from "@murphai/operator-config/operator-config";
+import { ensureHostedAssistantOperatorDefaults } from "@murphai/operator-config/hosted-assistant-config";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
@@ -46,6 +49,7 @@ vi.mock("@murphai/vault-usecases/vault-services", () => ({
 
 import {
   prepareHostedWakeContext,
+  prepareHostedAssistantAutoReplyForWake,
   readHostedAssistantExecutionDefaultTarget,
   reconcileHostedAssistantChannelState,
 } from "../src/hosted-runtime/context.ts";
@@ -529,6 +533,49 @@ test("hosted member activation preserves an explicit signup timezone hint", asyn
   }
 });
 
+test("initial hosted bootstrap is reused while later configuration reads observe changed defaults", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+  const bootstrap = await ensureHostedAssistantOperatorDefaults({
+    allowMissing: false,
+    env: HOSTED_ASSISTANT_SEED_ENV,
+    homeDirectory: operatorHomeRoot,
+  });
+  const readConfig = vi.spyOn(operatorConfig, "readOperatorConfig");
+  try {
+    const target = await readHostedAssistantExecutionDefaultTarget({
+      assistantBootstrap: bootstrap,
+      homeDirectory: operatorHomeRoot,
+      runtimeEnv: HOSTED_ASSISTANT_SEED_ENV,
+    });
+    const wake = buildLegacyWake({
+      event: { kind: "member.activated", memberChannels: DEFAULT_MEMBER_CHANNELS, userId: "member_synthetic_bootstrap" },
+      eventId: "evt_synthetic_initial_bootstrap",
+      occurredAt: "2026-03-28T09:05:00.000Z",
+    });
+    const readiness = await prepareHostedAssistantAutoReplyForWake(
+      vaultRoot, wake, HOSTED_ASSISTANT_SEED_ENV, HOSTED_RUNTIME_RESOLVED_CONFIG,
+      { assistantBootstrap: bootstrap, operatorHomeRoot },
+    );
+    assert.deepEqual(target, HOSTED_CODEX_VERCEL_GATEWAY_TARGET);
+    assert.equal(readiness.assistantConfigured, true);
+    assert.equal(readConfig.mock.calls.length, 0);
+
+    await prepareHostedAssistantAutoReplyForWake(
+      vaultRoot, wake, HOSTED_ASSISTANT_SEED_ENV, HOSTED_RUNTIME_RESOLVED_CONFIG,
+      { operatorHomeRoot },
+    );
+    assert.equal(readConfig.mock.calls.length, 1);
+    const updatedTarget = await readHostedAssistantExecutionDefaultTarget({
+      homeDirectory: operatorHomeRoot,
+      runtimeEnv: { ...HOSTED_ASSISTANT_SEED_ENV, HOSTED_ASSISTANT_REASONING_EFFORT: "high" },
+    });
+    assert.equal(updatedTarget?.reasoningEffort, "high");
+  } finally {
+    readConfig.mockRestore();
+    await cleanup();
+  }
+});
+
 test("hosted assistant bootstrap exposes an execution default target for later maintenance turns", async () => {
   const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
   const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
@@ -912,6 +959,28 @@ test("hosted wake context does not change auto-reply state on non-channel follow
       assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, autoReplyAfterActivation);
     });
   } finally {
+    await cleanup();
+  }
+});
+
+test("accepted voice enables ordinary replies without requiring a live media port", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-voice-context-");
+  const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      const config = { channelCapabilities: { emailSendReady: false, telegramBotConfigured: false }, deviceSync: null };
+      const wake = buildHostedExecutionConversationMessageWake({
+        eventId: "synthetic-voice-accepted", userId: "member_synthetic_voice",
+        occurredAt: "2026-09-21T12:00:00.000Z",
+        message: { channel: "voice", callId: "synthetic-call", inputId: "synthetic-input", text: "Read the current record." },
+      });
+      const state = await prepareHostedAssistantAutoReplyForWake(vaultRoot, wake, buildHostedAssistantSeedRuntimeEnv(), config);
+      assert.equal(state.assistantConfigured, true);
+      assert.equal(state.voiceAutoReplyEnabled, true);
+      assert.deepEqual(summarizeAutoReply(await readAutomationState(vaultRoot)), [{ channel: "voice", eligibleAfter: null }]);
+    });
+  } finally {
+    restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);
     await cleanup();
   }
 });

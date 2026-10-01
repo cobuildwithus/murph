@@ -7,10 +7,10 @@ import { getPrisma } from "../prisma";
 import {
   claimHostedMemberSignupNotificationEmailAttempt,
   readHostedMemberCoreState,
-  readHostedMemberEmailAuthorization,
   readHostedMemberSignupNotificationContext,
 } from "./hosted-member-store";
 import { readActiveHostedMemberAccess } from "./member-access";
+import { readHostedLinqProductionCanaryMemberId } from "./linq-production-canary";
 import {
   HostedResendPlainTextEmailError,
   sendHostedResendPlainTextEmail,
@@ -34,7 +34,8 @@ export type HostedSignupNotificationEmailResult =
         | "already_attempted"
         | "member_not_active"
         | "member_not_found"
-        | "not_configured";
+        | "not_configured"
+        | "production_canary";
       status: "skipped";
     }
   | {
@@ -120,6 +121,17 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
   }
 
   const prisma = input.prisma ?? getPrisma();
+  const productionCanaryMemberId = await readHostedLinqProductionCanaryMemberId({
+    prisma,
+    source: input.env,
+  });
+  if (productionCanaryMemberId === input.memberId) {
+    return {
+      reason: "production_canary",
+      status: "skipped",
+    };
+  }
+
   const hasActiveAccess = await readActiveHostedMemberAccess({
     memberId: input.memberId,
     prisma,
@@ -147,14 +159,6 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
       status: "skipped",
     };
   }
-  const emailAuthorization = await readHostedMemberEmailAuthorization({
-    memberId: input.memberId,
-    prisma,
-  }).catch(() => null);
-  const customerEmail = emailAuthorization?.verifiedEmail?.address
-    ?? emailAuthorization?.stripeCheckoutEmail?.address
-    ?? null;
-
   const claimed = await claimHostedMemberSignupNotificationEmailAttempt({
     attemptedAt: now,
     memberId: input.memberId,
@@ -174,7 +178,6 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
     idempotencyKey: buildHostedSignupNotificationEmailIdempotencyKey(input.memberId),
     subject: buildHostedSignupNotificationEmailSubject(signupSnapshot.context),
     text: buildHostedSignupNotificationEmailText({
-      customerEmail,
       activationSurface: input.activationSurface,
       fallbackOccurredAt: signupSnapshot.createdAt,
       signupContext: signupSnapshot.context,
@@ -190,7 +193,6 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
 
 function buildHostedSignupNotificationEmailText(input: {
   activationSurface?: HostedSignupSurface;
-  customerEmail?: string | null;
   fallbackOccurredAt: Date;
   signupContext: HostedSignupNotificationContextV1 | null;
 }): string {
@@ -211,7 +213,6 @@ function buildHostedSignupNotificationEmailText(input: {
       ? `Activated via: ${formatHostedSignupSurface(input.activationSurface)}`
       : null,
     location ? `Approximate location (network): ${location}` : null,
-    input.customerEmail ? `Email: ${input.customerEmail}` : null,
   ].filter((line): line is string => line !== null).join("\n");
 }
 

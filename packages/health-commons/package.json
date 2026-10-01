@@ -17,15 +17,20 @@
       "import": "./dist/runtime.js",
       "default": "./dist/runtime.js"
     },
+    "./goal-runtime": {
+      "types": "./dist/goal-runtime.d.ts",
+      "import": "./dist/goal-runtime.js",
+      "default": "./dist/goal-runtime.js"
+    },
+    "./goal-index-runtime": {
+      "types": "./dist/goal-index-runtime.d.ts",
+      "import": "./dist/goal-index-runtime.js",
+      "default": "./dist/goal-index-runtime.js"
+    },
     "./biomarker-entity-mappings": {
       "types": "./dist/biomarker-entity-mappings.d.ts",
       "import": "./dist/biomarker-entity-mappings.js",
       "default": "./dist/biomarker-entity-mappings.js"
-    },
-    "./biomarker-fallback-ranges": {
-      "types": "./dist/biomarker-fallback-ranges.d.ts",
-      "import": "./dist/biomarker-fallback-ranges.js",
-      "default": "./dist/biomarker-fallback-ranges.js"
     },
     "./generated/*": "./generated/*"
   },

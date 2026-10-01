@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "workout-completion-continuity",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Fewer repeated questions while logging sets",
+    "summary": "Murph keeps the workout context of short private completion replies and checks saved routine instructions before asking you to repeat them.",
+    "details": "Explicit repetition conventions can fill later sets. Planned targets and previous results remain separate, and unclear workout or exercise choices still receive a focused question.",
+    "relevanceTags": ["workouts", "reminders"],
+    "sourcePullRequests": []
+  }
+}

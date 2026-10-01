@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-14",
+  "order": 100,
+  "item": {
+    "id": "message-based-idle-window",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Your last message sets the idle window",
+    "summary": "Murph now bases its ten-minute idle window on your latest message.",
+    "details": "Background syncing and housekeeping do not restart that window. Work already underway can finish safely, and new messages or scheduled work can resume processing.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3460
+    ]
+  }
+}

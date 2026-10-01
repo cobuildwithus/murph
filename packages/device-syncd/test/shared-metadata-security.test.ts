@@ -78,6 +78,43 @@ describe("sanitizeStoredDeviceSyncMetadata", () => {
 });
 
 describe("mergeStoredDeviceSyncMetadataPatch", () => {
+  it("retains caller-owned progress before optional patch fields at capacity", () => {
+    const existing = {
+      ...Object.fromEntries(Array.from({ length: 15 }, (_, index) => [`diagnostic${index}`, index])),
+      progress: "complete",
+    };
+    const merged = mergeStoredDeviceSyncMetadataPatch(
+      existing,
+      { checked: true, diagnostic0: 99 },
+      ["progress", "missing", "progress"],
+    );
+    expect(merged).toMatchObject({ progress: "complete", checked: true, diagnostic0: 99 });
+    expect(Object.keys(merged)).toHaveLength(16);
+    expect(merged.diagnostic14).toBeUndefined();
+    expect(merged.missing).toBeUndefined();
+  });
+
+  it("sanitizes prioritized fields and keeps patch tombstones authoritative", () => {
+    expect(mergeStoredDeviceSyncMetadataPatch(
+      { progress: "retrying", accessToken: "synthetic", source: "initial" },
+      { progress: null, userId: "synthetic" },
+      ["accessToken", "userId", "constructor", "toString", "__proto__", "progress"],
+    )).toEqual({ progress: null, source: "initial" });
+  });
+
+  it("prioritizes progress before truncating either oversized input", () => {
+    const diagnostics = Object.fromEntries(Array.from({ length: 16 }, (_, index) => [`diagnostic${index}`, index]));
+    for (const [existing, patch] of [
+      [{ ...diagnostics, progress: "complete" }, null],
+      [{ ...diagnostics, progress: "complete" }, { checked: true }],
+      [{ progress: "retrying" }, { ...diagnostics, progress: "complete" }],
+    ] as const) {
+      const merged = mergeStoredDeviceSyncMetadataPatch(existing, patch, ["progress"]);
+      expect(merged.progress).toBe("complete");
+      expect(Object.keys(merged)).toHaveLength(16);
+    }
+  });
+
   it("keeps patch keys when existing metadata is already capped", () => {
     const existing = Object.fromEntries(
       Array.from({ length: 16 }, (_, index) => [`existing${index}`, `value-${index}`]),

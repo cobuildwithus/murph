@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-31",
+  "order": 200,
+  "item": {
+    "id": "journal-connected-context",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Journal keeps the last seven days in view",
+    "summary": "Journal now shows a rolling seven-day timeline and can add clear life context from new calendar, travel, and Environment changes.",
+    "details": "New calendar and email connections get a private notice before use. Medical and private events stay excluded, travel stores only normalized itinerary facts, and every automatic entry remains correctable through Murph.",
+    "relevanceTags": ["journal", "calendar", "travel", "privacy", "personal-patterns"],
+    "sourcePullRequests": []
+  }
+}

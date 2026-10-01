@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {
   lstat,
   readFile,
@@ -10,6 +11,15 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+  loadGeneratedHealthCommonsWebGoalIndex,
+  type HealthCommonsWebGoalIndex,
+} from "@murphai/health-commons/runtime";
+
+import {
+  hasCompletePublicHealthGoalCatalog,
+} from "../src/public-health-goal-catalog-contract.js";
 
 import {
   buildHostedWorkerSecretsPayload,
@@ -24,7 +34,8 @@ import {
 
 export const runnerBundleManifestFileName = ".murph-runner-bundle-manifest.json";
 
-const runnerBundleManifestSchemaVersion = 2;
+const runnerBundleManifestSchemaVersion = 3;
+const publicReleaseShaPattern = /^[a-f0-9]{40}$/u;
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultAppDir = path.resolve(scriptDir, "..");
 const defaultRepoRoot = path.resolve(defaultAppDir, "../..");
@@ -34,7 +45,12 @@ const healthCommonsPackageName = "@murphai/health-commons";
 const healthCommonsFinnishDrySaunaProtocol = {
   key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
 } as const;
-const healthCommonsRuntimeGeneratedArtifacts = [
+const healthCommonsImproveDeepSleepGoal = {
+  key: "goal_template:improve-deep-sleep",
+  routeId: "improve-deep-sleep",
+  startPrompt: "Hey Murph, help me improve my deep sleep.",
+} as const;
+const healthCommonsRuntimeJsonArtifacts = [
   {
     label: "Health Commons protocol index",
     relativePath: path.join("generated", "protocol-index.json"),
@@ -52,6 +68,10 @@ const healthCommonsRuntimeGeneratedArtifacts = [
     relativePath: path.join("generated", "biomarker-desired-directions.json"),
   },
 ] as const;
+const healthCommonsGoalIndexArtifact = {
+  label: "Health Commons goal index",
+  relativePath: path.join("generated", "web", "browse", "goals.json"),
+} as const;
 const healthCommonsKnowledgeIndexArtifact = {
   label: "Health Commons knowledge index",
   relativePath: path.join("generated", "knowledge.sqlite"),
@@ -65,10 +85,6 @@ const healthCommonsRuntimeObsoleteGeneratedArtifacts = [
     label: "Health Commons runtime entities index",
     relativePath: path.join("generated", "entities.ndjson"),
   },
-  {
-    label: "Health Commons generated web artifacts",
-    relativePath: path.join("generated", "web"),
-  },
 ] as const;
 const healthCommonsProtocolIndexSchemaVersion =
   "murph.commons.protocol-index.v1";
@@ -78,6 +94,7 @@ const healthCommonsProtocolFamilyGraphSchemaVersion =
   "murph.commons.protocol-family-graph.v1";
 const healthCommonsBiomarkerDesiredDirectionsSchemaVersion =
   "murph.commons.biomarker-desired-directions.v1";
+const healthCommonsRevisionPattern = /^sha256:[a-f0-9]{64}$/u;
 const healthCommonsBiomarkerDesiredDirections = new Set([
   "higher",
   "higher_or_stable",
@@ -95,6 +112,7 @@ export interface RunnerBundleManifest {
   bundleFingerprint: string;
   generatedAt: string;
   includeBundleOnlyDependencies: boolean;
+  releaseSha: string;
   schemaVersion: typeof runnerBundleManifestSchemaVersion;
   sourceFingerprint: string;
   workspacePackageNames: readonly string[];
@@ -107,8 +125,9 @@ export async function writeRunnerBundleManifest(
     buildSkipped?: boolean;
     includeBundleOnlyDependencies?: boolean;
     now?: () => Date;
+    releaseSha: string;
     repoRoot?: string;
-  } = {},
+  },
 ): Promise<RunnerBundleManifest> {
   const manifest = await buildRunnerBundleManifest(bundleDir, input);
 
@@ -128,12 +147,14 @@ async function buildRunnerBundleManifest(
     buildSkipped?: boolean;
     includeBundleOnlyDependencies?: boolean;
     now?: () => Date;
+    releaseSha: string;
     repoRoot?: string;
-  } = {},
+  },
 ): Promise<RunnerBundleManifest> {
   const includeBundleOnlyDependencies = input.includeBundleOnlyDependencies ?? true;
   const appDir = input.appDir ?? defaultAppDir;
   const repoRoot = input.repoRoot ?? defaultRepoRoot;
+  const releaseSha = normalizePublicReleaseSha(input.releaseSha);
 
   return {
     buildSkipped: input.buildSkipped === true,
@@ -143,6 +164,7 @@ async function buildRunnerBundleManifest(
     bundleFingerprint: await fingerprintRunnerBundle(bundleDir),
     generatedAt: (input.now ?? (() => new Date()))().toISOString(),
     includeBundleOnlyDependencies,
+    releaseSha,
     schemaVersion: runnerBundleManifestSchemaVersion,
     sourceFingerprint: await fingerprintHostedRunnerSources({
       appDir,
@@ -265,12 +287,10 @@ export async function assertPreparedRunnerBundle(input: {
     throw new Error("Prepared runner bundle changed after assembly; rebuild deploy artifacts before deploying.");
   }
 
-  await assertRunnerBundleHealthCommonsRuntimeArtifacts(input.runnerBundleDir);
-
   return manifest;
 }
 
-async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundleManifest> {
+export async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundleManifest> {
   const manifest = await readJsonObjectFile(
     path.join(bundleDir, runnerBundleManifestFileName),
     "runner bundle manifest",
@@ -281,6 +301,8 @@ async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundle
     typeof manifest.buildSkipped !== "boolean" ||
     typeof manifest.generatedAt !== "string" ||
     typeof manifest.includeBundleOnlyDependencies !== "boolean" ||
+    typeof manifest.releaseSha !== "string" ||
+    !publicReleaseShaPattern.test(manifest.releaseSha) ||
     typeof manifest.sourceFingerprint !== "string" ||
     typeof manifest.bundleFingerprint !== "string" ||
     !isStringArray(manifest.workspacePackageNames) ||
@@ -295,10 +317,43 @@ async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundle
     bundleFingerprint: manifest.bundleFingerprint,
     generatedAt: manifest.generatedAt,
     includeBundleOnlyDependencies: manifest.includeBundleOnlyDependencies,
+    releaseSha: manifest.releaseSha,
     schemaVersion: runnerBundleManifestSchemaVersion,
     sourceFingerprint: manifest.sourceFingerprint,
     workspacePackageNames: manifest.workspacePackageNames,
   };
+}
+
+export function resolvePublicRunnerReleaseSha(
+  repoRoot: string = defaultRepoRoot,
+): string {
+  const releaseResult = spawnSync(
+    "git",
+    ["rev-parse", "--verify", "HEAD^{commit}"],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  const releaseSha = releaseResult.stdout.trim().toLowerCase();
+  if (
+    releaseResult.error
+    || releaseResult.status !== 0
+    || !publicReleaseShaPattern.test(releaseSha)
+  ) {
+    throw new Error("Could not resolve the public Murph release SHA for the runner bundle.");
+  }
+
+  return releaseSha;
+}
+
+function normalizePublicReleaseSha(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!publicReleaseShaPattern.test(normalized)) {
+    throw new TypeError("Runner bundle release SHA must be a full public Git commit SHA.");
+  }
+  return normalized;
 }
 
 async function assertRunnerBundleShape(
@@ -371,7 +426,7 @@ async function assertRunnerBundleShape(
     );
   }
 
-  await assertRunnerBundleHealthCommonsPackageFiles(bundleDir);
+  await assertRunnerBundleHealthCommonsArtifacts(bundleDir);
 }
 
 function assertGeneratedWranglerConfig(config: Record<string, unknown>): void {
@@ -389,6 +444,10 @@ function assertGeneratedWranglerConfig(config: Record<string, unknown>): void {
     containers,
     "DeploySmokeRunnerContainer",
   );
+  const standbyRunnerContainer = findGeneratedContainerConfig(
+    containers,
+    "StandbyRunnerContainer",
+  );
 
   if (!runnerContainer) {
     throw new Error("Generated Wrangler config is missing the RunnerContainer entry.");
@@ -397,9 +456,18 @@ function assertGeneratedWranglerConfig(config: Record<string, unknown>): void {
   if (!deploySmokeContainer) {
     throw new Error("Generated Wrangler config is missing the DeploySmokeRunnerContainer entry.");
   }
+  if (!standbyRunnerContainer) {
+    throw new Error("Generated Wrangler config is missing the StandbyRunnerContainer entry.");
+  }
 
   assertGeneratedContainerUsesPreparedImage(runnerContainer);
   assertGeneratedContainerUsesPreparedImage(deploySmokeContainer);
+  assertGeneratedContainerUsesPreparedImage(standbyRunnerContainer);
+  const nextRunnerContainer = findGeneratedContainerConfig(containers, "NextRunnerContainer");
+  if (!nextRunnerContainer) {
+    throw new Error("Generated Wrangler config is missing the NextRunnerContainer entry.");
+  }
+  assertGeneratedContainerUsesPreparedImage(nextRunnerContainer);
 }
 
 function findGeneratedContainerConfig(
@@ -570,6 +638,13 @@ async function assertInstalledRunnerDependency(
   throw new Error(`Missing runner dependency ${packageName}.`);
 }
 
+export async function assertRunnerBundleHealthCommonsArtifacts(
+  bundleDir: string,
+): Promise<void> {
+  await assertRunnerBundleHealthCommonsPackageFiles(bundleDir);
+  await assertRunnerBundleHealthCommonsRuntimeArtifacts(bundleDir);
+}
+
 async function assertRunnerBundleHealthCommonsPackageFiles(bundleDir: string): Promise<void> {
   const packageDirs = await findInstalledPackageDirectories(
     path.join(bundleDir, "node_modules"),
@@ -587,7 +662,10 @@ async function assertRunnerBundleHealthCommonsPackageFiles(bundleDir: string): P
       packageName: healthCommonsPackageName,
       rootDir: bundleDir,
     });
-    for (const artifact of healthCommonsRuntimeGeneratedArtifacts) {
+    for (const artifact of [
+      ...healthCommonsRuntimeJsonArtifacts,
+      healthCommonsGoalIndexArtifact,
+    ]) {
       await resolveContainedRunnerDependencyFile({
         filePath: path.join(packageDir, artifact.relativePath),
         label: artifact.label,
@@ -595,6 +673,7 @@ async function assertRunnerBundleHealthCommonsPackageFiles(bundleDir: string): P
         rootDir: bundleDir,
       });
     }
+    await assertRunnerBundleHealthCommonsGeneratedWebShape(packageDir);
     await resolveContainedRunnerDependencyFile({
       filePath: path.join(packageDir, healthCommonsKnowledgeIndexArtifact.relativePath),
       label: healthCommonsKnowledgeIndexArtifact.label,
@@ -634,7 +713,7 @@ async function assertRunnerBundleHealthCommonsRuntimeArtifacts(bundleDir: string
       protocolFamilyGraph,
       biomarkerDesiredDirections,
     ] = await Promise.all(
-      healthCommonsRuntimeGeneratedArtifacts.map(async (artifact) => {
+      healthCommonsRuntimeJsonArtifacts.map(async (artifact) => {
         const artifactPath = await resolveContainedRunnerDependencyFile({
           filePath: path.join(packageDir, artifact.relativePath),
           label: artifact.label,
@@ -647,13 +726,64 @@ async function assertRunnerBundleHealthCommonsRuntimeArtifacts(bundleDir: string
         );
       }),
     );
+    let goalIndex: HealthCommonsWebGoalIndex;
+    try {
+      goalIndex = loadGeneratedHealthCommonsWebGoalIndex({
+        generatedWebRoot: path.join(packageDir, "generated", "web"),
+      });
+    } catch {
+      throw new Error("Runner Health Commons goal index is invalid.");
+    }
     assertHealthCommonsRuntimeArtifacts({
       biomarkerDesiredDirections,
       protocolFamilyGraph,
       protocolIndex,
       protocolRunSpecs,
+      goalIndex,
     });
   }
+}
+
+async function assertRunnerBundleHealthCommonsGeneratedWebShape(
+  packageDir: string,
+): Promise<void> {
+  const generatedWebDir = path.join(packageDir, "generated", "web");
+  const generatedWebEntries = await readdir(generatedWebDir, {
+    withFileTypes: true,
+  });
+  const unexpectedWebEntry = generatedWebEntries.find(
+    (entry) => entry.name !== "browse" || !entry.isDirectory(),
+  );
+
+  if (unexpectedWebEntry || generatedWebEntries.length !== 1) {
+    throwUnexpectedHealthCommonsGeneratedWebArtifact(
+      unexpectedWebEntry
+        ? path.join("generated", "web", unexpectedWebEntry.name)
+        : path.join("generated", "web"),
+    );
+  }
+
+  const browseDir = path.join(generatedWebDir, "browse");
+  const browseEntries = await readdir(browseDir, { withFileTypes: true });
+  const unexpectedBrowseEntry = browseEntries.find(
+    (entry) => entry.name !== "goals.json" || !entry.isFile(),
+  );
+
+  if (unexpectedBrowseEntry || browseEntries.length !== 1) {
+    throwUnexpectedHealthCommonsGeneratedWebArtifact(
+      unexpectedBrowseEntry
+        ? path.join("generated", "web", "browse", unexpectedBrowseEntry.name)
+        : path.join("generated", "web", "browse"),
+    );
+  }
+}
+
+function throwUnexpectedHealthCommonsGeneratedWebArtifact(
+  relativePath: string,
+): never {
+  throw new Error(
+    `Runner dependency ${healthCommonsPackageName} must not ship unexpected Health Commons generated web artifact ${relativePath}.`,
+  );
 }
 
 async function assertRunnerDependencyPathAbsent(input: {
@@ -865,6 +995,7 @@ function isRecordObject(value: unknown): value is Record<string, unknown> {
 
 function assertHealthCommonsRuntimeArtifacts(input: {
   biomarkerDesiredDirections: Record<string, unknown>;
+  goalIndex: HealthCommonsWebGoalIndex;
   protocolFamilyGraph: Record<string, unknown>;
   protocolIndex: Record<string, unknown>;
   protocolRunSpecs: Record<string, unknown>;
@@ -883,7 +1014,8 @@ function assertHealthCommonsRuntimeArtifacts(input: {
   if (
     input.protocolIndex.catalogHash !== input.protocolRunSpecs.catalogHash ||
     input.protocolIndex.catalogHash !== input.protocolFamilyGraph.catalogHash ||
-    input.protocolIndex.catalogHash !== input.biomarkerDesiredDirections.catalogHash
+    input.protocolIndex.catalogHash !== input.biomarkerDesiredDirections.catalogHash ||
+    input.protocolIndex.catalogHash !== input.goalIndex.catalogHash
   ) {
     throw new Error(
       "Runner Health Commons runtime artifacts have mismatched catalog hashes; rebuild deploy artifacts before deploying.",
@@ -909,6 +1041,7 @@ function assertHealthCommonsRuntimeArtifacts(input: {
   assertHealthCommonsProtocolFamilyGraphIncludesFinnishDrySauna(
     input.protocolFamilyGraph,
   );
+  assertHealthCommonsGoalIndexIncludesImproveDeepSleep(input.goalIndex);
 }
 
 function assertHealthCommonsBiomarkerDesiredDirectionsArtifact(
@@ -1334,6 +1467,32 @@ function assertHealthCommonsProtocolFamilyGraphIncludesFinnishDrySauna(
   }
 }
 
+function assertHealthCommonsGoalIndexIncludesImproveDeepSleep(
+  artifact: HealthCommonsWebGoalIndex,
+): void {
+  const goal = artifact.goals.find(
+    (entry) => entry.key === healthCommonsImproveDeepSleepGoal.key,
+  );
+
+  if (
+    !goal ||
+    goal.routeId !== healthCommonsImproveDeepSleepGoal.routeId ||
+    goal.startPrompt !== healthCommonsImproveDeepSleepGoal.startPrompt ||
+    !healthCommonsRevisionPattern.test(goal.revision.pageRevisionId) ||
+    !healthCommonsRevisionPattern.test(goal.revision.workflowSpecRevisionId)
+  ) {
+    throw new Error(
+      "Runner Health Commons goal index is stale or missing Improve My Deep Sleep; rebuild deploy artifacts before deploying.",
+    );
+  }
+
+  if (!hasCompletePublicHealthGoalCatalog(artifact.goals)) {
+    throw new Error(
+      "Runner Health Commons goal index is incomplete; expected at least 250 unique, valid compact goals across exactly the seven public categories; rebuild deploy artifacts before deploying.",
+    );
+  }
+}
+
 function findProtocolArtifactEntry(
   artifact: Record<string, unknown>,
   collectionKey: "protocols",
@@ -1535,6 +1694,7 @@ async function resolveHostedRunnerSourceRoots(input: {
     path.join(input.repoRoot, "tsconfig.base.json"),
     path.join(input.repoRoot, "Dockerfile.cloudflare-hosted-runner"),
     path.join(input.repoRoot, "Dockerfile.cloudflare-hosted-runner-base"),
+    path.join(input.repoRoot, "patches/codex-public-live.patch"),
     path.join(input.appDir, ".dockerignore"),
     path.join(input.appDir, "scripts"),
   ];

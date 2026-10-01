@@ -10,9 +10,6 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { generateHostedVaultShareId } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
-import {
-  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
-} from "./delivery-limits";
 import { parseHostedVaultShareRowProjectionScope } from "./row-projection-scope";
 
 export type HostedVaultShareGrantClient = PrismaClient | Prisma.TransactionClient;
@@ -42,17 +39,18 @@ export async function grantHostedVaultShareTx(input: {
     });
   }
 
-  // This is the sole production create/regrant owner. Serialize the exact
-  // grantor/scope cohort before checking both the tuple and its active count,
-  // and retain the transaction-scoped lock through the eventual write.
-  const cohortLockKey = JSON.stringify([
+  // This is the sole production create/regrant owner. Serialize only the exact
+  // tuple so concurrent regrants retain a deterministic generation lifecycle
+  // without making unrelated destinations wait on one another.
+  const tupleLockKey = JSON.stringify([
     input.grantorMemberId,
     projectionScopeKey,
+    input.destinationMemberId,
   ]);
   await input.tx.$executeRaw`
     SELECT pg_advisory_xact_lock(
-      hashtext('hosted_vault_share_grant_limit'),
-      hashtext(${cohortLockKey})
+      hashtext('hosted_vault_share_grant_tuple'),
+      hashtext(${tupleLockKey})
     )
   `;
 
@@ -74,30 +72,6 @@ export async function grantHostedVaultShareTx(input: {
     };
   }
 
-  // Enforce the maximum resulting cardinality. Refreshing an already-active
-  // tuple is cardinality-neutral, including when the cohort is exactly full.
-  if (existing?.status !== "granted") {
-    const activeGrantCount = await input.tx.hostedVaultShare.count({
-      where: {
-        grantorMemberId: input.grantorMemberId,
-        projectionScopeKey,
-        status: "granted",
-      },
-    });
-    if (
-      activeGrantCount
-      >= HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION
-    ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
-        httpStatus: 409,
-        message:
-          "You have reached the group health-sharing limit for this permission. Turn off this permission in another group before sharing it here.",
-        retryable: false,
-      });
-    }
-  }
-
   if (!existing) {
     try {
       const created = await input.tx.hostedVaultShare.create({
@@ -108,6 +82,7 @@ export async function grantHostedVaultShareTx(input: {
           grantorMemberId: input.grantorMemberId,
           projectionKind,
           projectionSnapshotCiphertext: null,
+          projectionSourceWorkspaceVersion: null,
           projectionScopeJson: toPrismaJsonValue(projectionScope),
           projectionScopeKey,
           revokedAt: null,
@@ -160,6 +135,7 @@ export async function grantHostedVaultShareTx(input: {
       grantedAt: input.now,
       projectionKind,
       projectionSnapshotCiphertext: null,
+      projectionSourceWorkspaceVersion: null,
       projectionScopeJson: toPrismaJsonValue(projectionScope),
       projectionScopeKey,
       revokedAt: null,
@@ -187,6 +163,7 @@ export async function revokeHostedVaultSharesTx(input: {
   const result = await input.tx.hostedVaultShare.updateMany({
     data: {
       projectionSnapshotCiphertext: null,
+      projectionSourceWorkspaceVersion: null,
       revokedAt: input.now,
       status: "revoked",
       updatedAt: input.now,

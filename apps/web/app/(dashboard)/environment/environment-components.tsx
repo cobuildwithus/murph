@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, type ReactNode, type SVGProps } from "react";
-import { cva } from "class-variance-authority";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -26,6 +25,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/src/components/ui/tooltip";
+import { MurphGradeBadge } from "@/src/components/murph-grade-badge";
 
 import {
   Dialog,
@@ -63,38 +63,6 @@ type EnvironmentContext = {
   outdoorAir: string;
 };
 
-type GradeTone = "olive" | "amber" | "terracotta" | "muted";
-
-export const gradeBadgeVariants = cva(
-  "inline-flex shrink-0 items-center justify-center rounded-xl font-serif font-semibold leading-none",
-  {
-    variants: {
-      tone: {
-        olive: "bg-primary/15 text-primary",
-        amber: "bg-[#d89a1c]/15 text-[#8a5a00]",
-        terracotta: "bg-destructive/10 text-destructive",
-        muted: "bg-muted text-muted-foreground",
-      },
-      size: {
-        xs: "size-7 rounded-lg text-sm",
-        sm: "size-10 text-xl",
-        lg: "size-20 text-5xl tracking-[-0.03em]",
-      },
-    },
-    defaultVariants: {
-      tone: "muted",
-      size: "sm",
-    },
-  },
-);
-
-function gradeTone(letter: CategoryGrade["letter"]): GradeTone {
-  if (letter === "A" || letter === "B") return "olive";
-  if (letter === "C") return "amber";
-  if (letter === "D" || letter === "E") return "terracotta";
-  return "muted";
-}
-
 export function GradeBadge({
   grade,
   size = "sm",
@@ -115,14 +83,7 @@ export function GradeBadge({
         : `Grade ${grade.letter}, ${grade.pct} percent${bonusSummary}`
       : "Grade not available";
 
-  return (
-    <span
-      className={gradeBadgeVariants({ tone: gradeTone(grade.letter), size })}
-    >
-      <span className="sr-only">{label}</span>
-      <span aria-hidden="true">{grade.letter ?? "–"}</span>
-    </span>
-  );
+  return <MurphGradeBadge label={label} letter={grade.letter} size={size} />;
 }
 
 function GradeDialog({
@@ -166,7 +127,7 @@ function GradeDialog({
                       grade.redFlags === 1
                         ? "An urgent issue caps"
                         : `${grade.redFlags} urgent issues cap`
-                    } this grade at E. ${grade.met} of ${
+                    } this grade at F. ${grade.met} of ${
                       grade.graded
                     } known conditions are within target.${
                       grade.capabilityBonus && grade.basePct !== undefined
@@ -420,7 +381,7 @@ export function ShareEnvironmentButton({
 
   if (disabled) {
     return (
-      <TooltipProvider delay={150}>
+      <TooltipProvider>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -539,8 +500,8 @@ export function EnvironmentHero({
               >
                 {grade.redFlags} urgent{" "}
                 {grade.redFlags === 1 ? "issue" : "issues"}{" "}
-                {grade.letter === "E"
-                  ? `${grade.redFlags === 1 ? "caps" : "cap"} the grade at E`
+                {grade.letter === "F"
+                  ? `${grade.redFlags === 1 ? "caps" : "cap"} the grade at F`
                   : `${grade.redFlags === 1 ? "needs" : "need"} attention now`}
               </button>
             ) : null}
@@ -1157,9 +1118,9 @@ export function NextChecksStrip({
     if (next) open(next);
   };
   return (
-    <section aria-label="What to check next">
+    <section aria-label="What to review next">
       <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-        What to check next
+        What to review next
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {shown.map((item) => (

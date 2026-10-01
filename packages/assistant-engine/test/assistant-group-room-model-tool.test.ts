@@ -86,7 +86,6 @@ describe('authenticated group room-model tool', () => {
 
     const missing = await executeRequest({
       args: { action: 'show' },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -99,13 +98,11 @@ describe('authenticated group room-model tool', () => {
         body: firstBody,
         expectedDigest: missingState.digest,
       },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
     const show = await executeRequest({
       args: { action: 'show' },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -119,7 +116,6 @@ describe('authenticated group room-model tool', () => {
           }
         ).digest,
       },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -144,7 +140,6 @@ describe('authenticated group room-model tool', () => {
 
     const showMissing = await executeRequest({
       args: { action: 'show' },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -169,7 +164,6 @@ describe('authenticated group room-model tool', () => {
           body,
           expectedDigest: missingDigest,
         },
-        available: true,
         scope: createUserActionScope('group'),
         vaultRoot,
       })
@@ -182,7 +176,6 @@ describe('authenticated group room-model tool', () => {
         body: '## People\n- Casey likes dry rulings.',
         expectedDigest: missingDigest,
       },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -194,7 +187,6 @@ describe('authenticated group room-model tool', () => {
         body: '## People\n- stale replacement',
         expectedDigest: missingDigest,
       },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -202,7 +194,6 @@ describe('authenticated group room-model tool', () => {
 
     const showCreated = await executeRequest({
       args: { action: 'show' },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -216,7 +207,6 @@ describe('authenticated group room-model tool', () => {
         action: 'delete',
         expectedDigest: createdState.digest,
       },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -226,7 +216,6 @@ describe('authenticated group room-model tool', () => {
 
     const recreatedShow = await executeRequest({
       args: { action: 'show' },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -241,25 +230,23 @@ describe('authenticated group room-model tool', () => {
         body: '## What to avoid\n- Keep the old nickname retired.',
         expectedDigest: recreatedMissingDigest,
       },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
     expect(recreated.rpcResult.success).toBe(true)
   })
 
-  it('fails closed without declared-tool and current group-input authority', async () => {
+  it('fails closed without current group-input authority', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-group-room-model-tool-denied-',
     )
     cleanupPaths.push(parentRoot)
     await initializeVault({ vaultRoot })
 
-    for (const [available, scope] of [
-      [false, createUserActionScope('group')],
-      [true, createUserActionScope('direct')],
-      [true, { ...createUserActionScope('group'), acceptedInputIds: [] }],
-      [true, null],
+    for (const scope of [
+      createUserActionScope('direct'),
+      { ...createUserActionScope('group'), acceptedInputIds: [] },
+      null,
     ] as const) {
       const result = await executeRequest({
         args: {
@@ -267,7 +254,6 @@ describe('authenticated group room-model tool', () => {
           body: '## Tips\n- should not persist',
           expectedDigest: 'a'.repeat(64),
         },
-        available,
         scope,
         vaultRoot,
       })
@@ -289,7 +275,6 @@ describe('authenticated group room-model tool', () => {
     await initializeVault({ vaultRoot })
 
     const show = await executeGroupRoomModelDynamicTool({
-      available: true,
       managedMaintenanceAuthorized: true,
       request: requireGroupRoomModelRequest({ action: 'show' }),
       userActionScope: null,
@@ -301,7 +286,6 @@ describe('authenticated group room-model tool', () => {
       }
     ).digest
     const write = await executeGroupRoomModelDynamicTool({
-      available: true,
       managedMaintenanceAuthorized: true,
       request: requireGroupRoomModelRequest({
         action: 'upsert',
@@ -317,7 +301,6 @@ describe('authenticated group room-model tool', () => {
       .resolves.toContain('Keep mock rulings dry.')
 
     const current = await executeGroupRoomModelDynamicTool({
-      available: true,
       managedMaintenanceAuthorized: true,
       request: requireGroupRoomModelRequest({ action: 'show' }),
       userActionScope: null,
@@ -336,7 +319,6 @@ describe('authenticated group room-model tool', () => {
       '## People\n- _Sender_: `456` likes dry rulings.',
     ]) {
       const identifyingWrite = await executeGroupRoomModelDynamicTool({
-        available: true,
         managedMaintenanceAuthorized: true,
         request: requireGroupRoomModelRequest({
           action: 'upsert',
@@ -384,7 +366,6 @@ describe('authenticated group room-model tool', () => {
     )
     const missing = await executeRequest({
       args: { action: 'show' },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -399,7 +380,6 @@ describe('authenticated group room-model tool', () => {
         body: '## Tips\n- prior valid tip',
         expectedDigest,
       },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -445,7 +425,6 @@ describe('authenticated group room-model tool', () => {
 
       const show = await executeRequest({
         args: { action: 'show' },
-        available: true,
         scope: createUserActionScope('group'),
         vaultRoot,
       })
@@ -455,7 +434,6 @@ describe('authenticated group room-model tool', () => {
           body: '## Tips\n- replacement',
           expectedDigest,
         },
-        available: true,
         scope: createUserActionScope('group'),
         vaultRoot,
       })
@@ -485,7 +463,6 @@ describe('authenticated group room-model tool', () => {
     await initializeVault({ vaultRoot })
     const missing = await executeRequest({
       args: { action: 'show' },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -500,7 +477,6 @@ describe('authenticated group room-model tool', () => {
         body: '## Tips\n- prior valid tip',
         expectedDigest,
       },
-      available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
@@ -523,7 +499,6 @@ describe('authenticated group room-model tool', () => {
       },
     ] as const) {
       const result = await executeGroupRoomModelDynamicTool({
-        available: true,
         readGroupRoomModelState: readFailure,
         request: requireGroupRoomModelRequest(args),
         userActionScope: createUserActionScope('group'),
@@ -559,7 +534,6 @@ function readRequest(args: unknown) {
 
 async function executeRequest(input: {
   args: unknown
-  available: boolean
   scope: AssistantHostedUserActionScope | null
   vaultRoot: string
 }) {
@@ -570,7 +544,6 @@ async function executeRequest(input: {
   return await executeMurphDynamicToolRequest({
     env: {},
     fetchImpl: fetch,
-    groupRoomModelAvailable: input.available,
     hostedToolContext: createHostedToolContext(input.scope),
     nextUsageOrdinal: () => 0,
     progressDelivery: null,

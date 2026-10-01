@@ -12,10 +12,6 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authPanelProps: null as Record<string, unknown> | null,
-  completeAuth: vi.fn(),
-  emailAuthProps: null as Record<string, unknown> | null,
-  logout: vi.fn(),
-  phoneAuthProps: null as Record<string, unknown> | null,
   refresh: vi.fn(),
 }));
 
@@ -26,15 +22,8 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: () => ({
-    logout: mocks.logout,
-  }),
-  useUser: () => ({ user: null }),
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
-  HostedAuthPanel(props: Record<string, unknown>) {
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () => ({
+  HostedFirstPartyAuthPanel(props: Record<string, unknown>) {
     mocks.authPanelProps = props;
     return createElement(
       "div",
@@ -44,41 +33,9 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
   },
 }));
 
-vi.mock("@/src/components/hosted-onboarding/hosted-email-auth-button", () => ({
-  HostedEmailAuthButton(props: Record<string, unknown>) {
-    mocks.emailAuthProps = props;
-    return createElement(
-      "div",
-      { "data-hosted-email-auth": "true" },
-      "Email auth",
-    );
-  },
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-invite-phone-auth", () => ({
-  HostedInvitePhoneAuth(props: Record<string, unknown>) {
-    mocks.phoneAuthProps = props;
-    return createElement(
-      "div",
-      { "data-hosted-phone-auth": "true" },
-      "Phone auth",
-    );
-  },
-}));
-
-vi.mock("@/src/components/hosted-onboarding/use-hosted-auth-completion", () => ({
-  useHostedAuthCompletion: () => ({
-    completeAuth: mocks.completeAuth,
-    completingMethod: null,
-    errorMessage: null,
-  }),
-}));
-
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.authPanelProps = null;
-  mocks.emailAuthProps = null;
-  mocks.phoneAuthProps = null;
 });
 
 test("open invites reuse the shared auth panel with every supported method", async () => {
@@ -99,8 +56,6 @@ test("open invites reuse the shared auth panel with every supported method", asy
     requireLaunchConsentOnCompletion: true,
     size: "compact",
   });
-  expect(mocks.emailAuthProps).toBeNull();
-  expect(mocks.phoneAuthProps).toBeNull();
 
   const onCompleted = mocks.authPanelProps?.onCompleted;
   if (typeof onCompleted !== "function") {
@@ -119,7 +74,7 @@ test("open invites reuse the shared auth panel with every supported method", asy
   await cleanup();
 });
 
-test("targeted phone invites keep their locked phone verification", async () => {
+test("targeted phone invites retain their hint and server-bound first-party verification", async () => {
   const { cleanup, container } = await renderClientComponent(
     createElement(JoinInvitePhoneVerificationIsland, {
       inviteCode: "invite-code",
@@ -133,16 +88,8 @@ test("targeted phone invites keep their locked phone verification", async () => 
     { requireButton: false },
   );
 
-  expect(container.querySelector('[data-hosted-phone-auth="true"]')).not.toBeNull();
-  expect(mocks.phoneAuthProps).toMatchObject({
-    inviteCode: "invite-code",
-    phoneAuthTarget: {
-      kind: "saved",
-      phoneHint: "••• 1212",
-    },
-    phoneHint: "••• 1212",
-  });
-  expect(mocks.authPanelProps).toBeNull();
+  expect(container.textContent).toContain("ending in 1212");
+  expect(mocks.authPanelProps).toMatchObject({ inviteCode: "invite-code", methods: ["phone"] });
 
   await cleanup();
 });

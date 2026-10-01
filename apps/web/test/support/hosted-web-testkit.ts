@@ -1,3 +1,5 @@
+export { createHostedRuntimeMigrationRehearsalForTest } from "./hosted-runtime-migration-testkit";
+export { initializeEmptyPostgresRuntimeForTest, readPostgresRuntimeIdentityForTest, startStuckPostgresRuntimeForTest, agePostgresRuntimeForTest } from "./hosted-runtime-owner-testkit";
 export {
   HostedBillingBrowserDriver,
   type HostedBillingBrowserActor,
@@ -9,6 +11,7 @@ export {
 export {
   issueHostedWebInviteForTest,
   readHostedBillingProjectionForTest,
+  readHostedBillingUsageGateForTest,
   readHostedFamilyProjectionForTest,
   seedHostedBillingMemberForTest,
   waitForHostedBillingProjectionForTest,
@@ -71,9 +74,12 @@ import type { HostedAssistantProvider } from "@murphai/hosted-execution/assistan
 import {
   parseHostedExecutionWake,
   parseHostedRuntimeLatencyTraceEvent,
+  parseHostedRuntimeUsageRecordRequest,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRuntimeLatencyPhaseBreakdown,
+import {
+  HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES,
+  type HostedRuntimeUsageRecordRequest,
+  type HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedVaultShareProjectionMode,
@@ -85,6 +91,27 @@ import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/subject
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
 import type { HostedBillingStatusForTest } from "./hosted-billing-live-testkit";
+
+// Cross-app snapshot diagnostics exercise the actual route, including callback auth.
+export async function postHostedDeviceSyncSnapshotForTest(request: Request): Promise<Response> {
+  const routeModuleSpecifier = new URL(
+    "../../app/api/internal/device-sync/runtime/snapshot/route.ts", import.meta.url,
+  ).href;
+  const { POST } = await import(routeModuleSpecifier);
+  return POST(request);
+}
+
+// The same pre-parse body limit as usage ingestion, without callback auth or DB
+// effects. Keep cross-app contract tests on this existing public testkit seam.
+export async function readHostedUsageRecordRequestForTest(
+  request: Request,
+): Promise<HostedRuntimeUsageRecordRequest> {
+  const { readRawBodyBuffer } = await import("../../src/lib/http");
+  const bytes = await readRawBodyBuffer(request, {
+    limitBytes: HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES,
+  });
+  return parseHostedRuntimeUsageRecordRequest(JSON.parse(bytes.toString("utf8")));
+}
 
 const hostedRuntimeLogTestMigrationTable = "_murph_e2e_runtime_log_migration";
 const hostedRuntimeLogTestMigrationsRoot = new URL(
@@ -110,6 +137,10 @@ const hostedTemporalClientModuleSpecifier = new URL(
 ).href;
 const hostedSignalRuntimeModuleSpecifier = new URL(
   "../../src/lib/hosted-orchestration/signal-runtime.ts",
+  import.meta.url,
+).href;
+const hostedActionApprovalModuleSpecifier = new URL(
+  "../../src/lib/action-approvals.ts",
   import.meta.url,
 ).href;
 const hostedAssistantModelPreferenceModuleSpecifier = new URL(
@@ -138,6 +169,10 @@ const hostedVaultShareProjectionStoreModuleSpecifier = new URL(
 ).href;
 const hostedComputerUseServiceModuleSpecifier = new URL(
   "../../src/lib/computer-use/service.ts",
+  import.meta.url,
+).href;
+const hostedComputerUseCryptoModuleSpecifier = new URL(
+  "../../src/lib/computer-use/crypto.ts",
   import.meta.url,
 ).href;
 const hostedComputerUseStoreModuleSpecifier = new URL(
@@ -204,19 +239,22 @@ interface HostedVaultShareGrantStoreForTestModule {
 }
 
 interface HostedVaultShareProjectionStoreForTestModule {
-  findActiveHostedVaultShares(input: {
+  findActiveHostedVaultSharePage(input: {
     grantorMemberId: string;
     prisma: HostedTestPrismaClient;
     projectionMode?: HostedVaultShareProjectionMode;
     projectionScope: HostedVaultShareProjectionScope;
-  }): Promise<Array<{
-    destinationMemberId: string;
-    grantorMemberId: string;
-    id: string;
-    projectionKind: string;
-    projectionScope: HostedVaultShareProjectionScope;
-    projectionScopeKey: string;
-  }>>;
+    sourceWorkspaceVersion: string;
+  }): Promise<{
+    shares: Array<{
+      destinationMemberId: string;
+      grantorMemberId: string;
+      id: string;
+      projectionKind: string;
+      projectionScope: HostedVaultShareProjectionScope;
+      projectionScopeKey: string;
+    }>;
+  }>;
   replaceHostedVaultShareProjectionSnapshot(input: {
     prisma: HostedTestPrismaClient;
     projectionMode?: HostedVaultShareProjectionMode;
@@ -271,8 +309,14 @@ interface HostedTestPrismaFactoryClient {
     }>;
     updateMany(args: unknown): Promise<{ count: number }>;
   };
+  hostedMailboxLaneCounter: {
+    findUnique(args: unknown): Promise<{
+      consumedSeq: bigint;
+    } | null>;
+  };
   hostedMember: {
     create(args: unknown): Promise<{ id: string }>;
+    deleteMany(args: { where: { id: { in: string[] } } }): Promise<{ count: number }>;
     update(args: unknown): Promise<{ id: string }>;
   };
 }
@@ -290,7 +334,10 @@ interface HostedLinqWorkspaceIsolationForTestPrismaClient {
     } | null>;
   };
   hostedThreadContainer: {
-    findUnique(args: unknown): Promise<{ memberId: string } | null>;
+    findUnique(args: unknown): Promise<{
+      memberId: string;
+      monthlyUsageLimitUsdMicros: bigint;
+    } | null>;
   };
   hostedWorkspace: {
     findUnique(args: unknown): Promise<{ version: bigint } | null>;
@@ -518,6 +565,16 @@ interface HostedComputerUseServiceModule {
   }) => HostedComputerUseServiceForTest;
 }
 
+interface HostedComputerUseCryptoModule {
+  encryptComputerRunSecret(input: {
+    field: "kernel-live-view-url";
+    memberId: string;
+    prisma: HostedTestPrismaClient;
+    runId: string;
+    value: string;
+  }): Promise<string | null>;
+}
+
 export interface HostedComputerRunForTest {
   awaitingReason: string | null;
   checkpointContext: {
@@ -680,6 +737,11 @@ interface HostedRuntimeSignalModule {
     client?: HostedRuntimeTemporalSignalClient | null;
     environment?: NodeJS.ProcessEnv;
     expectedUserId?: string | null;
+    knownCheckpoint?: {
+      lane: "system";
+      laneSeq: string;
+      userId: string;
+    };
     mailboxItemId: string;
     prisma?: HostedTestPrismaClient;
   }): Promise<{
@@ -713,6 +775,44 @@ interface HostedRuntimeSignalModule {
     signalAccepted: true;
     workflowId: string;
   }>;
+}
+
+interface HostedActionApprovalIdentityForTest {
+  bindingHash: string;
+  expiresAt: Date;
+  tokenHash: string;
+}
+
+interface HostedActionApprovalModuleForTest {
+  decideHostedActionApprovalTx(input: {
+    approval: HostedActionApprovalIdentityForTest;
+    challenge: {
+      credentialWrite: { memberId: string; expectedEncrypted: null; nextEncrypted: null };
+      passkeys: [];
+      bindingHash: string;
+      expiresAt: Date;
+      kind: "assistant.action.approve";
+      memberId: string;
+      tokenHash: string;
+    };
+    decision: "approved";
+    memberId: string;
+    now: Date;
+    tx: unknown;
+  }): Promise<{
+    runtimeResume: {
+      lane: "system";
+      laneSeq: string;
+      mailboxItemId: string;
+      userId: string;
+    };
+  }>;
+  requirePendingHostedActionApproval(input: {
+    approvalId: string;
+    memberId: string;
+    now: Date;
+    prisma: unknown;
+  }): Promise<HostedActionApprovalIdentityForTest>;
 }
 
 interface HostedAssistantModelPreferenceModule {
@@ -941,6 +1041,27 @@ export async function readHostedMailboxItemForTest(input: {
       lane: item.lane,
       laneSeq: item.laneSeq.toString(),
     };
+  });
+}
+
+export async function readHostedMailboxConsumedSeqForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  lane: "conversation" | "system";
+  userId: string;
+}): Promise<{ consumedSeq: string }> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const counter = await deps.prisma.hostedMailboxLaneCounter.findUnique({
+      select: {
+        consumedSeq: true,
+      },
+      where: {
+        userId_lane: {
+          lane: input.lane,
+          userId: input.userId,
+        },
+      },
+    });
+    return { consumedSeq: counter?.consumedSeq.toString() ?? "0" };
   });
 }
 
@@ -1457,12 +1578,13 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
         });
       }
       for (const projectionScope of input.projectionScopes) {
-        const shares = await projectionStore.findActiveHostedVaultShares({
+        const page = await projectionStore.findActiveHostedVaultSharePage({
           grantorMemberId: participant.memberId,
           prisma: deps.prisma,
           projectionScope,
+          sourceWorkspaceVersion: sourceWorkspace.version.toString(),
         });
-        const share = shares.find((candidate) =>
+        const share = page.shares.find((candidate) =>
           candidate.destinationMemberId === input.runtimeMemberId
         );
         if (!share) {
@@ -1508,6 +1630,7 @@ export async function readHostedVaultShareProjectionCiphertextForTest(input: {
 }
 
 export async function seedHostedWorkspaceWakeForTest(input: {
+  defaultProcessingWake?: boolean;
   environment?: NodeJS.ProcessEnv;
   userId: string;
   wakeAt: Date | string;
@@ -1518,14 +1641,23 @@ export async function seedHostedWorkspaceWakeForTest(input: {
       data: {
         nextWakeAt: new Date(input.wakeAt),
         nextWakeReason: input.wakeReason,
+        ...(input.defaultProcessingWake
+          ? {
+              nextDefaultProcessingWakeAt: new Date(input.wakeAt),
+              nextDefaultProcessingWakeReason: input.wakeReason,
+            }
+          : {}),
       },
       where: {
+        ...(input.defaultProcessingWake
+          ? { systemMailboxProgressGeneration: { not: null } }
+          : {}),
         userId: input.userId,
       },
     });
     if (result.count !== 1) {
       throw new Error(
-        "Hosted-local workspace wake seed requires exactly one existing workspace.",
+        "Hosted-local workspace wake seed requires exactly one compatible existing workspace.",
       );
     }
   });
@@ -1586,24 +1718,52 @@ export async function readLatestHostedSensitiveActionChallengeForTest(input: {
   );
 }
 
-export async function approveHostedSensitiveActionChallengeForTest(input: {
+export async function approveHostedActionAndSignalRuntimeForTest(input: {
+  approvalId: string;
   environment?: NodeJS.ProcessEnv;
+  memberId: string;
   tokenHash: string;
-}): Promise<HostedSensitiveActionChallengeForTest> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) => {
-    const decidedAt = new Date();
-    return await deps.prisma.hostedSensitiveActionChallenge.update({
-      data: {
-        approvalStatus: "approved",
-        consumedAt: null,
-        consumedBy: null,
-        decidedAt,
-        expiresAt: new Date(decidedAt.getTime() + 15 * 60 * 1_000),
-      },
-      where: {
-        tokenHash: input.tokenHash,
-      },
+}): Promise<{ signalAccepted: true }> {
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const now = new Date();
+    const actionApproval = await loadHostedActionApprovalModuleForTest();
+    const approval = await actionApproval.requirePendingHostedActionApproval({
+      approvalId: input.approvalId,
+      memberId: input.memberId,
+      now,
+      prisma: deps.prisma,
     });
+    const result = await deps.prisma.$transaction(async (tx) =>
+      await actionApproval.decideHostedActionApprovalTx({
+        approval,
+        challenge: {
+          credentialWrite: { memberId: input.memberId, expectedEncrypted: null, nextEncrypted: null },
+          passkeys: [],
+          bindingHash: approval.bindingHash,
+          expiresAt: approval.expiresAt,
+          kind: "assistant.action.approve",
+          memberId: input.memberId,
+          tokenHash: input.tokenHash,
+        },
+        decision: "approved",
+        memberId: input.memberId,
+        now,
+        tx,
+      }));
+    const signalModule = await loadHostedRuntimeSignalModule();
+    const signal = await signalModule.signalHostedMailboxAppendRuntime({
+      client: deps.temporalSignalClient,
+      environment: deps.environment,
+      expectedUserId: input.memberId,
+      knownCheckpoint: {
+        lane: result.runtimeResume.lane,
+        laneSeq: result.runtimeResume.laneSeq,
+        userId: result.runtimeResume.userId,
+      },
+      mailboxItemId: result.runtimeResume.mailboxItemId,
+      prisma: deps.prisma,
+    });
+    return { signalAccepted: signal.signalAccepted };
   });
 }
 
@@ -1721,15 +1881,20 @@ export async function seedHostedAiUsageLimitPeriodForTest(input: {
   periodStart: Date;
   remainingUsdMicros?: bigint;
 }): Promise<HostedAiUsagePeriodForTest> {
-  const limitUsdMicros = 10_000_000n;
-  const remainingUsdMicros = input.remainingUsdMicros ?? 0n;
-  if (remainingUsdMicros < 0n || remainingUsdMicros > limitUsdMicros) {
-    throw new RangeError("Hosted AI usage test balance must be within the period limit.");
-  }
-  const spentUsdMicros = limitUsdMicros - remainingUsdMicros;
-  const blockedAt = remainingUsdMicros === 0n ? input.periodStart : null;
-  return withHostedWebTestkitDeps(input.environment, async (deps) =>
-    await deps.prisma.hostedAiUsagePeriod.upsert({
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const threadContainer = await deps.prisma.hostedThreadContainer.findUnique({
+      select: { monthlyUsageLimitUsdMicros: true },
+      where: { memberId: input.memberId },
+    });
+    const limitUsdMicros =
+      threadContainer?.monthlyUsageLimitUsdMicros ?? 10_000_000n;
+    const remainingUsdMicros = input.remainingUsdMicros ?? 0n;
+    if (remainingUsdMicros < 0n || remainingUsdMicros > limitUsdMicros) {
+      throw new RangeError("Hosted AI usage test balance must be within the period limit.");
+    }
+    const spentUsdMicros = limitUsdMicros - remainingUsdMicros;
+    const blockedAt = remainingUsdMicros === 0n ? input.periodStart : null;
+    return await deps.prisma.hostedAiUsagePeriod.upsert({
       create: {
         billingPlanCode: "launch_monthly",
         blockedAt,
@@ -1754,8 +1919,8 @@ export async function seedHostedAiUsageLimitPeriodForTest(input: {
           periodStart: input.periodStart,
         },
       },
-    })
-  );
+    });
+  });
 }
 
 export async function readHostedAiUsageLimitPeriodForTest(input: {
@@ -1835,14 +2000,29 @@ export async function seedHostedComputerRunForTest(input: {
   environment?: NodeJS.ProcessEnv;
   expiresAt?: Date;
   kernelSessionId?: string;
+  liveViewUrl: string;
   memberId: string;
   runId: string;
 }): Promise<HostedComputerRunForTest> {
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const cryptoModule = await import(
+      hostedComputerUseCryptoModuleSpecifier
+    ) as HostedComputerUseCryptoModule;
+    const kernelLiveViewUrlEncrypted = await cryptoModule.encryptComputerRunSecret({
+      field: "kernel-live-view-url",
+      memberId: input.memberId,
+      prisma: deps.prisma,
+      runId: input.runId,
+      value: input.liveViewUrl,
+    });
+    if (!kernelLiveViewUrlEncrypted) {
+      throw new Error("Hosted computer test run live-view encryption failed.");
+    }
     const run = await deps.prisma.hostedComputerRun.create({
       data: {
         expiresAt: input.expiresAt ?? new Date(Date.now() + 60 * 60 * 1_000),
         id: input.runId,
+        kernelLiveViewUrlEncrypted,
         kernelProfileName: `hosted-local-${input.runId}`,
         kernelSessionId: input.kernelSessionId ?? `hosted-local-${input.runId}`,
         memberId: input.memberId,
@@ -2126,6 +2306,7 @@ export async function signalHostedManualRunRuntimeForTest(input: {
 export async function signalHostedMailboxAppendRuntimeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
+  knownCheckpoint?: Parameters<HostedRuntimeSignalModule["signalHostedMailboxAppendRuntime"]>[0]["knownCheckpoint"];
   mailboxItemId: string;
 }): Promise<{
   signalAccepted: true;
@@ -2137,6 +2318,7 @@ export async function signalHostedMailboxAppendRuntimeForTest(input: {
       client: deps.temporalSignalClient,
       environment: deps.environment,
       expectedUserId: input.expectedUserId ?? null,
+      knownCheckpoint: input.knownCheckpoint,
       mailboxItemId: input.mailboxItemId,
       prisma: deps.prisma,
     });
@@ -2356,6 +2538,14 @@ async function loadHostedTemporalClientModule(): Promise<HostedTemporalClientMod
 
 async function loadHostedRuntimeSignalModule(): Promise<HostedRuntimeSignalModule> {
   return await import(hostedSignalRuntimeModuleSpecifier) as HostedRuntimeSignalModule;
+}
+
+async function loadHostedActionApprovalModuleForTest(): Promise<
+  HostedActionApprovalModuleForTest
+> {
+  return await import(
+    hostedActionApprovalModuleSpecifier
+  ) as HostedActionApprovalModuleForTest;
 }
 
 async function loadHostedAssistantModelPreferenceModule(): Promise<

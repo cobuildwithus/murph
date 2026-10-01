@@ -223,10 +223,12 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
   });
 
   it("persists the exact validated heartbeat update shape in durable state", async () => {
+    const nextReconcileAt = new Date("2026-03-25T06:00:00.000Z");
     const { store, updateConnection } = createHeartbeatStore({
       lastErrorCode: "OLD_CODE",
       lastErrorMessage: "Old failure",
       lastSyncErrorAt: new Date("2026-03-25T01:00:00.000Z"),
+      nextReconcileAt,
     });
 
     const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
@@ -241,6 +243,7 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
       lastErrorMessage: "New failure",
       lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
       lastSyncErrorAt: "2026-03-25T01:00:00.000Z",
+      nextReconcileAt: nextReconcileAt.toISOString(),
     });
     expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -248,6 +251,9 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
         lastSyncCompletedAt: expect.any(Date),
       }),
     }));
+    expect(updateConnection.mock.calls[0]?.[0].data).not.toHaveProperty(
+      "nextReconcileAt",
+    );
   });
 
   it("decrypts heartbeat connection secrets through the mutation transaction client", async () => {

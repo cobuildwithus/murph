@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-02",
+  "order": 200,
+  "item": {
+    "id": "connected-health-sync-queues-recover",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Connected health sync queues recover",
+    "summary": "Queued connected-health updates now resume when an account-channel refresh is waiting ahead of them.",
+    "details": "Both updates keep their durable ordering and retry behavior, while recovery no longer depends on sending Murph another message.",
+    "relevanceTags": ["wearables", "reliability"],
+    "sourcePullRequests": [2757]
+  }
+}

@@ -1,9 +1,3 @@
-import type {
-  HostedWorkspaceInvocationProcessingMode,
-} from "@murphai/hosted-execution/runtime-control";
-
-export type RunnerRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
-
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
 export interface DurableObjectSqlCursorLike<
@@ -31,7 +25,7 @@ export interface DurableObjectStorageLike {
   deleteAlarm?(): Promise<void>;
   get<T>(key: string): Promise<T | undefined>;
   getAlarm(): Promise<number | null>;
-  list?<T>(options?: { prefix?: string }): Promise<Map<string, T>>;
+  list?<T>(options?: { prefix?: string; limit?: number; startAfter?: string }): Promise<Map<string, T>>;
   put<T>(key: string, value: T): Promise<void>;
   setAlarm(scheduledTime: number | Date): Promise<void>;
   sql?: DurableObjectSqlStorageLike;
@@ -39,28 +33,7 @@ export interface DurableObjectStorageLike {
 }
 
 export interface DurableObjectStateLike {
+  id?: { toString(): string };
   storage: DurableObjectStorageLike;
   waitUntil(promise: Promise<unknown>): void;
-}
-
-export type RunnerWriteFenceKind = "runtime";
-
-export interface RunnerWriteFenceRecord {
-  attemptId: string;
-  generation: number;
-  kind: RunnerWriteFenceKind;
-  processingMode: RunnerRuntimeProcessingMode;
-  runnerContainerName: string | null;
-  startedAt: string;
-  workspaceVersion: string | null;
-}
-
-export interface RunnerStateRecord {
-  writeFence: RunnerWriteFenceRecord | null;
-  failureCount: number;
-  lastErrorAt: string | null;
-  lastErrorCode: string | null;
-  lastInvocationAt: string | null;
-  pendingRunnerContainerName: string | null;
-  userId: string;
 }

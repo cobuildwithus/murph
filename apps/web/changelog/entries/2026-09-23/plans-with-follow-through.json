@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-23",
+  "order": 100,
+  "item": {
+    "id": "plans-with-follow-through",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Plans with follow-through",
+    "summary": "When a private conversation leads to a repeated-action plan, Murph offers practical reminders and a check-in to help you follow through.",
+    "details": "You can accept, adjust, or decline the support. Murph reuses timing you have already shared and asks about timing when needed before scheduling.",
+    "relevanceTags": [
+      "plans",
+      "reminders"
+    ],
+    "sourcePullRequests": [3683]
+  }
+}

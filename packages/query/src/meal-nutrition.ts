@@ -1,3 +1,4 @@
+import { resolveMealNutritionGoals, type MealNutritionGoalContext } from "./meal-nutrition-goals.ts";
 import {
   extractIsoDatePrefix,
   MEAL_MICRONUTRIENT_DEFINITIONS,
@@ -6,10 +7,11 @@ import {
 import type { CanonicalEntity } from "./canonical-entities.ts";
 
 import {
+  createVaultReadModel,
   listEntities,
-  readVault,
   type VaultReadModel,
-} from "./model.ts";
+} from "./read-model.ts";
+import { readCanonicalEntityFamilySource } from "./vault-source.ts";
 
 export interface MealNutritionMetricTotal {
   total: number | null;
@@ -31,11 +33,13 @@ export interface MealNutritionDayTotal {
 }
 
 export interface MealNutritionTotalsOptions {
+  resolveGoals?: boolean;
   from?: string;
   to?: string;
 }
 
 export interface MealNutritionTotalsResult {
+  goalContext?: MealNutritionGoalContext;
   from: string | null;
   to: string | null;
   mealCount: number;
@@ -472,14 +476,30 @@ export async function readMealNutritionTotals(
   vaultRoot: string,
   options: MealNutritionTotalsOptions = {},
 ): Promise<MealNutritionTotalsResult> {
-  const readModel = await readVault(vaultRoot);
-  return summarizeMealNutritionTotals(readModel, options);
+  if (options.resolveGoals && (!options.from || options.from !== options.to)) {
+    throw new Error("Goal resolution requires identical explicit from and to dates.");
+  }
+  const [readModel, goals] = await Promise.all([
+    readMealNutritionModel(vaultRoot),
+    options.resolveGoals ? readCanonicalEntityFamilySource(vaultRoot, "goal") : Promise.resolve(null),
+  ]);
+  return {
+    ...summarizeMealNutritionTotals(readModel, options),
+    ...(goals && options.from ? { goalContext: resolveMealNutritionGoals(goals, options.from) } : {}),
+  };
 }
 
 export async function readMealNutrientTotals(
   vaultRoot: string,
   options: MealNutritionTotalsOptions = {},
 ): Promise<MealNutrientTotalsResult> {
-  const readModel = await readVault(vaultRoot);
+  const readModel = await readMealNutritionModel(vaultRoot);
   return summarizeMealNutrientTotals(readModel, options);
+}
+
+async function readMealNutritionModel(vaultRoot: string): Promise<VaultReadModel> {
+  return createVaultReadModel({
+    vaultRoot,
+    entities: await readCanonicalEntityFamilySource(vaultRoot, "event"),
+  });
 }

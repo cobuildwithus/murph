@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { access, chmod, mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertPreparedDeployArtifacts,
   assertPreparedRunnerBundle,
+  resolvePublicRunnerReleaseSha,
   runnerBundleManifestFileName,
   writeRunnerBundleManifest,
   type RunnerBundleManifest,
@@ -21,8 +23,13 @@ import {
   resolveHostedRunnerBuildPackageNames,
   resolveHostedRunnerWorkspacePackageNames,
 } from "../scripts/runner-bundle-contract.js";
+import {
+  PUBLIC_HEALTH_GOAL_CATEGORIES,
+  PUBLIC_HEALTH_GOAL_MINIMUM_COUNT,
+} from "../src/public-health-goal-catalog-contract.js";
 
 const healthCommonsPackageName = "@murphai/health-commons";
+const testPublicReleaseSha = "0123456789abcdef0123456789abcdef01234567";
 const finnishDrySaunaProtocol = {
   attribution: {
     ownerType: "murph",
@@ -111,6 +118,51 @@ const extraProtocolSummary = {
   slug: "protocols/extra/extra-protocol",
   title: "Extra Protocol",
 } as const;
+const improveDeepSleepGoalSummary = {
+  aliases: ["get more deep sleep"],
+  bundlePath: "bundles/goal_template/improve-deep-sleep.json",
+  category: "sleep",
+  goalPhrase: "improve my deep sleep",
+  key: "goal_template:improve-deep-sleep",
+  outcomeKind: "biomarker",
+  pagePath: "pages/goals/improve-deep-sleep.json",
+  parentGoalKey: null,
+  quality: "usable",
+  revision: {
+    pageRevisionId: `sha256:${"1".repeat(64)}`,
+    recipeHash: null,
+    runSpecRevisionId: null,
+    workflowSpecRevisionId: `sha256:${"2".repeat(64)}`,
+  },
+  routeId: "improve-deep-sleep",
+  safetyTier: "moderate",
+  slug: "improve-deep-sleep",
+  startPrompt: "Hey Murph, help me improve my deep sleep.",
+  status: "field-testing",
+  sources: [
+    {
+      label: "Healthy sleep habits",
+      url: "https://example.com/healthy-sleep-habits",
+    },
+    {
+      label: "Sleep stages overview",
+      url: "https://example.org/sleep-stages",
+    },
+  ],
+  successSignals: [
+    {
+      id: "restorative-sleep",
+      kind: "symptom",
+      label: "Wake feeling more restored",
+    },
+  ],
+  summary: "Build the conditions that support restorative deep sleep.",
+  title: "Improve My Deep Sleep",
+  workflow: {
+    kind: "habit_plan",
+    ownerSkillIds: ["sleep-improvement"],
+  },
+} as const;
 const requiredHostedCryptoWorkerVars = {
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
@@ -123,10 +175,77 @@ const requiredHostedCryptoWorkerVars = {
 } as const;
 
 describe("deploy artifact validation", () => {
+  it("keeps the public base release when private composition changes the checkout", async () => {
+    const repoRoot = await mkdtemp(path.join(os.tmpdir(), "murph-runner-release-"));
+    try {
+      runGit(repoRoot, ["init", "--quiet"]);
+      await writeFile(path.join(repoRoot, "release-source.txt"), "committed\n", "utf8");
+      runGit(repoRoot, ["add", "release-source.txt"]);
+      runGit(repoRoot, [
+        "-c",
+        "user.name=Murph Test",
+        "-c",
+        "user.email=murph-test@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--no-gpg-sign",
+        "--no-verify",
+        "--quiet",
+        "-m",
+        "test release",
+      ]);
+
+      const releaseSha = resolvePublicRunnerReleaseSha(repoRoot);
+      expect(releaseSha).toMatch(/^[a-f0-9]{40}$/u);
+
+      await writeFile(path.join(repoRoot, "release-source.txt"), "dirty\n", "utf8");
+      expect(resolvePublicRunnerReleaseSha(repoRoot)).toBe(releaseSha);
+    } finally {
+      await rm(repoRoot, { force: true, recursive: true });
+    }
+  });
+
   it("accepts a complete freshly assembled deploy artifact set", async () => {
     const fixture = await createDeployArtifactFixture();
 
+    expect(fixture.manifest).toMatchObject({
+      releaseSha: testPublicReleaseSha,
+      schemaVersion: 3,
+    });
     await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
+  });
+
+  it("rejects a runner bundle whose release provenance is not a public commit SHA", async () => {
+    const fixture = await createDeployArtifactFixture();
+    await writeFile(
+      path.join(fixture.runnerBundleDir, runnerBundleManifestFileName),
+      `${JSON.stringify({
+        ...fixture.manifest,
+        releaseSha: "cloudflare-version-uuid",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(assertPreparedRunnerBundle(fixture)).rejects.toThrow(
+      "Runner bundle manifest is incomplete or invalid.",
+    );
+  });
+
+  it("rejects a runner bundle without public base release provenance", async () => {
+    const fixture = await createDeployArtifactFixture();
+    await writeFile(
+      path.join(fixture.runnerBundleDir, runnerBundleManifestFileName),
+      `${JSON.stringify({
+        ...fixture.manifest,
+        releaseSha: null,
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(assertPreparedRunnerBundle(fixture)).rejects.toThrow(
+      "Runner bundle manifest is incomplete or invalid.",
+    );
   });
 
   it("accepts runner dependencies installed through pnpm's virtual store", async () => {
@@ -279,6 +398,265 @@ describe("deploy artifact validation", () => {
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       "Missing Health Commons protocol run specs.",
+    );
+  });
+
+  it("rejects a runner bundle missing the Health Commons goal index", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await rm(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "web",
+        "browse",
+        "goals.json",
+      ),
+    );
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Missing Health Commons goal index.",
+    );
+  });
+
+  it("rejects a runner bundle with an invalid Health Commons goal index schema", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "web",
+        "browse",
+        "goals.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().goalIndex,
+        schemaVersion: "murph.commons.web.goal-index.v0",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons goal index is invalid.",
+    );
+  });
+
+  it("rejects a runner bundle with an invalid Health Commons goal revision", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "web",
+        "browse",
+        "goals.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().goalIndex,
+        goals: [
+          {
+            ...improveDeepSleepGoalSummary,
+            revision: {
+              ...improveDeepSleepGoalSummary.revision,
+              pageRevisionId: "sha256:stale",
+            },
+          },
+        ],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons goal index is invalid.",
+    );
+  });
+
+  it("rejects a runner bundle with a mismatched Health Commons goal index catalog hash", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "web",
+        "browse",
+        "goals.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().goalIndex,
+        catalogHash: "sha256:other",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons runtime artifacts have mismatched catalog hashes",
+    );
+  });
+
+  it("rejects a stale Improve My Deep Sleep goal prompt", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "web",
+        "browse",
+        "goals.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().goalIndex,
+        goals: [
+          {
+            ...improveDeepSleepGoalSummary,
+            goalPhrase: "sleep more deeply",
+            startPrompt: "Hey Murph, help me sleep more deeply.",
+          },
+        ],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons goal index is stale or missing Improve My Deep Sleep",
+    );
+  });
+
+  it("rejects a runner bundle with fewer than 250 public goals", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "web",
+        "browse",
+        "goals.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().goalIndex,
+        goals: createPublicGoalSummaries().slice(
+          0,
+          PUBLIC_HEALTH_GOAL_MINIMUM_COUNT - 1,
+        ),
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons goal index is incomplete",
+    );
+  });
+
+  it("rejects a runner bundle outside the exact seven public goal categories", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "web",
+        "browse",
+        "goals.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().goalIndex,
+        goals: createPublicGoalSummaries().map((goal) => ({
+          ...goal,
+          category: "sleep",
+        })),
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons goal index is incomplete",
+    );
+  });
+
+  it.each(["key", "routeId"] as const)(
+    "rejects a runner bundle with duplicate public goal %s values",
+    async (identityField) => {
+      const fixture = await createDeployArtifactFixture();
+      const goals = createPublicGoalSummaries().map(
+        (goal): Record<string, unknown> => ({ ...goal }),
+      );
+      goals[1] = {
+        ...goals[1],
+        [identityField]: goals[0]?.[identityField],
+      };
+
+      await writeHealthCommonsGoalIndexFixture(fixture, goals);
+
+      await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+        identityField === "routeId"
+          ? "Runner Health Commons goal index is invalid."
+          : "Runner Health Commons goal index is incomplete",
+      );
+    },
+  );
+
+  it("rejects a runner bundle with a blank required compact goal field", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const goals = createPublicGoalSummaries().map(
+      (goal): Record<string, unknown> => ({ ...goal }),
+    );
+    goals[1] = { ...goals[1], title: "   " };
+
+    await writeHealthCommonsGoalIndexFixture(fixture, goals);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons goal index is incomplete",
+    );
+  });
+
+  it("rejects a runner bundle with a non-exact compact goal revision", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const goals = createPublicGoalSummaries().map(
+      (goal): Record<string, unknown> => ({ ...goal }),
+    );
+    goals[1] = {
+      ...goals[1],
+      revision: {
+        ...(goals[1]?.revision as Record<string, unknown>),
+        pageRevisionId: "sha256:short",
+      },
+    };
+
+    await writeHealthCommonsGoalIndexFixture(fixture, goals);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons goal index is invalid.",
     );
   });
 
@@ -665,31 +1043,51 @@ describe("deploy artifact validation", () => {
     );
   });
 
-  it.each([
-    ["entities.ndjson", "Health Commons runtime entities index", "stale entities\n"],
-    ["web", "Health Commons generated web artifacts", null],
-  ] as const)(
-    "rejects a runner bundle that still ships obsolete Health Commons %s",
-    async (artifactName, label, contents) => {
-      const fixture = await createDeployArtifactFixture();
-      const artifactPath = path.join(
+  it("rejects a runner bundle that still ships the obsolete Health Commons entities index", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
         fixture.runnerBundleDir,
         "node_modules",
         "@murphai",
         "health-commons",
         "generated",
-        artifactName,
+        "entities.ndjson",
+      ),
+      "stale entities\n",
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner dependency @murphai/health-commons must not ship obsolete Health Commons runtime entities index.",
+    );
+  });
+
+  it.each([
+    ["routes", "index.json"],
+    ["browse", "experiments.json"],
+  ] as const)(
+    "rejects unexpected Health Commons generated web artifact %s/%s",
+    async (directoryName, artifactName) => {
+      const fixture = await createDeployArtifactFixture();
+      const directoryPath = path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "web",
+        directoryName,
       );
 
-      if (contents === null) {
-        await mkdir(artifactPath, { recursive: true });
-      } else {
-        await writeFile(artifactPath, contents, "utf8");
-      }
+      await mkdir(directoryPath, { recursive: true });
+      await writeFile(path.join(directoryPath, artifactName), "{}\n", "utf8");
       await rewriteRunnerBundleManifest(fixture);
 
       await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
-        `Runner dependency @murphai/health-commons must not ship obsolete ${label}.`,
+        `Runner dependency @murphai/health-commons must not ship unexpected Health Commons generated web artifact generated/web/${directoryName}`,
       );
     },
   );
@@ -952,6 +1350,7 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
     const future = new Date(Date.parse(fixture.manifest.generatedAt) + 10_000);
     const manifestInput: Parameters<typeof writeRunnerBundleManifest>[1] = {
       now: () => new Date(future.getTime() + 1_000),
+      releaseSha: fixture.manifest.releaseSha,
     };
 
     if (fixture.appDir) {
@@ -1011,6 +1410,21 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
     });
   });
 
+  it("rejects a prepared runner bundle after only the native Codex patch changes", async () => {
+    const sourceFixture = await createDeployArtifactSourceFixture();
+    const fixture = await createDeployArtifactFixture(sourceFixture);
+    await mkdir(path.join(sourceFixture.repoRoot, "patches"), { recursive: true });
+    await writeFile(
+      path.join(sourceFixture.repoRoot, "patches", "codex-public-live.patch"),
+      "synthetic native compatibility patch\n",
+      "utf8",
+    );
+
+    await expect(assertPreparedRunnerBundle(fixture)).rejects.toThrow(
+      "Prepared runner bundle source fingerprint is stale",
+    );
+  });
+
   it("accepts worker secrets rendered after the runner bundle", async () => {
     const fixture = await createDeployArtifactFixture();
     const future = new Date(Date.parse(fixture.manifest.generatedAt) + 10_000);
@@ -1034,6 +1448,11 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
             image: "../../Dockerfile.cloudflare-hosted-runner",
             image_build_context: ".",
           },
+          {
+            class_name: "StandbyRunnerContainer",
+            image: "../../Dockerfile.cloudflare-hosted-runner",
+            image_build_context: ".",
+          },
         ],
       },
     });
@@ -1049,6 +1468,7 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
       readHostedDeployAutomationEnvironment({
         ...fixture.source,
         CF_CONTAINER_MAX_INSTANCES: "99",
+        CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "0",
       }),
     );
 
@@ -1196,6 +1616,7 @@ async function createDeployArtifactFixture(input: {
   const manifestInput: Parameters<typeof writeRunnerBundleManifest>[1] = {
     buildSkipped: input.buildSkipped === true,
     includeBundleOnlyDependencies: input.includeBundleOnlyDependencies ?? true,
+    releaseSha: testPublicReleaseSha,
   };
 
   if (input.appDir) {
@@ -1243,7 +1664,9 @@ async function rewriteRunnerBundleManifest(fixture: {
   repoRoot?: string;
   runnerBundleDir: string;
 }): Promise<RunnerBundleManifest> {
-  const input: Parameters<typeof writeRunnerBundleManifest>[1] = {};
+  const input: Parameters<typeof writeRunnerBundleManifest>[1] = {
+    releaseSha: testPublicReleaseSha,
+  };
 
   if (fixture.appDir) {
     input.appDir = fixture.appDir;
@@ -1254,6 +1677,34 @@ async function rewriteRunnerBundleManifest(fixture: {
   }
 
   return await writeRunnerBundleManifest(fixture.runnerBundleDir, input);
+}
+
+async function writeHealthCommonsGoalIndexFixture(
+  fixture: {
+    appDir?: string;
+    repoRoot?: string;
+    runnerBundleDir: string;
+  },
+  goals: readonly unknown[],
+): Promise<void> {
+  await writeFile(
+    path.join(
+      fixture.runnerBundleDir,
+      "node_modules",
+      "@murphai",
+      "health-commons",
+      "generated",
+      "web",
+      "browse",
+      "goals.json",
+    ),
+    `${JSON.stringify({
+      ...createHealthCommonsRuntimeArtifacts().goalIndex,
+      goals,
+    }, null, 2)}\n`,
+    "utf8",
+  );
+  await rewriteRunnerBundleManifest(fixture);
 }
 
 async function createDeployArtifactSourceFixture(input: {
@@ -1364,6 +1815,7 @@ async function writeHealthCommonsRuntimeArtifacts(
   input: {
     biomarkerDesiredDirections?: Record<string, unknown>;
     familyGraph?: Record<string, unknown>;
+    goalIndex?: Record<string, unknown>;
     protocolIndex?: Record<string, unknown>;
     protocolRunSpecs?: Record<string, unknown>;
   } = {},
@@ -1395,11 +1847,18 @@ async function writeHealthCommonsRuntimeArtifacts(
     `${JSON.stringify(artifacts.familyGraph, null, 2)}\n`,
     "utf8",
   );
+  await mkdir(path.join(generatedDir, "web", "browse"), { recursive: true });
+  await writeFile(
+    path.join(generatedDir, "web", "browse", "goals.json"),
+    `${JSON.stringify(artifacts.goalIndex, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 function createHealthCommonsRuntimeArtifacts(input: {
   biomarkerDesiredDirections?: Record<string, unknown>;
   familyGraph?: Record<string, unknown>;
+  goalIndex?: Record<string, unknown>;
   protocolIndex?: Record<string, unknown>;
   protocolRunSpecs?: Record<string, unknown>;
 } = {}) {
@@ -1444,13 +1903,49 @@ function createHealthCommonsRuntimeArtifacts(input: {
     protocols: [finnishDrySaunaProtocolSummary],
     schemaVersion: "murph.commons.protocol-family-graph.v1",
   };
+  const goalIndex = input.goalIndex ?? {
+    catalogHash: "sha256:test",
+    goals: createPublicGoalSummaries(),
+    schemaVersion: "murph.commons.web.goal-index.v2",
+  };
 
   return {
     biomarkerDesiredDirections,
     familyGraph,
+    goalIndex,
     protocolIndex,
     protocolRunSpecs,
   };
+}
+
+function createPublicGoalSummaries() {
+  return Array.from(
+    { length: PUBLIC_HEALTH_GOAL_MINIMUM_COUNT },
+    (_, index) => {
+      if (index === 0) {
+        return improveDeepSleepGoalSummary;
+      }
+
+      const routeId = `fixture-goal-${index}`;
+      return {
+        ...improveDeepSleepGoalSummary,
+        aliases: [],
+        bundlePath: `bundles/goal_template/${routeId}.json`,
+        category:
+          PUBLIC_HEALTH_GOAL_CATEGORIES[
+            index % PUBLIC_HEALTH_GOAL_CATEGORIES.length
+          ],
+        goalPhrase: `complete fixture goal ${index}`,
+        key: `goal_template:${routeId}`,
+        pagePath: `pages/goals/${routeId}.json`,
+        routeId,
+        slug: routeId,
+        startPrompt: `Hey Murph, help me complete fixture goal ${index}.`,
+        summary: `Fixture public goal ${index}.`,
+        title: `Fixture Goal ${index}`,
+      };
+    },
+  );
 }
 
 function selectRunnerDependencyPackageName(packageNames: readonly string[]): string {
@@ -1461,4 +1956,15 @@ function selectRunnerDependencyPackageName(packageNames: readonly string[]): str
   }
 
   return packageName;
+}
+
+function runGit(repoRoot: string, args: readonly string[]): void {
+  const result = spawnSync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error("Git fixture command failed.");
+  }
 }

@@ -22,7 +22,6 @@ import {
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationPublic,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
-  checkpointHostedRuntimeBridgeWorkspace as checkpointHostedRuntimeBridgeWorkspaceTestkitPublic,
   createHostedWorkspaceRuntimeBridgeJobOptions as createHostedWorkspaceRuntimeBridgeJobOptionsPublic,
 } from "@murphai/assistant-runtime/hosted-invocation-testkit";
 import {
@@ -46,6 +45,9 @@ import {
   parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponseWorkerPublic,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
+  startHostedWorkspaceRestorePreparation as startHostedWorkspaceRestorePreparationPublic,
+} from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
+import {
   parseHostedEmailSendRequest as parseHostedEmailSendRequestDirect,
 } from "../src/hosted-email.ts";
 import {
@@ -63,7 +65,6 @@ import {
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
 } from "../src/hosted-invocation.ts";
 import {
-  checkpointHostedRuntimeBridgeWorkspace as checkpointHostedRuntimeBridgeWorkspaceTestkitDirect,
   createHostedWorkspaceRuntimeBridgeJobOptions as createHostedWorkspaceRuntimeBridgeJobOptionsDirect,
 } from "../src/hosted-invocation-testkit.ts";
 import {
@@ -90,6 +91,9 @@ import {
   parseHostedAssistantRuntimeConfig as parseHostedAssistantRuntimeConfigWorkerDirect,
   parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponseWorkerDirect,
 } from "../src/hosted-runtime-worker-contracts.ts";
+import {
+  startHostedWorkspaceRestorePreparation as startHostedWorkspaceRestorePreparationDirect,
+} from "../src/hosted-workspace-restore-preparation.ts";
 
 const expectedAssistantRuntimePublicExportKeys = [
   ".",
@@ -102,6 +106,8 @@ const expectedAssistantRuntimePublicExportKeys = [
   "./hosted-provider-effects",
   "./hosted-runtime-contracts",
   "./hosted-runtime-worker-contracts",
+  "./hosted-vault-share-capture-worker",
+  "./hosted-workspace-restore-preparation",
 ] as const;
 
 type AssistantRuntimePackageManifest = {
@@ -263,10 +269,6 @@ test("hosted-invocation-testkit subpath export stays wired to bridge option cons
     createHostedWorkspaceRuntimeBridgeJobOptionsPublic,
     createHostedWorkspaceRuntimeBridgeJobOptionsDirect,
   );
-  assert.equal(
-    checkpointHostedRuntimeBridgeWorkspaceTestkitPublic,
-    checkpointHostedRuntimeBridgeWorkspaceTestkitDirect,
-  );
 });
 
 test("hosted-provider-effects subpath stays wired to the hosted provider effects source surface", () => {
@@ -302,6 +304,13 @@ test("hosted-runtime-worker-contracts subpath stays wired to the worker contract
   assert.equal(
     parseHostedRuntimeLatencyTraceResponseWorkerPublic,
     parseHostedRuntimeLatencyTraceResponseWorkerDirect,
+  );
+});
+
+test("hosted-workspace-restore-preparation subpath stays wired to the restore preparation source surface", () => {
+  assert.equal(
+    startHostedWorkspaceRestorePreparationPublic,
+    startHostedWorkspaceRestorePreparationDirect,
   );
 });
 

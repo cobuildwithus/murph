@@ -137,6 +137,7 @@ import {
 } from "../src/assistant/delivery-service.ts";
 import {
   type AssistantGeneratedImageCapturePersistence,
+  type AssistantHostedExecutionContext,
   normalizeAssistantExecutionContext,
   resolveAssistantExecutionDefaultTarget,
   resolveAssistantExecutionOperatorDefaults,
@@ -707,6 +708,62 @@ describe("assistant usage recording seam", () => {
       }),
       ["assistant_input_a", "assistant_input_b"],
     );
+  });
+
+  it("waits for additional usage recording to finish", async () => {
+    let finishRecording: () => void = () => undefined;
+    const recording = new Promise<void>((resolve) => {
+      finishRecording = resolve;
+    });
+    const recordUsage = vi.fn(() => recording);
+
+    let finished = false;
+    const result = recordAdditionalAssistantUsageEvents({
+      additionalUsages: [
+        {
+          occurredAt: "2026-04-08T10:00:04.000Z",
+          provider: "codex-cli",
+          providerRequestOrdinal: 1,
+          providerRequestOutcome: "succeeded",
+          usage: {
+            apiKeyEnv: null,
+            baseUrl: null,
+            cacheWriteTokens: null,
+            cachedInputTokens: null,
+            inputTokens: 3,
+            outputTokens: 2,
+            providerMetadataJson: null,
+            providerName: null,
+            providerRequestId: null,
+            rawUsageJson: null,
+            reasoningTokens: null,
+            requestedModel: null,
+            servedModel: null,
+            totalTokens: 5,
+          },
+        },
+      ],
+      effectiveEnv: {},
+      executionContext: {
+        hosted: {
+          memberId: "member-42",
+          usageRecorder: { recordUsage },
+          userEnvKeys: [],
+        },
+      },
+      providerResult: createProviderResult(),
+      turnId: "turn-additional-latency",
+    }).then(() => {
+      finished = true;
+    });
+
+    expect(recordUsage).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    expect(finished).toBe(false);
+
+    finishRecording();
+    await result;
+    expect(finished).toBe(true);
   });
 
   it("uses Codex provider options without legacy credential headers for fallback hosted usage attribution", async () => {
@@ -2035,6 +2092,72 @@ describe("assistant delivery orchestration seam", () => {
       message: "Answer two.",
       turnId: "turn-segments",
     });
+  });
+
+  it("preserves, replaces, and clears per-delivery context references", async () => {
+    const session = createAssistantSession();
+    const reminderReferences = [{
+      entityId: "wfmt_current",
+      entityKind: "workout_format",
+    }];
+    const workoutReferences = [{
+      entityId: "evt_current",
+      entityKind: "activity_session",
+    }];
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "idem-segment-context-reference",
+        messageLength: 10,
+        providerMessageId: "provider-segment-context-reference",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "thread-1",
+        targetKind: "thread",
+      },
+      intent: { intentId: "intent-segment-context-reference" },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantPrecedingReplies({
+      input: {
+        deliverResponse: true,
+        prompt: "hello",
+        vault: "/vault",
+      },
+      segments: [
+        {
+          deliveryContext: {
+            outboxAutomationContextReferences: reminderReferences,
+          },
+          response: "Inherited reminder context.",
+        },
+        {
+          contextReferences: workoutReferences,
+          deliveryContext: {
+            outboxAutomationContextReferences: reminderReferences,
+          },
+          response: "Replaced with workout context.",
+        },
+        {
+          contextReferences: [],
+          deliveryContext: {
+            outboxAutomationContextReferences: reminderReferences,
+          },
+          response: "Cleared context.",
+        },
+      ],
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-segment-context-references",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map(
+        (call) => call[0]?.automationContextReferences,
+      ),
+    ).toEqual([reminderReferences, workoutReferences, []]);
   });
 
   it("derives preceding segment keys from an explicit delivery idempotency key", async () => {
@@ -3524,6 +3647,132 @@ describe("assistant delivery orchestration seam", () => {
 });
 
 describe("assistant execution context normalization", () => {
+  it("keeps absent contexts and absent optional fields distinct", () => {
+    for (const input of [undefined, null, { hosted: null }]) {
+      expect(normalizeAssistantExecutionContext(input)).toEqual({ hosted: null });
+    }
+    const onTypingAccepted = vi.fn();
+    expect(normalizeAssistantExecutionContext({
+      hosted: {
+        memberId: " member-synthetic ",
+        userEnvKeys: [" SYNTHETIC_KEY ", "", "SYNTHETIC_KEY"],
+        actionApprovalPort: null,
+        deviceTool: undefined,
+        dynamicContextPrompts: ["", "  "],
+        channelTypingDependencies: { onTypingAccepted },
+        progressDeliveryDependencies: { signal: new AbortController().signal },
+        releaseSha: "  ",
+        runtimeName: null,
+      },
+    })).toEqual({
+      hosted: {
+        memberId: "member-synthetic",
+        userEnvKeys: ["SYNTHETIC_KEY", "SYNTHETIC_KEY"],
+      },
+    });
+    expect(onTypingAccepted).not.toHaveBeenCalled();
+  });
+
+  it("preserves accessor order, field order, and bound versus forwarded helpers", async () => {
+    const reads: string[] = [];
+    const receivers: unknown[] = [];
+    const request = async function (this: unknown) {
+      receivers.push(this);
+      return {
+        action: "list_accounts" as const,
+        accounts: [],
+        provider: null,
+        sourceProvider: null,
+      };
+    };
+    const deviceTool = {
+      get request() {
+        reads.push("device.request");
+        return request;
+      },
+    };
+    const assertTurnCommitAuthority = async function (this: unknown) {
+      receivers.push(this);
+    };
+    const currentAssistantInputId = () => "input-synthetic";
+    const recordUsage = async () => {};
+    const launcher = { launch: () => "started" as const };
+    const hosted: AssistantHostedExecutionContext = {
+      get memberId() {
+        reads.push("memberId");
+        return " member-synthetic ";
+      },
+      get deviceTool() {
+        reads.push("deviceTool");
+        return deviceTool;
+      },
+      get releaseSha() {
+        reads.push("releaseSha");
+        return " release-synthetic ";
+      },
+      get usageRecorder() {
+        reads.push("usageRecorder");
+        return { recordUsage };
+      },
+      get assertTurnCommitAuthority() {
+        reads.push("assertTurnCommitAuthority");
+        return assertTurnCommitAuthority;
+      },
+      get currentAssistantInputId() {
+        reads.push("currentAssistantInputId");
+        return currentAssistantInputId;
+      },
+      get imageGenerationLauncher() {
+        reads.push("imageGenerationLauncher");
+        return launcher;
+      },
+      get userEnvKeys() {
+        reads.push("userEnvKeys");
+        return [];
+      },
+    };
+    const normalized = normalizeAssistantExecutionContext({ hosted }).hosted;
+    expect(reads).toEqual([
+      "memberId", "deviceTool", "device.request", "device.request",
+      "releaseSha", "usageRecorder",
+      "assertTurnCommitAuthority", "assertTurnCommitAuthority",
+      "currentAssistantInputId", "currentAssistantInputId",
+      "imageGenerationLauncher", "imageGenerationLauncher", "userEnvKeys",
+    ]);
+    expect(Object.keys(normalized!)).toEqual([
+      "assertTurnCommitAuthority", "currentAssistantInputId", "imageGenerationLauncher",
+      "deviceTool", "releaseSha", "usageRecorder", "memberId", "userEnvKeys",
+    ]);
+    expect(normalized?.currentAssistantInputId).toBe(currentAssistantInputId);
+    expect(normalized?.usageRecorder?.recordUsage).toBe(recordUsage);
+    expect(normalized?.imageGenerationLauncher).toBe(launcher);
+    const boundAuthority = normalized?.assertTurnCommitAuthority;
+    expect(boundAuthority).toBeTypeOf("function");
+    await boundAuthority!({ acceptedInputs: [], turnId: "turn-synthetic" });
+    await normalized!.deviceTool!.request({ action: "list_accounts" });
+    expect(receivers).toEqual([hosted, deviceTool]);
+  });
+
+  it("normalizes ports before rejecting a blank member without reading return-only helpers", () => {
+    const reads: string[] = [];
+    const failure = new Error("synthetic port accessor failure");
+    const hosted: AssistantHostedExecutionContext = {
+      memberId: " ",
+      userEnvKeys: [],
+      get deviceTool() {
+        reads.push("deviceTool");
+        return undefined;
+      },
+      get assertTurnCommitAuthority(): never {
+        throw failure;
+      },
+    };
+    expect(normalizeAssistantExecutionContext({ hosted })).toEqual({ hosted: null });
+    expect(reads).toEqual(["deviceTool"]);
+    Object.defineProperty(hosted, "deviceTool", { get() { throw failure; } });
+    expect(() => normalizeAssistantExecutionContext({ hosted })).toThrow(failure);
+  });
+
   it("drops hosted execution context when the hosted member id is blank", () => {
     expect(
       normalizeAssistantExecutionContext({
@@ -4770,12 +5019,11 @@ function createSharedPlan(input?: {
       bindingDelivery: AssistantBindingDelivery | null;
       channel: string | null;
       deliveryPolicy: "binding-target-only" | "explicit-target-override" | "not-requested";
-      effectiveThreadIsDirect: boolean | null;
+      threadIsDirect: boolean | null;
       explicitTarget: string | null;
       identityId: string | null;
       replyToMessageId: string | null;
       threadId: string | null;
-      threadIsDirect: boolean | null;
     }> | null;
   };
   persistUserPromptOnFailure?: boolean;
@@ -4794,12 +5042,11 @@ function createSharedPlan(input?: {
               bindingDelivery: null,
               channel: null,
               deliveryPolicy: "not-requested",
-              effectiveThreadIsDirect: null,
+              threadIsDirect: null,
               explicitTarget: null,
               identityId: null,
               replyToMessageId: null,
               threadId: null,
-              threadIsDirect: null,
               ...input.conversationPolicy.audience,
             }
           : {
@@ -4807,12 +5054,11 @@ function createSharedPlan(input?: {
           bindingDelivery: null,
           channel: null,
           deliveryPolicy: "not-requested",
-          effectiveThreadIsDirect: null,
+          threadIsDirect: null,
           explicitTarget: null,
           identityId: null,
           replyToMessageId: null,
           threadId: null,
-          threadIsDirect: null,
         },
       operatorAuthority: "direct-operator",
     },

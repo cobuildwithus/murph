@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -20,7 +19,6 @@ const scriptPath = path.join(repoRoot, "scripts", "install-playwright-chromium.s
 const workflowDirectory = path.join(repoRoot, ".github", "workflows");
 const WORKFLOWS_CALLING_SCRIPT = [
   "hosted-stripe-billing.yml",
-  "pr-1498-design-proof-capture.yml",
   "web-viewport-overflow.yml",
 ] as const;
 
@@ -39,7 +37,7 @@ function writeExecutable(filePath: string, contents: string): void {
 }
 
 /** Executes the shipped wrapper while replacing only its external commands. */
-function runWrapper(input: { aptConfig?: string; pnpmExit?: number } = {}) {
+function runWrapper(input: { pnpmExit?: number } = {}) {
   const sharedTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
   if (!sharedTempRoot) throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
   const root = mkdtempSync(path.join(sharedTempRoot, "playwright-install-"));
@@ -52,20 +50,11 @@ function runWrapper(input: { aptConfig?: string; pnpmExit?: number } = {}) {
     [
       "#!/usr/bin/env bash",
       'printf \'%s\\n\' "$*" >> "$MURPH_TEST_STATE_DIR/sudo-calls"',
+      'if [[ "$*" == "rm -f /etc/apt/sources.list.d/google-chrome.sources" ]]; then',
+      '  exit 0',
+      'fi',
       'if [[ "$1" != "tee" ]]; then exit 2; fi',
       'cat > "$MURPH_TEST_STATE_DIR/apt-policy"',
-    ].join("\n"),
-  );
-  writeExecutable(
-    path.join(binDirectory, "apt-config"),
-    [
-      "#!/usr/bin/env bash",
-      'printf \'%s\\n\' "$*" >> "$MURPH_TEST_STATE_DIR/apt-config-calls"',
-      'if [[ -n "${MURPH_TEST_APT_CONFIG:-}" ]]; then',
-      '  printf \'%s\\n\' "$MURPH_TEST_APT_CONFIG"',
-      "else",
-      '  cat "$MURPH_TEST_STATE_DIR/apt-policy"',
-      "fi",
     ].join("\n"),
   );
   writeExecutable(
@@ -81,7 +70,6 @@ function runWrapper(input: { aptConfig?: string; pnpmExit?: number } = {}) {
     encoding: "utf8",
     env: {
       ...process.env,
-      MURPH_TEST_APT_CONFIG: input.aptConfig ?? "",
       MURPH_TEST_PNPM_EXIT: String(input.pnpmExit ?? 0),
       MURPH_TEST_STATE_DIR: root,
       PATH: `${binDirectory}:${process.env.PATH ?? ""}`,
@@ -97,7 +85,7 @@ describe("install-playwright-chromium.sh", () => {
     expect(spawnSync("bash", ["-n", scriptPath]).status).toBe(0);
   });
 
-  it("loads the bounded apt policy before invoking Playwright once", () => {
+  it("removes only the unused Chrome source and writes the apt policy before Playwright", () => {
     const { result, root } = runWrapper();
 
     expect(result.status).toBe(0);
@@ -109,30 +97,14 @@ describe("install-playwright-chromium.sh", () => {
         "",
       ].join("\n"),
     );
-    expect(readFileSync(path.join(root, "sudo-calls"), "utf8").trim()).toBe(
-      "tee /etc/apt/apt.conf.d/99murph-playwright",
-    );
-    expect(readFileSync(path.join(root, "apt-config-calls"), "utf8").trim()).toBe(
-      "dump",
-    );
+    expect(readFileSync(path.join(root, "sudo-calls"), "utf8").trim().split("\n"))
+      .toEqual([
+        "rm -f /etc/apt/sources.list.d/google-chrome.sources",
+        "tee /etc/apt/apt.conf.d/zzzz-murph-playwright",
+      ]);
     expect(readFileSync(path.join(root, "pnpm-calls"), "utf8").trim()).toBe(
       "--dir apps/web exec playwright install --with-deps chromium",
     );
-  });
-
-  it("fails before Playwright when apt did not load the checked policy", () => {
-    const { result, root } = runWrapper({
-      aptConfig: [
-        'Acquire::Retries "1";',
-        'Acquire::http::Timeout "180";',
-      ].join("\n"),
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      'Playwright apt policy was not loaded: Acquire::https::Timeout "180";',
-    );
-    expect(existsSync(path.join(root, "pnpm-calls"))).toBe(false);
   });
 
   it("propagates the one Playwright invocation's final status", () => {

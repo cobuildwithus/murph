@@ -8,7 +8,7 @@ import {
   type CsvSampleImportPlan,
   type CsvSampleImportResult,
   type CsvSampleImportWriteResult,
-  parseDelimitedRows,
+  CsvSampleImportError,
   prepareCsvSampleImport,
   profileCsvSampleFile,
 } from "./csv-sample-import-planner.ts";
@@ -28,16 +28,7 @@ export type {
   CsvSampleImportWriteResult,
   PreparedCsvSampleImportPayload,
 } from "./csv-sample-import-planner.ts";
-export type {
-  SampleSeriesInputRecord,
-  SampleSeriesSummaryInput,
-  SampleSummaryProfile,
-  SampleThresholdSummary,
-  SampleWindowGap,
-  SampleWindowScreen,
-  SampleWindowSummary,
-} from "./sample-series-summary.ts";
-export { summarizeSampleSeries } from "./sample-series-summary.ts";
+export { CsvSampleImportError } from "./csv-sample-import-planner.ts";
 
 export interface CsvSampleImporterOptions {
   corePort?: unknown;
@@ -48,7 +39,10 @@ export async function importCsvSamples(
   input: unknown,
   { corePort, presetRegistry }: CsvSampleImporterOptions = {},
 ): Promise<CsvSampleImportResult> {
-  const writer = assertCanonicalWritePort(corePort, ["importSamples"]);
+  const writer = assertCanonicalWritePort(corePort, [
+    "validateSampleImport",
+    "importSamples",
+  ]);
   const plan = await prepareCsvSampleImport(input, { presetRegistry });
   const imports: CsvSampleImportBatchResult[] = [];
   const lookupIds: string[] = [];
@@ -56,10 +50,25 @@ export async function importCsvSamples(
   let importedCount = 0;
   let skippedCount = 0;
 
-  for (const importPlan of plan.imports) {
+  for (const [importIndex, importPlan] of plan.imports.entries()) {
+    if (importPlan.payload.samples.length === 0) continue;
+
+    try {
+      await writer.validateSampleImport(importPlan.payload);
+    } catch (error) {
+      throw toCsvSampleWriteError(error, importIndex, importPlan.stream);
+    }
+  }
+
+  for (const [importIndex, importPlan] of plan.imports.entries()) {
     const result = importPlan.payload.samples.length === 0
       ? createSkippedBatchResult(plan, importPlan)
-      : await writePlannedBatch(writer.importSamples, plan, importPlan);
+      : await writePlannedBatch(
+        writer.importSamples,
+        plan,
+        importPlan,
+        importIndex,
+      );
 
     imports.push(result);
     importedCount += result.importedCount;
@@ -110,8 +119,14 @@ async function writePlannedBatch(
   writeImport: (payload: SampleImportPayload) => unknown,
   plan: CsvSampleImportPlan,
   importPlan: CsvSampleImportBatchPlan,
+  importIndex: number,
 ): Promise<CsvSampleImportBatchResult> {
-  const rawResult = await writeImport(importPlan.payload);
+  let rawResult: unknown;
+  try {
+    rawResult = await writeImport(importPlan.payload);
+  } catch (error) {
+    throw toCsvSampleWriteError(error, importIndex, importPlan.stream);
+  }
   const result = normalizeWriteResult(rawResult);
 
   return {
@@ -128,6 +143,43 @@ async function writePlannedBatch(
     lookupIds: result.records.map((record) => record.id),
     ledgerFiles: result.shardPaths,
   };
+}
+
+function toCsvSampleWriteError(
+  error: unknown,
+  importIndex: number,
+  stream: CsvSampleImportBatchPlan["stream"],
+): unknown {
+  if (
+    !Number.isSafeInteger(importIndex)
+    || importIndex < 0
+    || !isRecord(error)
+    || !isRecord(error.details)
+  ) {
+    return error;
+  }
+
+  const sampleIndex = error.details.sampleIndex;
+  const sampleField = error.details.sampleField;
+  if (
+    typeof sampleIndex !== "number"
+    || !Number.isSafeInteger(sampleIndex)
+    || sampleIndex < 0
+    || typeof sampleField !== "string"
+  ) {
+    return error;
+  }
+
+  return new CsvSampleImportError({
+    code: "invalid_sample",
+    importIndex,
+    sampleField,
+    stream,
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function normalizeWriteResult(value: unknown): CsvSampleImportWriteResult {
@@ -168,4 +220,4 @@ function normalizeWriteResult(value: unknown): CsvSampleImportWriteResult {
   };
 }
 
-export { parseDelimitedRows, prepareCsvSampleImport, profileCsvSampleFile };
+export { prepareCsvSampleImport, profileCsvSampleFile };

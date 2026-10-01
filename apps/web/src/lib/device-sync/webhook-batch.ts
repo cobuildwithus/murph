@@ -7,6 +7,21 @@ import {
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 import type { HandleWebhookResult } from "@murphai/device-syncd/types";
 
+// These are fixed messages from the source-admission owners. Do not log an
+// arbitrary error message: provider errors can contain private payloads.
+const sourceReadinessReasons = new Map([
+  ["Device source setup must finish before its webhook can be accepted.", "setup_uncommitted"],
+  ["Device source setup is not visible yet. Retry shortly.", "source_missing"],
+  ["A newer device source setup is still pending. Retry shortly.", "newer_setup_pending"],
+  ["Device source authority could not be resolved. Retry shortly.", "authority_missing"],
+  ["Device source authority changed while webhook work was prepared. Retry shortly.", "authority_changed"],
+  ["Current device source registration is not active yet. Retry shortly.", "registration_inactive"],
+  ["Device source registration is still settling. Retry shortly.", "registration_settling"],
+  ["Junction webhook data source provenance is not available yet. Retry shortly.", "provenance_missing"],
+  ["Device data source setup is not visible yet. Retry shortly.", "data_source_missing"],
+  ["Device data source registration is still settling. Retry shortly.", "data_registration_settling"],
+]);
+
 export async function admitHostedDeviceWebhookBatch(input: {
   entries: readonly DeviceWebhookQueuePayloadV1[];
   handle: (entry: DeviceWebhookQueuePayloadV1) => Promise<HandleWebhookResult>;
@@ -18,6 +33,7 @@ export async function admitHostedDeviceWebhookBatch(input: {
     batchSize,
   );
   const failureCounts = new Map<string, number>();
+  const sourceReadinessFailureCounts = new Map<string, number>();
   const accountLanes = new Map<string, Array<{
     entry: DeviceWebhookQueuePayloadV1;
     index: number;
@@ -38,6 +54,10 @@ export async function admitHostedDeviceWebhookBatch(input: {
     recordFailureCode(isDeviceSyncError(error)
       ? error.code
       : "DEVICE_WEBHOOK_ADMISSION_UNCLASSIFIED");
+    if (isDeviceSyncError(error) && error.code === "WEBHOOK_SOURCE_NOT_READY") {
+      const reason = sourceReadinessReasons.get(error.message) ?? "unclassified";
+      sourceReadinessFailureCounts.set(reason, (sourceReadinessFailureCounts.get(reason) ?? 0) + 1);
+    }
   };
   const retainForRetry = (item: { entry: DeviceWebhookQueuePayloadV1; index: number }) => {
     resultSlots[item.index] = {
@@ -96,6 +116,11 @@ export async function admitHostedDeviceWebhookBatch(input: {
     duplicateCount,
     failureCounts: Object.fromEntries([...failureCounts].sort(([left], [right]) =>
       left.localeCompare(right))),
+    ...(sourceReadinessFailureCounts.size > 0 ? {
+      sourceReadinessFailureCounts: Object.fromEntries(
+        [...sourceReadinessFailureCounts].sort(([left], [right]) => left.localeCompare(right)),
+      ),
+    } : {}),
     maxAccountLanes: DEVICE_WEBHOOK_ADMISSION_ACCOUNT_LANES,
     retryCount,
   });

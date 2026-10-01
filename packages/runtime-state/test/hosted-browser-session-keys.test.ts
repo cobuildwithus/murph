@@ -96,13 +96,16 @@ test("hosted browser session key helpers reject malformed envelopes, missing rec
     }),
   ).rejects.toThrow(/Hosted browser session key envelope is missing a browser-session recipient\./u);
 
+  const tamperedCiphertext = Buffer.from(envelope.recipients[0].ciphertext, "base64");
+  tamperedCiphertext[0] ^= 1;
+
   await expect(
     unwrapHostedBrowserSessionKey({
       envelope: {
         ...envelope,
         recipients: [{
           ...envelope.recipients[0],
-          ciphertext: envelope.recipients[0].ciphertext.slice(0, -2) + "AA",
+          ciphertext: tamperedCiphertext.toString("base64"),
         }],
       },
       recipientPrivateKeyJwk: recipient.privateKeyJwk,

@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import {
   HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS,
@@ -40,6 +39,17 @@ export {
   HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT,
   HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,
 };
+export type { HealthCommonsGoalSource } from "./goal-sources.ts";
+import {
+  getGeneratedHealthCommonsWebGoalIndex,
+  loadGeneratedHealthCommonsWebGoalIndex,
+  loadGeneratedHealthCommonsWebGoalPage,
+} from "./goal-runtime.ts";
+export {
+  getGeneratedHealthCommonsWebGoalIndex,
+  loadGeneratedHealthCommonsWebGoalIndex,
+  loadGeneratedHealthCommonsWebGoalPage,
+};
 import {
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
@@ -65,6 +75,23 @@ export type {
   HealthCommonsProtocolRunSpec,
 } from "./protocol-artifacts.ts";
 import {
+  defaultHealthCommonsPackageRootUrl,
+  generatedWebArtifactUrl,
+  MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
+  readGeneratedWebArtifact,
+  type LoadGeneratedHealthCommonsWebArtifactOptions,
+} from "./runtime-paths.ts";
+export { MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV };
+export type { LoadGeneratedHealthCommonsWebArtifactOptions } from "./runtime-paths.ts";
+import {
+  getGeneratedHealthCommonsWebRouteIndex,
+  loadGeneratedHealthCommonsWebRouteIndex,
+} from "./web-route-runtime.ts";
+export {
+  getGeneratedHealthCommonsWebRouteIndex,
+  loadGeneratedHealthCommonsWebRouteIndex,
+};
+import {
   HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_RESULTS_PUBLIC_SCHEMA_VERSION,
@@ -72,7 +99,6 @@ import {
   HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_ROUTE_BUNDLE_SCHEMA_VERSION,
-  HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION,
   type HealthCommonsWebBiomarkerIndex,
   type HealthCommonsWebExperimentIndex,
   type HealthCommonsWebExperimentProtocolTab,
@@ -81,7 +107,6 @@ import {
   type HealthCommonsWebExperimentShell,
   type HealthCommonsWebProjectionKey,
   type HealthCommonsWebRouteBundle,
-  type HealthCommonsWebRouteIndex,
 } from "./web-artifacts.ts";
 
 export type {
@@ -93,14 +118,15 @@ export type {
   HealthCommonsWebExperimentResearchTab,
   HealthCommonsWebExperimentResultsPublic,
   HealthCommonsWebExperimentShell,
+  HealthCommonsWebGoalIndex,
+  HealthCommonsWebGoalIndexEntry,
+  HealthCommonsWebGoalPage,
+  HealthCommonsWebGoalRevisionRef,
   HealthCommonsWebProjectionKey,
 } from "./web-artifacts.ts";
 export { isRunnableProtocolStatus } from "./protocol-publishing.ts";
 
 export type HealthCommonsEntity = HealthCommonsCatalogEntity;
-
-export const MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV =
-  "MURPH_HEALTH_COMMONS_PACKAGE_ROOT";
 
 export const HEALTH_COMMONS_PAGE_STATUSES = [
   "draft",
@@ -150,12 +176,39 @@ export interface LoadGeneratedHealthCommonsProtocolFamilyGraphOptions {
   protocolFamilyGraphPath?: string | URL;
 }
 
-export interface LoadGeneratedHealthCommonsBiomarkerDesiredDirectionsOptions {
-  biomarkerDesiredDirectionsPath?: string | URL;
+export type HealthCommonsProtocolArtifact =
+  | "protocol_family_graph"
+  | "protocol_index"
+  | "protocol_run_specs";
+
+export type HealthCommonsProtocolArtifactFailureCategory =
+  | "invalid"
+  | "unavailable";
+
+export class HealthCommonsProtocolArtifactError extends Error {
+  readonly artifact: HealthCommonsProtocolArtifact;
+  readonly category: HealthCommonsProtocolArtifactFailureCategory;
+  readonly code = "HEALTH_COMMONS_PROTOCOL_ARTIFACT_FAILURE";
+
+  constructor(input: {
+    artifact: HealthCommonsProtocolArtifact;
+    category: HealthCommonsProtocolArtifactFailureCategory;
+  }) {
+    super(`Health Commons protocol artifact is ${input.category}.`);
+    this.name = "HealthCommonsProtocolArtifactError";
+    this.artifact = input.artifact;
+    this.category = input.category;
+  }
 }
 
-export interface LoadGeneratedHealthCommonsWebArtifactOptions {
-  generatedWebRoot?: string | URL;
+export function isHealthCommonsProtocolArtifactError(
+  error: unknown,
+): error is HealthCommonsProtocolArtifactError {
+  return error instanceof HealthCommonsProtocolArtifactError;
+}
+
+export interface LoadGeneratedHealthCommonsBiomarkerDesiredDirectionsOptions {
+  biomarkerDesiredDirectionsPath?: string | URL;
 }
 
 export interface SearchGeneratedHealthCommonsKnowledgeOptions {
@@ -430,15 +483,6 @@ type HealthCommonsWebExperimentProjectionKey = Extract<
   | "experiment.results-public"
   | "experiment.shell"
 >;
-const HEALTH_COMMONS_WEB_PROJECTION_KEYS: readonly HealthCommonsWebProjectionKey[] = [
-  "biomarker.overview",
-  "biomarker.research",
-  "biomarker.shell",
-  "experiment.protocol",
-  "experiment.research",
-  "experiment.results-public",
-  "experiment.shell",
-];
 
 let cachedGeneratedProtocolIndexReader: HealthCommonsProtocolIndexReader | null = null;
 let cachedGeneratedProtocolRunSpecReader: HealthCommonsProtocolRunSpecReader | null = null;
@@ -447,7 +491,6 @@ let cachedGeneratedBiomarkerDesiredDirections:
   HealthCommonsBiomarkerDesiredDirectionsArtifact | null = null;
 let cachedGeneratedWebBiomarkerIndex: HealthCommonsWebBiomarkerIndex | null = null;
 let cachedGeneratedWebExperimentIndex: HealthCommonsWebExperimentIndex | null = null;
-let cachedGeneratedWebRouteIndex: HealthCommonsWebRouteIndex | null = null;
 const cachedGeneratedWebRouteBundles = new Map<string, HealthCommonsWebRouteBundle>();
 const cachedGeneratedWebExperimentResearchTabs = new Map<
   string,
@@ -469,13 +512,15 @@ const cachedGeneratedWebExperimentResultsPublic = new Map<
 export function loadGeneratedHealthCommonsProtocolIndex(
   options: LoadGeneratedHealthCommonsProtocolIndexOptions = {},
 ): HealthCommonsProtocolIndexArtifact {
-  const raw = readFileSync(
-    options.protocolIndexPath ?? defaultGeneratedProtocolIndexUrl(),
-    "utf8",
-  );
-  const parsed = parseJsonObject(raw);
-  assertGeneratedHealthCommonsProtocolIndex(parsed);
-  return parsed;
+  return loadGeneratedHealthCommonsProtocolArtifact("protocol_index", () => {
+    const raw = readFileSync(
+      options.protocolIndexPath ?? defaultGeneratedProtocolIndexUrl(),
+      "utf8",
+    );
+    const parsed = parseJsonObject(raw);
+    assertGeneratedHealthCommonsProtocolIndex(parsed);
+    return parsed;
+  });
 }
 
 export function getGeneratedHealthCommonsProtocolIndexReader(
@@ -496,13 +541,15 @@ export function getGeneratedHealthCommonsProtocolIndexReader(
 export function loadGeneratedHealthCommonsProtocolRunSpecs(
   options: LoadGeneratedHealthCommonsProtocolRunSpecsOptions = {},
 ): HealthCommonsProtocolRunSpecsArtifact {
-  const raw = readFileSync(
-    options.protocolRunSpecsPath ?? defaultGeneratedProtocolRunSpecsUrl(),
-    "utf8",
-  );
-  const parsed = parseJsonObject(raw);
-  assertGeneratedHealthCommonsProtocolRunSpecs(parsed);
-  return parsed;
+  return loadGeneratedHealthCommonsProtocolArtifact("protocol_run_specs", () => {
+    const raw = readFileSync(
+      options.protocolRunSpecsPath ?? defaultGeneratedProtocolRunSpecsUrl(),
+      "utf8",
+    );
+    const parsed = parseJsonObject(raw);
+    assertGeneratedHealthCommonsProtocolRunSpecs(parsed);
+    return parsed;
+  });
 }
 
 export function getGeneratedHealthCommonsProtocolRunSpecReader(
@@ -523,13 +570,15 @@ export function getGeneratedHealthCommonsProtocolRunSpecReader(
 export function loadGeneratedHealthCommonsProtocolFamilyGraph(
   options: LoadGeneratedHealthCommonsProtocolFamilyGraphOptions = {},
 ): HealthCommonsProtocolFamilyGraphArtifact {
-  const raw = readFileSync(
-    options.protocolFamilyGraphPath ?? defaultGeneratedProtocolFamilyGraphUrl(),
-    "utf8",
-  );
-  const parsed = parseJsonObject(raw);
-  assertGeneratedHealthCommonsProtocolFamilyGraph(parsed);
-  return parsed;
+  return loadGeneratedHealthCommonsProtocolArtifact("protocol_family_graph", () => {
+    const raw = readFileSync(
+      options.protocolFamilyGraphPath ?? defaultGeneratedProtocolFamilyGraphUrl(),
+      "utf8",
+    );
+    const parsed = parseJsonObject(raw);
+    assertGeneratedHealthCommonsProtocolFamilyGraph(parsed);
+    return parsed;
+  });
 }
 
 export function getGeneratedHealthCommonsProtocolFamilyGraphReader(
@@ -575,25 +624,10 @@ export function getGeneratedHealthCommonsBiomarkerDesiredDirections(
   return cachedGeneratedBiomarkerDesiredDirections;
 }
 
-export function loadGeneratedHealthCommonsWebRouteIndex(
-  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
-): HealthCommonsWebRouteIndex {
-  const raw = readFileSync(
-    new URL("routes/index.json", normalizeGeneratedWebRoot(options.generatedWebRoot)),
-    "utf8",
-  );
-  const parsed = parseJsonObject(raw);
-  assertGeneratedWebRouteIndex(parsed);
-  return parsed;
-}
-
 export function loadGeneratedHealthCommonsWebExperimentIndex(
   options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
 ): HealthCommonsWebExperimentIndex {
-  const raw = readFileSync(
-    new URL("browse/experiments.json", normalizeGeneratedWebRoot(options.generatedWebRoot)),
-    "utf8",
-  );
+  const raw = readGeneratedWebArtifact("browse/experiments.json", options.generatedWebRoot);
   const parsed = parseJsonObject(raw);
   assertGeneratedWebExperimentIndex(parsed);
   return parsed;
@@ -602,24 +636,10 @@ export function loadGeneratedHealthCommonsWebExperimentIndex(
 export function loadGeneratedHealthCommonsWebBiomarkerIndex(
   options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
 ): HealthCommonsWebBiomarkerIndex {
-  const raw = readFileSync(
-    new URL("browse/biomarkers.json", normalizeGeneratedWebRoot(options.generatedWebRoot)),
-    "utf8",
-  );
+  const raw = readGeneratedWebArtifact("browse/biomarkers.json", options.generatedWebRoot);
   const parsed = parseJsonObject(raw);
   assertGeneratedWebBiomarkerIndex(parsed);
   return parsed;
-}
-
-export function getGeneratedHealthCommonsWebRouteIndex(
-  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
-): HealthCommonsWebRouteIndex {
-  if (options.generatedWebRoot) {
-    return loadGeneratedHealthCommonsWebRouteIndex(options);
-  }
-
-  cachedGeneratedWebRouteIndex ??= loadGeneratedHealthCommonsWebRouteIndex();
-  return cachedGeneratedWebRouteIndex;
 }
 
 export function getGeneratedHealthCommonsWebExperimentIndex(
@@ -690,7 +710,7 @@ export function loadGeneratedHealthCommonsWebRouteBundle(input: {
     return cachedGeneratedWebRouteBundles.get(cacheKey) ?? null;
   }
 
-  const raw = readFileSync(generatedWebArtifactUrl(route.bundlePath, input.generatedWebRoot), "utf8");
+  const raw = readGeneratedWebArtifact(route.bundlePath, input.generatedWebRoot);
   const bundle = parseJsonObject(raw);
   assertGeneratedWebRouteBundle(bundle, route.bundlePath);
 
@@ -792,7 +812,7 @@ function loadGeneratedHealthCommonsWebExperimentArtifact<T>(input: {
     return null;
   }
 
-  const raw = readFileSync(artifactUrl, "utf8");
+  const raw = readGeneratedWebArtifact(artifactPath, input.generatedWebRoot);
   const artifact = parseJsonObject(raw);
   input.assertArtifact(artifact, artifactPath);
   assertGeneratedWebExperimentArtifactMatchesRoute(artifact, {
@@ -2153,25 +2173,6 @@ function safeDecodeURIComponent(value: string): string {
   }
 }
 
-function normalizeGeneratedWebRoot(value: string | URL | undefined): URL {
-  if (!value) {
-    return ensureTrailingSlashUrl(defaultGeneratedWebRootUrl());
-  }
-
-  const url = typeof value === "string"
-    ? stringToGeneratedWebRootUrl(value)
-    : value;
-  return ensureTrailingSlashUrl(url);
-}
-
-function generatedWebArtifactUrl(artifactPath: string, generatedWebRoot: string | URL | undefined): URL {
-  if (!isSafeGeneratedWebArtifactPath(artifactPath)) {
-    throw new Error(`Unsafe Health Commons generated web artifact path: ${artifactPath}`);
-  }
-
-  return new URL(artifactPath, normalizeGeneratedWebRoot(generatedWebRoot));
-}
-
 function routeIdFromGeneratedWebBundlePath(bundlePath: string): string {
   const parts = bundlePath.split("/");
   if (
@@ -2236,21 +2237,6 @@ function assertGeneratedWebExperimentArtifactMatchesRoute(
   }
 }
 
-function isSafeGeneratedWebArtifactPath(value: string): boolean {
-  if (/^[a-z][a-z\d+.-]*:/iu.test(value) || value.startsWith("/") || value.includes("\\")) {
-    return false;
-  }
-
-  const parts = value.split("/");
-  return parts.length > 0 && parts.every((part) =>
-    part.length > 0 && part !== "." && part !== ".."
-  );
-}
-
-function ensureTrailingSlashUrl(value: URL): URL {
-  return value.href.endsWith("/") ? value : new URL(`${value.href}/`);
-}
-
 function defaultGeneratedProtocolIndexUrl(): URL {
   return new URL(
     DEFAULT_GENERATED_PROTOCOL_INDEX_PATH,
@@ -2286,59 +2272,6 @@ function defaultGeneratedKnowledgeIndexUrl(): URL {
   );
 }
 
-function defaultHealthCommonsPackageRootUrl(): URL {
-  const envValue = process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]?.trim();
-  if (envValue) {
-    return ensureTrailingSlashUrl(stringToFileOrUrl(envValue));
-  }
-
-  return ensureTrailingSlashUrl(new URL("..", import.meta.url));
-}
-
-function defaultGeneratedWebRootUrl(): URL {
-  const envPackageRoot = process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]?.trim();
-  if (envPackageRoot) {
-    return ensureTrailingSlashUrl(
-      new URL("generated/web", defaultHealthCommonsPackageRootUrl()),
-    );
-  }
-
-  const runtimeSourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const fallbackGeneratedWebRootUrl = pathToFileURL(resolve(
-    process.cwd(),
-    "packages/health-commons/generated/web",
-  ));
-  const candidateRootUrls = [
-    fallbackGeneratedWebRootUrl,
-    pathToFileURL(resolve(process.cwd(), "../packages/health-commons/generated/web")),
-    pathToFileURL(resolve(process.cwd(), "../../packages/health-commons/generated/web")),
-    pathToFileURL(resolve(runtimeSourceRoot, "generated/web")),
-  ];
-
-  for (const candidateRootUrl of candidateRootUrls) {
-    const candidateRoot = candidateRootUrl.protocol === "file:"
-      ? fileURLToPath(candidateRootUrl)
-      : null;
-    if (candidateRoot && existsSync(resolve(candidateRoot, "routes/index.json"))) {
-      return ensureTrailingSlashUrl(candidateRootUrl);
-    }
-  }
-
-  return ensureTrailingSlashUrl(fallbackGeneratedWebRootUrl);
-}
-
-function stringToGeneratedWebRootUrl(value: string): URL {
-  return stringToFileOrUrl(value);
-}
-
-function stringToFileOrUrl(value: string): URL {
-  if (/^[a-z][a-z\d+.-]*:/iu.test(value)) {
-    return new URL(value);
-  }
-
-  return pathToFileURL(resolve(value));
-}
-
 function parseJsonObject(raw: string): unknown {
   const parsed = JSON.parse(raw) as unknown;
 
@@ -2347,6 +2280,34 @@ function parseJsonObject(raw: string): unknown {
   }
 
   return parsed;
+}
+
+function loadGeneratedHealthCommonsProtocolArtifact<TValue>(
+  artifact: HealthCommonsProtocolArtifact,
+  load: () => TValue,
+): TValue {
+  try {
+    return load();
+  } catch (error) {
+    if (isHealthCommonsProtocolArtifactError(error)) {
+      throw error;
+    }
+    const code = readNodeErrorCode(error);
+    throw new HealthCommonsProtocolArtifactError({
+      artifact,
+      category:
+        code === "EACCES" || code === "ENOENT" || code === "EPERM"
+          ? "unavailable"
+          : "invalid",
+    });
+  }
+}
+
+function readNodeErrorCode(error: unknown): string | null {
+  return error && typeof error === "object" && "code" in error
+    && typeof error.code === "string"
+    ? error.code
+    : null;
 }
 
 function assertGeneratedHealthCommonsProtocolIndex(
@@ -2359,8 +2320,7 @@ function assertGeneratedHealthCommonsProtocolIndex(
   if (
     value["schemaVersion"] !== HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION ||
     typeof value["catalogHash"] !== "string" ||
-    !Array.isArray(value["protocols"]) ||
-    !value["protocols"].every(isGeneratedProtocolIndexEntry) ||
+    !isArrayOf(value["protocols"], isGeneratedProtocolIndexEntry) ||
     !value["protocols"].every(hasGeneratedProtocolSearchText)
   ) {
     throw new Error("Health Commons generated protocol index is invalid.");
@@ -2377,8 +2337,7 @@ function assertGeneratedHealthCommonsProtocolRunSpecs(
   if (
     value["schemaVersion"] !== HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION ||
     typeof value["catalogHash"] !== "string" ||
-    !Array.isArray(value["protocols"]) ||
-    !value["protocols"].every(isGeneratedProtocolRunSpec)
+    !isArrayOf(value["protocols"], isGeneratedProtocolRunSpec)
   ) {
     throw new Error("Health Commons generated protocol run specs are invalid.");
   }
@@ -2394,12 +2353,9 @@ function assertGeneratedHealthCommonsProtocolFamilyGraph(
   if (
     value["schemaVersion"] !== HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION ||
     typeof value["catalogHash"] !== "string" ||
-    !Array.isArray(value["protocols"]) ||
-    !value["protocols"].every(isGeneratedProtocolIndexEntry) ||
-    !Array.isArray(value["families"]) ||
-    !value["families"].every(isGeneratedProtocolFamilySummary) ||
-    !Array.isArray(value["edges"]) ||
-    !value["edges"].every(isGeneratedProtocolFamilyGraphEdge)
+    !isArrayOf(value["protocols"], isGeneratedProtocolIndexEntry) ||
+    !isArrayOf(value["families"], isGeneratedProtocolFamilySummary) ||
+    !isArrayOf(value["edges"], isGeneratedProtocolFamilyGraphEdge)
   ) {
     throw new Error("Health Commons generated protocol family graph is invalid.");
   }
@@ -2413,8 +2369,7 @@ function isGeneratedProtocolRunSpec(value: unknown): boolean {
   return (
     Array.isArray(value["expectedSignalDescriptions"]) &&
     Array.isArray(value["testPlans"]) &&
-    Array.isArray(value["whyItWorks"]) &&
-    value["whyItWorks"].every(isString) &&
+    isArrayOf(value["whyItWorks"], isString) &&
     isNullableRecord(value["experimentOnboarding"]) &&
     isNullableRecord(value["protocol"]) &&
     isNullableRecord(value["safety"])
@@ -2424,7 +2379,7 @@ function isGeneratedProtocolRunSpec(value: unknown): boolean {
 function isGeneratedProtocolIndexEntry(value: unknown): boolean {
   return isGeneratedProtocolEntitySummary(value, "protocol_variant") &&
     isRecord(value) &&
-    (value["searchText"] === undefined || typeof value["searchText"] === "string") &&
+    isOptionalString(value["searchText"]) &&
     isGeneratedProtocolTraits(value["traits"]);
 }
 
@@ -2445,17 +2400,14 @@ function isGeneratedProtocolEntitySummary(
   }
 
   return (
-    Array.isArray(value["aliases"]) &&
-    value["aliases"].every(isString) &&
-    Array.isArray(value["categories"]) &&
-    value["categories"].every(isString) &&
+    isArrayOf(value["aliases"], isString) &&
+    isArrayOf(value["categories"], isString) &&
     value["entityType"] === entityType &&
     typeof value["key"] === "string" &&
     typeof value["relativePath"] === "string" &&
     isGeneratedProtocolRevision(value["revision"]) &&
     typeof value["routeId"] === "string" &&
-    Array.isArray(value["routeIds"]) &&
-    value["routeIds"].every(isString) &&
+    isArrayOf(value["routeIds"], isString) &&
     typeof value["slug"] === "string" &&
     isNullableString(value["status"]) &&
     isNullableString(value["summary"]) &&
@@ -2498,29 +2450,11 @@ function assertGeneratedHealthCommonsBiomarkerDesiredDirections(
     value["schemaVersion"] !==
       HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION ||
     typeof value["catalogHash"] !== "string" ||
-    !Array.isArray(value["biomarkers"]) ||
-    !value["biomarkers"].every(isGeneratedBiomarkerDesiredDirectionEntry)
+    !isArrayOf(value["biomarkers"], isGeneratedBiomarkerDesiredDirectionEntry)
   ) {
     throw new Error(
       "Health Commons generated biomarker desired directions are invalid.",
     );
-  }
-}
-
-function assertGeneratedWebRouteIndex(
-  value: unknown,
-): asserts value is HealthCommonsWebRouteIndex {
-  if (!isRecord(value)) {
-    throw new Error("Health Commons generated web route index is invalid.");
-  }
-
-  if (
-    value["schemaVersion"] !== HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION ||
-    typeof value["catalogHash"] !== "string" ||
-    !Array.isArray(value["routes"]) ||
-    !value["routes"].every(isGeneratedWebRouteIndexEntry)
-  ) {
-    throw new Error("Health Commons generated web route index is invalid.");
   }
 }
 
@@ -2534,8 +2468,7 @@ function assertGeneratedWebExperimentIndex(
   if (
     value["schemaVersion"] !== HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION ||
     typeof value["catalogHash"] !== "string" ||
-    !Array.isArray(value["experiments"]) ||
-    !value["experiments"].every(isGeneratedWebExperimentIndexEntry)
+    !isArrayOf(value["experiments"], isGeneratedWebExperimentIndexEntry)
   ) {
     throw new Error("Health Commons generated web experiment index is invalid.");
   }
@@ -2551,8 +2484,7 @@ function assertGeneratedWebBiomarkerIndex(
   if (
     value["schemaVersion"] !== HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION ||
     typeof value["catalogHash"] !== "string" ||
-    !Array.isArray(value["biomarkers"]) ||
-    !value["biomarkers"].every(isGeneratedWebBiomarkerIndexEntry)
+    !isArrayOf(value["biomarkers"], isGeneratedWebBiomarkerIndexEntry)
   ) {
     throw new Error("Health Commons generated web biomarker index is invalid.");
   }
@@ -2572,26 +2504,20 @@ function assertGeneratedWebExperimentResearchTab(
     typeof value["key"] !== "string" ||
     typeof value["title"] !== "string" ||
     typeof value["description"] !== "string" ||
-    !Array.isArray(value["protocolKeepInMind"]) ||
-    !value["protocolKeepInMind"].every(isString) ||
-    !Array.isArray(value["researchStats"]) ||
-    !value["researchStats"].every(isGeneratedWebResearchStat) ||
+    !isArrayOf(value["protocolKeepInMind"], isString) ||
+    !isArrayOf(value["researchStats"], isGeneratedWebResearchStat) ||
     !isRecord(value["revision"]) ||
     !isRecord(value["route"]) ||
     !isGeneratedWebRoute(value["route"]) ||
     value["route"]["entityType"] !== "protocol_variant" ||
-    !Array.isArray(value["studies"]) ||
-    !value["studies"].every(isGeneratedWebResearchStudy)
+    !isArrayOf(value["studies"], isGeneratedWebResearchStudy)
   ) {
     throw new Error(`Health Commons generated experiment research tab is invalid: ${tabPath}.`);
   }
 
   if (
     value["researchGroups"] !== undefined &&
-    (
-      !Array.isArray(value["researchGroups"]) ||
-      !value["researchGroups"].every(isGeneratedWebResearchGroup)
-    )
+    !isArrayOf(value["researchGroups"], isGeneratedWebResearchGroup)
   ) {
     throw new Error(`Health Commons generated experiment research groups are invalid: ${tabPath}.`);
   }
@@ -2622,7 +2548,7 @@ function assertGeneratedWebExperimentShell(
     typeof value["evidenceLabel"] !== "string" ||
     typeof value["evidenceLevel"] !== "number" ||
     typeof value["id"] !== "string" ||
-    (typeof value["image"] !== "string" && value["image"] !== null) ||
+    !isNullableString(value["image"]) ||
     typeof value["key"] !== "string" ||
     !isRecord(value["revision"]) ||
     !isRecord(value["route"]) ||
@@ -2647,22 +2573,15 @@ function assertGeneratedWebExperimentProtocolTab(
     typeof value["baselineDays"] !== "number" ||
     typeof value["catalogHash"] !== "string" ||
     typeof value["durationDays"] !== "number" ||
-    !Array.isArray(value["expectedSignals"]) ||
-    !value["expectedSignals"].every(isGeneratedWebExperimentSignal) ||
-    !Array.isArray(value["experts"]) ||
-    !value["experts"].every(isGeneratedWebExperimentExpert) ||
+    !isArrayOf(value["expectedSignals"], isGeneratedWebExperimentSignal) ||
+    !isArrayOf(value["experts"], isGeneratedWebExperimentExpert) ||
     typeof value["id"] !== "string" ||
     typeof value["key"] !== "string" ||
-    !Array.isArray(value["measurementPaths"]) ||
-    !value["measurementPaths"].every(isGeneratedWebMeasurementPath) ||
-    !Array.isArray(value["mechanismChain"]) ||
-    !value["mechanismChain"].every(isGeneratedWebMechanismChainStep) ||
-    !Array.isArray(value["protocol"]) ||
-    !value["protocol"].every(isGeneratedWebProtocolStep) ||
-    !Array.isArray(value["protocolFacts"]) ||
-    !value["protocolFacts"].every(isGeneratedWebProtocolFact) ||
-    !Array.isArray(value["protocolTips"]) ||
-    !value["protocolTips"].every(isString) ||
+    !isArrayOf(value["measurementPaths"], isGeneratedWebMeasurementPath) ||
+    !isArrayOf(value["mechanismChain"], isGeneratedWebMechanismChainStep) ||
+    !isArrayOf(value["protocol"], isGeneratedWebProtocolStep) ||
+    !isArrayOf(value["protocolFacts"], isGeneratedWebProtocolFact) ||
+    !isArrayOf(value["protocolTips"], isString) ||
     !isRecord(value["revision"]) ||
     !isRecord(value["route"]) ||
     !isGeneratedWebRoute(value["route"]) ||
@@ -2701,8 +2620,7 @@ function assertGeneratedWebExperimentResultsPublic(
     typeof value["durationDays"] !== "number" ||
     typeof value["id"] !== "string" ||
     typeof value["key"] !== "string" ||
-    !Array.isArray(value["protocol"]) ||
-    !value["protocol"].every(isGeneratedWebProtocolStep) ||
+    !isArrayOf(value["protocol"], isGeneratedWebProtocolStep) ||
     !isRecord(value["revision"]) ||
     !isRecord(value["route"]) ||
     !isGeneratedWebRoute(value["route"]) ||
@@ -2743,50 +2661,15 @@ function assertGeneratedWebRouteBundle(
   }
 }
 
-function isGeneratedWebRouteIndexEntry(value: unknown): boolean {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const projections = value["projections"];
-  return (
-    Array.isArray(value["aliases"]) &&
-    value["aliases"].every(isString) &&
-    typeof value["bundlePath"] === "string" &&
-    isSafeGeneratedWebArtifactPath(value["bundlePath"]) &&
-    typeof value["entityType"] === "string" &&
-    typeof value["key"] === "string" &&
-    typeof value["routeId"] === "string" &&
-    typeof value["slug"] === "string" &&
-    (
-      projections === undefined ||
-      (
-        isRecord(projections) &&
-        Object.entries(projections).every(([projectionKey, artifactPath]) =>
-          isGeneratedWebProjectionKey(projectionKey) &&
-          typeof artifactPath === "string" &&
-          isSafeGeneratedWebArtifactPath(artifactPath)
-        )
-      )
-    )
-  );
-}
-
-function isGeneratedWebProjectionKey(value: string): value is HealthCommonsWebProjectionKey {
-  return HEALTH_COMMONS_WEB_PROJECTION_KEYS.some((projectionKey) => projectionKey === value);
-}
-
 function isGeneratedWebExperimentIndexEntry(value: unknown): boolean {
   if (!isRecord(value)) {
     return false;
   }
 
   return (
-    Array.isArray(value["aliases"]) &&
-    value["aliases"].every(isString) &&
+    isArrayOf(value["aliases"], isString) &&
     typeof value["baselineDays"] === "number" &&
-    Array.isArray(value["categories"]) &&
-    value["categories"].every(isString) &&
+    isArrayOf(value["categories"], isString) &&
     typeof value["bundlePath"] === "string" &&
     typeof value["category"] === "string" &&
     typeof value["description"] === "string" &&
@@ -2794,9 +2677,9 @@ function isGeneratedWebExperimentIndexEntry(value: unknown): boolean {
     typeof value["evidenceLabel"] === "string" &&
     typeof value["evidenceLevel"] === "number" &&
     typeof value["hidden"] === "boolean" &&
-    (typeof value["image"] === "string" || value["image"] === null) &&
+    isNullableString(value["image"]) &&
     typeof value["key"] === "string" &&
-    (typeof value["quality"] === "string" || value["quality"] === null) &&
+    isNullableString(value["quality"]) &&
     isRecord(value["revision"]) &&
     typeof value["routeId"] === "string" &&
     typeof value["slug"] === "string" &&
@@ -2805,9 +2688,9 @@ function isGeneratedWebExperimentIndexEntry(value: unknown): boolean {
       typeof value["sortRank"] === "number" ||
       value["sortRank"] === null
     ) &&
-    (typeof value["status"] === "string" || value["status"] === null) &&
+    isNullableString(value["status"]) &&
     typeof value["studyCount"] === "number" &&
-    (typeof value["summary"] === "string" || value["summary"] === null) &&
+    isNullableString(value["summary"]) &&
     typeof value["title"] === "string"
   );
 }
@@ -2818,26 +2701,35 @@ function isGeneratedWebBiomarkerIndexEntry(value: unknown): boolean {
   }
 
   return (
-    Array.isArray(value["aliases"]) &&
-    value["aliases"].every(isString) &&
+    isArrayOf(value["aliases"], isString) &&
     typeof value["bundlePath"] === "string" &&
-    Array.isArray(value["categories"]) &&
-    value["categories"].every(isString) &&
+    isArrayOf(value["categories"], isString) &&
     isHealthCommonsBiomarkerDesiredDirection(value["desiredDirection"]) &&
-    Array.isArray(value["fallbackRanges"]) &&
-    value["fallbackRanges"].every(isGeneratedWebBiomarkerFallbackRange) &&
+    isArrayOf(value["fallbackRanges"], isGeneratedWebBiomarkerFallbackRange) &&
+    Array.isArray(value["privateMetricBindings"]) &&
+    typeof value["valuePrecision"] === "number" &&
     typeof value["hidden"] === "boolean" &&
     typeof value["key"] === "string" &&
     typeof value["published"] === "boolean" &&
-    (typeof value["quality"] === "string" || value["quality"] === null) &&
+    isNullableString(value["quality"]) &&
     isRecord(value["revision"]) &&
     typeof value["routeId"] === "string" &&
     typeof value["slug"] === "string" &&
-    (typeof value["status"] === "string" || value["status"] === null) &&
-    (typeof value["summary"] === "string" || value["summary"] === null) &&
+    isNullableString(value["status"]) &&
+    isNullableString(value["summary"]) &&
     typeof value["title"] === "string" &&
-    (typeof value["unit"] === "string" || value["unit"] === null)
+    isNullableString(value["unit"])
   );
+}
+
+function isGeneratedWebSourceSnippet(value: unknown): boolean {
+  return isRecord(value)
+    && (value["citation"] === null || value["citation"] === undefined || typeof value["citation"] === "string")
+    && (value["finding"] === null || value["finding"] === undefined || typeof value["finding"] === "string")
+    && typeof value["key"] === "string"
+    && typeof value["title"] === "string"
+    && (value["url"] === null || value["url"] === undefined || typeof value["url"] === "string")
+    && (value["year"] === null || value["year"] === undefined || typeof value["year"] === "number");
 }
 
 function isGeneratedWebBiomarkerFallbackRange(value: unknown): boolean {
@@ -2875,8 +2767,7 @@ function isGeneratedWebBiomarkerFallbackBound(value: unknown): value is {
 
 function isGeneratedWebRoute(value: Record<string, unknown>): boolean {
   return (
-    Array.isArray(value["aliases"]) &&
-    value["aliases"].every(isString) &&
+    isArrayOf(value["aliases"], isString) &&
     typeof value["entityType"] === "string" &&
     typeof value["routeId"] === "string" &&
     typeof value["slug"] === "string"
@@ -2913,12 +2804,11 @@ function isGeneratedWebResearchGroup(value: unknown): boolean {
   }
 
   return (
-    (value["defaultOpen"] === undefined || typeof value["defaultOpen"] === "boolean") &&
+    isOptionalBoolean(value["defaultOpen"]) &&
     typeof value["id"] === "string" &&
     typeof value["label"] === "string" &&
     isGeneratedWebResearchStance(value["stance"]) &&
-    Array.isArray(value["studies"]) &&
-    value["studies"].every(isGeneratedWebResearchStudy) &&
+    isArrayOf(value["studies"], isGeneratedWebResearchStudy) &&
     typeof value["summary"] === "string"
   );
 }
@@ -2931,24 +2821,24 @@ function isGeneratedWebResearchStudy(value: unknown): boolean {
   return (
     Object.keys(value).every((key) => GENERATED_WEB_RESEARCH_STUDY_KEYS.has(key)) &&
     typeof value["authors"] === "string" &&
-    (value["caveat"] === undefined || typeof value["caveat"] === "string") &&
-    (value["designLabel"] === undefined || typeof value["designLabel"] === "string") &&
-    (value["displayPriority"] === undefined || typeof value["displayPriority"] === "number") &&
-    (value["duration"] === undefined || typeof value["duration"] === "string") &&
-    (value["finding"] === undefined || typeof value["finding"] === "string") &&
+    isOptionalString(value["caveat"]) &&
+    isOptionalString(value["designLabel"]) &&
+    isOptionalNumber(value["displayPriority"]) &&
+    isOptionalString(value["duration"]) &&
+    isOptionalString(value["finding"]) &&
     (
       value["findingKind"] === undefined ||
       isGeneratedWebResearchFindingKind(value["findingKind"])
     ) &&
-    (value["groupId"] === undefined || typeof value["groupId"] === "string") &&
-    (value["headline"] === undefined || typeof value["headline"] === "string") &&
-    (value["implication"] === undefined || typeof value["implication"] === "string") &&
+    isOptionalString(value["groupId"]) &&
+    isOptionalString(value["headline"]) &&
+    isOptionalString(value["implication"]) &&
     typeof value["journal"] === "string" &&
     (
       value["participantCountKind"] === undefined ||
       isGeneratedWebResearchParticipantCountKind(value["participantCountKind"])
     ) &&
-    (value["population"] === undefined || typeof value["population"] === "string") &&
+    isOptionalString(value["population"]) &&
     (
       value["result"] === undefined ||
       isGeneratedWebResearchResult(value["result"])
@@ -2963,9 +2853,9 @@ function isGeneratedWebResearchStudy(value: unknown): boolean {
     ) &&
     typeof value["title"] === "string" &&
     isGeneratedWebResearchStudyType(value["type"]) &&
-    (value["year"] === undefined || typeof value["year"] === "number") &&
-    (value["participants"] === undefined || typeof value["participants"] === "number") &&
-    (value["includedStudyCount"] === undefined || typeof value["includedStudyCount"] === "number") &&
+    isOptionalNumber(value["year"]) &&
+    isOptionalNumber(value["participants"]) &&
+    isOptionalNumber(value["includedStudyCount"]) &&
     (
       value["url"] === undefined ||
       (typeof value["url"] === "string" && isSafeGeneratedWebHttpUrl(value["url"]))
@@ -2992,19 +2882,16 @@ function isGeneratedWebExperimentSignal(value: unknown): boolean {
   }
 
   return (
-    (value["baseline"] === undefined || typeof value["baseline"] === "string") &&
+    isOptionalString(value["baseline"]) &&
     typeof value["delta"] === "string" &&
-    (value["description"] === undefined || typeof value["description"] === "string") &&
+    isOptionalString(value["description"]) &&
     isGeneratedWebSignalDirection(value["direction"]) &&
-    (value["displayValue"] === undefined || typeof value["displayValue"] === "string") &&
+    isOptionalString(value["displayValue"]) &&
     (
       value["estimatedChange"] === undefined ||
       isGeneratedWebExperimentSignalEstimate(value["estimatedChange"])
     ) &&
-    (
-      value["biomarkerRouteId"] === undefined ||
-      typeof value["biomarkerRouteId"] === "string"
-    ) &&
+    isOptionalString(value["biomarkerRouteId"]) &&
     typeof value["expected"] === "string" &&
     typeof value["label"] === "string" &&
     (
@@ -3012,7 +2899,7 @@ function isGeneratedWebExperimentSignal(value: unknown): boolean {
       value["protocolProminence"] === "focus" ||
       value["protocolProminence"] === "context"
     ) &&
-    (value["unit"] === undefined || typeof value["unit"] === "string") &&
+    isOptionalString(value["unit"]) &&
     typeof value["value"] === "string"
   );
 }
@@ -3024,20 +2911,20 @@ function isGeneratedWebExperimentSignalEstimate(value: unknown): boolean {
 
   if (value["kind"] === "mixed_or_contextual") {
     return (
-      (value["basis"] === undefined || typeof value["basis"] === "string") &&
+      isOptionalString(value["basis"]) &&
       isGeneratedWebExperimentSignalEstimateConfidence(value["confidence"]) &&
-      (value["window"] === undefined || typeof value["window"] === "string")
+      isOptionalString(value["window"])
     );
   }
 
   return (
     (value["kind"] === "absolute" || value["kind"] === "relative_percent") &&
-    (value["basis"] === undefined || typeof value["basis"] === "string") &&
+    isOptionalString(value["basis"]) &&
     isGeneratedWebExperimentSignalEstimateConfidence(value["confidence"]) &&
     typeof value["high"] === "number" &&
     typeof value["low"] === "number" &&
     typeof value["unit"] === "string" &&
-    (value["window"] === undefined || typeof value["window"] === "string")
+    isOptionalString(value["window"])
   );
 }
 
@@ -3059,18 +2946,13 @@ function isGeneratedWebMeasurementPath(value: unknown): boolean {
   return (
     typeof value["isDefault"] === "boolean" &&
     typeof value["label"] === "string" &&
-    Array.isArray(value["methodKeys"]) &&
-    value["methodKeys"].every(isString) &&
-    Array.isArray(value["methods"]) &&
-    value["methods"].every(isGeneratedWebMeasurementMethodReference) &&
-    Array.isArray(value["notes"]) &&
-    value["notes"].every(isString) &&
-    Array.isArray(value["outcomeLabels"]) &&
-    value["outcomeLabels"].every(isString) &&
+    isArrayOf(value["methodKeys"], isString) &&
+    isArrayOf(value["methods"], isGeneratedWebMeasurementMethodReference) &&
+    isArrayOf(value["notes"], isString) &&
+    isArrayOf(value["outcomeLabels"], isString) &&
     typeof value["pathId"] === "string" &&
     typeof value["required"] === "boolean" &&
-    Array.isArray(value["safetyOutcomeLabels"]) &&
-    value["safetyOutcomeLabels"].every(isString) &&
+    isArrayOf(value["safetyOutcomeLabels"], isString) &&
     typeof value["tier"] === "string"
   );
 }
@@ -3081,14 +2963,13 @@ function isGeneratedWebMeasurementMethodReference(value: unknown): boolean {
   }
 
   return (
-    (value["href"] === undefined || typeof value["href"] === "string") &&
+    isOptionalString(value["href"]) &&
     typeof value["key"] === "string" &&
-    Array.isArray(value["modalities"]) &&
-    value["modalities"].every(isString) &&
+    isArrayOf(value["modalities"], isString) &&
     (value["privacy"] === undefined || isGeneratedWebMeasurementMethodPrivacy(value["privacy"])) &&
-    (value["routeId"] === undefined || typeof value["routeId"] === "string") &&
+    isOptionalString(value["routeId"]) &&
     typeof value["shortName"] === "string" &&
-    (value["summary"] === undefined || typeof value["summary"] === "string") &&
+    isOptionalString(value["summary"]) &&
     typeof value["tier"] === "string" &&
     typeof value["title"] === "string"
   );
@@ -3100,12 +2981,9 @@ function isGeneratedWebMeasurementMethodPrivacy(value: unknown): boolean {
   }
 
   return (
-    (value["containsIdentifiableImages"] === undefined ||
-      typeof value["containsIdentifiableImages"] === "boolean") &&
-    (value["localOnlyRecommended"] === undefined ||
-      typeof value["localOnlyRecommended"] === "boolean") &&
-    Array.isArray(value["notes"]) &&
-    value["notes"].every(isString)
+    isOptionalBoolean(value["containsIdentifiableImages"]) &&
+    isOptionalBoolean(value["localOnlyRecommended"]) &&
+    isArrayOf(value["notes"], isString)
   );
 }
 
@@ -3127,19 +3005,15 @@ function isGeneratedWebSessionShape(value: unknown): boolean {
   }
 
   return (
-    (value["label"] === undefined || typeof value["label"] === "string") &&
-    Array.isArray(value["segments"]) &&
-    value["segments"].every(isGeneratedWebSessionShapeSegment) &&
+    isOptionalString(value["label"]) &&
+    isArrayOf(value["segments"], isGeneratedWebSessionShapeSegment) &&
     (
       value["summarySegments"] === undefined ||
-      (
-        Array.isArray(value["summarySegments"]) &&
-        value["summarySegments"].every(isGeneratedWebSessionShapeSegment)
-      )
+      isArrayOf(value["summarySegments"], isGeneratedWebSessionShapeSegment)
     ) &&
     (
       value["ticks"] === undefined ||
-      (Array.isArray(value["ticks"]) && value["ticks"].every(isGeneratedWebSessionShapeTick))
+      isArrayOf(value["ticks"], isGeneratedWebSessionShapeTick)
     )
   );
 }
@@ -3193,7 +3067,7 @@ function isGeneratedWebProtocolFact(value: unknown): boolean {
   }
 
   return (
-    (value["detail"] === undefined || typeof value["detail"] === "string") &&
+    isOptionalString(value["detail"]) &&
     typeof value["label"] === "string" &&
     typeof value["value"] === "string"
   );
@@ -3208,7 +3082,7 @@ function isGeneratedWebExperimentExpert(value: unknown): boolean {
     typeof value["field"] === "string" &&
     typeof value["initials"] === "string" &&
     typeof value["name"] === "string" &&
-    (value["profileImageUrl"] === undefined || typeof value["profileImageUrl"] === "string") &&
+    isOptionalString(value["profileImageUrl"]) &&
     typeof value["quote"] === "string"
   );
 }
@@ -3220,10 +3094,8 @@ function isGeneratedWebSafety(value: unknown): boolean {
 
   return (
     typeof value["cautionLevel"] === "number" &&
-    Array.isArray(value["precautions"]) &&
-    value["precautions"].every(isString) &&
-    Array.isArray(value["whoShouldAvoid"]) &&
-    value["whoShouldAvoid"].every(isString)
+    isArrayOf(value["precautions"], isString) &&
+    isArrayOf(value["whoShouldAvoid"], isString)
   );
 }
 
@@ -3233,14 +3105,13 @@ function isGeneratedWebExperimentCommons(value: unknown): boolean {
   }
 
   return (
-    Array.isArray(value["aliases"]) &&
-    value["aliases"].every(isString) &&
+    isArrayOf(value["aliases"], isString) &&
     typeof value["catalogHash"] === "string" &&
     typeof value["key"] === "string" &&
     typeof value["pageRevisionId"] === "string" &&
-    (typeof value["recipeHash"] === "string" || value["recipeHash"] === null) &&
+    isNullableString(value["recipeHash"]) &&
     typeof value["routeId"] === "string" &&
-    (typeof value["runSpecRevisionId"] === "string" || value["runSpecRevisionId"] === null) &&
+    isNullableString(value["runSpecRevisionId"]) &&
     typeof value["slug"] === "string"
   );
 }
@@ -3505,6 +3376,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isString(value: unknown): value is string {
   return typeof value === "string";
+}
+
+function isArrayOf(
+  value: unknown,
+  isItem: (item: unknown) => boolean,
+): value is unknown[] {
+  return Array.isArray(value) && value.every(isItem);
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || isString(value);
+}
+
+function isOptionalNumber(value: unknown): value is number | undefined {
+  return value === undefined || typeof value === "number";
+}
+
+function isOptionalBoolean(value: unknown): value is boolean | undefined {
+  return value === undefined || typeof value === "boolean";
 }
 
 function isNullableString(value: unknown): value is string | null {

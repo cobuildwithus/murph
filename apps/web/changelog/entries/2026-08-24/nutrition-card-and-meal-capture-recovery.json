@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-24",
+  "order": 100,
+  "item": {
+    "id": "nutrition-card-and-meal-capture-recovery",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Nutrition tracking recovers more gracefully",
+    "summary": "Murph can now complete more nutrition cards with compatible saved goals and recover a captured meal when its first update fails.",
+    "details": "Saved goal meaning stays unchanged, and automatic captures retain a photo-supported observation when a trustworthy numeric estimate is not available.",
+    "relevanceTags": ["assistant", "nutrition", "reliability"],
+    "sourcePullRequests": [2240]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-26",
+  "order": 100,
+  "item": {
+    "id": "nutrition-context-meal-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Nutrition cards use saved context",
+    "summary": "Murph now reuses established nutrition suitability and repairs recoverable meal gaps before sending a daily nutrition card.",
+    "details": "If a meal's identity or amount is still unclear, Murph asks one focused question instead of presenting partial totals as the finished day. Number-sensitive and scheduled paths keep their existing boundaries.",
+    "relevanceTags": ["assistant", "nutrition", "messaging", "recovery"],
+    "sourcePullRequests": [2336]
+  }
+}

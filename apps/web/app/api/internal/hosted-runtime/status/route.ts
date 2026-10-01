@@ -71,10 +71,15 @@ export const GET = withJsonError(async (request: Request) => {
           checkpointedAt: workspace.checkpointedAt,
           createdAt: workspace.createdAt,
           inboxMediaRetentionWakeAt: workspace.inboxMediaRetentionWakeAt,
+          nextDefaultProcessingWakeAt: workspace.nextDefaultProcessingWakeAt,
+          nextDefaultProcessingWakeReason:
+            workspace.nextDefaultProcessingWakeReason,
           nextWakeAt: workspace.nextWakeAt,
           nextWakeReason: workspace.nextWakeReason,
           redactedStatus: redactedStatus,
           snapshotRef: workspace.snapshotRef,
+          systemMailboxProgressGeneration:
+            workspace.systemMailboxProgressGeneration,
           updatedAt: workspace.updatedAt,
           userId: workspace.userId,
           version: workspace.version,

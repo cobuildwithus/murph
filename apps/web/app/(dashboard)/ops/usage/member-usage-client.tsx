@@ -1418,8 +1418,9 @@ function UsageResetAllSurface(input: {
           <Alert variant="destructive">
             <AlertDescription>
               Paid, Family-sponsored, and group-container rows clear current
-              included spend and blocking. Exhausted direct Starter rows get the
-              existing one-policy allowance recovery. Immutable usage history,
+              included spend and blocking. Direct Starter rows clear current usage
+              and restore their Starter allowance to $4.50, including partly used
+              allowances. Immutable usage history,
               purchased credits, and referral credits remain unchanged. The
               server processes up to 10 members serially per request. At the
               starting count, that is about {formatInteger(Math.ceil(

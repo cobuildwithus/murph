@@ -1,11 +1,12 @@
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
+import type { JunctionRequestTimeoutDiagnosticDetails } from "./types.ts";
+import { readSafeJunctionRequestTimeoutDiagnostics } from "./junction-request-timeout-diagnostics.ts";
 
-import {
-  parseSerializableConfiguredDeviceSyncProviderConfigs,
-  type SerializableConfiguredDeviceSyncProviderConfigs,
-} from "./config/serializable-provider-configs.ts";
+export { readSafeJunctionRequestTimeoutDiagnostics } from "./junction-request-timeout-diagnostics.ts";
 
-import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
+export { encodeJunctionReconcileProof, readJunctionReconcileProof } from "./junction-reconcile-proof.ts";
+
+import { JUNCTION_RECONCILE_PROOF_METADATA_KEY, JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
@@ -24,6 +25,8 @@ import type {
   DeviceConnectionSourceStatus,
 } from "./client.ts";
 export {
+  JUNCTION_RECONCILE_PROOF_METADATA_KEY,
+  JUNCTION_TEMPORAL_SWEEP_METADATA_KEY,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
@@ -33,6 +36,9 @@ export {
 
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";
+/** Optional diagnostic UTF-8 length of the serialized successful snapshot; never authority. */
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER =
+  "x-murph-device-sync-snapshot-bytes";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH =
   "/api/internal/device-sync/runtime/apply";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH =
@@ -41,6 +47,8 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
   "/api/internal/device-sync/runtime/dirty-ack";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
+export const HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH =
+  "/api/internal/device-sync/no-data-outreach";
 export const HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH =
   "/api/internal/device-sync/fitbit-migration/cutover";
 export const HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT = 100;
@@ -243,11 +251,21 @@ export function mergeHostedDeviceSyncConnectionMetadata(input: {
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown> | null | undefined;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
-  return mergeHostedJunctionHistoricalBackfillMetadata({
+  const merged = mergeHostedJunctionHistoricalBackfillMetadata({
     hostedMetadata: input.hostedMetadata,
     localConnectionStateUnpublished: input.localConnectionStateUnpublished,
     localMetadata: input.localMetadata ?? {},
   });
+  // Local SQLite owns unpublished scheduling/import progress. Keep the actual
+  // Web baseline until a checkpointed continuation authorizes publication.
+  for (const key of [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, JUNCTION_RECONCILE_PROOF_METADATA_KEY]) {
+    const localValue = input.localMetadata?.[key];
+    if (typeof localValue === "string") {
+      merged.metadata[key] = localValue;
+      merged.preservedLocalProgress ||= localValue !== input.hostedMetadata[key];
+    }
+  }
+  return merged;
 }
 
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
@@ -266,6 +284,23 @@ export interface HostedExecutionDeviceSyncReconcileResponse {
   connectionId: string;
   occurredAt: string;
   status: "queued";
+}
+
+export type HostedExecutionDeviceSyncNoDataOutreachRequest = {
+  assistantInputId: string;
+  sourceProviderSlug: string;
+} & (
+  | { mode: "after_days"; afterDays: number }
+  | { mode: "default" }
+  | { mode: "off" }
+);
+
+export interface HostedExecutionDeviceSyncNoDataOutreachResponse {
+  action: "configure_no_data_outreach";
+  effectiveAfterDays: number | null;
+  setting: "custom" | "default" | "off";
+  sourceProviderSlug: string;
+  status: "saved" | "unchanged";
 }
 
 export interface HostedExecutionDeviceSyncFitbitMigrationCutoverRequest {
@@ -425,8 +460,6 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
   generatedAt: string;
   /** Null only when the current bounded page exhausted matching authority. */
   nextCursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
-  /** Invocation-scoped client configuration for current app-bound connections. */
-  providerConfigs?: SerializableConfiguredDeviceSyncProviderConfigs;
   userId: string;
 }
 
@@ -465,7 +498,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
   lastDataAt?: string | null;
 }
 
-export interface HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
+export interface HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails extends JunctionRequestTimeoutDiagnosticDetails {
   failureCauseCode?: string;
   failureCauseName?: string;
   failureErrorCause?: string;
@@ -561,6 +594,7 @@ export interface HostedExecutionDeviceSyncDirtyResource {
   providerSendToWebhookMs?: number | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
+  providerDedupeKey?: string;
   resource: string | null;
   resourceCategory: string | null;
   sourceProviderSlug: string | null;
@@ -722,6 +756,8 @@ export interface HostedExecutionDeviceSyncJobHint {
 }
 
 export interface HostedExecutionDeviceSyncWakeHint {
+  junctionReconcileProof?: string;
+  junctionTemporalSweepKey?: string;
   eventType?: string | null;
   jobs?: HostedExecutionDeviceSyncJobHint[];
   nextReconcileAt?: string | null;
@@ -750,6 +786,9 @@ type HostedExecutionDeviceSyncHintPayloadFieldKind = "boolean" | "isoTimestamp" 
 const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   Record<string, HostedExecutionDeviceSyncHintPayloadFieldKind>
 > = Object.freeze({
+  calendarRefreshDay: "string",
+  companionAdmissionId: "string",
+  companionObservationJson: "string",
   dataType: "string",
   emptyBackfillAttempts: "number",
   eventType: "string",
@@ -758,6 +797,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   historicalProofFirstSeenAt: "isoTimestamp",
   historicalProofSourceProviderSlug: "string",
   historicalProviderRecordsSeen: "boolean",
+  historicalPullPending: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",
   historicalUnresolvedProviderRecordCount: "number",
@@ -766,13 +806,17 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   includeProfile: "boolean",
   objectId: "string",
   occurredAt: "isoTimestamp",
+  reconcileProof: "string",
   resource: "string",
   resourceCategory: "string",
   sourceLifecycleEpoch: "number",
   resourceId: "string",
   resourceType: "string",
+  silentSinceAt: "isoTimestamp",
   sourceEventType: "string",
+  sourceInstanceId: "string",
   sourceProviderSlug: "string",
+  sourceType: "string",
   summaryPhaseComplete: "boolean",
   summaryResourceCursor: "string",
   temporalAuthorityTimeZone: "string",
@@ -781,6 +825,8 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   timeseriesWindowHours: "number",
   webhookDataJson: "string",
   workoutStreamCursor: "string",
+  workoutStreamEmptyReplay: "boolean",
+  workoutStreamEmptySeen: "boolean",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
 });
@@ -905,6 +951,112 @@ export function parseHostedExecutionDeviceSyncReconcileResponse(
   };
 }
 
+export function parseHostedExecutionDeviceSyncNoDataOutreachRequest(
+  value: unknown,
+): HostedExecutionDeviceSyncNoDataOutreachRequest {
+  const record = requireObject(value, "Hosted device-sync no-data outreach request");
+  const mode = requireString(
+    record.mode,
+    "Hosted device-sync no-data outreach request mode",
+  );
+  const assistantInputId = requireString(
+    record.assistantInputId,
+    "Hosted device-sync no-data outreach request assistantInputId",
+  );
+  if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
+    throw new TypeError(
+      "Hosted device-sync no-data outreach request assistantInputId is invalid.",
+    );
+  }
+  const common = {
+    assistantInputId,
+    sourceProviderSlug: requireString(
+      record.sourceProviderSlug,
+      "Hosted device-sync no-data outreach request sourceProviderSlug",
+    ),
+  };
+  if (mode === "after_days") {
+    assertSupportedFields(
+      record,
+      "Hosted device-sync no-data outreach request",
+      ["afterDays", "assistantInputId", "mode", "sourceProviderSlug"],
+    );
+    const afterDays = requirePositiveInteger(
+      record.afterDays,
+      "Hosted device-sync no-data outreach request afterDays",
+    );
+    if (afterDays < 5 || afterDays > 30) {
+      throw new TypeError(
+        "Hosted device-sync no-data outreach request afterDays must be between 5 and 30.",
+      );
+    }
+    return { ...common, afterDays, mode };
+  }
+  if (mode !== "default" && mode !== "off") {
+    throw new TypeError("Hosted device-sync no-data outreach request mode is invalid.");
+  }
+  assertSupportedFields(
+    record,
+    "Hosted device-sync no-data outreach request",
+    ["assistantInputId", "mode", "sourceProviderSlug"],
+  );
+  return { ...common, mode };
+}
+
+export function parseHostedExecutionDeviceSyncNoDataOutreachResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncNoDataOutreachResponse {
+  const record = requireObject(value, "Hosted device-sync no-data outreach response");
+  assertSupportedFields(
+    record,
+    "Hosted device-sync no-data outreach response",
+    ["action", "effectiveAfterDays", "setting", "sourceProviderSlug", "status"],
+  );
+  if (record.action !== "configure_no_data_outreach") {
+    throw new TypeError("Hosted device-sync no-data outreach response action is invalid.");
+  }
+  if (
+    record.setting !== "custom"
+    && record.setting !== "default"
+    && record.setting !== "off"
+  ) {
+    throw new TypeError("Hosted device-sync no-data outreach response setting is invalid.");
+  }
+  if (record.status !== "saved" && record.status !== "unchanged") {
+    throw new TypeError("Hosted device-sync no-data outreach response status is invalid.");
+  }
+  const effectiveAfterDays = record.effectiveAfterDays === null
+    ? null
+    : requirePositiveInteger(
+        record.effectiveAfterDays,
+        "Hosted device-sync no-data outreach response effectiveAfterDays",
+      );
+  const minimumDays = record.setting === "default"
+    && record.sourceProviderSlug === "apple_health_kit" ? 3 : 5;
+  if (
+    (record.setting === "off" && effectiveAfterDays !== null)
+    || (record.setting !== "off" && (
+      effectiveAfterDays === null
+      || effectiveAfterDays < minimumDays
+      || effectiveAfterDays > 30
+    ))
+  ) {
+    throw new TypeError(
+      "Hosted device-sync no-data outreach response setting and effectiveAfterDays are inconsistent.",
+    );
+  }
+  return {
+    action: record.action,
+    effectiveAfterDays,
+    setting: record.setting,
+    sourceProviderSlug: requireString(
+      record.sourceProviderSlug,
+      "Hosted device-sync no-data outreach response sourceProviderSlug",
+    ),
+    status: record.status,
+  };
+}
+
 export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
   value: unknown,
 ): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
@@ -935,14 +1087,6 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
                 record.nextCursor,
                 "Hosted device-sync runtime snapshot response nextCursor",
               ),
-        }),
-    ...(record.providerConfigs === undefined
-      ? {}
-      : {
-          providerConfigs: parseSerializableConfiguredDeviceSyncProviderConfigs(
-            record.providerConfigs,
-            "Hosted device-sync runtime snapshot response providerConfigs",
-          ),
         }),
     userId: requireString(record.userId, "Hosted device-sync runtime snapshot response userId"),
   };
@@ -1410,6 +1554,23 @@ export function parseHostedExecutionDeviceSyncWakeHint(
     ).map((entry, index) => parseHostedExecutionDeviceSyncJobHint(entry, index));
   }
 
+  if (record.junctionReconcileProof !== undefined) {
+    if (typeof record.junctionReconcileProof !== "string"
+      || record.junctionReconcileProof.trim().length === 0
+      || record.junctionReconcileProof.length > 256) {
+      throw new TypeError("Hosted execution device-sync.wake hint junctionReconcileProof must be a nonempty string of at most 256 characters.");
+    }
+    next.junctionReconcileProof = record.junctionReconcileProof;
+  }
+
+  if (record.junctionTemporalSweepKey !== undefined) {
+    if (typeof record.junctionTemporalSweepKey !== "string"
+      || !/^[a-f0-9]{64}$/u.test(record.junctionTemporalSweepKey)) {
+      throw new TypeError("Hosted execution device-sync.wake hint junctionTemporalSweepKey must be a SHA-256 hash.");
+    }
+    next.junctionTemporalSweepKey = record.junctionTemporalSweepKey;
+  }
+
   if (record.nextReconcileAt !== undefined) {
     next.nextReconcileAt = readNullableIsoTimestamp(
       record.nextReconcileAt,
@@ -1518,11 +1679,10 @@ function parseHostedExecutionDeviceSyncJobHintPayload(
   const next: Record<string, unknown> = {};
 
   for (const [field, rawValue] of Object.entries(record)) {
-    const kind = HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS[field];
-
-    if (!kind) {
+    if (!Object.hasOwn(HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS, field)) {
       throw new TypeError(`${label}.${field} is not supported.`);
     }
+    const kind = HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS[field];
 
     if (kind === "string" && rawValue === "") {
       continue;
@@ -1701,6 +1861,14 @@ function parseHostedExecutionDeviceSyncDirtyResource(
       : {}),
     jobKind: requireString(record.jobKind, `${label}.jobKind`),
     payload: readHostedExecutionDeviceSyncDirtyPayload(record.payload, `${label}.payload`),
+    ...(record.providerDedupeKey === undefined || record.providerDedupeKey === null
+      ? {}
+      : {
+          providerDedupeKey: requireString(
+            record.providerDedupeKey,
+            `${label}.providerDedupeKey`,
+          ),
+        }),
     resource: readNullableStringValue(record.resource, `${label}.resource`),
     resourceCategory: readNullableStringValue(record.resourceCategory, `${label}.resourceCategory`),
     sourceProviderSlug: readNullableStringValue(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
@@ -2165,6 +2333,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnostic(
     details: parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
       record.details,
       `${label}.details`,
+      code,
     ),
     retryable: requireBoolean(record.retryable, `${label}.retryable`),
   };
@@ -2173,6 +2342,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnostic(
 function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
   value: unknown,
   label: string,
+  code: string,
 ): HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
   if (value === undefined || value === null) {
     return {};
@@ -2180,6 +2350,11 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
 
   const record = requireObject(value, label);
   assertSupportedFields(record, label, [
+    "providerRequestTimeoutMs",
+    "providerRequestElapsedMs",
+    "providerRequestAttempt",
+    "providerRequestStage",
+    "providerResponseHeadersPresent",
     "failureCauseCode",
     "failureCauseName",
     "failureErrorCause",
@@ -2320,7 +2495,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
     }
   }
 
-  return details;
+  return { ...details, ...readSafeJunctionRequestTimeoutDiagnostics(code, record) };
 }
 
 function assertHostedExecutionDeviceSyncRuntimeMutationFences(input: {

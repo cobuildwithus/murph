@@ -6,8 +6,7 @@ interface MockDeviceOauthSessionRow {
   state: string;
   userId: string | null;
   provider: string;
-  providerApplicationId: string | null;
-  providerApplicationRevision: number | null;
+
   returnTo: string | null;
   metadataJson: Record<string, unknown> | null;
   createdAt: Date;
@@ -55,173 +54,8 @@ describe("PrismaHostedOAuthSessionStore.createOAuthState", () => {
   });
 });
 
-describe("PrismaHostedOAuthSessionStore member-owned provider binding", () => {
-  it("persists and re-reads the exact application revision without consuming state", async () => {
-    const create = vi.fn().mockResolvedValue({});
-    const findFirst = vi.fn().mockResolvedValue({
-      provider: "strava",
-      providerApplicationId: "dpa_123",
-      providerApplicationRevision: 4,
-      userId: "user_123",
-    });
-    const applicationFindFirst = vi.fn().mockResolvedValue({ id: "dpa_123" });
-    const tx = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      deviceOauthSession: { create },
-      deviceProviderApplication: { findFirst: applicationFindFirst },
-    };
-    const store = {
-      prisma: {
-        $transaction: async <TResult>(
-          callback: (transaction: typeof tx) => Promise<TResult>,
-        ) => callback(tx),
-        deviceOauthSession: { findFirst },
-      },
-      createOAuthStateWithProviderApplication:
-        PrismaHostedOAuthSessionStore.prototype.createOAuthStateWithProviderApplication,
-      readOAuthStateProviderApplicationBinding:
-        PrismaHostedOAuthSessionStore.prototype.readOAuthStateProviderApplicationBinding,
-    };
-    const state = {
-      state: "state_123",
-      ownerId: "user_123",
-      provider: "strava",
-      returnTo: "https://murph.test/connect",
-      metadata: {},
-      createdAt: "2026-04-13T12:00:00.000Z",
-      expiresAt: "2026-04-13T12:15:00.000Z",
-    };
-    const binding = {
-      applicationId: "dpa_123",
-      provider: "strava" as const,
-      revision: 4,
-    };
-
-    await store.createOAuthStateWithProviderApplication(state, binding);
-    await expect(store.readOAuthStateProviderApplicationBinding({
-      expectedOwnerId: "user_123",
-      expectedProvider: "strava",
-      now: "2026-04-13T12:01:00.000Z",
-      state: "state_123",
-    })).resolves.toEqual(binding);
-
-    expect(applicationFindFirst).toHaveBeenCalledWith({
-      select: { id: true },
-      where: {
-        id: "dpa_123",
-        memberId: "user_123",
-        provider: "strava",
-        revision: 4,
-      },
-    });
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        providerApplicationId: "dpa_123",
-        providerApplicationRevision: 4,
-      }),
-    });
-    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        provider: "strava",
-        state: "state_123",
-        userId: "user_123",
-      }),
-    }));
-  });
-
-  it("rejects a stale application revision before persisting OAuth state", async () => {
-    const create = vi.fn().mockResolvedValue({});
-    const tx = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      deviceOauthSession: { create },
-      deviceProviderApplication: {
-        findFirst: vi.fn().mockResolvedValue(null),
-      },
-    };
-    const store = {
-      prisma: {
-        $transaction: async <TResult>(
-          callback: (transaction: typeof tx) => Promise<TResult>,
-        ) => callback(tx),
-      },
-      createOAuthStateWithProviderApplication:
-        PrismaHostedOAuthSessionStore.prototype.createOAuthStateWithProviderApplication,
-    };
-
-    await expect(store.createOAuthStateWithProviderApplication({
-      state: "state_123",
-      ownerId: "user_123",
-      provider: "strava",
-      returnTo: null,
-      metadata: {},
-      createdAt: "2026-04-13T12:00:00.000Z",
-      expiresAt: "2026-04-13T12:15:00.000Z",
-    }, {
-      applicationId: "dpa_123",
-      provider: "strava",
-      revision: 4,
-    })).rejects.toMatchObject({
-      code: "PROVIDER_APPLICATION_STALE",
-      httpStatus: 409,
-    });
-    expect(create).not.toHaveBeenCalled();
-  });
-
-  it("rejects provider mismatch before persisting state", async () => {
-    const create = vi.fn().mockResolvedValue({});
-    const store = {
-      prisma: { deviceOauthSession: { create } },
-      createOAuthStateWithProviderApplication:
-        PrismaHostedOAuthSessionStore.prototype.createOAuthStateWithProviderApplication,
-    };
-
-    await expect(store.createOAuthStateWithProviderApplication({
-      state: "state_123",
-      ownerId: "user_123",
-      provider: "oura",
-      returnTo: null,
-      metadata: {},
-      createdAt: "2026-04-13T12:00:00.000Z",
-      expiresAt: "2026-04-13T12:15:00.000Z",
-    }, {
-      applicationId: "dpa_123",
-      provider: "strava",
-      revision: 4,
-    })).rejects.toThrow(/provider mismatch/u);
-    expect(create).not.toHaveBeenCalled();
-  });
-});
 
 describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
-
-  it("refuses to consume state through a different provider application", async () => {
-    const record = buildOAuthSessionRow({
-      provider: "strava",
-      providerApplicationId: "dpa_original",
-      providerApplicationRevision: 4,
-    });
-    const tx = createTransaction({ record });
-    const store = createStore(tx);
-
-    await expect(
-      store.consumeOAuthStateWithProviderApplication(
-        record.state,
-        record.createdAt.toISOString(),
-        {
-          applicationId: "dpa_other",
-          provider: "strava",
-          revision: 4,
-        },
-        "strava",
-        record.userId ?? undefined,
-      ),
-    ).rejects.toMatchObject({
-      code: "PROVIDER_APPLICATION_STALE",
-      retryable: false,
-    });
-    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
-    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
-  });
 
   it("reports an already-consumed expired state as requiring manual provider recovery", async () => {
     const record = buildOAuthSessionRow({
@@ -383,15 +217,31 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
       },
     });
     expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
-    const lockSql = String(tx.$queryRaw.mock.calls[0]?.[0].join("?"));
-    expect(lockSql).toContain(
+    const memberLockSql = String(tx.$queryRaw.mock.calls[0]?.[0].join("?"));
+    const oauthLockSql = String(tx.$queryRaw.mock.calls[1]?.[0].join("?"));
+    expect(memberLockSql).toContain('from "hosted_member"');
+    expect(memberLockSql).toContain('where "id" = ? for update');
+    expect(tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual([record.userId]);
+    expect(oauthLockSql).toContain(
       'FROM "device_oauth_session" AS oauth_session',
     );
-    expect(lockSql).toContain('WHERE oauth_session."state" = ?');
-    expect(lockSql).toContain("FOR UPDATE OF oauth_session");
-    expect(tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual([record.state]);
+    expect(oauthLockSql).toContain('WHERE oauth_session."state" = ?');
+    expect(oauthLockSql).toContain("FOR UPDATE OF oauth_session");
+    expect(tx.$queryRaw.mock.calls[1]?.slice(1)).toEqual([record.state]);
+    expect(
+      tx.$outerFindUnique.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      tx.$queryRaw.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
     expect(
       tx.$queryRaw.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      tx.$queryRaw.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(
+      tx.$queryRaw.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
     ).toBeLessThan(
       tx.deviceOauthSession.findUnique.mock.invocationCallOrder[0]
         ?? Number.POSITIVE_INFINITY,
@@ -450,7 +300,25 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
       consumedAt: consumedAt.toISOString(),
       status: "replayed",
     });
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the state owner changes after the unlocked hint", async () => {
+    const record = buildOAuthSessionRow({ userId: "user_replacement" });
+    const tx = createTransaction({
+      ownerHint: { userId: "user_original" },
+      record,
+    });
+    const store = createStore(tx);
+
+    await expect(store.consumeOAuthState(
+      record.state,
+      record.createdAt.toISOString(),
+      record.provider,
+    )).resolves.toEqual({ status: "missing" });
+    expect(tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual(["user_original"]);
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 
@@ -512,8 +380,7 @@ function buildOAuthSessionRow(
     state: overrides.state ?? "state_123",
     userId: overrides.userId ?? "user_123",
     provider: overrides.provider ?? "whoop",
-    providerApplicationId: overrides.providerApplicationId ?? null,
-    providerApplicationRevision: overrides.providerApplicationRevision ?? null,
+
     returnTo: overrides.returnTo ?? "https://murph.test/settings",
     metadataJson: overrides.metadataJson ?? null,
     createdAt: overrides.createdAt ?? new Date("2026-04-13T12:00:00.000Z"),
@@ -525,17 +392,28 @@ function buildOAuthSessionRow(
 function createTransaction(input: {
   record?: MockDeviceOauthSessionRow | null;
   deleteManyCount?: number;
+  ownerHint?: { userId: string | null } | null;
   owner?: { suspendedAt: Date | null } | null;
   replayConsumedAt?: Date;
   updateManyCount?: number;
 }) {
-  const findUnique = vi.fn().mockResolvedValue(input.record ?? null);
+  const findUnique = vi.fn().mockImplementation(async (args: {
+    where: { state: string; userId?: string | null };
+  }) => Object.hasOwn(args.where, "userId") && args.where.userId !== input.record?.userId
+    ? null
+    : input.record ?? null);
   if (input.replayConsumedAt) {
     findUnique
       .mockResolvedValueOnce(input.record ?? null)
       .mockResolvedValueOnce({ consumedAt: input.replayConsumedAt });
   }
+  const ownerHint = Object.hasOwn(input, "ownerHint")
+    ? input.ownerHint ?? null
+    : input.record
+      ? { userId: input.record.userId }
+      : null;
   return {
+    $outerFindUnique: vi.fn().mockResolvedValue(ownerHint),
     $queryRaw: vi.fn().mockResolvedValue(
       input.owner === null
         ? []
@@ -552,6 +430,10 @@ function createTransaction(input: {
 function createStore(tx: ReturnType<typeof createTransaction>) {
   return new PrismaHostedOAuthSessionStore({
     ...tx,
+    deviceOauthSession: {
+      ...tx.deviceOauthSession,
+      findUnique: tx.$outerFindUnique,
+    },
     $transaction: async <TResult>(
       callback: (transaction: typeof tx) => Promise<TResult>,
     ) => callback(tx),

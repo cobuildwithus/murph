@@ -22,6 +22,7 @@ type HostedGroupParticipantHandleLookup = {
 };
 
 export async function lookupHostedGroupParticipantMemberIdsByHandles(input: {
+  ambiguityPolicy?: "throw" | "unresolved";
   handles: readonly string[];
   prisma: HostedOnboardingReadClient;
 }): Promise<ReadonlyMap<string, string | null>> {
@@ -123,6 +124,7 @@ export async function lookupHostedGroupParticipantMemberIdsByHandles(input: {
     memberIdsByHandle.set(
       handle,
       resolveHostedGroupParticipantMemberId({
+        ambiguityPolicy: input.ambiguityPolicy ?? "throw",
         kind: lookup.kind,
         memberIds,
       }),
@@ -202,10 +204,14 @@ function indexHostedGroupParticipantMemberIdsByLookupKey(
 }
 
 function resolveHostedGroupParticipantMemberId(input: {
+  ambiguityPolicy: "throw" | "unresolved";
   kind: HostedLinqParticipantContactKind;
   memberIds: ReadonlySet<string>;
 }): string | null {
   if (input.memberIds.size > 1) {
+    if (input.ambiguityPolicy === "unresolved") {
+      return null;
+    }
     throw hostedOnboardingError({
       code: input.kind === "phone"
         ? "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS"

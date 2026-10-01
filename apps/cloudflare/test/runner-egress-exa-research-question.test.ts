@@ -1,3 +1,4 @@
+import { createPostgresTestOwner, forbiddenLegacyRuntime, nativeProviderTestNamespace } from "./postgres-owner-fixtures.ts";
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildExaResearchScoutBatchLaneRequest,
@@ -83,15 +84,15 @@ function createLegacyBatchLaneRequestBody() {
   })
 }
 
-function createExaTestEnv(validateRuntimeWriteFence: () => Promise<boolean>) {
+function createExaTestEnv(validateRuntimeWriteFence: (input: { attemptId: string; generation: string; userId: string }) => Promise<boolean>) {
   return {
     ...createHostedExecutionTestEnv(),
     EXA_API_KEY: 'exa-worker-secret',
-    USER_RUNNER: {
-      getByName: () => ({
-        validateRuntimeWriteFence,
-      }),
-    },
+    USER_RUNNER: forbiddenLegacyRuntime,
+    RUNNER_CONTAINER: nativeProviderTestNamespace(async () => {
+      const owner = createPostgresTestOwner();
+      return await validateRuntimeWriteFence({ userId: owner.userId, attemptId: owner.attemptId!, generation: owner.generation }) ? owner : null;
+    }),
   } as unknown as RunnerOutboundEnvironmentSource
 }
 
@@ -123,7 +124,7 @@ describe('hosted Exa egress for focused structured scopes', () => {
         method: 'POST',
       }),
       createExaTestEnv(validateRuntimeWriteFence),
-      { containerId: 'opaque-container-id' },
+      { className: "RunnerContainer", containerId: 'opaque-container-id' },
     )
 
     expect(response.status).toBe(200)
@@ -173,7 +174,7 @@ describe('hosted Exa egress for focused structured scopes', () => {
         method: 'POST',
       }),
       createExaTestEnv(validateRuntimeWriteFence),
-      { containerId: 'opaque-container-id' },
+      { className: "RunnerContainer", containerId: 'opaque-container-id' },
     )
 
     expect(response.status).toBe(403)
@@ -217,7 +218,7 @@ describe('hosted Exa egress for focused structured scopes', () => {
             method: 'POST',
           }),
           createExaTestEnv(validateRuntimeWriteFence),
-          { containerId: `opaque-${field}-container-id` },
+          { className: "RunnerContainer", containerId: `opaque-${field}-container-id` },
         )
 
         expect(response.status).toBe(403)
@@ -263,7 +264,7 @@ describe('hosted Exa egress for focused structured scopes', () => {
             method: 'POST',
           }),
           createExaTestEnv(validateRuntimeWriteFence),
-          { containerId: `legacy-${field}-container-id` },
+          { className: "RunnerContainer", containerId: `legacy-${field}-container-id` },
         )
 
         expect(response.status).toBe(403)

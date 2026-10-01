@@ -32,10 +32,18 @@ import {
 } from "../src/web-callback-auth.ts";
 import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
 } from "../src/hosted-runner-smoke-contract.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
+import {
+  readHostedStandbyMode,
+  readHostedStandbyTarget,
+} from "../src/standby-runner-contract.ts";
+import type {
+  HostedStandbyMode,
+} from "../src/standby-runner-contract.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -43,7 +51,8 @@ type FetchLike = typeof fetch;
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
-const WORKER_VERSION_SMOKE_MAX_ATTEMPTS = 5;
+// Edge propagation can outlast a few seconds after control-plane activation.
+const WORKER_VERSION_SMOKE_MAX_ATTEMPTS = 30;
 const WORKER_VERSION_SMOKE_RETRY_DELAY_MS = 2_000;
 const DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_ATTEMPTS = 120;
 const DEFAULT_RUNNER_CONTAINER_SMOKE_RETRY_DELAY_MS = 10_000;
@@ -65,6 +74,7 @@ type SmokeUserStatus = HostedRunnerStatusResponse;
 interface SmokeRunnerBundleManifest {
   buildSkipped?: boolean;
   bundleFingerprint?: string;
+  releaseSha?: string;
   sourceFingerprint?: string;
 }
 
@@ -72,6 +82,7 @@ interface SmokeCodexShellResult {
   cliSurfaceContractBytes?: unknown;
   cliSurfaceHotPathProofCount?: unknown;
   client?: unknown;
+  healthCommonsCliGoalProofCount?: unknown;
   murphPathBytes?: unknown;
   noteAddBytes?: unknown;
   stderrBytes?: unknown;
@@ -157,7 +168,20 @@ export function resolveSmokeRunnerManifestPath(source: EnvSource = process.env):
     ?? path.join(appDir, ".deploy", "runner-bundle", runnerBundleManifestFileName);
 }
 
+export function resolveSmokeExpectedStandbyMode(
+  source: EnvSource = process.env,
+): HostedStandbyMode | null {
+  if (normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE) === null) {
+    return null;
+  }
+
+  return readHostedStandbyMode({
+    HOSTED_EXECUTION_STANDBY_MODE: source.HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE,
+  });
+}
+
 export async function runSmokeHostedDeploy(input: {
+  phase?: "artifact" | "serving";
   fetchImpl?: FetchLike;
   log?: (message: string) => void;
   source?: EnvSource;
@@ -168,7 +192,8 @@ export async function runSmokeHostedDeploy(input: {
   const workerBaseUrl = resolveSmokeWorkerBaseUrl(source);
   const smokeUserId = normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_USER_ID);
   const smokeVersionId = normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_VERSION_ID);
-  const shouldSmokeRunnerContainer = readBooleanEnv(
+  const expectedStandbyMode = resolveSmokeExpectedStandbyMode(source);
+  const shouldSmokeRunnerContainer = input.phase === "artifact" || readBooleanEnv(
     source.HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER,
     false,
   );
@@ -198,21 +223,11 @@ export async function runSmokeHostedDeploy(input: {
     fetchImpl,
     healthUrl: new URL("/health", smokeBaseUrl).toString(),
     log,
+    expectedStandbyMode,
     serviceBannerUrl: new URL("/", smokeBaseUrl).toString(),
     smokeVersionId,
     versionOverrideHeaders,
   });
-
-  let status: SmokeUserStatus | null = null;
-  const statusRequest: SmokeControlRequest | null = smokeUserId && authorizationHeader
-    ? {
-        authorizationHeader,
-        boundUserId: smokeUserId,
-        fetchImpl,
-        url: new URL(buildCloudflareHostedControlUserStatusPath(smokeUserId), smokeBaseUrl).toString(),
-        versionOverrideHeaders,
-      }
-    : null;
 
   if (shouldSmokeRunnerContainer) {
     let runnerSmokeDispatcher: Agent | null = null;
@@ -240,6 +255,7 @@ export async function runSmokeHostedDeploy(input: {
         url: buildRunnerContainerSmokeUrl({
           directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
           liveModelTurn: false,
+          phase: input.phase,
           smokeBaseUrl,
         }),
         versionOverrideHeaders,
@@ -260,6 +276,7 @@ export async function runSmokeHostedDeploy(input: {
           url: buildRunnerContainerSmokeUrl({
             directR2PresignedPut: false,
             liveModelTurn: true,
+            phase: input.phase,
             smokeBaseUrl,
           }),
           versionOverrideHeaders,
@@ -268,6 +285,11 @@ export async function runSmokeHostedDeploy(input: {
     } finally {
       await runnerSmokeDispatcher?.close();
     }
+  }
+
+  if (input.phase === "artifact") {
+    log("Isolated candidate artifact smoke checks passed.");
+    return;
   }
 
   if (!smokeUserId) {
@@ -282,10 +304,13 @@ export async function runSmokeHostedDeploy(input: {
     );
   }
 
-  if (!statusRequest) {
-    throw new Error("Authenticated hosted status configuration is missing.");
-  }
-  status ??= await readSmokeUserStatus(statusRequest);
+  const status = await readSmokeUserStatus({
+    authorizationHeader,
+    boundUserId: smokeUserId,
+    fetchImpl,
+    url: new URL(buildCloudflareHostedControlUserStatusPath(smokeUserId), smokeBaseUrl).toString(),
+    versionOverrideHeaders,
+  });
   log(
     "Authenticated hosted status check passed. "
       + `mailboxLag=${JSON.stringify(status.mailboxLag)}`,
@@ -320,23 +345,19 @@ async function assertRunnerContainerSmoke(input: {
       Math.max(1, retryPolicy.maxWaitMs - elapsedBeforeAttemptMs),
     );
     try {
-      assertSmokeRunnerBundleManifest(
-        // Each attempt addresses its own smoke Durable Object, so a retry gets a
-        // fresh container-provisioning decision instead of re-reading the one
-        // instance this run already pinned. Worker code updates immediately while
-        // containers roll out gradually, so the first instance can legitimately be
-        // pre-rollout, and polling it keeps it below the idle TTL that would
-        // otherwise replace it.
-        await readRunnerContainerSmoke({
-          ...input,
-          attempt,
-          signal: requestDeadline,
-        }),
+      // Each attempt addresses its own smoke Durable Object, so a retry gets a
+      // fresh container-provisioning decision instead of re-reading the one
+      // instance this run already pinned. Worker code updates immediately while
+      // containers roll out gradually, so the first instance can legitimately be
+      // pre-rollout, and polling it keeps it below the idle TTL that would
+      // otherwise replace it.
+      await readRunnerContainerSmoke({
+        ...input,
+        attempt,
         expectedManifest,
-        {
-          retryable: retryableFailures,
-        },
-      );
+        retryableManifestMismatch: retryableFailures,
+        signal: requestDeadline,
+      });
       return attempt;
     } catch (error) {
       const elapsedMs = Date.now() - startedAtMs;
@@ -373,11 +394,34 @@ async function assertRunnerContainerSmoke(input: {
   throw new Error("runner container smoke exhausted its attempts without a verdict.");
 }
 
+type SmokeStandbyInventory = {
+  ready?: unknown;
+  readyCount?: unknown;
+  provisioningCount?: unknown;
+  target?: unknown;
+  releaseMatches?: unknown;
+};
+
+function assertSmokeStandbyInventory(
+  inventory: SmokeStandbyInventory | null | undefined,
+  source: Record<string, string | undefined>,
+): void {
+  const mode = resolveSmokeExpectedStandbyMode(source);
+  if (mode === null || mode === "off") return;
+  const target = readHostedStandbyTarget(source);
+  if (!inventory || inventory.ready !== true || inventory.releaseMatches !== true
+    || inventory.target !== target || inventory.readyCount !== target || inventory.provisioningCount !== 0) {
+    throw new RunnerContainerSmokeRetryableError("Deploy standby inventory proof is missing or does not match the configured target.");
+  }
+}
+
 async function readRunnerContainerSmoke(input: {
   attempt: number;
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
+  expectedManifest: SmokeRunnerBundleManifest;
+  retryableManifestMismatch: boolean;
   signal: AbortSignal;
   source: EnvSource;
   url: string;
@@ -414,6 +458,7 @@ async function readRunnerContainerSmoke(input: {
     }
     throw (
       response.status === 400 || response.status >= 500
+      || (response.status === 404 && url.pathname === "/internal/deploy/artifact-smoke")
     )
       ? new RunnerContainerSmokeRetryableError(message)
       : new Error(message);
@@ -421,6 +466,7 @@ async function readRunnerContainerSmoke(input: {
 
   const responsePayload = await response.json() as {
     ok?: unknown;
+    standbyInventory?: SmokeStandbyInventory | null;
     runnerContainer?: {
       codexShell?: SmokeCodexShellResult | null;
       directR2PresignedPut?: SmokeDirectR2PresignedPutResult | null;
@@ -442,6 +488,16 @@ async function readRunnerContainerSmoke(input: {
     throw new Error("runner container smoke did not return the expected service id.");
   }
 
+  const runnerBundle = responsePayload.runnerContainer.runnerBundle ?? null;
+  // A pre-rollout container can implement an older smoke response schema. Check
+  // provenance before asserting current schema fields so that expected rollout
+  // skew remains retryable instead of failing the deployment immediately.
+  assertSmokeRunnerBundleManifest(runnerBundle, input.expectedManifest, {
+    retryable: input.retryableManifestMismatch,
+  });
+  if (input.expectLiveModelTurnModel === null && new URL(input.url).pathname !== "/internal/deploy/artifact-smoke") {
+    assertSmokeStandbyInventory(responsePayload.standbyInventory, input.source);
+  }
   assertSmokeCodexShellResult(responsePayload.runnerContainer.codexShell);
   if (input.expectDirectR2PresignedPut) {
     assertSmokeDirectR2PresignedPutResult(responsePayload.runnerContainer.directR2PresignedPut);
@@ -453,7 +509,7 @@ async function readRunnerContainerSmoke(input: {
     );
   }
 
-  return responsePayload.runnerContainer.runnerBundle ?? null;
+  return runnerBundle;
 }
 
 async function readSmokeFailureBody(response: Response): Promise<string | null> {
@@ -483,9 +539,11 @@ function redactSmokeFailureBody(value: string): string {
 function buildRunnerContainerSmokeUrl(input: {
   directR2PresignedPut: boolean;
   liveModelTurn: boolean;
+  phase?: "artifact" | "serving";
   smokeBaseUrl: string;
 }): string {
-  const url = new URL("/internal/deploy/container-smoke", input.smokeBaseUrl);
+  const url = new URL(input.phase === "artifact"
+    ? "/internal/deploy/artifact-smoke" : "/internal/deploy/container-smoke", input.smokeBaseUrl);
   if (input.directR2PresignedPut) {
     url.searchParams.set("directR2PresignedPut", "1");
   }
@@ -495,7 +553,7 @@ function buildRunnerContainerSmokeUrl(input: {
   return url.toString();
 }
 
-function assertSmokeCodexShellResult(
+export function assertSmokeCodexShellResult(
   value: SmokeCodexShellResult | null | undefined,
 ): void {
   if (!value || typeof value !== "object") {
@@ -522,6 +580,16 @@ function assertSmokeCodexShellResult(
   ) {
     throw new Error(
       "runner container Codex shell smoke did not prove assistant CLI surface hot-path schemas.",
+    );
+  }
+  if (
+    typeof value.healthCommonsCliGoalProofCount !== "number"
+    || !Number.isInteger(value.healthCommonsCliGoalProofCount)
+    || value.healthCommonsCliGoalProofCount
+      !== HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT
+  ) {
+    throw new Error(
+      "runner container Codex shell smoke did not prove public Goal CLI round trips.",
     );
   }
   if (typeof value.stderrBytes !== "number" || value.stderrBytes < 0) {
@@ -583,6 +651,12 @@ async function readExpectedRunnerBundleManifest(source: EnvSource): Promise<Smok
   ) {
     throw new Error("runner smoke manifest is missing bundle/source fingerprints.");
   }
+  if (
+    manifest.releaseSha !== undefined
+    && !/^[a-f0-9]{40}$/u.test(manifest.releaseSha)
+  ) {
+    throw new Error("runner smoke manifest has invalid public release provenance.");
+  }
 
   return manifest;
 }
@@ -610,7 +684,8 @@ function assertSmokeRunnerBundleManifest(
 
   if (
     typeof actual.bundleFingerprint !== "string" ||
-    typeof actual.sourceFingerprint !== "string"
+    typeof actual.sourceFingerprint !== "string" ||
+    (expected.releaseSha !== undefined && typeof actual.releaseSha !== "string")
   ) {
     throw createManifestError(
       "runner container smoke returned incomplete runner bundle metadata.",
@@ -619,12 +694,13 @@ function assertSmokeRunnerBundleManifest(
 
   if (
     actual.bundleFingerprint !== expected.bundleFingerprint ||
-    actual.sourceFingerprint !== expected.sourceFingerprint
+    actual.sourceFingerprint !== expected.sourceFingerprint ||
+    actual.releaseSha !== expected.releaseSha
   ) {
     throw createManifestError(
       "runner container smoke did not run the expected runner bundle. "
-        + `expected bundle=${expected.bundleFingerprint} source=${expected.sourceFingerprint}; `
-        + `actual bundle=${actual.bundleFingerprint} source=${actual.sourceFingerprint}.`,
+        + `expected bundle=${expected.bundleFingerprint} source=${expected.sourceFingerprint} release=${expected.releaseSha ?? "legacy"}; `
+        + `actual bundle=${actual.bundleFingerprint} source=${actual.sourceFingerprint} release=${actual.releaseSha ?? "legacy"}.`,
     );
   }
 }
@@ -672,6 +748,7 @@ async function sleep(ms: number): Promise<void> {
 }
 
 async function assertPublicWorkerSmoke(input: {
+  expectedStandbyMode: HostedStandbyMode | null;
   fetchImpl: FetchLike;
   healthUrl: string;
   log: (message: string) => void;
@@ -690,6 +767,7 @@ async function assertPublicWorkerSmoke(input: {
       await assertHealth(
         input.fetchImpl,
         input.healthUrl,
+        input.expectedStandbyMode,
         input.smokeVersionId,
         input.versionOverrideHeaders,
       );
@@ -714,6 +792,7 @@ async function assertPublicWorkerSmoke(input: {
 async function assertHealth(
   fetchImpl: FetchLike,
   url: string,
+  expectedStandbyMode: HostedStandbyMode | null,
   expectedVersionId: string | null,
   versionOverrideHeaders: Record<string, string> | undefined,
 ): Promise<void> {
@@ -721,6 +800,12 @@ async function assertHealth(
 
   if (payload.ok !== true) {
     throw new Error("worker health check did not return ok=true.");
+  }
+
+  if (expectedStandbyMode !== null && payload.standbyMode !== expectedStandbyMode) {
+    throw new Error(
+      `worker health check did not report standby mode ${expectedStandbyMode}.`,
+    );
   }
 
   assertSmokeWorkerVersion(payload, expectedVersionId, "worker health check");
@@ -750,7 +835,12 @@ async function readSmokePublicPayload(
   url: string,
   versionOverrideHeaders: Record<string, string> | undefined,
   action: string,
-): Promise<{ ok?: unknown; service?: unknown; workerVersionId?: unknown }> {
+): Promise<{
+  ok?: unknown;
+  service?: unknown;
+  standbyMode?: unknown;
+  workerVersionId?: unknown;
+}> {
   const response = await fetchImpl(url, {
     headers: versionOverrideHeaders,
   });
@@ -759,7 +849,12 @@ async function readSmokePublicPayload(
     throw new Error(`${action} failed with HTTP ${response.status}.`);
   }
 
-  return await response.json() as { ok?: unknown; service?: unknown; workerVersionId?: unknown };
+  return await response.json() as {
+    ok?: unknown;
+    service?: unknown;
+    standbyMode?: unknown;
+    workerVersionId?: unknown;
+  };
 }
 
 function assertSmokeWorkerVersion(

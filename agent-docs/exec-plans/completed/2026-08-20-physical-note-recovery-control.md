@@ -1,0 +1,248 @@
+# Physical-note recovery control
+
+## Goal
+
+Let a member explicitly ask Murph to resolve an earlier ambiguous physical-note
+submission without attempting another send, while preserving the existing
+one-effect, privacy, billing, and provider-ambiguity guarantees.
+
+## Proven symptom and root cause
+
+- A legacy physical-note row can remain unresolved after an older Web version
+  terminalized a provider-ambiguous outcome without a safe failure category.
+- A later explicit send correctly records an unsent blocker and performs the
+  existing bounded provider metadata lookup, but an indeterminate lookup leaves
+  both rows blocked.
+- The only current model-facing recovery path is coupled to another complete
+  physical-note send request. Murph therefore cannot act on a direct request to
+  clear or resolve the earlier attempt, even though Web already owns the safe
+  reconciliation primitive.
+
+## Product UX plan
+
+Classification: Product change.
+
+### Outcome
+
+A member can ask Murph to resolve an old physical-note attempt, and Murph will
+either confirm that it was accepted, safely clear a provider-proven absence, or
+say that the outcome is still uncertain without sending anything new. When
+multiple independent guards exist, Murph also distinguishes the checked
+attempt's outcome from the fact that another unresolved blocker remains.
+
+### Entry and promise
+
+The entry is a current accepted direct or authenticated-group message asking to
+cancel, clear, check, or resolve an earlier unresolved physical note. Murph
+performs one foreground provider reconciliation and replies in the same turn.
+There is no automatic retry, notification, or background follow-up.
+
+### Affected people
+
+- A direct member with an aged ambiguous legacy row wants to make a future note
+  possible without authorizing one now.
+- A current authenticated group participant wants to resolve the group's prior
+  note while preserving participant and route authority.
+- A member whose provider record proves acceptance needs a truthful explanation
+  that the earlier note cannot be treated as canceled and that no new note was
+  sent.
+- A member whose provider read is recent or indeterminate needs the blocker to
+  remain in place and a clear statement that nothing new was sent and no
+  automatic follow-up is running.
+- A member with multiple legacy unresolved rows needs to learn when the checked
+  oldest row was accepted or cleared, that a different blocker remains, and
+  that another current explicit request is required for one more check.
+
+### Proof path
+
+- Assistant tests start from an accepted message reference and exercise the new
+  tool through the hosted physical-note port to each visible result.
+- Web owner tests prove accepted, absent, recent, indeterminate, already-clear,
+  and group-authority outcomes without a provider create call.
+- Cloudflare tests prove only the exact additive route is allowed and that the
+  recovery request is forwarded once without send-style transport replay.
+- The Product UX walkthrough replays direct and group recovery, accepted,
+  safely cleared, and still-pending results against the production-shaped
+  contracts.
+
+### Deliberate exclusions
+
+- Recovery does not create, resend, or automatically continue a physical note.
+- Recovery does not claim to recall or cancel a mailpiece already accepted by
+  the print provider.
+- Recovery does not clear a recent or provider-indeterminate outcome.
+- Recovery adds no scheduler, queue, provider id, retry lifecycle, or
+  user-visible history store. It does add one minimal accepted-input claim and
+  result row because assistant-turn replay otherwise could advance a second
+  guard with the same explicit request.
+
+## Implementation
+
+1. Add a bounded recovery request/response and additive Web-control route to the
+   hosted-execution contract.
+2. Reuse the existing Web-owned oldest-guard lookup and reconciliation
+   transitions behind current member or group-participant authority, with one
+   durable accepted-input binding that prevents a replay from selecting a
+   different guard.
+3. Add a `murph.resolve_physical_note` dynamic tool that requires the exact
+   current accepted message and reports literal provider-backed outcomes.
+4. Update the physical-note product/skill contracts and add the member-visible
+   changelog entry.
+5. Run focused package, Web, Cloudflare, Assistant, typecheck, Product UX, and
+   docs-drift proof.
+6. Push the candidate, run the preliminary Product UX, prompt, and coverage
+   lenses plus the final cross-cutting ReviewGPT gate concurrently with CI,
+   resolve accepted findings, and close this plan with the final scoped commit.
+
+## Deployment
+
+Deploy Web's additive recovery table, route, and response producer first. Then deploy the
+Cloudflare allowlist/port and runner bundle with immediate container convergence
+and fingerprint proof. An older runner never calls the new route; a new runner
+against old Web would receive a route failure and cannot provide recovery.
+
+## Product UX walkthrough
+
+Result: Ready.
+
+- Direct accepted evidence: the exact current accepted message authorizes one
+  lookup; the reply says the earlier note was accepted for printing, cannot be
+  treated as canceled, and no new note was sent.
+- Direct safely-clearable evidence: an aged proven absence settles the old
+  guard and any unsent `prior_note_unresolved` blocker; the reply says the
+  blocker is clear and requires a separate future send request.
+- Recent or indeterminate evidence: the guard remains unchanged. Recent absence
+  returns the existing safety-window end, while aged indeterminate evidence
+  returns no false retry time; both say there is no automatic follow-up.
+- Multiple legacy guards: one provider read resolves only the checked oldest
+  guard. The result preserves its `accepted` or `clear` outcome and separately
+  reports that another unresolved submission remains; Murph asks for another
+  explicit recovery request instead of calling twice or describing the
+  successful check as indeterminate.
+- Authenticated group: participant and exact route authority are checked at
+  entry and again immediately before the provider read.
+- Already clear or unavailable: no provider read occurs for an already-clear
+  member, and missing provider configuration leaves an existing guard intact.
+- Turn replay: a completed accepted input returns its stored checked-guard
+  response with zero additional provider reads. An interrupted pre-terminal
+  claim remains unconfirmed and cannot advance a second guard. Terminal note,
+  blocker, usage, remaining-guard, and response writes commit together; a
+  response-write failure rolls them all back so a new accepted input can retry
+  the same guard. A new accepted input is required to check the next guard.
+
+The walkthrough uses the production-shaped Web owner, Cloudflare control port,
+and Assistant Engine tool-result tests. A rendered image adds no material proof
+because the changed surface is conversational semantics and durable recovery,
+not Web presentation.
+
+## Verification progress
+
+- Focused Web physical-note service tests: pass.
+- Focused Cloudflare physical-note port/policy tests: pass.
+- Focused Assistant Engine physical-note tool tests: pass.
+- Canonical affected verification (`pnpm test:diff`): pass, including all
+  affected package tests, hosted-local package-boundary proof, the full hosted
+  Web verify/build, and full Cloudflare Node and Workers verification.
+- Affected Web, Cloudflare, Assistant Engine, Assistant Runtime, and hosted
+  execution typechecks: pass.
+- Web lint, documentation drift, and documentation gardening: pass.
+- Real pinned Codex app-server initial-provider-input measurement, using the
+  same captured complete requests with volatile identifiers/paths canonicalized
+  and `gpt-tokenizer@3.4.0` `o200k_harmony`: direct
+  `125030 bytes / 27657 tokens` to `125124 bytes / 27675 tokens`
+  (`+94 bytes / +18 tokens`, `+0.08% bytes / +0.07% tokens`); group
+  `109536 bytes / 24157 tokens` to `109630 bytes / 24175 tokens`
+  (`+94 bytes / +18 tokens`, `+0.09% bytes / +0.07% tokens`). The initial
+  delta is only the existing code-mode deferred-discovery record; the full
+  recovery schema is absent from both ordinary and explicit recovery initial
+  requests and is loaded only after explicit discovery. A pinned app-server
+  provider-boundary regression proves ordinary non-use, explicit discovery,
+  one authorized call, and a sub-200-byte discovery-record ceiling.
+- Repository-wide typecheck reports two pre-existing Junction workspace-boundary
+  violations outside this change; all workspace package/app typechecks pass.
+- Preliminary Product UX/prompt/coverage review at the immutable first-reviewed
+  head returned two accepted findings: transport-loss copy was overconfident,
+  and the low-frequency recovery schema was eagerly exposed. Recovery now keeps
+  a lost response explicitly unconfirmed and uses the existing deferred
+  code-mode discovery path with ordinary-turn and explicit-call proof.
+- Final ReviewGPT round 1 at the same immutable head independently returned the
+  accepted transport-loss finding and no other cross-cutting finding. The
+  correction preserves definite no-change copy for a returned Web
+  `unavailable` result while keeping thrown/lost responses uncertainty-safe.
+- Final ReviewGPT round 2 verified those corrections and required a
+  retrospective for the repeated coarse-status mechanism: after Web cleared a
+  checked oldest guard, a different remaining guard could make the aggregate
+  response `pending` and cause false row-specific copy. The PR retrospective
+  chose one Web-owned response correction: `status` now describes the checked
+  guard and `remainingUnresolved` derives from the remaining-guard read already
+  on the path. No state owner, query, provider call, retry, or lifecycle was
+  added.
+- Final ReviewGPT round 3 found an equal-timestamp guard-selection ambiguity.
+  Checked-row status now derives only from the exact reloaded checked row, and
+  guard selection uses the total `(createdAt, id)` order with fake-store and
+  real-PostgreSQL proof.
+- Final ReviewGPT round 4 verified every earlier correction and required a
+  second retrospective: an enclosing assistant-turn replay could reuse one
+  accepted input after the first guard terminalized and select a second guard.
+  The retrospective revised the earlier no-state decision and chose one narrow
+  Web-owned accepted-input claim/result row. Completed replay returns the
+  stored response with no provider call; interrupted replay remains unconfirmed;
+  only a new accepted input may advance the next guard.
+- Final ReviewGPT round 5 verified the replay fence and found one terminal
+  atomicity gap: note state, blockers, and paid usage committed before the
+  recovery response, so a result-write failure could strand an incomplete
+  claim after terminalizing the guard. The finding was accepted. Terminal
+  recovery now moves the existing remaining-guard read and result persistence
+  into the existing member-locked note transaction; pending and unavailable
+  outcomes remain on the separate nonterminal completion path. This adds no
+  table, query, provider call, lock, dependency, retry, or lifecycle.
+- Corrected-head focused proof passes: 37 Web service tests, 5 storage-contract
+  tests, 12 real-PostgreSQL admission/replay tests, 16 Cloudflare port tests,
+  36 Assistant physical-note tests, 6 hosted-contract tests, the pinned deferred provider-boundary
+  scenario, and all affected Web, Cloudflare, hosted-execution, Assistant
+  Engine, and Assistant Runtime typechecks. The production runner bundle is
+  9,390,194 bytes against a 9,397,704-byte ceiling, leaving 7,510 bytes of
+  headroom.
+- Post-finding canonical affected verification (`pnpm test:diff`): pass. This
+  includes 4,006 Assistant Engine tests, 2,430 Assistant Runtime tests, 1,182
+  CLI tests, 10,788 hosted Web tests plus lint/dev-smoke/production build, and
+  2,612 Cloudflare Node plus 15 Workers tests.
+- Candidate is published as PR #2099; the next final ReviewGPT round, canonical
+  corrected-head verification, and exact-head CI remain open before plan
+  closure.
+- Round-4 remediation proof additionally applies all hosted Web migrations to
+  an isolated local PostgreSQL database, preserves the replay fence after the
+  checked note pointer is deleted, returns the same completed response with
+  zero additional provider reads or usage settlements, leaves an interrupted
+  claim unconfirmed after restart, and permits only a new accepted input to
+  advance the next guard. Focused Web lint/typecheck, Prisma validation and
+  generation, documentation drift, and documentation gardening pass.
+- Round-5 remediation injects a recovery-result write failure after accepted
+  note, usage, and blocker mutations and after aged-absence blocker cleanup.
+  Both the in-memory rollback model and real PostgreSQL prove that every
+  terminal mutation rolls back while the accepted-input claim stays incomplete;
+  a new accepted input then reconciles the same guard, commits one result, and
+  replays without another provider read or usage settlement. The final
+  corrected-head ReviewGPT round and exact-head CI remain open.
+- Final ReviewGPT round 6 verified every earlier correction and found a
+  separate member-feedback omission: when standalone recovery is the operation
+  that first proves a paid note was accepted, Web settles the already-authorized
+  usage but the recovered result does not disclose that usage. The earlier
+  design treated recovery as a status-only response, and its paid-replay test
+  proved one settlement while asserting the same incomplete response shape.
+  Deriving the fact from the note later is unsafe because the replay relation
+  intentionally uses `ON DELETE SET NULL`; deriving it from current pricing is
+  also incorrect because pricing can change. The accepted correction is one
+  nullable `settledUsageCostUsdMicros` scalar on the existing recovery result
+  row and response. The current paid acceptance path populates it from the
+  frozen note cost only after the ordinary usage write succeeds in the existing
+  member-locked transaction. Complimentary acceptance, legacy restored
+  acceptance with erased billing evidence, and every non-accepted result keep
+  it null. Assistant copy will disclose that the earlier accepted note used the
+  returned Murph-time amount while making clear that recovery sent nothing and
+  added no separate fee. This adds no table, query, provider call, owner, queue,
+  retry, or lifecycle.
+
+Status: completed
+Updated: 2026-08-21
+Completed: 2026-08-21

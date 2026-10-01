@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-08-11
+Last verified: 2026-09-09
 
 ## Current Posture
 
@@ -12,7 +12,8 @@ Last verified: 2026-08-11
   A professional subject does not turn study into professional work. Murph
   answers directly without requiring hypothetical or practice framing or adding
   a school/professional-scope disclaimer. Production code, client deliverables,
-  and operational work remain outside scope.
+  and unrelated operational work remain outside scope. Read-only troubleshooting
+  of Murph using non-secret diagnostics in the current member workspace is in scope.
 - General model capability is the substrate. Murph's compounding advantage is
   longitudinal member context: relevant history, evidence, preferences,
   constraints, goals, actions, and outcomes that it can retrieve when they
@@ -26,6 +27,12 @@ Last verified: 2026-08-11
   the member. More context should reduce repetition and improve judgment and
   timing. Murph should keep asking new, high-value questions while material
   gaps remain; it should not ask merely to increase coverage.
+- In an authenticated private conversation, a requested whole-workspace archive
+  includes every file under the member's workspace root as-is, including hidden
+  files, runtime records, history, configuration and credential-bearing records.
+  Do not filter or sanitize the member's own export based on content sensitivity.
+  Preserve original bytes and paths and use the existing file-send approval.
+  This does not grant access to other workspaces or the host filesystem.
 - Current member controls are surface-specific: freeform memories can be
   inspected, updated, or forgotten; structured health records are corrected
   or statused through their canonical owners. Do not claim universal deletion
@@ -283,3 +290,23 @@ missing testing sound reassuring. Keep supplement and branded-food search
 useful without implying that separately ranked corpora are directly
 comparable. Generic foods, inferred test linkage, and formula-revision claims
 remain outside the surface until their product meaning is explicitly defined.
+
+Food comparison should give the useful conclusion before the supporting data.
+Show one quiet winner per complete nutrition metric with its row rule, and at
+most one plain sentence that counts visible rows led. Never turn that result
+into a universal health or safety score. Keep exact test results, evidence
+coverage, and unknowns behind one evidence meter and one combined side sheet.
+Use a short popover for one metric, with raw reports hidden until requested. Never rank an incomplete
+metric or assign unequal ranks to tied values. When evidence is bounded, show
+returned and total observation scope. Render the public DTO's unknowns directly
+instead of rebuilding evidence completeness in the page. Do not infer sample
+coverage from report or lot metadata. A screened observation must keep its
+measured result, threshold, basis, and authority inspectable.
+
+## Home setup surface
+
+The signed-in `/home` page shows remaining messaging, device, and lab setup
+cards. When none remain, it offers a Message Murph button using the sidebar’s contact action. Experiment runs,
+experiment suggestions, and feature promotions do not appear on Home. Existing
+initial personality onboarding, connection results, usage notices, and load
+errors retain their current owners.

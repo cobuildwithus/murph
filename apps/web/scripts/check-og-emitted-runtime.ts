@@ -294,7 +294,8 @@ async function main(): Promise<void> {
  * The deployed function's root holds the repository layout, so brand assets sit
  * under `apps/web/`, never at the root. A route that resolved an asset as
  * `join(process.cwd(), "public", ...)` therefore read a path that does not
- * exist in the function; every such caller must go through app/font-files.ts.
+ * exist in the function; every such caller must go through
+ * app/runtime-asset-files.ts.
  */
 function assertDeployedAssetLayout(relocatedRoot: string): void {
   const deployed = path.join(relocatedRoot, "apps/web/public/logo.svg");
@@ -317,7 +318,7 @@ function assertDeployedAssetLayout(relocatedRoot: string): void {
   if (existsSync(workingDirectoryRelative)) {
     throw new Error([
       "The relocated function unexpectedly holds public/logo.svg at its root.",
-      "Asset resolution assumptions in app/font-files.ts need to be rechecked.",
+      "Asset resolution assumptions in app/runtime-asset-files.ts need to be rechecked.",
     ].join("\n"));
   }
 }
@@ -362,7 +363,7 @@ function assertProbeOutput(output: ProbeOutput, relocatedRoot: string): void {
   if (failures.length > 0) {
     throw new Error([
       "The emitted OG serverless function does not render from its deployed filesystem layout.",
-      "Check app/font-files.ts path resolution and outputFileTracingIncludes in next.config.ts.",
+      "Check app/runtime-asset-files.ts path resolution and outputFileTracingIncludes in next.config.ts.",
       ...failures.map((failure) => `- ${failure}`),
     ].join("\n"));
   }

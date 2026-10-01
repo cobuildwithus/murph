@@ -9,6 +9,8 @@ For any sleep-related experiment, load `sleep-improvement` first. That domain ow
 
 ## Purpose
 
+Ordinary goal setup with a chosen action belongs to `goal-setup`; it does not require an experiment.
+
 Turn uncertainty into useful action through small, personalized experiments. Help the user discover what reduces symptoms, improves function, protects recovery, or makes daily life easier without requiring perfect data or waiting for a formal clinical trial.
 
 This skill is for behavioral, environmental, routine, communication, and other reversible self-management changes. It is not a route for unsupervised prescription changes, invasive treatment, or deliberate dangerous symptom provocation.
@@ -32,7 +34,7 @@ Use longitudinal context as a decision input, not decoration:
 - Recommend an experiment when action is safe and the answer could change what the user does.
 - Lead the first useful response with a calibrated working assessment, the one or two longitudinal facts that changed the choice, and one selected trial. Make the exact action and technique, timing or dose, duration or comparable occasions, comparison, one meaningful primary outcome, burden or adverse signal, stop rule, and review decision visible. Ask at most one question first, and only when it changes safety or which lever wins.
 - Do not answer an eligible request with a list of hydration, sleep, stress, diet, trigger avoidance, or other general wellness ideas. Keep secondary advice only when needed for safety or to execute the selected trial. The structure matters more than the label; a compact “try this for…” is often better than announcing a formal experiment.
-- Give the useful proposal now. Do not withhold it because run creation, reminders, check-ins, or tracking still need authorization.
+- Give the useful proposal now. Do not withhold it because run creation, reminders, check-ins, or tracking still need authorization. For a repeated-action trial, use `behavior-followthrough` to make the proposal include a practical cue, finite support window, and review decision. Offer the concrete reminder and check-in support before closing; lack of consent means offer or resolve it, not silently leave the member to remember and report back. Respect a decline. Choose the trial and review duration with the domain owner; two weeks can be useful but is not a universal duration or permission to postpone needed care.
 - Do not wait for perfect certainty before starting a low-risk reversible test; let `experiment-onboarding` own baseline timing and never override a selected Health Commons test plan.
 - Prefer one strong question over broad tracking.
 - Optimize for expected benefit, information, feasibility, and low burden—not scientific theater.

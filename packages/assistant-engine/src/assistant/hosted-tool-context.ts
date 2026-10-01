@@ -1,3 +1,4 @@
+import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
 
 import type {
@@ -60,7 +61,7 @@ import {
 } from './return-contact-kind.js'
 import { createAssistantGroupEmailOutboxTool } from './group-email-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
-import type { AnalyzeVideoAttachmentAuthority } from '../assistant-codex/analyze-video-tool.js'
+import type { AnalyzeVideoAttachmentAuthority, ConversationAttachmentAuthority } from '../assistant-codex/analyze-video-tool.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -145,6 +146,7 @@ export interface AssistantHostedToolContext {
   readonly groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   readonly groupSharedReader?: AssistantHostedGroupSharedReader | null
   readonly groupTool?: AssistantHostedGroupTool | null
+  readonly pollTool?: ConversationPollTool | null
   readonly imessageContactTool?: AssistantHostedIMessageContactTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
   readonly imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
@@ -164,6 +166,7 @@ export interface AssistantHostedToolContext {
     reasoningEffort: string | null
   }
   currentHostedMailboxItemIds(): readonly string[]
+  currentConversationAttachmentAuthorities?(): readonly ConversationAttachmentAuthority[]
   currentAnalyzeVideoAttachmentAuthorities?(): readonly AnalyzeVideoAttachmentAuthority[]
   currentHostedImageCompletionEffectScope?():
     AssistantHostedImageCompletionEffectScope | null
@@ -215,6 +218,7 @@ export function createAssistantHostedToolContext(input: {
   beforeToolExecution?: (deliveryContextOrdinal: number) => Promise<void>
   getConversationScope?: () => AssistantConversationScope
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
+  getConversationAttachmentAuthorities?: () => readonly ConversationAttachmentAuthority[]
   getAnalyzeVideoAttachmentAuthorities?: () => readonly AnalyzeVideoAttachmentAuthority[]
   getUserActionAcceptedInputIds?: () => readonly string[]
   getProductFeedbackAcceptedInputIds?: () => readonly string[]
@@ -423,6 +427,7 @@ export function createAssistantHostedToolContext(input: {
       executionContext?.groupPermissionOfferTool ?? null,
     groupSharedReader: executionContext?.groupSharedReader ?? null,
     groupTool: executionContext?.groupTool ?? null,
+    pollTool: readPollTool(executionContext),
     imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
     imageGenerationLauncher: imageGenerationLauncher
@@ -540,12 +545,17 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
     },
+    currentConversationAttachmentAuthorities: () => {
+      if (readCurrentUserActionScope() === null) return []
+      return input.getConversationAttachmentAuthorities?.() ?? []
+    },
     currentAnalyzeVideoAttachmentAuthorities: () => {
       const userActionScope = readCurrentUserActionScope()
       if (userActionScope === null) return []
-      const acceptedInputIds = new Set(userActionScope.acceptedInputIds)
-      return (input.getAnalyzeVideoAttachmentAuthorities?.() ?? [])
-        .filter((authority) => acceptedInputIds.has(authority.messageRef))
+      // The turn owner freezes current and retained same-conversation evidence
+      // before provider execution. Historical clips need no new accepted input.
+      return input.getConversationAttachmentAuthorities?.().filter((item) => item.kind === 'video')
+        ?? input.getAnalyzeVideoAttachmentAuthorities?.() ?? []
     },
     currentHostedImageCompletionEffectScope:
       readCurrentHostedImageCompletionEffectScope,
@@ -706,4 +716,8 @@ function normalizeHostedDeliveryContextValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0
     ? value.trim()
     : null
+}
+
+function readPollTool(context: AssistantHostedExecutionContext | null): ConversationPollTool | null {
+  return context?.pollTool ?? null
 }

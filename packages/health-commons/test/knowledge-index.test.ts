@@ -250,4 +250,86 @@ describe("Health Commons knowledge SQLite projection", () => {
       await rm(temporaryRoot, { force: true, recursive: true });
     }
   });
+
+  it("keeps goal templates out of evidence topic ownership and knowledge chunks", async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), "health-commons-goal-collision-"));
+    const databasePath = path.join(temporaryRoot, "knowledge.sqlite");
+    const catalog = testCatalog();
+    const drySauna = catalog.entities.find((entity) =>
+      entity.key === "experiment_family:dry-sauna"
+    );
+    if (!drySauna) {
+      throw new Error("Expected the dry-sauna test entity.");
+    }
+    drySauna.aliases = [...(drySauna.aliases ?? []), "improve my deep sleep"];
+    catalog.entities.push({
+      schemaVersion: "murph.commons.page.v1",
+      entityType: "goal_template",
+      key: "goal_template:improve-deep-sleep",
+      slug: "improve-deep-sleep",
+      title: "Improve My Deep Sleep",
+      summary: "A goal guide whose title overlaps an evidence-backed topic alias.",
+      status: "field-testing",
+      quality: "usable",
+      goal: {
+        category: "sleep",
+        outcomeKind: "biomarker",
+        goalPhrase: "improve my deep sleep",
+        successSignals: [{
+          id: "deep-sleep-trend",
+          kind: "biomarker",
+          label: "Improve a same-device deep-sleep trend",
+        }],
+        evidenceSourceKeys: ["source_artifact:pmid-29849692"],
+        workflow: {
+          kind: "habit_plan",
+          ownerSkillIds: ["sleep-improvement"],
+        },
+        startPrompt: "Hey Murph, help me improve my deep sleep.",
+        indexable: true,
+      },
+      claims: [{
+        claimId: "goal-prose-must-not-be-indexed",
+        type: "association_not_causation",
+        text: "This goal-only prose must not become a Health Commons knowledge chunk.",
+        strength: "moderate",
+        sourceKeys: ["source_artifact:pmid-29849692"],
+      }],
+      safety: { cautionLevel: "moderate" },
+      body: "Goal guide prose belongs to the dedicated Goal list and show surfaces.",
+      relativePath: "goals/sleep/improve-deep-sleep.md",
+      revision,
+    });
+
+    try {
+      writeHealthCommonsKnowledgeIndex(databasePath, catalog);
+
+      const result = searchHealthCommonsKnowledgeIndex({
+        databasePath,
+        query: "What does the evidence say about improve my deep sleep?",
+      });
+      expect(result.topic).toEqual({
+        key: "experiment_family:dry-sauna",
+        title: "Dry Sauna",
+      });
+      expect(result.items).toEqual([
+        expect.objectContaining({ entityKey: "experiment_family:dry-sauna" }),
+      ]);
+
+      const { DatabaseSync } = await import("node:sqlite");
+      const database = new DatabaseSync(databasePath, { readOnly: true });
+      try {
+        expect(database.prepare(
+          "SELECT count(*) AS count FROM topic_owners WHERE owner_key = ? OR entity_key = ?",
+        ).get("goal_template:improve-deep-sleep", "goal_template:improve-deep-sleep")?.count).toBe(0);
+        expect(database.prepare(
+          "SELECT count(*) AS count FROM chunks WHERE entity_key = ?",
+        ).get("goal_template:improve-deep-sleep")?.count).toBe(0);
+      } finally {
+        database.close();
+      }
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true });
+    }
+  });
 });

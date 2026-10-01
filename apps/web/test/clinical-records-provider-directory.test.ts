@@ -78,9 +78,11 @@ describe("Clinical Records provider directory", () => {
         "patient/Procedure.s",
         "patient/Goal.s",
         "patient/ServiceRequest.s",
+        "patient/Binary.r",
+        "patient/Media.r",
       ],
     });
-    expect(buildEpicBetaRetrievalPlan({
+    expect(buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
       frozenAt: new Date("2026-07-21T12:00:00.000Z"),
       pageCount: "100",
       resourceTypes: entry.resourceTypes,
@@ -109,6 +111,23 @@ describe("Clinical Records provider directory", () => {
       "provider-goals",
       "service-requests",
       "vital-sign-observations",
+      "document-references-imaging",
+      "document-references-external-ccda",
+      "document-references-outside-notes",
+      "outside-vital-sign-observations",
+      "document-references-summaries",
+      "document-references-questionnaires",
+      "document-references-correspondence",
+      "document-references-handoff",
+      "document-references-assessments",
+      "document-references-document-information",
+      "document-references-clinical-references",
+      "document-references-his",
+      "document-references-oasis",
+      "document-references-irf-pai",
+      "document-references-advance-directive",
+      "document-references-irf-pai-hyphenated",
+
     ]);
   });
 
@@ -239,23 +258,17 @@ describe("Clinical Records provider directory", () => {
     }))).toThrow(/unknown policy/u);
   });
 
-  it("rejects unsorted v2 entries and invalid capability overrides", () => {
+  it("rejects unsorted v2 entries", () => {
     const first = makeDirectory({ id: "epic-z-brand" });
     const secondEntry = makeDirectory({ id: "epic-a-brand" }).entries[0];
     expect(() => parseClinicalProviderDirectory({
       ...first,
       entries: [first.entries[0], secondEntry],
     })).toThrow(/strictly sorted/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectory({
-      capabilityOverrides: [{
-        evidenceVersion: "test-evidence-v1",
-        queryScopeId: "unknown-query",
-        support: "verified",
-      }],
-    }))).toThrow(/unknown query scope/u);
+
   });
 
-  it("requires the exact owned policy and rejects malformed hashes and capability evidence", () => {
+  it("requires the exact owned policy and rejects malformed hashes", () => {
     expect(() => parseClinicalProviderDirectory(makeDirectory({
       policies: [
         { ...EPIC_ACQUISITION_POLICY, id: "z-policy" },
@@ -283,37 +296,7 @@ describe("Clinical Records provider directory", () => {
       sourceBundleSha256: "not-a-sha256",
     }))).toThrow(/source bundle hash/u);
 
-    const verified = (queryScopeId: string) => ({
-      evidenceVersion: "test-evidence-v1",
-      queryScopeId,
-      support: "verified",
-    });
-    expect(() => parseClinicalProviderDirectory(makeDirectory({
-      capabilityOverrides: [
-        verified("patient-demographics"),
-        verified("diagnostic-reports"),
-      ],
-    }))).toThrow(/capability overrides must be strictly sorted/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectory({
-      capabilityOverrides: [
-        verified("diagnostic-reports"),
-        verified("diagnostic-reports"),
-      ],
-    }))).toThrow(/capability overrides must be strictly sorted/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectory({
-      capabilityOverrides: [{
-        evidenceVersion: "test-evidence-v1",
-        queryScopeId: "diagnostic-reports",
-        support: "maybe",
-      }],
-    }))).toThrow(/support is invalid/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectory({
-      capabilityOverrides: [{
-        evidenceVersion: "",
-        queryScopeId: "diagnostic-reports",
-        support: "verified",
-      }],
-    }))).toThrow(/evidence version is out of bounds/u);
+
   });
 });
 
@@ -325,11 +308,6 @@ function readCommittedDirectory() {
 }
 
 function makeDirectory(overrides: {
-  capabilityOverrides?: Array<{
-    evidenceVersion: string;
-    queryScopeId: string;
-    support: string;
-  }>;
   clientIdEnvironmentKey?: string;
   fhirBaseUrl?: string;
   id?: string;
@@ -342,9 +320,6 @@ function makeDirectory(overrides: {
     entries: [{
       aliases: ["Test Health"],
       brandName: "Test Health System",
-      ...(overrides.capabilityOverrides
-        ? { capabilityOverrides: overrides.capabilityOverrides }
-        : {}),
       clientIdEnvironmentKey: overrides.clientIdEnvironmentKey ?? "EPIC_SMART_CLIENT_ID",
       fhirBaseUrl: overrides.fhirBaseUrl ?? "https://fhir.example.test/FHIR/R4",
       id: overrides.id ?? "epic-test-brand",

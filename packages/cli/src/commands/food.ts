@@ -6,10 +6,9 @@ import {
   FOOD_STATUSES,
   NUTRITION_CONFIDENCE_LEVELS,
   NUTRITION_PROVENANCE_SOURCES,
-  foodUpsertPayloadSchema,
   type FoodUpsertPayload,
 } from '@murphai/contracts'
-import { Cli, z } from 'incur'
+import { Cli, Errors, z } from 'incur'
 
 import { requestIdFromOptions, withBaseOptions } from '@murphai/operator-config/command-helpers'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -246,13 +245,6 @@ export function buildFoodSavePayload(input: FoodSavePayloadInput): FoodSavePaylo
       type: 'related_regimen',
       targetId,
     }))
-  }
-
-  const parsed = foodUpsertPayloadSchema.safeParse(payload)
-  if (!parsed.success) {
-    throw new VaultCliError('contract_invalid', 'Food save options are invalid.', {
-      errors: parsed.error.flatten(),
-    })
   }
 
   return payload
@@ -561,8 +553,11 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
     args: z.object({
       query: z
         .string()
+        .trim()
         .min(1)
-        .describe('Food product, brand, USDA FDC id, UPC, or generic ingredient search text.'),
+        .max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH)
+        .optional()
+        .describe('Food product, brand, USDA FDC id, UPC, or generic ingredient. Supply one quoted query positionally or with --query, never both.'),
     }),
     description: 'Search the hosted food label database from hosted assistant runtime without writing records.',
     examples: [
@@ -575,9 +570,15 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
           generic: true,
         },
       },
+      {
+        description: 'Use the named alternative for one food.',
+        options: { query: "'rolled oats'", generic: true },
+      },
     ],
-    hint: 'Hosted assistant runtime authorizes this lookup through the Worker data API intercept. Use --generic for USDA generic ingredient rows instead of branded food products.',
+    hint: 'Supply exactly one quoted positional query or --query value. For several foods use search-labels-batch with repeated --query. Use --generic for USDA ingredients. The default returns one compact nutrition match; expand only for an ambiguous match or a missing fact.',
     options: z.object({
+      query: z.string().trim().min(1).max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH)
+        .optional().describe('Alternative to the positional query. Supply exactly one form; use search-labels-batch for several foods.'),
       limit: z
         .number()
         .int()
@@ -600,12 +601,27 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
     }),
     output: foodLabelSearchResultSchema,
     async run(context) {
+      const query = context.args.query ?? context.options.query
+      if (query === undefined || (context.args.query !== undefined && context.options.query !== undefined)) {
+        throw new Errors.IncurError({
+          code: 'VALIDATION_ERROR',
+          message: 'Supply exactly one food query, positionally or with --query.',
+          hint: 'Use food search-labels "rolled oats" or food search-labels --query "rolled oats". For several foods use food search-labels-batch --query "rolled oats" --query "plain yogurt".',
+          stage: 'validation',
+          fieldErrors: [{
+            code: query === undefined ? 'invalid_type' : 'custom',
+            path: 'query', missing: query === undefined, expected: 'string',
+            received: query === undefined ? 'missing' : 'invalid',
+            message: 'Supply one query using exactly one form.',
+          }],
+        })
+      }
       return await searchFoodLabels({
         fullLabel: context.options.fullLabel,
         genericOnly: context.options.generic,
         includeOffMarket: context.options.includeOffMarket,
         limit: context.options.limit,
-        q: context.args.query,
+        q: query,
       })
     },
   })
@@ -623,13 +639,13 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         },
       },
     ],
-    hint: 'Repeat --query for each food. For USDA FDC ids or UPCs, use `food search-labels` with one query. Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
+    hint: 'Repeat --query for each food. Each query may be food search text, a USDA FDC id, or a UPC. Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
     options: z.object({
       query: z
         .array(z.string().min(1).max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH))
         .min(1)
         .max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES)
-        .describe('Food product, brand, or generic ingredient search text. Repeat --query for multiple values.'),
+        .describe('Food product, brand, USDA FDC id, UPC, or generic ingredient search text. Repeat --query for multiple values.'),
       limit: z
         .number()
         .int()

@@ -1,0 +1,93 @@
+---
+schemaVersion: murph.commons.page.v1
+entityType: goal_template
+key: goal_template:reconnect-with-people
+slug: reconnect-with-people
+title: Reconnect With People I Care About
+summary: Reopen meaningful relationships with low-pressure messages, specific invitations, and respect for how both people have changed.
+status: field-testing
+quality: usable
+aliases:
+  - reconnect with old friends
+  - get back in touch with people
+categories:
+  - goals
+  - mind
+  - connection
+goal:
+  category: mind
+  parentGoalKey: goal_template:build-a-support-system
+  outcomeKind: behavior
+  goalPhrase: reconnect with people I care about
+  successSignals:
+    - id: outreach_sent
+      kind: behavior
+      label: Thoughtful reconnection messages are sent
+    - id: plans_made
+      kind: behavior
+      label: Mutual interest becomes a specific plan
+    - id: renewed_connections
+      kind: milestone
+      label: Worthwhile relationships regain a sustainable rhythm
+  evidenceSourceKeys:
+    - source_artifact:pmid-21280967
+    - source_artifact:doi-10-1016-j-chbr-2021-100070
+  workflow:
+    kind: general_plan
+    ownerSkillIds:
+      - behavior-followthrough
+      - stress-regulation
+  startPrompt: Hey Murph, help me reconnect with people I care about.
+  indexable: true
+safety:
+  cautionLevel: low
+---
+
+Many relationships fade because of moves, work, caregiving, illness, changing routines, or plain inertia, not because either person chose an ending. Reconnecting is a good way to rebuild connection because you already share history. The task is to reopen the door without demanding that the relationship instantly become what it once was.
+
+A good reconnection message is warm, specific, and easy to answer. It acknowledges the gap without making the other person manage your guilt. From there, let current mutual interest, not nostalgia alone, decide what the relationship becomes.
+
+## What to do
+
+- **Make a short reconnection list.** Choose a few people you remember with warmth, trust, or genuine curiosity. Prioritize relationships that were respectful and reasonably mutual.
+- **Know why you're reaching out.** You might miss the person, want to repair an accidental drift, appreciate what they meant to you, or simply wonder how they are. Don't contact someone only to relieve guilt or ask a favor.
+- **Send a low-pressure message.** Mention a real memory or reason you thought of them, say you'd enjoy catching up, and make clear there's no obligation.
+- **Offer a specific next step.** Suggest a short call, coffee, walk, or a couple of times that work. A concrete option is easier to accept than "we should catch up someday."
+- **Acknowledge the gap simply.** "I let too much time pass" is often enough. If you caused a specific hurt, offer a direct apology that names your action and doesn't demand forgiveness.
+- **Follow up once, then leave room.** Messages get missed and schedules are crowded; one kind follow-up is reasonable, repeated pressure is not.
+- **Meet the person as they are now.** Ask about their present life. Shared history can start the conversation, but a renewed relationship needs current knowledge and new experiences.
+- **Build a rhythm you can keep.** If the contact is mutual, schedule the next plan before another year passes, at a frequency both of you can realistically maintain.
+
+## A simple plan
+
+Write a short list of names and sort each into one of three groups: easy reconnection, meaningful but uncertain, or repair needed. Start with an easy one so you can practice before the most emotionally complicated relationship.
+
+Draft a three-part message: why they came to mind, a warm statement, and a specific invitation. For example: "I walked past the place where we used to get lunch and thought of you. I'd really like to hear how you are. Would you be up for a 20-minute call next week?" Edit out long explanations and send it.
+
+If they respond warmly, confirm a plan promptly. During the conversation, ask more than you report. Share an honest update without trying to cover every lost year. End by saying whether you'd like to do it again and suggesting a next step.
+
+Send messages one at a time so you have attention for real follow-through. After several weeks, review messages, replies, conversations, and relationships where both people want another plan.
+
+## How to know it is working
+
+The first success is taking respectful action; you can't control the reply. The next signals are mutual: the person answers with interest, asks about you, accepts or proposes a plan, and follows up afterward. A renewed relationship eventually finds a rhythm that doesn't depend on apologies for the last gap.
+
+Don't judge the whole project on one unanswered message. Some people are overwhelmed, cautious, or simply in a different season. The useful outcome is a smaller set of current, mutual connections, not a perfect response rate or the restoration of every old friendship.
+
+## If you get stuck
+
+If shame keeps you from sending the message, make the acknowledgment shorter and more accountable: name the gap, express care, invite contact, and let them choose. If you owe an apology, don't explain away the impact or ask the person to reassure you.
+
+If someone responds but never commits, make one specific invitation and then match their level of effort. If the conversation feels stuck in old memories, ask what matters in their life now. If you mainly miss who you were during that period, honor the memory without forcing the person to recreate it.
+
+Don't reopen relationships that involved abuse, coercion, stalking, repeated manipulation, or serious boundary violations just to meet this goal. Support can be built elsewhere.
+
+## A quick note
+
+Reconnection is an invitation, not a claim on another person's time or forgiveness. Respect no response, a request for distance, or a changed boundary. If a past relationship was unsafe, consider talking with a trusted person or counselor before making contact.
+
+## Sources
+
+- [U.S. Surgeon General: Social Connection Resources](https://www.hhs.gov/surgeongeneral/reports-and-publications/connection/resources/index.html)
+- [CDC: Improving Social Connectedness](https://www.cdc.gov/social-connectedness/improving/index.html)
+- [American Psychological Association: The Health Benefits of Strong Relationships](https://www.apa.org/topics/relationships/social-connections-health)

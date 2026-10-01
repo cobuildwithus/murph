@@ -3,7 +3,7 @@
 import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { ContactRoundIcon } from "lucide-react";
 
-import { Button, buttonVariants } from "@/src/components/ui/button";
+import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -200,6 +200,8 @@ export const IN_APP_BROWSER_DESCRIPTION =
   "You're in an in-app browser, which can't save contacts. This opens Safari instead.";
 const IN_APP_BROWSER_HANDOFF_ERROR =
   "Couldn't open Safari. Check your connection and try again.";
+const CONTACT_CARD_UNAVAILABLE_ERROR =
+  "Murph's contact card is temporarily unavailable. Try again.";
 const MURPH_CONTACT_CARD_HANDOFF_TIMEOUT_MS = 10_000;
 // Long enough that a host "Open in Safari?" confirmation can still be tapped
 // before the attempt is treated as never launched.
@@ -240,6 +242,7 @@ export function MurphContactCardPicker({
   );
   const [selectedId, setSelectedId] = useState(initialAvatarId);
   const [handoffStatus, setHandoffStatus] = useState<"error" | "pending" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const handoffController = useRef<AbortController | null>(null);
   const selected = findMurphContactAvatarOption(selectedId);
   const browser = detectInAppBrowser(userAgent);
@@ -251,38 +254,78 @@ export function MurphContactCardPicker({
     if (!nextOpen && controller) {
       handoffController.current = null;
       controller.abort();
+      setActionError(
+        opensInSafari ? IN_APP_BROWSER_HANDOFF_ERROR : CONTACT_CARD_UNAVAILABLE_ERROR,
+      );
       setHandoffStatus("error");
       return;
     }
     onOpenChange(nextOpen);
   }
 
-  function failHandoff(controller: AbortController) {
+  function failHandoff(controller: AbortController, message: string) {
     // Aborting settles any launch wait so its listeners cannot outlive the attempt.
     controller.abort();
     if (handoffController.current !== controller) return;
     handoffController.current = null;
+    setActionError(message);
     setHandoffStatus("error");
   }
 
-  async function handleSafariHandoff() {
-    if (handoffController.current) return;
+  function beginContactCardAction() {
     const controller = new AbortController();
     handoffController.current = controller;
+    setActionError(null);
     setHandoffStatus("pending");
+    return controller;
+  }
+
+  async function prepareContactCard(controller: AbortController) {
     const issuanceDeadline = setTimeout(
       () => controller.abort(),
       MURPH_CONTACT_CARD_HANDOFF_TIMEOUT_MS,
     );
+    try {
+      return await issueMurphContactCardHandoff(selected.id, controller.signal);
+    } finally {
+      clearTimeout(issuanceDeadline);
+    }
+  }
+
+  async function handleDirectDownload() {
+    if (handoffController.current) return;
+    const controller = beginContactCardAction();
+
+    try {
+      await prepareContactCard(controller);
+    } catch {
+      failHandoff(controller, CONTACT_CARD_UNAVAILABLE_ERROR);
+      return;
+    }
+
+    try {
+      window.location.assign(murphContactCardDownloadHref(selected.id));
+    } catch {
+      failHandoff(controller, CONTACT_CARD_UNAVAILABLE_ERROR);
+      return;
+    }
+
+    if (handoffController.current !== controller) return;
+    handoffController.current = null;
+    setHandoffStatus(null);
+    onAddToContacts(selected);
+  }
+
+  async function handleSafariHandoff() {
+    if (handoffController.current) return;
+    const controller = beginContactCardAction();
 
     let claim: string;
     try {
-      claim = await issueMurphContactCardHandoff(selected.id, controller.signal);
+      claim = await prepareContactCard(controller);
     } catch {
-      failHandoff(controller);
+      failHandoff(controller, CONTACT_CARD_UNAVAILABLE_ERROR);
       return;
-    } finally {
-      clearTimeout(issuanceDeadline);
     }
 
     // `assign` returns void whether or not the host accepted the scheme
@@ -293,11 +336,11 @@ export function MurphContactCardPicker({
         `x-safari-https://${window.location.host}/api/murph-contact-card?handoff=${encodeURIComponent(claim)}`,
       );
     } catch {
-      failHandoff(controller);
+      failHandoff(controller, IN_APP_BROWSER_HANDOFF_ERROR);
       return;
     }
     if (!(await launched)) {
-      failHandoff(controller);
+      failHandoff(controller, IN_APP_BROWSER_HANDOFF_ERROR);
       return;
     }
 
@@ -324,26 +367,28 @@ export function MurphContactCardPicker({
           <p className="px-2 text-center text-xs leading-5 text-muted-foreground">
             {IN_APP_BROWSER_DESCRIPTION}
           </p>
-          {handoffStatus === "error" ? (
-            <p
-              className="px-2 text-center text-sm leading-5 text-destructive"
-              role="alert"
-            >
-              {IN_APP_BROWSER_HANDOFF_ERROR}
-            </p>
-          ) : null}
         </>
       ) : (
         /* Keep the vCard inline so iOS opens its contact preview instead of Files. */
-        <a
-          className={buttonVariants({ className: "w-full", size: "xl" })}
-          href={murphContactCardDownloadHref(selected.id)}
-          onClick={() => onAddToContacts(selected)}
+        <Button
+          className="w-full"
+          disabled={handoffStatus === "pending"}
+          onClick={() => void handleDirectDownload()}
+          size="xl"
+          type="button"
         >
           <ContactRoundIcon data-icon="inline-start" />
-          {pickerCopy.primaryAction}
-        </a>
+          {handoffStatus === "pending" ? "Preparing contact…" : pickerCopy.primaryAction}
+        </Button>
       )}
+      {handoffStatus === "error" && actionError ? (
+        <p
+          className="px-2 text-center text-sm leading-5 text-destructive"
+          role="alert"
+        >
+          {actionError}
+        </p>
+      ) : null}
       <Button
         className="w-full"
         disabled={handoffStatus === "pending"}

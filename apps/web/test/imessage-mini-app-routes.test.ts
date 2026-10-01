@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
+import { buildWorkoutSessionAppCardEnvelopeV6 } from "@murphai/contracts";
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import nativeWorkoutRequest from "./fixtures/imessage-workout-native-request.json";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { isRecord } from "../src/lib/primitives";
@@ -26,26 +29,30 @@ const mocks = vi.hoisted(() => ({
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   authenticateAgentSessionByTokenHash: vi.fn(),
+  findAgentSession: vi.fn(),
   readJsonObject: vi.fn(async (request: Request) => await request.json()),
   readHostedMailboxWakeByDedupeKey: vi.fn(),
-  requirePrivyMemberAuthFromBearerToken: vi.fn(),
-  revokeAgentSession: vi.fn(),
+  requireHostedMemberAuthFromBearerToken: vi.fn(),
   runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   transaction: vi.fn(),
   transactionQuery: vi.fn(async () => []),
+  updateAgentSessions: vi.fn(),
   upsertAgentSession: vi.fn(),
 }));
 
 const transactionClient = {
   $queryRaw: mocks.transactionQuery,
   deviceAgentSession: {
+    findUnique: mocks.findAgentSession,
+    updateMany: mocks.updateAgentSessions,
     upsert: mocks.upsertAgentSession,
   },
   marker: "transaction",
 };
 const prisma = {
   $transaction: mocks.transaction,
+  deviceAgentSession: transactionClient.deviceAgentSession,
   marker: "prisma",
 };
 
@@ -59,8 +66,8 @@ vi.mock("@/src/lib/http", async (importOriginal) => ({
   readJsonObject: mocks.readJsonObject,
 }));
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requirePrivyMemberAuthFromBearerToken:
-    mocks.requirePrivyMemberAuthFromBearerToken,
+  requireHostedMemberAuthFromBearerToken:
+    mocks.requireHostedMemberAuthFromBearerToken,
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed: mocks.assertActiveHostedMemberAccessAllowed,
@@ -72,7 +79,6 @@ vi.mock("@/src/lib/legal/consent", () => ({
 vi.mock("@/src/lib/device-sync/prisma-store/agent-sessions", () => ({
   PrismaHostedAgentSessionStore: class {
     authenticateAgentSessionByTokenHash = mocks.authenticateAgentSessionByTokenHash;
-    revokeAgentSession = mocks.revokeAgentSession;
   },
 }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -87,10 +93,12 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 type EnrollmentRoute = typeof import("../app/api/device-sync/companion/imessage-mini-app/enrollment/route");
+type RenewalRoute = typeof import("../app/api/device-sync/companion/imessage-mini-app/renewal/route");
 type MemberActionRoute = typeof import("../app/api/device-sync/companion/imessage-mini-app/member-actions/route");
 type MemberActionStatusRoute = typeof import("../app/api/device-sync/companion/imessage-mini-app/member-actions/[actionId]/route");
 
 let enrollmentRoute: EnrollmentRoute;
+let renewalRoute: RenewalRoute;
 let memberActionRoute: MemberActionRoute;
 let memberActionStatusRoute: MemberActionStatusRoute;
 
@@ -105,6 +113,7 @@ function jsonRequest(url: string, token: string, method: "POST" | "DELETE", body
 describe("iMessage mini-app routes", () => {
   beforeAll(async () => {
     enrollmentRoute = await import("../app/api/device-sync/companion/imessage-mini-app/enrollment/route");
+    renewalRoute = await import("../app/api/device-sync/companion/imessage-mini-app/renewal/route");
     memberActionRoute = await import("../app/api/device-sync/companion/imessage-mini-app/member-actions/route");
     memberActionStatusRoute = await import("../app/api/device-sync/companion/imessage-mini-app/member-actions/[actionId]/route");
   });
@@ -114,7 +123,7 @@ describe("iMessage mini-app routes", () => {
     mocks.readJsonObject.mockImplementation(async (request: Request) =>
       await request.json()
     );
-    mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireHostedMemberAuthFromBearerToken.mockResolvedValue({
       member: { id: "member-1" },
     });
     mocks.upsertAgentSession.mockImplementation(async (input) => ({
@@ -123,6 +132,8 @@ describe("iMessage mini-app routes", () => {
       revokeReason: null,
       replacedBySessionId: null,
     }));
+    mocks.findAgentSession.mockResolvedValue(null);
+    mocks.updateAgentSessions.mockResolvedValue({ count: 1 });
     mocks.authenticateAgentSessionByTokenHash.mockResolvedValue({
       status: "active",
       session: ACTIVE_SESSION,
@@ -145,11 +156,37 @@ describe("iMessage mini-app routes", () => {
       workflowId: "hosted-user-runtime:member-1",
     });
     mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(null);
-    mocks.revokeAgentSession.mockResolvedValue({
-      ...ACTIVE_SESSION,
-      revokedAt: "2026-07-10T12:10:00.000Z",
-      revokeReason: "imessage_app_request",
-    });
+  });
+
+  it("accepts corrections across a 16 by 16 workout above the former request budget", async () => {
+    const result = { kind: "weight_reps", reps: 12, weight: 135, weightUnit: "lb" };
+    const body = { schemaVersion: 1, actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+      requestedAt: new Date().toISOString(), action: {
+        kind: "workout.live.apply", version: 1,
+        expectedWorkout: { actionBinding: "a".repeat(64),
+          exercises: Array.from({ length: 16 }, (_, i) => ({ name: `Exercise ${i + 1}`,
+            sets: Array.from({ length: 16 }, () => ({ logged: false })) })),
+        },
+        mutations: Array.from({ length: 256 }, (_, i) => ({ kind: "set.put",
+          exerciseName: `Exercise ${Math.floor(i / 16) + 1}`, exercisePosition: Math.floor(i / 16) + 1,
+          setPosition: i % 16 + 1, expectedResult: null, result })),
+        presentation: { title: "Workout", subtitle: null, footer: null,
+          workout: { version: 1, state: "completed",
+            exercises: Array.from({ length: 16 }, (_, i) => ({ name: `Exercise ${i + 1}`,
+              sets: Array.from({ length: 16 }, () => ({ status: "skipped", actual: null, target: null })) })),
+          },
+        },
+      },
+    };
+    expect(Buffer.byteLength(JSON.stringify(body))).toBeGreaterThan(24 * 1_024);
+    const original = await vi.importActual<typeof import("../src/lib/http")>("../src/lib/http");
+    mocks.readJsonObject.mockImplementationOnce(original.readJsonObject);
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN, "POST", body,
+    ));
+    expect(response.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
   });
 
   it("exchanges a verified Privy member session for a scoped derived credential", async () => {
@@ -164,7 +201,7 @@ describe("iMessage mini-app routes", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       prisma,
     );
@@ -193,6 +230,7 @@ describe("iMessage mini-app routes", () => {
     expect(body).toMatchObject({
       schemaVersion: 1,
       credential: {
+        renewalToken: expect.stringMatching(/^hbds_imessage_renew_/u),
         token: expect.stringMatching(/^hbds_imessage_/u),
       },
     });
@@ -212,7 +250,7 @@ describe("iMessage mini-app routes", () => {
     const responsePromise = enrollmentRoute.POST(request);
     await Promise.resolve();
 
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.transaction).not.toHaveBeenCalled();
 
     body.resolve({ schemaVersion: 1 });
@@ -242,9 +280,13 @@ describe("iMessage mini-app routes", () => {
       const secondBody = await secondResponse.json();
       const firstToken = readCredentialToken(firstBody);
       const secondToken = readCredentialToken(secondBody);
+      const firstRenewalToken = readRenewalToken(firstBody);
+      const secondRenewalToken = readRenewalToken(secondBody);
 
       expect(firstToken).toMatch(/^hbds_imessage_[A-Za-z0-9_-]{43}$/u);
       expect(secondToken).not.toBe(firstToken);
+      expect(firstRenewalToken).toMatch(/^hbds_imessage_renew_[A-Za-z0-9_-]{43}$/u);
+      expect(secondRenewalToken).not.toBe(firstRenewalToken);
       expect(firstBody).toMatchObject({
         credential: { expiresAt: "2026-07-11T12:00:00.000Z" },
       });
@@ -263,6 +305,9 @@ describe("iMessage mini-app routes", () => {
             tokenHash: createHash("sha256")
               .update(`murph:imessage-mini-app:v1\0${firstToken}`)
               .digest("hex"),
+            imessageRenewalTokenHash: createHash("sha256")
+              .update(`murph:imessage-mini-app:renewal:v1\0${firstRenewalToken}`)
+              .digest("hex"),
           }),
           update: expect.objectContaining({
             createdAt: new Date("2026-07-10T12:00:00.000Z"),
@@ -278,9 +323,154 @@ describe("iMessage mini-app routes", () => {
       });
       expect(JSON.stringify(mocks.upsertAgentSession.mock.calls)).not.toContain(firstToken);
       expect(JSON.stringify(mocks.upsertAgentSession.mock.calls)).not.toContain(secondToken);
+      expect(JSON.stringify(mocks.upsertAgentSession.mock.calls)).not.toContain(firstRenewalToken);
+      expect(JSON.stringify(mocks.upsertAgentSession.mock.calls)).not.toContain(secondRenewalToken);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("renews an expired action credential without Privy or a second session row", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
+    try {
+      const enrolled = await enrollmentRoute.POST(jsonRequest(
+        "https://example.test/api/device-sync/companion/imessage-mini-app/enrollment",
+        "privy-identity-proof",
+        "POST",
+        { schemaVersion: 1 },
+      ));
+      const enrollmentBody = await enrolled.json();
+      const originalToken = readCredentialToken(enrollmentBody);
+      const renewalToken = readRenewalToken(enrollmentBody);
+      const create = mocks.upsertAgentSession.mock.calls[0]?.[0].create;
+      const session = {
+        ...create,
+        revokedAt: null,
+        revokeReason: null,
+        replacedBySessionId: null,
+      };
+
+      vi.setSystemTime(new Date("2026-07-11T13:00:00.000Z"));
+      mocks.findAgentSession.mockReset();
+      mocks.findAgentSession
+        .mockResolvedValueOnce({ userId: "member-1" })
+        .mockResolvedValueOnce(session);
+
+      const renewed = await renewalRoute.POST(jsonRequest(
+        "https://example.test/api/device-sync/companion/imessage-mini-app/renewal",
+        renewalToken,
+        "POST",
+        { schemaVersion: 1 },
+      ));
+      const body = await renewed.json();
+
+      expect(renewed.status).toBe(200);
+      expect(body).toMatchObject({
+        schemaVersion: 1,
+        credential: {
+          expiresAt: "2026-07-12T13:00:00.000Z",
+          renewalToken,
+          token: expect.stringMatching(/^hbds_imessage_[A-Za-z0-9_-]{43}$/u),
+        },
+      });
+      expect(readCredentialToken(body)).not.toBe(originalToken);
+      expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledTimes(1);
+      expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenLastCalledWith({
+        memberId: "member-1",
+        prisma: transactionClient,
+      });
+      expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
+        memberId: "member-1",
+        prisma: transactionClient,
+      });
+      expect(mocks.updateAgentSessions).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(mocks.updateAgentSessions.mock.calls)).not.toContain(renewalToken);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("converges repeated renewal on the current bounded action credential", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
+    try {
+      const enrolled = await enrollmentRoute.POST(jsonRequest(
+        "https://example.test/api/device-sync/companion/imessage-mini-app/enrollment",
+        "privy-identity-proof",
+        "POST",
+        { schemaVersion: 1 },
+      ));
+      const enrollmentBody = await enrolled.json();
+      const renewalToken = readRenewalToken(enrollmentBody);
+      const create = mocks.upsertAgentSession.mock.calls[0]?.[0].create;
+      const session = {
+        ...create,
+        revokedAt: null,
+        revokeReason: null,
+        replacedBySessionId: null,
+      };
+
+      vi.setSystemTime(new Date("2026-07-10T13:00:00.000Z"));
+      mocks.findAgentSession.mockReset();
+      mocks.findAgentSession
+        .mockResolvedValueOnce({ userId: "member-1" })
+        .mockResolvedValueOnce(session);
+
+      const renewed = await renewalRoute.POST(jsonRequest(
+        "https://example.test/api/device-sync/companion/imessage-mini-app/renewal",
+        renewalToken,
+        "POST",
+        { schemaVersion: 1 },
+      ));
+      const body = await renewed.json();
+
+      expect(body).toEqual(enrollmentBody);
+      expect(mocks.updateAgentSessions).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a retained renewal hash after an older writer replaces the action generation", async () => {
+    const renewalToken = `hbds_imessage_renew_${"r".repeat(43)}`;
+    mocks.findAgentSession.mockReset();
+    mocks.findAgentSession
+      .mockResolvedValueOnce({ userId: "member-1" })
+      .mockResolvedValueOnce({
+        ...ACTIVE_SESSION,
+        id: messagesSessionId("member-1"),
+        tokenHash: "replacement-action-hash",
+        imessageRenewalTokenHash: createHash("sha256")
+          .update(`murph:imessage-mini-app:renewal:v1\0${renewalToken}`)
+          .digest("hex"),
+        expiresAt: new Date("2026-07-11T12:00:00.000Z"),
+        revokedAt: null,
+      });
+
+    const response = await renewalRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/renewal",
+      renewalToken,
+      "POST",
+      { schemaVersion: 1 },
+    ));
+
+    expect(response.status).toBe(401);
+    expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+    expect(mocks.updateAgentSessions).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid renewal envelope before credential or authority reads", async () => {
+    const response = await renewalRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/renewal",
+      `hbds_imessage_renew_${"r".repeat(43)}`,
+      "POST",
+      { schemaVersion: 2 },
+    ));
+
+    expect(response.status).toBe(400);
+    expect(mocks.findAgentSession).not.toHaveBeenCalled();
+    expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid enrollment envelope before identity or authority reads", async () => {
@@ -292,7 +482,7 @@ describe("iMessage mini-app routes", () => {
     ));
 
     expect(response.status).toBe(400);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
 
@@ -400,6 +590,213 @@ describe("iMessage mini-app routes", () => {
       duplicate: false,
       schemaVersion: 1,
     });
+  });
+
+  it("admits the native Swift payload and canonicalizes omitted/null retries identically", async () => {
+    const body = { ...nativeWorkoutRequest, requestedAt: new Date().toISOString() };
+    const first = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      body,
+    ));
+    expect(first.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
+    const admitted = mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[0]?.[0].envelope;
+    expect(admitted.request).toMatchObject({
+      actionId: body.actionId,
+      requestedAt: body.requestedAt,
+      action: {
+        mutations: body.action.mutations,
+        presentation: {
+          subtitle: null,
+          footer: null,
+          workout: { exercises: [{ sets: [
+            { status: "completed", actual: "80 lb × 10", target: null },
+            { status: "pending", actual: null, target: null },
+          ] }] },
+        },
+      },
+    });
+    const retry = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      admitted.request,
+    ));
+    expect(retry.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[1]?.[0].envelope)
+      .toEqual(admitted);
+    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledTimes(2);
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an incomplete completed result before mailbox preparation", async () => {
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      {
+        ...nativeWorkoutRequest,
+        requestedAt: new Date().toISOString(),
+        action: {
+          ...nativeWorkoutRequest.action,
+          presentation: {
+            ...nativeWorkoutRequest.action.presentation,
+            workout: {
+              ...nativeWorkoutRequest.action.presentation.workout,
+              exercises: [{ name: "Cable Row", sets: [{ status: "completed" }] }],
+            },
+          },
+        },
+      },
+    ));
+    expect(response.status).toBe(400);
+    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("admits a workout snapshot read and returns its typed card result", async () => {
+    const requestBody = validSnapshotRequest();
+    const submitted = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      requestBody,
+    ));
+
+    expect(submitted.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        envelope: expect.objectContaining({
+          request: expect.objectContaining({
+            action: requestBody.action,
+          }),
+        }),
+      }));
+
+    const cardUrl = "https://www.withmurph.ai/#murph-card=card";
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValueOnce({
+      eventId: `member.action.completed:${requestBody.actionId}`,
+      kind: "member.action.completed",
+      occurredAt: "2026-08-12T15:00:01.000Z",
+      outcome: {
+        actionId: requestBody.actionId,
+        completedAt: "2026-08-12T15:00:01.000Z",
+        reason: null,
+        result: {
+          cardUrl,
+          kind: "workout.live.snapshot",
+          version: 1,
+        },
+        schemaVersion: 1,
+        status: "unchanged",
+      },
+      userId: "member-1",
+    });
+    const status = await memberActionStatusRoute.GET(createBearerRequest(
+      `https://example.test/api/device-sync/companion/imessage-mini-app/member-actions/${requestBody.actionId}`,
+      MESSAGES_TOKEN,
+      { method: "GET" },
+    ), {
+      params: Promise.resolve({ actionId: requestBody.actionId }),
+    });
+
+    await expect(status.json()).resolves.toEqual({
+      actionId: requestBody.actionId,
+      completedAt: "2026-08-12T15:00:01.000Z",
+      reason: null,
+      result: {
+        cardUrl,
+        kind: "workout.live.snapshot",
+        version: 1,
+      },
+      schemaVersion: 1,
+      status: "unchanged",
+    });
+  });
+
+  it.each([
+    ["active", "workout.live.snapshot"],
+    ["completed", "workout.live.snapshot"],
+    ["active", "workout.live.apply"],
+    ["completed", "workout.live.apply"],
+  ] as const)("keeps %s %s results readable by old and opted-in clients without rewriting receipts", async (state, kind) => {
+    const actionId = validSnapshotRequest().actionId;
+    const card = compatibilityWorkoutEnvelope(state);
+    const outcome = {
+      actionId,
+      completedAt: "2026-09-22T15:00:01.000Z",
+      reason: null,
+      result: { card, kind, version: 1 },
+      schemaVersion: 1,
+      status: kind === "workout.live.apply" ? "applied" : "unchanged",
+    };
+    const before = JSON.stringify(outcome);
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue({
+      kind: "member.action.completed", outcome,
+    });
+
+    for (const format of [null, "unknown", "envelope-v6"]) {
+      const response = await memberActionStatusRoute.GET(createBearerRequest(
+        `https://example.test/api/device-sync/companion/imessage-mini-app/member-actions/${actionId}`,
+        MESSAGES_TOKEN,
+        { method: "GET", headers: format ? { "X-Murph-Workout-Card-Format": format } : {} },
+      ), { params: Promise.resolve({ actionId }) });
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      if (format === "envelope-v6") {
+        expect(body).toEqual(outcome);
+      } else {
+        expect(body).toEqual({
+          ...outcome,
+          result: { kind, version: 1, cardUrl: expect.any(String) },
+        });
+        expect(body.result.cardUrl.length).toBeLessThan(2_048);
+        const decoded = JSON.parse(Buffer.from(
+          body.result.cardUrl.split("#murph-card=")[1], "base64url",
+        ).toString("utf8"));
+        expect(decoded.schemaVersion).toBe(state === "active" ? 6 : 4);
+        expect(decoded.card.s).toBe(state === "active" ? "a" : "c");
+        if (state === "completed") {
+          expect(decoded.card).not.toHaveProperty("b");
+          expect(decoded.card.e[0][1][0]).toEqual(["c", "8 reps", "8 reps"]);
+        } else {
+          expect(decoded).toEqual(card);
+        }
+      }
+      expect(response.headers.get("cache-control")).toContain("no-store");
+    }
+    expect(JSON.stringify(outcome)).toBe(before);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxWakeByDedupeKey).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["workout.live.apply", "workout.live.snapshot"] as const)("preserves the legacy oversized %s outcome and full opted-in editor", async (kind) => {
+    const actionId = validSnapshotRequest().actionId;
+    const outcome = {
+      actionId, completedAt: "2026-09-22T15:00:01.000Z", reason: null,
+      result: { card: compatibilityWorkoutEnvelope("active", true), kind, version: 1 },
+      schemaVersion: 1,
+      status: kind === "workout.live.apply" ? "applied" : "unchanged",
+    };
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue({ kind: "member.action.completed", outcome });
+    for (const direct of [false, true]) {
+      const response = await memberActionStatusRoute.GET(createBearerRequest(
+        `https://example.test/api/device-sync/companion/imessage-mini-app/member-actions/${actionId}`,
+        MESSAGES_TOKEN,
+        { method: "GET", headers: direct ? { "X-Murph-Workout-Card-Format": "envelope-v6" } : {} },
+      ), { params: Promise.resolve({ actionId }) });
+      const body = await response.json();
+      if (direct) expect(body).toEqual(outcome);
+      else expect(body).toEqual({
+        actionId, completedAt: outcome.completedAt, schemaVersion: 1,
+        status: kind === "workout.live.apply" ? "applied" : "rejected",
+        reason: kind === "workout.live.apply" ? null : "workout_changed",
+      });
+    }
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
   });
 
   it("rejects an indistinguishable destructive batch before mailbox append", async () => {
@@ -616,6 +1013,17 @@ describe("iMessage mini-app routes", () => {
   });
 
   it("revokes the derived credential without requiring the member to remain active", async () => {
+    const tokenHash = createHash("sha256")
+      .update(`murph:imessage-mini-app:v1\0${MESSAGES_TOKEN}`)
+      .digest("hex");
+    mocks.findAgentSession.mockResolvedValueOnce({
+      ...ACTIVE_SESSION,
+      id: messagesSessionId("member-1"),
+      tokenHash,
+      imessageRenewalTokenHash: null,
+      expiresAt: new Date("2026-07-11T12:00:00.000Z"),
+      revokedAt: null,
+    });
     const response = await enrollmentRoute.DELETE(jsonRequest(
       "https://example.test/api/device-sync/companion/imessage-mini-app/enrollment",
       MESSAGES_TOKEN,
@@ -624,11 +1032,64 @@ describe("iMessage mini-app routes", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ schemaVersion: 1, revoked: true });
-    expect(mocks.revokeAgentSession).toHaveBeenCalledWith(expect.objectContaining({
-      reason: "imessage_app_request",
-      sessionId: "dsa_messages",
-    }));
+    expect(mocks.updateAgentSessions).toHaveBeenCalledWith({
+      where: {
+        id: messagesSessionId("member-1"),
+        tokenHash,
+        revokedAt: null,
+      },
+      data: expect.objectContaining({
+        revokeReason: "imessage_app_request",
+        revokedAt: expect.any(Date),
+      }),
+    });
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+  });
+
+  it("revokes the lifecycle authority with its renewal bearer after action expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
+    try {
+      const enrolled = await enrollmentRoute.POST(jsonRequest(
+        "https://example.test/api/device-sync/companion/imessage-mini-app/enrollment",
+        "privy-identity-proof",
+        "POST",
+        { schemaVersion: 1 },
+      ));
+      const body = await enrolled.json();
+      const renewalToken = readRenewalToken(body);
+      const session = {
+        ...mocks.upsertAgentSession.mock.calls[0]?.[0].create,
+        revokedAt: null,
+        revokeReason: null,
+        replacedBySessionId: null,
+      };
+      vi.setSystemTime(new Date("2026-07-12T12:00:00.000Z"));
+      mocks.findAgentSession.mockReset();
+      mocks.findAgentSession.mockResolvedValueOnce(session);
+      mocks.assertActiveHostedMemberAccessAllowed.mockClear();
+      mocks.assertHostedLaunchRequiredConsentGranted.mockClear();
+
+      const response = await enrollmentRoute.DELETE(jsonRequest(
+        "https://example.test/api/device-sync/companion/imessage-mini-app/enrollment",
+        renewalToken,
+        "DELETE",
+      ));
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ schemaVersion: 1, revoked: true });
+      expect(mocks.updateAgentSessions).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          id: messagesSessionId("member-1"),
+          imessageRenewalTokenHash: session.imessageRenewalTokenHash,
+          tokenHash: session.tokenHash,
+          revokedAt: null,
+        }),
+      }));
+      expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -669,6 +1130,32 @@ function validMemberActionRequest() {
   };
 }
 
+function validSnapshotRequest() {
+  return {
+    action: {
+      kind: "workout.live.snapshot",
+      presentation: {
+        footer: "Log each set.",
+        subtitle: null,
+        title: "Strength",
+        workout: {
+          exercises: [{
+            name: "Leg press",
+            sets: [{ actual: null, status: "pending", target: "8 reps" }],
+          }],
+          state: "active",
+          version: 1,
+        },
+      },
+      version: 1,
+      workoutBinding: "a".repeat(64),
+    },
+    actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+    requestedAt: new Date().toISOString(),
+    schemaVersion: 1,
+  } as const;
+}
+
 function readCredentialToken(body: unknown): string {
   if (
     !isRecord(body)
@@ -680,6 +1167,23 @@ function readCredentialToken(body: unknown): string {
   return body.credential.token;
 }
 
+function readRenewalToken(body: unknown): string {
+  if (
+    !isRecord(body)
+    || !isRecord(body.credential)
+    || typeof body.credential.renewalToken !== "string"
+  ) {
+    throw new TypeError("Expected an iMessage enrollment renewal token.");
+  }
+  return body.credential.renewalToken;
+}
+
+function messagesSessionId(memberId: string): string {
+  return `dsa_imessage_${createHash("sha256")
+    .update(`murph:imessage-mini-app:session:v1\0${memberId}`)
+    .digest("hex")}`;
+}
+
 function invocationOrder(
   mock: { mock: { invocationCallOrder: number[] } },
   index = 0,
@@ -689,4 +1193,24 @@ function invocationOrder(
     throw new TypeError("Expected the mocked call to have an invocation order.");
   }
   return order;
+}
+
+function compatibilityWorkoutEnvelope(state: "active" | "completed", oversized = false) {
+  const exercises = Array.from({ length: oversized ? 16 : 1 }, (_, i) => ({
+    name: oversized ? `Exercise ${i + 1} with a long but valid display name` : "Cable Row",
+    sets: Array.from({ length: oversized ? 16 : 1 }, () => ({
+      status: "completed" as const, target: "8 reps", actual: "8 reps",
+    })),
+  }));
+  return buildWorkoutSessionAppCardEnvelopeV6({
+    title: "Strength", subtitle: null, footer: null,
+    workout: { version: 1, state, exercises },
+    editor: {
+      version: 1, actionBinding: "a".repeat(64), setRemovalBinding: "b".repeat(64),
+      exercises: exercises.map((exercise) => ({
+        unitOverride: null,
+        sets: exercise.sets.map(() => ({ logged: true, result: { kind: "reps" as const, reps: 8 } })),
+      })),
+    },
+  });
 }

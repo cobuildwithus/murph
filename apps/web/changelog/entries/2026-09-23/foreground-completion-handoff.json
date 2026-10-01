@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-23",
+  "order": 100,
+  "item": {
+    "id": "foreground-completion-handoff",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting when a conversation resumes",
+    "summary": "Messages can start processing sooner after background work has finished.",
+    "details": "Murph skips an unnecessary retry delay when handing completed background work back to a conversation.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3674
+    ]
+  }
+}

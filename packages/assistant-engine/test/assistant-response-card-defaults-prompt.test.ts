@@ -30,8 +30,10 @@ describe('assistant response-card defaults', () => {
     const groupPrompt = buildAssistantSystemPrompt(createPromptInput('group'))
 
     expect(directPrompt).toContain(
-      'Private cards: verified meal/live-workout updates use the allowed card alone; meal intent never sets targets.',
+      'Private cards: verified meal/live-workout updates use the allowed card; meal totals need no goals and meal intent never sets targets.',
     )
+    expect(directPrompt).toContain('Routine meal capture and daily nutrition summaries are one short workflow, even with several skill/context reads, a save, readback and totals check. Do not send a progress update for those steps or before the card.')
+    expect(directPrompt).toContain('The first suitable totals-only card includes the fixed optional-goals introduction; later cards and prior declines omit it.')
     expect(directPrompt).not.toContain('routine logs stay concise')
     expect((directPrompt.match(/Private cards:/gu) ?? [])).toHaveLength(1)
     expect(groupPrompt).not.toContain('Private cards:')

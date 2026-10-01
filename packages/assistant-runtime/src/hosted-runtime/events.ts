@@ -55,9 +55,7 @@ export async function executeHostedMailboxEvent(input: {
   operatorHomeRoot?: string | null;
   preferenceAppliedAt?: string;
   preferenceCausalSeq?: string;
-  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
-  shouldYieldClinicalRecords?: (() => boolean) | null;
-  shouldYieldDeviceSync?: (() => boolean) | null;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runtime: Pick<
@@ -82,6 +80,16 @@ export async function executeHostedMailboxEvent(input: {
     };
   }
 
+  if (input.wake.kind === "clinical-records.enrichment-requested") {
+    const { executeHostedClinicalEnrichmentWake } = await import("./events/clinical-enrichment.ts");
+    const outcome = await executeHostedClinicalEnrichmentWake({
+      wake: input.wake,
+      vaultRoot: input.vaultRoot,
+      signal: input.signal,
+      shouldYield: input.shouldYieldBackgroundMaintenance,
+    });
+    return { bootstrapResult: null, ...outcome };
+  }
   const bootstrapResult = await prepareHostedWakeContext(
     input.vaultRoot,
     input.wake,
@@ -109,14 +117,8 @@ export async function executeHostedMailboxEvent(input: {
     runtimeLogContext: input.runtimeLogContext ?? null,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal ?? null,
-    ...(input.shouldYieldClinicalRecords
-      ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
-      : {}),
-    ...(input.shouldYieldAssistantAskCompletion
-      ? { shouldYieldAssistantAskCompletion: input.shouldYieldAssistantAskCompletion }
-      : {}),
-    ...(input.shouldYieldDeviceSync
-      ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
+    ...(input.shouldYieldBackgroundMaintenance
+      ? { shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance }
       : {}),
     sourceMailboxItemId: input.sourceMailboxItemId ?? null,
     vaultRoot: input.vaultRoot,
@@ -138,11 +140,14 @@ export async function executeHostedMailboxEvent(input: {
       : {}),
     postCheckpointRecord: mailboxEffect.postCheckpointRecord,
     redactedLogEntries: mailboxEffect.redactedLogEntries ?? [],
+    ...(mailboxEffect.systemProgressed === true
+      ? { systemProgressed: true as const }
+      : {}),
   };
 }
 
 async function handleHostedMailboxEvent(input: {
-  wake: HostedExecutionWake;
+  wake: Exclude<HostedExecutionWake, { kind: "clinical-records.enrichment-requested" }>;
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;
@@ -154,9 +159,7 @@ async function handleHostedMailboxEvent(input: {
   > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
-  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
-  shouldYieldClinicalRecords?: (() => boolean) | null;
-  shouldYieldDeviceSync?: (() => boolean) | null;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
@@ -176,14 +179,8 @@ async function handleHostedMailboxEvent(input: {
     runtimeLogContext: input.runtimeLogContext,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
-    ...(input.shouldYieldClinicalRecords
-      ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
-      : {}),
-    ...(input.shouldYieldAssistantAskCompletion
-      ? { shouldYieldAssistantAskCompletion: input.shouldYieldAssistantAskCompletion }
-      : {}),
-    ...(input.shouldYieldDeviceSync
-      ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
+    ...(input.shouldYieldBackgroundMaintenance
+      ? { shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance }
       : {}),
     sourceMailboxItemId: input.sourceMailboxItemId,
     vaultRoot: input.vaultRoot,
@@ -191,7 +188,7 @@ async function handleHostedMailboxEvent(input: {
 }
 
 async function executeHostedSystemWake(input: {
-  wake: HostedExecutionSystemWake;
+  wake: Exclude<HostedExecutionSystemWake, { kind: "clinical-records.enrichment-requested" }>;
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;
@@ -203,9 +200,7 @@ async function executeHostedSystemWake(input: {
   > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
-  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
-  shouldYieldClinicalRecords?: (() => boolean) | null;
-  shouldYieldDeviceSync?: (() => boolean) | null;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
@@ -217,6 +212,7 @@ async function executeHostedSystemWake(input: {
       );
       return executeHostedMemberActivatedWake({
         wake: input.wake,
+        shouldYield: input.shouldYieldBackgroundMaintenance,
         executionContext: input.executionContext,
         sourceMailboxItemId: input.sourceMailboxItemId,
         turnEnvironment: createHostedAssistantTurnEnvironment({
@@ -262,6 +258,7 @@ async function executeHostedSystemWake(input: {
         "./events/assistant-notification.ts"
       );
       return executeHostedAssistantNotificationWake({
+        effectsPort: input.runtime.platform.effectsPort,
         wake: input.wake,
         executionContext: input.executionContext,
         forceQueueOnly: input.forceQueueOnlyAssistantNotification,
@@ -281,7 +278,7 @@ async function executeHostedSystemWake(input: {
       return executeHostedAssistantAskCompletedWake({
         wake: input.wake,
         executionContext: input.executionContext,
-        shouldYield: input.shouldYieldAssistantAskCompletion ?? null,
+        shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
         signal: input.signal,
         sourceMailboxItemId: input.sourceMailboxItemId,
         turnEnvironment: createHostedAssistantTurnEnvironment({
@@ -298,8 +295,8 @@ async function executeHostedSystemWake(input: {
       } = await loadHostedClinicalRecordsMaintenanceModule();
       const clinicalRecordsMetrics = await runHostedClinicalRecordsSyncWakeLane({
         clinicalRecordsPort: input.runtime.platform.clinicalRecordsPort ?? null,
-        ...(input.shouldYieldClinicalRecords
-          ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
+        ...(input.shouldYieldBackgroundMaintenance
+          ? { shouldYieldClinicalRecords: input.shouldYieldBackgroundMaintenance }
           : {}),
         signal: input.signal,
         vaultRoot: input.vaultRoot,
@@ -332,22 +329,18 @@ async function executeHostedSystemWake(input: {
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
         retainFollowUpWakeUntilCheckpoint: true,
-        ...(input.runtimeLogContext
-          ? { runtimeLogContext: input.runtimeLogContext }
-          : {}),
+        runtimeLogContext: input.runtimeLogContext,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
-        ...(input.shouldYieldDeviceSync
-          ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
-          : {}),
-        ...(input.signal ? { signal: input.signal } : {}),
+        shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance,
+        signal: input.signal,
         timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
       const shouldSkipActivityAutomation = deviceSyncMetrics.deviceSyncSkipped
         || input.signal?.aborted === true
-        || input.shouldYieldDeviceSync?.() === true;
+        || input.shouldYieldBackgroundMaintenance?.() === true;
       const activityAutomation = shouldSkipActivityAutomation
         ? { matched: 0, nextWakeAt: null, scheduled: 0 }
         : await scheduleDeviceActivityTriggeredAutomations({
@@ -378,7 +371,12 @@ async function executeHostedSystemWake(input: {
         mailboxLane: "device-sync",
         nextWakeAt: nextWake.at,
         ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
-        postCheckpointRecord: deviceSyncMetrics.postCheckpointRecord ?? null,
+        postCheckpointRecord: nullableSystemWakeValue(
+          deviceSyncMetrics.postCheckpointRecord,
+        ),
+        ...(deviceSyncMetrics.systemProgressed === true
+          ? { systemProgressed: true as const }
+          : {}),
       });
     case "environment-voice.captured": {
       const { executeHostedEnvironmentVoiceWake } = await import(
@@ -456,12 +454,23 @@ async function executeHostedSystemWake(input: {
       throw new TypeError(
         "Retired hosted vault-share revoke wakes must never reach system wake execution.",
       );
-    case "meal-photo.captured":
-      // Meal photos become canonical meal records at mailbox import so their
-      // staged object can be cleaned up only after the workspace checkpoint.
-      throw new TypeError(
-        "Hosted meal-photo wakes are landed at mailbox import and must never reach system wake execution.",
+    case "meal-photo.captured": {
+      const { executeHostedManualMealPhotoWake } = await import(
+        "./events/assistant-notification.ts"
       );
+      return executeHostedManualMealPhotoWake({
+        wake: input.wake,
+        executionContext: input.executionContext,
+        forceQueueOnly: input.forceQueueOnlyAssistantNotification,
+        sourceMailboxItemId: input.sourceMailboxItemId,
+        turnEnvironment: createHostedAssistantTurnEnvironment({
+          operatorHomeRoot: input.operatorHomeRoot,
+          runtimeEnv: input.runtimeEnv,
+          vaultRoot: input.vaultRoot,
+        }),
+        vaultRoot: input.vaultRoot,
+      });
+    }
     case "health.daily-metric.reported":
       // The canonical observation landed at mailbox import. After that write
       // checkpoints, refresh any already-granted group projections.
@@ -470,11 +479,23 @@ async function executeHostedSystemWake(input: {
         mailboxLane: "runtime-control",
         postCheckpointRecord: { kind: "vault-share.projection" },
       });
+    case "journal.group-fact.recorded":
+      // The private Journal note landed during mailbox import. The ordinary
+      // workspace checkpoint publishes it to the member's browser replica.
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        postCheckpointRecord: null,
+      });
   }
 
   const exhaustiveWake: never = input.wake;
   void exhaustiveWake;
   throw new TypeError('Unsupported hosted system wake kind.');
+}
+
+function nullableSystemWakeValue<T>(value: T | undefined): T | null {
+  return value ?? null;
 }
 
 function emitHostedDeviceActivityAutomationFailureLog(input: {

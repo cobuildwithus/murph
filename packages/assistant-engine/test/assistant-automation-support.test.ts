@@ -1330,6 +1330,23 @@ describe('assistant auto-reply prompt builder support', () => {
     })
   })
 
+  it('captures one prompt instant and derives its local date from the vault timezone', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2027-02-14T07:17:05.678Z'))
+    const { vaultRoot } = await createTempVault('assistant-prompt-time-context-')
+    await initializeVault({
+      timezone: 'America/Los_Angeles',
+      vaultRoot,
+    })
+
+    await expect(resolveAssistantPromptTimeContext(vaultRoot)).resolves.toEqual({
+      canonicalTimeZoneAvailable: true,
+      currentInstant: '2027-02-14T07:17:05.678Z',
+      currentLocalDate: '2027-02-13',
+      currentTimeZone: 'America/Los_Angeles',
+    })
+  })
+
   it('keeps the turn-resolved timezone when vault metadata changes during assembly', async () => {
     const { vaultRoot } = await createTempVault('assistant-automation-timezone-stable-')
     await initializeVault({

@@ -54,18 +54,25 @@ export function buildHostedDeviceSyncCallbackProof(input: {
   };
 }
 
-export function verifyHostedDeviceSyncCallbackProof(input: {
+export type HostedDeviceSyncCallbackProofError =
+  | "CALLBACK_STATE_INVALID"
+  | "CALLBACK_PROOF_MISSING"
+  | "CALLBACK_PROOF_MALFORMED"
+  | "CALLBACK_PROOF_EXPIRED"
+  | "CALLBACK_PROOF_MISMATCH";
+
+export function readHostedDeviceSyncCallbackProofError(input: {
   memberId: string;
   now?: Date;
   provider: string;
   request: Request;
   sessionId: string;
-  state: string;
-}): boolean {
+  state: string | null;
+}): HostedDeviceSyncCallbackProofError | null {
   const provider = normalizeHostedDeviceSyncProvider(input.provider);
   const state = normalizeHostedDeviceSyncState(input.state);
   if (!provider || !state) {
-    return false;
+    return "CALLBACK_STATE_INVALID";
   }
 
   const tokenValue = readCookieFromRequest(
@@ -73,7 +80,7 @@ export function verifyHostedDeviceSyncCallbackProof(input: {
     hostedDeviceSyncCallbackProofCookieName(provider),
   );
   if (!tokenValue) {
-    return false;
+    return "CALLBACK_PROOF_MISSING";
   }
 
   const tokenParts = tokenValue.split(".");
@@ -81,7 +88,7 @@ export function verifyHostedDeviceSyncCallbackProof(input: {
     tokenParts.length !== 3
     || tokenParts[0] !== HOSTED_DEVICE_SYNC_CALLBACK_PROOF_TOKEN_PREFIX
   ) {
-    return false;
+    return "CALLBACK_PROOF_MALFORMED";
   }
 
   const expiresAtMs = Number(tokenParts[1]);
@@ -89,11 +96,14 @@ export function verifyHostedDeviceSyncCallbackProof(input: {
   const nowMs = (input.now ?? new Date()).getTime();
   if (
     !Number.isSafeInteger(expiresAtMs)
-    || expiresAtMs <= nowMs
     || expiresAtMs > nowMs + HOSTED_DEVICE_SYNC_CALLBACK_PROOF_MAX_AGE_SECONDS * 1_000
     || !SHA256_BASE64URL_PATTERN.test(authenticator)
   ) {
-    return false;
+    return "CALLBACK_PROOF_MALFORMED";
+  }
+
+  if (expiresAtMs <= nowMs) {
+    return "CALLBACK_PROOF_EXPIRED";
   }
 
   const expectedAuthenticator = createHostedDeviceSyncCallbackProofAuthenticator({
@@ -104,7 +114,7 @@ export function verifyHostedDeviceSyncCallbackProof(input: {
     state,
   });
 
-  return safeEqual(authenticator, expectedAuthenticator);
+  return safeEqual(authenticator, expectedAuthenticator) ? null : "CALLBACK_PROOF_MISMATCH";
 }
 
 export function readHostedDeviceSyncCallbackState(url: URL): string | null {

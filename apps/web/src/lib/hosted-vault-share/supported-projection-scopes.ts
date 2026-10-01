@@ -113,12 +113,8 @@ export function readHostedVaultShareSupportedProjectionScopeKeysFromRequest(
   const supported = new Set<string>();
   for (const value of values) {
     try {
-      supported.add(buildHostedVaultShareProjectionScopeKey(
-        parseHostedVaultShareProjectionScopeKey(
-          value,
-          "Vault share supported projection scope",
-        ),
-      ));
+      const scope = parseHostedVaultShareProjectionScopeKey(value, "Vault share supported projection scope");
+      supported.add(buildHostedVaultShareProjectionScopeKey(scope));
     } catch {
       // Unknown future scopes are not a reason to fall back to legacy support.
     }

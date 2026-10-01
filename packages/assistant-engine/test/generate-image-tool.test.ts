@@ -25,6 +25,27 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 }
 
 describe('executeGenerateImageTool reference images', () => {
+  it('preserves the subscription recovery meaning through the tool result without spending or retrying', async () => {
+    let requests = 0
+    const result = await executeGenerateImageTool({
+      args: { alt: null, prompt: 'Draw a blue circle.', outputFormat: 'png', quality: 'low', size: '1024x1024' },
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl: async () => {
+        requests += 1
+        return Response.json({ error: { code: 'MURPH_IMAGE_SUBSCRIPTION_REQUIRED' } }, { status: 403 })
+      },
+      providerRequestOrdinal: 1,
+    })
+    expect(result.rpcSuccess).toBe(false)
+    expect(result.rpcText).toContain('requires a subscription')
+    expect(result.rpcText).toContain('Pulse')
+    expect(result.rpcText).toContain('Group')
+    expect(result.rpcText).not.toMatch(/does not charge|without a subscription/iu)
+    expect(result.rpcText).toContain('text chat still works')
+    expect(result.usageDraft).toBeUndefined()
+    expect(requests).toBe(1)
+  })
+
   it('does not require a vault root when no reference image refs are provided', async () => {
     await withTempDir(async (codexHome) => {
       let capturedUrl: string | null = null
@@ -75,6 +96,7 @@ describe('executeGenerateImageTool reference images', () => {
     expect(result).toEqual({
       rpcSuccess: false,
       rpcText: 'hosted private image delivery requires the owning vault',
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
     })
   })
 
@@ -254,6 +276,7 @@ describe('executeGenerateImageTool reference images', () => {
         rpcSuccess: false,
         rpcText:
           'image edit failed: ASSISTANT_IMAGE_GENERATION_FAILED (http 400, invalid_image, request req_image_edit_failed): The reference image could not be decoded.',
+        failureDiagnostic: { failureStage: 'execution', failureReason: 'handler_exception', errorCategory: 'invalid_input' },
       })
     })
   })

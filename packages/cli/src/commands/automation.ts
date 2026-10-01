@@ -10,6 +10,7 @@ import {
   automationContextReferencesSchema,
   automationPlannedOccurrenceOffsetMsSchema,
   automationDeviceActivityKindSchema,
+  automationDeviceActivitySourceValues,
   automationRouteSchema,
   automationScaffoldPayloadSchema,
   automationScheduleSchema,
@@ -44,6 +45,7 @@ import {
 } from "@murphai/vault-usecases";
 import {
   pathSchema,
+  timeZoneSchema,
 } from "@murphai/operator-config/vault-cli-contracts";
 import {
   patchAutomation,
@@ -55,6 +57,7 @@ import {
   listAutomationPage,
   showAutomation,
 } from "@murphai/query";
+import { publicValidationIssue } from "./public-validation-issue.js";
 const automationSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
@@ -66,11 +69,13 @@ interface AutomationScheduleOptions {
   scheduleEveryMs?: number;
   scheduleKind?: AutomationTimeScheduleKind;
   scheduleLocalTime?: string;
+  scheduleTimeZone?: string;
   triggerAt?: string;
   triggerCron?: string;
   triggerEveryMs?: number;
   triggerKind?: AutomationScheduleKind;
   triggerLocalTime?: string;
+  triggerTimeZone?: string;
 }
 
 interface AutomationLifecycleOptions {
@@ -131,7 +136,21 @@ export const automationListItemSchema = automationRecordSchema
   })
   .strict();
 
-export const automationListResultSchema = z.object({
+export const automationCompactListItemSchema = automationRecordSchema
+  .pick({
+    automationId: true,
+    slug: true,
+    title: true,
+    status: true,
+    summary: true,
+    activeUntil: true,
+    schedule: true,
+    supportKind: true,
+    updatedAt: true,
+  })
+  .strict();
+
+const automationListResultFields = {
   vault: pathSchema,
   filters: z.object({
     status: z.array(z.enum(automationStatusValues)).nullable(),
@@ -143,8 +162,23 @@ export const automationListResultSchema = z.object({
   count: z.number().int().nonnegative(),
   totalCount: z.number().int().nonnegative(),
   nextCursor: z.string().min(1).nullable(),
+};
+
+export const automationCompactListResultSchema = z.object({
+  ...automationListResultFields,
+  compact: z.literal(true),
+  items: z.array(automationCompactListItemSchema),
+});
+
+export const automationFullListResultSchema = z.object({
+  ...automationListResultFields,
   items: z.array(automationListItemSchema),
 });
+
+export const automationListResultSchema = z.union([
+  automationCompactListResultSchema,
+  automationFullListResultSchema,
+]);
 
 export const automationShowResultSchema = z.object({
   vault: pathSchema,
@@ -192,8 +226,150 @@ function automationListItem(
   return item;
 }
 
-function invalidAutomationOption(message: string): never {
-  throw new VaultCliError("invalid_option", message);
+function automationCompactListItem(
+  record: z.infer<typeof automationRecordSchema>,
+): z.infer<typeof automationCompactListItemSchema> {
+  return {
+    automationId: record.automationId,
+    slug: record.slug,
+    title: record.title,
+    status: record.status,
+    summary: record.summary,
+    activeUntil: record.activeUntil,
+    schedule: record.schedule,
+    supportKind: record.supportKind,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function invalidAutomationOption(
+  message: string,
+  publicPath?: readonly (string | number)[],
+): never {
+  throw new VaultCliError("invalid_option", message, {
+    retryable: false,
+    ...(publicPath
+      ? { issues: [publicValidationIssue({ code: "custom" }, publicPath)] }
+      : {}),
+    stage: "validation",
+  });
+}
+
+interface AutomationValidationIssue {
+  code: string;
+  message: string;
+  path: readonly PropertyKey[];
+}
+
+interface AutomationSchema<T> {
+  safeParse(value: unknown):
+    | { data: T; success: true }
+    | { error: { issues: readonly AutomationValidationIssue[] }; success: false };
+}
+
+function parseAutomationValue<T>(
+  schema: AutomationSchema<T>,
+  value: unknown,
+  input: {
+    code: string;
+    message: string;
+    publicPathForIssue: (
+      issue: AutomationValidationIssue,
+    ) => readonly (string | number)[] | undefined;
+  },
+): T {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) {
+    return parsed.data;
+  }
+
+  const issues = parsed.error.issues.flatMap((issue) => {
+    const publicPath = input.publicPathForIssue(issue);
+    return publicPath ? [publicValidationIssue(issue, publicPath)] : [];
+  });
+
+  throw new VaultCliError(input.code, input.message, {
+    retryable: false,
+    ...(issues.length > 0 ? { issues } : {}),
+    stage: "validation",
+  });
+}
+
+const automationSchedulePublicFieldsByKind: Record<AutomationScheduleKind, ReadonlySet<string>> = {
+  at: new Set(["kind", "at"]),
+  every: new Set(["kind", "everyMs"]),
+  cron: new Set(["kind", "expression", "timeZone"]),
+  dailyLocal: new Set(["kind", "localTime", "timeZone"]),
+  deviceActivity: new Set(["kind", "after", "source", "activityKind"]),
+};
+const automationSchedulePublicFields = new Set(Object.values(automationSchedulePublicFieldsByKind).flatMap((fields) => [...fields]));
+const automationRoutePublicFields = new Set(["channel", "deliveryTarget", "identityId", "participantId", "threadId"]);
+const automationTargetPublicFields = new Set(["model", "modelProvider", "reasoningEffort"]);
+const automationPayloadPublicFields = new Set([
+  "activeUntil", "automationId", "continuityPolicy", "instructions", "plannedOccurrenceOffsetMs",
+  "slug", "status", "summary", "supportKind", "title",
+]);
+const automationContextReferencePublicFields = new Set(["entityKind", "entityId"]);
+
+type AutomationPublicRoot = "assistantTargetOverride" | "contextReference" | "payload" | "route" | "schedule";
+
+function automationIssuePublicPath(
+  issue: AutomationValidationIssue,
+  publicRoot?: AutomationPublicRoot,
+  scheduleKind?: AutomationScheduleKind,
+): readonly (string | number)[] | undefined {
+  const [field, nestedField, itemField] = issue.path;
+  const isIndex = (value: PropertyKey | undefined): value is number =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+  if (publicRoot === "contextReference") {
+    if (issue.path.length === 0 || (issue.path.length === 1 && isIndex(field))) return [publicRoot];
+    return issue.path.length === 2 && isIndex(field) && typeof nestedField === "string" &&
+        automationContextReferencePublicFields.has(nestedField)
+      ? [publicRoot, field, nestedField]
+      : undefined;
+  }
+
+  if (publicRoot === "schedule" || publicRoot === "route" || publicRoot === "assistantTargetOverride") {
+    const publicFields = publicRoot === "schedule"
+      ? scheduleKind === undefined ? undefined : automationSchedulePublicFieldsByKind[scheduleKind]
+      : publicRoot === "route" ? automationRoutePublicFields : automationTargetPublicFields;
+    return issue.path.length === 1 && typeof field === "string" && publicFields?.has(field)
+      ? [publicRoot, field]
+      : undefined;
+  }
+
+  const prefix = publicRoot === "payload" ? [publicRoot] : [];
+  if (typeof field !== "string") return undefined;
+  if (automationPayloadPublicFields.has(field)) {
+    return issue.path.length === 1 ? [...prefix, field] : undefined;
+  }
+  if (field === "tags") {
+    if (issue.path.length === 1) return [...prefix, field];
+    return issue.path.length === 2 && isIndex(nestedField)
+      ? [...prefix, field, nestedField]
+      : undefined;
+  }
+  if (field === "contextReferences") {
+    if (issue.path.length === 1 || (issue.path.length === 2 && isIndex(nestedField))) {
+      return [...prefix, field];
+    }
+    return issue.path.length === 3 && isIndex(nestedField) && typeof itemField === "string" &&
+        automationContextReferencePublicFields.has(itemField)
+      ? [...prefix, field, nestedField, itemField]
+      : undefined;
+  }
+
+  const nestedPublicFields = field === "schedule" ? automationSchedulePublicFields
+    : field === "route" ? automationRoutePublicFields
+    : field === "assistantTargetOverride" ? automationTargetPublicFields
+    : undefined;
+  if (nestedPublicFields === undefined) return undefined;
+  if (issue.path.length === 1) return [...prefix, field];
+  return issue.path.length === 2 && typeof nestedField === "string" &&
+      nestedPublicFields.has(nestedField)
+    ? [...prefix, field, nestedField]
+    : undefined;
 }
 
 function requireStringOption(
@@ -214,7 +390,10 @@ function requireNumberOption(
 
 function resolveAutomationTriggerKind(options: AutomationScheduleOptions): AutomationScheduleKind {
   if (options.triggerKind && options.scheduleKind && options.triggerKind !== options.scheduleKind) {
-    return invalidAutomationOption("--trigger-kind and --schedule-kind must match when both are provided.");
+    return invalidAutomationOption(
+      "--trigger-kind and --schedule-kind must match when both are provided.",
+      ["schedule", "kind"],
+    );
   }
 
   return options.triggerKind ?? options.scheduleKind ?? invalidAutomationOption(
@@ -222,44 +401,170 @@ function resolveAutomationTriggerKind(options: AutomationScheduleOptions): Autom
   );
 }
 
+function resolveAutomationTimeZone(
+  options: AutomationScheduleOptions,
+  kind: AutomationScheduleKind,
+): string | undefined {
+  if (
+    options.triggerTimeZone !== undefined &&
+    options.scheduleTimeZone !== undefined &&
+    options.triggerTimeZone !== options.scheduleTimeZone
+  ) {
+    return invalidAutomationOption(
+      "--trigger-time-zone and --schedule-time-zone must match when both are provided.",
+      ["schedule", "timeZone"],
+    );
+  }
+
+  const timeZone = options.triggerTimeZone ?? options.scheduleTimeZone;
+  if (timeZone !== undefined && kind !== "cron" && kind !== "dailyLocal") {
+    return invalidAutomationOption(
+      "A schedule timezone can only be used with recurring cron or dailyLocal wall-clock triggers.",
+      ["schedule", "timeZone"],
+    );
+  }
+
+  return timeZone;
+}
+
+function assertAutomationScheduleValueOptionsMatchKind(
+  options: AutomationScheduleOptions,
+  kind: AutomationScheduleKind,
+): void {
+  const fields = [
+    {
+      canonicalName: "trigger-at",
+      canonicalValue: options.triggerAt,
+      kind: "at",
+      legacyName: "schedule-at",
+      legacyValue: options.scheduleAt,
+      publicField: "at",
+    },
+    {
+      canonicalName: "trigger-every-ms",
+      canonicalValue: options.triggerEveryMs,
+      kind: "every",
+      legacyName: "schedule-every-ms",
+      legacyValue: options.scheduleEveryMs,
+      publicField: "everyMs",
+    },
+    {
+      canonicalName: "trigger-cron",
+      canonicalValue: options.triggerCron,
+      kind: "cron",
+      legacyName: "schedule-cron",
+      legacyValue: options.scheduleCron,
+      publicField: "expression",
+    },
+    {
+      canonicalName: "trigger-local-time",
+      canonicalValue: options.triggerLocalTime,
+      kind: "dailyLocal",
+      legacyName: "schedule-local-time",
+      legacyValue: options.scheduleLocalTime,
+      publicField: "localTime",
+    },
+  ] as const;
+
+  for (const field of fields) {
+    const canonicalProvided = field.canonicalValue !== undefined;
+    const legacyProvided = field.legacyValue !== undefined;
+    if (!canonicalProvided && !legacyProvided) continue;
+
+    const publicPath = ["schedule", field.publicField] as const;
+    if (field.kind !== kind) {
+      const providedOptions = [
+        ...(canonicalProvided ? [`--${field.canonicalName}`] : []),
+        ...(legacyProvided ? [`--${field.legacyName}`] : []),
+      ];
+      return invalidAutomationOption(
+        `${providedOptions.join(" and ")} can only be used with --trigger-kind=${field.kind}.`,
+        publicPath,
+      );
+    }
+
+    if (
+      canonicalProvided &&
+      legacyProvided &&
+      field.canonicalValue !== field.legacyValue
+    ) {
+      return invalidAutomationOption(
+        `--${field.canonicalName} and --${field.legacyName} must match when both are provided.`,
+        publicPath,
+      );
+    }
+  }
+}
+
 function buildAutomationScheduleFromOptions(
   options: AutomationScheduleOptions,
   defaults: { now: string },
 ): AutomationSchedule {
   const kind = resolveAutomationTriggerKind(options);
-  if (kind !== "deviceActivity" && (options.deviceSource || options.activityKind)) {
+  const timeZone = resolveAutomationTimeZone(options, kind);
+  assertAutomationScheduleValueOptionsMatchKind(options, kind);
+  if (kind !== "deviceActivity" && options.deviceSource !== undefined) {
     return invalidAutomationOption(
-      "--device-source and --activity-kind can only be used with --trigger-kind=deviceActivity.",
+      "--device-source can only be used with --trigger-kind=deviceActivity.",
+      ["schedule", "source"],
+    );
+  }
+  if (kind !== "deviceActivity" && options.activityKind !== undefined) {
+    return invalidAutomationOption(
+      "--activity-kind can only be used with --trigger-kind=deviceActivity.",
+      ["schedule", "activityKind"],
     );
   }
 
   switch (kind) {
     case "at":
-      return automationScheduleSchema.parse({
+      return parseAutomationValue(automationScheduleSchema, {
         kind: "at",
         at: requireStringOption(options.triggerAt ?? options.scheduleAt, "trigger-at"),
+      }, {
+        code: "invalid_schedule",
+        message: "Automation schedule is invalid. Correct the scheduled time and retry.",
+        publicPathForIssue: (issue) => automationIssuePublicPath(issue, "schedule", kind),
       });
     case "every":
-      return automationScheduleSchema.parse({
+      return parseAutomationValue(automationScheduleSchema, {
         kind: "every",
         everyMs: requireNumberOption(options.triggerEveryMs ?? options.scheduleEveryMs, "trigger-every-ms"),
+      }, {
+        code: "invalid_schedule",
+        message: "Automation schedule is invalid. Use a finite positive interval and retry.",
+        publicPathForIssue: (issue) => automationIssuePublicPath(issue, "schedule", kind),
       });
     case "cron":
-      return automationScheduleSchema.parse({
+      return parseAutomationValue(automationScheduleSchema, {
         kind: "cron",
         expression: requireStringOption(options.triggerCron ?? options.scheduleCron, "trigger-cron"),
+        ...(timeZone === undefined ? {} : { timeZone }),
+      }, {
+        code: "invalid_schedule",
+        message: "Automation schedule is invalid. Use a five-field cron expression and a valid IANA timezone when one is supplied.",
+        publicPathForIssue: (issue) => automationIssuePublicPath(issue, "schedule", kind),
       });
     case "dailyLocal":
-      return automationScheduleSchema.parse({
+      return parseAutomationValue(automationScheduleSchema, {
         kind: "dailyLocal",
         localTime: requireStringOption(options.triggerLocalTime ?? options.scheduleLocalTime, "trigger-local-time"),
+        ...(timeZone === undefined ? {} : { timeZone }),
+      }, {
+        code: "invalid_schedule",
+        message: "Automation schedule is invalid. Use a 24-hour local time and a valid IANA timezone when one is supplied.",
+        publicPathForIssue: (issue) => automationIssuePublicPath(issue, "schedule", kind),
       });
     case "deviceActivity":
-      return automationScheduleSchema.parse({
+      return parseAutomationValue(automationScheduleSchema, {
         kind: "deviceActivity",
         after: defaults.now,
         ...(options.deviceSource ? { source: options.deviceSource } : {}),
         ...(options.activityKind ? { activityKind: normalizeDeviceActivityKindOption(options.activityKind) } : {}),
+      }, {
+        code: "invalid_schedule",
+        message: "Automation schedule is invalid. Correct the device activity trigger fields and retry.",
+        publicPathForIssue: (issue) => automationIssuePublicPath(issue, "schedule", kind),
       });
   }
 }
@@ -303,8 +608,14 @@ function buildAutomationRouteFromOptions(
     participantId: normalizeAutomationRouteOption(input.participantId),
     threadId: normalizeAutomationRouteOption(input.threadId),
   });
-  return automationRouteSchema.parse(
+  return parseAutomationValue(
+    automationRouteSchema,
     resolveAssistantDeliveryRouteWithCurrentRoute(explicit, null),
+    {
+      code: "invalid_route",
+      message: "Automation delivery route is invalid. Correct the route fields and retry.",
+      publicPathForIssue: (issue) => automationIssuePublicPath(issue, "route"),
+    },
   );
 }
 
@@ -320,10 +631,20 @@ function automationStatusIsActive(status: AutomationScaffoldPayload["status"] | 
 }
 
 function normalizeAutomationRouteFieldsForSave(route: unknown): AutomationRoute {
-  return automationRouteSchema.parse(
+  return parseAutomationValue(
+    automationRouteSchema,
     stripPrivateAssistantRoutePlaceholders(
-      automationRouteSchema.parse(route),
+      parseAutomationValue(automationRouteSchema, route, {
+        code: "invalid_route",
+        message: "Automation delivery route is invalid. Correct the route fields and retry.",
+        publicPathForIssue: (issue) => automationIssuePublicPath(issue, "route"),
+      }),
     ),
+    {
+      code: "invalid_route",
+      message: "Automation delivery route is invalid. Correct the route fields and retry.",
+      publicPathForIssue: (issue) => automationIssuePublicPath(issue, "route"),
+    },
   );
 }
 
@@ -340,10 +661,14 @@ function buildAutomationAssistantTargetOverrideFromOptions(
   const model = normalizeAutomationRouteOption(input.assistantTargetOverrideModel);
   const modelProvider = normalizeAutomationRouteOption(input.assistantTargetOverrideModelProvider);
   const reasoningEffort = normalizeAutomationRouteOption(input.assistantTargetOverrideReasoningEffort);
-  const target = automationAssistantTargetOverrideSchema.parse({
+  const target = parseAutomationValue(automationAssistantTargetOverrideSchema, {
     ...(model ? { model } : {}),
     ...(modelProvider ? { modelProvider } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
+  }, {
+    code: "invalid_assistant_target_override",
+    message: "Automation assistant target override is invalid. Correct the model, provider, or reasoning effort and retry.",
+    publicPathForIssue: (issue) => automationIssuePublicPath(issue, "assistantTargetOverride"),
   });
 
   return Object.keys(target).length > 0 ? target : undefined;
@@ -368,9 +693,13 @@ function buildAutomationAssistantTargetOverridePatchFromOptions(
     return undefined;
   }
 
-  return automationAssistantTargetOverrideSchema.parse({
+  return parseAutomationValue(automationAssistantTargetOverrideSchema, {
     ...(input.existingAssistantTargetOverride ?? {}),
     ...target,
+  }, {
+    code: "invalid_assistant_target_override",
+    message: "Automation assistant target override is invalid. Correct the model, provider, or reasoning effort and retry.",
+    publicPathForIssue: (issue) => automationIssuePublicPath(issue, "assistantTargetOverride"),
   });
 }
 
@@ -417,6 +746,7 @@ function normalizeAutomationContextReferenceOptions(
     if (separatorIndex <= 0 || separatorIndex === entry.length - 1) {
       return invalidAutomationOption(
         "Each --context-reference must use <entity-kind>=<entity-id> form.",
+        ["contextReference"],
       );
     }
 
@@ -425,14 +755,11 @@ function normalizeAutomationContextReferenceOptions(
       entityId: entry.slice(separatorIndex + 1),
     };
   });
-  const parsed = automationContextReferencesSchema.safeParse(references);
-  if (!parsed.success) {
-    return invalidAutomationOption(
-      `Invalid --context-reference: ${parsed.error.issues.map((issue) => issue.message).join(" ")}`,
-    );
-  }
-
-  return parsed.data;
+  return parseAutomationValue(automationContextReferencesSchema, references, {
+    code: "invalid_context_reference",
+    message: "Automation context references are invalid. Use <entity-kind>=<canonical-entity-id> for each reference.",
+    publicPathForIssue: (issue) => automationIssuePublicPath(issue, "contextReference"),
+  });
 }
 
 function buildAutomationContextReferencesPatchFromOptions(input: {
@@ -604,7 +931,10 @@ const automationSharedOptionSchemas = {
     .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time.")
     .optional()
     .describe("Required HH:MM local time when --trigger-kind=dailyLocal."),
-  deviceSource: z.enum(["whoop", "whoop_v2"]).optional().describe("Optional device activity source filter."),
+  triggerTimeZone: timeZoneSchema
+    .optional()
+    .describe("Optional IANA timezone for cron or dailyLocal wall-clock fields."),
+  deviceSource: z.enum(automationDeviceActivitySourceValues).optional().describe("Optional device activity source filter."),
   activityKind: z
     .string()
     .min(1)
@@ -633,6 +963,9 @@ const automationSharedOptionSchemas = {
     .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time.")
     .optional()
     .describe("Required HH:MM local time when --schedule-kind=dailyLocal."),
+  scheduleTimeZone: timeZoneSchema
+    .optional()
+    .describe("Legacy alias for --trigger-time-zone."),
   channel: z.string().min(1).optional().describe("Optional outbound route channel."),
   deliveryTarget: z
     .string()
@@ -716,7 +1049,19 @@ const automationEditOptionSchemas = {
     .describe("Clear the stored assistant target override."),
 };
 
-export function registerAutomationCommands(cli: Cli.Cli) {
+interface AutomationCommandDependencies {
+  listAutomationPage?: typeof listAutomationPage;
+  showAutomation?: typeof showAutomation;
+}
+
+export function registerAutomationCommands(
+  cli: Cli.Cli,
+  dependencies: AutomationCommandDependencies = {},
+) {
+  const listAutomationPageForCommand =
+    dependencies.listAutomationPage ?? listAutomationPage;
+  const showAutomationForCommand =
+    dependencies.showAutomation ?? showAutomation;
   const automation = Cli.create("automation", {
     description: "Canonical automation registry commands.",
   });
@@ -772,7 +1117,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       if (automationStatusIsActive(context.options.status)) {
         assertAutomationRouteCanDeliver(route);
       }
-      const input: AutomationScaffoldPayload = automationScaffoldPayloadSchema.parse({
+      const input: AutomationScaffoldPayload = parseAutomationValue(automationScaffoldPayloadSchema, {
         activeUntil: buildAutomationActiveUntilPatch({
           activeUntil: context.options.activeUntil,
           clearActiveUntil: context.options.clearActiveUntil,
@@ -799,11 +1144,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           scheduleEveryMs: context.options.scheduleEveryMs,
           scheduleKind: context.options.scheduleKind,
           scheduleLocalTime: context.options.scheduleLocalTime,
+          scheduleTimeZone: context.options.scheduleTimeZone,
           triggerAt: context.options.triggerAt,
           triggerCron: context.options.triggerCron,
           triggerEveryMs: context.options.triggerEveryMs,
           triggerKind: context.options.triggerKind,
           triggerLocalTime: context.options.triggerLocalTime,
+          triggerTimeZone: context.options.triggerTimeZone,
         }, { now }),
         slug: context.options.slug,
         status: context.options.status,
@@ -814,6 +1161,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           tags: context.options.tags,
         }),
         title: context.args.title,
+      }, {
+        code: "invalid_automation_payload",
+        message: "Automation definition is invalid. Correct the reported automation fields and retry.",
+        publicPathForIssue: (issue) => automationIssuePublicPath(issue),
       });
       const result = await upsertAutomation({
         ...input,
@@ -852,7 +1203,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     output: automationSaveResultSchema,
     async run(context) {
       const now = new Date().toISOString();
-      const existing = await showAutomation(context.options.vault, context.args.lookup);
+      const existing = await showAutomationForCommand(context.options.vault, context.args.lookup);
       if (!existing) {
         throw new VaultCliError(
           "automation_not_found",
@@ -880,11 +1231,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         scheduleEveryMs: context.options.scheduleEveryMs,
         scheduleKind: context.options.scheduleKind,
         scheduleLocalTime: context.options.scheduleLocalTime,
+        scheduleTimeZone: context.options.scheduleTimeZone,
         triggerAt: context.options.triggerAt,
         triggerCron: context.options.triggerCron,
         triggerEveryMs: context.options.triggerEveryMs,
         triggerKind: context.options.triggerKind,
         triggerLocalTime: context.options.triggerLocalTime,
+        triggerTimeZone: context.options.triggerTimeZone,
       };
       const route = hasDefinedAutomationOption(routeOptions)
         ? buildAutomationRouteFromOptions(routeOptions)
@@ -957,7 +1310,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     async run(context) {
       return {
         vault: context.options.vault,
-        automation: await showAutomation(context.options.vault, context.args.lookup),
+        automation: await showAutomationForCommand(context.options.vault, context.args.lookup),
       };
     },
   });
@@ -972,7 +1325,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
-      const existing = await showAutomation(context.options.vault, context.args.lookup);
+      const existing = await showAutomationForCommand(context.options.vault, context.args.lookup);
       if (!existing) {
         throw new VaultCliError(
           "automation_not_found",
@@ -1002,6 +1355,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
   automation.command("list", {
     args: z.object({}),
     description: "List automation records with optional filters.",
+    hint: "Use --compact --text <words> to find matching ids with small output; use automation show <id> for instructions and full readback before editing. Use automation edit <id> for sparse operator edits, preserving omitted fields.",
     options: withBaseOptions({
       status: z
         .array(z.enum(automationStatusValues))
@@ -1022,10 +1376,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .min(1)
         .optional()
         .describe("Continue an exact support-series listing after this automation id."),
+      compact: z.boolean().default(false).describe(
+        "Return identifiers, current updatedAt, and basic lifecycle and schedule state; use automation show for complete details.",
+      ),
       limit: z.number().int().positive().max(200).default(10),
     }),
     output: automationListResultSchema,
-    async run(context) {
+    async run(context): Promise<z.infer<typeof automationListResultSchema>> {
       if (context.options.cursor !== undefined && context.options.supportSeriesId === undefined) {
         return invalidAutomationOption(
           "--cursor requires --support-series-id so pagination uses immutable automation ids.",
@@ -1035,7 +1392,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       const exactTag = supportSeriesId === undefined
         ? undefined
         : requireAutomationSupportSeriesTagFromId(supportSeriesId);
-      const page = await listAutomationPage(context.options.vault, {
+      const page = await listAutomationPageForCommand(context.options.vault, {
         cursor: context.options.cursor,
         exactTag,
         limit: context.options.limit,
@@ -1043,7 +1400,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         text: context.options.text,
       });
 
-      return {
+      const result = {
         vault: context.options.vault,
         filters: {
           status: context.options.status ?? null,
@@ -1055,6 +1412,18 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         count: page.items.length,
         totalCount: page.totalCount,
         nextCursor: page.nextCursor,
+      };
+
+      if (context.options.compact) {
+        return {
+          ...result,
+          compact: true,
+          items: page.items.map((item) => automationCompactListItem(item)),
+        };
+      }
+
+      return {
+        ...result,
         items: page.items.map((item) => automationListItem(item)),
       };
     },
@@ -1114,11 +1483,17 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
-      const input = automationScaffoldPayloadSchema.parse(
+      const input = parseAutomationValue(
+        automationScaffoldPayloadSchema,
         await loadJsonInputObject(
           context.options.input,
           "automation payload",
         ),
+        {
+          code: "invalid_automation_payload",
+          message: "Automation import payload is invalid. Correct the reported payload fields and retry the import.",
+          publicPathForIssue: (issue) => automationIssuePublicPath(issue, "payload"),
+        },
       );
       assertNoRawAutomationSupportSeriesTags(input.tags);
       const route = normalizeAutomationRouteFieldsForSave(input.route);

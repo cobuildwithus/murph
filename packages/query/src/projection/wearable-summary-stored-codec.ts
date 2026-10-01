@@ -142,17 +142,24 @@ export function parseStoredWearableActivityRow<TSummary>(
   if (!isJsonObject(summary)) {
     return null;
   }
-  const evidence = storedActivityEvidenceSchema.safeParse(
-    summary[STORED_ACTIVITY_EVIDENCE_KEY],
-  );
-  if (!evidence.success) {
+  const evidence = parseStoredWearableActivityEvidence(summary[STORED_ACTIVITY_EVIDENCE_KEY]);
+  if (!evidence) {
     return null;
   }
 
   delete summary.activitySessions;
   delete summary[STORED_ACTIVITY_EVIDENCE_KEY];
   restoreStoredWearableMetricEnvelopes("activity", summary);
-  return { summary, ...evidence.data };
+  return { summary, ...evidence };
+}
+
+/** Validate activity evidence at the stored codec boundary. */
+function parseStoredWearableActivityEvidence(value: unknown): {
+  metricCandidates: WearableActivityMetricCandidateEvidence[];
+  sessions: WearableActivitySessionEvidence[];
+} | null {
+  const parsed = storedActivityEvidenceSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 const storedTokenSchema = z.string().max(120).regex(

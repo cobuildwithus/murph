@@ -10,31 +10,6 @@ const repoRoot = path.resolve(path.dirname(scriptPath), "..");
 const sharedHostMode = resolveSharedHostMode(process.env);
 process.env.MURPH_VERIFY_SHARED_HOST = sharedHostMode;
 
-if (process.env.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1") {
-  const result = spawnSync(
-    process.execPath,
-    [
-      path.join(repoRoot, "scripts", "run-with-workspace-artifact-lock.mjs"),
-      "build:test-runtime:prepared",
-      "--",
-      process.execPath,
-      scriptPath,
-      ...process.argv.slice(2),
-    ],
-    {
-      cwd: repoRoot,
-      env: process.env,
-      stdio: "inherit",
-    },
-  );
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  process.exit(result.status ?? 1);
-}
-
 if (
   sharedHostMode === "1" &&
   process.env.MURPH_VERIFY_HOST_SLOT_HELD !== "1"
@@ -91,7 +66,6 @@ const workspaceSmokePackages = [
   {
     packageName: "assistant-engine",
     requiredSubpaths: [
-      "assistant-automation",
       "assistant-state",
       "knowledge",
     ],
@@ -134,6 +108,7 @@ const baseSmokeImportPaths = [
   "packages/exercise-library/dist/index.js",
   "packages/exercise-library/dist/runtime.js",
   "packages/assistant-engine/dist/index.js",
+  "packages/assistant-runtime/dist/hosted-vault-share-capture-worker.js",
   "packages/core/dist/index.js",
   "packages/importers/dist/index.js",
   "packages/importers/dist/core-port.js",
@@ -159,6 +134,10 @@ const publishedWorkspaceSmokeImportSpecifiers = ownerPackageSmokeImports.flatMap
   (ownerPackageSmokeImport) => ownerPackageSmokeImport.publishedImportSpecifiers,
 );
 const publishedSelfSmokeImportGroups = [
+  {
+    cwd: path.join(repoRoot, "packages/assistant-runtime"),
+    specifiers: ["@murphai/assistant-runtime/hosted-vault-share-capture-worker"],
+  },
   {
     cwd: path.join(repoRoot, "packages/runtime-state"),
     specifiers: ["@murphai/runtime-state", "@murphai/runtime-state/node"],

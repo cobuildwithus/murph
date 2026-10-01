@@ -27,7 +27,7 @@ describe('assistant nutrition source grounding', () => {
     )
     expect(food).toContain('Do not let vision or memory answer both.')
     expect(food).toContain(
-      'reuse applicable label or USDA facts already verified in the conversation or saved record.',
+      'For every numeric meal estimate—including interactive meal logs, user-sent photos, automatic-meal-capture enrichment, and scheduled closeouts—reuse already verified label or USDA nutrient density for unchanged components; resolve remaining identifiable material components from the hosted food-label database.',
     )
     expect(food).toContain(
       'use returned label or USDA facts for calories and macros',
@@ -81,8 +81,36 @@ describe('assistant nutrition source grounding', () => {
       'Do not silently assume restaurant or prepared food has no added fat.',
     )
     expect(food).toContain(
-      'If that bounded source pass is unavailable or still inconclusive, finish with a clearly marked estimate or range',
+      'When the user names a restaurant and recognizable menu item, and known context does not trigger one of the numeric safety exceptions below, resolve nutrition before the meal mutation.',
     )
+    expect(food).toContain(
+      'Use a normal exact restaurant/menu search rather than a generic substitute.',
+    )
+    expect(food).toContain(
+      'Run this database search first even when the user supplies an official restaurant URL.',
+    )
+    expect(food).toContain(
+      'When a numeric safety exception already applies, save the meal without calorie or macro estimates.',
+    )
+    expect(food).toContain(
+      'Do not force a nutrition lookup, clarification, or safety preflight just to capture the meal.',
+    )
+    expect(food).toContain(
+      "If that search has no exact result, use the bounded source fallback below.",
+    )
+    expect(food).toContain(
+      'When using that official source, retain its URL in nutrition source detail.',
+    )
+    expect(food).toContain(
+      'Only after the database result, official source, or clearly marked last-resort estimate is resolved may you call `meal add` or `meal edit` with the available nutrition and provenance.',
+    )
+    expect(food).toContain(
+      'After this bounded pass fails, give a clearly marked estimate or useful range',
+    )
+    expect(food).not.toContain('use `computer_act` to follow')
+    expect(food).toContain('make one targeted web search for the official label/menu')
+    expect(food).toContain('Quantity corrections and requests for totals do not require re-looking up unchanged products.')
+    expect(food).toContain('Preserve exact evidence requirements for allergies, supplement doses, clinical nutrient limits, and explicit exactness requests.')
     expect(automatic).toContain(
       'Read `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md` before estimating nutrition',
     )
@@ -121,20 +149,5 @@ describe('assistant nutrition source grounding', () => {
     expect(supplementSkill).toContain(
       'If a returned serving, amount, or ingredient field is absent or source-null, do not infer it',
     )
-  })
-
-  it('bounds routine research while preserving safety-critical verification and correction provenance', async () => {
-    const food = compact(await readFile(
-      path.join(resolveAssistantSkillsRoot(), 'food-journal', 'SKILL.md'),
-      'utf8',
-    ))
-
-    expect(food).toContain('one initial database pass for unresolved components')
-    expect(food).toContain('make one targeted web search for the unresolved facts')
-    expect(food).toContain('Remove excluded items without researching them')
-    expect(food).toContain('rescale unchanged verified facts')
-    expect(food).toContain('not allergen safety, supplement dosing, clinical nutrient limits, or an explicit request for exact verification')
-    expect(food).toContain('verify the result before saying it is saved')
-    expect(food).toContain('an answer-only request does not itself authorize a new meal record')
   })
 })

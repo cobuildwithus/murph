@@ -43,25 +43,13 @@ const GRADE_CHIP_TONES: Record<string, string> = {
 function ReportCardArtifact() {
   return (
     <div className="rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#3d5028]">
-          Environment grade
-        </span>
-        <span className="font-mono text-[10px] tabular-nums text-[#736a58]">
-          42 of 48 known
-        </span>
-      </div>
-
-      <div className="mt-4 flex items-center gap-4">
+      <div className="flex items-center gap-4">
         <span className="flex size-14 items-center justify-center rounded-xl bg-[#d89a1c]/15 font-serif text-3xl font-semibold text-[#8a5a00]">
           C
         </span>
         <div>
           <p className="font-serif text-[1.75rem] font-semibold leading-none tracking-[-0.02em] text-[#2d3436]">
             74%
-          </p>
-          <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#736a58]">
-            Getting there
           </p>
         </div>
       </div>
@@ -97,11 +85,7 @@ function ReportCardArtifact() {
 function CheckNextArtifact() {
   return (
     <div className="rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
-      <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#3d5028]">
-        What to check next
-      </span>
-
-      <div className="mt-3 space-y-2.5">
+      <div className="space-y-2.5">
         <div className="rounded-xl bg-[#a04f30]/10 px-3.5 py-3 ring-1 ring-[#a04f30]/35">
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-[0.875rem] font-medium text-[#5c3320]">
@@ -140,10 +124,7 @@ export function EnvironmentSection() {
     <section className="bg-[linear-gradient(165deg,#f2ead9_0%,#e9ddc2_100%)] px-4 py-20 sm:px-8 lg:px-16 lg:py-28">
       <div className="mx-auto max-w-[1200px]">
         <div className="max-w-[720px]">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#3d5028]">
-            Environment
-          </p>
-          <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#26311f]">
+          <h2 className="font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#26311f]">
             Health is built at home. Murph grades yours.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3f4a34]">

@@ -1,6 +1,12 @@
 import { Buffer } from "node:buffer";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("node:timers/promises", async (importOriginal) => ({
+  ...await importOriginal<typeof import("node:timers/promises")>(),
+  setTimeout: vi.fn(),
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingLinqConfig: () => ({
@@ -22,6 +28,7 @@ const TEST_KEYRING_ENTRIES = {
 let restoreContactPrivacyKeyring: (() => void) | null = null;
 
 beforeEach(() => {
+  vi.mocked(delay).mockReset().mockResolvedValue(undefined);
   restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
     currentVersion: "v1",
     entries: { v1: TEST_KEYRING_ENTRIES.v1 },
@@ -169,6 +176,114 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     });
 
     expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { code: "P2010", meta: { driverAdapterError: { cause: { originalCode: "40001" } } } },
+    { name: "DriverAdapterError", cause: { originalCode: "40001", kind: "TransactionWriteConflict" } },
+    { name: "DriverAdapterError", cause: { originalCode: "23505", kind: "UniqueConstraintViolation" } },
+    { name: "DriverAdapterError", cause: { originalCode: "40P01" } },
+  ])("spaces recognized conflicts before a fresh transaction: %j", async (conflict) => {
+    const queryRaw = vi.fn(async (_query: unknown) => [{ syncedCount: 1n }]);
+    const tx = { $queryRaw: queryRaw };
+    let attempts = 0;
+    const transaction = vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => {
+      attempts += 1;
+      const result = await callback(tx);
+      if (attempts < 3) {
+        throw conflict;
+      }
+      return result;
+    });
+    let releaseWait!: () => void;
+    vi.mocked(delay).mockImplementation(() => new Promise((resolve) => {
+      releaseWait = () => resolve(undefined);
+    }));
+    stubInventoryFetch({ phone_numbers: [{ id: "line_1", phone_number: "+15550000001" }] });
+    const sync = syncHostedLinqPhoneNumberInventory({ prisma: { $transaction: transaction } as never });
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      await vi.waitFor(() => expect(delay).toHaveBeenCalledTimes(attempt));
+      expect(transaction).toHaveBeenCalledTimes(attempt);
+      const milliseconds = vi.mocked(delay).mock.calls[attempt - 1]?.[0];
+      expect(milliseconds).toBeGreaterThanOrEqual(50);
+      expect(milliseconds).toBeLessThanOrEqual(250);
+      releaseWait();
+    }
+    await expect(sync).resolves.toEqual({ syncedCount: 1 });
+    expect(transaction).toHaveBeenCalledTimes(3);
+    expect(queryRaw).toHaveBeenCalledTimes(3);
+    expect(queryRaw.mock.calls[1]?.[0]).toEqual(queryRaw.mock.calls[0]?.[0]);
+    expect(queryRaw.mock.calls[2]?.[0]).toEqual(queryRaw.mock.calls[0]?.[0]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(transaction).toHaveBeenLastCalledWith(expect.any(Function), { isolationLevel: "Serializable" });
+  });
+
+  it("returns the final conflict after three attempts and only two waits", async () => {
+    const conflicts = [1, 2, 3].map(() => ({ name: "DriverAdapterError", cause: { originalCode: "40001" } }));
+    const transaction = vi.fn()
+      .mockRejectedValueOnce(conflicts[0])
+      .mockRejectedValueOnce(conflicts[1])
+      .mockRejectedValueOnce(conflicts[2]);
+    stubInventoryFetch({ phone_numbers: [] });
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      prisma: { $transaction: transaction } as never,
+    })).rejects.toBe(conflicts[2]);
+    expect(transaction).toHaveBeenCalledTimes(3);
+    expect(delay).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    new Error("unknown apply failure"),
+    { name: "DriverAdapterError", cause: { originalCode: "08006" } },
+    { name: "DriverAdapterError", cause: { kind: "TransactionWriteConflict" } },
+    { name: "OtherError", cause: { originalCode: "40001" } },
+    { code: "P2010", meta: { code: "42501" } },
+  ])("does not retry an unproved conflict: %j", async (error) => {
+    const transaction = vi.fn().mockRejectedValue(error);
+    stubInventoryFetch({ phone_numbers: [] });
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      prisma: { $transaction: transaction } as never,
+    })).rejects.toBe(error);
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(delay).not.toHaveBeenCalled();
+  });
+
+  it("cancels during the retry wait without starting another transaction", async () => {
+    const timers = await vi.importActual<typeof import("node:timers/promises")>("node:timers/promises");
+    const controller = new AbortController();
+    const cancellation = new Error("inventory sync canceled");
+    const transaction = vi.fn().mockRejectedValue({ code: "P2034" });
+    vi.mocked(delay).mockImplementation((milliseconds, value, options) => {
+      const waiting = timers.setTimeout(milliseconds, value, options);
+      queueMicrotask(() => controller.abort(cancellation));
+      return waiting;
+    });
+    stubInventoryFetch({ phone_numbers: [] });
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      prisma: { $transaction: transaction } as never,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError", cause: cancellation });
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(delay).toHaveBeenCalledTimes(1);
+  });
+
+  it("rechecks cancellation after the retry wait before transaction admission", async () => {
+    const controller = new AbortController();
+    const cancellation = new Error("inventory sync canceled");
+    const transaction = vi.fn().mockRejectedValue({ code: "P2034" });
+    vi.mocked(delay).mockImplementation(async () => controller.abort(cancellation));
+    stubInventoryFetch({ phone_numbers: [] });
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      prisma: { $transaction: transaction } as never,
+      signal: controller.signal,
+    })).rejects.toBe(cancellation);
+    expect(transaction).toHaveBeenCalledTimes(1);
   });
 
   it.each([

@@ -1,4 +1,10 @@
+import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
+import {
+  toolTextResult as connectedAppsTextResult,
+  withConnectedAppsToolFailureDetails,
+} from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
+import { removeConnectedContextAccount } from '../../assistant/journal-connected-context-ledger.js'
 
 import {
   hostedConnectedAppsExecuteInputSchema,
@@ -156,18 +162,14 @@ function invalidConnectedAppsArgumentsRequest(
 
 export async function executeConnectedAppsDynamicTool(input: {
   abortSignal?: AbortSignal | null
+  vaultRoot?: string | null
   connectedApps: AssistantConnectedAppsPort
   emailSendAuthorized: boolean
   request: Exclude<
     ConnectedAppsDynamicToolRequest,
     { kind: 'invalid-connected-apps-arguments' }
   >
-}): Promise<{
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-}> {
+}): Promise<MurphDynamicToolExecutionResult> {
   const requestBody: HostedConnectedAppsRequest = toHostedConnectedAppsRequest(input.request)
   const ambiguousWriteMessage = readConnectedAppsAmbiguousWriteMessage(requestBody)
 
@@ -175,6 +177,7 @@ export async function executeConnectedAppsDynamicTool(input: {
     return connectedAppsTextResult(
       false,
       'email sending requires current user input in a private conversation',
+      'authority_rejected',
     )
   }
 
@@ -182,6 +185,16 @@ export async function executeConnectedAppsDynamicTool(input: {
     const response = await input.connectedApps.request(requestBody, {
       signal: input.abortSignal ?? null,
     })
+    if (input.vaultRoot && requestBody.operation === 'manage' && requestBody.input.action === 'disconnect') {
+      const disconnected = z.object({ status: z.literal('disconnected'), account: z.object({ id: z.string().min(1) }) }).parse(response.result)
+      try {
+        await removeConnectedContextAccount(input.vaultRoot, disconnected.account.id)
+      } catch (error) {
+        return connectedAppsTextResult(false,
+          'The account was disconnected, but saved upcoming-context controls could not be updated. Read journal-connected-context and remove this account from activeAccounts before confirming that its saved plans are excluded.',
+          'handler_exception', error)
+      }
+    }
     // Compaction belongs to the web tier alone. It is not idempotent: an email
     // whose visible text contains escaped markup (`&lt;p&gt;`) decodes to real
     // tags on the first pass, and a second pass would strip them as structure
@@ -193,6 +206,7 @@ export async function executeConnectedAppsDynamicTool(input: {
         false,
         ambiguousWriteMessage
           ?? 'connected apps result is too large; narrow the query or request a smaller page',
+        'oversized_result',
       )
     }
 
@@ -202,15 +216,20 @@ export async function executeConnectedAppsDynamicTool(input: {
       ambiguousWriteMessage
       && isConnectedAppsAmbiguousWriteFailure(error)
     ) {
-      return connectedAppsTextResult(false, ambiguousWriteMessage)
-    }
-    if (isConnectedAppsOfficialAlertRequest(requestBody)) {
-      return connectedAppsTextResult(
-        false,
-        `${describeConnectedAppsFailure(error, 'none')} Do not retry this optional alert read; continue without alert context.`,
+      return withConnectedAppsToolFailureDetails(
+        connectedAppsTextResult(false, ambiguousWriteMessage, 'handler_exception', error), error,
       )
     }
-    return connectedAppsTextResult(false, describeConnectedAppsFailure(error))
+    if (isConnectedAppsOfficialAlertRequest(requestBody)) {
+      return withConnectedAppsToolFailureDetails(connectedAppsTextResult(
+        false,
+        `${describeConnectedAppsFailure(error, 'none')} Do not retry this optional alert read; continue without alert context.`,
+        'handler_exception', error,
+      ), error)
+    }
+    return withConnectedAppsToolFailureDetails(
+      connectedAppsTextResult(false, describeConnectedAppsFailure(error), 'handler_exception', error), error,
+    )
   }
 }
 
@@ -336,14 +355,5 @@ function toHostedConnectedAppsRequest(
       return { input: request.args, operation: 'search' }
     case 'connected-apps-execute':
       return { input: request.args, operation: 'execute' }
-  }
-}
-
-function connectedAppsTextResult(success: boolean, text: string) {
-  return {
-    rpcResult: {
-      contentItems: [{ text, type: 'inputText' as const }],
-      success,
-    },
   }
 }

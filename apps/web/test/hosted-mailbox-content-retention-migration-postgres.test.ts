@@ -19,6 +19,10 @@ const generatedImageRetentionMigrationUrl = new URL(
   "../prisma/migrations/20260805010000_rearm_generated_image_capture_retention/migration.sql",
   import.meta.url,
 );
+const hostedInboxVideoRetentionMigrationUrl = new URL(
+  "../prisma/migrations/20260824010000_rearm_hosted_inbox_video_retention/migration.sql",
+  import.meta.url,
+);
 
 if (
   runPostgresMigrationProof
@@ -37,6 +41,10 @@ describe.skipIf(!runPostgresMigrationProof)(
       const recoveryMigrationSql = await readFile(recoveryMigrationUrl, "utf8");
       const generatedImageRetentionMigrationSql = await readFile(
         generatedImageRetentionMigrationUrl,
+        "utf8",
+      );
+      const hostedInboxVideoRetentionMigrationSql = await readFile(
+        hostedInboxVideoRetentionMigrationUrl,
         "utf8",
       );
       const client = new pg.Client({ connectionString: databaseUrl });
@@ -124,6 +132,7 @@ describe.skipIf(!runPostgresMigrationProof)(
 
         await client.query(recoveryMigrationSql);
         await client.query(generatedImageRetentionMigrationSql);
+        await client.query(hostedInboxVideoRetentionMigrationSql);
 
         const staleCheckpoint = await client.query(`
           UPDATE "hosted_workspace"
@@ -132,7 +141,7 @@ describe.skipIf(!runPostgresMigrationProof)(
             "checkpointed_at" = '2026-07-26T15:00:00.000Z',
             "version" = "version" + 1
           WHERE "user_id" = 'snapshot-missing-wake'
-            AND "version" = 12
+            AND "version" = 13
         `);
         expect(staleCheckpoint.rowCount).toBe(0);
 
@@ -179,7 +188,7 @@ describe.skipIf(!runPostgresMigrationProof)(
             dueNow: true,
             userId: "snapshot-existing-wake",
             signalAttemptedAt: null,
-            version: "8",
+            version: "9",
             wakeAt: transactionTimestamp,
           },
           {
@@ -187,7 +196,7 @@ describe.skipIf(!runPostgresMigrationProof)(
             dueNow: true,
             userId: "snapshot-missing-wake",
             signalAttemptedAt: null,
-            version: "13",
+            version: "14",
             wakeAt: transactionTimestamp,
           },
         ]);

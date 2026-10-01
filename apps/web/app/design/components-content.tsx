@@ -13,6 +13,8 @@ import {
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
+import { ExperimentBrowseCard } from "@/src/components/experiments/experiment-browse-card";
+import { ExperimentHeroCard } from "@/src/components/experiments/experiment-hero-card";
 import {
   GroupUsageFundingActions,
   GroupUsageFundingShell,
@@ -37,6 +39,7 @@ import {
 import {
   HostedIdentitySessionLoading,
   HostedIdentitySessionMismatch,
+  HostedSettingsIdentityRemovalView,
 } from "@/src/components/settings/hosted-settings-identity-link-dialog";
 import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
@@ -73,7 +76,7 @@ import {
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { PublicTrustPageContent } from "@/src/components/public/public-trust-page";
-import { ABOUT_MURPH_CONTENT } from "@/src/lib/public-trust-pages";
+import { CONTACT_MURPH_CONTENT } from "@/src/lib/public-trust-pages";
 import { MURPH_CONTACT_EMAIL } from "@/src/lib/murph-contact-routing";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
@@ -149,6 +152,7 @@ import { HostedFamilyManager } from "@/src/components/settings/hosted-family-set
 import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/hosted-plan-change-button";
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
+import { FoodBrandVisualStudy } from "./food-label-lab-study";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
   DESIGN_AI_USAGE_ACTIVITY,
@@ -167,6 +171,8 @@ import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
+import { CONNECT_NOTICE_PRESENTATION } from "../(dashboard)/connect/connect-page-client";
+import { createConnectCallbackNotice } from "../(dashboard)/connect/connect-page-helpers";
 import {
   HostedAccountDeletionErrorAlert,
 } from "@/src/components/settings/hosted-data-privacy-settings";
@@ -177,12 +183,17 @@ import {
   EnvironmentEmptyState,
   EnvironmentVoiceRefreshNotice,
 } from "../(dashboard)/environment/environment-page-client";
+import { GroupPrivateConversions } from "../(dashboard)/ops/growth/group-private-conversions";
+import { PublicComparisonTableStudy } from "./public-comparison-table-study";
+import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
 import { MurphCardHandoffStudy } from "./murph-card-handoff-study";
+import { ApprovalPasskeyStudy } from "./approval-passkey-study";
+import { BetterAuthAdoptionStudy } from "./better-auth-adoption-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
@@ -195,8 +206,6 @@ const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
   flow: "fill-gaps",
-  idleDescription:
-    "Two short topics, based on what Murph does not know yet.",
   idleTitle: "Only the missing details",
   topics: [
     {
@@ -607,6 +616,31 @@ const DESIGN_HOME_HISTORY_CARDS: ExperimentLibraryCard[] = [
   },
 ];
 
+const DESIGN_GROUP_PRIVATE_CONVERSIONS = {
+  dailySeries: Array.from({ length: 30 }, (_, index) => ({
+    conversions: index === 16 || index === 22
+      ? 1
+      : index === 28
+        ? 2
+        : 0,
+    date: `2026-08-${String(index + 1).padStart(2, "0")}`,
+  })),
+  total: 7,
+} satisfies HostedGrowthDashboard["groupPrivateConversions"];
+
+const DESIGN_NO_RECENT_GROUP_PRIVATE_CONVERSIONS = {
+  dailySeries: DESIGN_GROUP_PRIVATE_CONVERSIONS.dailySeries.map(({ date }) => ({
+    conversions: 0,
+    date,
+  })),
+  total: 7,
+} satisfies HostedGrowthDashboard["groupPrivateConversions"];
+
+const callbackRecoveryNotice = createConnectCallbackNotice({
+  status: "error", errorCode: "CALLBACK_PROOF_INVALID", provider: "junction",
+  connectSource: null, connectTarget: null,
+}, []);
+
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
@@ -650,14 +684,49 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <div data-design-component="food-brand-visual" id="food-brand-visual" inert>
+          <Section title="Food brand visual">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Brand-aware food identity with a local category-art fallback.
+            </p>
+            <FoodBrandVisualStudy />
+          </Section>
+        </div>
+
+        <Separator />
+
         <div data-design-component="public-trust-page" id="public-trust-page">
           <Section title="Public trust page">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production About-page content and responsive editorial hierarchy.
-              The Contact page uses the same component with support-specific copy.
+              Production Contact-page content with its compact responsive hierarchy.
             </p>
             <div className="overflow-hidden border border-[#c4a882]/35">
-              <PublicTrustPageContent content={ABOUT_MURPH_CONTENT} />
+              <PublicTrustPageContent content={CONTACT_MURPH_CONTENT} />
+            </div>
+          </Section>
+        </div>
+
+        <Separator />
+
+        <div data-design-component="experiment-library-cards" id="experiment-library-cards" inert>
+          <Section title="Experiment library cards">
+            <div className="grid items-start gap-6 md:grid-cols-2">
+              <ExperimentHeroCard
+                id="design-featured"
+                title="Featured experiment"
+                category="Movement"
+                image="/design-assets/hero-daily-step-floor.jpeg"
+                metadata="Featured card study"
+                href={null}
+              />
+              <ExperimentBrowseCard
+                id="design-browse"
+                title="Browse experiment"
+                category="Movement"
+                image="/design-assets/hero-daily-step-floor.jpeg"
+                metadata="Browse card study"
+                href={null}
+              />
             </div>
           </Section>
         </div>
@@ -670,6 +739,32 @@ export function ComponentsContent() {
           </p>
           <DashboardSidebarStudy />
         </Section>
+
+        <Separator />
+
+        <div
+          data-design-component="growth-group-private-conversions"
+          id="growth-group-private-conversions"
+          inert
+        >
+          <Section title="Group-to-private growth conversions">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production ops component with synthetic populated and empty data.
+            </p>
+            <div className="flex flex-col gap-8">
+              <GroupPrivateConversions
+                conversions={DESIGN_GROUP_PRIVATE_CONVERSIONS}
+                titleId="design-growth-group-private-conversions-title"
+              />
+              <div id="growth-group-private-conversions-empty">
+                <GroupPrivateConversions
+                  conversions={DESIGN_NO_RECENT_GROUP_PRIVATE_CONVERSIONS}
+                  titleId="design-growth-group-private-conversions-empty-title"
+                />
+              </div>
+            </div>
+          </Section>
+        </div>
 
         <Separator />
 
@@ -729,11 +824,10 @@ export function ComponentsContent() {
                   </HostedInlineAuthButton>
                 </div>
               </DialogPreviewFrame>
-              <DialogPreviewFrame label="Telegram ready handoff">
+              <DialogPreviewFrame label="Telegram authorization available">
                 <HostedTelegramAuthButtonPresentation
                   active
                   onClick={() => {}}
-                  readyToContinue
                 />
               </DialogPreviewFrame>
             </div>
@@ -1401,11 +1495,22 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section id="device-connection-return" title="Device Connection Return">
+          {callbackRecoveryNotice ? (
+            <Alert {...CONNECT_NOTICE_PRESENTATION.info}>
+              <AlertTitle>{callbackRecoveryNotice.title}</AlertTitle>
+              <AlertDescription>{callbackRecoveryNotice.message}</AlertDescription>
+            </Alert>
+          ) : null}
+        </Section>
+
+        <Separator />
+
         <Section title="Connect Callback Error Notice">
           <div className="flex flex-col gap-4" inert>
             <ConnectCallbackErrorNotice
-              errorCode="CALLBACK_PROOF_INVALID"
-              message="That return link did not match the browser you started in, so nothing was connected. Start Oura again from this page."
+              errorCode="OAUTH_CALLBACK_REJECTED"
+              message="Oura was not connected this time. You can try again whenever you're ready."
               sourceLabel="Oura"
               title="Unable to finish connection"
             />
@@ -1467,7 +1572,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Dialog">
+        <Section id="dialog" title="Dialog">
           <Dialog>
             <div className="flex"><DialogTrigger render={<Button>Open Dialog</Button>} /></div>
             <DialogContent>
@@ -1735,8 +1840,9 @@ export function ComponentsContent() {
               inert
             >
               <GroupSponsorshipManagementCard
+                periodEndTimeZone="UTC"
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
-                initialSelectedMonthlyCapMinor={2_000}
+                initialSelectedMonthlyCapMinor={5_000}
                 management={{
                   authorizationId: "hgsa_design_component",
                   chargedThisPeriodMinor: 500,
@@ -2200,6 +2306,61 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section id="linked-account-removal" title="Linked Account Removal">
+          <p className="text-sm leading-6 text-muted-foreground">
+            Settings confirms the exact connection and explains the messaging
+            consequence before disconnecting it. Removal is unavailable until
+            another supported sign-in can keep the account accessible.
+          </p>
+          <div
+            className="grid max-w-4xl gap-4 sm:grid-cols-2"
+            data-design-component="linked-account-removal"
+            inert
+          >
+            <div className="rounded-xl border border-border bg-card p-5">
+              <HostedSettingsIdentityRemovalView
+                displayValue="@preview_member"
+                errorMessage={null}
+                intent="replace"
+                label="Telegram"
+                onCancel={() => {}}
+                onRemove={() => {}}
+                pending={false}
+                providerAccountRemoved={false}
+                removable
+              />
+            </div>
+            <div className="rounded-xl border border-border bg-card p-5">
+              <HostedSettingsIdentityRemovalView
+                displayValue="member@example.test"
+                errorMessage={null}
+                intent="remove"
+                label="Email"
+                onCancel={() => {}}
+                onRemove={() => {}}
+                pending={false}
+                providerAccountRemoved={false}
+                removable={false}
+              />
+            </div>
+            <div className="rounded-xl border border-border bg-card p-5">
+              <HostedSettingsIdentityRemovalView
+                displayValue="Connected"
+                errorMessage="Telegram is disconnected. Finish updating Murph."
+                intent="finish"
+                label="Telegram"
+                onCancel={() => {}}
+                onRemove={() => {}}
+                pending={false}
+                providerAccountRemoved
+                removable
+              />
+            </div>
+          </div>
+        </Section>
+
+        <Separator />
+
         <Section title="Group funding supporters">
           <p className="text-sm text-muted-foreground">
             The funding page recognizes the current monthly sponsor and recent
@@ -2375,7 +2536,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Contact Card Picker">
+        <Section id="contact-card-picker" title="Contact Card Picker">
           <p className="text-sm text-muted-foreground">
             Post-signup drawer/dialog where a new member picks the photo on
             Murph&apos;s contact card, then adds Murph as a contact. Drawer under
@@ -2499,6 +2660,22 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <div
+          data-design-component="public-comparison-table"
+          id="public-comparison-table"
+          inert
+        >
+          <Section title="Public comparison table">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              The production comparison table with synthetic content, including
+              its labeled mobile scroll region and semantic row headers.
+            </p>
+            <PublicComparisonTableStudy />
+          </Section>
+        </div>
+
+        <Separator />
+
         <Section title="Table">
           <Table>
             <TableHeader><TableRow><TableHead>Metric</TableHead><TableHead>Before → After</TableHead><TableHead className="text-right">Change</TableHead></TableRow></TableHeader>
@@ -2602,6 +2779,18 @@ export function ComponentsContent() {
 
         <Section title="Health data consent settings row">
           <HealthDataConsentControlStudy />
+        </Section>
+
+        <Separator />
+
+        <Section title="Approval passkey update">
+          <ApprovalPasskeyStudy />
+        </Section>
+
+        <Separator />
+
+        <Section title="Sign-in and account security">
+          <BetterAuthAdoptionStudy />
         </Section>
 
         <Separator />

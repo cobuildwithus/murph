@@ -16,10 +16,8 @@ describe('assistant research guidance', () => {
     expect(prompt).not.toContain('Configured Exa research:')
   })
 
-  it('defines the configured direct-turn privacy, evidence, and stopping contract', () => {
-    const prompt = buildAssistantResearchScoutCapabilityText({
-      progressUpdateMode: 'direct',
-    })
+  it('defines the configured privacy, evidence, and stopping contract', () => {
+    const prompt = buildAssistantResearchScoutCapabilityText()
 
     expect(prompt).toContain('{"mode":"focused"}')
     expect(prompt).toContain('exact server-owned public concepts')
@@ -40,19 +38,8 @@ describe('assistant research guidance', () => {
     expect(prompt).toContain('do not fabricate evidence')
     expect(prompt).toContain('do not')
     expect(prompt).toContain('repeat the lookup blindly')
-    expect(prompt).toContain('one short natural update')
-  })
-
-  it('preserves the stricter configured group progress threshold', () => {
-    const prompt = buildAssistantResearchScoutCapabilityText({
-      progressUpdateMode: 'group',
-    })
-
-    expect(prompt).toContain(
-      'a research lookup alone does not justify a status message',
-    )
-    expect(prompt).toContain('research scout-batch')
-    expect(prompt).toContain('never send a mode-less single-scout request')
+    expect(prompt).not.toContain('progress')
     expect(prompt).not.toContain('one short natural update')
+    expect(prompt).not.toContain('status message')
   })
 })

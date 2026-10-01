@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 200,
+  "item": {
+    "id": "independent-messaging-channels",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Other channels keep moving when iMessage goes quiet",
+    "summary": "An inactive iMessage conversation no longer pauses scheduled work or email greetings on your other connected channels.",
+    "details": "Proactive iMessage outreach still follows its inactivity pause. Your saved preferences and access rules continue to apply on every channel.",
+    "relevanceTags": ["messaging", "email", "telegram", "reliability"],
+    "sourcePullRequests": []
+  }
+}

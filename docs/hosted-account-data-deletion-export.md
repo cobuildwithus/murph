@@ -1,34 +1,55 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-08-12
+Last verified: 2026-08-27
 
 ## Purpose
 
-Murph hosted users need a real way to export useful private vault data and delete their account (and all their data) from the Settings page before wider beta. Both sensitive actions require a one-time, session-bound signature from the member's Privy embedded Ethereum wallet. Privy protects that wallet with passkey MFA and may reuse its verified MFA session for up to one hour. The primary user-facing export downloads the decrypted browser-vault replica JSON that powers dashboard pages. Deletion also requires an exact typed confirmation phrase and wipes the member's Stripe and Privy vendor accounts.
+Murph hosted users need a real way to export useful private vault data and delete their account (and all their data) from the Settings page before wider beta. Vault export requires a one-time, session-bound signature from the member's Privy embedded Ethereum wallet. Privy protects that wallet with passkey MFA and may reuse its verified MFA session for up to one hour. The primary user-facing export downloads the decrypted browser-vault replica JSON that powers dashboard pages. Deletion uses the authenticated Murph app session plus same-origin admission and an exact typed confirmation phrase; it does not require passkey or wallet setup. Deletion wipes the member's Stripe and Privy vendor accounts.
 
 ## User-facing entry points
 
 - `/settings` includes a **Data & privacy** section.
 - **Export vault** opens a confirmation dialog that requires a sensitive-data acknowledgement, creates a short-lived authorization challenge, signs it with the passkey-MFA-protected Privy wallet, then loads the current browser-vault replica through `/api/settings/vault-export/session` and downloads it as JSON in the browser.
-- **Delete account** explains that deletion is permanent, requires the exact phrase `DELETE MY ACCOUNT`, and signs a distinct one-time authorization challenge before deletion begins. After success the Settings page shows a short confirmation and redirects home; the hosted session is revoked server-side.
+- **Delete account** explains that deletion is permanent and requires the exact phrase `DELETE MY ACCOUNT`. It uses the current authenticated Murph app session without creating or signing a passkey-wallet challenge, and remains available if secure approval is unavailable while vault export stays disabled. After success the Settings page shows a short confirmation and redirects home; the hosted session is revoked server-side.
 
 ## Security model
 
-Account deletion is intentionally stricter than normal settings reads. Vault export is an explicit user-intent confirmation gesture for the bulk JSON download, not a stricter session-trust upgrade: an active hosted session can already read the same encrypted browser-vault replica through `POST /api/browser-vault/session` to render the dashboard, so the MFA-bound signature on export protects against confused-deputy and forced-action paths (browser extensions, embedded iframes, accidental UI activation) rather than against an attacker who already has the live session cookie. Account deletion is destructive and the MFA gate is a real authority requirement: a signature is required before any vendor cancel, Prisma delete, or vendor-account cleanup runs.
+Account deletion is intentionally deliberate but does not introduce a separate passkey identity requirement. The current authenticated Murph app session identifies the member, browser mutation-origin protection blocks cross-origin admission, and the exact typed phrase records explicit destructive intent before any vendor cancel, Prisma delete, or vendor-account cleanup runs. Vault export remains an explicit user-intent confirmation gesture for the bulk JSON download, not a stricter session-trust upgrade: an active hosted session can already read the same encrypted browser-vault replica through `POST /api/browser-vault/session` to render the dashboard, so the MFA-bound signature on export protects against confused-deputy and forced-action paths (browser extensions, embedded iframes, accidental UI activation) rather than against an attacker who already has the live session cookie.
 
-1. `POST /api/settings/sensitive-action-challenge` derives a binding from the authenticated member, action kind, and Murph app-session id. It stores only a SHA-256 hash of the random challenge token and expires the row after 15 minutes.
+1. For vault export, `POST /api/settings/sensitive-action-challenge` derives a binding from the authenticated member, action kind, and Murph app-session id. It stores only a SHA-256 hash of the random challenge token and expires the row after 15 minutes. The endpoint temporarily admits the legacy `account.delete` kind so Settings pages loaded before the deletion change can finish during rollout, but the deletion route neither requires nor consumes that challenge.
 2. The browser signs the exact server-generated message with the canonical Privy embedded Ethereum wallet. Murph does not clear Privy's one-hour MFA verification cache; each action still requires a fresh one-time wallet signature.
-3. The real export or deletion route fetches the current Privy user, requires passkey-only wallet MFA, recovers the signer locally, compares it with the canonical embedded wallet, and atomically deletes the matching challenge before any sensitive work begins.
+3. The export route fetches the current Privy user, requires passkey-only wallet MFA, recovers the signer locally, compares it with the canonical embedded wallet, and atomically deletes the matching challenge before export begins.
 4. Settings vault export uses the same encrypted browser-vault replica plumbing as dashboard reads but runs through a self-contained `POST /api/settings/vault-export/session` route. The route verifies the MFA-bound signature first, then re-reads workspace state and pending device-sync state, compares the current workspace source-state hash against the replica's `sourceBundleHash`, fetches the encrypted retained replica from the hosted execution control client, and only then atomically consumes the one-time challenge. An existing retained replica remains exportable while source changes or device imports are pending; the response marks that state so the client explains that recent changes may be absent, and active processing receives a best-effort refresh signal. A missing workspace or replica returns a retryable error without consuming the challenge. Withdrawn consent never wakes processing and can export only the latest replica already retained.
 5. The Settings client decrypts the browser-vault replica in-browser and downloads the decrypted JSON. The decrypted vault payload never passes through a separate hosted metadata-export endpoint; the obsolete public `/api/settings/data-export` route was removed.
-6. `POST /api/settings/privacy/delete` keeps authenticated privacy access for members without active billing, requires the exact typed phrase, and consumes its distinct `account.delete` authorization before suspending the member or starting provider cleanup.
+6. `POST /api/settings/privacy/delete` keeps authenticated privacy access for members without active billing, resolves the current app-session member, enforces browser mutation-origin protection and the exact typed phrase, then suspends that member before starting provider cleanup. It requires and consumes no passkey-wallet authorization; any legacy authorization field is ignored.
 7. All challenge and action routes enforce browser mutation-origin protection and bounded JSON request bodies.
-8. A signature is bound to one member, one app session, one action, and one challenge. Replays, cross-action use, and cross-session use fail closed.
+8. An export signature is bound to one member, one app session, one action, and one challenge. Replays, cross-action use, and cross-session use fail closed.
 9. Provider revocation and Retell call-object deletion run before local database deletion while local retry identifiers and token references are still readable. Retell cleanup fails closed on ambiguous provider or local-write outcomes.
 10. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row. That same transaction first inserts a foreign-key-free cleanup receipt whose minimal vendor/runtime identifier payload is KMS-encrypted with receipt- and environment-bound authenticated data.
 11. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
 12. The per-user Temporal runtime workflow is terminated best-effort before deletion starts, again after the Prisma transaction commits, and again after Cloudflare runner/R2 cleanup, so live runtime writers are stopped before local rows are removed and stale wake state is neutralized after cleanup.
 13. The Stripe subscription is canceled before the Prisma transaction and fails closed: if the cancel call fails, deletion aborts with a retryable error so a deleted account can never keep an active subscription billing it. Stripe customer, Privy user, Cloudflare runner-state/R2, and isolated runtime-log deletion run immediately after the local wipe and remain owned by the encrypted cleanup receipt until every target confirms completion.
+
+## Production canary reset exception
+
+The authenticated Linq production canary reset deletes the configured canary
+account's content and runtime state through a dedicated account-deletion entrypoint.
+That entrypoint verifies the current fixed canary identity and preserves primary
+ingress traces and isolated runtime logs under their existing retention deadlines.
+It settles runtime-log cleanup as a no-op in the encrypted retry receipt, so a
+later vendor-cleanup retry cannot erase the diagnostics. It skips explicit ingress
+trace deletion; the diagnostic-retention migration removes the mailbox cascade.
+
+This exception is unavailable to ordinary account-deletion callers. Settings
+deletion, including deletion of the canary through the ordinary service, still
+explicitly erases ingress traces and retries isolated runtime-log deletion.
+No member or mailbox payload remains solely to retain canary diagnostics.
+Both ingress trace-creation paths lock the unsuspended member during their insert,
+so the ordinary account-deletion suspension fence also prevents late trace
+recreation after the mailbox cascade is removed. Roll out those writers and drain
+old Web instances before applying the diagnostic-retention contract migration
+from `apps/web/prisma/contract-migrations`. The existing post-promotion runner
+owns its alias check and drain; it must not run in the predeploy Prisma lane.
 
 ## Export contract
 
@@ -105,6 +126,7 @@ The Settings vault export does not include:
 | `prisma.hosted_web_session` | Live delete | Metadata/counts | Deletes active and revoked claim-bound app-session authenticators. Export reports counts only and omits session authenticators. |
 | `prisma.hosted_sensitive_action_challenge` | Live delete | Not exported secret | Deletes hashed authorization challenges and durable Assistant approval decisions stored in the same member-scoped table. Raw tokens, signatures, action hashes, and wallet authorization material are never exported. |
 | `prisma.hosted_member_identity` | Live delete | Confirmed data export | Deletes Privy identity and encrypted contact hints. Confirmed export includes decrypted user-facing phone, Privy, and wallet fields while omitting lookup keys and active phone-code attempt IDs. |
+| `prisma.hosted_group_participant_observation` | Documented retention | Not exported derived data | Global blinded roster evidence is not member-owned authority, account deletion does not remove it, and it expires no later than 14 days after its latest observation. A recreated account can match live evidence before expiry. User exports omit this derived evidence and its lookup keys. |
 | `prisma.hosted_address_book_projection` | Live delete | Metadata/counts | Deletes the member's opt-in projection revision and enabled state before the member row. Export reports metadata/counts only. |
 | `prisma.hosted_address_book_contact` | Live delete | Not exported secret | Deletes member-scoped phone tokens and encrypted advisory labels before the projection, preventing subsequent advisory lookup. Export never includes tokens, ciphertext, projected names, or third-party phone values. Labels already emitted into model/provider content cannot be recalled. |
 | `prisma.hosted_member_routing` | Live delete | Confirmed data export | Deletes encrypted Linq, Telegram, and reply-alias routing bindings. Confirmed export includes decrypted user-facing routing IDs while omitting lookup keys. |
@@ -229,3 +251,14 @@ Retell call objects are actively deleted before the local wipe. The local phone-
 - usage-credit cleanup: store coverage includes purchase and ledger rows, deletion counts both stores, and ledger entries are deleted before purchases and hosted member rows.
 
 Any future account data store should update `HOSTED_ACCOUNT_DATA_STORE_COVERAGE`, the deletion/export implementation, this document, and the coverage test in the same change.
+
+## Temporary Ops unused-signup cleanup
+
+The authentication retirement owner documents a narrow, explicitly targeted Ops
+operation for unused legacy signups. It calls `deleteHostedAccountData` with an
+expected creation time. Eligibility and suspension share the existing member
+locks and precede external refresh/billing/provider operations; ordinary
+self-service deletion keeps its existing behavior. Both paths use the same
+canonical deletion and encrypted cleanup receipts. See
+[`hosted-auth-migration.md`](hosted-auth-migration.md#operator-disposition-of-unused-legacy-signups)
+for admission, refusal, retry and removal conditions.

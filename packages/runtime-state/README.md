@@ -3,6 +3,11 @@
 Workspace-private shared runtime-state helpers for Murph packages that need explicit local state
 next to a vault without turning that state into canonical product truth.
 
+Directory locks publish their complete metadata through one atomic directory
+rename. The unpublished metadata file needs no separate atomic rename; its
+private permissions and the existing ownership and stale-lock checks remain
+required.
+
 ## Scope
 
 - root `@murphai/runtime-state` exports the worker-safe hosted email/env/loopback helpers plus pure hosted bundle identity types/equality used by shared contracts
@@ -23,13 +28,34 @@ Inside the vault, `.runtime/**` is now split by durability/rebuildability and by
 
 `vault/.runtime/operations/assistant/**` is the assistant runtime residue root. Hosted execution treats this root as runtime continuity by default so Cloudflare can stay a thin runner over the local assistant runtime. Assistant descriptors still document/audit known files, but new assistant continuity files do not need a descriptor to survive hosted checkpoint/restore. The hosted denylist stays small and safety-oriented: secrets, device-sync runtime state, parser executable-selector config, quarantine/repair payloads, locks, pid/socket files, temp lock files, legacy assistant usage queues, assistant event logs, global `.runtime/cache/**`, `.runtime/tmp/**`, and rebuildable `.runtime/projections/**` stay out of hosted workspace snapshots, except for the exact query-cache triplet `.runtime/projections/query.sqlite{,-wal,-shm}`. That exception is encrypted derived cache only: PAX archives preserve canonical source-file subsecond mtimes, restore still validates the query source manifest and rebuilds it when stale, older archive formats remain readable, and no other projection becomes portable. Assistant diagnostics snapshots, pending issue records, status snapshots, runtime budgets, cron run logs, outbox state, receipts, sessions, transcripts, hosted inbox runtime state, parser runtime state outside executable selectors, and mailbox/runtime continuity files move with the encrypted hosted workspace. The two assistant JSONL event logs are bounded local observability only and are rewritten by the five-minute runtime maintenance seam as one tail: `diagnostics/events.jsonl` keeps 7 days or 512 KiB, and `journals/runtime-events.jsonl` keeps 7 days, 2,000 events, or 1 MiB. Routine diagnostic info events are not mirrored into runtime events; warning/error diagnostics keep the small redacted runtime signal, while `diagnostics/snapshot.json` carries portable counters and recent warning/error text. Hosted assistant usage records directly to the web-owned usage ledger through the hosted-execution usage contract instead of using assistant-runtime snapshot state.
 
-The exact flat `.runtime/operations/assistant/generated-deliveries/<filename>` subtree is declared portable for active one-time delivery continuity. Encrypted hosted checkpoints include it, while portable support ZIPs exclude it with all `.runtime/**`. After the reader-compatible release converges, initial and retry file-send preparation may adopt only this exact direct regular file: assistant-runtime parents are tightened to `0700`, the file to `0600`, and path/type/symlink state is revalidated before reading or hashing. Quiescent cleanup retains exact active descriptors and removes only terminal, changed, or orphaned direct files after the whole flat inventory and outbox state are trusted. No generic `exports/**` path is reserved by this contract, and the reader-compatible release remains the rollback floor while a persisted ref may exist.
+The bounded presentation-only group participant display-name cache at `.runtime/operations/assistant/state/group-participant-display-names.json` is explicitly portable and rebuildable. Encrypted snapshots retain it for latency, while its fixed TTL and effect-time authority owners keep it from becoming profile, contact, membership, or consent truth.
+
+The exact flat `.runtime/operations/assistant/generated-deliveries/<filename>` subtree is declared portable for active one-time delivery continuity. Encrypted hosted checkpoints include it, while portable support ZIPs exclude it with all `.runtime/**`. After the reader-compatible release converges, initial and retry file-send preparation may adopt only this exact direct regular file: assistant-runtime parents are tightened to `0700`, the file to `0600`, and path/type/symlink state is revalidated before reading or hashing. Quiescent cleanup retains exact active descriptors and removes only terminal, changed, or orphaned direct files after the direct inventory and outbox state are trusted. A legacy nested directory is counted and retained as opaque residue without blocking independent direct-file cleanup; it never gains generated-delivery ownership. No generic `exports/**` path is reserved by this contract, and the reader-compatible release remains the rollback floor while a persisted ref may exist.
 
 Direct-R2 v2 hosted snapshots keep that broad runtime continuity policy and write one encrypted compressed workspace archive directly to R2 from the hosted container during `idle_shutdown`. Hosted Codex native memory generation and reads are currently disabled. The dormant portability boundary preserves only the exact Codex-owned read artifacts `.codex-hosted/memories/raw_memories.md`, `.codex-hosted/memories/MEMORY.md`, and `.codex-hosted/memories/memory_summary.md`, plus active `.codex-hosted/sessions/YYYY/MM/DD/rollout-*.jsonl` files referenced by live assistant session resume state. Skills, extensions, rollout summaries, Git state and history, arbitrary memory descendants, memory/state SQLite databases and sidecars, and credential, secret, key, certificate, auth, config, cache, temp, lock, pid, socket, log, history, and prompt-history files are not portable. Cold and warm-clean restore both prune Codex home back to those exact read artifacts and referenced rollouts. Full native-memory workspace persistence remains deferred until Codex owns a sealed or quiesced export that can prove excluded credential material is absent from live files and history. Foreground assistant turns do not publish a separate Codex continuity artifact or workspace pointer. If a warm container dies before the next idle-shutdown v2 snapshot, restore must still be correct from durable mailbox, audit transcript records, and assistant runtime state even when provider-native resume optimization is unavailable; bounded committed transcript history may be included only in fresh-thread prompts or stale-resume fallback prompts. `canonical_runtime_commit` stores exact hosted canonical write receipts in supervisor-owned artifacts and durably checkpoints the receipt-log ref in workspace status until the idle checkpoint snapshot becomes authoritative and omits the receipt-log ref from committed workspace status. Pre-checkpoint foreground reruns append from that in-flight log; restore replays artifact-backed receipt logs only for legacy or interrupted checkpoint states that still expose a log ref, and never replays assistant-local receipt files. Legacy hosted-bundle full/base, hot, and delta producers remain compatibility surfaces for old refs and tests only; new production workspace snapshots are produced by the direct-R2 v2 `idle_shutdown` path.
+
+Snapshot inventory filters excluded paths before filesystem inspection. A root
+absent at its initial inspection remains optional for uninitialized workspaces;
+once an included file or directory is observed, its disappearance fails planning
+instead of accepting a partial replacement snapshot. This applies to both vault
+and operator-home traversal.
+
+The hosted container synchronously stops the resident Codex process before
+starting every cold or warm-clean restore. The next process rebuilds its private
+indexes from the retained rollout instead of carrying process-local database
+state across filesystem lifecycles.
 
 That assistant runtime root is intentionally not a product-state incubator. If a datum is user-facing, queryable, or something future product features will build on, it belongs in canonical `vault/**` or explicit `derived/**` materializations, not under assistant runtime.
 
 Assistant runtime state also has a single filesystem permission policy. The `@murphai/runtime-state/node/assistant-state-fs` subpath owns assistant-state write primitives, audit, and repair. Assistant runtime directories under `.runtime/operations/assistant/**` must be created as `0700`, files must be created as `0600`, and hosted bundle restore/materialization applies that same path-derived policy while writing restored files. `assistant doctor` is the operator-facing diagnostic and explicit repair path; normal runtime writers should enforce modes at write time rather than depending on doctor cleanup.
+
+Directory preparation validates current path types and permissions on every
+call, changes permissions only when they differ, and creates outside ancestors
+only when the private runtime root is missing. Readers prepare the directories
+they actually consume; receipt, transcript, routing, and accepted-input journal
+operations do not require the whole assistant tree. Existing writers secure their
+destination parents, including ancestry needed for secret-sidecar deletion. No
+process-local permission cache substitutes for current checks.
 
 ## Contract
 
@@ -44,3 +70,49 @@ Assistant runtime state also has a single filesystem permission policy. The `@mu
 - legacy hosted-bundle snapshots may externalize large raw artifacts under `vault/raw/**` into separate encrypted content-addressed objects. Direct-R2 v2 snapshots include restored workspace bytes in the encrypted archive instead of producing artifact sidecars.
 - hosted per-user env overrides live in a separate encrypted object and are not folded into the workspace snapshot
 - downstream packages should consume these helpers instead of inventing their own per-package runtime path conventions or versioning schemes
+
+Hosted mailbox input metadata is durable operational state in
+`.runtime/operations/assistant/state/hosted-mailbox-inputs.sqlite`, separate from
+sanitized assistant input events. It uses the existing runtime SQLite migration
+and lock owners, DELETE journaling, secure deletion, and one closed private file
+per checkpoint. The assistant-engine owner migrates legacy per-input JSON files
+during residue maintenance and retains rows only while their input events
+survive. This database is not a disposable projection: loss or corruption fails
+closed. The first database write establishes a SQLite-capable runner rollback
+floor; old runners cannot consume converted workspace metadata.
+
+## CLI timing transport and optional failure detail
+
+`@murphai/runtime-state/cli-timing` owns the finite timing schema, registered
+command catalog, code/stage vocabularies, normalization and bounds.
+`@murphai/runtime-state/node/cli-timing` owns one best-effort authenticated
+loopback UDP datagram per subprocess. The CLI exit owner observes the existing
+exit code before calling `process.exit`; it does not await telemetry. Bundled
+and source entrypoints continue to share the existing timing owner.
+
+The sender uses a fixed synchronous `127.0.0.1` lookup for both bind and send,
+and an exclusive ephemeral bind. Node's default numeric-address lookup still
+schedules asynchronous work; a following `process.exit` can otherwise discard
+that work even after the socket has bound. Exclusive binding also avoids the
+cluster shared-handle path. The socket remains unreferenced and closes on send
+completion or error. Missing/invalid endpoints, native bind/send failure, a dead
+receiver and send-buffer pressure remain best-effort loss, never delayed exits,
+command errors, output, retries or keepalive. There is no flush wait, timer,
+queue, persisted file, process supervisor or parallel reporting channel.
+
+`murph.cli-timing.v1` is unchanged. Per-command `failures` and `droppedFailures`
+remain optional; older producers without them are accepted. New codes
+`exercise_not_found`, `exercise_catalog_unavailable` and `exercise_catalog_invalid`
+are exact existing source-owned errors, not new domain behavior. Prefer
+consumer-first deployment of catalog additions: older finite readers collapse
+unrecognized codes to `unknown`, retaining timing, outcome and failure counts.
+Unknown strings/extra fields are never forwarded. Assistant shell diagnostics
+reuse these catalogs; they do not establish another timing or error vocabulary.
+
+`test/cli-timing-process.test.ts` uses actual terminating subprocesses, the
+production source module and a live loopback receiver, including immediate and
+already-bound failures, nested termination and failed/dead transports. CLI
+entrypoint tests in `packages/cli/test/cli-timing-subprocess.test.ts` separately
+cover domain/validation rejection and nearby successes with isolated synthetic
+state, fake food lookup and byte-identical output/exit checks. They neither
+identify historical production arguments nor require a real-model journey.

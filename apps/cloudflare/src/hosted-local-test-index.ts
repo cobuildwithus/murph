@@ -1,19 +1,27 @@
+export { SmallRunnerContainer } from "./standby-runner-container.ts";
 export { ContainerProxy } from "@cloudflare/containers";
 export {
   DeploySmokeRunnerContainer,
 } from "./runner-container.ts";
 export {
   RunnerContainer,
+  NextRunnerContainer,
 } from "./hosted-local-test/runner-container.ts";
 export {
-  HostedLocalTestUserRunnerDurableObject as UserRunnerDurableObject,
-} from "./worker/hosted-local-test-user-runner-durable-object.ts";
+  HostedLocalTestStandbyRunnerContainer as StandbyRunnerContainer,
+} from "./hosted-local-test/standby-runner-container.ts";
 export {
   DatabaseHealthDurableObject,
 } from "./worker/database-health-durable-object.ts";
 export {
   DeviceWebhookQueueHealthDurableObject,
 } from "./worker/device-webhook-queue-health-durable-object.ts";
+export {
+  OpenAiAuthorizationAlertDurableObject,
+} from "./worker/openai-authorization-alert-durable-object.ts";
+export {
+  StandbyRunnerCoordinatorDurableObject,
+} from "./worker/standby-runner-coordinator-durable-object.ts";
 
 import {
   handleHostedEmailIngress,

@@ -37,6 +37,7 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  assertOrderedDateRange,
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
   createCommonListCommand,
@@ -343,6 +344,10 @@ export function registerMeasurementCommands(cli: Cli.Cli) {
           typeof options.occurredAt === 'string'
             ? options.occurredAt
             : undefined,
+        timeZone:
+          typeof options.timeZone === 'string'
+            ? options.timeZone
+            : undefined,
       })
       const mediaPaths = Array.isArray(options.media)
         ? options.media.filter((entry): entry is string => typeof entry === 'string')
@@ -494,6 +499,7 @@ export function registerMeasurementCommands(cli: Cli.Cli) {
     }),
     output: measurementEntryListResultSchema,
     async run({ options }) {
+      assertOrderedDateRange(options.from, options.to)
       return listMeasurementEntries({
         vault: options.vault,
         metrics: options.metric,

@@ -12,8 +12,8 @@ const mocks = vi.hoisted(() => ({
   readHostedAddressBookStatus: vi.fn(),
   readJsonObject: vi.fn(),
   replaceHostedAddressBookProjection: vi.fn(),
-  requireActivePrivyMemberAuthFromBearerToken: vi.fn(),
-  requirePrivyMemberAuthFromBearerToken: vi.fn(),
+  requireActiveHostedMemberAuthFromBearerToken: vi.fn(),
+  requireHostedMemberAuthFromBearerToken: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-address-book/projection", async (importOriginal) => ({
@@ -31,10 +31,10 @@ vi.mock("@/src/lib/http", async (importOriginal) => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireActivePrivyMemberAuthFromBearerToken:
-    mocks.requireActivePrivyMemberAuthFromBearerToken,
-  requirePrivyMemberAuthFromBearerToken:
-    mocks.requirePrivyMemberAuthFromBearerToken,
+  requireActiveHostedMemberAuthFromBearerToken:
+    mocks.requireActiveHostedMemberAuthFromBearerToken,
+  requireHostedMemberAuthFromBearerToken:
+    mocks.requireHostedMemberAuthFromBearerToken,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -71,6 +71,8 @@ const DELETION = {
   schemaVersion: 1 as const,
 };
 
+const SLOW_GET_STAGE_MS = 5_000;
+
 let route: AddressBookRoute;
 
 describe("device sync companion address-book route", () => {
@@ -81,8 +83,8 @@ describe("device sync companion address-book route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prisma);
-    mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({ member: MEMBER });
-    mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireHostedMemberAuthFromBearerToken.mockResolvedValue({ member: MEMBER });
+    mocks.requireActiveHostedMemberAuthFromBearerToken.mockResolvedValue({
       member: MEMBER,
     });
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
@@ -100,6 +102,8 @@ describe("device sync companion address-book route", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 
@@ -112,17 +116,123 @@ describe("device sync companion address-book route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(STATUS);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       mocks.prisma,
+      { runStage: expect.any(Function) },
     );
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
     expect(mocks.readHostedAddressBookStatus).toHaveBeenCalledWith({
       memberId: MEMBER.id,
       prisma: mocks.prisma,
     });
     expect(route.maxDuration).toBe(60);
+  });
+
+  it("reports stalled identity-token verification before the route deadline", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let resolveAuth!: (value: { member: typeof MEMBER }) => void;
+    const pendingAuth = new Promise<{ member: typeof MEMBER }>((resolve) => {
+      resolveAuth = resolve;
+    });
+    mocks.requireHostedMemberAuthFromBearerToken.mockImplementation(
+      (_request, _prisma, options) => options.runStage(
+        "identity_token_verification",
+        () => pendingAuth,
+      ),
+    );
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/address-book",
+    );
+
+    const responsePromise = route.GET(request);
+    await vi.advanceTimersByTimeAsync(SLOW_GET_STAGE_MS);
+
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted companion address-book GET stage slow.",
+      {
+        elapsedMs: SLOW_GET_STAGE_MS,
+        stage: "identity_token_verification",
+      },
+    );
+
+    resolveAuth({ member: MEMBER });
+    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("reports a stalled member lookup before the route deadline", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let resolveAuth!: (value: { member: typeof MEMBER }) => void;
+    const pendingAuth = new Promise<{ member: typeof MEMBER }>((resolve) => {
+      resolveAuth = resolve;
+    });
+    mocks.requireHostedMemberAuthFromBearerToken.mockImplementation(
+      (_request, _prisma, options) => options.runStage(
+        "member_lookup",
+        () => pendingAuth,
+      ),
+    );
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/address-book",
+    );
+
+    const responsePromise = route.GET(request);
+    await vi.advanceTimersByTimeAsync(SLOW_GET_STAGE_MS);
+
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted companion address-book GET stage slow.",
+      {
+        elapsedMs: SLOW_GET_STAGE_MS,
+        stage: "member_lookup",
+      },
+    );
+
+    resolveAuth({ member: MEMBER });
+    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("reports a stalled status read without logging member or request data", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let resolveStatus!: (value: typeof STATUS) => void;
+    mocks.readHostedAddressBookStatus.mockReturnValue(
+      new Promise((resolve) => {
+        resolveStatus = resolve;
+      }),
+    );
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/address-book",
+    );
+
+    const responsePromise = route.GET(request);
+    await vi.advanceTimersByTimeAsync(SLOW_GET_STAGE_MS);
+
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted companion address-book GET stage slow.",
+      {
+        elapsedMs: SLOW_GET_STAGE_MS,
+        stage: "status_read",
+      },
+    );
+
+    resolveStatus(STATUS);
+    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("clears the slow-stage timers after a normal status read", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/address-book",
+    );
+
+    await expect(route.GET(request)).resolves.toMatchObject({ status: 200 });
+    await vi.advanceTimersByTimeAsync(SLOW_GET_STAGE_MS * 2);
+
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("requires active access and launch consent for bounded replacements", async () => {
@@ -136,11 +246,11 @@ describe("device sync companion address-book route", () => {
     const response = await route.PUT(request);
 
     expect(response.status).toBe(200);
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       mocks.prisma,
     );
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
       memberId: MEMBER.id,
       prisma: mocks.prisma,
@@ -169,11 +279,11 @@ describe("device sync companion address-book route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(STATUS);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       mocks.prisma,
     );
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
     expect(mocks.readJsonObject).toHaveBeenCalledWith(request, {
       limitBytes: 1024,

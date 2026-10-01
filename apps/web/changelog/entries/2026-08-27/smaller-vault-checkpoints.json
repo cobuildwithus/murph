@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-27",
+  "order": 100,
+  "item": {
+    "id": "smaller-vault-checkpoints",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less duplicate workspace storage",
+    "summary": "Murph now rebuilds its private workspace index without redundant audit copies and unused lookup structures, reducing backup bulk while keeping audits and exports complete.",
+    "details": "Canonical health and audit records are unchanged. Older closed event history now compresses automatically during interruptible idle checkpoint maintenance, while new messages still preempt cleanup.",
+    "relevanceTags": ["performance", "reliability", "privacy"],
+    "sourcePullRequests": [2427, 2470]
+  }
+}

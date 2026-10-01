@@ -1,0 +1,27 @@
+{
+  "name": "checkpoint-barrier-context-test",
+  "main": "./checkpoint-barrier-worker.ts",
+  "compatibility_date": "2026-03-27",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BARRIER",
+        "class_name": "CheckpointBarrier"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "CheckpointBarrier"
+      ]
+    }
+  ],
+  "vars": {
+    "MURPH_HOSTED_EXECUTION_STDIO_LOGS": "0"
+  }
+}

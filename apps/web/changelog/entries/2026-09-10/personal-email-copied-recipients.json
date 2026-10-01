@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "personal-email-copied-recipients",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Reliable personal email replies with copied recipients",
+    "summary": "Copying someone on a message to your personal Murph reply address no longer prevents Murph from answering you.",
+    "details": "Murph sends its reply only to your current verified email address. Group email conversations keep their existing sharing rules.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3233
+    ]
+  }
+}

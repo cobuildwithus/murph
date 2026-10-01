@@ -15,6 +15,12 @@ import {
   getDefaultProductLabelsPool,
 } from "./product-labels";
 import { normalizePublicProductLabel } from "./public-products/normalize-label";
+import {
+  getPopularFoodBrands,
+  getPopularFoodCategorySearchQuery,
+  getPopularFoodDirectBrandNames,
+  orderFoodsByPopularity,
+} from "./food-popularity";
 
 const GENERIC_FOOD_DATA_ORIGINS = [
   "usda_foundation",
@@ -140,7 +146,10 @@ export function createFoodsQueries(client: ProductLabelsQueryClient): {
 
 export function createPublicFoodsQueries(client: ProductLabelsQueryClient): {
   searchPublicFoods: (input: {
+    comparisonReadyOnly?: boolean;
+    foodSearchOrder?: "relevance" | "evidence" | "popular";
     limit: number;
+    offset?: number;
     q: string;
   }) => Promise<PublicProductLabelSearchItem[]>;
   getPublicFoodRecordById: (input: {
@@ -155,7 +164,33 @@ export function createPublicFoodsQueries(client: ProductLabelsQueryClient): {
   });
 
   return {
-    searchPublicFoods: queries.searchCompact,
+    searchPublicFoods: async (input) => {
+      const popularBrands =
+        input.foodSearchOrder === "popular"
+          ? getPopularFoodBrands(input.q)
+          : [];
+      const directBrandNames =
+        input.foodSearchOrder === "popular"
+          ? getPopularFoodDirectBrandNames(input.q)
+          : [];
+      const popularCategorySearchQuery =
+        input.foodSearchOrder === "popular"
+          ? getPopularFoodCategorySearchQuery(input.q)
+          : null;
+      const rows = await queries.searchCompact({
+        ...input,
+        popularBrandKeys: popularBrands.map((brand) => brand.key),
+        popularBrandNames: [
+          ...new Set(
+            directBrandNames.flatMap((name) => [name, name.toUpperCase()]),
+          ),
+        ],
+        popularCategorySearchQuery,
+      });
+      return input.foodSearchOrder === "popular"
+        ? orderFoodsByPopularity(rows, input.q)
+        : rows;
+    },
     getPublicFoodRecordById: queries.getRecordById,
     getPublicFoodEvidence: queries.getEvidence,
   };
@@ -196,7 +231,8 @@ export function toFoodNutritionSearchItem(
     .filter((row) => {
       const name = row.name.trim().toLowerCase();
       return FOOD_MEAL_NUTRIENT_NAME_PATTERNS.some((pattern) =>
-        pattern.test(name));
+        pattern.test(name),
+      );
     })
     .slice(0, FOOD_MEAL_NUTRITION_ROW_LIMIT);
 
@@ -211,9 +247,10 @@ export function toFoodNutritionSearchItem(
     contaminantSummary: toFoodContaminantSearchSummary(item.contaminants),
     label: {
       nutrition: {
-        basis: mealNutritionRows.length > 0
-          ? normalized.nutrition.basis
-          : "unavailable",
+        basis:
+          mealNutritionRows.length > 0
+            ? normalized.nutrition.basis
+            : "unavailable",
         rows: mealNutritionRows,
       },
       serving: normalized.serving,
@@ -245,21 +282,20 @@ function toFoodContaminantSearchSummary(
       },
       ...(alert.screeningPolicy
         ? {
-          screeningPolicy: {
-            id: alert.screeningPolicy.id,
-            assumedBodyWeightKg:
-              alert.screeningPolicy.assumedBodyWeightKg,
-            assumedServingsPerDay:
-              alert.screeningPolicy.assumedServingsPerDay,
-            servingGrams: alert.screeningPolicy.servingGrams,
-            exposure: {
-              value: alert.screeningPolicy.exposure.value,
-              unit: alert.screeningPolicy.exposure.unit,
-              basis: alert.screeningPolicy.exposure.basis,
+            screeningPolicy: {
+              id: alert.screeningPolicy.id,
+              assumedBodyWeightKg: alert.screeningPolicy.assumedBodyWeightKg,
+              assumedServingsPerDay:
+                alert.screeningPolicy.assumedServingsPerDay,
+              servingGrams: alert.screeningPolicy.servingGrams,
+              exposure: {
+                value: alert.screeningPolicy.exposure.value,
+                unit: alert.screeningPolicy.exposure.unit,
+                basis: alert.screeningPolicy.exposure.basis,
+              },
+              ratio: alert.screeningPolicy.ratio,
             },
-            ratio: alert.screeningPolicy.ratio,
-          },
-        }
+          }
         : {}),
       source: {
         name: alert.source.name,
@@ -291,15 +327,17 @@ function toFoodContaminantSearchSummary(
     alertsTruncated: contaminants.alertCount > alerts.length,
     alerts,
     observationCount: contaminants.observationCount,
-    observationsTruncated:
-      contaminants.observationCount > observations.length,
+    observationsTruncated: contaminants.observationCount > observations.length,
     observations,
   };
 }
 
 export async function searchPublicFoods(input: {
+  comparisonReadyOnly?: boolean;
+  foodSearchOrder?: "relevance" | "evidence" | "popular";
   q: string;
   limit: number;
+  offset?: number;
 }): Promise<PublicProductLabelSearchItem[]> {
   return await defaultPublicFoodsQueries().searchPublicFoods(input);
 }
@@ -324,7 +362,9 @@ function defaultFoodsQueries(): ReturnType<typeof createFoodsQueries> {
   return defaultFoodsQueriesInstance;
 }
 
-function defaultPublicFoodsQueries(): ReturnType<typeof createPublicFoodsQueries> {
+function defaultPublicFoodsQueries(): ReturnType<
+  typeof createPublicFoodsQueries
+> {
   defaultPublicFoodsQueriesInstance ??= createPublicFoodsQueries(
     getDefaultProductLabelsPool(),
   );

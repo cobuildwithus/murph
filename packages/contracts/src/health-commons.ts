@@ -15,6 +15,52 @@ export const HEALTH_COMMONS_MEASUREMENT_PLAN_SCHEMA_VERSION =
   "murph.commons.measurement-plan.v1" as const;
 export const HEALTH_COMMONS_REDIRECTS_SCHEMA_VERSION = "murph.commons.redirects.v1" as const;
 
+export const HEALTH_COMMONS_GOAL_CATEGORIES = [
+  "sleep",
+  "nutrition",
+  "cardio",
+  "strength",
+  "mind",
+  "biomarkers",
+  "life-stages",
+] as const;
+
+export const HEALTH_COMMONS_GOAL_OUTCOME_KINDS = [
+  "behavior",
+  "biomarker",
+  "capacity",
+  "skill",
+  "event",
+  "symptom",
+  "function",
+] as const;
+
+export const HEALTH_COMMONS_GOAL_SUCCESS_SIGNAL_KINDS = [
+  "behavior",
+  "biomarker",
+  "capacity",
+  "milestone",
+  "symptom",
+  "function",
+] as const;
+
+export const HEALTH_COMMONS_GOAL_WORKFLOW_KINDS = [
+  "general_plan",
+  "habit_plan",
+  "training_plan",
+  "tracking_plan",
+  "care_support",
+] as const;
+
+export type HealthCommonsGoalCategory =
+  (typeof HEALTH_COMMONS_GOAL_CATEGORIES)[number];
+export type HealthCommonsGoalOutcomeKind =
+  (typeof HEALTH_COMMONS_GOAL_OUTCOME_KINDS)[number];
+export type HealthCommonsGoalSuccessSignalKind =
+  (typeof HEALTH_COMMONS_GOAL_SUCCESS_SIGNAL_KINDS)[number];
+export type HealthCommonsGoalWorkflowKind =
+  (typeof HEALTH_COMMONS_GOAL_WORKFLOW_KINDS)[number];
+
 export const HEALTH_COMMONS_ENTITY_TYPES = [
   "mission",
   "domain",
@@ -309,7 +355,9 @@ export const HEALTH_COMMONS_BIOMARKER_FALLBACK_SPECIMEN_KINDS = [
 export type HealthCommonsBiomarkerFallbackSpecimenKind =
   (typeof HEALTH_COMMONS_BIOMARKER_FALLBACK_SPECIMEN_KINDS)[number];
 
-const KEY_PATTERN = "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$";
+const KEY_VALUE_PATTERN = "[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?";
+const KEY_PATTERN = `^[a-z_]+:${KEY_VALUE_PATTERN}$`;
+const GOAL_TEMPLATE_KEY_PATTERN = `^goal_template:${KEY_VALUE_PATTERN}$`;
 const STABLE_ID_PATTERN = "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$";
 const PATH_SEGMENT_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
 const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
@@ -317,6 +365,9 @@ const TARGET_FIELD_PATTERN = "^[A-Za-z][A-Za-z0-9]*(?:\\.[A-Za-z][A-Za-z0-9]*)*$
 
 export const healthCommonsEntityTypeSchema = z.enum(HEALTH_COMMONS_ENTITY_TYPES);
 export const healthCommonsKeySchema = z.string().regex(new RegExp(KEY_PATTERN, "u"));
+export const healthCommonsGoalTemplateKeySchema = z
+  .string()
+  .regex(new RegExp(GOAL_TEMPLATE_KEY_PATTERN, "u"));
 export const healthCommonsStableIdSchema = z.string().regex(new RegExp(STABLE_ID_PATTERN, "u"));
 export const healthCommonsRelativePathSchema = z.string().regex(new RegExp(PATH_SEGMENT_PATTERN, "u"));
 export const healthCommonsSha256HexSchema = z.string().regex(new RegExp(SHA256_HEX_PATTERN, "u"));
@@ -1213,6 +1264,83 @@ export const healthCommonsSafetySchema = z
 
 export type HealthCommonsSafety = z.infer<typeof healthCommonsSafetySchema>;
 
+export const healthCommonsGoalSuccessSignalSchema = z
+  .object({
+    id: healthCommonsStableIdSchema,
+    kind: z.enum(HEALTH_COMMONS_GOAL_SUCCESS_SIGNAL_KINDS),
+    label: shortStringSchema,
+  })
+  .strict();
+
+export type HealthCommonsGoalSuccessSignal = z.infer<
+  typeof healthCommonsGoalSuccessSignalSchema
+>;
+
+export const healthCommonsGoalWorkflowSchema = z
+  .object({
+    kind: z.enum(HEALTH_COMMONS_GOAL_WORKFLOW_KINDS),
+    ownerSkillIds: z
+      .array(healthCommonsStableIdSchema)
+      .min(1)
+      .max(4)
+      .meta({ uniqueItems: true })
+      .superRefine((values, context) => {
+        if (new Set(values).size !== values.length) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Goal workflow ownerSkillIds must be unique.",
+          });
+        }
+      }),
+  })
+  .strict();
+
+export type HealthCommonsGoalWorkflow = z.infer<
+  typeof healthCommonsGoalWorkflowSchema
+>;
+
+export const healthCommonsGoalTemplateSchema = z
+  .object({
+    category: z.enum(HEALTH_COMMONS_GOAL_CATEGORIES),
+    parentGoalKey: healthCommonsGoalTemplateKeySchema.optional(),
+    outcomeKind: z.enum(HEALTH_COMMONS_GOAL_OUTCOME_KINDS),
+    goalPhrase: nonEmptyStringSchema.max(160),
+    successSignals: z.array(healthCommonsGoalSuccessSignalSchema).min(1).max(8),
+    evidenceSourceKeys: z
+      .array(healthCommonsKeySchema)
+      .min(1)
+      .max(24)
+      .meta({ uniqueItems: true })
+      .superRefine((values, context) => {
+        if (new Set(values).size !== values.length) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Goal evidenceSourceKeys must be unique.",
+          });
+        }
+      }),
+    workflow: healthCommonsGoalWorkflowSchema,
+    startPrompt: shortStringSchema,
+    indexable: z.boolean(),
+  })
+  .strict()
+  .superRefine((goal, context) => {
+    addDuplicateStableIdIssues(context, goal.successSignals, ["successSignals"], "id");
+
+    const expectedPrompt = `Hey Murph, help me ${goal.goalPhrase}.`;
+    if (goal.startPrompt !== expectedPrompt) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Goal startPrompt must be exactly: ${expectedPrompt}`,
+        path: ["startPrompt"],
+      });
+    }
+  });
+
+export type HealthCommonsGoalTemplate = z.infer<
+  typeof healthCommonsGoalTemplateSchema
+>;
+
 export const healthCommonsResearchEvidenceSchema = z
   .object({
     designKind: z.enum(HEALTH_COMMONS_RESEARCH_EVIDENCE_DESIGN_KINDS),
@@ -1796,6 +1924,7 @@ export const healthCommonsPageFrontmatterSchema = z
     expectedSignalDescriptions: z.array(healthCommonsExpectedSignalDescriptionSchema).optional(),
     measurementPlan: healthCommonsMeasurementPlanSchema.optional(),
     experimentOnboarding: healthCommonsExperimentOnboardingSchema.optional(),
+    goal: healthCommonsGoalTemplateSchema.optional(),
     whyItWorks: z.array(longStringSchema).optional(),
     mechanismChain: z.array(healthCommonsMechanismChainStepSchema).optional(),
     claims: z.array(healthCommonsClaimSchema).optional(),
@@ -1887,6 +2016,8 @@ export const healthCommonsPageFrontmatterSchema = z
       });
     }
 
+    addGoalTemplatePageIssues(page, context);
+
     if (page.entityType !== "biomarker" && page.referenceGuidance) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -1945,6 +2076,93 @@ export const healthCommonsPageFrontmatterSchema = z
 
 export type HealthCommonsPageFrontmatter = z.infer<typeof healthCommonsPageFrontmatterSchema>;
 
+function addGoalTemplatePageIssues(
+  page: {
+    entityType: HealthCommonsEntityType;
+    goal?: HealthCommonsGoalTemplate;
+    hidden?: boolean;
+    key: string;
+    quality?: "stub" | "usable" | "reviewed" | "excellent";
+    safety?: HealthCommonsSafety;
+    slug: string;
+    status?: "draft" | "field-testing" | "reviewed" | "deprecated" | "community";
+    summary?: string;
+    title: string;
+  },
+  context: z.RefinementCtx,
+): void {
+  if (page.entityType !== "goal_template") {
+    if (page.goal) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "goal is only valid on goal_template pages.",
+        path: ["goal"],
+      });
+    }
+    return;
+  }
+
+  if (!page.key.startsWith("goal_template:")) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "goal_template page keys must start with goal_template:.",
+      path: ["key"],
+    });
+  }
+  const requiredFields = [
+    [page.goal, "goal", "goal block"],
+    [page.summary, "summary", "summary"],
+    [page.safety, "safety", "safety block"],
+    [page.status, "status", "status"],
+    [page.quality, "quality", "quality"],
+  ] as const;
+  for (const [value, path, label] of requiredFields) {
+    if (!value) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `goal_template pages must include ${label}.`,
+        path: [path],
+      });
+    }
+  }
+  if (page.title.length > 80) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "goal_template titles must be 80 characters or fewer.",
+      path: ["title"],
+    });
+  }
+  if (page.slug.includes("/")) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "goal_template slugs must be flat; use goal.category and the content path for grouping.",
+      path: ["slug"],
+    });
+  }
+  if (page.goal?.parentGoalKey === page.key) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "A goal_template cannot be its own parent.",
+      path: ["goal", "parentGoalKey"],
+    });
+  }
+  if (
+    page.goal?.indexable === true
+    && (
+      !page.status
+      || !["field-testing", "reviewed", "community"].includes(page.status)
+      || page.hidden === true
+      || page.quality === "stub"
+    )
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Indexable goal_template pages must be visible, usable, and published.",
+      path: ["goal", "indexable"],
+    });
+  }
+}
+
 export const healthCommonsRedirectSchema = z
   .object({
     from: healthCommonsKeySchema,
@@ -1996,6 +2214,7 @@ export const healthCommonsRevisionSchema = z
     pageRevisionId: z.string().startsWith("sha256:"),
     runSpecRevisionId: z.string().startsWith("sha256:").nullable().optional(),
     recipeHash: z.string().startsWith("sha256:").nullable().optional(),
+    workflowSpecRevisionId: z.string().startsWith("sha256:").nullable().optional(),
   })
   .strict();
 

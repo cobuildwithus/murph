@@ -416,6 +416,7 @@ function createProvider(input: {
   bloodPressureRecords?: readonly Record<string, unknown>[];
   includeNote?: boolean;
   noteRecords?: readonly Record<string, unknown>[];
+  onTimeseriesResponse?: () => void;
   timeseriesRecords?: Readonly<Record<string, readonly Record<string, unknown>[]>>;
   bloodPressureRequestFailure?: {
     active: boolean;
@@ -555,7 +556,7 @@ function createProvider(input: {
         };
         const noteWindowStart = url.searchParams.get("start_date");
         const noteWindowEnd = url.searchParams.get("end_date");
-        const logicalResource = resource === "body_fat" ? "fat" : resource;
+        const logicalResource = resource === "body_fat" ? "fat" : resource === "body_weight" ? "weight" : resource;
         const noteRecords = (input.noteRecords ?? []).filter((record) => {
           const timestamp = typeof record.start === "string" ? record.start : null;
           return timestamp !== null
@@ -586,6 +587,7 @@ function createProvider(input: {
           : resource === "note"
             ? noteRecords
             : timeseriesRecords;
+        input.onTimeseriesResponse?.();
         return createJsonResponse(
           records.length > 0
             ? {
@@ -1271,13 +1273,15 @@ test("prior Oura note coverage receives one current semantic reimport while dens
     initialResult: boundedResult,
     provider,
   });
-  // Bounded dual-owner shape: seven ordinary UTC provider-date requests from
-  // the broad correction sweep plus one exact vault-local temporal window for
-  // the newest lag-closed day.
+  // Ordinary history stays at seven provider dates. Complete-day authority is
+  // separately queued for the same bounded horizon, without an inline request.
   assert.equal(
     requests.filter((request) => request.resource === "stress_level").length,
-    8,
+    7,
   );
+  assert.equal(boundedResult.scheduledJobs?.filter((job) =>
+    job.payload?.resource === "stress_level" && job.payload?.temporalAuthorityTimeZone
+  ).length, 7);
 
   const completed = createScheduledJobs(
     createStoredAccount({ metadata: result.metadataPatch, sources }),
@@ -2077,7 +2081,8 @@ test.each([
   }
 });
 
-test("maximum-cardinality schedule-time history queries 396 keys once and offers one inactive root", () => {
+// Exhaust every root at full source cardinality, including under package fanout.
+test("maximum-cardinality schedule-time history queries 396 keys once and offers one inactive root", { timeout: 120_000 }, () => {
   const resources = ["note", ...SPARSE_DAILY_HISTORY_RESOURCES, "weight"] as const;
   const availability = Object.fromEntries(
     ["blood_pressure", ...resources].map((resource) => [resource, true]),
@@ -2182,13 +2187,11 @@ test("maximum-cardinality schedule-time history queries 396 keys once and offers
 });
 
 test.each([
-  ["before provider discovery", 1, 0, 0, 0],
-  ["after provider discovery", 3, 1, 0, 0],
-  ["after timeseries fetch", 4, 1, 1, 0],
-  ["after snapshot preparation", 5, 1, 1, 0],
-] as const)("an old source epoch is fenced %s", async (
-  _label,
-  supersedeAtRead,
+  ["before provider discovery", 1, 0, 0],
+  ["after provider discovery", 1, 0, 0],
+  ["after timeseries fetch", 1, 1, 0],
+] as const)("a remote epoch change %s is fenced before health-data fetch or import", async (
+  boundary,
   expectedProviderListRequests,
   expectedTimeseriesRequests,
   expectedImportCalls,
@@ -2206,8 +2209,8 @@ test.each([
     requests,
     timeseriesRecords: {
       caffeine: [{
-        end: "2026-06-10T08:05:00.000Z",
-        start: "2026-06-10T08:00:00.000Z",
+        end: "2025-12-13T08:05:00.000Z",
+        start: "2025-12-13T08:00:00.000Z",
         unit: "g",
         value: 0.08,
       }],
@@ -2235,7 +2238,6 @@ test.each([
     ).jobs,
     "caffeine",
   );
-  let sourceReads = 0;
   const result = await requireValue(provider.jobExecutor).executeJob(
     createJobContext({
       account: createAccount({ sources: [epochOneSource] }),
@@ -2244,11 +2246,13 @@ test.each([
         return importWithRealJunctionNormalizer(snapshot);
       },
       listConnectionSources: async () => {
-        sourceReads += 1;
-        return sourceReads >= supersedeAtRead ? [epochTwoSource] : [epochOneSource];
+        const superseded = boundary === "before provider discovery"
+          || (boundary === "after provider discovery" && providerListRequests.count > 0)
+          || (boundary === "after timeseries fetch" && requests.length > 0);
+        return superseded ? [epochTwoSource] : [epochOneSource];
       },
     }),
-    toJobRecord(job, 200 + supersedeAtRead),
+    toJobRecord(job, 200),
   );
 
   assert.equal(result.metadataPatch, undefined);
@@ -2455,7 +2459,6 @@ test("maximum source projection uses one shared snapshot while retaining exact-s
     ).find((candidate) => candidate !== undefined)),
     EXTENDED_HISTORY_EXECUTION_FIXTURE_DAYS,
   );
-  const targetSlug = String(job.payload?.sourceProviderSlug);
   const sourceReads: string[] = [];
   let importCalls = 0;
 
@@ -2476,13 +2479,7 @@ test("maximum source projection uses one shared snapshot while retaining exact-s
     toJobRecord(job, 260),
   );
 
-  assert.deepEqual(sourceReads, [
-    targetSlug,
-    "*",
-    "*",
-    "*",
-    targetSlug,
-  ]);
+  assert.deepEqual(sourceReads, ["*", "*"]);
   assert.equal(providerListRequests.count, 1);
   assert.equal(requests.length, 1);
   assert.equal(importCalls, 1);
@@ -2798,7 +2795,58 @@ test("date-mode history and reconcile keep provider days atomic across UTC midni
   }
 });
 
+test("empty sparse history shares bounded jobs while preserving populated and foreground boundaries", async () => {
+  for (const scenario of ["empty", "populated", "foreground"] as const) {
+    const requests: TimeseriesRequest[] = [];
+    const importedSnapshots: unknown[] = [];
+    const provider = createProvider({
+      requests,
+      historicalPullState: { resource: "body_temperature", status: "success" },
+      providerState: {
+        resourceAvailability: { body_temperature: true },
+        status: "connected",
+      },
+      timeseriesResources: ["body_temperature"],
+      timeseriesRecords: scenario === "populated" ? {
+        body_temperature: [{ timestamp: "2026-05-24T08:00:00.000Z", value: 36.6, unit: "c" }],
+      } : {},
+    });
+    const job = withHistoricalFixtureDays(
+      createScheduledResourceJob(provider, "body_temperature"), 20,
+    );
+    const context = createJobContext({
+      importedSnapshots,
+      ...(scenario === "foreground" ? { shouldYield: () => requests.length >= 3 } : {}),
+    });
+    const first = await requireValue(provider.jobExecutor).executeJob(context, toJobRecord(job, 1));
+    const continuation = findResourceJob(first.scheduledJobs ?? [], "body_temperature");
+    const expectedDays = scenario === "empty" ? 16 : 3;
+    assert.equal(requests.length, expectedDays, scenario);
+    assert.equal(continuation.dedupeKey, job.dedupeKey, scenario);
+    assert.equal(continuation.payload?.windowStart,
+      new Date(Date.parse(String(job.payload?.windowStart)) + expectedDays * 86_400_000).toISOString(), scenario);
+    assert.equal(continuation.payload?.windowEnd, job.payload?.windowEnd, scenario);
+    assert.equal(importedSnapshots.length, scenario === "populated" ? 1 : 0, scenario);
+    if (scenario === "populated") {
+      const imported = requireValue(junctionProviderAdapter.parseSnapshot)(importedSnapshots[0]);
+      assert.equal(imported.windowStart, "2026-05-24T00:00:00.000Z");
+      assert.equal(imported.windowEnd, "2026-05-25T00:00:00.000Z");
+    }
+    assertHistoryCoverage(first.metadataPatch, "omron", "body_temperature", false);
+    if (scenario === "empty") {
+      const last = await requireValue(provider.jobExecutor).executeJob(context, toJobRecord(continuation, 2));
+      assert.equal(requests.length, 20);
+      assert.equal(last.scheduledJobs?.length ?? 0, 0);
+      assertHistoryCoverage(last.metadataPatch, "omron", "body_temperature");
+    }
+  }
+});
+
 test("sparse history waits for upstream pull success beyond the empty retry ladder", async () => {
+  const readinessDecisions: string[] = [];
+  const recordHistoricalPullReadiness = (readiness: string): void => {
+    readinessDecisions.push(readiness);
+  };
   const historicalPullState: MutableHistoricalPullState = {
     resource: "caffeine",
     status: "in_progress",
@@ -2838,7 +2886,7 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
     },
   }, 1);
   const pending = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
+    { ...createJobContext(), recordHistoricalPullReadiness },
     exhausted,
   );
   const retry = findResourceJob(pending.scheduledJobs ?? [], "caffeine");
@@ -2846,6 +2894,7 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
   assertHistoryCoverage(pending.metadataPatch, "omron", "caffeine", false);
   assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
   assert.equal(requests.length, 0);
+  assert.deepEqual(readinessDecisions, ["pending"]);
 
   historicalPullState.status = "success";
   timeseriesRecords.push({
@@ -2855,7 +2904,10 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
     value: 0.08,
   });
   const completed = await executeImmediateResourceContinuations({
-    context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    context: {
+      ...createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+      recordHistoricalPullReadiness,
+    },
     job: toJobRecord(retry, 2),
     provider,
     resource: "caffeine",
@@ -2863,6 +2915,7 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
 
   assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine");
   assert.equal(requests.length, 3);
+  assert.equal(readinessDecisions.at(-1), "ready");
 });
 
 test("sparse history completion resolves supported source aliases", async () => {
@@ -3017,7 +3070,7 @@ test("successful upstream pull with no sparse rows completes after one scan", as
     resource: "caffeine",
   });
 
-  assert.equal(completed.executionCount, 2);
+  assert.equal(completed.executionCount, 1);
   assert.equal(requests.length, 2);
   assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine");
 });
@@ -3056,7 +3109,7 @@ test("unavailable upstream status cannot certify zero-row sparse history", async
   });
   const retry = findResourceJob(first.result.scheduledJobs ?? [], "caffeine");
 
-  assert.equal(first.executionCount, 2);
+  assert.equal(first.executionCount, 1);
   assert.equal(requests.length, 2);
   assertHistoryCoverage(first.result.metadataPatch, "omron", "caffeine", false);
   assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
@@ -3315,7 +3368,7 @@ test("not_pulled skips frozen history but catches a queued migration up to curre
       startingIndex: 3,
     });
 
-    assert.equal(completed.executionCount, 34);
+    assert.equal(completed.executionCount, 3);
     assert.equal(requests.length, 34);
     assert.equal(requests[0]?.start, "2026-06-11");
     assert.equal(requests.at(-1)?.end, "2026-07-14");
@@ -4129,14 +4182,12 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
       message: `Temporary hosted device-sync ${boundary} failure.`,
       retryable: true,
     });
-    let sourceStateReads = 0;
     const failed = await requireValue(provider.jobExecutor).executeJob(
       createJobContext({
         ...(boundary === "source-state"
           ? {
               listConnectionSources: async () => {
-                sourceStateReads += 1;
-                if (sourceStateReads <= 3) {
+                if (requests.length === 0) {
                   return [];
                 }
                 throw failure;
@@ -4201,10 +4252,220 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
   }
 });
 
-test("an empty successful segment retries when its post-fetch source reread fails", async () => {
+test.each([false, true])("terminal historical segments retain fresh source checks (records: %s)", async (hasRecords) => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    bloodPressureRecords: hasRecords ? [{
+      id: "bp-source-read-bound",
+      timestamp: "2026-05-12T08:30:00.000Z",
+      systolic: 120,
+      diastolic: 78,
+    }] : [],
+    requests,
+  });
+  const scheduled = createScheduledBloodPressureJob(provider);
+  const source = createSourceSummary("omron");
+  const events: string[] = [];
+  const context = createJobContext({
+    listConnectionSources: async () => {
+      if (requests.length > 0) events.push("sources");
+      return [source];
+    },
+    importSnapshot: async (snapshot) => {
+      events.push("import");
+      return importWithRealJunctionNormalizer(snapshot);
+    },
+  });
+  const result = await requireValue(provider.jobExecutor).executeJob(context, toJobRecord({
+    ...scheduled,
+    payload: {
+      ...scheduled.payload,
+      historicalWindowStart: "2026-05-12T00:00:00.000Z",
+      windowStart: "2026-05-12T00:00:00.000Z",
+      windowEnd: "2026-05-13T00:00:00.000Z",
+    },
+  }, 144));
+
+  assert.deepEqual(events, hasRecords ? ["sources", "import", "sources"] : ["sources"]);
+  assert.equal(requests.filter((request) => request.resource === "blood_pressure").length, 1);
+  assert.equal(result.scheduledJobs?.length ?? 0, hasRecords ? 0 : 1);
+});
+
+test.each([false, true])("intermediate history only reads authority for admission and import (records: %s)", async (hasRecords) => {
+  // Traverse distinct daily continuations rather than replaying a duplicate job.
+  const segmentCount = 128;
+  const records: Record<string, unknown>[] = hasRecords ? [{
+    id: "synthetic-history-reading",
+    timestamp: "2026-05-12T08:30:00.000Z",
+    systolic: 120,
+    diastolic: 78,
+  }] : [];
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ bloodPressureRecords: records, requests });
+  const original = withHistoricalFixtureDays(
+    createScheduledBloodPressureJob(provider),
+    segmentCount + 1,
+  );
+  const source = createSourceSummary("omron");
+  let sourceReads = 0;
+  let imports = 0;
+  let nextJob = original;
+  for (let index = 0; index < segmentCount; index += 1) {
+    const windowStart = String(nextJob.payload?.windowStart);
+    if (hasRecords) {
+      records[0]!.id = `synthetic-history-reading-${index}`;
+      records[0]!.timestamp = `${windowStart.slice(0, 10)}T08:30:00.000Z`;
+    }
+    const result = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({
+        account: createAccount({ sources: [source] }),
+        connectionSourceAdmissionMode: "listed_only",
+        listConnectionSources: async () => {
+          sourceReads += 1;
+          return [source];
+        },
+        importSnapshot: async (snapshot) => {
+          imports += 1;
+          return importWithRealJunctionNormalizer(snapshot);
+        },
+      }),
+      toJobRecord(nextJob, index),
+    );
+    assert.equal(result.metadataPatch, undefined);
+    nextJob = findBloodPressureJob(result.scheduledJobs ?? []);
+    assert.equal(nextJob.dedupeKey, original.dedupeKey);
+    assert.equal(nextJob.payload?.sourceLifecycleEpoch, original.payload?.sourceLifecycleEpoch);
+    assert.equal(nextJob.payload?.historicalWindowStart, original.payload?.historicalWindowStart);
+    assert.equal(nextJob.payload?.windowEnd, original.payload?.windowEnd);
+    assert.equal(nextJob.payload?.windowStart, new Date(
+      Date.parse(windowStart) + 24 * 60 * 60_000,
+    ).toISOString());
+    assert.equal(nextJob.payload?.historicalRecordsSeen, hasRecords);
+  }
+  assert.equal(requests.length, segmentCount);
+  assert.equal(imports, hasRecords ? segmentCount : 0);
+  assert.equal(sourceReads, segmentCount * (hasRecords ? 2 : 1));
+});
+
+test.each(["local", "hosted"] as const)(
+  "%s intermediate continuations survive restart but cannot cross a source fence or reconnect",
+  async (authority) => {
+    for (const hasRecords of [false, true]) {
+      for (const change of ["disconnect", "reconnect"] as const) {
+        const tempDir = await makeTempDirectory("murph-history-source-admission");
+        const databasePath = path.join(tempDir, "state.sqlite");
+        let store = new SqliteDeviceSyncStore(databasePath);
+        try {
+          const account = store.upsertAccount({
+            connectedAt: NOW,
+            credential: {
+              credentialMetadata: {},
+              kind: "provider_config",
+              providerConfigKey: "junction",
+            },
+            externalAccountId: "junction-user-1",
+            provider: "junction",
+            scopes: [],
+            status: "active",
+          });
+          let liveSource = store.upsertConnectionSource({
+            ...createSourceSummary("omron"),
+            connectionId: account.id,
+            sourceInstanceKey: "junction-source-omron",
+          });
+          const changeAuthority = () => {
+            liveSource = {
+              ...liveSource,
+              lifecycleEpoch: change === "reconnect" ? 2 : 1,
+              lastErrorCode: change === "disconnect"
+                ? DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+                : null,
+            };
+            if (authority === "local") store.upsertConnectionSource(liveSource);
+          };
+          const requests: TimeseriesRequest[] = [];
+          let imports = 0;
+          const provider = createProvider({
+            bloodPressureRecords: hasRecords ? [{
+              id: "synthetic-reading-before-source-change",
+              timestamp: "2026-05-12T08:30:00.000Z",
+              systolic: 120,
+              diastolic: 78,
+            }] : [],
+            onTimeseriesResponse: () => {
+              if (!hasRecords) changeAuthority();
+            },
+            requests,
+          });
+          const context = (): ProviderJobContext => ({
+            ...createJobContext({
+              account: {
+                ...createAccount({
+                  sources: requireValue(store.getAccountById(account.id)).sources,
+                }),
+                id: account.id,
+              },
+              connectionSourceAdmissionMode: authority === "hosted"
+                ? "listed_only"
+                : "discover_unlisted",
+              importSnapshot: async (snapshot) => {
+                imports += 1;
+                const receipt = await importWithRealJunctionNormalizer(snapshot);
+                changeAuthority();
+                return receipt;
+              },
+              listConnectionSources: async () => authority === "hosted"
+                ? [liveSource]
+                : store.listConnectionSources({ connectionId: account.id }),
+            }),
+            upsertConnectionSource: (input) => store.upsertConnectionSource({
+              ...input,
+              connectionId: account.id,
+            }, { preserveDisconnected: true }),
+          });
+          const original = createScheduledBloodPressureJob(provider);
+          const first = await requireValue(provider.jobExecutor).executeJob(
+            context(),
+            { ...toJobRecord(original, 0), accountId: account.id },
+          );
+          assert.equal(first.metadataPatch, undefined);
+          const continuation = findBloodPressureJob(first.scheduledJobs ?? []);
+          const queued = store.enqueueJob({
+            ...continuation,
+            accountId: account.id,
+            provider: "junction",
+          });
+          store.close();
+          store = new SqliteDeviceSyncStore(databasePath);
+          const restored = requireValue(store.getJobById(queued.id));
+          assert.deepEqual(restored.payload, continuation.payload);
+          assert.equal(restored.dedupeKey, original.dedupeKey);
+          assert.equal(restored.payload.sourceLifecycleEpoch, 1);
+          const fenced = await requireValue(provider.jobExecutor).executeJob(context(), restored);
+          assert.equal(requests.length, 1);
+          assert.equal(imports, hasRecords ? 1 : 0);
+          assert.equal(fenced.metadataPatch, undefined);
+          assert.equal(fenced.scheduledJobs, undefined);
+          if (authority === "local") {
+            const source = requireValue(store.listConnectionSources({
+              connectionId: account.id,
+            })[0]);
+            assert.equal(source.lastErrorCode, liveSource.lastErrorCode);
+            assert.equal(source.lifecycleEpoch, liveSource.lifecycleEpoch);
+          }
+        } finally {
+          store.close();
+          await rm(tempDir, { force: true, recursive: true });
+        }
+      }
+    }
+  },
+);
+
+test("an empty terminal segment retries when its post-fetch source reread fails", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({ bloodPressureRecords: [], requests });
-  const original = createScheduledBloodPressureJob(provider);
+  const original = withHistoricalFixtureDays(createScheduledBloodPressureJob(provider), 1);
   const failure = deviceSyncError({
     code: "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE",
     httpStatus: 503,
@@ -4218,7 +4479,7 @@ test("an empty successful segment retries when its post-fetch source reread fail
       createJobContext({
         listConnectionSources: async () => {
           sourceStateReads += 1;
-          if (sourceStateReads <= 3) {
+          if (requests.length === 0) {
             return [];
           }
           throw failure;
@@ -4232,7 +4493,7 @@ test("an empty successful segment retries when its post-fetch source reread fail
       && error.retryable === true,
   );
 
-  assert.equal(sourceStateReads, 4);
+  assert.equal(sourceStateReads, 2);
   assert.equal(
     requests.filter((request) => request.resource === "blood_pressure").length,
     1,
@@ -5062,7 +5323,7 @@ test.each(SOURCE_DISCONNECT_FENCE_CODES)(
         id: "bp-disconnected-source",
         provider_connection_id: "provider-omron-1",
         sourceProviderSlug: "omron",
-        timestamp: "2026-05-20T08:30:00.000Z",
+        timestamp: "2026-05-12T08:30:00.000Z",
         systolic: 120,
         diastolic: 78,
       }],
@@ -5870,5 +6131,135 @@ test("prior coverage reopens all 13 resources at the fixed 180-day generation", 
       assert.equal(job.payload?.windowStart, EXTENDED_HISTORY_WINDOW_START);
       assert.equal(job.payload?.windowEnd, BACKFILL_WINDOW_END);
     }
+  }
+});
+
+test("pending weight history imports available records and keeps one retry across day boundaries", async () => {
+  const historicalPullState: MutableHistoricalPullState = { resource: "weight", status: "in_progress" };
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    historicalPullState, requests, timeseriesResources: ["weight"],
+    providerState: { resourceAvailability: { weight: true }, status: "connected" },
+    timeseriesRecords: { weight: [{ id: "weight-history-1", timestamp: "2026-06-09T08:00:00.000Z", value: 70, unit: "kg" }] },
+  });
+  const schedule = requireValue(requireValue(provider.jobExecutor).createScheduledJobs);
+  const sources = [createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true })];
+  const account = createStoredAccount({ sources });
+  const root = findResourceJob(schedule(account, NOW).jobs, "weight");
+  const tomorrow = "2026-06-12T12:00:00.000Z";
+  assert.equal(findResourceJob(schedule(account, tomorrow).jobs, "weight").dedupeKey, root.dedupeKey);
+  assert.equal(schedule(account, tomorrow, { findActiveDedupeKeys: () => new Set([root.dedupeKey!]) })
+    .jobs.some((job) => job.payload?.resource === "weight"), false);
+  const snapshots: unknown[] = [];
+  const initial = withHistoricalFixtureDays(root, 2);
+  const context = createJobContext({ account: createAccount({ sources }), importedSnapshots: snapshots });
+  const pending = await executeImmediateResourceContinuations({
+    context, job: toJobRecord({ ...initial, dedupeKey: "legacy-window-specific-key" }, 1), provider, resource: "weight",
+  });
+  assert.ok(requests.length > 0, "pending completion cannot prevent available historical reads");
+  const normalized = await Promise.all(snapshots.map(importWithRealJunctionNormalizer));
+  assert.equal(normalized.reduce((count, receipt) => count + receipt.canonicalEventCount, 0), 1,
+    "available weight becomes a canonical measurement while history is pending");
+  assertHistoryCoverage(pending.result.metadataPatch, "omron", "weight", false);
+  const retry = findResourceJob(pending.result.scheduledJobs ?? [], "weight");
+  assert.equal(retry.availableAt, tomorrow);
+  assert.equal(retry.dedupeKey, "legacy-window-specific-key", "accepted legacy windows keep their exact continuation owner");
+  historicalPullState.status = "success";
+  const completed = await executeImmediateResourceContinuations({
+    context: createJobContext({ account: createAccount({ sources }), now: tomorrow }), job: toJobRecord(retry, 2), provider, resource: "weight",
+  });
+  assertHistoryCoverage(completed.result.metadataPatch, "omron", "weight");
+});
+
+test("a scan that began while weight history was pending never certifies coverage after upstream finishes mid-scan", async () => {
+  const historicalPullState: MutableHistoricalPullState = { resource: "weight", status: "in_progress" };
+  const requests: TimeseriesRequest[] = [];
+  const weightRecords: Record<string, unknown>[] = [];
+  const provider = createProvider({
+    historicalPullState, requests, timeseriesResources: ["weight"],
+    providerState: { resourceAvailability: { weight: true }, status: "connected" },
+    timeseriesRecords: { weight: weightRecords },
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const sources = [createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true })];
+  const root = withHistoricalFixtureDays(
+    findResourceJob(requireValue(executor.createScheduledJobs)(createStoredAccount({ sources }), NOW).jobs, "weight"), 31,
+  );
+  const historicalWindowStart = root.payload?.historicalWindowStart;
+  assert.equal(typeof historicalWindowStart, "string");
+  const lateReadingAt = new Date(Date.parse(historicalWindowStart as string) + 60 * 60 * 1_000).toISOString();
+  const scan = async (input: {
+    afterFirstYield?: () => void; now: string; start: DeviceSyncJobInput; startingIndex: number;
+  }) => {
+    const snapshots: unknown[] = [];
+    const context = createJobContext({ account: createAccount({ sources }), importedSnapshots: snapshots, now: input.now });
+    const continuationFlags: unknown[] = [];
+    let job = toJobRecord(input.start, input.startingIndex);
+    let index = input.startingIndex + 1;
+    for (;;) {
+      const result = await executor.executeJob(context, job);
+      const continuation = (result.scheduledJobs ?? []).find((scheduled) =>
+        scheduled.kind === "resource" && scheduled.payload?.resource === "weight");
+      if (!continuation || (continuation.availableAt && continuation.availableAt !== context.now)) {
+        const normalized = await Promise.all(snapshots.map(importWithRealJunctionNormalizer));
+        return {
+          continuationFlags,
+          imported: normalized.reduce((count, receipt) => count + receipt.canonicalEventCount, 0),
+          result,
+        };
+      }
+      continuationFlags.push(continuation.payload?.historicalPullPending);
+      if (continuationFlags.length === 1) {
+        assert.ok(String(continuation.payload?.windowStart) > lateReadingAt, "the first window was already scanned");
+        input.afterFirstYield?.();
+      }
+      job = toJobRecord(continuation, index);
+      index += 1;
+    }
+  };
+  const pending = await scan({
+    afterFirstYield: () => {
+      // Upstream populates a day this scan already read, then finishes.
+      weightRecords.push({ id: "weight-late", timestamp: lateReadingAt, value: 70, unit: "kg" });
+      historicalPullState.status = "success";
+    },
+    now: NOW, start: root, startingIndex: 1,
+  });
+  assert.ok(pending.continuationFlags.length > 0 && pending.continuationFlags.every((flag) => flag === true),
+    "every continuation carries the pending start");
+  assert.equal(pending.imported, 0, "the late reading was not visible to the scan that began pending");
+  assertHistoryCoverage(pending.result.metadataPatch, "omron", "weight", false,
+    "a scan that began pending cannot certify coverage once upstream finishes");
+  const retry = findResourceJob(pending.result.scheduledJobs ?? [], "weight");
+  const tomorrow = "2026-06-12T12:00:00.000Z";
+  assert.equal(retry.availableAt, tomorrow);
+  assert.equal(retry.payload?.windowStart, historicalWindowStart, "the daily continuation restarts from the history start");
+  assert.equal(retry.dedupeKey, root.dedupeKey);
+  const ready = await scan({ now: tomorrow, start: retry, startingIndex: 100 });
+  assert.ok(ready.continuationFlags.every((flag) => flag === undefined), "a scan that starts ready clears the pending start");
+  assert.equal(ready.imported, 1, "the next ready scan imports the late reading");
+  assertHistoryCoverage(ready.result.metadataPatch, "omron", "weight");
+});
+
+
+test("a complete 180-day weight scan uses six bounded windows without dropping history", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ requests, timeseriesResources: ["weight"],
+    historicalPullState: { resource: "weight", status: "in_progress" },
+    providerState: { resourceAvailability: { weight: true }, status: "connected" },
+  });
+  const root = createScheduledResourceJob(provider, "weight");
+  await executeImmediateResourceContinuations({
+    context: createJobContext({ account: createAccount({ sources: [
+      createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true }),
+    ] }) }), job: toJobRecord(root, 1), provider, resource: "weight",
+  });
+  const windows = requests.filter((request) => request.resource === "body_weight");
+  assert.equal(windows.length, 6);
+  assert.equal(windows[0]?.start, root.payload?.windowStart);
+  assert.equal(windows.at(-1)?.end, root.payload?.windowEnd);
+  for (const [index, window] of windows.entries()) {
+    assert.ok(Date.parse(window.end!) - Date.parse(window.start!) <= 30 * 86_400_000);
+    if (index > 0) assert.equal(window.start, windows[index - 1]?.end);
   }
 });

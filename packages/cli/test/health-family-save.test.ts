@@ -275,7 +275,9 @@ test("family save requires a typed relationship field", async () => {
     assert.equal(result.exitCode, 1);
     assert.equal(result.envelope.ok, false);
     if (!result.envelope.ok) {
-      assert.match(result.envelope.error.message ?? "", /relationship/u);
+      assert.equal(result.envelope.error.message, "The command input is invalid.");
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "relationship");
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.received, "missing");
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -306,10 +308,9 @@ test("family save rejects invalid related variant ids before writing", async () 
     assert.notEqual(result.exitCode, null);
     assert.equal(result.envelope.ok, false);
     if (!result.envelope.ok) {
-      assert.match(
-        result.envelope.error.message ?? "",
-        /genetic variant id matching var_<ULID>/u,
-      );
+      assert.equal(result.envelope.error.message, "The command input is invalid.");
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "relatedVariantId");
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.received, "invalid");
     }
     assert.deepEqual(await listMarkdownFiles(path.join(vaultRoot, "bank/family")), []);
   } finally {

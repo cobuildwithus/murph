@@ -9,7 +9,7 @@ import {
   nearFlatThresholdForUnit,
   type BrowserVaultMetricRowWithValue,
 } from "../src/lib/browser-vault/trend-comparison";
-import { resolveHealthCommonsBiomarkerDetail } from "../src/lib/health-commons/biomarker-detail";
+import { resolveHealthCommonsBiomarkerOverview } from "../src/lib/health-commons/biomarker-projections";
 
 test("formatTrendDeltaUnit returns percentage points for percentage units", () => {
   assert.equal(formatTrendDeltaUnit("%"), "percentage points");
@@ -27,7 +27,7 @@ test("nearFlatThresholdForUnit returns unit-specific thresholds", () => {
 });
 
 test("buildTrendComparison treats SpO₂ percent change inside threshold as flat", () => {
-  const biomarker = resolveHealthCommonsBiomarkerDetail("blood-oxygen-spo2");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("blood-oxygen-spo2");
   assert.ok(biomarker);
 
   const comparison = buildTrendComparison(
@@ -48,7 +48,7 @@ test("buildTrendComparison treats SpO₂ percent change inside threshold as flat
 });
 
 test("buildTrendComparison classifies percent deltas from raw value, not rounded display", () => {
-  const biomarker = resolveHealthCommonsBiomarkerDetail("blood-oxygen-spo2");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("blood-oxygen-spo2");
   assert.ok(biomarker);
 
   // raw delta of 0.54% rounds to 0.5 but the threshold check uses raw value (>0.5)
@@ -70,7 +70,7 @@ test("buildTrendComparison classifies percent deltas from raw value, not rounded
 });
 
 test("buildTrendComparison treats modest VO₂max change as flat", () => {
-  const biomarker = resolveHealthCommonsBiomarkerDetail("estimated-vo2max");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("estimated-vo2max");
   assert.ok(biomarker);
 
   const comparison = buildTrendComparison(
@@ -91,7 +91,7 @@ test("buildTrendComparison treats modest VO₂max change as flat", () => {
 });
 
 test("buildTrendComparison treats 1-minute deep-sleep delta as flat", () => {
-  const biomarker = resolveHealthCommonsBiomarkerDetail("deep-sleep-minutes");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("deep-sleep-minutes");
   assert.ok(biomarker);
 
   const comparison = buildTrendComparison(

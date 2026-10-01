@@ -23,6 +23,10 @@
       "types": "./dist/assistant-ask.d.ts",
       "default": "./dist/assistant-ask.js"
     },
+    "./clinical-document-extraction": {
+      "types": "./dist/clinical-document-extraction.d.ts",
+      "default": "./dist/clinical-document-extraction.js"
+    },
     "./assistant-codex": {
       "types": "./dist/assistant-codex.d.ts",
       "default": "./dist/assistant-codex.js"
@@ -106,12 +110,13 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json && node dist/assistant/generate-cli-surface-contract.js",
+    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json",
     "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
@@ -129,7 +134,11 @@
     "node": ">=24.14.1"
   },
   "devDependencies": {
-    "@openai/codex": "0.147.0",
+    "@openai/codex": "0.159.1",
+    "@types/ws": "8.18.1",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "ws": "8.21.0",
     "zod": "^4.4.3"
   }
 }

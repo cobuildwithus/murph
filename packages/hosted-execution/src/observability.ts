@@ -49,7 +49,9 @@ const HOSTED_EXECUTION_MAX_DIAGNOSTIC_MESSAGE_LENGTH = 320;
 const HOSTED_EXECUTION_MAX_STACK_PREVIEW_LINES = 3;
 const HOSTED_EXECUTION_MAX_DETAIL_ARRAY_LENGTH = 32;
 const HOSTED_EXECUTION_MAX_DETAIL_DEPTH = 4;
-const HOSTED_EXECUTION_MAX_DETAIL_KEYS = 32;
+// Responses relay observations include completion and close fields after the
+// timing counters. Keep the complete bounded record while retaining redaction.
+const HOSTED_EXECUTION_MAX_DETAIL_KEYS = 64;
 const HOSTED_EXECUTION_MAX_ERROR_PROPERTY_SCAN_DEPTH = 3;
 const HOSTED_EXECUTION_SAFE_CONFIGURATION_MESSAGE_PATTERNS = [
   /^(?:[A-Z][A-Z0-9_]{1,127}|CF_[A-Z0-9_]{1,127}|HOSTED_[A-Z0-9_]{1,127}|DEVICE_SYNC_[A-Z0-9_]{1,127})\s+(?:must be|is)\s+configured(?:\s+for [A-Za-z0-9 ._/-]+)?\.?$/u,
@@ -160,6 +162,25 @@ export type HostedExecutionStructuredLogDetailValue =
 export type HostedExecutionStructuredLogDetails = {
   [key: string]: HostedExecutionStructuredLogDetailValue;
 };
+
+export const HOSTED_ASSISTANT_NOTIFICATION_VALIDATION_FAILURE_REASONS = [
+  "decision_json_unparseable",
+  "decision_schema_invalid",
+  "runtime_presentation_non_send_decision",
+  "creative_response_media_invalid",
+] as const;
+
+export type HostedAssistantNotificationValidationFailureReason =
+  (typeof HOSTED_ASSISTANT_NOTIFICATION_VALIDATION_FAILURE_REASONS)[number];
+
+export function isHostedAssistantNotificationValidationFailureReason(
+  value: unknown,
+): value is HostedAssistantNotificationValidationFailureReason {
+  return typeof value === "string"
+    && HOSTED_ASSISTANT_NOTIFICATION_VALIDATION_FAILURE_REASONS.some(
+      (reason) => reason === value,
+    );
+}
 
 const HOSTED_ASSISTANT_NOTIFICATION_STRING_DETAIL_KEYS = [
   "assistantNotificationChannel",
@@ -575,15 +596,24 @@ export function extractHostedAssistantNotificationRedactedDetails(
     return null;
   }
 
+  const contextDetails = sanitizeHostedExecutionStructuredLogDetails(
+    readHostedExecutionObjectErrorProperty(error, ["context"]),
+  );
   const mergedDetails = mergeHostedExecutionStructuredLogDetails(
-    sanitizeHostedExecutionStructuredLogDetails(
-      readHostedExecutionObjectErrorProperty(error, ["context"]),
-    ),
+    contextDetails,
     sanitizeHostedExecutionStructuredLogDetails(
       readHostedExecutionObjectErrorProperty(error, ["details"]),
     ),
   );
   const details: HostedExecutionStructuredLogDetails = {};
+
+  const validationFailureReason =
+    contextDetails?.assistantNotificationValidationFailureReason;
+  if (
+    isHostedAssistantNotificationValidationFailureReason(validationFailureReason)
+  ) {
+    details.assistantNotificationValidationFailureReason = validationFailureReason;
+  }
 
   for (const key of HOSTED_ASSISTANT_NOTIFICATION_STRING_DETAIL_KEYS) {
     const value = mergedDetails?.[key];

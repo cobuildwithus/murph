@@ -46,6 +46,25 @@ export function filterConnectSourcesForSearch(
   );
 }
 
+export function resolveConnectSourceIdFromHash(
+  hash: string | undefined,
+  sources: readonly Pick<ConnectSource, "id">[],
+): string | null {
+  const sourceId = hash?.startsWith("#") ? hash.slice(1) : (hash ?? "");
+
+  return sources.some((source) => source.id === sourceId) ? sourceId : null;
+}
+
+export function stripConnectSourceHash() {
+  if (typeof window === "undefined" || typeof window.location.href !== "string") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.hash = "";
+  window.history?.replaceState?.(window.history.state, "", url.toString());
+}
+
 export function isHostedDeviceConnectIntentUnavailableError(
   error: unknown,
 ): error is HostedOnboardingApiError {
@@ -193,6 +212,14 @@ export function createConnectCallbackNotice(
       kind: "success",
       title: "Device connected",
       message: `Connected ${sourceLabel}.`,
+    };
+  }
+
+  if (input.errorCode === "CALLBACK_PROOF_INVALID") {
+    return {
+      kind: "info",
+      title: "Check your connections",
+      message: "This return link can’t be used. Your current connections are shown below. If a device still needs connecting, start from its card.",
     };
   }
 
@@ -364,8 +391,6 @@ function describeDeviceSyncCallbackError(providerLabel: string, errorCode: strin
       return `${providerLabel} was not connected this time. You can try again whenever you're ready.`;
     case "OAUTH_STATE_INVALID":
       return `${providerLabel} gave us an expired or invalid return from the last attempt. Start a fresh connection and try again.`;
-    case "CALLBACK_PROOF_INVALID":
-      return `That return link did not match the browser you started in, so nothing was connected. Start ${providerLabel} again from this page.`;
     case "CALLBACK_SESSION_REQUIRED":
       return `You were signed out before ${providerLabel} finished connecting. Log in, then start the connection again.`;
     default:

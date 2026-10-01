@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+<!-- SVG created with Arrow, by QuiverAI (https://quiver.ai) -->
+  <style type="text/css">.cls-0 {fill:#FEF8EC;}
+.cls-1 {fill:#EAE4D3;}
+.cls-2 {fill:none;stroke:#0B4C3A;stroke-width:0.7742478097622028;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.cls-3 {fill:#8AAF97;}
+.cls-4 {fill:none;stroke:#0B4C3A;stroke-width:1.0413016270337923;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.cls-5 {fill:#FCF6EA;}
+.cls-6 {fill:#CD7450;}
+.cls-7 {fill:none;stroke:#0B4C3A;stroke-width:0.7742478097622028;stroke-miterlimit:10;}
+.cls-8 {fill:#EAF5ED;}
+.cls-9 {fill:none;stroke:#0B4C3A;stroke-width:0.5687909887359198;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.cls-10 {fill:#C5DDC4;}
+.cls-11 {fill:none;stroke:#0B4C3A;stroke-width:0.5189687108886107;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.cls-12 {fill:none;stroke:#8BAF98;stroke-width:0.645767209011264;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}</style>
+  <path class="cls-1" d="m107 91.75-8.891-10.65h-66.88l-9.212 10.41v22.43h84.91v-22.19z"/>
+  <path class="cls-2" d="m107 113.9v-22.19l-8.891-10.65h-66.88l-9.212 10.65v22.19" stroke-width=".7742"/>
+  <path class="cls-3" d="m5.767 30.32v51.82c-0.0801 0.7209 0.3204 0.9612 0.6408 1.121l4.165 1.762 0.3204-0.0801 0.0801-53.27 0.3204-0.3204 47.18-15.46-4.486-1.842-47.18 15.54-1.041 0.7209z"/>
+  <path class="cls-4" d="m58.55 15.82-4.406-1.762-47.34 15.54-0.8811 0.4806-0.1602 0.4806v51.58c0 0.7209 0.3204 0.801 0.6408 0.9612l3.845 1.842c0.4806 0.1602 0.4806 0.0801 0.4806-0.3204l0.0801-52.55 0.1602-0.7209 47.58-15.54z" stroke-width="1.041"/>
+  <path class="cls-4" d="m6.168 29.92 4.566 1.602" stroke-width="1.041"/>
+  <path class="cls-4" d="m58.63 15.82 0.0801 26.75" stroke-width="1.041"/>
+  <path class="cls-5" d="m37.25 50.02c-0.1602 5.046-1.682 30.28-1.682 30.92 0 2.403 2.563 4.886 8.17 5.687 2.964 0.4005 6.809 0.5607 6.809 0.5607h15.46c2.563 0 21.79 0.7209 22.51-1.362l1.522-1.121-0.7209-34.68h-52.07z"/>
+  <path class="cls-3" d="m37.33 50.02c-0.0801-0.6408-0.0801-7.449 0-8.09 0.2403-0.8811 0.8811-1.041 1.202-0.9612 4.806 0.4806 12.9 1.442 21.87 1.602 8.571 0.1602 23.63-1.442 27.39-1.682 0.801-0.0801 1.362 0.4806 1.442 1.041v8.01c-4.566 0.4806-15.14 1.842-26.51 2.003-7.529 0.0801-19.78-1.121-25.39-1.922z"/>
+  <path class="cls-6" d="m57.67 52.03v4.245l11.13-0.0801v-4.245l-11.13 0.0801z"/>
+  <path class="cls-7" d="m37.25 50.02c-0.1602 5.046-1.682 30.28-1.682 30.92 0 2.403 2.563 4.886 8.17 5.687 2.964 0.4005 6.809 0.5607 6.809 0.5607h15.46c2.563 0 21.79 0.5607 22.51-1.362l1.522-1.121-0.801-34.68" stroke-width=".7742"/>
+  <path class="cls-7" d="m37.33 50.02c-0.1602-0.6408-0.0801-6.969-0.0801-7.77s0.6408-1.362 1.282-1.282c4.806 0.4806 12.9 1.442 21.87 1.602 8.571 0.1602 23.63-1.282 27.39-1.682 0.8811-0.0801 1.362 0.4806 1.362 1.282v7.529c-4.566 0.4806-15.06 2.083-26.43 2.243-7.529 0.0801-19.78-1.121-25.39-1.922z" stroke-width=".7742"/>
+  <path class="cls-7" d="m57.67 52.03v4.245c0 0.2403 6.328-0.0801 10.97 0 0.1602 0 0.1602-0.0801 0.1602-0.1602v-4.085" stroke-width=".7742"/>
+  <path class="cls-4" d="m6.328 114.3h116.2" stroke-width="1.041"/>
+  <path class="cls-8" d="m86.91 71.41 1.522 16.02c0.3204 1.842 8.891 2.243 9.051 0.2403l1.522-16.26h-12.1z"/>
+  <path class="cls-9" d="m86.83 71.41 1.602 16.1c0.3204 1.922 8.891 2.163 9.051 0.1602l1.522-16.26h-12.18z" stroke-width=".5688"/>
+  <path class="cls-8" d="m99 71.41c0 1.762-12.18 2.243-12.18 0 0-1.762 12.18-2.243 12.18 0z"/>
+  <path class="cls-9" d="m99 71.41c0 1.762-12.18 2.243-12.18 0 0-1.762 12.18-2.243 12.18 0z" stroke-width=".5688"/>
+  <path class="cls-10" d="m88.43 77.74 0.801 9.131c0.2403 1.202 7.289 1.522 7.369 0.1602l0.8811-9.292h-9.051z"/>
+  <path class="cls-10" d="m97.48 77.74c0 1.282-9.051 1.602-9.051 0 0-1.282 9.051-1.602 9.051 0z"/>
+  <path class="cls-11" d="m88.59 77.74c1.202 1.282 8.17 1.282 8.811 0.0801" stroke-width=".519"/>
+  <path class="cls-12" d="m32.04 91.75h65.12" stroke-width=".6458"/>
+</svg>

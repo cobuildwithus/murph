@@ -15,7 +15,6 @@ describe("runner bundle package closure", () => {
       "@murphai/assistant-cli",
       "@murphai/assistant-engine",
       "@murphai/assistant-runtime",
-      "@murphai/assistantd",
       "@murphai/clinical-records",
       "@murphai/cloudflare-hosted-control",
       "@murphai/contracts",
@@ -48,7 +47,6 @@ describe("runner bundle package closure", () => {
       "@murphai/assistant-cli",
       "@murphai/assistant-engine",
       "@murphai/assistant-runtime",
-      "@murphai/assistantd",
       "@murphai/clinical-records",
       "@murphai/cloudflare-hosted-control",
       "@murphai/contracts",
@@ -73,12 +71,15 @@ describe("runner bundle package closure", () => {
     ]);
   });
 
-  it("can still resolve an explicit reduced bundle closure without the bundled murph shell", () => {
-    expect(
-      resolveHostedRunnerWorkspacePackageNames({
-        includeBundleOnlyDependencies: false,
-      }),
-    ).toEqual([
+  it("keeps the built CLI as an assembly-only input for the reduced runtime closure", () => {
+    const reducedWorkspacePackageNames = resolveHostedRunnerWorkspacePackageNames({
+      includeBundleOnlyDependencies: false,
+    });
+    const reducedBuildPackageNames = resolveHostedRunnerBuildPackageNames({
+      includeBundleOnlyDependencies: false,
+    });
+
+    expect(reducedWorkspacePackageNames).toEqual([
       "@murphai/assistant-engine",
       "@murphai/assistant-runtime",
       "@murphai/clinical-records",
@@ -100,14 +101,10 @@ describe("runner bundle package closure", () => {
       "@murphai/runtime-state",
       "@murphai/vault-usecases",
     ]);
-    expect(
-      resolveHostedRunnerBuildPackageNames({
-        includeBundleOnlyDependencies: false,
-      }),
-    ).toEqual(
-      resolveHostedRunnerWorkspacePackageNames({
-        includeBundleOnlyDependencies: false,
-      }),
-    );
+    expect(reducedWorkspacePackageNames).not.toContain("@murphai/murph");
+    expect(reducedBuildPackageNames).toEqual(hostedRunnerBuildPackageNames);
+    expect(reducedBuildPackageNames).toContain("@murphai/murph");
+    expect(reducedBuildPackageNames).toContain("@murphai/assistant-cli");
+    expect(reducedBuildPackageNames).toContain("@murphai/setup-cli");
   });
 });

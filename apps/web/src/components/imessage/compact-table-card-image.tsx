@@ -32,6 +32,8 @@ const FOOTER_FONT_SIZE = 49;
 const CAPTION_2_FONT_SIZE = 41;
 const CAPTION_FONT_SIZE = 45;
 const SUBHEADLINE_FONT_SIZE = 56;
+const GENERIC_GRID_FONT_SIZE = 48;
+const GENERIC_GRID_GAP = 24;
 const GENERIC_ROW_LABEL_WIDTH = CARD_CONTENT_WIDTH * 0.38;
 const GENERIC_VALUES_WIDTH = CARD_CONTENT_WIDTH * 0.62;
 const INTRINSIC_TRACK_SAFETY_PADDING = 4;
@@ -391,8 +393,6 @@ function GenericTableSnapshot({
     return <GenericStackedRows card={card} header={header} rows={rows} />;
   }
 
-  const valueFontSize = SUBHEADLINE_FONT_SIZE;
-
   return (
     <div
       data-compact-table-layout="grid"
@@ -407,7 +407,7 @@ function GenericTableSnapshot({
           display: "flex",
           height: header?.height ?? 66,
           alignItems: "center",
-          gap: 38,
+          gap: GENERIC_GRID_GAP,
           color: IMESSAGE_CARD_COLOR.secondary,
           fontSize: CAPTION_2_FONT_SIZE,
           fontWeight: 600,
@@ -452,7 +452,7 @@ function GenericTableSnapshot({
             display: "flex",
             height: rows[rowIndex]?.height ?? 93,
             alignItems: "center",
-            gap: 38,
+            gap: GENERIC_GRID_GAP,
             borderTop: `2px solid ${IMESSAGE_CARD_COLOR.divider}`,
           }}
         >
@@ -461,7 +461,7 @@ function GenericTableSnapshot({
               display: "flex",
               width: header?.rowHeaderWidth ?? GENERIC_ROW_LABEL_WIDTH,
               flexShrink: 0,
-              fontSize: SUBHEADLINE_FONT_SIZE,
+              fontSize: GENERIC_GRID_FONT_SIZE,
               fontWeight: 600,
               lineHeight: 1.15,
               whiteSpace: "pre-wrap",
@@ -479,7 +479,7 @@ function GenericTableSnapshot({
                   / card.columns.length,
                 flexShrink: 0,
                 justifyContent: "flex-end",
-                fontSize: valueFontSize,
+                fontSize: GENERIC_GRID_FONT_SIZE,
                 fontVariantNumeric: "tabular-nums",
                 lineHeight: 1.15,
                 textAlign: "right",
@@ -678,7 +678,9 @@ function getCompactTableCardImageLayout(
       genericMode === "grid"
         ? gridWidths.rowHeaderWidth
         : CARD_CONTENT_WIDTH,
-      SUBHEADLINE_FONT_SIZE,
+      genericMode === "grid"
+        ? GENERIC_GRID_FONT_SIZE
+        : SUBHEADLINE_FONT_SIZE,
       600,
     );
     const values = row.values.map((value, index) =>
@@ -687,14 +689,16 @@ function getCompactTableCardImageLayout(
         genericMode === "grid"
           ? gridWidths.columnWidths[index] ?? valueWidth
           : CARD_CONTENT_WIDTH,
-        SUBHEADLINE_FONT_SIZE,
+        genericMode === "grid"
+          ? GENERIC_GRID_FONT_SIZE
+          : SUBHEADLINE_FONT_SIZE,
       )
     );
     const textHeight = genericMode === "grid"
       ? Math.max(
-        label.lineCount * SUBHEADLINE_FONT_SIZE * 1.15,
+        label.lineCount * GENERIC_GRID_FONT_SIZE * 1.15,
         ...values.map((value) =>
-          value.lineCount * SUBHEADLINE_FONT_SIZE * 1.15
+          value.lineCount * GENERIC_GRID_FONT_SIZE * 1.15
         ),
       )
       : label.lineCount * SUBHEADLINE_FONT_SIZE * 1.15
@@ -790,7 +794,7 @@ function getCompactTableGridWidths(
         0.07,
       ),
       ...card.rows.map((row) =>
-        measureDmSans600Text(row.label, SUBHEADLINE_FONT_SIZE)
+        measureDmSans600Text(row.label, GENERIC_GRID_FONT_SIZE)
       ),
     ),
   ) + INTRINSIC_TRACK_SAFETY_PADDING;
@@ -805,13 +809,13 @@ function getCompactTableGridWidths(
         ...card.rows.map((row) =>
           measureDmSans400Text(
             row.values[index] ?? "",
-            SUBHEADLINE_FONT_SIZE,
+            GENERIC_GRID_FONT_SIZE,
           )
         ),
       ),
     ) + INTRINSIC_TRACK_SAFETY_PADDING
   );
-  const horizontalSpacing = card.columns.length * 38;
+  const horizontalSpacing = card.columns.length * GENERIC_GRID_GAP;
   return {
     columnWidths,
     rowHeaderWidth,

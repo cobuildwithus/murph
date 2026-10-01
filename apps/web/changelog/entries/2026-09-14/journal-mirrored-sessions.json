@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-14",
+  "order": 100,
+  "item": {
+    "id": "journal-mirrored-sessions",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "One session across connected sources",
+    "summary": "Journal counts matching workout copies once and combines matching sleep records from connected sources.",
+    "details": "Contributing sources stay visible. Separate sessions and conflicting records remain separate.",
+    "relevanceTags": [
+      "journal",
+      "devices"
+    ],
+    "sourcePullRequests": [
+      3464
+    ]
+  }
+}
