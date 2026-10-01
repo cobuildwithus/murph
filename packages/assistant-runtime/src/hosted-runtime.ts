@@ -8880,6 +8880,49 @@ function createAbortGuardedClinicalDocumentFetcher(
   return (fetchInput, options) => guard(() => fetchDocument(fetchInput, options));
 }
 
+function createAbortGuardedDeviceSyncPort(
+  port: NonNullable<HostedRuntimePlatform["deviceSyncPort"]>,
+  guard: <T>(run: () => Promise<T>) => Promise<T>,
+): NonNullable<HostedRuntimePlatform["deviceSyncPort"]> {
+  return {
+    ...(port.haptic ? {
+      haptic: (hapticInput) => guard(() => port.haptic!(hapticInput)),
+    } : {}),
+    ackDirtyStateProcessed: (ackInput) =>
+      guard(() => port.ackDirtyStateProcessed(ackInput)),
+    applyUpdates: (applyInput) =>
+      guard(() => port.applyUpdates(applyInput)),
+    createConnectLink: (connectInput) =>
+      guard(() => port.createConnectLink(connectInput)),
+    ...(port.configureNoDataOutreach
+      ? {
+          configureNoDataOutreach: (configureInput) =>
+            guard(() =>
+              port.configureNoDataOutreach!(configureInput)
+            ),
+        }
+      : {}),
+    ...(port.completeFitbitMigration
+      ? {
+          completeFitbitMigration: (cutoverInput) =>
+            guard(() =>
+              port.completeFitbitMigration!(cutoverInput)
+            ),
+        }
+      : {}),
+    ...(port.reconcileAccount
+      ? {
+          reconcileAccount: (reconcileInput) =>
+            guard(() => port.reconcileAccount!(reconcileInput)),
+        }
+      : {}),
+    fetchDirtyStates: (dirtyInput) =>
+      guard(() => port.fetchDirtyStates(dirtyInput)),
+    fetchSnapshot: (snapshotInput) =>
+      guard(() => port.fetchSnapshot(snapshotInput)),
+  };
+}
+
 function createAbortGuardedHostedRuntimePlatform(
   platform: HostedRuntimePlatform,
   assertLive: () => void,
@@ -8916,44 +8959,9 @@ function createAbortGuardedHostedRuntimePlatform(
           },
         }
       : {}),
-    ...(platform.deviceSyncPort
-      ? {
-          deviceSyncPort: {
-            ackDirtyStateProcessed: (ackInput) =>
-              guard(() => platform.deviceSyncPort!.ackDirtyStateProcessed(ackInput)),
-            applyUpdates: (applyInput) =>
-              guard(() => platform.deviceSyncPort!.applyUpdates(applyInput)),
-            createConnectLink: (connectInput) =>
-              guard(() => platform.deviceSyncPort!.createConnectLink(connectInput)),
-            ...(platform.deviceSyncPort.configureNoDataOutreach
-              ? {
-                  configureNoDataOutreach: (configureInput) =>
-                    guard(() =>
-                      platform.deviceSyncPort!.configureNoDataOutreach!(configureInput)
-                    ),
-                }
-              : {}),
-            ...(platform.deviceSyncPort.completeFitbitMigration
-              ? {
-                  completeFitbitMigration: (cutoverInput) =>
-                    guard(() =>
-                      platform.deviceSyncPort!.completeFitbitMigration!(cutoverInput)
-                    ),
-                }
-              : {}),
-            ...(platform.deviceSyncPort.reconcileAccount
-              ? {
-                  reconcileAccount: (reconcileInput) =>
-                    guard(() => platform.deviceSyncPort!.reconcileAccount!(reconcileInput)),
-                }
-              : {}),
-            fetchDirtyStates: (dirtyInput) =>
-              guard(() => platform.deviceSyncPort!.fetchDirtyStates(dirtyInput)),
-            fetchSnapshot: (snapshotInput) =>
-              guard(() => platform.deviceSyncPort!.fetchSnapshot(snapshotInput)),
-          },
-        }
-      : {}),
+    ...(platform.deviceSyncPort ? {
+      deviceSyncPort: createAbortGuardedDeviceSyncPort(platform.deviceSyncPort, guard),
+    } : {}),
     ...(platform.clinicalRecordsPort
       ? {
           clinicalRecordsPort: {

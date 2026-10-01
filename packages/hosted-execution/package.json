@@ -197,6 +197,10 @@
     "./conversation-polls": {
       "types": "./dist/conversation-polls.d.ts",
       "default": "./dist/conversation-polls.js"
+    },
+    "./wearable-haptics": {
+      "types": "./dist/wearable-haptics.d.ts",
+      "default": "./dist/wearable-haptics.js"
     }
   },
   "files": [

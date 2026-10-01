@@ -1,5 +1,7 @@
 # Murph Agent Docs Index
 
+Companion wrist command contracts and delivery limits: [wearable haptics](references/wearable-haptics.md).
+
 Runtime ownership response timing is tracked in
 [the response plan](exec-plans/completed/2026-09-23-runtime-owner-response.md);
 its durable contract remains in the hosted Postgres runtime reference.

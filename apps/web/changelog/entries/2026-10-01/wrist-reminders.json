@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-01",
+  "order": 100,
+  "item": {
+    "id": "wrist-reminders",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Wrist reminders through the iPhone app",
+    "summary": "Request a wrist reminder now or schedule one through Murph after connecting a compatible band in Wrist reminders.",
+    "details": "The experimental connection supports WHOOP 5/MG and Garmin Find Device commands. Keep Murph open with the band connected when the reminder is due. Garmin may also make a sound; device compatibility is still being verified.",
+    "relevanceTags": [
+      "reminders",
+      "wearables"
+    ],
+    "sourcePullRequests": []
+  }
+}

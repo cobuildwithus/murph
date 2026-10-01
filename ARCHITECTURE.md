@@ -5299,3 +5299,14 @@ Existing provider admission still applies when member capacity is exhausted.
 Deploy the additive database migration and Web accounting before the runtime
 producer; mixed older runtimes do not carry the funding identity. This is a
 forward fix, not historical usage reclassification.
+
+
+### Companion wrist commands
+
+The existing device tool carries a closed `haptic` operation for WHOOP and Garmin.
+Runtime-owned private/scheduled authority reaches a signed Web callback; bearer
+companion polling claims expiring commands before Bluetooth execution. The
+runtime scheduler owns delays. Session leases and durable duplicate-effect
+receipts stay in Web/Postgres; Bluetooth/vendor framing stays in the iOS app.
+See [wearable haptics](agent-docs/references/wearable-haptics.md) for the contract,
+query bounds, receipt semantics, foreground limit and rollout order.
