@@ -44,6 +44,7 @@ interface BrowserConfig {
   source: WearableSource;
   startUrl: string;
   timeoutMs: number;
+  dataTimeoutMs: number;
   webBaseUrl: string;
   webOrigin: string;
 }
@@ -205,7 +206,7 @@ async function main(): Promise<void> {
       await waitForCanonicalDataCheck({
         input: process.stdin,
         onReady: () => process.stdout.write("MURPH_E2E_GARMIN_CONNECTED=1\n"),
-        timeoutMs: config.timeoutMs + 30_000,
+        timeoutMs: config.dataTimeoutMs + 30_000,
       });
     }
 
@@ -306,7 +307,8 @@ async function openBrowserSession(config: BrowserConfig): Promise<BrowserSession
     headless: config.headless,
     profileName: kernelProfile,
     saveChanges: true,
-    timeoutSeconds: Math.ceil((config.timeoutMs + 60_000) / 1_000),
+    timeoutSeconds: Math.ceil((config.timeoutMs
+      + (config.awaitCanonicalData ? config.dataTimeoutMs + 60_000 : 0) + 60_000) / 1_000),
   });
   let kernelTunnel: OwnedKernelTunnel | null = null;
 
@@ -1361,6 +1363,14 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       environment,
       key: "MURPH_E2E_PROVIDER_TIMEOUT_MS",
       maximumMs: 600_000,
+      minimumMs: 30_000,
+      runnerName: RUNNER_NAME,
+    }),
+    dataTimeoutMs: readHostedLocalBrowserTimeout({
+      defaultMs: 420_000,
+      environment,
+      key: "MURPH_E2E_GARMIN_DATA_TIMEOUT_MS",
+      maximumMs: 1_800_000,
       minimumMs: 30_000,
       runnerName: RUNNER_NAME,
     }),

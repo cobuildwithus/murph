@@ -23,7 +23,9 @@ Native email canary work continues separately in its existing PRs.
 - [x] Reject empty-data success in the private receipt consumer.
 - [x] Verify the original receipt changes with regression tests, typechecks, required review and exact-head CI.
 - [x] Verify bounded provider diagnostics for an unsuccessful live data proof.
-- [ ] Verify the provider query includes the entire final closed calendar day.
+- [x] Verify the provider query includes the entire final closed calendar day.
+- [ ] Distinguish missing inventory from absent timestamps and probe the bounded historical range across activity, sleep, and workouts.
+- [ ] Give canonical ingestion enough time to observe the ordinary fifteen-minute empty-history retry, preserving shorter authorization limits.
 - [ ] Run the hosted canary and require canonical ingestion plus cleanup.
 
 ## Evidence and risks
@@ -43,8 +45,23 @@ change the proof result, or log provider payloads, dates, IDs, or health values.
 A client-level regression reproduced the canary's end-date truncation: the
 inclusive final day was transmitted as midnight at the beginning of that day.
 Use an explicit end-of-day instant while preserving the same closed-day window
-and exact canonical-value comparison. The new diagnostic run remains active;
-this request-boundary correction is a separate follow-up.
+and exact canonical-value comparison. The request-boundary correction is merged
+and verified, but the live query still returned no records in its selected window.
+
+The next diagnostic keeps the ten-second total deadline while probing three
+summary resources over the provider's default ninety-day historical range.
+Only closed availability categories leave the process. It distinguishes missing
+inventory owners from missing timestamps; diagnostic records cannot pass the
+canonical proof.
+
+The isolated canary has no configured Junction webhook receiver and relies on
+the ordinary historical retry path. That path first retries empty history after
+fifteen minutes; the existing seven-minute data deadline cannot observe it.
+Public Murph will support a separate bounded data deadline and retain the
+browser session through that deadline and cleanup. Land the public support and
+controller timeout first, then configure twenty minutes for data in Murph Cloud
+and extend its outer runner limit. No production scheduling, webhook targets,
+or member state changes are required.
 
 ## Verification
 

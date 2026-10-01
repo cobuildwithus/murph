@@ -473,7 +473,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
     });
   });
 
-  it("creates and tears down the exact owned Garmin Kernel browser and tunnel", async () => {
+  it.each([false, true])("owns the Garmin Kernel browser through cleanup with canonical data=%s", async (canonicalData) => {
     const child = createKernelTunnelChild();
     const clearCookies = vi.fn(async () => undefined);
     const browser = {
@@ -482,6 +482,10 @@ describe("hosted-local Junction wearable browser authorization", () => {
     };
     const config = createConfig({
       KERNEL_API_KEY: "kernel-test-key",
+      ...(canonicalData ? {
+        MURPH_E2E_JUNCTION_WEARABLE_DATA: "1",
+        MURPH_E2E_GARMIN_DATA_TIMEOUT_MS: "1200000",
+      } : {}),
       MURPH_E2E_CONNECT_URL:
         "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=garmin",
       MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
@@ -527,7 +531,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
       headless: false,
       profileName: "murph-junction-garmin-canary",
       saveChanges: true,
-      timeoutSeconds: 90,
+      timeoutSeconds: canonicalData ? 1350 : 90,
     });
     expect(kernelLifecycleMocks.connectOverCDP).toHaveBeenCalledWith(
       "wss://cdp.example.test/session/capability-secret",
@@ -1960,6 +1964,31 @@ describe("hosted-local Junction wearable browser authorization", () => {
 
 
 describe("live Garmin canonical-data browser rendezvous", () => {
+  it("keeps the browser rendezvous open through the first historical retry", async () => {
+    vi.useFakeTimers();
+    const input = new PassThrough();
+    const config = createConfig({
+      MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      MURPH_E2E_CONNECT_URL: "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=garmin",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+      MURPH_E2E_JUNCTION_WEARABLE_DATA: "1",
+      MURPH_E2E_GARMIN_DATA_TIMEOUT_MS: "1200000",
+    });
+    try {
+      let settled = false;
+      const waiting = waitForHostedLocalJunctionCanonicalDataCheckForTest({
+        input, onReady: () => undefined, timeoutMs: config.dataTimeoutMs + 30_000,
+      }).finally(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(settled).toBe(false);
+      input.end("MURPH_E2E_GARMIN_DATA_CHECK_COMPLETE=1\n");
+      await expect(waiting).resolves.toBeUndefined();
+    } finally {
+      input.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   it("retains connection-only mode unless canonical proof is explicitly selected", () => {
     expect(createConfig().awaitCanonicalData).toBe(false);
     expect(() => createConfig({ MURPH_E2E_JUNCTION_WEARABLE_DATA: "1" })).toThrow("requires Garmin");

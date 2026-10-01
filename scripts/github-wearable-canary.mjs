@@ -9,7 +9,7 @@ const PRIVATE_REPOSITORY = "cobuildwithus/murph-cloud";
 const WORKFLOW = "junction-wearable-canary.yml";
 const WORKFLOW_NAME = "Private Junction Garmin Canary";
 const WORKFLOW_PATH = `.github/workflows/${WORKFLOW}`;
-const TIMEOUT_MS = 54 * 60_000;
+const TIMEOUT_MS = 74 * 60_000;
 
 export function wearableCanaryProofDigest({ privateSha, publicSha, requestId }) {
   assertSha(privateSha, "private canary revision");
