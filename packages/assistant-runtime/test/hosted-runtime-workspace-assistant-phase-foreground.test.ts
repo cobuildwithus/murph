@@ -94,13 +94,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveHostedOldestAssistantInputOccurredAt).not.toHaveBeenCalled();
+    const cutoff = mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls[0]?.[0]
+      .assistantAskCompletionOccurredBefore;
+    expect(typeof cutoff).toBe("function");
+    await expect(cutoff()).resolves.toBe(occurredAt);
     expect(mocks.resolveHostedOldestAssistantInputOccurredAt).toHaveBeenCalledWith({
       assistantInputIds: ["input_fresh"],
       signal: null,
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
-      expect.objectContaining({ assistantAskCompletionOccurredBefore: occurredAt }),
+      expect.objectContaining({ assistantAskCompletionOccurredBefore: expect.any(Function) }),
     );
   });
 
@@ -694,9 +699,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           "runtime.pending-effects-reconcile-requested",
           "assistant.ask.completed",
         ],
-        assistantAskCompletionOccurredBefore: pendingInputAt,
+        assistantAskCompletionOccurredBefore: expect.any(Function),
       }),
     );
+    const cutoff = mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls[0]?.[0]
+      .assistantAskCompletionOccurredBefore;
+    await expect(cutoff()).resolves.toBe(pendingInputAt);
     expect(mocks.resolveHostedOldestAssistantInputOccurredAt).toHaveBeenCalledWith({
       assistantInputIds: ["ain_00000000000000000000000000000001"],
       signal: null,
@@ -1144,7 +1152,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         allowedRouteActions: ["continue-assistant-ask"],
         allowedWakeKinds: ["assistant.ask.completed"],
-        assistantAskCompletionOccurredBefore: null,
+        assistantAskCompletionOccurredBefore: expect.any(Function),
       }),
     );
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalledWith(
@@ -1159,10 +1167,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: expect.any(Function),
       vaultRoot: "/tmp/murph-vault",
     });
-    expect(mocks.resolveHostedOldestPendingAssistantInputAt).toHaveBeenCalledWith({
-      signal: null,
-      vaultRoot: "/tmp/murph-vault",
-    });
+    expect(mocks.resolveHostedOldestPendingAssistantInputAt).not.toHaveBeenCalled();
     expect(mocks.resolveHostedOldestAssistantInputOccurredAt).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: armedWakeAt,
@@ -2180,31 +2185,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
-  });
-
-  it("keeps a future causal approval wake behind foreground input at pass admission", async () => {
-    const now = "2026-04-27T00:00:00.000Z";
-    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(now);
-
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1,
-      now: () => now,
-    }));
-
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
-      expect.objectContaining({
-        allowedRouteActions: [
-          "apply-runtime-control-request",
-          "continue-assistant-ask",
-        ],
-        allowedWakeKinds: [
-          "runtime.pending-effects-reconcile-requested",
-          "assistant.ask.completed",
-        ],
-        vaultRoot: "/tmp/murph-vault",
-      }),
-    );
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
   });
 
   it("keeps unrelated system wakes behind foreground input at pass admission", async () => {

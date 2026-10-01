@@ -465,3 +465,14 @@ covered without zsh. These tests do not start Codex or make a model request.
 Session preflight validates routing under the existing runtime write lock without
 preparing secret storage. Session persistence owns that directory's permission
 and symlink checks before writing a session or removing its legacy sidecar.
+
+
+## Canonical reminder verification
+
+The canonical live reminder fixture supplies a synthetic hosted automation port
+for creation and cancellation. That port delegates persistence and timing to the
+production core and cron owners; hosted authorization and route policy remain
+covered by assistant-runtime entrypoint tests. The journey checks one hosted save,
+the saved reminder model override, actual queued delivery, and one archive patch.
+`canonical-live-preflight.test.ts` verifies its port wiring, canonical records,
+optimistic concurrency, and cancellation without a model or delivery provider.

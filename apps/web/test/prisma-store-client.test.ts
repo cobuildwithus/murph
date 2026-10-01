@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
 
   interface FakePool {
     connect: (...args: unknown[]) => unknown;
+    on: ReturnType<typeof vi.fn>;
     idleCount: number;
     options: Record<string, unknown>;
     totalCount: number;
@@ -48,6 +49,7 @@ const mocks = vi.hoisted(() => {
   ) {
     const pool: FakePool = {
       connect,
+      on: vi.fn(),
       idleCount: 0,
       options,
       totalCount: 0,
@@ -1420,7 +1422,12 @@ describe("prisma module", () => {
     expect(pool.connect()).toBe(pending);
     const callback = vi.fn();
     expect(pool.connect(callback)).toBeUndefined();
-    expect(mocks.connect.mock.calls).toEqual([[], [callback]]);
+    expect(mocks.connect.mock.calls).toEqual([[], [expect.any(Function)]]);
+    const forwarded = mocks.connect.mock.calls[1]![0] as (...args: unknown[]) => unknown;
+    const callbackReceiver = {};
+    forwarded.call(callbackReceiver, null, "result");
+    expect(callback).toHaveBeenCalledWith(null, "result");
+    expect(callback.mock.contexts).toEqual([callbackReceiver]);
     expect(mocks.connect.mock.contexts).toEqual([pool, pool]);
   });
 

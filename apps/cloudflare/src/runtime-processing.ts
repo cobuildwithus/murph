@@ -61,7 +61,7 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
   const { diagnostics } = context;
   if (!context.namespace) return retryProcessing(context, "missing_container_binding");
   const ctx = { ...context, namespace: context.namespace };
-  let claim = context.input.admission ?? await ctx.command({ operation: "claim", processingMode: ctx.mode });
+  let claim = await readRuntimeAdmission(ctx);
   let previousGeneration: string | undefined;
   // One completed owner, one expired retained target, then its fresh successor.
   // Contention beyond these bounded transitions belongs to the existing retry owner.
@@ -91,11 +91,25 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
   return retryProcessing(ctx, "claim_blocked");
 }
 
+async function readRuntimeAdmission(ctx: ProcessingContext) {
+  const admission = ctx.input.admission;
+  // An upstream admission is a snapshot. Refresh an unfinished background
+  // owner so the canonical claim can apply foreground priority atomically.
+  const refresh = isForegroundBehindBackground(ctx, admission?.owner) && admission?.status === "existing"
+    && admission.owner?.userId === ctx.input.userId && admission.owner.phase === "starting"
+    && admission.owner.workspaceVersion === null;
+  return admission && !refresh ? admission : ctx.command({ operation: "claim", processingMode: ctx.mode });
+}
+
+function isForegroundBehindBackground(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot | null | undefined): boolean {
+  return ctx.mode === "default" && owner?.processingMode === "system_mailbox";
+}
+
 function createProcessingContext(source: RuntimeProcessingSource, input: RuntimeProcessingInput, diagnostics: RuntimeProcessingDiagnostics) {
   const env = readHostedExecutionEnvironment(asWorkerStringEnvironment(source));
   const budget = createRuntimeProcessingCommandBudget({ commandTimeoutMs: input.commandTimeoutMs ?? null,
-    startedAtMs: input.commandStartedAtEpochMs ?? Date.now(), webControlTimeoutMs: env.webControlTimeoutMs });
-  const step = async <T>(operationName: string, operation: () => Promise<T>, timeoutMs = env.webControlTimeoutMs): Promise<T> => {
+    startedAtMs: input.commandStartedAtEpochMs ?? Date.now() });
+  const step = async <T>(operationName: string, operation: () => Promise<T>, timeoutMs = budget.deadlineAtMs - Date.now()): Promise<T> => {
     const startedAt = Date.now();
     try {
       return await runRuntimeProcessingCommandStep({ budget, operation, stepTimeoutMs: timeoutMs });
@@ -111,7 +125,7 @@ function createProcessingContext(source: RuntimeProcessingSource, input: Runtime
     }
   };
   const command = (value: HostedRuntimeOwnerCommand) => step(`owner_${value.operation}`, () => commandHostedRuntimeOwner({ source, userId: input.userId, command: value,
-    timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget, stepTimeoutMs: env.webControlTimeoutMs }) }));
+    timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget, stepTimeoutMs: env.webControlTimeoutMs }) }), env.webControlTimeoutMs);
   const namespace = createHostedRunnerContainerNamespaceRouter({ exactUser: source.RUNNER_CONTAINER,
     next: source.NEXT_RUNNER_CONTAINER, standby: source.STANDBY_RUNNER_CONTAINER ?? null });
   return { source, input, env, budget, step, command, namespace, diagnostics, mode: input.processingMode ?? "default" };
@@ -132,26 +146,28 @@ function acceptedProcessing(ctx: ProcessingContext, owner: HostedRuntimeOwnerSna
     recommendedRecheckAt: computeRuntimeProcessingOwnerRecheckAt({ env: ctx.env }) };
 }
 
-async function retireRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot) {
+async function retireRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   const identity = requireIdentity(owner);
-  if ((await ctx.command({ operation: "retire", ...identity, completed: false })).status !== "updated") return;
+  if ((await ctx.command({ operation: "retire", ...identity, completed: false })).status !== "updated") return null;
   if (owner.runnerContainerName) {
     const target = owner.runnerContainerName;
     const slot = requireHostedRunnerSlotLifecycle(ctx.namespace.getByName(target));
     await ctx.step("retire_target", () => slot.retireStandbySlot({ ...(owner.allocationId ? { claimId: owner.allocationId } : {}),
       target: { slotName: target, userId: ctx.input.userId } }));
     const binding = await ctx.step("read_retired_binding", () => slot.readStandbySlotBinding());
-    if (binding.state !== "retired" || binding.slotName !== target) return;
+    if (binding.state !== "retired" || binding.slotName !== target) return retryProcessing(ctx, "retirement_pending");
   }
   await ctx.command({ operation: "release", ...identity, runnerContainerName: owner.runnerContainerName });
+  // A competing caller may already have advanced ownership. Re-admit rather
+  // than sleep; the generation guard prevents reusing an unreleased owner.
+  return null;
 }
 
 /** A null result requests fresh canonical admission after settled recovery. */
 async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, wake: HostedRuntimeEnsureProcessingResponse | null): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   const identity = requireIdentity(owner);
   if (owner.phase === "retiring" && !owner.completedAt) {
-    await retireRuntime(ctx, owner);
-    return retryProcessing(ctx, "retirement_pending");
+    return retireRuntime(ctx, owner);
   }
   const container = owner.runnerContainerName ? ctx.namespace.getByName(owner.runnerContainerName) : null;
   const receipt = container?.readSupervisedInvocation
@@ -160,17 +176,16 @@ async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRun
     return await reconcileCompletedRuntime(ctx, owner, receipt.immediateRecheckRequested) ? null : retryProcessing(ctx, "completion_unconfirmed");
   }
   if (owner.phase === "retiring" || (owner.processingMode === "inbox_media_retention" && ctx.mode !== "inbox_media_retention")) {
-    await retireRuntime(ctx, owner);
-    return retryProcessing(ctx, "retirement_pending");
+    return retireRuntime(ctx, owner);
   }
   if (wake) return wake;
   // Age decides when to attempt retirement; it never proves stoppedness.
   const startingDeadline = owner.startedAt ? Date.parse(owner.startedAt) + 30_000 : 0;
   if (owner.phase === "starting" && startingDeadline > Date.now()) {
-    return retryProcessing(ctx, "starting_fence_preserved", startingDeadline);
+    return retryProcessing(ctx, "starting_fence_preserved",
+      isForegroundBehindBackground(ctx, owner) ? Math.min(startingDeadline, Date.now() + 1_000) : startingDeadline);
   }
-  await retireRuntime(ctx, owner);
-  return retryProcessing(ctx, "retirement_pending");
+  return retireRuntime(ctx, owner);
 }
 
 async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, immediateRecheckRequested: boolean): Promise<boolean> {
@@ -185,7 +200,7 @@ async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRu
     source: ctx.source, userId: ctx.input.userId, ...identity,
     settledRunnerContainerName: runnerContainerName,
     result: immediateRecheckRequested ? { immediateRecheckRequested: true } : {},
-  }));
+  }), ctx.env.webControlTimeoutMs);
   // A stale result can mean a concurrent caller already released this owner.
   // Re-admit from Postgres; neither the old snapshot nor the receipt grants launch.
   return true;
@@ -194,8 +209,15 @@ async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRu
 async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   if (owner.phase === "retiring" || !owner.runnerContainerName || owner.workspaceVersion === null) return null;
   if (owner.processingMode === "inbox_media_retention" && ctx.mode !== "inbox_media_retention") return null;
-  if (ctx.mode === "inbox_media_retention" && owner.processingMode !== ctx.mode) return retryProcessing(ctx, "processing_mode_conflict");
   const identity = requireIdentity(owner);
+  if (ctx.mode === "inbox_media_retention" && owner.processingMode !== ctx.mode) {
+    // A mode mismatch protects live work, not a failed invocation's stale owner.
+    // Inactive owners still pass through receipt, startup, and retirement proof.
+    const live = await readRuntimeFenceLivenessBestEffort({ commandBudget: ctx.budget,
+      identity: { ...identity, leaseGeneration: identity.generation, userId: ctx.input.userId },
+      runnerContainerName: owner.runnerContainerName, runnerContainerNamespace: ctx.namespace, stepTimeoutMs: 1_000 });
+    return live.outcome === "inactive" ? null : retryProcessing(ctx, "processing_mode_conflict");
+  }
   ctx.diagnostics.stage = "active_wake";
   const wake = await ensureActiveRuntimeProcessing({ activeRuntime: {
     ...(ctx.input.voiceCallId ? { voiceCallId: ctx.input.voiceCallId } : {}),
@@ -223,13 +245,12 @@ async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedR
   if (!container.ensureReadyForProcessing || !container.startSupervisedInvocation) throw new Error("Native runtime supervision is unavailable.");
   const [ready, prepared] = await Promise.all([
     ctx.step("container_readiness", () => container.ensureReadyForProcessing!({ userId: ctx.input.userId, orchestrationAttemptId: ctx.input.orchestrationAttemptId,
-      timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget: ctx.budget, stepTimeoutMs: 15_000 }) })),
+      timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget: ctx.budget, stepTimeoutMs: 15_000 }) }), 15_000),
     ctx.step("prepare_invocation", () => prepare(ownerToken(owner), binding)),
   ]);
   if (ready.kind !== "ready") return retryProcessing(ctx, "container_not_ready");
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(prepared.token.providerEgressToken!)));
   const launch = {
-    providerEgressTokenHash: Array.from(digest, value => value.toString(16).padStart(2, "0")).join(""),
+    providerEgressTokenHash: null,
     customInferenceEnvelope: prepared.customInferenceEnvelope,
     platformAiUsageAllowed: prepared.platformAiUsageAllowed,
   };
@@ -302,12 +323,8 @@ function createInvocationPreparation(ctx: ProcessingContext) {
       return parseHostedWorkspaceReadResponse(await response.json());
     },
     async bindInvocation(facts) {
-      // Provider APIs such as Linq use the invocation-scoped opaque token.
-      // Persist only its digest; the raw capability travels in the launch job.
-      const bytes = crypto.getRandomValues(new Uint8Array(32));
-      const providerEgressToken = `provider-egress-${Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("")}`;
       return { ...facts.token, workspaceVersion: facts.workspaceVersion,
-        processingMode: facts.processingMode ?? facts.token.processingMode, providerEgressToken };
+        processingMode: facts.processingMode ?? facts.token.processingMode };
     },
   });
 
@@ -321,6 +338,6 @@ function requireIdentity(owner: HostedRuntimeOwnerSnapshot) {
 function ownerToken(owner: HostedRuntimeOwnerSnapshot): RunnerWriteFenceToken {
   if (!owner.startedAt || !owner.processingMode) throw new Error("Hosted runtime invocation facts are incomplete.");
   return { ...requireIdentity(owner), kind: "runtime", processingMode: owner.processingMode,
-    providerEgressToken: null, runnerContainerName: owner.runnerContainerName, startedAt: owner.startedAt,
+    runnerContainerName: owner.runnerContainerName, startedAt: owner.startedAt,
     userId: owner.userId, workspaceVersion: owner.workspaceVersion };
 }

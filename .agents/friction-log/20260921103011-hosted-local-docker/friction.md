@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local AMD64 emulation cannot enforce the Codex Linux sandbox'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3862'
 ---
 
 ## Expected Behavior

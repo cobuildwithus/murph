@@ -19,7 +19,7 @@ type CodexTurnMessage = Record<string, unknown>
 export const ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE =
   'ASSISTANT_CODEX_USAGE_LIMIT'
 
-// CodexErrorInfo variants (app-server protocol, pinned codex 0.156.1) that
+// CodexErrorInfo variants (app-server protocol, pinned codex 0.159.1) that
 // describe a lost or unusable provider connection. These map to the
 // retryable ASSISTANT_CODEX_CONNECTION_LOST process-exit classification.
 const CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS = new Set([
@@ -39,8 +39,15 @@ function isCodexUsageLimitErrorInfo(
 function isCodexConnectionLossErrorInfo(
   errorInfo: CodexStructuredErrorInfo | null,
 ): boolean {
+  // Codex 0.158 also uses httpConnectionFailed for unexpected HTTP statuses.
+  // Permanent rejections must not enter Murph's connection-recovery loop.
   return errorInfo !== null &&
-    CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS.has(errorInfo.kind)
+    CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS.has(errorInfo.kind) &&
+    (errorInfo.kind !== 'httpConnectionFailed' ||
+      errorInfo.httpStatusCode === null ||
+      errorInfo.httpStatusCode === 408 ||
+      errorInfo.httpStatusCode === 429 ||
+      errorInfo.httpStatusCode >= 500)
 }
 
 function buildCodexErrorInfoContext(

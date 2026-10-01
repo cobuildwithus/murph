@@ -52,18 +52,12 @@ import {
   type HostedStandbySlotBinding,
 } from "./standby-runner-contract.js";
 import {
-  createHostedProviderEgressCredential,
-} from "./hosted-provider-egress-credential.js";
-import {
   parseHostedInferenceRuntimeTarget,
   type HostedInferenceRuntimeTarget,
 } from "./hosted-inference-runtime-target.ts";
 import {
   sealHostedInferenceRuntimeTarget,
 } from "./hosted-inference-target-envelope.ts";
-import {
-  readHostedProviderCredentialDiagnosticKind,
-} from "./hosted-provider-credential-diagnostics.js";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
@@ -99,21 +93,13 @@ import {
 
 const HOSTED_INFERENCE_RUNTIME_TARGET_MAX_BODY_BYTES = 16 * 1024;
 const HOSTED_INFERENCE_RUNTIME_TARGET_PATH = "/api/internal/hosted-inference/resolve";
-const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = {
-  EXA_API_KEY: "exa",
-  MAPBOX_ACCESS_TOKEN: "mapbox",
-  MURPH_DATA_API_KEY: "murph_data_api",
-  OPENAI_API_KEY: "openai",
-  VENICE_API_KEY: "venice",
-} as const;
-const HOSTED_RUNNER_WORKERS_AI_TRANSCRIBE_PROVIDER_KIND = "workers_ai_transcribe";
+const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = [
+  "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "OPENAI_API_KEY", "VENICE_API_KEY",
+] as const;
 const HOSTED_CUSTOM_INFERENCE_PROVIDER = "hosted-custom-inference";
 const HOSTED_CUSTOM_INFERENCE_API_KEY_ENV = "MURPH_CUSTOM_INFERENCE_API_KEY";
 const HOSTED_CUSTOM_INFERENCE_CONTEXT_WINDOW_ENV =
   "HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS";
-
-type HostedRunnerNativeProviderCredentialEnvName =
-  keyof typeof HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV;
 
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
   "murph.hosted.workspace-snapshot-path-hash.v1";
@@ -471,53 +457,14 @@ export class RuntimeInvocationPreparation {
           userId: input.userId,
         }),
       ]);
-    const openAiCredentialBeforeMintKind =
-      readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
-    const veniceCredentialBeforeMintKind =
-      readHostedProviderCredentialDiagnosticKind(forwardedEnv.VENICE_API_KEY);
-    let openAiProviderCredentialMinted = false;
-    let veniceProviderCredentialMinted = false;
-    const createProviderCredential = async (providerKind: string) =>
-      await createHostedProviderEgressCredential({
-        providerKind,
-        runnerContainerName,
-        source: this.input.runnerRuntimeEnvSource,
-        userId: input.userId,
-      });
-    for (const [envKey, providerKind] of Object.entries(
-      HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV,
-    ) as Array<[HostedRunnerNativeProviderCredentialEnvName, string]>) {
-      // OpenAI remains available as a separately scoped managed credential for
-      // provider-specific tools such as image generation even when core
-      // assistant inference runs through Venice.
-      if (
-        envKey === "VENICE_API_KEY"
-        && !isHostedRunnerVeniceProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER)
-      ) {
-        continue;
-      }
-      if (typeof forwardedEnv[envKey] === "string" && forwardedEnv[envKey].length > 0) {
-        forwardedEnv[envKey] = await createProviderCredential(providerKind);
-        if (envKey === "OPENAI_API_KEY") {
-          openAiProviderCredentialMinted = true;
-        }
-        if (envKey === "VENICE_API_KEY") {
-          veniceProviderCredentialMinted = true;
-        }
-      }
+    for (const envKey of HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV) {
+      if (forwardedEnv[envKey]) forwardedEnv[envKey] = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
     }
-    const openAiCredentialAfterMintKind =
-      readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
-    const veniceCredentialAfterMintKind =
-      readHostedProviderCredentialDiagnosticKind(forwardedEnv.VENICE_API_KEY);
-    const workersAiTranscribeProviderEgressCredential = await createProviderCredential(
-      HOSTED_RUNNER_WORKERS_AI_TRANSCRIBE_PROVIDER_KIND,
-    );
     const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
       configSource,
       forwardedEnv,
       providerEgressCredentials: {
-        workersAiTranscribe: workersAiTranscribeProviderEgressCredential,
+        workersAiTranscribe: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       },
       rewritePlatformUrlsForContainer: true,
       runnerSecrets,
@@ -545,7 +492,6 @@ export class RuntimeInvocationPreparation {
         ...(input.processingMode
           ? { processingMode: input.processingMode }
           : {}),
-        providerEgressToken: input.token.providerEgressToken,
         userId: input.userId,
         workspace: input.workspace,
         workspaceVersion: input.workspaceVersion,
@@ -572,12 +518,6 @@ export class RuntimeInvocationPreparation {
             forwardedEnv,
             userEnv,
           }),
-        openAiCredentialAfterMintKind,
-        openAiCredentialBeforeMintKind,
-        openAiProviderCredentialMinted,
-        veniceCredentialAfterMintKind,
-        veniceCredentialBeforeMintKind,
-        veniceProviderCredentialMinted,
         preparedSnapshotRestorePresent: preparedSnapshotRestore !== null,
         processingMode: nullableRunnerValue(input.processingMode),
         runnerContainerWorkerVersionPresent: runnerContainerName !== input.userId,

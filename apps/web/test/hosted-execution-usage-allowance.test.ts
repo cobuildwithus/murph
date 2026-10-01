@@ -27,7 +27,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => {
   throw new Error("Allowance reads must not load the Family mutation workflow.");
 });
 
-vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
+vi.mock("@/src/lib/hosted-execution/usage-credit-usage-settlement", () => ({
   settleHostedUsageCreditForUsageTx:
     usageCreditMocks.settleHostedUsageCreditForUsageTx,
 }));
@@ -387,6 +387,7 @@ function buildAggregateOnlyOpenAiImageUsageRecord(): AssistantUsageRecord {
 
 describe("hosted AI usage allowance pricing", () => {
   it.each([
+    ["gpt-6.1-sol", 1_710_000n, 3_095_000n],
     ["gpt-6-sol", 1_720_000n, 3_115_000n],
     ["gpt-6-luna", 86_000n, 155_750n],
   ] as const)("prices %s with published cache and service-tier rates", (model, shortCost, longCost) => {
@@ -407,7 +408,9 @@ describe("hosted AI usage allowance pricing", () => {
         expect(priced).toMatchObject({
           costUsdMicros: expected * numerator / denominator,
           counted: true,
-          pricingVersion: `openai-api-pricing-2026-09-22-gpt-6-sol-luna-${tokenPricingBasis}`,
+          pricingVersion: model === "gpt-6.1-sol"
+            ? `openai-api-pricing-2026-09-29-gpt-6.1-sol-${tokenPricingBasis}`
+            : `openai-api-pricing-2026-09-22-gpt-6-sol-luna-${tokenPricingBasis}`,
           pricingSnapshot: { model, modelSource: "served", pricingSource: "https://developers.openai.com/api/docs/pricing" },
         });
       }
@@ -493,7 +496,7 @@ describe("hosted AI usage allowance pricing", () => {
     expect(result.pricingSnapshot).toMatchObject({ model: "gpt-6-astra", modelSource: "served", pricingSource: "https://developers.openai.com/api/docs/models/gpt-6-astra" });
   });
 
-  it.each(["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"])("does not mistake cumulative %s input for a long request", (model) => {
+  it.each(["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])("does not mistake cumulative %s input for a long request", (model) => {
     const result = priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       requestedModel: model,
@@ -503,7 +506,7 @@ describe("hosted AI usage allowance pricing", () => {
       outputTokens: 10_000,
       usageExtractionSourcePath: "thread.tokenUsage.total.delta",
     });
-    expect(result.costUsdMicros).toBe(model === "gpt-6-astra" ? 4_500_000n : model === "gpt-6-sol" ? 900_000n : 45_000n);
+    expect(result.costUsdMicros).toBe(model === "gpt-6-astra" ? 4_500_000n : (model === "gpt-6-sol" || model === "gpt-6.1-sol") ? 900_000n : 45_000n);
   });
 
   it("does not invent Venice pricing for Astra", () => {
@@ -1622,7 +1625,20 @@ describe("hosted AI usage allowance pricing", () => {
         modelSource: "requested",
         pricingSource: "https://elevenlabs.io/pricing/api",
       },
-      pricingVersion: "elevenlabs-tts-pricing-2026-06-18",
+      pricingVersion: "elevenlabs-tts-pricing-2026-09-28",
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...voiceMemo,
+      rawUsageJson: { characterCount: 1_001 },
+      requestedModel: "eleven_v4",
+    })).toMatchObject({
+      costUsdMicros: 80_080n,
+      counted: true,
+      pricingSnapshot: {
+        characters: { count: "1001", usdMicrosPerThousandCharacters: "80000" },
+        model: "eleven_v4",
+      },
     });
 
     expect(priceHostedAiUsageForAllowance({

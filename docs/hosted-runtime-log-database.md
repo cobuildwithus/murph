@@ -681,6 +681,28 @@ Return only those aggregates. Never return `subject_key` values or raw JSON.
 The preflight log uses the existing runtime-log transport, and the error remains
 on the existing retry path; both changes are observability-only.
 
+### External route response validation (structured logs)
+
+The actual Cloudflare external route authority port emits at most one warning
+for a decoded HTTP-success response rejected by its existing parser, through
+`emitHostedExecutionStructuredLog`, not the runtime-log database callback.
+`responseIsObject`, `authorizedValid`, `assistantAskFallbackRequiredValid`, and
+`threadIsDirectValid` are validation booleans: absent optional fields are valid;
+all four are false for a non-object body. No response values, arbitrary keys,
+request authority, body, URL, headers, error text, or stack are included.
+`workspaceAttemptId` reuses the resolved write-fence attempt header through the
+existing sanitizer; `transport` is `direct` or `proxy`. The parser's return and
+exact thrown error remain unchanged, including legacy authorized-only success.
+There is no added request, authority read, retry, success log, or transport-failure
+log; only the failure path derives these fixed fields. For a fixed natural-traffic
+window, query existing structured logs with `schema = murph.hosted-execution.log.v1`,
+`component = hosted.runtime.control-plane`, `phase = runtime.starting`,
+`details.operation = thread_route_authority`, and
+`message = Hosted external thread route authority response validation failed.`;
+group counts by transport and the four booleans, using sanitized attempt correlation
+only when needed. These are observed validation failures, not an authorization or
+success-rate denominator; do not generate failures or replay traffic to collect them.
+
 ### Assistant-notification validation attribution
 
 An existing `mailbox.system_processed` warning with
@@ -1388,6 +1410,49 @@ separate. Propose a behavior correction only after at least two matching
 action/code observations and a deterministic reproduction at the responsible
 owner; telemetry alone does not establish the original cause.
 
+### Batch read attribution and connected-app failure status
+
+Parsed batch children for exactly `knowledge show`, `event show` and
+`event payload-schema` use the existing `vault-cli knowledge` / `vault-cli event`
+profile labels. Known knowledge children contribute the existing optional
+`knowledgeCounts` from parsed argv operation, success and structured error code;
+counters never parse stdout or data, in either compact or noncompact mode. Direct
+and batch contributions merge in either order, including direct failures. Unknown
+batch paths still use `other`; malformed envelopes retain the outer batch fallback.
+The v2 profile, safe integer sums, child/family caps, timing and byte semantics are
+unchanged. Missing-page counts describe expected rejections, not bad model behavior.
+
+The outer connected-app execution catch may add only `connectedAppsHttpStatus`
+to its existing private failure diagnostic/classification row. It is an integer
+100..599 from an own data `status`, falling back to own data `statusCode` only
+when status is nullish. The observer rejects proxies before descriptors and does
+not invoke accessors, follow prototypes/context/causes, coerce values, or retain
+codes, names, messages, arguments, payloads, identifiers or URLs. Invalid or absent
+status is omitted. Ordinary, ambiguous-write and official-alert caught failures
+retain their exact RPC text, error category and retry posture. No field is taken
+from successful/oversized results, local preflight/admission refusals, or the
+separate local disconnect-cleanup failure. This does not repair pre-existing
+RPC error projection or infer transport failure from absent status.
+
+No new event, profile label or schema is required. The unchanged issue reporter,
+sanitizer and record parser accept the optional numeric detail (six keys in a
+connected-app classification row, below the existing 24-key cap). Existing usage
+readers already accept these labels and optional knowledge counters. Old producers
+and records remain valid; this patch does not backfill historical attribution.
+Deploy compatible readers first wherever they are not already present, then the
+producer runtime. Verify exact reader release and Worker/runner bundle versions,
+including warm containers, before comparing natural emissions across a fixed,
+bounded prior/latest window. Do not induce failures or mutate production data.
+
+Group future connected-app classification failures by the bounded status, keeping
+413 separate from status-absent/unknown evidence. A 413 on an otherwise-valid
+oversized request belongs to the efficiency investigation, not a presumed prompt
+bug; unrelated Web status observations do not establish request correlation.
+Use batch knowledge counters to identify missing-page rejections. Keep completion
+rows as the existing call denominator, not extra failures, and do not add profile
+counts to overlapping native CLI counts. Unresolved connection loss remains
+unresolved. This rollout grants no automatic rollback or production mutation.
+
 ### Finite CLI failure counts (optional, same timing identity)
 
 Each non-successful invocation from a new producer contributes at most one
@@ -1457,8 +1522,12 @@ static field names are admitted:
 
 - `automation list`: limit, status (only these two options from `packages/cli/src/commands/automation.ts`).
 - `food search-labels`: query, limit.
+- `knowledge show`: slug (required positional argument in `packages/cli/src/commands/knowledge.ts`).
+- `measurement entry list`: metric, from, to, limit (only these top-level options from `packages/cli/src/commands/measurement.ts`; no metric array indices).
+- `event list`: kind, from, to, tag, experiment, limit (the command and its shared list factory), plus the fixed Incur invocation field arguments.
+- `event payload-schema`: kind, for (required public kind and optional literal `import-jsonl` surface in `packages/cli/src/commands/event.ts`).
 - `knowledge upsert`: body, slug, title, pageType, status, clearLibraryLinks,
-  relatedSlug, librarySlug, sourcePath.
+  relatedSlug, librarySlug, sourcePath, plus the fixed Incur invocation field arguments.
 - `knowledge append-section`: slug, heading, body, title, position, sourcePath.
 
 Issue codes use the closed standard vocabulary in `CliValidationDiagnostic`;
@@ -1563,6 +1632,47 @@ list with no provider calls or filesystem changes, plus byte-identical output
 and exits with timing disabled/enabled. No prompt, schema or dynamic-tool change
 is implied by these synthetic probes.
 
+The `event list` fields and `knowledge upsert` invocation-field admission use
+that same reader-first rollout, including warm engine/profile and completion
+consumers. Older readers omit the new tuples and coalesce equal code/stage pairs,
+retaining calls, phases, outcomes, report counts and drops; existing knowledge
+option detail remains readable. New readers accept old producers unchanged and
+cannot reconstruct omitted detail. The fixed invocation field is retained where
+the source supplies it in `fieldErrors` or `publicIssues`; original exceptions
+without it remain code/stage-only. Do not infer it from an error name or message. Set
+`MURPH_CLI_EVENT_INVOCATION_VALIDATION_COMPAT_BASE` to the actual pre-extension
+commit for the history-backed runtime-state test. No schema bump, migration,
+backfill or new event is required. Only after approved telemetry rollout and
+consumer/producer convergence, observe natural traffic; do not induce calls.
+
+The `knowledge show`, `event payload-schema` and `measurement entry list` field
+extensions use that same consumer-first Web/reader, then runner/CLI-producer
+rollout. Run the history-backed reader tests with
+`MURPH_CLI_READ_VALIDATION_COMPAT_BASE=85d536703736f3553105e01120f5560a25b732e4`
+for the first two commands and
+`MURPH_CLI_MEASUREMENT_VALIDATION_COMPAT_BASE=00001e1f796f5fa17dfba94e3a38215b0a87d656`
+for measurement entries. They check old-reader omission/coalescing with unchanged
+envelopes, counts and drops, and new-reader acceptance of old writers with or
+without failure detail.
+Verify deployed Web/reader source versions and runner bundle/source versions,
+including warm processes, before interpreting natural-traffic coverage. Mixed
+versions and a rollback to the old reader can lose only this optional detail;
+old producers cannot emit it. No coordinated pause, backfill or schema bump is
+needed. Rollback does not change command behavior or legacy accounting.
+
+The native timing parity fixture covers missing/malformed slug, missing/invalid
+kind and invalid `for`, both default/explicit valid schema requests, a valid
+knowledge read and an ordinary missing-page rejection. It requires identical
+output/exits with timing off/on, zero provider calls and unchanged filesystem
+contents. Measurement-entry cases reuse that fixture for missing metric,
+malformed from, impossible-calendar-date to and excessive limit. These synthetic
+cases prove the observation seam, not which mistake caused a production failure.
+Absent detail cannot distinguish these alternatives; nested metric-index issues
+remain deliberately unattributed. Cause remains ambiguous until natural failed
+traffic carries this detail; null/absent fields are not healthy outcomes. Do not trigger production
+failures to validate rollout. This diagnostics-only change needs no live-model
+journey and changes no prompt, command schema, recovery, retry or provider behavior.
+
 ### Bounded failure-frequency inspection and decision threshold
 
 Run on the **primary usage database** after compatible consumers and producers
@@ -1628,22 +1738,32 @@ actual old-reader skew, usage-body fitting and Web persisted normalization. Thes
 are synthetic local tests; no real-model journey or production destination is
 needed for this extension's unchanged output contract.
 
-#### Automation-list validation inspection (including singletons)
+#### Command-specific validation inspection (including singletons)
 
-For `automation list / VALIDATION_ERROR / validation`, **any newly attributed
-event warrants inspection, including one event in one turn**; the two-turn
+For `automation list`, `knowledge show`, `knowledge upsert`, `event list`,
+`event payload-schema` and `measurement entry list` with
+`VALIDATION_ERROR / validation`, **any newly
+attributed event warrants inspection, including one event in one turn**; the two-turn
 implementation-investigation threshold above does not gate this inspection.
 Attribution is not an automatic behavior or prompt change. Reproduce the exact
 attributed path synthetically and establish its cause before proposing one.
+For the event-list/upsert probe, `arguments / custom` identifies an Incur
+invocation rejection, not a particular option or its value. A specific option
+such as `limit / too_big` supports inspecting that option's existing contract;
+it does not authorize changing the limit. Absent detail remains unresolved,
+including historical upsert failures; do not infer their field or cause from
+these synthetic probes. These are selected issue observations within CLI calls,
+not additional failures to sum with action-completion diagnostics.
 This extension does not classify connected-app result-size failures, missing
-knowledge reads, other food/knowledge/meal errors, generic shell exits or unknown
-event/automation outcomes.
+knowledge pages, generic shell exits, profile `other`, exercise-card failures or
+turn-level provider loss. None can be equated with these input rejections.
 
 After consumer/producer convergence, run this read-only query on the primary
 usage database for a fixed natural-traffic window. Bind `:window_start_utc` and
 `:window_end_utc` to UTC timestamps (use consecutive 12-hour windows for a
-comparison). It returns only bounded metadata, keeps absent validation visible,
-and uses turn IDs only internally to avoid summing repeated profile snapshots.
+comparison). It returns only finite command/field/code/missing groups, keeps absent
+validation visible, and uses turn IDs only internally to avoid summing repeated
+profile snapshots.
 A 10,000-row cap hit requires a narrower window; counts are observed lower bounds,
 not complete attempt totals. Check missing reports and drop counters separately.
 
@@ -1661,32 +1781,46 @@ WITH rows AS MATERIALIZED (
   FROM rows
   CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
   WHERE t ->> 'schema' = 'murph.cli-timing.v1'
-    AND c ->> 'command' = 'automation list'
+    AND c ->> 'command' IN ('automation list', 'knowledge show', 'knowledge upsert',
+      'event list', 'event payload-schema', 'measurement entry list')
     AND c ->> 'outcome' = 'error'
 ), per_turn AS (
-  SELECT turn_id, f.field, f.issue_code, f.missing,
+  SELECT turn_id, c ->> 'command' AS command, f.field, f.issue_code, f.missing,
          max(f.observations) AS observations
   FROM commands
   CROSS JOIN LATERAL (
-    SELECT e -> 'validation' ->> 'field' AS field,
-           e -> 'validation' ->> 'code' AS issue_code,
-           e -> 'validation' ->> 'missing' AS missing,
+    SELECT CASE
+             WHEN c ->> 'command' = 'automation list' AND e -> 'validation' ->> 'field' IN ('limit', 'status')
+               OR c ->> 'command' = 'knowledge show' AND e -> 'validation' ->> 'field' = 'slug'
+               OR c ->> 'command' = 'knowledge upsert' AND e -> 'validation' ->> 'field' IN (
+                 'body', 'slug', 'title', 'pageType', 'status', 'clearLibraryLinks',
+                 'relatedSlug', 'librarySlug', 'sourcePath', 'arguments')
+               OR c ->> 'command' = 'event list' AND e -> 'validation' ->> 'field' IN (
+                 'kind', 'from', 'to', 'tag', 'experiment', 'limit', 'arguments')
+               OR c ->> 'command' = 'event payload-schema' AND e -> 'validation' ->> 'field' IN ('kind', 'for')
+               OR c ->> 'command' = 'measurement entry list' AND e -> 'validation' ->> 'field' IN ('metric', 'from', 'to', 'limit')
+             THEN e -> 'validation' ->> 'field' END AS field,
+           CASE WHEN e -> 'validation' ->> 'code' IN (
+             'invalid_type', 'too_big', 'too_small', 'invalid_format', 'not_multiple_of',
+             'unrecognized_keys', 'invalid_union', 'invalid_key', 'invalid_element', 'invalid_value', 'custom'
+           ) THEN e -> 'validation' ->> 'code' END AS issue_code,
+           CASE WHEN jsonb_typeof(e -> 'validation' -> 'missing') = 'boolean'
+             THEN e -> 'validation' ->> 'missing' END AS missing,
            sum((e ->> 'count')::numeric) AS observations
     FROM jsonb_array_elements(c -> 'failures') e
     WHERE e ->> 'code' = 'VALIDATION_ERROR'
       AND e ->> 'stage' = 'validation'
-    GROUP BY e -> 'validation' ->> 'field', e -> 'validation' ->> 'code',
-             e -> 'validation' ->> 'missing'
+    GROUP BY 1, 2, 3
   ) f
-  GROUP BY turn_id, f.field, f.issue_code, f.missing
+  GROUP BY turn_id, c ->> 'command', f.field, f.issue_code, f.missing
 )
-SELECT field, issue_code, missing, count(*) AS independent_turns,
+SELECT command, field, issue_code, missing, count(*) AS independent_turns,
        sum(observations) AS observed_failures_lower_bound,
-       (field IN ('limit', 'status')) IS TRUE AS inspect,
+       (field IS NOT NULL AND issue_code IS NOT NULL) AS inspect,
        (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
 FROM per_turn
-GROUP BY field, issue_code, missing
-ORDER BY independent_turns DESC, field, issue_code, missing
+GROUP BY command, field, issue_code, missing
+ORDER BY independent_turns DESC, command, field, issue_code, missing
 LIMIT 50;
 ```
 

@@ -280,6 +280,10 @@ describe('assistant skill assets', () => {
     )
     expect(daily).toContain('current-local-day totals as provisional and say "so far."')
     expect(daily).toContain('not proof of failed provider sync or import')
+    expect(ASSISTANT_SKILLS.find((skill) => skill.slug === 'running-cardio')?.triggerHint).toContain('Use daily-activity for ordinary walking breaks and everyday movement targets.')
+    expect(daily).toContain('For a simple time-based walking plan, use the person\'s stated current activity, available window, and chosen duration plus relevant saved context.')
+    expect(daily).toContain('Do not collect step counts, labs, body measurements, or unrelated event history unless symptoms, a known condition, or the requested target makes them decision-changing.')
+    expect(daily).toContain('Missing wearable coverage alone does not require more data reads or a step target.')
   })
 
   managedGroupSkillIt('keeps shared activity interpretation in its owner', async () => {
@@ -305,6 +309,7 @@ describe('assistant skill assets', () => {
     )
     expect(experimentSkill.triggerHint).not.toContain('private direct')
     expect(experimentSkill.triggerHint).not.toContain('proactively use it')
+    expect(experimentSkill.triggerHint).toContain('Ordinary goal setup with a chosen action belongs to goal-setup.')
 
     const raw = await readSkillFile(experimentSkill)
     const compact = raw.replace(/\s+/gu, ' ')
@@ -1294,6 +1299,12 @@ describe('assistant skill assets', () => {
       return
     }
 
+    const setup = await readSkillFile(behaviorSkill)
+    expect(Buffer.byteLength(setup)).toBeLessThan(29_000)
+    expect(setup).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/references/support-runtime.md')
+    expect(setup).toContain('Quiet\nchanges to an existing plan still require that reference and reconciliation.')
+    expect(setup).not.toContain('## Notification decision policy')
+
     expect(behaviorSkill.triggerHint).toContain('ignored reminders')
     expect(behaviorSkill.triggerHint).toContain('reminder fatigue')
     expect(behaviorSkill.triggerHint).toContain(
@@ -1309,7 +1320,7 @@ describe('assistant skill assets', () => {
     }
 
     const [raw, stressRaw] = await Promise.all([
-      readSkillFile(behaviorSkill),
+      Promise.all([readSkillFile(behaviorSkill), readFile(path.join(resolveAssistantSkillsRoot(), 'behavior-followthrough/references/support-runtime.md'), 'utf8')]).then((parts) => parts.join('\n')),
       readSkillFile(stressSkill),
     ])
     const compact = raw.replace(/\s+/gu, ' ')

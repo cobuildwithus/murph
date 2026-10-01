@@ -1,3 +1,4 @@
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { afterEach, expect, test, vi } from "vitest";
 import { commandHostedRuntimeReplicaPut, commandHostedRuntimeSnapshot, HostedRuntimeResourceRejectedError } from "../src/runtime-resource-client.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../src/web-control-plane.ts";
@@ -6,6 +7,10 @@ import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { HOSTED_RUNTIME_ATTEMPT_ID_HEADER, HOSTED_RUNTIME_LEASE_GENERATION_HEADER, HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER } from "../src/runner-outbound/headers.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 
+vi.mock("@murphai/hosted-execution", async importOriginal => ({
+  ...await importOriginal<typeof import("@murphai/hosted-execution")>(),
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
 vi.mock("../src/web-control-plane.ts", () => ({ fetchHostedExecutionWebControlPlaneResponse: vi.fn() }));
 afterEach(() => vi.resetAllMocks());
 
@@ -94,3 +99,50 @@ test("preserves admitted and already-applied replica results", async () => {
   expect(await command()).toBe(true);
   expect(await command()).toBe(false);
 });
+
+
+test.each(["POST", "DELETE"])("media %s uses one transactional callback and no crypto lookup", async method => {
+  vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockResolvedValue(Response.json({
+    cutover: "postgres", applied: true, reason: null, purge: null,
+  }));
+  const response = await handleRunnerOutboundRequest(mediaRequest(method),
+    { ...createHostedExecutionTestEnv(), BUNDLES: new MemoryEncryptedR2Bucket() }, "synthetic-member");
+  expect(response.status).toBe(200);
+  expect(fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledOnce();
+  const callback = vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mock.calls[0]![0];
+  expect(callback.path).toBe("/api/internal/hosted-runtime/media");
+  expect(JSON.parse(callback.body!)).toMatchObject({
+    operation: method === "POST" ? "register" : "retire", attemptId: "synthetic-attempt", generation: "1",
+  });
+});
+
+test.each(["POST", "DELETE"])("media %s preserves stale-owner rejection at the mutation", async method => {
+  vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockResolvedValue(Response.json({
+    error: { code: "HOSTED_RUNTIME_OWNER_STALE", message: "PRIVATE_RESPONSE" },
+  }, { status: 409 }));
+  const response = await handleRunnerOutboundRequest(mediaRequest(method),
+    { ...createHostedExecutionTestEnv(), BUNDLES: new MemoryEncryptedR2Bucket() }, "synthetic-member");
+  expect(response.status).toBe(401);
+  expect(emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+    message: "Hosted runner media request completed.",
+    level: "warn",
+    details: expect.objectContaining({
+      responseStatus: 401, mediaAuthorized: false, errorCode: "HOSTED_RUNTIME_OWNER_STALE",
+    }),
+  }));
+  expect(await response.text()).not.toContain("PRIVATE_");
+  expect(fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledOnce();
+});
+
+function mediaRequest(method: string): Request {
+  return new Request(`http://media.worker/media/${"a".repeat(64)}`, {
+    method,
+    headers: {
+      [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "synthetic-attempt",
+      [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "1",
+      "x-hosted-runtime-media-byte-size": "4",
+      "x-hosted-runtime-media-kind": "image",
+      "x-hosted-runtime-media-sha256": "b".repeat(64),
+    },
+  });
+}

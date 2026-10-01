@@ -16,6 +16,7 @@ import {
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { JunctionTimeseriesProgressError } from "./junction-timeseries-progress.ts";
+import { readSafeJunctionRequestTimeoutDiagnostics } from "./junction-request-timeout-diagnostics.ts";
 import {
   isJunctionCompanionHrvRmssdJob,
   isJunctionSparseCalendarRefreshJob,
@@ -2568,6 +2569,7 @@ function buildDeviceSyncErrorFailureDiagnostics(
     providerRequestBodyKind: readSafeDiagnosticToken(error.details?.requestBodyKind),
     ...junctionEcgContext,
     ...workoutCandidateContext,
+    ...readSafeJunctionRequestTimeoutDiagnostics(error.code, error.details),
     providerRequestContentType: readSafeDiagnosticToken(error.details?.requestContentType),
     providerRequestCredentialPresent: readSafeDiagnosticBoolean(error.details?.requestCredentialPresent),
     providerRequestEndpointKind,

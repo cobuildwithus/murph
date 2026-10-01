@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-30",
+  "order": 100,
+  "item": {
+    "id": "conversation-startup-priority",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Conversations get startup priority",
+    "summary": "Your messages can take priority when background syncing is still starting up.",
+    "details": "Background syncing can still start on its own. If a session is already running, it can pick up your message directly.",
+    "relevanceTags": [
+      "conversations",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}

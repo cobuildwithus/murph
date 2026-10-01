@@ -407,8 +407,8 @@ to apply after cutover.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Codex App Server owns managed OpenAI standalone web search. Its exact
-  `POST /v1/alpha/search` request uses the existing signed provider credential
-  and Worker egress owner; a provider rejection remains the current tool
+  `POST /v1/alpha/search` request uses native container authority
+  and the Worker egress owner; a provider rejection remains the current tool
   failure and must not create a Murph-side retry, fallback search provider,
   queue, or durable search state. Unsupported methods, paths, providers, and
   invalid runtime identity fail closed before Worker-owned credential
@@ -622,7 +622,7 @@ to apply after cutover.
   starving the other. The durable null snapshot remains an explicit `pending`
   shared-read state until the member runtime materializes it.
 - Direct hosted Codex process projection includes the selected core provider
-  and only that provider's signed egress credential. Changing providers
+  and that provider's SDK credential placeholder. Changing providers
   therefore changes the warm-process launch identity; the replacement process
   cannot inherit the prior provider's endpoint or credential.
 - Explicit remote verification is fail-closed. The dispatcher never retries on
@@ -775,6 +775,11 @@ to apply after cutover.
   children stop without another grace period; future durable wakes can start
   cold. DO reactivation preserves the SDK task, while process replacement does
   not inherit a completed process's watermark.
+  Activity expiry rearms and yields to an active invocation before acquiring the
+  lifecycle lock, which the invocation retains until its response settles.
+  Maintenance must not hold the SDK alarm open behind that long-running work.
+  Destructive cleanup remains locked and rechecks interaction ownership after
+  external reads; scheduling a future check grants no new conversation warmth.
 - The production database-health operator alert is an independent Cloudflare
   singleton so the monitored Postgres database cannot take down its own page
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample
@@ -2147,7 +2152,14 @@ to apply after cutover.
   caller-supplied ciphertext, new key owner or cross-request cache is added.
 - Queue-enabled provider webhooks verify once, freeze a versioned prepared
   event, and encrypt before any Postgres read. Raw provider signature headers
-  and payload bytes do not enter Queue state. The prepared event enters one
+  and payload bytes do not enter Queue state. Web retries enqueue once
+  only when fetch reports a network failure before returning
+  a response. The retry reuses the exact encrypted envelope and transport id;
+  canonical prepared-event deduplication covers a lost acceptance response.
+  Each attempt retains the configured control timeout, with at most two calls.
+  HTTP rejections, invalid responses, cancellation and timeout are not retried
+  here. Exhaustion still returns retryable 503 without synchronous fallback.
+  The prepared event enters the existing
   Cloudflare Queue consumer configured for batches of 100, five-second
   collection, concurrency one, ten retries, and an encrypted DLQ. The consumer
   decrypts outside Postgres and partitions Web callbacks by exact UTF-8 size at
@@ -2293,8 +2305,11 @@ to apply after cutover.
   failures and history discard reuse. A new inventory read is one attempt capped
   at eight seconds, accepts at most 64 provider rows, and its source projection
   reads the current local source set once before at most 64 serial upserts.
-  Every summary admission still reads live sources after the provider fetch,
-  independently of provider cardinality or inventory reuse. Ordinary units contain
+  Populated summary admission still reads live sources after the provider fetch,
+  independently of provider cardinality or inventory reuse. Empty summaries have
+  no canonical records or authoritative deletions, so they skip import; bounded
+  empty summary units also skip the import-only source read and advance their
+  existing continuation. Historical and timeseries coverage checks are unchanged. Ordinary units contain
   one resource and allow at most three sequential pages with one eight-second
   request attempt per page.
   Sleep and sleep-cycle remain one canonical unit so
@@ -2556,6 +2571,18 @@ to apply after cutover.
   updates cover all three channels and preserve stale-lease rejection. These
   facts never acknowledge mailbox consumption; the checkpoint retains ownership.
   A system head ages from its accepted mailbox creation time.
+  Imported `member.activated` and `device-sync.wake` work may defer their alerts
+  while the same active default-mode runtime owns both its workspace progress
+  generation and the
+  latest foreground trace's attempt/generation. That trace must prove a terminal
+  reply or no-reply after the system head and last workspace checkpoint, with an
+  unexpired runtime-owned checkpoint deadline. Read only the newest trace through
+  the existing member/acceptance index; never fall back to older evidence when
+  that trace is incomplete. Expiry restores the original system-head age. This
+  grace respects foreground priority without treating a device import or a
+  future retry wake as completion. Other system kinds, unimported heads, retired
+  owners, generation mismatches, and already-published completion retain normal
+  stall classification.
   Lane high-water reads select only sequence and update time; they never fetch
   inline or externalized mailbox ciphertext.
   Import and unrelated

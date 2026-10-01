@@ -11,9 +11,13 @@ import {
   parseHostedRunnerStatusResponse,
   parseHostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRunnerStatusResponse,
-  HostedWorkspaceInvocationResult,
+import {
+  HOSTED_RUNTIME_LOG_COMPONENTS,
+  HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_LOG_LEVELS,
+  HOSTED_RUNTIME_LOG_PHASES,
+  type HostedRunnerStatusResponse,
+  type HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -1151,6 +1155,9 @@ function sanitizeHostedFailureValue(value: unknown): unknown {
     if (shouldOmitHostedFailureStatusKey(key)) {
       if (child !== null && child !== undefined) {
         sanitized[`${key}Present`] = true;
+        if (key === "recentLogs" && Array.isArray(child)) {
+          sanitized.recentLogMetadata = summarizeHostedFailureLogMetadata(child);
+        }
       }
       continue;
     }
@@ -1159,6 +1166,25 @@ function sanitizeHostedFailureValue(value: unknown): unknown {
   }
 
   return sanitized;
+}
+
+function summarizeHostedFailureLogMetadata(entries: unknown[]): unknown[] {
+  // Select values from the existing closed contract, never copy log payloads,
+  // free-form errors, timestamps or identifiers into uploaded diagnostics.
+  return entries.slice(-8).flatMap((entry) => {
+    if (!entry || typeof entry !== "object"
+      || !("level" in entry) || !("component" in entry)
+      || !("phase" in entry) || !("eventCode" in entry)) {
+      return [];
+    }
+    const level = HOSTED_RUNTIME_LOG_LEVELS.find((value) => value === entry.level);
+    const component = HOSTED_RUNTIME_LOG_COMPONENTS.find((value) => value === entry.component);
+    const phase = HOSTED_RUNTIME_LOG_PHASES.find((value) => value === entry.phase);
+    const eventCode = HOSTED_RUNTIME_LOG_EVENT_CODES.find((value) => value === entry.eventCode);
+    return level && component && phase && eventCode
+      ? [{ level, component, phase, eventCode }]
+      : [];
+  });
 }
 
 function shouldOmitHostedFailureStatusKey(key: string): boolean {

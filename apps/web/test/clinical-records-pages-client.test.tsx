@@ -902,6 +902,24 @@ describe("Clinical Records status page", () => {
     expect(rendered.container.textContent).toContain("No records imported yet");
   });
 
+  it("explains portal coverage limits and counts skips without claiming existing results", async () => {
+    const connection = makeConnection();
+    const { RecordsPageClient } = await import("../app/(dashboard)/records/records-page-client");
+    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
+      authenticated: true,
+      initialCallback: null,
+      initialConnections: [{ ...connection, lastErrorCode: "provider-search-incomplete",
+        latestRun: { ...connection.latestRun!, skippedExistingCount: 2 } }],
+      initialLoadError: false,
+    }), { requireButton: false });
+    cleanup = rendered.cleanup;
+    expect(rendered.container.textContent).toContain("Limited portal coverage");
+    expect(rendered.container.textContent).toContain("Your portal reported limited coverage. Any records saved are ready to use.");
+    expect(rendered.container.textContent).toContain("2 repeated items skipped.");
+    expect(rendered.container.textContent).not.toContain("already in Murph");
+    expect(rendered.container.textContent).toContain("3 records added");
+  });
+
   it("renders truthful partial status, strips callback state, and deduplicates disconnect attempts", async () => {
     const connection = makeConnection();
     const technicalMessage = "Clinical Records credential revocation failed upstream.";
@@ -1092,7 +1110,7 @@ describe("Clinical Records status page", () => {
     const completeBadge = Array.from(rendered.container.querySelectorAll("span"))
       .find((span) => span.textContent === "Imported");
     assert.ok(completeBadge);
-    expect(completeBadge.className).toContain("bg-primary");
+    expect(completeBadge.className).toContain("sr-only");
     expect(rendered.container.querySelector('a[href="/biomarkers"]')?.textContent).toBe("View lab results");
     expect(rendered.container.textContent).toContain(
       "Your records are saved and ready for conversations with Murph.",

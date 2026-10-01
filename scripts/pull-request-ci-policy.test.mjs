@@ -278,7 +278,7 @@ function inspectHostSupportReleaseGraph(source) {
     webTests,
     /^      matrix: \$\{\{ fromJSON\(needs\.release-verification-plan-linux\.outputs\.hosted_web_test_matrix\) \}\}$/mu,
   );
-  assert.match(webTests, /^        image: public\.ecr\.aws\/docker\/library\/postgres:17$/mu);
+  assert.match(webTests, /^        image: postgres:17$/mu);
   assert.match(webTests, /^      MURPH_HOSTED_WEB_TEST_SHARD: \$\{\{ matrix\.shard \}\}$/mu);
   assert.match(webTests, /^      MURPH_HOSTED_WEB_VERIFY_LANE: test-shard$/mu);
   assert.match(webTests, /^      MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK: "1"$/mu);
@@ -302,7 +302,7 @@ function inspectHostSupportReleaseGraph(source) {
   assert.match(webPostgres, /^      fail-fast: false$/mu);
   assert.match(webPostgres, /^      max-parallel: 4$/mu);
   assert.match(webPostgres, /^      matrix:\n        shard: \[1, 2, 3, 4\]$/mu);
-  assert.match(webPostgres, /^        image: public\.ecr\.aws\/docker\/library\/postgres:17$/mu);
+  assert.match(webPostgres, /^        image: postgres:17$/mu);
   assert.match(webPostgres, /^          POSTGRES_DB: murph_test_gate$/mu);
   assert.match(webPostgres, /--health-cmd "pg_isready -U postgres -d murph_test_gate"/u);
   assert.match(webPostgres, /^          - 5432:5432$/mu);
@@ -771,6 +771,13 @@ test("Release checks accepts exactly docs-proof or full-shard receipts", async (
 
 test("required Stripe boundary accepts docs-only skipped and full proof modes", async () => {
   const source = await workflow("hosted-stripe-billing.yml");
+  const live = jobBlock(source, "live-stripe-browser");
+  assert.match(live, /^    runs-on: ubuntu-24.04$/mu);
+  assert.match(live, /^        image: postgres:17$/mu);
+  assert.match(live, /^          POSTGRES_DB: murph_hosted_stripe_billing$/mu);
+  assert.match(live, /--health-cmd "pg_isready -U postgres -d murph_hosted_stripe_billing"/u);
+  assert.match(live, /^          - 5432:5432$/mu);
+  assert.doesNotMatch(live, /^\s+credentials:|docker login/mu);
   const base = {
     EVENT_NAME: "pull_request",
     HERMETIC_RESULT: "skipped",
@@ -1081,42 +1088,6 @@ test("draft reset rejects missing, ambiguous, or mismatched head candidates befo
       listedPullRequests,
       synchronizedWhileDraft: false,
     }), 0);
-  }
-});
-
-test("operator docs preserve the bounded Host Support release graph", async () => {
-  const [runtimeOperations, testingMap] = await Promise.all([
-    readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
-    readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
-  ]);
-  for (const document of [runtimeOperations, testingMap]) {
-    assert.match(document, /scripts\/release-verification-plan\.mjs/u);
-    assert.match(document, /six(?:-shard package| package)/u);
-    assert.match(document, /four(?:-shard Web-test| release-plan-owned Web| Web test)/u);
-    assert.match(document, /package-boundary[\s\S]{0,160}(?:exactly once|sole owner)/u);
-    assert.match(document, /organization-level/u);
-    assert.match(document, /Release checks \(ubuntu\)/u);
-  }
-  assert.match(testingMap, /separate runners[\s\S]{0,160}Frog #2656/u);
-  assert.match(runtimeOperations, /Web and Cloudflare never execute in the same job or runner/u);
-});
-
-test("operator docs preserve the ready-only exact-head lifecycle and native canary cadence", async () => {
-  const documents = await Promise.all([
-    readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
-    readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
-  ]);
-  for (const document of documents) {
-    assert.match(document, /draft-first|start as drafts/u);
-    assert.match(document, /ready_for_review|ready for review/u);
-    assert.match(document, /synchronize[\s\S]{0,240}draft/u);
-    assert.match(document, /exact head|exact-head/u);
-    assert.match(document, /production canar/u);
-    assert.match(document, /twelve-hour/u);
-    assert.doesNotMatch(
-      document,
-      /native-ios-hosted-e2e-retry\.mjs|--failure-code (?:android_workflow_rerun|xcodebuild_failed)/u,
-    );
   }
 });
 

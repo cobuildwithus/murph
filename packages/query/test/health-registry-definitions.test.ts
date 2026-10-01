@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 
 import {
   allergyRegistryEntityDefinition,
-  bankEntityDefinitions,
   bankEntityDefinitionByKind,
   conditionRegistryEntityDefinition,
   extractBankEntityRegistryLinks,
@@ -44,9 +43,6 @@ import {
   workoutFormatRecordFromEntity,
   workoutFormatRegistryDefinition,
 } from "../src/health/registries.ts";
-import {
-  getBankRegistryQueryMetadata,
-} from "../src/health/bank-registry-query-metadata.ts";
 import { projectRegistryEntity } from "../src/health/projectors/registry.ts";
 import type { MarkdownDocumentRecord } from "../src/health/shared.ts";
 import {
@@ -88,7 +84,7 @@ test("query registry definitions combine canonical registry metadata with query-
       continue;
     }
 
-    const queryMetadata = getBankRegistryQueryMetadata(kind);
+    const queryMetadata = getBankEntityRegistryProjectionMetadata(kind);
 
     assert.equal(registryDefinition.registry.directory, definition.registry.directory);
     assert.deepEqual(registryDefinition.registry.idKeys, definition.registry.idKeys);
@@ -98,15 +94,6 @@ test("query registry definitions combine canonical registry metadata with query-
     assert.equal(
       typeof registryDefinition.compare,
       queryMetadata.sortBehavior ? "function" : "undefined",
-    );
-  }
-});
-
-test("bank registry definitions reuse the contracts projection owner for every family", () => {
-  for (const { kind } of bankEntityDefinitions) {
-    assert.equal(
-      getBankRegistryQueryMetadata(kind),
-      getBankEntityRegistryProjectionMetadata(kind),
     );
   }
 });
@@ -499,7 +486,7 @@ test("family and genetics split canonical payload metadata from query sort metad
   assert.ok(familyRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(familyRegistryEntityDefinition.registry.upsertPayloadSchema);
   assert.ok(familyRegistryEntityDefinition.registry.patchPayloadSchema);
-  assert.equal(getBankRegistryQueryMetadata("family").sortBehavior, "title");
+  assert.equal(getBankEntityRegistryProjectionMetadata("family").sortBehavior, "title");
 
   const parsedFamilyPayload = familyRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
     title: "Mother",
@@ -525,7 +512,7 @@ test("family and genetics split canonical payload metadata from query sort metad
   assert.ok(geneticsRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(geneticsRegistryEntityDefinition.registry.upsertPayloadSchema);
   assert.ok(geneticsRegistryEntityDefinition.registry.patchPayloadSchema);
-  assert.equal(getBankRegistryQueryMetadata("genetics").sortBehavior, "gene-title");
+  assert.equal(getBankEntityRegistryProjectionMetadata("genetics").sortBehavior, "gene-title");
 
   const parsedGeneticsPayload = geneticsRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
     gene: "APOE",

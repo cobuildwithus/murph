@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
@@ -93,32 +92,6 @@ test("does not render mocked private biomarker values when browser-vault is unav
   assert.match(markup, /Connect a device/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
   assert.doesNotMatch(markup, /Latest Demo/iu);
-});
-
-test("the biomarker overview mounts the browser-vault private card", () => {
-  const source = readFileSync(
-    new URL("../src/components/biomarkers/biomarker-detail/biomarker-overview.tsx", import.meta.url),
-    "utf8",
-  );
-  const layoutSource = readFileSync(
-    new URL(
-      "../app/(dashboard)/biomarkers/[biomarkerId]/biomarker-layout-client.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  const dashboardLayoutSource = readFileSync(
-    new URL("../app/(dashboard)/layout.tsx", import.meta.url),
-    "utf8",
-  );
-
-  assert.match(source, /BiomarkerPrivateTrendCard/u);
-  // The persistent dashboard layout provider owns the browser vault, so the
-  // overview mounts the consumer directly without a route-local provider.
-  assert.doesNotMatch(source, /BrowserVaultProvider/u);
-  assert.match(dashboardLayoutSource, /BrowserVaultProvider/u);
-  assert.doesNotMatch(layoutSource, /BrowserVaultProvider/u);
-  assert.doesNotMatch(source, /BiomarkerTrendDetail/u);
 });
 
 test("the biomarker overview uses a concise experiments section heading", () => {

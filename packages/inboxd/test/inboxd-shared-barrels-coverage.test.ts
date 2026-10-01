@@ -26,7 +26,6 @@ vi.mock("@murphai/core", () => ({
 }));
 
 import * as sharedModule from "../src/shared.ts";
-import * as sharedRuntimeModule from "../src/shared-runtime.ts";
 import {
   assertVaultPathOnDisk,
   buildAttachmentId,
@@ -36,7 +35,6 @@ import {
   createInboxCaptureIdentityKey,
   ensureParentDirectory,
   generatePrefixedId,
-  mapObjectEntries,
   normalizeRelativePath,
   normalizeStoredAttachments,
   sanitizeFileName,
@@ -63,15 +61,7 @@ afterEach(() => {
   mocks.assertPathWithinVaultOnDiskMock.mockReset();
 });
 
-test("shared barrel re-exports the shared-runtime helpers and contract types without drift", () => {
-  assert.equal(sharedModule.createCaptureCheckpoint, sharedRuntimeModule.createCaptureCheckpoint);
-  assert.equal(sharedModule.normalizeTextValue, sharedRuntimeModule.normalizeTextValue);
-  assert.equal(sharedModule.redactSensitivePaths, sharedRuntimeModule.redactSensitivePaths);
-  assert.equal(sharedModule.relayAbort, sharedRuntimeModule.relayAbort);
-  assert.equal(sharedModule.sanitizeRawMetadata, sharedRuntimeModule.sanitizeRawMetadata);
-  assert.equal(sharedModule.toIsoTimestamp, sharedRuntimeModule.toIsoTimestamp);
-  assert.equal(sharedModule.waitForAbortOrTimeout, sharedRuntimeModule.waitForAbortOrTimeout);
-
+test("stored attachment types stay aligned across the public contract and normalization", () => {
   expectTypeOf<BarrelStoredAttachment>().toEqualTypeOf<ContractStoredAttachment>();
   expectTypeOf<Parameters<typeof normalizeStoredAttachments>[1]>().toEqualTypeOf<
     ReadonlyArray<ContractStoredAttachment>
@@ -212,11 +202,6 @@ test("shared helpers normalize ids, snippets, search text, and attachment record
     `${"x".repeat(177)}...`,
   );
   assert.equal(buildSnippet(undefined, " second "), "second");
-
-  assert.deepEqual(
-    mapObjectEntries({ alpha: 1, beta: 2 }, (key, entry) => [key.toUpperCase(), Number(entry) * 10]),
-    { ALPHA: 10, BETA: 20 },
-  );
 
   assert.equal(
     createInboxCaptureIdentityKey({

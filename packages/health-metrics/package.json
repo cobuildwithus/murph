@@ -11,6 +11,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./wearable-provider-catalog": {
+      "types": "./dist/wearable-provider-catalog.d.ts",
+      "import": "./dist/wearable-provider-catalog.js",
+      "default": "./dist/wearable-provider-catalog.js"
     }
   },
   "files": [

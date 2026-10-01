@@ -80,10 +80,11 @@ import type {
   WorkerActiveRuntimeUserFenceResult,
 } from "./worker-contracts.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
+import type { HostedRuntimeCompletionReceipt } from "./runtime-completion-receipt.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 import { HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS } from "./container-runtime-completion.ts";
 
-import { RunnerInvocationReceiptStore, type RunnerInvocationReceipt } from "./runner-invocation-receipt.ts";
+import { RunnerInvocationReceiptStore, type RunnerInvocationReceipt, type RunnerProviderAuthority } from "./runner-invocation-receipt.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
@@ -328,10 +329,11 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   startSupervisedInvocation?(input: HostedExecutionContainerInvokeRequest): Promise<{ accepted: true }>;
-  recordSupervisedRuntimeCompletion?(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<{ completed: boolean }>;
+  recordSupervisedRuntimeCompletion?(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<HostedRuntimeCompletionReceipt>;
   readSupervisedInvocation?(input: { userId: string }): Promise<RunnerInvocationReceipt | null>;
   beginRuntimeUsageSettlement?(input: { userId: string; attemptId: string; generation: string; reportId: string }): Promise<boolean>;
   finishRuntimeUsageSettlement?(input: { userId: string; attemptId: string; generation: string; reportId: string; allowed: boolean }): Promise<void>;
+  readProviderAuthority?(): Promise<RunnerProviderAuthority | null>;
   runtimeUsageSettlementAllowsProviders?(input: { userId: string; attemptId: string; generation: string }): Promise<boolean>;
   onRuntimeCompletionRecorded?(
     input: RunnerContainerRuntimeCompletionRecordedInput,
@@ -659,6 +661,7 @@ export class RunnerContainer extends Container {
   // This discriminator is namespace identity, not a second lifecycle owner.
   protected readonly slotNamespace: "runner" | "standby" | "small" = "runner";
   private slotStore: RunnerSlotBindingStore | null = null;
+  private invocationReceipts: RunnerInvocationReceiptStore | null = null;
   private readonly durableObjectName: string | null;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private lifecycleLockPendingCount = 0;
@@ -675,6 +678,7 @@ export class RunnerContainer extends Container {
   private pendingCompletionCleanup: RunnerContainerPendingCompletionCleanup | null = null;
   private recordedCompletionCleanup: RunnerContainerRuntimeCompletionRecordedInput | null = null;
   private workspaceInvocationOperations: RunnerWorkspaceInvocationOperation[] = [];
+  private readonly readinessOperations = new Set<AbortController>();
   private workspaceInvocationNoPointerAbort:
     RunnerWorkspaceInvocationNoPointerAbort | null = null;
   private containerInteractionGeneration = 0;
@@ -1028,7 +1032,9 @@ export class RunnerContainer extends Container {
     const receipts = this.requireInvocationReceiptStore();
     // Reserve durably before launch. Retrying after eviction never reexecutes
     // an ambiguous invocation; reconciliation inspects this exact target.
-    if (receipts.register(identity) === "existing") return { accepted: true };
+    if (receipts.register(identity, { workspaceVersion: request.workspaceVersion,
+      customInferenceEnvelope: authority.owner.customInferenceEnvelope,
+      platformAiUsageAllowed: authority.owner.platformAiUsageAllowed }) === "existing") return { accepted: true };
     const result = this.invoke(payload);
     this.ctx.waitUntil(result.then(async (completed) => {
       if (!receipts.complete(identity, completed.immediateRecheckRequested === true)) return;
@@ -1058,12 +1064,12 @@ export class RunnerContainer extends Container {
     return { accepted: true };
   }
 
-  async recordSupervisedRuntimeCompletion(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<{ completed: boolean }> {
+  async recordSupervisedRuntimeCompletion(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<HostedRuntimeCompletionReceipt> {
     this.authorizeBoundUser(input.userId);
-    if (!this.requireInvocationReceiptStore().complete(input, input.result.immediateRecheckRequested === true)) return { completed: false };
+    if (!this.requireInvocationReceiptStore().complete(input, input.result.immediateRecheckRequested === true)) return { completed: false, reason: "native_receipt_mismatch" };
     const completed = await recordHostedRuntimeOwnerCompletion({ ...input, source: this.environment });
     if (completed) await this.onRuntimeCompletionRecorded({ userId: input.userId, attemptId: input.attemptId, leaseGeneration: input.generation });
-    return { completed };
+    return completed ? { completed: true } : { completed: false, reason: "canonical_completion_rejected" };
   }
 
   async readSupervisedInvocation(input: { userId: string }): Promise<RunnerInvocationReceipt | null> {
@@ -1081,14 +1087,39 @@ export class RunnerContainer extends Container {
     this.requireInvocationReceiptStore().finishUsageSettlement(input, input.reportId, input.allowed);
   }
 
+  // Existing Workers may finish requests across controller deployment.
   async runtimeUsageSettlementAllowsProviders(input: { userId: string; attemptId: string; generation: string }): Promise<boolean> {
     this.authorizeBoundUser(input.userId);
     return this.requireInvocationReceiptStore().usageSettlementAllowsProviders(input);
   }
 
+  async readProviderAuthority(): Promise<RunnerProviderAuthority | null> {
+    const binding = this.readRunnerSlotBindingOptional();
+    if (!binding?.userId || (binding.state !== "bound" && binding.state !== "retiring")) return null;
+    const receipts = this.requireInvocationReceiptStore();
+    let invocation = receipts.readProviderInvocation();
+    if (!invocation) return null;
+    // Rolling deploy: old registered invocations have no native provider context.
+    // Import it once; fresh launches persist it before any container execution.
+    if (!invocation.context) {
+      const { owner } = await commandHostedRuntimeOwner({ source: this.environment,
+        userId: binding.userId, command: { operation: "reconcile" } });
+      if (!owner || owner.attemptId !== invocation.attemptId || owner.generation !== invocation.generation
+        || owner.runnerContainerName !== binding.slotName || owner.workspaceVersion === null
+        || !["starting", "active", "retiring"].includes(owner.phase)) return null;
+      receipts.restoreProviderContext(invocation, { workspaceVersion: owner.workspaceVersion,
+        customInferenceEnvelope: owner.customInferenceEnvelope, platformAiUsageAllowed: owner.platformAiUsageAllowed });
+      invocation = receipts.readProviderInvocation();
+    }
+    const state = this.readRunnerSlotBindingOptional()?.state;
+    if (state !== "bound" && state !== "retiring") return null;
+    return invocation?.context ? { retiring: state === "retiring", userId: binding.userId, attemptId: invocation.attemptId,
+      generation: invocation.generation, ...invocation.context, settlementPending: invocation.settlementPending } : null;
+  }
+
   private requireInvocationReceiptStore(): RunnerInvocationReceiptStore {
     if (!this.ctx.storage.sql) throw new Error("Native invocation receipts require SQLite storage.");
-    return new RunnerInvocationReceiptStore(this.ctx.storage.sql);
+    return this.invocationReceipts ??= new RunnerInvocationReceiptStore(this.ctx.storage.sql);
   }
 
   async invoke(
@@ -1220,6 +1251,12 @@ export class RunnerContainer extends Container {
     this.noteContainerInteraction();
     this.pendingCompletionCleanup = null;
     this.recordedCompletionCleanup = null;
+    // Retirement must interrupt preparation before queuing behind its lifecycle
+    // lock. A normal Error forces cold-start cleanup instead of preserving the
+    // startup window used for retryable readiness timeouts.
+    for (const readiness of this.readinessOperations) {
+      readiness.abort(new Error("runner preparation retired"));
+    }
     const operationsAtDestroy = [...this.workspaceInvocationOperations];
     for (const operation of operationsAtDestroy) {
       if (!operation.abortController.signal.aborted) {
@@ -1321,7 +1358,11 @@ export class RunnerContainer extends Container {
     // Start the wall-clock deadline before lifecycle-lock admission. A queued
     // readiness request must not receive a fresh timeout after its caller-side
     // guard has already elapsed.
-    const readinessSignal = AbortSignal.timeout(input.timeoutMs);
+    const readinessAbort = new AbortController();
+    this.readinessOperations.add(readinessAbort);
+    const readinessSignal = combineRunnerContainerAbortSignals(
+      readinessAbort.signal, AbortSignal.timeout(input.timeoutMs),
+    );
     let lifecycleLockAcquired = false;
     let cleanupSettlementTimedOut = false;
     const startupFailureObservation: RunnerContainerStartupFailureObservation = {
@@ -1416,6 +1457,13 @@ export class RunnerContainer extends Container {
         return { kind: "cleanup_unsettled" };
       }
       throw error;
+    } finally {
+      // The caller's timeout can precede native cleanup. Keep cancellation
+      // registered until the actual lifecycle operation settles.
+      void readiness.then(
+        () => this.readinessOperations.delete(readinessAbort),
+        () => this.readinessOperations.delete(readinessAbort),
+      );
     }
   }
 
@@ -2132,37 +2180,20 @@ export class RunnerContainer extends Container {
   private async evaluateWarmContainerLifecycle(
     input: RunnerContainerLifecycleEvaluationInput,
   ): Promise<void> {
-    const eligible = await this.withLifecycleLock(async () => {
-      if (this.readRunnerSlotBindingOptional()?.state === "unbound") {
-        this.renewPlatformActivityTimeout("standby-unbound-ready");
-        return false;
-      }
-      // SDK 0.3.7 consumes a scheduled callback even if it throws. Persist
-      // recovery before external reads; uncertainty grants no conversation lease.
-      await this.scheduleLifecycleCheck(
-        Date.now() + (input.trigger === "invoke-completed"
-          ? HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS
-          : readRunnerContainerLifecycleReevaluationMs(this.environment)),
-      );
-      return !this.lifecycleInteractionChanged(input.expectedInteractionGeneration);
-    }, { blockPointerlessWake: false });
-    // Control-plane latency must not hold the native lifecycle lock ahead of
-    // an arriving message. The locked evaluator rechecks interaction ownership.
-    if (!eligible || !await this.runtimeOwnerAllowsIdleCleanup()) return;
-    await this.withLifecycleLock(
-      () => this.evaluateWarmContainerLifecycleLocked(input),
-      { blockPointerlessWake: false },
-    );
-  }
-
-  private async evaluateWarmContainerLifecycleLocked(
-    input: RunnerContainerLifecycleEvaluationInput,
-  ): Promise<void> {
-    const lifecycleObservedAtMs = Date.now();
-    const lifecycleStagePrefix = input.trigger;
-    if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
+    if (this.readRunnerSlotBindingOptional()?.state === "unbound") {
+      this.renewPlatformActivityTimeout("standby-unbound-ready");
       return;
     }
+    // Rearm before external reads and before waiting for the lifecycle lock:
+    // invoke() holds that lock for the full lifetime of the child invocation.
+    // An active invocation must let the SDK finish and service its next alarm.
+    await this.scheduleLifecycleCheck(
+      Date.now() + (input.trigger === "invoke-completed"
+        ? HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS
+        : readRunnerContainerLifecycleReevaluationMs(this.environment)),
+    );
+    const lifecycleObservedAtMs = Date.now();
+    const lifecycleStagePrefix = input.trigger;
     const activeOperation = this.readWorkspaceInvocationOperation();
     if (activeOperation) {
       if (input.trigger === "activity-expired") {
@@ -2185,8 +2216,26 @@ export class RunnerContainer extends Container {
       return;
     }
 
+    // Control-plane latency must not hold the native lifecycle lock ahead of
+    // an arriving message. Only destructive evaluation needs the lock; it
+    // rechecks interaction ownership after this external read.
+    if (this.containerInteractionGeneration !== input.expectedInteractionGeneration
+      || !await this.runtimeOwnerAllowsIdleCleanup()) return;
+    await this.withLifecycleLock(
+      () => this.evaluateWarmContainerLifecycleLocked(input),
+      { blockPointerlessWake: false },
+    );
+  }
+
+  private async evaluateWarmContainerLifecycleLocked(
+    input: RunnerContainerLifecycleEvaluationInput,
+  ): Promise<void> {
+    const lifecycleStagePrefix = input.trigger;
+    if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
+      return;
+    }
     if (input.trigger === "activity-expired") {
-      this.lastActivityExpiryAtMs = lifecycleObservedAtMs;
+      this.lastActivityExpiryAtMs = Date.now();
     }
 
     if (!await this.canStopWarmContainer({

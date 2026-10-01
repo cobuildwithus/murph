@@ -27,6 +27,7 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/health-metrics": "workspace:*",
     "@murphai/runtime-state": "workspace:*"

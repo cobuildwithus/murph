@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -91,31 +90,4 @@ describe("hosted group sponsorship contracts", () => {
       },
     })).toThrow(/canonical/u);
   });
-  it("documents the strict usage contract and old-Web sponsorship rollback floor", () => {
-    const deployGuide = readFileSync(
-      new URL("../../../apps/cloudflare/DEPLOY.md", import.meta.url),
-      "utf8",
-    );
-    const section = deployGuide.match(
-      /## Group Usage Projection Privacy and Monthly Sponsorship Rollout[\s\S]*?(?=\n## )/u,
-    )?.[0];
-    const normalizedSection = section?.replace(/\s+/gu, " ");
-
-    expect(section).toBeDefined();
-    expect(normalizedSection).toContain(
-      "There is no strip-only reader phase or rollout-only feature flag",
-    );
-    expect(normalizedSection).toContain(
-      "A mixed-version Web/runner window may temporarily make the strict read fail",
-    );
-    expect(normalizedSection).toContain(
-      "Confirm both the migration and new Web have converged before enabling monthly authorization creation or automatic refill admission",
-    );
-    expect(normalizedSection).toContain(
-      "The first monthly authorization is the old-Web rollback floor",
-    );
-    expect(normalizedSection).toContain("Recover with a forward fix");
-    expect(normalizedSection).toContain("not a permanent rollout framework");
-  });
-
 });

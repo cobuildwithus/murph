@@ -10,6 +10,7 @@ import {
   isPrismaOperationTimingActive,
   recordPrismaOperationTiming,
   startPrismaPoolAcquisitionTiming,
+  startPrismaQueryTiming,
 } from "./prisma-operation-timing";
 import { installHostedWebWarningFilters } from "./process-warnings";
 
@@ -218,6 +219,36 @@ function createPrismaPool(input: CreatePrismaClientInput): PgPool {
     max: poolMax,
   });
 
+  // A physical client covers pool queries and transaction statements exactly
+  // once. Capture the requesting scope before pg invokes completion callbacks.
+  pool.on("connect", (client) => {
+    client.query = new Proxy(client.query, {
+      apply(query, receiver, args) {
+        const record = startPrismaQueryTiming();
+        if (!record) return Reflect.apply(query, receiver, args);
+        const callback = args.at(-1);
+        try {
+          if (typeof callback === "function") {
+            return Reflect.apply(query, receiver, [...args.slice(0, -1), function (this: unknown, ...result: unknown[]) {
+              record(result[0] != null);
+              return Reflect.apply(callback, this, result);
+            }]);
+          }
+          const pending: Promise<unknown> = Reflect.apply(query, receiver, args);
+          // pg also accepts streaming Submittable objects; leave those intact.
+          if (!pending || typeof pending.then !== "function") return pending;
+          return pending.then(
+            result => { record(false); return result; },
+            error => { record(true); throw error; },
+          );
+        } catch (error) {
+          record(true);
+          throw error;
+        }
+      },
+    });
+  });
+
   // Transaction statements reuse their acquired client. Sample only real
   // checkouts so those statements cannot masquerade as prospective waiters.
   // Forward both pg callback and promise forms without changing their lifetime.
@@ -226,14 +257,16 @@ function createPrismaPool(input: CreatePrismaClientInput): PgPool {
       const snapshot = readDatabasePoolSnapshot(pool);
       reportDatabasePoolPressure(pool, poolMax, snapshot);
       const record = startPrismaPoolAcquisitionTiming(snapshot);
-      if (!record) return Reflect.apply(connect, receiver, args);
       const callback = args[0];
       if (typeof callback === "function") {
-        return Reflect.apply(connect, receiver, [function (this: unknown, ...result: unknown[]) {
-          record();
+        // A queued checkout may be fulfilled by another request's release.
+        // Restore the requesting scope, including the absence of a collector.
+        return Reflect.apply(connect, receiver, [AsyncLocalStorage.bind(function (this: unknown, ...result: unknown[]) {
+          record?.();
           return Reflect.apply(callback, this, result);
-        }]);
+        })]);
       }
+      if (!record) return Reflect.apply(connect, receiver, args);
       try {
         const pending: Promise<unknown> = Reflect.apply(connect, receiver, args);
         return pending.finally(record);
@@ -301,14 +334,15 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
     query: {
       $allOperations({ args, model, operation, query }) {
         const timingActive = isPrismaOperationTimingActive();
-        const startedAtMs = timingActive ? Date.now() : null;
+        const startedAtMs = timingActive ? performance.now() : null;
         const record = () => {
           if (startedAtMs === null) {
             return;
           }
           recordPrismaOperationTiming(
             model ? `${model}.${operation}` : operation,
-            Date.now() - startedAtMs,
+            performance.now() - startedAtMs,
+            startedAtMs,
           );
         };
         // Checkout/establishment timeouts precede SQL dispatch. A disconnect

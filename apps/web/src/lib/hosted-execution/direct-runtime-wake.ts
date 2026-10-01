@@ -10,8 +10,6 @@ import {
 
 import { readHostedExecutionControlClientIfConfigured } from "./control";
 import { describeHostedExecutionSafeLogErrorCode } from "./logging";
-import { executeHostedRuntimeOwnerCommand } from "./runtime-owner-control";
-import { getPrisma } from "../prisma";
 
 export type HostedDirectRuntimeWakeTiming = CloudflareHostedControlRuntimeEnsureProcessingTiming & {
   directWakeStartedAtEpochMs: number;
@@ -33,6 +31,8 @@ const HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS = 2;
  * Starts the control-only Cloudflare latency hint and always settles. Temporal
  * must own the durable mailbox signal. A caller may overlap its acknowledgement
  * only after the signal owner has validated access and started the request.
+ * The Worker claims through Web after dispatch; a failed hint must not leave a
+ * starting reservation that delays Temporal's durable wake.
  */
 export function startHostedDirectRuntimeWakeBestEffort(input: {
   onTiming?: (
@@ -101,11 +101,6 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
       attemptNumber += 1
     ) {
       signal.throwIfAborted();
-      const admission = await executeHostedRuntimeOwnerCommand({
-        prisma: getPrisma(), userId, command: { operation: "claim", processingMode: "default" },
-      });
-      if (admission.cutover !== "postgres" || !admission.owner
-        || (admission.status !== "claimed" && admission.status !== "existing")) return;
       const commandTimeoutMs = Math.min(
         HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS,
         deadlineAtEpochMs - Date.now()
@@ -126,7 +121,6 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
       timing.latest = null;
       directWakeAttemptCount = attemptNumber;
       const ensureResult = await client.ensureRuntimeProcessing({
-        admission,
         commandTimeoutMs,
         onTiming: (value) => {
           timing.latest = value;

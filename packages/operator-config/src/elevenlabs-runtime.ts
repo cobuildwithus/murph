@@ -17,9 +17,10 @@ import {
   normalizeNullableString,
 } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
+import { assertGeneratedMp3Audio } from './generated-audio.js'
 
 const DEFAULT_ELEVENLABS_API_BASE_URL = 'https://api.elevenlabs.io'
-const DEFAULT_ELEVENLABS_MODEL_ID = 'eleven_multilingual_v2'
+const DEFAULT_ELEVENLABS_MODEL_ID = 'eleven_v4'
 const ELEVENLABS_MUSIC_TIMEOUT_MS = 5 * 60_000
 const ELEVENLABS_MAX_RETRIES = 0
 const ELEVENLABS_ERROR_BODY_MAX_BYTES = 16 * 1024
@@ -107,8 +108,16 @@ export async function generateElevenLabsSpeech(input: {
     apiKey: input.apiKey,
     fetchImplementation: input.fetchImplementation,
     operation: 'speech',
-    request: async (client, requestOptions) =>
-      await client.textToSpeech.convert(
+    request: async (client, requestOptions) => modelId === 'eleven_v4'
+      ? await client.textToDialogue.convert(
+        {
+          inputs: [{ text, voiceId }],
+          modelId,
+          outputFormat: input.outputFormat ?? ELEVENLABS_TTS_OUTPUT_FORMAT,
+        },
+        requestOptions,
+      )
+      : await client.textToSpeech.convert(
         voiceId,
         {
           modelId,
@@ -271,14 +280,20 @@ async function requestElevenLabsAudio(input: {
   const startedAtMs = Date.now()
   try {
     const stream = await input.request(client, requestOptions)
+    const bytes = await readElevenLabsAudioStream(stream)
+    await assertGeneratedMp3Audio(bytes, timeout.signal)
     return {
-      bytes: await readElevenLabsAudioStream(stream),
+      bytes,
       contentType: 'audio/mpeg',
       filenameExtension: 'mp3',
     }
   } catch (error) {
     if (input.signal?.aborted) {
       throw timeout.signal.reason ?? error
+    }
+
+    if (error instanceof VaultCliError && error.code === 'ELEVENLABS_INVALID_AUDIO') {
+      throw error
     }
 
     if (

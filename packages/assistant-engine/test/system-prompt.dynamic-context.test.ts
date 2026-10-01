@@ -30,6 +30,21 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it.each(['direct', 'group'] as const)('routes lasting corrections to their canonical owner in %s conversations', (conversationScope) => {
+    const { prompt, stableRouteCapabilityPrompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, conversationScope,
+      channel: 'linq', hostedRuntime: true, assistantHostedAutomationAvailable: false,
+    })
+    expect(stableRouteCapabilityPrompt).toContain('For a correction meant to change future behavior, update the canonical state that controls that behavior')
+    expect(prompt).toContain('a one-off revision stays local, a task-specific change belongs to that task, and a broader preference belongs to its existing preference owner')
+    expect(prompt).toContain('Save behavioral instructions as reusable rules over fresh inputs; do not embed current inputs or worked examples unless the user explicitly wants those exact details retained')
+    expect(prompt).toContain('Preserve unrelated state and applicable constraints; do not turn a scoped preference into an unconditional override')
+    expect(prompt).toContain('Confirm a lasting change only from a successful authoritative result')
+    expect(prompt).toContain('If the owner is unavailable or the write fails, explain that the future change is not saved')
+    expect(prompt).toContain('never creates new permission or overrides consent, audience, or tool restrictions')
+    expect(prompt).toContain('Scheduled automation changes are unavailable in this turn')
+  })
+
   it.each(['direct', 'group'] as const)('keeps initiative bounded in the assembled %s prompt for Sol and existing profiles', (conversationScope) => {
     for (const modelBehaviorProfile of ['default', 'gpt5-agentic'] as const) {
       const { prompt, stableRouteCapabilityPrompt, dynamicTurnContextPrompt } = buildAssistantSystemPromptLayers({

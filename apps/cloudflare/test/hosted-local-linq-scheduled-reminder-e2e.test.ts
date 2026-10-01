@@ -39,8 +39,7 @@ const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const scheduledReminderImageAlt = "Sleep reminder illustration";
-const scheduledReminderDeliveredText =
-  `${reminderText}\n\n${scheduledReminderImageAlt}`;
+const scheduledReminderDeliveredText = reminderText;
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "Still there while the bedtime reminder is due?";
 const overlapForegroundReplyText = "Yep, I am here.";
@@ -90,7 +89,7 @@ const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
 const shutdownCheckpointBarrierWaitMs = 30_000;
-const productionLikeAssistantModel = "gpt-6-sol";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -858,8 +857,8 @@ async function assertScheduledReminderCronUsagePricingMatchedProviderRequest(inp
   expect(cronRows.length).toBeGreaterThan(0);
 
   const expectedPricingVersion = input.expectedTokenPricingBasis === "openai-flex"
-    ? "openai-api-pricing-2026-09-22-gpt-6-sol-luna-openai-flex"
-    : "openai-api-pricing-2026-09-22-gpt-6-sol-luna-standard";
+    ? "openai-api-pricing-2026-09-29-gpt-6.1-sol-openai-flex"
+    : "openai-api-pricing-2026-09-29-gpt-6.1-sol-standard";
   const expectedAdjustmentDenominator =
     input.expectedTokenPricingBasis === "openai-flex" ? "2" : "1";
 

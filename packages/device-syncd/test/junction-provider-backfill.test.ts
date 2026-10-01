@@ -22,6 +22,7 @@ import {
 } from "./junction-provider.harness.ts";
 
 import assert from "node:assert/strict";
+import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
@@ -42,6 +43,7 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { test, vi } from "vitest";
+import { DeviceSyncError } from "../src/errors.ts";
 import {
   buildJunctionClientUserId,
   createJunctionDeviceSyncProvider,
@@ -444,7 +446,7 @@ test("Junction programmatic timeseries overrides fetch exactly the requested res
   assert.deepEqual([...new Set(importedTimeseriesResources)].sort(), ["heartrate", "steps"]);
 });
 
-test("Junction page-heavy timeseries adapt to a smaller complete window before the parent budget", async () => {
+test.each(["page", "record"] as const)("Junction %s-heavy timeseries adapt to a smaller complete window before the parent budget", async (limit) => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -488,6 +490,18 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
         await new Promise<void>((resolve) => setTimeout(resolve, 5));
         const searchParams = new URL(url).searchParams;
         if (searchParams.get("start_date") === "2026-04-02") {
+          if (limit === "record") {
+            return createJsonResponse({
+              groups: { garmin: [{
+                data: Array.from({ length: 25_001 }, (_, index) => ({
+                  timestamp: new Date(Date.parse("2026-04-02T00:00:00.000Z") + index * 1_000).toISOString(),
+                  unit: "bpm",
+                  value: 72,
+                })),
+                source: { provider: "garmin", type: "watch" },
+              }] },
+            });
+          }
           return createJsonResponse({
             groups: {},
             next_cursor: searchParams.get("next_cursor") === "page-3"
@@ -551,12 +565,12 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
   clearTimeout(parentBudget);
 
   assert.equal(parent.signal.aborted, false);
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, limit === "page" ? 3 : 1);
   assert.equal(requests.every((url) => url.includes("/v2/timeseries/")), true);
   assert.equal(importedSnapshots.length, 0);
   const hourlyContinuation = requireValue(
     adaptiveResult.scheduledJobs?.[0],
-    "A page-heavy feature day should retry as a complete hour.",
+    "An oversized feature day should retry as a complete hour.",
   );
   assert.deepEqual(hourlyContinuation.payload, {
     emptyBackfillAttempts: 1,
@@ -583,6 +597,47 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
     windowEnd: "2026-04-03T00:00:00.000Z",
     windowStart: "2026-04-02T00:00:00.000Z",
   });
+});
+
+test.each([
+  { resource: "heartrate", hours: 1 },
+  { resource: "steps", hours: 24 },
+])("Junction record limits preserve the $resource $hours-hour boundary", async ({ resource, hours }) => {
+  let imports = 0;
+  let requests = 0;
+  const provider = createJunctionProvider(async (input) => {
+    assert.match(readUrl(input), new RegExp(`/timeseries/junction-user-1/${resource}/grouped`));
+    requests += 1;
+    return createJsonResponse({
+      groups: { garmin: [{
+        data: Array.from({ length: 25_001 }, () => ({
+          timestamp: "2026-04-02T00:30:00.000Z",
+          unit: resource === "heartrate" ? "bpm" : "count",
+          value: 72,
+        })),
+        source: { provider: "garmin", type: "watch" },
+      }] },
+    });
+  }, { summaryResources: [], timeseriesResources: [resource] });
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async () => { imports += 1; return { imported: true }; },
+      }),
+      createJob("reconcile", {
+        timeseriesCursor: "2026-04-02T00:00:00.000Z",
+        timeseriesResourceCursor: resource,
+        ...(hours === 1 ? { timeseriesWindowHours: 1 } : {}),
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    ),
+    { code: "JUNCTION_API_RECORD_LIMIT", retryable: true },
+  );
+  assert.equal(requests, 1);
+  assert.equal(imports, 0);
 });
 
 test("Junction deployed full-job progress resumes once and emits only scalar successors", async () => {
@@ -1421,11 +1476,63 @@ test("Junction yieldable reconcile checkpoints one bounded normalization-safe su
       { summaryPhaseComplete: true, summaryResourceCursor: undefined },
     ],
   );
-  assert.equal(importedSnapshots.length, 4);
+  assert.equal(importedSnapshots.length, 3);
+  assert.ok(importedSnapshots.every((snapshot) =>
+    Object.keys((snapshot as { summaries: Record<string, unknown> }).summaries).length > 0
+  ));
   assert.deepEqual(
     Object.keys((importedSnapshots[1] as { summaries: Record<string, unknown> }).summaries),
     ["sleep", "sleep_cycle"],
   );
+});
+
+test("Junction empty continuation produces only a receipt without health outputs", async () => {
+  const snapshot: JunctionSnapshotInput = {
+    accountId: "synthetic-account",
+    importedAt: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-03-27T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    connections: [{ id: "synthetic-provider", slug: "garmin" }],
+    summaries: {},
+    timeseries: {},
+  };
+  const normalized = normalizeJunctionSnapshot(snapshot);
+  assert.deepEqual(normalized.events, []);
+  assert.equal(normalized.samples, undefined);
+  assert.deepEqual(normalized.evidenceParts, []);
+  assert.equal(normalized.authoritativeEventSets, undefined);
+  const prepared = await prepareDeviceProviderSnapshotImport({ provider: "junction", snapshot });
+  assert.deepEqual(prepared.events, []);
+  assert.equal(prepared.authoritativeEventSets, undefined);
+  assert.deepEqual(prepared.evidenceParts, []);
+  assert.ok(prepared.ingestReceipt);
+});
+
+test.each([false, true])("Junction skips fetched empty summary imports with bounded=%s", async (bounded) => {
+  const importedSnapshots: JunctionSnapshotInput[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const pathname = new URL(readUrl(input)).pathname;
+    if (pathname.includes("/user/providers/")) return createJsonResponse({ providers: [] });
+    assert.ok(pathname.includes("/summary/activity/"));
+    return createJsonResponse({ data: [] });
+  }, { summaryResources: ["activity"], timeseriesResources: [] });
+  const context = createJunctionJobContext({
+    ...(bounded ? { shouldYield: () => false } : {}),
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot as JunctionSnapshotInput);
+      return { imported: true };
+    },
+  });
+  const result = await executeJunctionJob(provider, context, createJob("reconcile", {
+    windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
+  }));
+  assert.equal(importedSnapshots.length, 0);
+  if (bounded) {
+    const continuation = result.scheduledJobs?.find((job) => job.payload?.summaryPhaseComplete === true);
+    assert.ok(continuation);
+    await executeJunctionJob(provider, context, createJobFromInput(continuation));
+    assert.equal(importedSnapshots.length, 0);
+  }
 });
 
 test("Junction yieldable summary continuation fails within its inner provider-attempt bound", async () => {
@@ -1467,52 +1574,93 @@ test("Junction yieldable summary continuation fails within its inner provider-at
   assert.equal(summaryAttempts, 1);
 });
 
-test("Junction yieldable reconcile times out provider inventory once before the hosted deadline", async () => {
-  vi.useFakeTimers();
-  let inventoryAttempts = 0;
-  let summaryAttempts = 0;
-  try {
-    const provider = createJunctionProvider(async (input, init) => {
-      const url = readUrl(input);
-      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-        inventoryAttempts += 1;
-        return new Promise<Response>((_resolve, reject) => {
-          const signal = init?.signal;
-          if (!signal) {
-            reject(new Error("Expected the bounded inventory request to carry an abort signal."));
-            return;
-          }
-          const rejectAborted = () => reject(signal.reason);
-          if (signal.aborted) {
-            rejectAborted();
-            return;
-          }
-          signal.addEventListener("abort", rejectAborted, { once: true });
-        });
-      }
-      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/")) {
-        summaryAttempts += 1;
-        return createJsonResponse({ data: [] });
-      }
-      throw new Error(`Unexpected request: ${url}`);
+for (const { label, path, summaryResources, timeseries, oldBudget, budget } of [
+  { label: "inventory", path: "/v2/user/providers/", summaryResources: ["activity"], timeseries: false, oldBudget: 8_000, budget: 12_000 },
+  { label: "summary", path: "/v2/summary/activity/", summaryResources: ["activity"], timeseries: false, oldBudget: 8_000, budget: 12_000 },
+  { label: "coupled sleep", path: "/v2/summary/sleep/", summaryResources: ["sleep", "sleep_cycle"], timeseries: false, oldBudget: 5_000, budget: 7_500 },
+  { label: "coupled sleep cycle", path: "/v2/summary/sleep_cycle/", summaryResources: ["sleep", "sleep_cycle"], timeseries: false, oldBudget: 5_000, budget: 7_500 },
+  { label: "timeseries", path: "/v2/timeseries/", summaryResources: [], timeseries: true, oldBudget: 8_000, budget: 12_000 },
+]) {
+  test.each(["healthy", "between caps", "timeout", "foreground abort"])(`Junction full-job ${label}: %s`, async (outcome) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    // Put the native abort timer and the SDK timer on the same synthetic clock.
+    const abortTimeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("Synthetic deadline", "TimeoutError")), ms);
+      return controller.signal;
     });
-    const execution = executeJunctionJob(
-      provider,
-      createJunctionJobContext({ shouldYield: () => false }),
-      createJob("reconcile", {
+    const parent = new AbortController();
+    const foregroundReason = new Error("synthetic foreground yield");
+    const delay = outcome === "healthy" ? 10 : outcome === "timeout" ? budget + 1 : oldBudget + 500;
+    let attempts = 0;
+    try {
+      const provider = createJunctionProvider(async (input, init) => {
+        const pathname = new URL(readUrl(input)).pathname;
+        if (pathname.startsWith(path)) {
+          attempts += 1;
+          const signal = init?.signal;
+          assert.ok(signal);
+          await new Promise<void>((resolve, reject) => {
+            const abort = () => { clearTimeout(timer); reject(signal.reason); };
+            const timer = setTimeout(() => {
+              signal.removeEventListener("abort", abort);
+              resolve();
+            }, delay);
+            signal.addEventListener("abort", abort, { once: true });
+            if (signal.aborted) abort();
+          });
+        }
+        if (pathname.startsWith("/v2/user/providers/")) {
+          return createJsonResponse({ providers: [{
+            id: "synthetic-provider", name: "Garmin", slug: "garmin", status: "connected",
+            resource_availability: { activity: true, sleep: true, sleep_cycle: true, heartrate: true },
+          }] });
+        }
+        if (pathname.startsWith("/v2/summary/")) {
+          return createJsonResponse({ [pathname.split("/")[3]!]: [] });
+        }
+        if (pathname.startsWith("/v2/timeseries/")) return createJsonResponse({ groups: {} });
+        throw new Error("Unexpected synthetic Junction request");
+      }, { summaryResources, timeseriesResources: timeseries ? ["heartrate"] : [] });
+      const execution = executeJunctionJob(provider, createJunctionJobContext({
+        shouldYield: () => false,
+        signal: parent.signal,
+      }), createJob("reconcile", {
+        windowStart: "2026-04-02T00:00:00.000Z",
         windowEnd: "2026-04-03T00:00:00.000Z",
-        windowStart: "2026-03-27T00:00:00.000Z",
-      }),
-    );
-
-    await vi.advanceTimersByTimeAsync(8_000);
-    await assert.rejects(execution, { code: "JUNCTION_API_REQUEST_TIMEOUT", retryable: true });
-    assert.equal(inventoryAttempts, 1);
-    assert.equal(summaryAttempts, 0);
-  } finally {
-    vi.useRealTimers();
-  }
-});
+        ...(timeseries ? {
+          timeseriesCursor: "2026-04-02T00:00:00.000Z",
+          timeseriesResourceCursor: "heartrate",
+        } : {}),
+      }));
+      const checked = outcome === "timeout"
+        ? assert.rejects(execution, (error) => {
+          assert.ok(error instanceof DeviceSyncError);
+          assert.equal(error.code, "JUNCTION_API_REQUEST_TIMEOUT");
+          assert.equal(error.retryable, true);
+          assert.equal(error.details?.providerRequestTimeoutMs, budget);
+          assert.equal(error.details?.providerRequestElapsedMs, budget);
+          assert.equal(error.details?.providerRequestAttempt, 1);
+          assert.equal(error.details?.providerRequestStage, "awaiting_headers");
+          assert.equal(error.details?.providerResponseHeadersPresent, false);
+          return true;
+        })
+        : outcome === "foreground abort"
+          ? assert.rejects(execution, (error) => error === foregroundReason)
+          : assert.doesNotReject(execution);
+      if (outcome === "foreground abort") {
+        setTimeout(() => parent.abort(foregroundReason), 25);
+      }
+      await vi.advanceTimersByTimeAsync(outcome === "foreground abort" ? 25 : delay);
+      await checked;
+      assert.equal(attempts, 1, "The full-job request must not immediately retry");
+    } finally {
+      abortTimeout.mockRestore();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+}
 
 test("Junction yieldable reconcile bounds maximum provider projection to fixed source reads", async () => {
   const providers = Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
@@ -1554,9 +1702,8 @@ test("Junction yieldable reconcile bounds maximum provider projection to fixed s
     }),
   );
 
-  // One read projects the inventory and one fixed read admits the imported
-  // summary; neither count grows with provider cardinality.
-  assert.equal(sourceReads, 2);
+  // One read projects inventory; empty summaries need no import admission.
+  assert.equal(sourceReads, 1);
   assert.equal(sourceUpserts, JUNCTION_MAX_USER_PROVIDERS);
   assert.equal(result.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
 });

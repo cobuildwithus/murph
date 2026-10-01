@@ -57,6 +57,7 @@ import {
   seedMurphOnboardingFollowupFromStartedOnboarding,
   seedMurphOnboardingEarlyStallAutomation,
 } from './onboarding-followup-seed.js'
+import { MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from './managed-automation-ids.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 
 import { withAssistantCronWriteLock } from './cron/locking.js'
@@ -66,6 +67,8 @@ import {
   findAssistantCronCanonicalRuntimeRecord,
   readAssistantCronCanonicalRuntimeStore,
 } from './cron/runtime-state.js'
+
+export { MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from './managed-automation-ids.js'
 
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
 
@@ -162,8 +165,6 @@ export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
   'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FY'
 export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
   'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
-export const MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID =
-  'automation_01M0A7T3RN5VPD8C2K4V6X9ZBQ'
 export const MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID =
   'automation_01M1J7C8M0RN1NGC0NT3XT7D2A'
 export const MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID =
@@ -424,14 +425,14 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     ownerScope: 'member',
     hostedRuntimeOnly: true,
     assistantTargetOverride: {
-      model: 'gpt-6-sol',
-      reasoningEffort: 'low',
+      model: 'gpt-6-luna',
+      reasoningEffort: 'xhigh',
     },
     tags: ['murph-managed:journal-connected-context'],
     instructions: [
       'Run the private Journal connected-context morning pass.',
       '',
-      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its eligibility and opt-out check, calendar pass, email travel pass, due follow-up checks, canonical plan reconciliation, and existing reminder reconciliation. Review existing private reminders against current permitted context on every run, even without new plans or eligible connections. Repair supported errors in instructions, timing, references, and lifecycle through version-checked patches; follow the skill’s evidence and ownership rules. Upcoming context is derived automatically from Journal. Preserve Journal writes, source reconciliation, and existing one-shot follow-ups. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its eligibility and opt-out check, calendar pass, email travel pass, due follow-up checks, canonical plan reconciliation, and existing reminder reconciliation. Review existing private reminders against current permitted context on every run, even without new plans or eligible connections. Repair supported errors in instructions, timing, references, and lifecycle through version-checked patches; follow the skill’s evidence and ownership rules. Upcoming context is derived automatically from Journal. Preserve Journal writes and source reconciliation. Apply the skill’s health-purpose eligibility to new and existing follow-ups; preserve explicit member requests. Use the engine-supplied occurrence local date and timezone as the time anchor.',
       '',
       'Do not send a connection announcement or wait for a prior notice. Read eligible active sources in this run while preserving explicit opt-outs.',
       '',
@@ -452,8 +453,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     assistantTargetOverride: {
-      model: 'gpt-6-sol',
-      reasoningEffort: 'high',
+      model: 'gpt-6-luna',
+      reasoningEffort: 'xhigh',
     },
     tags: [
       'murph-managed:personal-patterns-update',
@@ -555,7 +556,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     assistantTargetOverride: {
-      model: 'gpt-6-sol',
+      model: 'gpt-6.1-sol',
       reasoningEffort: 'high',
     },
     tags: [
@@ -659,7 +660,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     assistantTargetOverride: {
-      model: 'gpt-6-sol',
+      model: 'gpt-6.1-sol',
       reasoningEffort: 'high',
     },
     tags: [

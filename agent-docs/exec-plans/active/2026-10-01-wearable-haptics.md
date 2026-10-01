@@ -45,7 +45,7 @@ protocol acknowledgement, not proof the wearer felt a vibration.
 - Focused proof: 12 Web service/route tests, 32 engine device tests, six Worker
   transport tests, and 55 runtime device integration tests pass.
 - Both live assistant journeys pass with synthetic effects: delayed WHOOP saves
-  one existing automation with no early buzz and invokes once when due; uncertain
+  one existing automation with no early buzz and queues once when due without claiming delivery; uncertain
   Garmin delivery invokes once and gives an uncertain reply without retry.
 - The exact migration was applied to temporary local PostgreSQL tables inside a
   rolled-back transaction; foreign keys and member-delete cascades pass.
@@ -61,13 +61,13 @@ protocol acknowledgement, not proof the wearer felt a vibration.
 A complete first-request capture through the real Codex App Server with a
 credential-free scripted Responses endpoint compares identical synthetic
 individual/group fixtures. Base is an exact device description/schema ablation
-against b902cfc42fa6e103c06fac99cd82f6fdd8b3a292; prompt builders are unchanged.
+against 4b6c3432a8e2752b50c8590df34c732e32d57378; prompt builders are unchanged.
 Only `prompt_cache_key` is excluded from decoded provider-visible JSON.
 
-- Individual: 152930 → 154492 UTF-8 bytes (+1562, +1.02%). Instructions are
-  unchanged at 87324 bytes; authored tool inventory is 60276 → 61412 bytes.
-- Group: 136030 → 136030 bytes. Instructions are 63574 bytes and tool inventory
-  42446 bytes at both revisions; the production planning owner disables device
+- Individual: 156214 → 157776 UTF-8 bytes (+1562, +1.00%). Instructions are
+  unchanged at 90835 bytes; authored tool inventory is 60308 → 61444 bytes.
+- Group: 130504 → 130504 bytes. Instructions are 65897 bytes and tool inventory
+  38839 bytes at both revisions; the production planning owner disables device
   tools for groups.
 - Exact target-model tokenizer is unavailable. No token estimate is reported.
 

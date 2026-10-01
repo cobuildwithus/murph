@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-30",
+  "order": 200,
+  "item": {
+    "id": "reduced-reply-overhead",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less overhead before replies",
+    "summary": "Murph performs fewer internal checks before provider activity, reducing overhead before typing and replies.",
+    "details": "Provider requests now use the running container’s local authority instead of an extra remote authorization call. Runtime ownership and usage limits remain enforced.",
+    "relevanceTags": [
+      "performance",
+      "messaging"
+    ],
+    "sourcePullRequests": [
+      3929
+    ]
+  }
+}

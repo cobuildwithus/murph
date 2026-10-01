@@ -82,6 +82,7 @@ import {
   type ParsedHostedLinqProviderEvent,
 } from "./linq-provider-events";
 import {
+  deriveHostedLinqDirectMailboxPreparationReason,
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   logHostedOnboardingDiagnostic,
@@ -894,6 +895,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         // writer ignores ambiguous and completed deliveries.
         await abandonInstantFirstTurn("planner-failed-before-provider-dispatch");
         finishHostedOnboardingTiming(planTiming, "failed", {
+          directLinqMailboxPreparationReason: deriveHostedLinqDirectMailboxPreparationReason(error),
           errorName: deriveHostedOnboardingTimingErrorName(error),
         });
         throw error;
@@ -1068,6 +1070,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
     finishHostedOnboardingTiming(timing, "failed", {
+      directLinqMailboxPreparationReason: deriveHostedLinqDirectMailboxPreparationReason(error),
       errorName: deriveHostedOnboardingTimingErrorName(error),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       eventType,
@@ -2976,7 +2979,10 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
       ) {
         logHostedOnboardingDiagnostic(
           "hosted-onboarding.webhook.thread-routing-preparation-retry",
-          { code: error.code },
+          {
+            code: error.code,
+            directLinqMailboxPreparationReason: deriveHostedLinqDirectMailboxPreparationReason(error),
+          },
         );
         continue;
       }

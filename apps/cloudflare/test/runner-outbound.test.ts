@@ -632,7 +632,7 @@ describe("handleRunnerOutboundRequest", () => {
       const session = "session" in command ? command.session : "expectedSession" in command ? command.expectedSession : null;
       const attemptId = session?.attemptId ?? ("attemptId" in command ? command.attemptId : "");
       const generation = session?.leaseGeneration ?? ("generation" in command ? command.generation : "");
-      if (command.operation !== "snapshot_create" && !await stub.validateRuntimeWriteFence?.({ userId, attemptId, generation })) return { cutover: "postgres", applied: false, session: null };
+      if (!await stub.validateRuntimeWriteFence?.({ userId, attemptId, generation })) return { cutover: "postgres", applied: false, session: null };
       const identity = { userId, attemptId, leaseGeneration: generation, snapshotId: "snapshotId" in command ? command.snapshotId : session?.snapshotId ?? "" };
       switch (command.operation) {
         case "snapshot_create": {
@@ -2438,7 +2438,10 @@ describe("handleRunnerOutboundRequest", () => {
       }), createRunnerOutboundEnv({ RUNNER_CONTAINER: { getByName } }), "member_123",
     );
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ completed: matched && receipt });
+    await expect(response.json()).resolves.toEqual({
+      completed: matched && receipt,
+      ...(!matched ? { reason: generation === "8" ? "superseded" : "owner_unconfirmed" } : {}),
+    });
     expect(runtimeOwnerClient.commandHostedRuntimeOwner).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       userId: "member_123", command: { operation: "reconcile" },
     }));
@@ -5344,8 +5347,8 @@ describe("handleRunnerOutboundRequest", () => {
 
   it.each([
     {
-      durationKey: "snapshotStartWriteFenceOwnerValidationDurationMs",
-      stage: "write_fence_owner_validation",
+      durationKey: "snapshotStartSessionCreateStorageDurationMs",
+      stage: "session_create_storage",
     },
     {
       durationKey: "snapshotStartCryptoDataKeyDurationMs",
@@ -5365,7 +5368,7 @@ describe("handleRunnerOutboundRequest", () => {
         throw new TypeError("Workspace snapshot write-fence stub is unavailable.");
       }
       const timedStub: ResourceTestBackend =
-        stage === "write_fence_owner_validation"
+        stage === "session_create_storage"
           ? {
               ...runnerStub,
               async validateRuntimeWriteFence(request) {
@@ -5713,7 +5716,7 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot start reason must be idle_shutdown.",
     });
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
     expect(runner.createHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.size).toBe(0);
   });
@@ -6873,6 +6876,8 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    expect(runtimeResourceClient.commandHostedRuntimeSnapshot).toHaveBeenCalledOnce();
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       generation: "9",

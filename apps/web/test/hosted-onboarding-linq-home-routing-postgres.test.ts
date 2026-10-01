@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import {
@@ -14,6 +14,7 @@ import {
   createHostedMailboxAssistantInputId,
   readHostedConversationAssistantIdentifierSecret,
 } from "@murphai/hosted-execution/assistant-identifiers";
+import { Client } from "pg";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -67,7 +68,10 @@ import {
 } from "@/src/lib/hosted-onboarding/telegram";
 import { planHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import { planHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
-import { runHostedLinqMessageEditPreparedTransaction } from "@/src/lib/hosted-onboarding/webhook-service";
+import {
+  handleHostedOnboardingLinqWebhook,
+  runHostedLinqMessageEditPreparedTransaction,
+} from "@/src/lib/hosted-onboarding/webhook-service";
 import { createPrismaClient } from "@/src/lib/prisma";
 import { readUnchangedHostedMemberHomeLinqBindingTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-linq";
 import { acquireHostedLinqChatOwnershipLockTx } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
@@ -190,6 +194,191 @@ async function acquireHostedMailboxSourceLocksForTest(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq home-routing PostgreSQL concurrency",
   () => {
+    it.each(["foreign-key insert", "member writer", "route writer"] as const)(
+      "prepared direct admission remains safe with a held %s",
+      async (lockHolder) => {
+        const authorityKey = generateKeyPairSync("ec", {
+          namedCurve: "prime256v1",
+          privateKeyEncoding: { format: "jwk" },
+          publicKeyEncoding: { format: "pem", type: "spki" },
+        });
+        const automationKey = generateKeyPairSync("ec", {
+          namedCurve: "prime256v1",
+          privateKeyEncoding: { format: "jwk" },
+          publicKeyEncoding: { format: "jwk" },
+        });
+        const webhookSecret = "synthetic-prepared-member-secret";
+        for (const [key, value] of Object.entries({
+          LINQ_WEBHOOK_SECRET: webhookSecret,
+          HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "off",
+          HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES: "+44",
+          HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: "",
+          HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "test-automation-key",
+          HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK:
+            JSON.stringify(automationKey.publicKey),
+          HOSTED_CRYPTO_ENV: "test",
+          HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
+            "projects/murph-test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1",
+          HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
+          HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+          HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+            "projects/murph-test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+          HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
+            JSON.stringify(authorityKey.privateKey),
+          HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
+        })) {
+          vi.stubEnv(key, value);
+        }
+        const fetch = vi.fn(async () => {
+          throw new Error("Unexpected external call in prepared-member proof.");
+        });
+        vi.stubGlobal("fetch", fetch);
+        channelWelcomeTestHooks.signal.mockResolvedValue({
+          workflowId: "synthetic-prepared-member-workflow",
+        });
+        const prisma = new PrismaClient({
+          adapter: new PrismaPg({
+            connectionString: databaseUrl,
+            connectionTimeoutMillis: 5_000,
+            statement_timeout: 5_000,
+          }),
+          log: [{ emit: "event", level: "query" }],
+        });
+        let preparedMemberLockAttempts = 0;
+        prisma.$on("query", ({ query }) => {
+          if (query.includes('from "hosted_member"') && query.includes("skip locked")) {
+            preparedMemberLockAttempts += 1;
+          }
+        });
+        const holder = new Client({
+          connectionString: databaseUrl,
+          connectionTimeoutMillis: 5_000,
+          statement_timeout: 5_000,
+        });
+        let fixture: Awaited<ReturnType<typeof createActivationContactFixture>> | null = null;
+        try {
+          fixture = await createActivationContactFixture(prisma, 0);
+          const { memberId, memberPhone, linePhone } = fixture;
+          const participantContact = createHostedLinqParticipantContact({
+            kind: "phone",
+            value: memberPhone,
+          });
+          if (!participantContact) throw new Error("Expected a synthetic phone contact.");
+          const chatId = `prepared-member-chat-${randomUUID()}`;
+          await prisma.$transaction((tx) => upsertHostedMemberHomeLinqBindingTx({
+            clearPending: true,
+            homeLineAssignedAt: new Date(),
+            linqChatId: chatId,
+            memberId,
+            participantContact,
+            prisma: tx,
+            recipientPhone: linePhone,
+          }), transactionOptions);
+          const eventId = `prepared-member-event-${randomUUID()}`;
+          const messageId = `prepared-member-message-${randomUUID()}`;
+          const occurredAt = new Date().toISOString();
+          const rawBody = JSON.stringify({
+            api_version: "v3",
+            created_at: occurredAt,
+            event_id: eventId,
+            event_type: "message.received",
+            webhook_version: "2026-02-03",
+            data: {
+              chat: {
+                id: chatId,
+                is_group: false,
+                owner_handle: {
+                  handle: linePhone, id: "synthetic-owner", is_me: true, service: "iMessage",
+                },
+              },
+              direction: "inbound",
+              id: messageId,
+              parts: [{ type: "text", value: "Synthetic prepared-member message" }],
+              sender_handle: { handle: memberPhone, id: "synthetic-sender", service: "iMessage" },
+              sent_at: occurredAt,
+              service: "iMessage",
+            },
+          });
+          const admit = () => {
+            const timestamp = String(Math.floor(Date.now() / 1_000));
+            return handleHostedOnboardingLinqWebhook({
+              prisma,
+              rawBody,
+              signature: createHmac("sha256", webhookSecret)
+                .update(`${timestamp}.${rawBody}`).digest("hex"),
+              timestamp,
+              // Keep post-response delivery and maintenance outside this admission proof.
+              scheduleAfterResponse: () => undefined,
+            });
+          };
+          await holder.connect();
+          await holder.query("BEGIN");
+          const feedbackId = `prepared-member-feedback-${randomUUID()}`;
+          if (lockHolder === "foreign-key insert") {
+            await holder.query(
+              `INSERT INTO hosted_product_feedback
+                (id, member_id, kind, related_changelog_item_ids_json)
+                VALUES ($1, $2, 'synthetic-lock-proof', '[]'::jsonb)`,
+              [feedbackId, memberId],
+            );
+          } else if (lockHolder === "member writer") {
+            await holder.query("UPDATE hosted_member SET updated_at = now() WHERE id = $1", [memberId]);
+          } else {
+            // Route writers serialize on the member before touching the routing row.
+            await holder.query("SELECT id FROM hosted_member WHERE id = $1 FOR NO KEY UPDATE", [memberId]);
+            await holder.query("UPDATE hosted_member_routing SET updated_at = now() WHERE member_id = $1", [memberId]);
+          }
+          // The awaited statement is the barrier: this connection retains its locks until COMMIT/end.
+          if (lockHolder !== "foreign-key insert") {
+            await expect(admit()).rejects.toMatchObject({
+              code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+              details: { preparationTarget: "direct_linq_mailbox", reason: "member" },
+              httpStatus: 503,
+              retryable: true,
+            });
+            expect(preparedMemberLockAttempts).toBe(2);
+            expect(await prisma.hostedMailboxItem.count({ where: { userId: memberId } })).toBe(0);
+            await holder.query("COMMIT");
+          }
+          await expect(admit()).resolves.toMatchObject({
+            ok: true,
+            reason: "wake-appended-active-member",
+          });
+          expect(preparedMemberLockAttempts).toBe(lockHolder === "foreign-key insert" ? 1 : 3);
+          // A separate connection observes the committed mailbox item while the FK holder is still open.
+          expect(await prisma.hostedMailboxItem.findMany({
+            where: { userId: memberId },
+            select: { dedupeKey: true, kind: true, sourceMessageLookupKey: true },
+          })).toEqual([{
+            dedupeKey: eventId,
+            kind: "conversation.message",
+            sourceMessageLookupKey: createHostedLinqMessageLookupKey(messageId),
+          }]);
+          await expect(admit()).resolves.toMatchObject({ duplicate: true });
+          expect(await prisma.hostedMailboxItem.count({ where: { userId: memberId } })).toBe(1);
+          if (lockHolder === "foreign-key insert") {
+            expect(await prisma.hostedProductFeedback.findUnique({ where: { id: feedbackId } })).toBeNull();
+            await holder.query("COMMIT");
+            expect(await prisma.hostedProductFeedback.findUnique({ where: { id: feedbackId } })).not.toBeNull();
+          }
+          expect(fetch).not.toHaveBeenCalled();
+        } finally {
+          // Closing the owned connection also rolls back an unreleased fixture transaction on failure.
+          try {
+            await holder.end();
+          } finally {
+            try {
+              if (fixture) await cleanupActivationContactFixture(prisma, fixture);
+            } finally {
+              channelWelcomeTestHooks.signal.mockReset();
+              vi.unstubAllEnvs();
+              await prisma.$disconnect();
+            }
+          }
+        }
+      },
+    );
+
     it("reads a warm mailbox workspace once without waiting for checkpoints and preserves cold creation and replay", async () => {
       const prisma = new PrismaClient({
         adapter: new PrismaPg({ connectionString: databaseUrl }),

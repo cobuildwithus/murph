@@ -45,23 +45,40 @@ controls resolve the target from that owner. Test nudges use ordinary
 `ensure-processing` admission and wait for acceptance before polling status;
 retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
+## Request consolidation
+
+Snapshot creation and media PUT, registration, and deletion use the existing
+resource command's locked ownership check without a preceding `authorize_effect`
+HTTP call. Snapshot creation returns no data key before admission, media uploads
+admit before sending bytes, and registration/retirement remain transactional.
+Media registration and deletion do not unwrap a crypto context. Media reads,
+artifacts, and private-media capability publication keep their separate authority
+checks: those paths can expose data or a capability without a resource mutation.
+Existing Web resource commands already enforce this boundary, so Worker rollout
+requires no new protocol or coordinated Web deployment.
+
 ## Claim, launch, completion, and recovery
 
-The ensure-processing request accepts an optional canonical Postgres admission
-response (`claimed` or `existing`). Only authenticated Web OIDC callers can
-supply it; the Worker validates its member binding before container work. Web
-can run its existing claim command locally and carry the result to the Worker,
-removing the initial Worker-to-Web callback. Requests without admission still
-claim through Web, including the separately deployed Temporal caller. Completion
-recovery still claims successors through Web; supplied snapshots never replace
-conditional database mutations or native attempt/generation checks.
+Runtime admission keeps the member lock before one composed eligibility read
+(suspension, explicit consent withdrawal, and canonical direct or sponsored
+access; retention still skips only the access requirement). Claim returns its
+locked routing result; target selection and launch preparation also reuse the
+Postgres gate proved by their ownership transaction instead of rereading it
+after commit.
 
-Deploy the accepting Worker before enabling Web to send admission. Old Web and
-Temporal callers remain supported by the new Worker. New Web is incompatible
-with an older strict Worker parser. Roll back Web and let it converge before
-rolling Worker below this reader floor. Publish reader and producer in separate
-PRs because Web deploys independently on merge. No protocol flag or cached
-admission is needed. Web must obtain a fresh snapshot for each direct retry.
+Best-effort Web direct wakes send no admission snapshot. The Worker claims
+through Web's canonical Postgres command after receiving the request, just as
+it does for Temporal. A failed Web dispatch therefore cannot leave a starting
+reservation that blocks the durable wake. Each explicit retry reads current
+admission through that same Worker callback. No compensating release is safe
+or necessary at the Web transport boundary.
+
+The optional canonical admission response (`claimed` or `existing`) remains
+supported for deployed Web callers. Only authenticated Web OIDC
+callers can supply it; the Worker validates its member binding before container
+work. Supplied snapshots never replace conditional database mutations or native
+attempt/generation checks. Requests without admission are accepted by both old
+and new Workers, so this caller change needs no coordinated Worker deployment.
 
 Existing compatible owners are woken immediately after Postgres admission. The
 native wake validates the exact attempt and generation; an accepted wake needs
@@ -69,6 +86,11 @@ no separate invocation receipt read. Unaccepted wakes still reconcile completed
 receipts and prove an inactive fence before release. Retiring owners and
 retention work that needs replacement follow the existing recovery path without
 a wake. Unknown wake acknowledgments never authorize replacement by themselves.
+Conflicting retention admission checks the existing native liveness seam before
+deferring to another mode. An inactive owner enters the same receipt, startup
+grace, and exact retirement/release path; active, mismatched, or unavailable
+liveness keeps the conflict retry. A stale processing mode alone cannot strand
+an invocation that failed before recording completion.
 
 After exact completed-receipt and inactive-fence proof, recovery uses the existing
 combined completion/release command. A stale acknowledgment requests fresh
@@ -87,8 +109,8 @@ The owner row has a monotonically increasing generation and one attempt. Its
 phases are `idle -> starting -> active -> retiring -> idle`. Claim records an
 allocation ID before an external allocation call. Target selection records the
 immutable slot before native binding. Preparation binds workspace start version,
-processing mode, the provider-token hash, encrypted inference settings, and
-managed-AI allowance once. The opaque provider token travels only in the job.
+processing mode, encrypted inference settings, and managed-AI allowance once.
+New invocations do not mint provider bearer credentials.
 The workspace checkpoint compare-and-swap version is independent of generation.
 
 Input preparation and native readiness overlap. The native slot submits the
@@ -98,14 +120,31 @@ Web authority together; startup does not make a second `authorize_effect` call.
 The existing readiness response advertises this capability. During mixed
 Worker/controller deployments, callers of older controllers still prepare through
 Web before the controller's authorization call; older callers remain supported.
-Provider effects continue to require their own live authorization.
+Provider effects read their native controller receipt and binding.
 Registered/completed receipts survive activation loss. A duplicate registration
 cannot execute the attempt twice. An uncertain launch or stop retains the exact
 target; age can schedule reconciliation but cannot authorize its replacement.
-While the existing starting fence is preserved, retry at its 30-second deadline
-instead of polling every three seconds. An independent wake can still reach a
-ready child sooner. Expiry starts the ordinary exact retirement proof; it does
-not establish stoppedness or release authority.
+An admitted default claim takes priority over an unlaunched system-mailbox start.
+Under the existing member and owner locks, claim changes that owner to `retiring`
+only while its phase is `starting` and workspace version is null. This serializes
+with `prepare_launch`: if launch preparation wins first, foreground wakes that
+same child; if priority wins, stale background launch is rejected. The adapter
+refreshes a supplied pre-launch background admission before using it.
+
+Retirement cancels native readiness before waiting on the lifecycle lock, then
+uses the existing exact target stop and release before fresh foreground admission.
+Uncertain stop keeps ownership pinned. Background still reuses its bound warm
+target or cold-starts independently of pristine standby inventory. Pool size and
+allocation policy are unchanged. An empty foreground pool retains cold fallback;
+preemption can discard partial background cold-start work in that case.
+
+While a system-mailbox starting fence remains, foreground rechecks after at most
+one second. Other startup waits keep the 30-second startup deadline. Expiry starts ordinary exact
+retirement proof; it does not establish stoppedness or release authority.
+Deploy cancellation-capable Cloudflare before the Web claim change. Old Web keeps
+the startup fence until launch or expiry; old Cloudflare still retires safely but
+can wait for preparation before stopping. Existing state and RPC shapes remain
+compatible in both directions; rollback restores the older latency behavior.
 
 Completion revokes ordinary effects and records completion before the adapter
 releases ownership. Reuse additionally requires the exact native completed
@@ -159,15 +198,32 @@ until completion or the existing retirement/shutdown path ends its ownership.
 This is not an immediate-cancellation guarantee. Deleted members remain blocked;
 their retained owner rows exist only for cleanup.
 
-Provider effects still authenticate their exact runtime identity or credential,
-apply provider operation policy, and enforce managed spending limits. The same
-Web authorization response selects Postgres or explicitly legacy routing; no
-separate backend-discovery request precedes it. Draining, stale, or failed
-Postgres authorization never falls back to legacy. No positive-allowance cache
-or standalone UserRunner callback preflight is added. Deploy Web's combined
-backend-selection/authorization response before its Worker consumer: older Web
-rejects exact-header authorization for legacy members instead of returning their
-backend. Existing Workers remain compatible with the new Web behavior.
+Provider effects use Cloudflare's platform-supplied container ID and class to
+resolve the exact native controller. Its immutable member binding and registered
+invocation receipt provide attempt/generation, admitted inference configuration,
+and initial spending allowance. Pending or denied usage settlements remain a
+native negative latch. Usage settlement resolves the same physical caller and
+persists its exact native pending receipt before the first Web request. The signed
+usage callback checks canonical ownership and updates the ledger; a failed Web
+request cannot leave further managed spending authorized. The Worker retains operation policy and real provider
+secrets; no request header, bearer token, or sentinel grants provider authority.
+There is one controller RPC and no Web/Postgres authorization callback on this
+ordinary path. Completion and native retirement revoke new provider calls;
+already admitted effects may finish. Existing Live resource attachment keeps
+its exact member/attempt/generation signature so cancellation can finish while
+retiring. Postgres remains admission, canonical mutation, and billing authority.
+A database-only retirement/deletion is not an instantaneous native stop: the
+existing exact retirement path owns that boundary.
+
+The receipt gains one nullable SQLite provider-context column. A predeployment
+registered receipt imports missing context once from its exact Web owner, then
+persists it through eviction; fresh launches write context before execution.
+Remove this migration branch after old invocations drain. Web's old provider
+reader and token-hash schema remain for deployed Workers during rollout, but
+new Workers never call `authorize_provider`. Those old readers and exact-runtime
+Web preflights use one committed-state SQL snapshot, without transaction locks
+or an extra routing query. Internal signed Web callbacks keep exact ownership
+checks; this change removes only the provider credential/callback path.
 
 Lock order is the cutover gate, member, runtime owner, then workspace/mailbox and
 resource rows. Transactions contain bounded database work only, with five-second
@@ -196,11 +252,14 @@ above the supported plaintext maximum. Partial recovery does not claim the
 missing canonical files were restored.
 Deploy the Web recovery reader before enabling protected recovery workflow modes.
 
-Owner locks return the current row, and callback/provider admission reads member
-existence from the member lock itself. These paths use three ordered lock queries
-in the completed Postgres phase, without separate owner/member rereads. Returned
-generations and workspace versions retain native bigint precision. Deleted
-members remain unauthorized even when cleanup retains their owner row.
+Canonical publication locks return the current row and read member existence
+from the member lock itself. These mutations retain three ordered lock queries.
+External-effect preflights use a single committed-state snapshot instead: their
+former locks ended before provider I/O and could not make the external effect
+atomic with revocation. An already admitted in-flight effect may finish; a read
+after committed retirement or deletion is denied. Generations and workspace
+versions retain native bigint precision. Deleted members remain unauthorized
+even when cleanup retains their owner row.
 
 The native usage-settlement receipt is a negative latch: pending or denied
 settlement blocks managed provider access. Only an explicit allowance response
@@ -342,6 +401,14 @@ outcome, elapsed time, observed fence and a finite retry reason. Telemetry canno
 delay the control response or change its result; orchestration correlation uses
 the existing domain-separated hash rather than retaining the raw attempt ID.
 
+Runtime log uploads still authenticate the signed callback, consume its nonce,
+and check runtime ownership. When that admission rejects a stale owner with
+`HOSTED_RUNTIME_OWNER_STALE` (409), the log route acknowledges the discarded
+batch with `loggedCount: 0`. Bounded shutdown drains can leave uploads in flight
+after retirement; these uploads cannot persist logs, request a recovery wake,
+or schedule alerts. Other callback failures retain their existing error response,
+and operational routes retain their stale-owner rejection.
+
 ### Reserved target retirement
 
 A selected target can remain unbound when its bind RPC times out before commit.
@@ -351,3 +418,14 @@ fencing admissions. A target with no persisted claim retires without one even
 when the Postgres reservation supplies its allocation claim. Bound targets
 still reject a mismatched claim or member. Failed native destruction leaves the
 slot retiring for the existing retry; delayed binds cannot resurrect it.
+
+### Processing deadline and settled recovery
+
+The processing command owns its deadline independently of the timeout for one
+Web callback. Native readiness retains its 15-second bound inside the command;
+Web owner callbacks retain their shorter per-request bound. An expired command
+preserves uncertain ownership and cannot launch a detached successor.
+
+After exact native retirement and an acknowledged canonical release, processing
+uses the existing bounded admission loop immediately. Failed or uncertain
+retirement/release still retries; elapsed time alone never proves stoppedness.

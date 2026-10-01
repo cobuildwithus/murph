@@ -24,6 +24,10 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Data First
 
+- For a simple time-based walking plan, use the person's stated current activity, available window, and
+  chosen duration plus relevant saved context. Do not collect step counts, labs, body measurements, or
+  unrelated event history unless symptoms, a known condition, or the requested target makes them
+  decision-changing. Missing wearable coverage alone does not require more data reads or a step target.
 - When the user specifically asks for basal calories, go directly to
   `vault-cli measurement entry list --metric calories_basal --from <date> --to <date> --limit 50 --format json`.
   Do not run `wearables day` first; basal calories are query-only and absent

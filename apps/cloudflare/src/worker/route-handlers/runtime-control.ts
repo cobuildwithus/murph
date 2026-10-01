@@ -226,6 +226,12 @@ export async function handleRuntimeEnsureProcessingRoute(
               reason: "runtime-ensure-processing-direct-completed",
               routeName: "runtime-ensure-processing",
             }, context.request, userId),
+            // Keep these request-local: merged runtime seeds may describe a
+            // competing Temporal wake instead of this direct HTTP request.
+            workerFetchStartedAtEpochMs: context.fetchStartedAtEpochMs ?? null,
+            workerFetchIsFirstRequest: context.fetchIsFirstRequest ?? null,
+            ...context.runtimeControlAuthTiming,
+            cloudflareRouteReceivedAtEpochMs,
             orchestrationAttemptId: ensureRequest.orchestrationAttemptId,
             ...(result.kind === "runtime_processing_accepted"
               ? {
@@ -354,7 +360,10 @@ async function runRuntimeEnsureProcessingForUser(input: {
   try {
     postgres = await ensurePostgresRuntimeProcessing(input.context.env, command, diagnostics);
   } finally {
-    if (postgres?.kind !== "runtime_processing_accepted" || postgres.action !== "woken") {
+    if (postgres?.kind !== "runtime_processing_accepted" || postgres.action !== "woken"
+      || Date.now() - input.commandStartedAtEpochMs > 1_000) {
+      // Fast wakes stay quiet; successful slow wakes still need their native
+      // dispatch/handler timings to explain foreground latency.
       // Snapshot before detaching so telemetry cannot extend the command budget.
       const entry = buildRuntimeProcessingSummaryEntry(diagnostics, postgres, input.commandStartedAtEpochMs);
       const telemetry = Promise.resolve().then(() => recordRuntimeProcessingSummary({

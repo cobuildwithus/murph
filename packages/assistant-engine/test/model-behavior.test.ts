@@ -1991,7 +1991,7 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity owns wearable facts; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
+      'Training/movement: daily-activity owns wearable facts, walking breaks, and everyday movement targets; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
     )
     expect(prompt).toContain(
       'Strength sets: strength-training chooses one owner. Exact activity-session stays live; exact regimen or experiment owns occurrences even with a workout-format template; only a standalone workout-format reminder starts a workout. Terse wording never switches owners. In groups, hand off privately without reads or writes.',
@@ -2209,7 +2209,8 @@ describe('assistant system prompt cache stability', () => {
       }),
     )
 
-    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_415)
+    // Private language selection and canonical memory policy add 1412 characters.
+    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(9_827)
     // This layer is resident on every turn for every member. Its ceiling is the
     // prior 66,780-character ratchet plus the reviewed 890-character wearable
     // freshness addition, for cross-route guidance that cannot live in an owning
@@ -2251,7 +2252,17 @@ describe('assistant system prompt cache stability', () => {
     // retain the previous margin without changing the unchanged group surface.
     // Saved-duration and support-privacy clarifications use the reviewed margin;
     // focused Sol journeys retain no-reconfirmation and de-identification checks.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(76_300)
+    // Goal setup distinguishes proposal from execution and reuses completed research.
+    // Complete-input byte measurement covers this increase; conditional support
+    // execution removes about 26 KB from fresh quiet-plan skill reads.
+    // Shared lasting-correction routing adds 1,022 characters. Complete private
+    // and group request measurements plus live task/preference/one-off proof
+    // cover this resident rule; retain the existing base margin.
+    // Direct tool-recovery progress guidance adds 659 characters. Complete
+    // native-provider captures measure +660 serialized bytes for direct turns
+    // and no group growth; live Sol success/failure journeys verify behavior.
+    // Preserve the existing 2-character margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_381)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2581,7 +2592,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd0ad54bd4a67a3937c845bc04aefb4fd4082d67bdca984ed14010e736abc20bf',
+      '6324f7e80517c979431bbd53f6527197e815f43af6629c0793abff4668fb498b',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2742,7 +2753,7 @@ describe('assistant experiment onboarding guidance', () => {
       'Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state.',
     )
     expect(prompt).toContain(
-      "Skip this search only when the request is limited to deterministic exact food-label nutrition facts resolved by food-journal's label database; use that database directly.",
+      "For deterministic exact food-label nutrition facts, use food-journal's label database directly.",
     )
     expect(prompt).toContain(
       'Health reasoning or advice beyond the returned label facts still requires Commons.',
@@ -2819,7 +2830,7 @@ describe('assistant experiment onboarding guidance', () => {
       'Do not apply this default to factual questions, logging or record updates, requests to be heard without problem-solving, acute or unstable situations',
     )
     expect(prompt).toContain(
-      'cases primarily owned by urgent or clinician-led evaluation, decisions the existing record already resolves, or cases where one clearly indicated direct action makes comparison unnecessary',
+      'cases primarily owned by urgent or clinician-led evaluation, decisions the existing record already resolves, or ordinary plans with a chosen or clearly indicated action',
     )
     expect(prompt).toContain(
       'give a working assessment plus one context-grounded bounded trial without waiting for experiment vocabulary or an explicit action verb',

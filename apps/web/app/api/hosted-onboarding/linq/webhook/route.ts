@@ -6,6 +6,7 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 import { withHostedVisibleSecondaryLinqOutcomes } from "@/src/lib/hosted-onboarding/visible-secondary-webhooks";
 import { readRawBodyBuffer } from "@/src/lib/http";
 import {
+  deriveHostedLinqDirectMailboxPreparationReason,
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   logHostedOnboardingDiagnostic,
@@ -74,6 +75,7 @@ export const POST = withJsonError(async (request: Request) => {
     return jsonOk(response, 202);
   } catch (error) {
     finishHostedOnboardingTiming(routeTiming, "failed", {
+      directLinqMailboxPreparationReason: deriveHostedLinqDirectMailboxPreparationReason(error),
       errorName: deriveHostedOnboardingTimingErrorName(error),
       signalAbortedBeforeReturn: request.signal.aborted,
     });

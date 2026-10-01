@@ -34,6 +34,7 @@ import {
   findActiveHostedVaultSharePage,
   hasUnmaterializedHostedVaultShareProjectionGeneration,
   replaceHostedVaultShareProjectionSnapshot,
+  type HostedVaultShareReplacementDeferralReason,
 } from "@/src/lib/hosted-vault-share/projection-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -106,13 +107,13 @@ export const POST = withJsonError(async (request: Request) => {
     // expected cohort. If that cohort changes between pages, never acknowledge
     // completion: the durable caller must restart against the new generation.
     if (continuation !== undefined) {
-      throw createHostedVaultShareDeliveryDeferredError();
+      throw createHostedVaultShareDeliveryDeferredError("pagination_generation_changed");
     }
     if (await hasUnmaterializedHostedVaultShareProjectionGeneration({
       grantorMemberId,
       projectionScope: body.projectionScope,
     })) {
-      throw createHostedVaultShareDeliveryDeferredError();
+      throw createHostedVaultShareDeliveryDeferredError("stale_generation_unmaterialized");
     }
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
@@ -130,7 +131,7 @@ export const POST = withJsonError(async (request: Request) => {
       grantorMemberId,
       projectionScope: body.projectionScope,
     })) {
-      throw createHostedVaultShareDeliveryDeferredError();
+      throw createHostedVaultShareDeliveryDeferredError("inactive_generation_unmaterialized");
     }
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
@@ -143,6 +144,7 @@ export const POST = withJsonError(async (request: Request) => {
   let deliveryFailed = false;
   let scopeFailed = false;
   let deliveryDeferred = false;
+  let replacementDeferralReason: HostedVaultShareReplacementDeferralReason | undefined;
 
   for (const share of page.shares) {
     if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
@@ -158,6 +160,7 @@ export const POST = withJsonError(async (request: Request) => {
       const outcome = await replaceHostedVaultShareProjectionSnapshot({
         deadlineAtEpochMs: effectDeadlineAtEpochMs,
         memberTimeZone: body.memberTimeZone,
+        onDeferral: (reason) => { replacementDeferralReason ??= reason; },
         ...(body.projectionMode ? { projectionMode: body.projectionMode } : {}),
         records,
         share,
@@ -205,7 +208,10 @@ export const POST = withJsonError(async (request: Request) => {
     );
   }
   if (deliveryDeferred) {
-    throw createHostedVaultShareDeliveryDeferredError();
+    throw createHostedVaultShareDeliveryDeferredError(
+      "replacement_no_active_share",
+      replacementDeferralReason,
+    );
   }
 
   return jsonOk(buildHostedVaultShareDeliverPageResponse(
@@ -239,7 +245,23 @@ function createHostedVaultShareDeliveryError(
   });
 }
 
-function createHostedVaultShareDeliveryDeferredError(): Error {
+function createHostedVaultShareDeliveryDeferredError(
+  reason:
+    | "pagination_generation_changed"
+    | "stale_generation_unmaterialized"
+    | "inactive_generation_unmaterialized"
+    | "replacement_no_active_share",
+  replacementDeferralReason?: HostedVaultShareReplacementDeferralReason,
+): Error {
+  try {
+    console.warn("Hosted vault-share delivery deferred.", {
+      schema: "murph.hosted-vault-share-delivery-deferred.v1",
+      reason,
+      ...(replacementDeferralReason === undefined ? {} : { replacementDeferralReason }),
+    });
+  } catch {
+    // Best-effort telemetry must not change the deferred response.
+  }
   return hostedOnboardingError({
     code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
     httpStatus: 503,

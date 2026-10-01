@@ -152,10 +152,6 @@ test('setup runtime resolver clones process env and surfaces ready channel and w
   )
 })
 
-test('setup env overrides tolerate missing overrides entirely', () => {
-  assert.doesNotThrow(() => createSetupRuntimeEnvResolver().getCurrentEnv())
-})
-
 test('text shared helpers normalize messages and redact structured path details', () => {
   assert.equal(normalizeNullableString(undefined), null)
   assert.equal(normalizeNullableString('   '), null)

@@ -25,6 +25,7 @@ import {
   type AssistantCronCanonicalRuntimeState,
   type AssistantCronCanonicalRuntimeStore,
 } from './runtime-state.js'
+import { MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from '../managed-automation-ids.js'
 import { resolveAssistantConversationKey } from '../bindings.js'
 import {
   appendLegacyGroupNewsletterSkillInstructions,
@@ -370,6 +371,7 @@ export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection
 export function isAssistantCronNotificationOccurrenceFresh(input: {
   now: Date
   occurrenceAt: string
+  expiresAfterMs?: number
 }): boolean {
   const nowMs = input.now.getTime()
   const occurrenceMs = Date.parse(input.occurrenceAt)
@@ -377,7 +379,8 @@ export function isAssistantCronNotificationOccurrenceFresh(input: {
     return true
   }
 
-  return nowMs - occurrenceMs <= ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS
+  const expiresAfterMs = input.expiresAfterMs ?? ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS
+  return nowMs - occurrenceMs <= expiresAfterMs
 }
 
 export function isCanonicalAssistantCronNotificationOccurrenceDeliverable(
@@ -399,7 +402,14 @@ export function isCanonicalAssistantCronNotificationOccurrenceDeliverable(
     return true
   }
 
-  return isAssistantCronNotificationOccurrenceFresh(input)
+  // This daily background review retains Flex on retries. Give the existing
+  // backoff time to recover from capacity shortages without replaying stale days.
+  const patternsDaily = input.source.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID
+    && input.source.schedule.kind === 'dailyLocal'
+  return isAssistantCronNotificationOccurrenceFresh({
+    ...input,
+    expiresAfterMs: patternsDaily ? 4 * 60 * 60 * 1000 : undefined,
+  })
 }
 
 function resolveCanonicalAssistantCronUnboundedOccurrenceAt(

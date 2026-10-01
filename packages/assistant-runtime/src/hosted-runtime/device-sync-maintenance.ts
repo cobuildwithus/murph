@@ -30,6 +30,7 @@ import {
 } from "@murphai/device-syncd/service";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import {
+  readSafeJunctionRequestTimeoutDiagnostics,
   sanitizeHostedRuntimeDiagnosticText,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -2135,6 +2136,9 @@ function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
 ): Record<string, boolean | number | string | null> {
   const redacted: Record<string, boolean | number | string | null> = {
     failureRetryable: diagnostic.retryable,
+    // Admit only this failure's closed fields, ahead of optional metadata so
+    // the shared 64-key structured-log sanitizer retains the timeout evidence.
+    ...readSafeJunctionRequestTimeoutDiagnostics(diagnostic.code, diagnostic.details),
   };
 
   // Keep this finite reason ahead of optional details for bounded log sanitizers.

@@ -5,11 +5,11 @@
  * source-tree review rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "b412ff32c417f855c2b2d1581b77058eed87c84b",
+  upstreamCommit: "8e68a98ef03cdde76d2e6800791ebdf1b3b95b24",
   upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "cec6091ac1321a179f1e0694bef88746e6f44f0e",
-  upstreamTag: "rust-v0.156.1",
-  version: "0.156.1",
+  upstreamSourceTree: "7ea79ec139a8dd7cfffdde84026a6786fb73a271",
+  upstreamTag: "rust-v0.159.1",
+  version: "0.159.1",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -205,6 +205,30 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
   ],
   nonProviderBinaryCandidates: [
     {
+      candidate: "/v1/analytics/codex/turn-costsestimated_usage_usd_microsthreadsspeedskipping",
+      disposition: "binary_false_positive",
+      owner: "codex-analytics",
+      reason: "The 0.158.0 Linux release joins the turn-cost route to adjacent usage field labels and goal-continuation text. backend-client/src/client/turn_usage.rs sets only /v1/analytics/codex/turn-costs on the separate analytics origin.",
+    },
+    {
+      candidate: "/v1/user-auth-credential/whoamiauth.json",
+      disposition: "binary_false_positive",
+      owner: "codex-login",
+      reason: "The 0.158.0 Linux release joins the whoami route to the adjacent auth.json filename. login/src/auth/personal_access_token.rs sets only /v1/user-auth-credential/whoami on the separate authentication origin.",
+    },
+    {
+      candidate: "/v1/livea",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The rebuilt 0.158.0 Darwin CLI joins /v1/live to adjacent Rust Display-error text starting with a. realtime_websocket/methods.rs constructs only the reviewed /v1/live endpoint.",
+    },
+    {
+      candidate: "/v1/logsint",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "The rebuilt 0.158.0 Darwin CLI joins the OTLP /v1/logs literal to the adjacent intValue protobuf field. The pinned opentelemetry-otlp exporter uses only /v1/logs on its configured telemetry origin.",
+    },
+    {
       candidate: "/v1/liveuse",
       disposition: "binary_false_positive",
       owner: "codex",
@@ -353,6 +377,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       disposition: "binary_false_positive",
       owner: "dependency",
       reason: "This exact Linux printable token joins unrelated serialized field labels; the pinned provider source has no such HTTP route.",
+    },
+    {
+      candidate: "/v1/raterowscols",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "The 0.159.1 Linux release joins rtc_avas/v1/ to serialized rate, rows, and cols labels before Exec. The pinned provider source has no such HTTP route.",
     },
     {
       candidate: "/v1/resp",

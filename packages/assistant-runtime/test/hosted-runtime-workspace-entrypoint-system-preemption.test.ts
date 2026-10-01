@@ -130,7 +130,10 @@ import {
   type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 
-describe("hosted workspace runtime entrypoint", () => {test("fresh foreground input before the initial system import upgrades in place", async () => {
+describe("hosted workspace runtime entrypoint", () => {
+  test.each([undefined, "system_mailbox", "default"] as const)(
+    "fresh foreground input with a %s wake before the initial system import upgrades in place",
+    async (requestedProcessingMode) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -184,7 +187,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         },
       };
       // The promotion wake lands before the runtime reaches its initial import.
-      runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+      runtimeWakeSignal.notify({ requestedProcessingMode });
 
       runtimeCompletion = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -518,206 +521,6 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
-  test("returns an immediate assistant wake when a default wake finds no conversation rows after the system import", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const events: string[] = [];
-    const fetchRequests: HostedMailboxFetchRequest[] = [];
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const baseDeviceSyncPort = createEmptyDeviceSyncPort();
-    const deviceItem = createMailboxItem({
-      dedupeKey: "device-sync.wake:fetch-race",
-      id: "mailbox_item_system_mailbox_fetch_race",
-      kind: "device-sync.wake",
-      lane: "system",
-      laneSeq: "1",
-    });
-
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      vi.setSystemTime(new Date(TEST_NOW));
-      mocks.prepareHostedCodexAssistantProcess.mockClear();
-      mocks.cancelPendingWarmCodexPreinitialization.mockClear();
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await enqueueDeviceSyncSystemMailboxItemForTest({
-        item: deviceItem,
-        vaultRoot,
-      });
-      const importState = createEmptyHostedMailboxImportState();
-      importState.watermarks.system = "1";
-      await writeMailboxImportStateFile(vaultRoot, importState);
-      const restoredWorkspace = await createVaultSnapshotBundle({
-        vaultRoot,
-      });
-      const baseMailboxPort = createMailboxPort({
-        events,
-        fetchRequests,
-        items: [],
-      });
-      const mailboxPort: HostedRuntimeMailboxPort = {
-        ...baseMailboxPort,
-        async fetch(request) {
-          runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
-          return await baseMailboxPort.fetch(request);
-        },
-      };
-
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_system_mailbox_fetch_race",
-            processingMode: "system_mailbox",
-            workspaceVersion: "0",
-          },
-          resolvedConfig: createDeviceSyncResolvedConfig(),
-        }),
-        {
-          async createCheckpointSnapshot() {
-            throw new Error("A spurious default wake must not checkpoint unchanged state.");
-          },
-          async importItem() {
-            throw new Error("The synthetic fetch returns no new mailbox rows.");
-          },
-          platform: createPlatform({
-            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
-            deviceSyncPort: baseDeviceSyncPort,
-            mailboxPort,
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({
-                snapshotRef: restoredWorkspace.snapshotRef,
-                version: "0",
-              }),
-            }),
-          }),
-          runtimeWakeSignal,
-          async runAssistantPhase() {
-            throw new Error("System mailbox mode must not enter assistant phase.");
-          },
-          vaultRoot,
-        },
-      );
-
-      assert.equal(result.immediateRecheckRequested, true);
-      assert.equal(result.nextWakeAt, TEST_NOW);
-      assert.equal(result.nextWakeReason, "assistant");
-      assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 0);
-      assert.equal(baseDeviceSyncPort.fetchDirtyStatesCalls, 0);
-      assert.equal(fetchRequests.length, 2);
-      assert.deepEqual(checkpointRequests, []);
-      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
-      assert.equal(mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length, 0);
-      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 1);
-    } finally {
-      vi.useRealTimers();
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test("checkpoints an imported system row before returning a spurious default wake", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const events: string[] = [];
-    const fetchRequests: HostedMailboxFetchRequest[] = [];
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const baseDeviceSyncPort = createEmptyDeviceSyncPort();
-    const deviceItem = createMailboxItem({
-      dedupeKey: "device-sync.wake:import-fetch-race",
-      id: "mailbox_item_system_mailbox_import_fetch_race",
-      kind: "device-sync.wake",
-      lane: "system",
-      laneSeq: "1",
-    });
-
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      vi.setSystemTime(new Date(TEST_NOW));
-      mocks.prepareHostedCodexAssistantProcess.mockClear();
-      mocks.cancelPendingWarmCodexPreinitialization.mockClear();
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const restoredWorkspace = await createVaultSnapshotBundle({
-        vaultRoot,
-      });
-      const baseMailboxPort = createMailboxPort({
-        events,
-        fetchRequests,
-        items: [deviceItem],
-      });
-      const mailboxPort: HostedRuntimeMailboxPort = {
-        ...baseMailboxPort,
-        async fetch(request) {
-          runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
-          return await baseMailboxPort.fetch(request);
-        },
-      };
-
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_system_mailbox_import_fetch_race",
-            processingMode: "system_mailbox",
-            workspaceVersion: "0",
-          },
-          resolvedConfig: createDeviceSyncResolvedConfig(),
-        }),
-        {
-          async createCheckpointSnapshot() {
-            return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "1".repeat(64),
-                size: 512,
-              }),
-            };
-          },
-          async importItem() {
-            await enqueueDeviceSyncSystemMailboxItemForTest({
-              item: deviceItem,
-              vaultRoot,
-            });
-            return { status: "imported" as const };
-          },
-          platform: createPlatform({
-            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
-            deviceSyncPort: baseDeviceSyncPort,
-            mailboxPort,
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({
-                snapshotRef: restoredWorkspace.snapshotRef,
-                version: "0",
-              }),
-            }),
-          }),
-          runtimeWakeSignal,
-          async runAssistantPhase() {
-            throw new Error("System mailbox mode must not enter assistant phase.");
-          },
-          vaultRoot,
-        },
-      );
-
-      assert.equal(result.immediateRecheckRequested, true);
-      assert.equal(result.nextWakeAt, TEST_NOW);
-      assert.equal(result.nextWakeReason, "assistant");
-      assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 0);
-      assert.equal(baseDeviceSyncPort.fetchDirtyStatesCalls, 0);
-      assert.equal(fetchRequests.length, 2);
-      assert.equal(checkpointRequests.length, 1);
-      assert.equal(
-        checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemImportedSeq,
-        "1",
-      );
-      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
-      assert.equal(mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length, 0);
-      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 1);
-    } finally {
-      vi.useRealTimers();
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
   test("a default wake inside the first system fetch survives to the same-invocation upgrade", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -842,7 +645,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
-  test("checkpoints an imported system row before upgrading in place", async () => {
+  test("keeps an imported system row while upgrading in place without a checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -953,14 +756,11 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       assert.equal(winner, "admitted", "The same invocation must admit the foreground batch instead of releasing.");
       assert.equal(assistantCalls, 1);
       assert.equal(deviceImports, 1);
-      assert.ok(
-        (checkpointsBeforeAdmission ?? 0) >= 1,
-        "The imported system row must be checkpointed before the foreground upgrade.",
-      );
-      assert.equal(
-        checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemImportedSeq,
-        "1",
-      );
+      assert.equal(checkpointsBeforeAdmission, 0,
+        "A qualified message must not wait for a background import checkpoint.");
+      assert.ok((await readHostedSystemMailboxState(vaultRoot)).pending.some(
+        (item) => item.itemId === deviceItem.id,
+      ), "The foreground upgrade preserves the device obligation in the live workspace.");
     } finally {
       controller.abort();
       await runtimeCompletion?.catch(() => undefined);

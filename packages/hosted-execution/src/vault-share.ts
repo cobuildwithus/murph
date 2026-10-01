@@ -8,7 +8,7 @@ import {
   isStrictIsoDateTime,
   normalizeActivityKindToken,
 } from "@murphai/contracts";
-import { resolveWearableProviderDescriptor } from "@murphai/health-metrics";
+import { resolveWearableProviderDescriptor } from "@murphai/health-metrics/wearable-provider-catalog";
 
 import {
   readNullableStringValue,
@@ -444,6 +444,11 @@ export const HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES =
     ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS.map((projectionKind) => ({ projectionKind })),
     ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   ] satisfies HostedVaultShareProjectionScope[]));
+
+// One canonical key per scope. The email grant itself is carried separately
+// from the data/profile authorization snapshot (99 of the current 100 scopes).
+export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX =
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.length - 1;
 
 function uniqueHostedVaultShareProjectionScopeList(
   projectionScopes: readonly HostedVaultShareProjectionScope[],

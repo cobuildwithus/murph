@@ -4,13 +4,13 @@ import { parseHostedRuntimeOwnerResponse, type HostedRuntimeOwnerCommand, type H
 import {
   recordHostedRuntimeFailure, isHostedRuntimeDeletionReady, recordHostedRuntimeTargetRetired, authorizeHostedRuntimeProvider,
   claimHostedRuntime, prepareHostedRuntimeLaunch, recordHostedRuntimeAccepted,
-  releaseHostedRuntimeAfterRetirement, requireHostedRuntimeOwnerTx, retireHostedRuntime,
+  releaseHostedRuntimeAfterRetirement, authorizeHostedRuntimeEffect, retireHostedRuntime,
   revokeHostedRuntimeAiUsageTx, selectHostedRuntimeTarget, releaseHostedRuntimeAfterCompletion,
 } from "./runtime-owner";
 
 type CommandInput = { prisma: PrismaClient; userId: string; command: HostedRuntimeOwnerCommand };
-type CommandResult = { status: HostedRuntimeOwnerResponse["status"]; owner: HostedRuntimeOwner | null };
-type IdentityCommand = Extract<HostedRuntimeOwnerCommand, { attemptId: string }>;
+type CommandResult = { cutover?: HostedRuntimeOwnerResponse["cutover"]; status: HostedRuntimeOwnerResponse["status"]; owner: HostedRuntimeOwner | null };
+type IdentityCommand = Exclude<Extract<HostedRuntimeOwnerCommand, { attemptId: string }>, { operation: "authorize_effect" }>;
 
 /** Durable ownership commands. The HTTP boundary owns advisory completion hints. */
 export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Promise<HostedRuntimeOwnerResponse> {
@@ -19,19 +19,19 @@ export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Pro
     const result = await resolveHostedLegacyMaterialization({ ...input.command, prisma: input.prisma, userId: input.userId });
     return parseHostedRuntimeOwnerResponse({ cutover: result.cutover, status: "observed", owner: projectOwner(result.owner) });
   }
-  // Provider authorization also selects the backend. An explicit legacy result
-  // can route to UserRunner; stale or draining authority never falls back.
-  const authorization = input.command.operation === "authorize_provider" || input.command.operation === "authorize_effect";
-  const backend = authorization ? await readHostedRuntimeMemberBackend(input.prisma, input.userId) : null;
-  if (backend !== null && backend !== "postgres") {
-    return parseHostedRuntimeOwnerResponse({ cutover: backend, status: "blocked", owner: null });
+  if (input.command.operation === "authorize_provider" || input.command.operation === "authorize_effect") {
+    const result = input.command.operation === "authorize_provider"
+      ? await authorizeHostedRuntimeProvider({ ...input.command, prisma: input.prisma, userId: input.userId })
+      : await authorizeHostedRuntimeEffect({ ...input.command, prisma: input.prisma, userId: input.userId });
+    return parseHostedRuntimeOwnerResponse({ cutover: result.cutover,
+      status: result.owner ? "authorized" : "blocked", owner: projectOwner(result.owner) });
   }
   const result = await executeCommand({ ...input, command: input.command });
-  const cutover = backend ?? await readHostedRuntimeMemberBackend(input.prisma, input.userId);
+  const cutover = result.cutover ?? await readHostedRuntimeMemberBackend(input.prisma, input.userId);
   return parseHostedRuntimeOwnerResponse({ cutover, status: result.status, owner: projectOwner(result.owner) });
 }
 
-async function executeCommand(input: Omit<CommandInput, "command"> & { command: Exclude<HostedRuntimeOwnerCommand, { operation: "resolve_legacy" }> }): Promise<CommandResult> {
+async function executeCommand(input: Omit<CommandInput, "command"> & { command: Exclude<HostedRuntimeOwnerCommand, { operation: "resolve_legacy" | "authorize_provider" | "authorize_effect" }> }): Promise<CommandResult> {
   const { prisma, userId, command } = input;
   switch (command.operation) {
     case "reconcile":
@@ -43,14 +43,10 @@ async function executeCommand(input: Omit<CommandInput, "command"> & { command: 
     }
     case "claim": {
       const result = await claimHostedRuntime({ prisma, userId, processingMode: command.processingMode });
-      return { status: result.status, owner: result.status === "blocked" ? null : result.owner };
+      return { cutover: result.cutover, status: result.status, owner: result.status === "blocked" ? null : result.owner };
     }
     case "target_retired":
       return mutated(await recordHostedRuntimeTargetRetired({ ...command, prisma, userId }));
-    case "authorize_provider": {
-      const owner = await authorizeHostedRuntimeProvider({ ...command, prisma, userId });
-      return { ...authorized(owner !== null), owner };
-    }
     default:
       return executeIdentityCommand({ ...input, command });
   }
@@ -61,9 +57,9 @@ async function executeIdentityCommand(input: Omit<CommandInput, "command"> & { c
   const identity = { userId, attemptId: command.attemptId, generation: command.generation };
   switch (command.operation) {
     case "select_target":
-      return { status: "updated", owner: await selectHostedRuntimeTarget({ prisma, identity, runnerContainerName: command.runnerContainerName }) };
+      return { cutover: "postgres", status: "updated", owner: await selectHostedRuntimeTarget({ prisma, identity, runnerContainerName: command.runnerContainerName }) };
     case "prepare_launch":
-      return { status: "updated", owner: await prepareHostedRuntimeLaunch({ ...command, prisma, identity }) };
+      return { cutover: "postgres", status: "updated", owner: await prepareHostedRuntimeLaunch({ ...command, prisma, identity }) };
     case "accepted":
       return mutated(await recordHostedRuntimeAccepted({ prisma, identity }));
     case "record_failure":
@@ -84,15 +80,6 @@ async function executeIdentityCommand(input: Omit<CommandInput, "command"> & { c
     case "revoke_ai_usage":
       await prisma.$transaction((tx) => revokeHostedRuntimeAiUsageTx(tx, identity));
       return mutated(true);
-    case "authorize_effect": {
-      const owner = await prisma.$transaction(async (tx) => {
-        const current = await requireHostedRuntimeOwnerTx(tx, identity);
-        if ((command.runnerContainerName !== null && current.runnerContainerName !== command.runnerContainerName)
-          || (command.managedAi && !current.platformAiUsageAllowed)) return null;
-        return current;
-      });
-      return { ...authorized(owner !== null), owner };
-    }
   }
 }
 

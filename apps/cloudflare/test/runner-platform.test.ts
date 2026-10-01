@@ -124,6 +124,7 @@ import {
 import {
   parseHostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/parsers";
+import * as hostedExecutionParsers from "@murphai/hosted-execution/parsers";
 import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
@@ -1087,7 +1088,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it.each([429, 500, 503])("retries HTTP %i direct R2 responses without an R2 error code", async (status) => {
+  it.each([429, 500, 502, 503, 504].flatMap((status) =>
+    [false, true].flatMap((managed) =>
+      [200, status, 412].map((nextStatus) => ({ status, managed, nextStatus }))
+    )
+  ))("bounds HTTP $status snapshot PUT retries with managed=$managed and next HTTP $nextStatus", async ({ status, managed, nextStatus }) => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-retry-"));
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -1108,6 +1113,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             JSON.stringify({
               expiresAt: new Date(Date.now() + 60_000).toISOString(),
               putUrl,
+              ...(managed ? { managedUploadId: "synthetic-upload" } : {}),
             }),
             {
               headers: {
@@ -1119,11 +1125,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         }
 
         putAttempt += 1;
-        await request.arrayBuffer();
+        expect(request.url).toBe(putUrl);
+        expect(request.method).toBe("PUT");
+        expect(request.headers.get("if-none-match")).toBe(managed ? null : "*");
+        expect(new Uint8Array(await request.arrayBuffer())).toEqual(encryptedBytes);
         if (putAttempt === 1) {
           return new Response("retry later", { status });
         }
-        return new Response(null, { status: 200 });
+        return new Response(null, {
+          headers: { etag: '"synthetic-part-etag"' },
+          status: nextStatus,
+        });
       });
       const platform = buildTestHostedExecutionRuntimePlatform({
         boundUserId: "member_123",
@@ -1137,11 +1149,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         snapshotId: "snapshot_runner_platform",
         sourceFilePath: encryptedFilePath,
       });
-      await retryJitter.advance();
-      await expect(upload).resolves.toEqual({
-        snapshotDirectR2PresignElapsedMs: expect.any(Number),
-        snapshotDirectR2PutElapsedMs: expect.any(Number),
-      });
+      const outcome = nextStatus === 200
+        ? expect(upload).resolves.toEqual({
+            snapshotDirectR2PresignElapsedMs: expect.any(Number),
+            snapshotDirectR2PutElapsedMs: expect.any(Number),
+          })
+        : expect(upload).rejects.toThrow(`not resumable after HTTP ${nextStatus};`);
+      // Surface an early rejection as a failed assertion rather than waiting
+      // forever for retry jitter that an incorrect status classifier skipped.
+      await Promise.race([retryJitter.advance(), outcome]);
+      await outcome;
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(putAttempt).toBe(2);
@@ -5847,9 +5864,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-123",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("calls ambient Worker fetch with the global receiver across hosted fetch boundaries", async () => {
@@ -5999,9 +6014,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(forwarded.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(forwarded.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-456",
-    );
+    expect(forwarded.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
     expect(forwarded.headers.has(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER)).toBe(false);
     expect(forwarded.method).toBe("PUT");
     expect(await forwarded.text()).toBe("b");
@@ -6062,9 +6075,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-local",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("rejects configured local provider fetches outside the configured base path", async () => {
@@ -6214,9 +6225,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
     expect(request.url).toBe("http://172.17.0.1:4012/bot__cloudflare_injected__/sendMessage");
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-local",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
 
     const rejectedFetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const rejectedFetch = createCloudflareHostedProviderFetch(
@@ -6283,9 +6292,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-linq-local",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("does not require external provider fetches to carry a runtime write-fence lease", async () => {
@@ -6337,9 +6344,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-platform",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("keeps public Internet fetches free of runtime authority headers", async () => {
@@ -7140,59 +7145,206 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
-  it.each([undefined, true, false, "invalid", null])("write-fences external route authority and validates audience %s", async (threadIsDirect) => {
+  describe.each(["direct", "proxy"] as const)("external route authority validation (%s)", (transport) => {
     const authority = {
       channel: "telegram" as const,
       containerMemberId: "member_123",
       threadId: "telegram_group_123",
     };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = input instanceof Request ? input : new Request(input, init);
-      expect(new URL(request.url).pathname).toBe(
-        HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
-      );
-      await expect(request.json()).resolves.toEqual(authority);
-      return new Response(JSON.stringify({ authorized: true, threadIsDirect }), {
-        headers: { "content-type": "application/json; charset=utf-8" },
-        status: 200,
+    const diagnosticMessage =
+      "Hosted external thread route authority response validation failed.";
+
+    function createAuthorityEffect(respond: () => Response | Promise<Response>) {
+      const fetchMock = vi.fn<typeof fetch>(async () => respond());
+      const readCurrentLease = vi.fn(() => ({
+        attemptId: "runtime_write_123",
+        leaseGeneration: "7",
+        userId: "member_123",
+        workspaceVersion: "6",
+      }));
+      const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }));
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock,
+        ...(transport === "direct" ? {
+          webCallbackSigning: environment.webCallbackSigning,
+          webControlBaseUrl: "https://web.example.test",
+        } : {}),
+        workspaceCheckpointBridge: { readCurrentLease },
       });
-    });
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    }));
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: "https://web.example.test",
-    });
-
-    const assertExternalThreadRouteAuthority =
-      platform.effectsPort.assertExternalThreadRouteAuthority;
-    if (!assertExternalThreadRouteAuthority) {
-      throw new Error("Expected external thread route authority effect.");
-    }
-    if (threadIsDirect !== undefined && typeof threadIsDirect !== "boolean") {
-      await expect(assertExternalThreadRouteAuthority(authority)).rejects.toThrow(
-        "Hosted external thread route authority response is invalid.",
-      );
-    } else {
-      await expect(assertExternalThreadRouteAuthority(authority)).resolves.toEqual(
-        threadIsDirect === undefined ? undefined : { threadIsDirect },
-      );
+      const assertAuthority = platform.effectsPort.assertExternalThreadRouteAuthority;
+      if (!assertAuthority) {
+        throw new Error("Expected external thread route authority effect.");
+      }
+      return { assertAuthority, fetchMock, readCurrentLease };
     }
 
-    const request = requireFetchRequest(
-      fetchMock.mock.calls[0],
-      "direct external thread route authority request",
+    async function expectOnlyAuthorityRequest(effect: ReturnType<typeof createAuthorityEffect>) {
+      expect(effect.fetchMock).toHaveBeenCalledTimes(1);
+      // Direct transport already revalidates the fence; telemetry adds no read.
+      expect(effect.readCurrentLease).toHaveBeenCalledTimes(transport === "direct" ? 2 : 1);
+      const request = requireFetchRequest(effect.fetchMock.mock.calls[0], "external route authority");
+      expect(request.url).toBe(
+        `${transport === "direct" ? "https://web.example.test" : "http://web-control.worker"}${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}${transport === "direct" ? "?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6" : ""}`,
+      );
+      expect(request.method).toBe("POST");
+      await expect(request.json()).resolves.toEqual(authority);
+      expectDefaultRuntimeWriteFenceHeaders(request);
+      if (transport === "direct") {
+        expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+        expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+      }
+    }
+
+    function readValidationDiagnostics() {
+      return mocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([entry]) => entry)
+        .filter((entry) => entry.message === diagnosticMessage);
+    }
+
+    it.each([
+      { name: "legacy", payload: { authorized: true }, expected: undefined },
+      { name: "direct", payload: { authorized: true, threadIsDirect: true }, expected: { threadIsDirect: true } },
+      { name: "group", payload: { authorized: true, threadIsDirect: false }, expected: { threadIsDirect: false } },
+      { name: "fallback only", payload: { authorized: true, assistantAskFallbackRequired: true }, expected: { assistantAskFallbackRequired: true } },
+      { name: "both false", payload: { authorized: true, assistantAskFallbackRequired: false, threadIsDirect: false }, expected: { assistantAskFallbackRequired: false, threadIsDirect: false } },
+    ])("preserves $name without a validation diagnostic", async ({ payload, expected }) => {
+      const effect = createAuthorityEffect(() => Response.json(payload));
+      await expect(effect.assertAuthority(authority)).resolves.toEqual(expected);
+      expect(readValidationDiagnostics()).toEqual([]);
+      await expectOnlyAuthorityRequest(effect);
+    });
+
+    const nonObjectShape = {
+      responseIsObject: false,
+      authorizedValid: false,
+      assistantAskFallbackRequiredValid: false,
+      threadIsDirectValid: false,
+    };
+    it.each([
+      { name: "null body", payload: null, invalid: nonObjectShape },
+      { name: "array body", payload: [], invalid: nonObjectShape },
+      { name: "scalar body", payload: "synthetic-private-value", invalid: nonObjectShape },
+      { name: "missing authorized", payload: {}, invalid: { authorizedValid: false } },
+      { name: "false authorized", payload: { authorized: false }, invalid: { authorizedValid: false } },
+      { name: "non-boolean authorized", payload: { authorized: "invalid" }, invalid: { authorizedValid: false } },
+      { name: "invalid audience", payload: { authorized: true, threadIsDirect: "invalid" }, invalid: { threadIsDirectValid: false } },
+      { name: "null audience", payload: { authorized: true, threadIsDirect: null }, invalid: { threadIsDirectValid: false } },
+      { name: "invalid fallback", payload: { authorized: true, assistantAskFallbackRequired: "invalid" }, invalid: { assistantAskFallbackRequiredValid: false } },
+      { name: "null fallback", payload: { authorized: true, assistantAskFallbackRequired: null }, invalid: { assistantAskFallbackRequiredValid: false } },
+      {
+        name: "multiple invalid fields and private extras",
+        payload: {
+          authorized: false,
+          assistantAskFallbackRequired: "synthetic-private-value",
+          threadIsDirect: "synthetic-private-value",
+          syntheticPrivateKey: { nested: ["synthetic-private-value"] },
+          body: "synthetic-private-value",
+          url: "https://synthetic-private.example.test",
+          headers: { authorization: "synthetic-private-value" },
+        },
+        invalid: { authorizedValid: false, assistantAskFallbackRequiredValid: false, threadIsDirectValid: false },
+      },
+    ])("observes $name once and preserves the parser error", async ({ payload, invalid }) => {
+      const parser = vi.spyOn(hostedExecutionParsers, "parseHostedExternalThreadRouteAuthorityResponse");
+      try {
+        const effect = createAuthorityEffect(() => Response.json(payload));
+        const result = effect.assertAuthority(authority);
+        await expect(result).rejects.toBeInstanceOf(TypeError);
+        expect(parser).toHaveBeenCalledTimes(1);
+        expect(parser.mock.results[0]?.type).toBe("throw");
+        await expect(result).rejects.toBe(parser.mock.results[0]?.value);
+        const details = {
+          operation: "thread_route_authority",
+          responseIsObject: true,
+          authorizedValid: true,
+          assistantAskFallbackRequiredValid: true,
+          threadIsDirectValid: true,
+          ...invalid,
+          transport,
+          workspaceAttemptId: "runtime_write_123",
+        };
+        await expect(result).rejects.toHaveProperty("message", details.responseIsObject
+          ? "Hosted external thread route authority response is invalid."
+          : "Hosted external thread route authority response must be an object.");
+        const diagnostics = readValidationDiagnostics();
+        expect(diagnostics).toHaveLength(1);
+        expect(diagnostics[0]).toEqual({
+          component: "hosted.runtime.control-plane",
+          details,
+          level: "warn",
+          message: diagnosticMessage,
+          phase: "runtime.starting",
+          userId: null,
+        });
+        const sanitized = buildHostedExecutionStructuredLogRecord(diagnostics[0]);
+        expect(sanitized.details).toEqual(details);
+        expect(sanitized).not.toHaveProperty("errorMessage");
+        const serialized = JSON.stringify([diagnostics, sanitized]);
+        for (const excluded of [
+          "syntheticPrivateKey", "synthetic-private", authority.containerMemberId, authority.threadId,
+        ]) {
+          expect(serialized).not.toContain(excluded);
+        }
+        await expectOnlyAuthorityRequest(effect);
+      } finally {
+        parser.mockRestore();
+      }
+    });
+
+    it.each(["http", "network", "invalid-json", "body-read"] as const)(
+      "does not emit this diagnostic or retry on %s failure",
+      async (failure) => {
+        const effect = createAuthorityEffect(() => {
+          if (failure === "network") throw new TypeError("Synthetic transport failure.");
+          if (failure === "http") return Response.json({ authorized: false }, { status: 503 });
+          if (failure === "invalid-json") return new Response("{");
+          return new Response(new ReadableStream({
+            start(controller) { controller.error(new Error("Synthetic body read failure.")); },
+          }));
+        });
+        const parser = vi.spyOn(hostedExecutionParsers, "parseHostedExternalThreadRouteAuthorityResponse");
+        try {
+          await expect(effect.assertAuthority(authority)).rejects.toBeInstanceOf(Error);
+          expect(parser).not.toHaveBeenCalled();
+          expect(readValidationDiagnostics()).toEqual([]);
+          await expectOnlyAuthorityRequest(effect);
+        } finally {
+          parser.mockRestore();
+        }
+      },
     );
-    expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
-    );
-    expectDefaultRuntimeWriteFenceHeaders(request);
-    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
-    expect(request.headers.get("x-hosted-execution-signature"))
-      .toMatch(/^[A-Za-z0-9\-_]+$/u);
+
+    it("preserves the exact parser error even when the existing log sink throws", async () => {
+      const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+        "@murphai/hosted-execution",
+      );
+      const parser = vi.spyOn(hostedExecutionParsers, "parseHostedExternalThreadRouteAuthorityResponse");
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {
+        throw new Error("Synthetic log sink failure.");
+      });
+      vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "on");
+      mocks.emitHostedExecutionStructuredLog.mockImplementation((entry) => {
+        if (entry.message === diagnosticMessage) return actual.emitHostedExecutionStructuredLog(entry);
+      });
+      try {
+        const effect = createAuthorityEffect(() => Response.json({ authorized: false }));
+        const result = effect.assertAuthority(authority);
+        await expect(result).rejects.toBeInstanceOf(TypeError);
+        expect(parser).toHaveBeenCalledTimes(1);
+        expect(parser.mock.results[0]?.type).toBe("throw");
+        await expect(result).rejects.toBe(parser.mock.results[0]?.value);
+        expect(readValidationDiagnostics()).toHaveLength(1);
+        expect(warn).toHaveBeenCalledTimes(1);
+        await expectOnlyAuthorityRequest(effect);
+      } finally {
+        parser.mockRestore();
+        warn.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    });
   });
 
   it("binds private Assistant Ask completion proof to its exact authorized direct route", async () => {

@@ -926,7 +926,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightSeed.schedule.expression).toBe('0 12 * * 0')
     expect(insightSeed.instructions).toContain('On this scheduled weekly run')
     expect(insightSeed.assistantTargetOverride).toEqual({
-      model: 'gpt-6-sol',
+      model: 'gpt-6.1-sol',
       reasoningEffort: 'high',
     })
     expect(insightSeed.instructions).not.toContain('Sunday at noon local time')
@@ -983,7 +983,7 @@ describe('applyMurphManagedAutomations', () => {
       'A monthly check for one user-relevant health friction worth offering help with.',
     )
     expect(seed.assistantTargetOverride).toEqual({
-      model: 'gpt-6-sol',
+      model: 'gpt-6.1-sol',
       reasoningEffort: 'high',
     })
     expect(seed.tags).toContain('murph-managed:monthly-improvement-coach')
@@ -1361,8 +1361,8 @@ describe('applyMurphManagedAutomations', () => {
     )
     expect(patternsUpdateRecord).toMatchObject({
       assistantTargetOverride: {
-        model: 'gpt-6-sol',
-        reasoningEffort: 'high',
+        model: 'gpt-6-luna',
+        reasoningEffort: 'xhigh',
       },
       schedule: { kind: 'dailyLocal', localTime: expect.any(String) },
       slug: 'personal-patterns-update',
@@ -1609,7 +1609,7 @@ describe('applyMurphManagedAutomations', () => {
       title: 'Monthly improvement coach',
     })
     expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
-      model: 'gpt-6-sol',
+      model: 'gpt-6.1-sol',
       reasoningEffort: 'high',
     })
     expect(improvementCoachRecord?.schedule).toEqual({
@@ -1785,7 +1785,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.records.get(morning.automationId)?.status).toBe('active')
   })
 
-  it('defines one hosted morning Journal context pass on GPT-6 Sol low', () => {
+  it('defines one hosted morning Journal context pass on GPT-6 Luna xhigh', () => {
     const morning = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) =>
         seed.automationId ===
@@ -1799,8 +1799,8 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(morning).toMatchObject({
       assistantTargetOverride: {
-        model: 'gpt-6-sol',
-        reasoningEffort: 'low',
+        model: 'gpt-6-luna',
+        reasoningEffort: 'xhigh',
       },
       hostedRuntimeOnly: true,
       schedule: { kind: 'dailyLocal', localTime: '08:00' },
@@ -1822,7 +1822,9 @@ describe('applyMurphManagedAutomations', () => {
       label: 'previous Luna model',
       override: { model: 'gpt-5.6-luna', reasoningEffort: 'high' },
     },
-  ])('reconciles Journal $label to GPT-6 Sol without changing other jobs or reading member preferences', async ({ override }) => {
+    { label: 'previous Sol low model', override: { model: 'gpt-6-sol', reasoningEffort: 'low' } },
+    { label: 'previous Sol high model', override: { model: 'gpt-6-sol', reasoningEffort: 'high' } },
+  ])('reconciles Journal and Patterns $label to GPT-6 Luna xhigh without changing other jobs or reading member preferences', async ({ override }) => {
     const options = {
       defaultRoute,
       now: new Date('2026-09-01T12:00:00.000Z'),
@@ -1832,14 +1834,17 @@ describe('applyMurphManagedAutomations', () => {
       },
       vaultRoot,
     }
-    const journalIds = [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID]
-    const morningOverride = { model: 'gpt-6-sol', reasoningEffort: 'low' }
+    const automationIds = [
+      MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+      MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+    ]
+    const managedOverride = { model: 'gpt-6-luna', reasoningEffort: 'xhigh' }
 
     await applyMurphManagedAutomations(options)
-    for (const automationId of journalIds) {
+    for (const automationId of automationIds) {
       const record = managedAutomationMocks.records.get(automationId)
       if (!record) throw new Error('Expected the managed Journal automation')
-      expect(record.assistantTargetOverride).toEqual(morningOverride)
+      expect(record.assistantTargetOverride).toEqual(managedOverride)
       managedAutomationMocks.records.set(automationId, {
         ...record,
         assistantTargetOverride: override,
@@ -1861,10 +1866,10 @@ describe('applyMurphManagedAutomations', () => {
       title: 'Synthetic reminder',
     })
     const expectedRecords = structuredClone(managedAutomationMocks.records)
-    for (const automationId of journalIds) {
+    for (const automationId of automationIds) {
       const record = expectedRecords.get(automationId)
       if (!record) throw new Error('Expected the managed Journal automation')
-      record.assistantTargetOverride = morningOverride
+      record.assistantTargetOverride = managedOverride
     }
     managedAutomationMocks.upsertAutomation.mockClear()
     managedAutomationMocks.patchAutomation.mockClear()
@@ -1873,13 +1878,13 @@ describe('applyMurphManagedAutomations', () => {
 
     await expect(applyMurphManagedAutomations(options)).resolves.toMatchObject({
       created: 0,
-      updated: 1,
+      updated: automationIds.length,
     })
-    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(automationIds.length)
     expect(managedAutomationMocks.upsertAutomation.mock.calls.map(
       ([input]) => input.automationId,
-    )).toEqual(journalIds)
-    // Includes Patterns, weekly Sol synthesis, inherited-model jobs and all
+    )).toEqual(automationIds)
+    // Includes weekly Sol synthesis, inherited-model jobs and all
     // existing routes, schedules, instructions and statuses, not just models.
     expect(managedAutomationMocks.records).toEqual(expectedRecords)
     expect(managedAutomationMocks.patchAutomation).not.toHaveBeenCalled()
@@ -2315,7 +2320,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
       .toEqual(expect.objectContaining({
         assistantTargetOverride: {
-          model: 'gpt-6-sol',
+          model: 'gpt-6.1-sol',
           reasoningEffort: 'high',
         },
         schedule: {

@@ -46,6 +46,7 @@ import {
 
 import {
   assertEmptyGarminCanaryWorkspace,
+  formatLiveGarminDataFailure,
   waitForLiveGarminCanonicalData,
 } from "./helpers/hosted-local-junction-live-data.js";
 
@@ -725,13 +726,14 @@ async function runLiveJunctionWearableProof(
     );
   }
 
+  let dataOutcome: "matched" | null = null;
   const connectedNotBefore = Date.now();
   const result = await runJunctionWearableBrowser({
     config,
     ...(config.canonicalData ? {
       onConnected: async (signal: AbortSignal) => {
         const provider = await import(junctionProviderModuleSpecifier) as JunctionProviderModule;
-        await waitForLiveGarminCanonicalData({
+        dataOutcome = await waitForLiveGarminCanonicalData({
           client: new JunctionClient({ apiKey: config.apiKey, environment: "sandbox", region: config.region }),
           clientUserId: provider.buildJunctionClientUserId(config.clientUserIdSecret, memberId),
           memberId,
@@ -740,6 +742,7 @@ async function runLiveJunctionWearableProof(
           signal,
           timeoutMs: config.timeoutMs,
         });
+        console.info("MURPH_E2E_GARMIN_CANONICAL_DATA_MATCHED=1");
       },
     } : {}),
     hostedSessionCookie,
@@ -752,9 +755,9 @@ async function runLiveJunctionWearableProof(
   if (config.canonicalData && config.canonicalDataReceiptPath) {
     try {
       await writeFile(config.canonicalDataReceiptPath, JSON.stringify({
-        contractVersion: 1,
+        contractVersion: 2,
         source: "garmin",
-        canonicalDataMatched: true,
+        dataOutcome,
       }) + "\n", { flag: "wx", mode: 0o600 });
     } catch {
       throw new Error("MURPH_E2E_GARMIN_DATA_RECEIPT_WRITE_FAILED");
@@ -884,7 +887,10 @@ async function runJunctionWearableBrowser(input: {
       lastWearableStage = forwardWearableStage(line) ?? lastWearableStage;
       if (line !== "MURPH_E2E_GARMIN_CONNECTED=1" || !input.onConnected || dataProof) continue;
       dataProof = input.onConnected(dataAbort.signal).catch((error: unknown) => {
-        dataFailure = error;
+        dataFailure = new Error(formatLiveGarminDataFailure(error));
+        // Disconnect runs even after a failed proof; report its safe cause now
+        // so a subsequent browser/cleanup failure cannot hide it.
+        console.error(formatLiveGarminDataFailure(error));
       }).finally(() => {
         // Complete the normal browser Disconnect even after a failed data proof.
         if (browserRun.child.exitCode === null && !browserRun.child.stdin?.destroyed) {

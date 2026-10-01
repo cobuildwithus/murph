@@ -1,6 +1,7 @@
 ---
 title: 'Scoped committer restores stale staged content after an edited rename'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3885'
 ---
 
 ## Expected Behavior

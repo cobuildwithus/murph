@@ -54,13 +54,18 @@ export function cliTimingFailureStage(value: unknown): CliFailureTiming["stage"]
 }
 
 
-// Only these command schemas own these exact top-level names. No path parsing,
-// coercion, array-index admission or prefix matching belongs in telemetry.
+// Only these command schemas (or Incur's fixed invocation field "arguments")
+// own these exact names. No path parsing, coercion, array-index admission or
+// prefix matching belongs in telemetry.
 const validationFields = [
   ["automation list", ["limit", "status"]],
+  ["event list", ["kind", "from", "to", "tag", "experiment", "limit", "arguments"]],
+  ["event payload-schema", ["kind", "for"]],
+  ["knowledge show", ["slug"]],
+  ["measurement entry list", ["metric", "from", "to", "limit"]],
   ["food search-labels", ["query", "limit"]],
   ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks",
-    "relatedSlug", "librarySlug", "sourcePath"]],
+    "relatedSlug", "librarySlug", "sourcePath", "arguments"]],
   ["knowledge append-section", ["slug", "heading", "body", "title", "position", "sourcePath"]],
 ] as const;
 const validationCodes = [

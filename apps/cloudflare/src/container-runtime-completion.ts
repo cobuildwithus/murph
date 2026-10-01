@@ -16,6 +16,11 @@ import type {
   HostedExecutionRunnerJobResult,
 } from "./runner-job-transport.ts";
 
+import {
+  HOSTED_RUNTIME_COMPLETION_RECEIPT_REASONS,
+  type HostedRuntimeCompletionReceipt,
+} from "./runtime-completion-receipt.ts";
+
 export const HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS = 1_000;
 
 export async function recordHostedContainerRuntimeCompletionBestEffort(input: {
@@ -25,14 +30,14 @@ export async function recordHostedContainerRuntimeCompletionBestEffort(input: {
 }): Promise<void> {
   const attemptId = input.job.request.attemptId;
   const userId = input.job.request.userId;
-  let completed = false;
+  let receipt: HostedRuntimeCompletionReceipt = { completed: false };
   let failure: unknown;
 
   try {
     const fetchImpl = input.fetchImpl ?? fetch;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
-      completed = await Promise.race([
+      receipt = await Promise.race([
         fetchImpl(CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT, {
           body: JSON.stringify({ result: input.result }),
           headers: {
@@ -65,6 +70,9 @@ export async function recordHostedContainerRuntimeCompletionBestEffort(input: {
     failure = error;
   }
 
+  const { completed, reason } = receipt;
+  const obsolete = !completed
+    && (reason === "already_completed" || reason === "superseded");
   emitHostedExecutionStructuredLog({
     component: "container",
     details: {
@@ -72,12 +80,15 @@ export async function recordHostedContainerRuntimeCompletionBestEffort(input: {
       runtimeCompletionReceiptOutcome: completed
         ? "recorded"
         : "not_recorded",
+      ...(reason ? { runtimeCompletionReceiptReason: reason } : {}),
       workspaceAttemptId: attemptId,
     },
-    level: completed ? "info" : "warn",
+    level: completed || obsolete ? "info" : "warn",
     message: completed
       ? "Hosted container recorded runtime completion with the durable fence owner."
-      : "Hosted container did not record runtime completion; preserving completed result.",
+      : obsolete
+        ? "Hosted container runtime completion callback is obsolete; preserving completed result."
+        : "Hosted container did not record runtime completion; preserving completed result.",
     phase: "checkpoint",
     userId,
   });
@@ -85,7 +96,7 @@ export async function recordHostedContainerRuntimeCompletionBestEffort(input: {
 
 async function readHostedContainerRuntimeCompletionReceipt(
   response: Response,
-): Promise<boolean> {
+): Promise<HostedRuntimeCompletionReceipt> {
   if (!response.ok) {
     throw new Error(
       `Hosted container runtime completion receipt returned HTTP ${response.status}.`,
@@ -101,5 +112,11 @@ async function readHostedContainerRuntimeCompletionReceipt(
   ) {
     throw new TypeError("Hosted container runtime completion receipt was invalid.");
   }
-  return receipt.completed;
+  // Boolean-only receipts remain valid during rolling deployments. Never let
+  // unknown wire text suppress warnings or attach a rejection to success.
+  if (receipt.completed) return { completed: true };
+  const reason = "reason" in receipt
+    ? HOSTED_RUNTIME_COMPLETION_RECEIPT_REASONS.find(value => value === receipt.reason)
+    : undefined;
+  return { completed: false, ...(reason ? { reason } : {}) };
 }

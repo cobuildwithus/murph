@@ -58,6 +58,11 @@ device-sync recovery path.
 Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
+Status checkpoints retaining the same normalized snapshot skip cleanup bookkeeping
+entirely. New publication and migration own resource registration; unchanged status
+updates introduce no new resource. Retirement validation and workspace CAS still
+run. Changed references record current and replaced resources, preserving recovery
+deadlines and metadata.
 
 Accessible auth completion routes to `/home`, which reads the member-owned
 onboarding completion state on every load. Pending members with a resolved text
@@ -111,6 +116,32 @@ schema, then count grouped only by message, `stage`, and `errorClass`. The recor
 is additive and Web-only: older deployments and readers tolerate its absence,
 and recovery uses a fresh revert or forward-fix commit on `main` so the replacement
 deployment receives current production admission.
+
+## Checkpoint failure observability
+
+After callback authentication succeeds, the Web checkpoint route emits at most
+one additional failure record: `Hosted workspace checkpoint failed.` with
+schema `murph.hosted-workspace.checkpoint.failure.v1`. Metadata contains only
+`schema`, `stage`, and `errorClass`. The five stages are `request_body`,
+`request_schema`, `runtime_authority`, `publication`, and `response`.
+`publication` includes the missing-workspace invariant; `response` starts after
+existing post-commit wake scheduling and covers parsing and JSON construction.
+Error classes are `type_error`, `range_error`, `error`, and `non_error`.
+
+The record contains no identifiers, versions, request values, paths, raw errors,
+messages, stacks, causes, or arbitrary metadata. Success, CAS conflict, and
+pre-authentication rejection add no observation. Diagnostic failure is isolated;
+the original error continues to the existing response mapper. Later asynchronous
+wake-signal failures retain their existing separate observation.
+
+Query natural production Vercel traffic by the exact message and schema, from
+the Web deployment-ready timestamp onward, and aggregate only by stage and
+error class. Existing Vercel request correlation joins the record to the callback;
+a later checkpoint alone does not establish acceptance of the earlier source
+state. No synthetic production failure is needed. Old and new Web/Worker/runtime
+combinations preserve identical request and response contracts; only new Web
+emits this optional log. A fresh revert or forward-fix must pass current Web
+production admission; restoring an old deployment is not the recovery path.
 
 ## Health-data withdrawal rollback floor
 
@@ -1412,6 +1443,32 @@ or an ephemeral preview deployment URL as a long-lived provider callback or
 webhook base. Web build validation and the browser start boundary reject a
 hostname mismatch before provider authorization begins.
 
+### Direct Linq preparation diagnostics
+
+The existing `hosted-onboarding.webhook.thread-routing-preparation-retry`
+diagnostic and failed Linq planning, service, and route timing records include
+`directLinqMailboxPreparationReason` only for a typed
+`HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED` error targeting
+`direct_linq_mailbox`. Its closed vocabulary is `control-root`,
+`home-chat-owner`, `ingress-root`, `member`, `routing`, or `thread-route`.
+Unknown, malformed, unrelated, and unreadable metadata omits the field; error
+messages, causes, and other details are never projected. The field distinguishes
+the existing preparation checks without adding events, I/O, retries, or state.
+Provider redelivery success alone does not identify the original stale fact.
+
+### Vault-share delivery deferral diagnostics
+
+`POST /api/internal/hosted-runtime/vault-share/deliver` emits at most one
+best-effort warning per deferred request with schema
+`murph.hosted-vault-share-delivery-deferred.v1`. Its only other field, `reason`,
+is `pagination_generation_changed`, `stale_generation_unmaterialized`,
+`inactive_generation_unmaterialized`, or `replacement_no_active_share`.
+The last value identifies a guarded replacement result, not its deeper cause.
+Successful requests emit no new diagnostic. The record contains no identifiers,
+projection kinds, content, versions, counts, credentials or error prose; the
+existing request log supplies correlation. Logging failure preserves the same
+generic retryable response. No new reads, writes, retries or network work occur.
+
 ### Workspace read timing
 
 `GET /api/internal/hosted-workspace` records content-free
@@ -1504,6 +1561,24 @@ This is Web-only, requires no migration or Worker rollout order, and preserves
 the existing response contract. After deployment, compare first-operation crypto
 and control-connection records with webhook-to-typing milestones. Local import
 benchmarks alone do not establish production latency savings.
+
+### Vercel source previews
+
+For an authorized source preview, run from the repository root of the task
+checkout already linked to the hosted Web Vercel project. Keep the project's
+configured root directory at `apps/web` so the upload includes workspace owners
+and Vercel builds the Web app:
+
+```sh
+vercel deploy --yes --target=preview --archive=tgz --no-wait
+```
+
+Use archive mode for this monorepo: its source tree can exceed Vercel's
+[15,000-file CLI upload limit](https://vercel.com/docs/limits#files).
+The [archive option](https://vercel.com/docs/cli/deploy#archive) compresses the
+deployment source before upload. The command uses the existing project link
+and credentials; `--no-wait` returns before the build finishes, so verify the
+preview's completed build before using it as review evidence.
 
 ### Vercel setup
 
@@ -1893,6 +1968,12 @@ number multiplied by the live Fluid instance count. Leaving
 without silently changing capacity. Use the pressure, acquisition, and callback
 measurements to re-baseline representative ingress, runtime-log, device-sync,
 signup, and Stripe workloads before choosing an explicit per-instance value.
+
+The generated Prisma client uses the supported `small` query compiler to reduce
+fresh-instance loading and first-query initialization. This is a build choice,
+not a database migration; query contracts, pool ownership, retries and transaction
+limits remain the same. Compare both cold and warm queries when changing it.
+Local startup measurements do not establish an end-to-end production deadline.
 
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
@@ -2665,3 +2746,28 @@ Current hosted billing assumptions:
   submitted as separate emails in one strict Resend batch with a Preview-bound
   idempotency key, so an ambiguous response can be retried without duplicate
   delivery. Logs contain aggregate counts and safe provider status only.
+
+## Bundled Web fonts
+
+`app/font-assets.ts` uses `next/font/local` and committed WOFF2 assets so Web
+builds never fetch Google Fonts. Keep the existing CSS variables, Fraunces
+400/600, DM Sans 100–1000, and DM Mono 400 when updating these assets.
+The separate TTF assets used for social cards remain unchanged.
+
+Font sources and licenses:
+
+- `Fraunces-400.woff2` and `Fraunces-600.woff2` are lossless WOFF2 encodings of
+  the adjacent committed TTF files. They retain all 624 character mappings.
+- `DMSans-Variable.woff2` comes from `ofl/dmsans/DMSans[opsz,wght].ttf`, with
+  optical size pinned to the default 9 used by the previous Google loader and
+  the complete weight axis retained. It has 403 character mappings.
+- `DMMono-400.woff2` comes from `ofl/dmmono/DMMono-Regular.ttf` and retains all
+  381 character mappings.
+- Upstream files and the three adjacent `*-OFL.txt` licenses come from
+  [Google Fonts commit 23e54b5](https://github.com/google/fonts/tree/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl).
+
+To refresh, review the upstream font and license changes, use FontTools
+`varLib.instancer` to pin DM Sans `opsz=9`, and encode with
+`TTFont.flavor = "woff2"` and Brotli. This is asset preparation only, never a
+build step or application dependency. Verify the local loader emits all four
+files without Google responses, then check the rendered families and weights.

@@ -87,7 +87,22 @@ export type DeviceSyncProviderRequestCandidateAliasSource =
   | "workoutId"
   | "workout_id";
 
-export interface DeviceSyncJobFailureDiagnosticDetails {
+export type JunctionRequestStage =
+  | "request_setup"
+  | "awaiting_headers"
+  | "response_body"
+  | "post_body";
+
+/** Metadata-only observations of one JUNCTION_API_REQUEST_TIMEOUT attempt. */
+export interface JunctionRequestTimeoutDiagnosticDetails {
+  providerRequestTimeoutMs?: number;
+  providerRequestElapsedMs?: number;
+  providerRequestAttempt?: number;
+  providerRequestStage?: JunctionRequestStage;
+  providerResponseHeadersPresent?: boolean;
+}
+
+export interface DeviceSyncJobFailureDiagnosticDetails extends JunctionRequestTimeoutDiagnosticDetails {
   failureCauseCode?: string;
   failureCauseName?: string;
   failureErrorCause?: string;

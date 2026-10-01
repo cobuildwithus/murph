@@ -9,6 +9,8 @@ For any sleep-related experiment, load `sleep-improvement` first. That domain ow
 
 ## Purpose
 
+Ordinary goal setup with a chosen action belongs to `goal-setup`; it does not require an experiment.
+
 Turn uncertainty into useful action through small, personalized experiments. Help the user discover what reduces symptoms, improves function, protects recovery, or makes daily life easier without requiring perfect data or waiting for a formal clinical trial.
 
 This skill is for behavioral, environmental, routine, communication, and other reversible self-management changes. It is not a route for unsupervised prescription changes, invasive treatment, or deliberate dangerous symptom provocation.

@@ -16,7 +16,7 @@ import {
   type ClinicalImportPlan,
   type ClinicalImportUpsertPayload,
 } from "@murphai/clinical-records";
-import { findEventByExternalRef, importEventBatch, initializeVault } from "@murphai/core";
+import { findEventByExternalRef, importEventBatch, initializeVault, upsertEvent, validateVault, withCanonicalWriteLock } from "@murphai/core";
 import {
   buildClinicalImportPlanFromSnapshot,
   clinicalPlanToEventImportDecisions,
@@ -63,6 +63,62 @@ afterEach(async () => {
 });
 
 describe("buildClinicalImportPlanFromSnapshot", () => {
+  it("keeps a hash-bound imported clinical observation valid under whole-vault validation", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": {
+        resourceType: "Observation", id: "synthetic-pulse", status: "final",
+        effectiveDateTime: "2026-07-01T12:00:00.000Z",
+        code: { coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }] },
+        valueQuantity: { value: 70, unit: "bpm" },
+      } },
+    });
+    await initializeVault({ vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const imported = await importEventBatch({ vaultRoot, apply: true, decisions: executableDecisions(plan) });
+    expect(imported.createdCount).toBe(1);
+    expect((await validateVault({ vaultRoot })).issues).toEqual([]);
+    await writeFile(path.join(vaultRoot, path.posix.dirname(MANIFEST_PATH), "Observation/page-1.json"), "{}");
+    expect((await validateVault({ vaultRoot })).issues).toContainEqual(expect.objectContaining({ code: "RAW_MANIFEST_INVALID" }));
+  });
+
+  it.each([
+    { code: { text: "Example assessment" }, valueInteger: 3 },
+    { code: { text: "Example assessment ".repeat(20) }, valueInteger: 3 },
+    { code: { coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }] }, valueQuantity: { value: 70 } },
+  ])("retains a dated unmapped observation as source prose without inventing a metric or unit %#", async (value) => {
+    const resource = { resourceType: "Observation", id: "source-assessment", status: "final",
+      effectiveDateTime: "2026-07-01T12:05:00.000Z", bodySite: { text: "Source site" }, ...value };
+    const makePlan = async (observation: object) => planFromFixture({ manifestPath: MANIFEST_PATH,
+      vaultRoot: await writeClinicalFixture({ resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+        pages: { "Observation/page-1.json": [observation] } }) });
+    const plan = await makePlan(resource);
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", noteType: "fhir_observation_source", occurredAt: resource.effectiveDateTime })]);
+    const record = upserts(plan)[0];
+    if (record?.kind !== "note") throw new Error("Expected source note");
+    expect(record.title.length).toBeLessThanOrEqual(160);
+    expect(record.note).toContain("without metric normalization or inferred units");
+    expect(record.note).toContain('"text": "Source site"');
+    expect(record).not.toHaveProperty("measurements");
+    // Provider JSON key order cannot create a changed-source conflict on replay.
+    const reordered = await makePlan(Object.fromEntries(Object.entries(resource).reverse()));
+    const replay = upserts(reordered)[0];
+    expect(replay?.kind === "note" && replay.note).toBe(record.note);
+  });
+
+  it.each([
+    { effectiveDateTime: "invalid" },
+    { modifierExtension: [{ url: "https://example.test/unknown-modifier", valueBoolean: true }] },
+  ])("keeps invalid dates or semantically uncertain observations held %#", async (override) => {
+    const vaultRoot = await writeClinicalFixture({ resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": [{ resourceType: "Observation", id: "uncertain-assessment", status: "final",
+        effectiveDateTime: "2026-07-01T12:05:00.000Z", code: { text: "Example assessment" }, valueInteger: 3, ...override }] } });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toHaveLength(1);
+  });
+
   it.each([
     ["Condition", "code", { text: "Historical asthma" }],
     ["AllergyIntolerance", "code", { text: "Penicillin allergy" }],
@@ -482,6 +538,71 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
         textValue: "Negative",
       })],
     ]);
+  });
+
+  it("preserves qualitative results with numeric reference bounds as source text", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": [{
+        resourceType: "Observation", id: "qualitative-with-numeric-bounds", status: "final",
+        effectiveDateTime: "2026-07-01T12:05:00.000Z",
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+        code: { text: "Example assay" }, valueString: "Below detection",
+        referenceRange: [{ low: { value: 2, unit: "ng/mL" }, high: { value: 8, unit: "ng/mL" }, text: "Assay reference interval" }],
+      }] },
+    });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(reviews(plan)).toEqual([]);
+    const record = upserts(plan)[0];
+    expect(record?.kind).toBe("test");
+    if (record?.kind !== "test") throw new Error("Expected a laboratory result");
+    expect(record.results).toEqual([expect.objectContaining({
+      analyte: "Example assay", textValue: "Below detection",
+      referenceRange: { text: "Assay reference interval; Low: 2 ng/mL; High: 8 ng/mL" },
+    })]);
+    expect(record.results?.[0]).not.toHaveProperty("value");
+    expect(record.results?.[0]).not.toHaveProperty("unit");
+    const canonicalVaultRoot = await initializeCanonicalFixtureVault();
+    await importEventBatch({ vaultRoot: canonicalVaultRoot, apply: true, decisions: [{
+      action: "retract", externalRef: record.externalRef,
+      reason: "laboratory observation result is not importable", evidence: record.evidence,
+    }] });
+    const held = await findEventByExternalRef({ vaultRoot: canonicalVaultRoot, ...record.externalRef, includeDeleted: true });
+    if (!held?.lifecycle) throw new Error("Expected the parser hold");
+    // Explicit reviewed recovery uses the canonical correction API. Ordinary
+    // re-import must still reject changed content at the same source revision.
+    await expect(importEventBatch({ vaultRoot: canonicalVaultRoot, apply: true, decisions: executableDecisions(plan) }))
+      .rejects.toMatchObject({ code: "EVENT_SOURCE_REVISION_CONFLICT" });
+    await withCanonicalWriteLock(canonicalVaultRoot, async () => {
+      expect(await findEventByExternalRef({ vaultRoot: canonicalVaultRoot, ...record.externalRef, includeDeleted: true })).toEqual(held);
+      await upsertEvent({ vaultRoot: canonicalVaultRoot, payload: { ...record, id: held.id } });
+    });
+    expect(await findEventByExternalRef({ vaultRoot: canonicalVaultRoot, ...record.externalRef }))
+      .toMatchObject({ kind: "test", id: held.id, results: record.results });
+    expect(await importEventBatch({ vaultRoot: canonicalVaultRoot, apply: true, decisions: executableDecisions(plan) }))
+      .toMatchObject({ createdCount: 0, skippedExistingCount: 1 });
+  });
+
+  it.each([
+    { low: { value: "invalid" } },
+    { low: { value: 9, unit: "ng/mL" }, high: { value: 2, unit: "ng/mL" } },
+    { low: { value: 2, unit: "ng/mL" }, high: { value: 8, unit: "mg/dL" } },
+    { low: { value: 2, comparator: ">" } },
+    { high: { value: 8 }, text: "x".repeat(160) },
+    { high: { value: 8 }, type: { text: "Therapeutic" } },
+  ])("keeps unsafe qualitative reference ranges held %#", async (range) => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": [{
+        resourceType: "Observation", id: "qualitative-held", status: "final",
+        effectiveDateTime: "2026-07-01T12:05:00.000Z",
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+        code: { text: "Example assay" }, valueString: "Below detection", referenceRange: [range],
+      }] },
+    });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toHaveLength(1);
   });
 
   it("holds ambiguous or unit-incompatible laboratory reference ranges for review", async () => {
@@ -978,23 +1099,12 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(reviews(plan)).toHaveLength(2);
-    expect(reviews(plan)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          resourceId: "lab-local-category",
-          reason: "observation code is not importable",
-        }),
-        expect.objectContaining({
-          resourceId: "lab-canonical-short-code",
-          reason: "observation code is not importable",
-        }),
-      ]),
-    );
-    expect(upserts(plan)).toHaveLength(2);
-    expect(upserts(plan).some((candidate) => candidate.externalRef.resourceId === "lab-local-category")).toBe(false);
-    expect(upserts(plan).some((candidate) => candidate.externalRef.resourceId === "lab-canonical-short-code"))
-      .toBe(false);
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toHaveLength(4);
+    for (const resourceId of ["lab-local-category", "lab-canonical-short-code"]) {
+      expect(upserts(plan).find((candidate) => candidate.externalRef.resourceId === resourceId))
+        .toMatchObject({ kind: "note", noteType: "fhir_observation_source" });
+    }
 
     const observation = upserts(plan).find(
       (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
@@ -3787,7 +3897,12 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     expect(reviews(plan)).toEqual([]);
   });
 
-  it.each(["warning", "error", "fatal"])("does not infer no-known allergies from a %s search outcome", async (severity) => {
+  it.each([
+    ...["warning", "error", "fatal"].map((severity) => ({ severity, code: "incomplete" })),
+    ...["4101", "4119"].map((code) => ({ severity: "warning", code: "processing", details: {
+      coding: [{ system: "urn:oid:1.2.840.114350.1.13.999.2.7.2.657369", code }],
+    } })),
+  ])("does not infer no-known allergies from an incomplete search outcome %#", async (issue) => {
     const vaultRoot = await writeClinicalFixture({
       manifest: { grantedScopes: ["patient/*.s"] },
       resourceFiles: [
@@ -3800,7 +3915,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
           type: "searchset",
           entry: [
             { resource: noKnownAllergyResource("negative-with-warning") },
-            { search: { mode: "outcome" }, resource: { resourceType: "OperationOutcome", issue: [{ severity, code: "incomplete" }] } },
+            { search: { mode: "outcome" }, resource: { resourceType: "OperationOutcome", issue: [issue] } },
           ],
         },
         "Condition/page-1.json": [],
@@ -4625,7 +4740,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       externalRef,
       reason: "unsupported modifier semantics",
       evidence,
-      ...(["DocumentReference", "DiagnosticReport"].includes(resourceType) ? { retractFacetPrefixes: ["document-extraction"] } : {}),
+      retractFacetPrefixes: ["document-extraction"],
     }]);
   });
 

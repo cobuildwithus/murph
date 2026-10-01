@@ -26,6 +26,7 @@ vi.mock("@/src/lib/prisma", async (importOriginal) => ({
 }));
 import { POST } from "../app/api/internal/hosted-mailbox/fetch/route";
 import { createPrismaClient } from "../src/lib/prisma";
+import { HostedDomainRootEnvelopeUnavailableError, readHostedRuntimeIngressCryptoContextForWorker } from "../src/lib/hosted-crypto/domain-root-store";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -38,6 +39,44 @@ if (enabled) {
 afterEach(() => { vi.unstubAllEnvs(); database.current = null; });
 
 describe.skipIf(!enabled)("signed runtime callback SQL load", () => {
+  it("checks workspace existence in the single ingress-envelope read", async () => {
+    const client = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }),
+      log: [{ emit: "event", level: "query" }] });
+    let statements = 0;
+    client.$on("query", () => { statements += 1; });
+    const userId = `callback_crypto_${randomUUID()}`;
+    const otherUserId = `callback_crypto_other_${randomUUID()}`;
+    const read = () => readHostedRuntimeIngressCryptoContextForWorker({ prisma: client, userId });
+    try {
+      await client.hostedMember.createMany({ data: [{ id: userId }, { id: otherUserId }] });
+      await client.hostedWorkspace.create({ data: { userId: otherUserId } });
+      await client.hostedUserCryptoEnvelope.create({ data: {
+        id: `callback_envelope_${randomUUID()}`, userId, domain: "ingress",
+        rootKeyId: "synthetic-root", signedEnvelopeJson: { authoritySignature: {
+          alg: "GCP-KMS-EC-P256-SHA256", keyVersionName: "synthetic-key",
+          signature: "synthetic-invalid-signature", signedAt: new Date().toISOString(),
+        } },
+      } });
+      statements = 0;
+      // Another member's workspace cannot admit this member's existing envelope.
+      await expect(read()).rejects.toBeInstanceOf(HostedDomainRootEnvelopeUnavailableError);
+      expect(statements).toBe(1);
+      await client.hostedWorkspace.create({ data: { userId } });
+      statements = 0;
+      const invalidEnvelope = await read().catch((error: unknown) => error);
+      expect(invalidEnvelope).toBeInstanceOf(Error);
+      expect(invalidEnvelope).not.toBeInstanceOf(HostedDomainRootEnvelopeUnavailableError);
+      expect(statements).toBe(1);
+      await client.hostedUserCryptoEnvelope.deleteMany({ where: { userId } });
+      statements = 0;
+      await expect(read()).rejects.toBeInstanceOf(HostedDomainRootEnvelopeUnavailableError);
+      expect(statements).toBe(1);
+    } finally {
+      await client.hostedMember.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
+      await client.$disconnect();
+    }
+  });
+
   it("counts replay protection, ownership, access and mailbox SQL together", async () => {
     const client = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }),
       log: [{ emit: "event", level: "query" }] });

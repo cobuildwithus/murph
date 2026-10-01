@@ -110,7 +110,8 @@ describe('assistant capability-offers prompt contract', () => {
     )
 
     expect(section).toContain('only the exact bounded offer')
-    expect(section).toContain('setup conversation only, not activation')
+    expect(section).toContain('Accepting an invitation to begin setup starts only that conversation.')
+    expect(section).toContain("Accepting a concrete final proposal authorizes its named writes under the owner's rules; perform them without asking again.")
     expect(section).toContain('Recurrence, OAuth, shared health data, other people')
     expect(section).toContain('money, and irreversible actions')
     expect(section).toContain('concrete final scope and confirmation')

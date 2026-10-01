@@ -6377,7 +6377,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
   })
 
-  it('skips unchanged Personal Patterns before model entry and resumes Sol high on the next changed occurrence', async () => {
+  it('skips unchanged Personal Patterns before model entry and resumes Luna xhigh on the next changed occurrence', async () => {
     vi.useFakeTimers()
     const occurrenceAt = '2026-04-08T13:00:00.000Z'
     vi.setSystemTime(new Date(occurrenceAt))
@@ -6407,7 +6407,7 @@ describe('assistant cron runtime orchestration', () => {
     vi.setSystemTime(new Date(next.state.nextRunAt!))
     await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      assistantTargetOverride: { model: 'gpt-6-sol', reasoningEffort: 'high' },
+      assistantTargetOverride: { model: 'gpt-6-luna', reasoningEffort: 'xhigh' },
       serviceTier: 'flex',
     }))
   })
@@ -6488,7 +6488,8 @@ describe('assistant cron runtime orchestration', () => {
     },
     {
       automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
-      name: 'Personal Patterns',
+      name: 'Personal Patterns after a prolonged capacity shortage',
+      retryDelayMs: 150 * 60_000,
       occurrenceAt: '2026-04-08T13:00:00.000Z',
     },
     ...[
@@ -6500,6 +6501,7 @@ describe('assistant cron runtime orchestration', () => {
   ])('keeps Flex after a failed managed $name occurrence', async ({
     automationId,
     occurrenceAt,
+    retryDelayMs = 30_000,
   }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(occurrenceAt))
@@ -6571,7 +6573,7 @@ describe('assistant cron runtime orchestration', () => {
     )
 
     cronMocks.canSkipManagedPersonalPatterns.mockClear().mockResolvedValue(true)
-    vi.setSystemTime(new Date(Date.parse(occurrenceAt) + 30_000))
+    vi.setSystemTime(new Date(Date.parse(occurrenceAt) + retryDelayMs))
     const retried = await processDueAssistantCronJobsLocal({
       executionContext,
       limit: 1,

@@ -241,8 +241,15 @@ async function runOpenAiAuthorizationAlertTest(): Promise<Response> {
 
   return await handleHostedRunnerOpenAiOutbound(
     providerRequest,
-    { ...readWorkerEnvironmentSource(), RUNNER_CONTAINER: { getByName: () => ({ runtimeUsageSettlementAllowsProviders: async () => true }) } },
-    { containerId: "private-runner-container-id" },
+    { ...readWorkerEnvironmentSource(), RUNNER_CONTAINER: {
+      idFromString: (id: string) => id,
+      get: () => ({ readProviderAuthority: async () => ({
+        ...lease, userId, customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        settlementPending: false, retiring: false,
+      }) }),
+      getByName: () => ({}),
+    } },
+    { className: "RunnerContainer", containerId: "private-runner-container-id" },
     async () => new Response("private-upstream-response-body", {
       headers: {
         "content-type": "application/problem+json",

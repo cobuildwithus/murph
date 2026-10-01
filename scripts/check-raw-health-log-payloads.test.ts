@@ -55,6 +55,29 @@ describe("check-raw-health-log-payloads", () => {
     ).toEqual([]);
   });
 
+  it("allows strict null and undefined presence comparisons", () => {
+    expect(blockedVariables(`
+      console.info({ completed: response !== undefined, missing: response === null });
+      logger.info({ absent: undefined === body, present: null !== output });
+    `)).toEqual([]);
+  });
+
+  it("still blocks payload-returning expressions around presence comparisons", () => {
+    expect(blockedVariables(`
+      console.info(response !== undefined && response);
+      console.info(response === null ? body : response);
+      console.info({ completed: response !== undefined, payload: response });
+      console.info(response ?? body);
+      console.info((response !== undefined, response));
+    `)).toEqual(["response", "body", "response", "response", "response", "body", "response"]);
+  });
+
+  it("still checks log calls nested inside a presence comparison", () => {
+    expect(blockedVariables(`
+      console.info(console.info(response) !== undefined);
+    `)).toEqual(["response"]);
+  });
+
   it("blocks input wrapper properties that can carry raw payloads", () => {
     expect(
       blockedVariables(`

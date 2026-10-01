@@ -1,3 +1,4 @@
+import { isHostedOnboardingError } from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
 
 const HOSTED_ONBOARDING_TIMING_LABEL_MAX_LENGTH = 80;
@@ -80,6 +81,43 @@ export function deriveHostedOnboardingTimingErrorName(error: unknown): string {
   }
 
   return "UnknownError";
+}
+
+export function deriveHostedLinqDirectMailboxPreparationReason(
+  error: unknown,
+):
+  | "control-root"
+  | "home-chat-owner"
+  | "ingress-root"
+  | "member"
+  | "routing"
+  | "thread-route"
+  | undefined {
+  try {
+    if (
+      !isHostedOnboardingError(error)
+      || error.code !== "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED"
+      || error.details?.preparationTarget !== "direct_linq_mailbox"
+    ) {
+      return undefined;
+    }
+
+    const reason = error.details.reason;
+    switch (reason) {
+      case "control-root":
+      case "home-chat-owner":
+      case "ingress-root":
+      case "member":
+      case "routing":
+      case "thread-route":
+        return reason;
+      default:
+        return undefined;
+    }
+  } catch {
+    // Unreadable metadata must not replace the original failure.
+    return undefined;
+  }
 }
 
 export function toHostedOnboardingLogIdSuffix(
