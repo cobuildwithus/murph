@@ -96,6 +96,7 @@ import {
   HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS,
   writeHostedLocalStripeCheckoutDiagnostics,
 } from "./stripe.ts";
+import { preflightHostedLocalTemporalWorker } from "./temporal-preflight.ts";
 import {
   buildHostedLocalTemporalRuntimeEnv,
   requireHostedLocalTemporalWorkerPackageDir,
@@ -244,7 +245,11 @@ export async function startHostedLocalDevStack(input: {
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
   if (config.temporal.mode !== "disabled") {
-    requireHostedLocalTemporalWorkerPackageDir(initialEnv);
+    await preflightHostedLocalTemporalWorker({
+      env: initialEnv,
+      packageDir: requireHostedLocalTemporalWorkerPackageDir(initialEnv),
+      signal: input.abortSignal,
+    });
   }
   assertHostedLocalWorktreeRuntimePreconditions(initialEnv);
   assertHostedLocalE2eIsolation(initialEnv, config);

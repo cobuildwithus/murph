@@ -3,6 +3,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Hosted-local Temporal compatibility preflight implementation and synthetic proof
+are recorded in [the completed preflight plan](exec-plans/completed/2026-09-25-frog-2661-temporal-preflight.md).
+The current command contract remains owned by `packages/hosted-local-harness/README.md`.
+
 Runtime claim eligibility, native provider authority, usage-settlement ordering, rollout compatibility,
 and reuse of transaction-validated routing facts are
 owned by [Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md).
