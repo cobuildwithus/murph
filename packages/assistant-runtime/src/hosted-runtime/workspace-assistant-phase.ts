@@ -5218,37 +5218,9 @@ async function runSystemMailboxMaintenancePhase(
         phaseInput,
       })
     : null;
-  if (
-    hostedSystemMailboxWakeIsDueForModelFreeOwner(
-      initialOwnerWake,
-      resolveHostedAssistantPhaseNowMs(phaseInput),
-    )
-  ) {
-    if (phaseInput.shouldYieldBackgroundMaintenance?.() === true) {
-      return {
-        backgroundMaintenanceYielded: true,
-        continueAssistantLane: false,
-        initialProviderCleanupCheckpoint,
-        pendingAssistantInputWakeAt,
-        result: buildPreAutomationLaneSkippedAssistantWakeResult({
-          wakeAt: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)).toISOString(),
-        }),
-      };
-    }
-    return {
-      backgroundMaintenanceYielded: false,
-      continueAssistantLane: false,
-      initialProviderCleanupCheckpoint,
-      pendingAssistantInputWakeAt,
-      result: withHostedRuntimeProjectionCheckpointRequest({
-        requested: staleDefaultProjectionDisproved,
-        result: withHostedRuntimeWakeCandidate({
-          result: { progressed: false },
-          wake: initialOwnerWake,
-        }),
-      }),
-    };
-  }
+  // Apply the existing preferences preplanning owner before handing a model-free
+  // item off. A due preference wake otherwise keeps selecting default mode,
+  // which hands off the earlier refresh forever without advancing either item.
   deferSystemMailboxPreparationForDelivery =
     initialOwnerWake?.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON;
 
@@ -5256,6 +5228,10 @@ async function runSystemMailboxMaintenancePhase(
     pendingAssistantInputBlocksMaintenance
     && !foregroundCausalAttempted
     && !hasBackgroundSelection
+    && !hostedSystemMailboxWakeIsDueForModelFreeOwner(
+      initialOwnerWake,
+      resolveHostedAssistantPhaseNowMs(phaseInput),
+    )
     && shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(phaseInput)
   ) {
     const preflightAssistantCronWakeState = await readAssistantCronWakeState();
@@ -5334,9 +5310,12 @@ async function runSystemMailboxMaintenancePhase(
       initialProviderCleanupCheckpoint,
       pendingAssistantInputWakeAt,
       result: mergeMemberPreferencesPrePlanningResult(
-        withHostedRuntimeWakeCandidate({
-          result: { progressed: false },
-          wake: refreshedOwnerWake,
+        withHostedRuntimeProjectionCheckpointRequest({
+          requested: staleDefaultProjectionDisproved,
+          result: withHostedRuntimeWakeCandidate({
+            result: { progressed: false },
+            wake: refreshedOwnerWake,
+          }),
         }),
       ),
     };
