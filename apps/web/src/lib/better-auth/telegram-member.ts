@@ -21,11 +21,11 @@ export async function prepareHostedAuthTelegramMember(input: {
   const invite = input.inviteCode ? await requireHostedInviteForAuthentication(input.inviteCode, input.prisma, new Date()) : null;
   const prepared = await prepareTelegramMember(input, invite?.member.id);
   if (!invite) return prepared;
-  if (invite.member.id !== prepared.memberId) throw new HostedAuthMigrationConflictError();
+  if (invite.member.id !== prepared.memberId) throw new HostedAuthMigrationConflictError("invite_member_mismatch");
   return { ...prepared, commitMember: async (tx) => {
     await prepared.commitMember(tx);
     const current = await requireHostedInviteForAuthentication(input.inviteCode!, tx, new Date());
-    if (current.member.id !== prepared.memberId) throw new HostedAuthMigrationConflictError();
+    if (current.member.id !== prepared.memberId) throw new HostedAuthMigrationConflictError("invite_member_mismatch");
   } };
 }
 
@@ -33,7 +33,7 @@ async function findTelegramMember(prisma: Client, telegramUserId: string) {
   const match = await lookupHostedMemberRoutingByTelegramUserId({ prisma, telegramUserId });
   if (!match) return null;
   const routing = await readHostedMemberRoutingState({ memberId: match.core.id, prisma });
-  if (routing?.telegramUserId !== telegramUserId) throw new HostedAuthMigrationConflictError();
+  if (routing?.telegramUserId !== telegramUserId) throw new HostedAuthMigrationConflictError("credential_binding_mismatch");
   assertHostedMemberNotSuspended(match.core);
   return match.core;
 }
@@ -47,7 +47,7 @@ async function prepareTelegramMember(input: { telegramUserId: string; prisma: Pr
     const prepared = await prepareHostedAuthImport({ memberId: member.id, prisma });
     // A removed Telegram credential must never be resurrected from routing or
     // a provider snapshot after the login projection has an established owner.
-    if (prepared.kind === "already_owned") throw new HostedAuthMigrationConflictError();
+    if (prepared.kind === "already_owned") throw new HostedAuthMigrationConflictError("credential_not_in_projection");
     if (prepared.kind === "prepared") return prepareImportedTelegramLogin(prepared, input);
   }
   return prepareNewTelegramLogin(input, member?.id ?? null, member ? undefined : invitedMemberId);
@@ -56,33 +56,33 @@ async function prepareTelegramMember(input: { telegramUserId: string; prisma: Pr
 async function prepareOwnedTelegramLogin(row: HostedAuthRecord, input: { telegramUserId: string; prisma: PrismaClient }): Promise<PreparedHostedAuthMember> {
   const { prisma } = input;
   const account = await openAuthRecord(row, prisma);
-  if (account.accountId !== input.telegramUserId || typeof account.userId !== "string") throw new HostedAuthMigrationConflictError();
+  if (account.accountId !== input.telegramUserId || typeof account.userId !== "string") throw new HostedAuthMigrationConflictError("credential_binding_mismatch");
   const memberId = account.userId;
   const user = await prisma.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: memberId } } });
-  if (!user) throw new HostedAuthMigrationConflictError();
+  if (!user) throw new HostedAuthMigrationConflictError("login_projection_missing");
   await openAuthRecord(user, prisma);
   const root = await prepareHostedDomainRootForWeb({ domain: "control", prepareMissing: false, prisma, userId: memberId, reason: "hosted-auth.telegram-login" });
   return { memberId, preparedControlRoot: root, commitMember: async (tx) => {
     await lockHostedMemberRow(tx, memberId);
     const member = await readHostedMemberCoreState({ memberId, prisma: tx });
-    if (!member) throw new HostedAuthMigrationConflictError();
+    if (!member) throw new HostedAuthMigrationConflictError("member_missing");
     assertHostedMemberNotSuspended(member);
     for (const expected of [row, user]) {
       const current = await tx.hostedAuthRecord.findUnique({ where: { model_id: { model: expected.model, id: expected.id } } });
-      if (JSON.stringify(current) !== JSON.stringify(expected)) throw new HostedAuthMigrationConflictError();
+      if (JSON.stringify(current) !== JSON.stringify(expected)) throw new HostedAuthMigrationConflictError("prepared_state_changed");
     }
     await revalidatePreparedHostedDomainRootForWebTx({ prepared: root, tx });
   } };
 }
 
 async function prepareImportedTelegramLogin(prepared: PreparedHostedAuthImport, input: { telegramUserId: string; prisma: PrismaClient }): Promise<PreparedHostedAuthMember> {
-  if (prepared.telegramUserId !== input.telegramUserId) throw new HostedAuthMigrationConflictError();
+  if (prepared.telegramUserId !== input.telegramUserId) throw new HostedAuthMigrationConflictError("credential_binding_mismatch");
   const now = new Date();
   const user = await sealAuthRecord("user", { id: prepared.memberId, ...prepared.user, createdAt: now, updatedAt: now }, input.prisma);
   const account = await prepareTelegramAccount(input.prisma, prepared.memberId, input.telegramUserId, now);
   return { memberId: prepared.memberId, preparedControlRoot: prepared.preparedRoot, commitMember: async (tx) => {
     await lockHostedAuthImportContacts(tx, prepared);
-    if (await revalidateHostedAuthImportTx(tx, prepared) !== "unowned") throw new HostedAuthMigrationConflictError();
+    if (await revalidateHostedAuthImportTx(tx, prepared) !== "unowned") throw new HostedAuthMigrationConflictError("prepared_state_changed");
     await tx.hostedAuthRecord.create({ data: user });
     await tx.hostedAuthRecord.create({ data: account });
   } };
@@ -94,7 +94,7 @@ async function prepareNewTelegramLogin(input: { telegramUserId: string; prisma: 
   if (invitedMemberId) await assertHostedAuthPristineInviteMember(prisma, memberId);
   const snapshot = await readHostedAuthSourceSnapshot(prisma, memberId);
   const identity = await readHostedMemberIdentity({ memberId, prisma });
-  if (identity?.privyUserId) throw new HostedAuthMigrationConflictError();
+  if (identity?.privyUserId) throw new HostedAuthMigrationConflictError("legacy_binding_present");
   const root = await prepareHostedDomainRootForWeb({ domain: "control", prisma, userId: memberId, reason: "hosted-auth.telegram-signup" });
   const now = new Date();
   const user = {
@@ -106,7 +106,7 @@ async function prepareNewTelegramLogin(input: { telegramUserId: string; prisma: 
     if (invitedMemberId) await assertHostedAuthPristineInviteMember(tx, memberId);
     const current = await findTelegramMember(tx, telegramUserId);
     const owned = await tx.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: memberId } } });
-    if ((current?.id ?? null) !== existingId || owned || snapshot !== await readHostedAuthSourceSnapshot(tx, memberId)) throw new HostedAuthMigrationConflictError();
+    if ((current?.id ?? null) !== existingId || owned || snapshot !== await readHostedAuthSourceSnapshot(tx, memberId)) throw new HostedAuthMigrationConflictError("prepared_state_changed");
     if (!current && !invitedMemberId) await createHostedMember({ memberId, billingStatus: HostedBillingStatus.not_started, prisma: tx });
     await revalidatePreparedHostedDomainRootForWebTx({ prepared: root, tx });
     if (!identity) await upsertHostedMemberIdentity({

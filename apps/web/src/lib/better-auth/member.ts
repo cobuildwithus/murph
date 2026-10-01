@@ -33,11 +33,11 @@ async function findCanonicalMember(prisma: Client, contact: HostedLinqParticipan
     where: { pendingLinqParticipantContactLookupKey: { in: createHostedLinqParticipantContactLookupKeyReadCandidates(contact) } },
     select: { memberId: true }, take: 2,
   });
-  if (pending.length > 1) throw new HostedAuthMigrationConflictError();
+  if (pending.length > 1) throw new HostedAuthMigrationConflictError("pending_contact_ambiguous");
   if (!pending[0]) return null;
   const routing = await readHostedMemberRoutingState({ memberId: pending[0].memberId, prisma });
   if (routing?.pendingLinqParticipantContact?.kind !== contact.kind || routing.pendingLinqParticipantContact.value !== contact.value) {
-    throw new HostedAuthMigrationConflictError();
+    throw new HostedAuthMigrationConflictError("credential_binding_mismatch");
   }
   return readHostedMemberCoreState({ memberId: pending[0].memberId, prisma });
 }
@@ -51,11 +51,11 @@ export async function prepareHostedAuthOtpMember(input: {
     ? await requireHostedInviteForAuthentication(input.inviteCode, input.prisma, new Date()) : null;
   const prepared = await prepareContactMember({ ...input, invitedMemberId: invite?.member.id });
   if (!invite) return prepared;
-  if (invite.member.id !== prepared.memberId) throw new HostedAuthMigrationConflictError();
+  if (invite.member.id !== prepared.memberId) throw new HostedAuthMigrationConflictError("invite_member_mismatch");
   return { ...prepared, commitMember: async (tx) => {
     await prepared.commitMember(tx);
     const current = await requireHostedInviteForAuthentication(input.inviteCode!, tx, new Date());
-    if (current.member.id !== prepared.memberId) throw new HostedAuthMigrationConflictError();
+    if (current.member.id !== prepared.memberId) throw new HostedAuthMigrationConflictError("invite_member_mismatch");
   } };
 }
 
@@ -69,7 +69,7 @@ async function prepareContactMember(input: { contact: HostedLinqParticipantConta
     const user = await openAuthRecord(row, prisma);
     const valid = contact.kind === "email" ? user.emailVerified && user.email === contact.value
       : user.phoneNumberVerified && user.phoneNumber === contact.value;
-    if (!valid) throw new HostedAuthMigrationConflictError();
+    if (!valid) throw new HostedAuthMigrationConflictError("credential_binding_mismatch");
     const root = await prepareHostedDomainRootForWeb({
       domain: "control", prepareMissing: false, prisma, userId: user.id, reason: "hosted-auth.login",
     });
@@ -77,10 +77,10 @@ async function prepareContactMember(input: { contact: HostedLinqParticipantConta
       await acquireHostedLinqParticipantContactLockTx({ contact, tx, lockTimeoutMs: 5_000 });
       await lockHostedMemberRow(tx, user.id, { timeoutMs: 5_000 });
       const member = await readHostedMemberCoreState({ memberId: user.id, prisma: tx });
-      if (!member) throw new HostedAuthMigrationConflictError();
+      if (!member) throw new HostedAuthMigrationConflictError("member_missing");
       assertHostedMemberNotSuspended(member);
       const current = await tx.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: user.id } } });
-      if (!current || JSON.stringify(current) !== JSON.stringify(row)) throw new HostedAuthMigrationConflictError();
+      if (!current || JSON.stringify(current) !== JSON.stringify(row)) throw new HostedAuthMigrationConflictError("prepared_state_changed");
       await openAuthRecord(current, tx);
       await revalidatePreparedHostedDomainRootForWebTx({ prepared: root, tx });
     } };
@@ -89,7 +89,7 @@ async function prepareContactMember(input: { contact: HostedLinqParticipantConta
   if (member) {
     assertHostedMemberNotSuspended(member);
     const prepared = await prepareHostedAuthImport({ memberId: member.id, prisma });
-    if (prepared.kind === "already_owned") throw new HostedAuthMigrationConflictError();
+    if (prepared.kind === "already_owned") throw new HostedAuthMigrationConflictError("credential_not_in_projection");
     if (prepared.kind === "prepared") return prepareImportedLogin(prepared, contact, prisma);
   }
   return prepareUnclaimedLogin(prisma, contact, member?.id ?? null, member ? undefined : input.invitedMemberId);
@@ -99,7 +99,7 @@ async function prepareImportedLogin(prepared: PreparedHostedAuthImport, contact:
   const matches = contact.kind === "email"
     ? prepared.user.emailVerified && prepared.user.email === contact.value
     : prepared.user.phoneNumberVerified && prepared.user.phoneNumber === contact.value;
-  if (!matches) throw new HostedAuthMigrationConflictError();
+  if (!matches) throw new HostedAuthMigrationConflictError("credential_binding_mismatch");
   const now = new Date();
   const account = prepared.telegramUserId ? await sealAuthRecord("account", {
     id: randomUUID(), userId: prepared.memberId, providerId: "telegram", accountId: prepared.telegramUserId,
@@ -107,7 +107,7 @@ async function prepareImportedLogin(prepared: PreparedHostedAuthImport, contact:
   }, prisma) : null;
   return { memberId: prepared.memberId, preparedControlRoot: prepared.preparedRoot, initialUser: prepared.user, commitMember: async (tx) => {
     await lockHostedAuthImportContacts(tx, prepared);
-    if (await revalidateHostedAuthImportTx(tx, prepared) !== "unowned") throw new HostedAuthMigrationConflictError();
+    if (await revalidateHostedAuthImportTx(tx, prepared) !== "unowned") throw new HostedAuthMigrationConflictError("prepared_state_changed");
     if (account) await tx.hostedAuthRecord.create({ data: account });
   } };
 }
@@ -125,7 +125,7 @@ export async function assertHostedAuthPristineInviteMember(prisma: Client, membe
   ]);
   if (!member || member.billingStatus !== HostedBillingStatus.not_started || member.suspendedAt || member.initialOnboardingCompletedAt
     || identity?.privyUserId || identity?.phoneNumber || identity?.signupPhoneNumber || member.identity?.linqEmailHandleEncrypted || email || routing || user) {
-    throw new HostedAuthMigrationConflictError();
+    throw new HostedAuthMigrationConflictError("invite_not_pristine");
   }
 }
 
@@ -134,7 +134,7 @@ async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqPa
   if (invitedMemberId) await assertHostedAuthPristineInviteMember(prisma, memberId);
   const snapshot = await readHostedAuthSourceSnapshot(prisma, memberId);
   const identity = existingId || invitedMemberId ? await readHostedMemberIdentity({ memberId, prisma }) : null;
-  if (identity?.privyUserId) throw new HostedAuthMigrationConflictError();
+  if (identity?.privyUserId) throw new HostedAuthMigrationConflictError("legacy_binding_present");
   const root = await prepareHostedDomainRootForWeb({ domain: "control", prisma, userId: memberId, reason: "hosted-auth.signup" });
   const replyAlias = contact.kind === "email"
     ? await prepareHostedMemberVerifiedEmailReplyAlias({ address: contact.value, memberId, prisma }) : undefined;
@@ -145,7 +145,7 @@ async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqPa
     const current = await findCanonicalMember(tx, contact);
     const owned = await tx.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: memberId } } });
     if ((current?.id ?? null) !== existingId || owned || snapshot !== await readHostedAuthSourceSnapshot(tx, memberId)) {
-      throw new HostedAuthMigrationConflictError();
+      throw new HostedAuthMigrationConflictError("prepared_state_changed");
     }
     if (current) assertHostedMemberNotSuspended(current);
     else if (!invitedMemberId) await createHostedMember({ memberId, billingStatus: HostedBillingStatus.not_started, prisma: tx });

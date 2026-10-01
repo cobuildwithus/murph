@@ -387,6 +387,12 @@ canonical member; it cannot resurrect the deleted one.
 
 ## Recovery and observation
 
+`AUTH_IDENTITY_RECONCILIATION_REQUIRED` keeps its existing public 409 response.
+The existing `Hosted onboarding route failed.` warning carries only a fixed,
+allowlisted `authIdentityReconciliationReason` from the rejected guard; unknown
+values are omitted. Reasons contain no identifiers, credentials, source snapshots
+or provider payloads and do not change reconciliation or retry policy.
+
 Widen cohorts only after method success, identity conflicts, integrity failures, native rejection causes and cleanup backlog are understood against the baseline. Cross-member authority, restored removed credentials, ignored revocation or deletion resurrection stops widening immediately.
 
 Before every stage, identify the minimum compatibility-aware recovery build. After new credential or factor mutations, an old Privy-only build is not a safe rollback target. Pause affected issuance/mutations while preserving valid sessions, then repair forward or use a build that preserves all committed state. Database snapshot restoration can resurrect deleted/revoked authority and is not routine rollback.

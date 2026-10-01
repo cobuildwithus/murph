@@ -26,14 +26,14 @@ export async function lockHostedAuthImportContacts(tx: Prisma.TransactionClient,
 export async function revalidateHostedAuthImportTx(tx: Prisma.TransactionClient, prepared: PreparedHostedAuthImport): Promise<"unowned" | "already_owned"> {
   await lockHostedMemberRow(tx, prepared.memberId, { timeoutMs: 5_000 });
   const member = await readHostedMemberCoreState({ memberId: prepared.memberId, prisma: tx });
-  if (!member) throw new HostedAuthMigrationConflictError();
+  if (!member) throw new HostedAuthMigrationConflictError("member_missing");
   assertHostedMemberNotSuspended(member);
   const owned = await tx.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: prepared.memberId } } });
   if (owned) {
     await openAuthRecord(owned, tx);
     return "already_owned";
   }
-  if (prepared.snapshot !== await readHostedAuthSourceSnapshot(tx, prepared.memberId)) throw new HostedAuthMigrationConflictError();
+  if (prepared.snapshot !== await readHostedAuthSourceSnapshot(tx, prepared.memberId)) throw new HostedAuthMigrationConflictError("source_snapshot_changed");
   await assertHostedPrivyAccountDeletionNotPending({ prisma: tx, privyUserId: prepared.privyUserId });
   await revalidatePreparedHostedDomainRootForWebTx({ prepared: prepared.preparedRoot, tx });
   return "unowned";

@@ -1,5 +1,5 @@
 import "server-only";
-import { HostedOnboardingError } from "../hosted-onboarding/errors";
+import { HostedAuthMigrationConflictError } from "../hosted-onboarding/errors";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prepareHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
@@ -11,6 +11,8 @@ import { readHostedPrivyUserById, resolveHostedPrivyIdentityFromVerifiedUser, ty
 import { normalizeHostedEmailAddress } from "../hosted-onboarding/contact-privacy";
 import { authLookupKey, openAuthRecord } from "./record-crypto";
 
+export { HostedAuthMigrationConflictError };
+
 type Client = PrismaClient | Prisma.TransactionClient;
 export type HostedAuthUserFields = {
   email: string;
@@ -20,13 +22,6 @@ export type HostedAuthUserFields = {
   name: string;
   credentialsChangedAt: Date | null;
 };
-
-export class HostedAuthMigrationConflictError extends HostedOnboardingError {
-  constructor() {
-    super({ code: "AUTH_IDENTITY_RECONCILIATION_REQUIRED", httpStatus: 409, message: "Authentication identity needs reconciliation before migration." });
-    this.name = "HostedAuthMigrationConflictError";
-  }
-}
 
 // Exact ciphertext and authority timestamps are kept only in request memory.
 // Unrelated billing, message delivery and routing activity do not stale a login.
@@ -57,7 +52,7 @@ export async function prepareHostedAuthImport(input: { memberId: string; prisma:
     return { kind: "already_owned" as const };
   }
   const member = await readHostedMemberCoreState({ memberId, prisma });
-  if (!member) throw new HostedAuthMigrationConflictError();
+  if (!member) throw new HostedAuthMigrationConflictError("member_missing");
   assertHostedMemberNotSuspended(member);
   const snapshot = await readHostedAuthSourceSnapshot(prisma, memberId);
   const [identity, email, routing] = await Promise.all([
@@ -75,7 +70,10 @@ export async function prepareHostedAuthImport(input: { memberId: string; prisma:
   const telegramUserId = routing?.telegramUserId ?? null;
   assertProviderImportBindings(provider, { privyUserId: identity.privyUserId, email: verifiedEmail, phone: verifiedPhone, telegramUserId });
   if ((!verifiedEmail && !verifiedPhone && !telegramUserId) || snapshot !== await readHostedAuthSourceSnapshot(prisma, memberId)) {
-    throw new HostedAuthMigrationConflictError();
+    throw new HostedAuthMigrationConflictError(
+      !verifiedEmail && !verifiedPhone && !telegramUserId
+        ? "verified_credential_missing" : "source_snapshot_changed",
+    );
   }
   const preparedRoot = await prepareHostedDomainRootForWeb({
     domain: "control", prepareMissing: false, prisma, userId: memberId, reason: "hosted-auth.import",
@@ -95,6 +93,6 @@ function assertProviderImportBindings(provider: HostedPrivyIdentity, expected: {
   const phone = provider.phone?.verifiedAt ? provider.phone.number : null;
   if (provider.userId !== expected.privyUserId || email !== expected.email || phone !== expected.phone
     || (provider.telegram?.telegramUserId ?? null) !== expected.telegramUserId) {
-    throw new HostedAuthMigrationConflictError();
+    throw new HostedAuthMigrationConflictError("provider_binding_mismatch");
   }
 }
