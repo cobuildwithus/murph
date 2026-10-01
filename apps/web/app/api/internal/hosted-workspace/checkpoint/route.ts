@@ -133,10 +133,16 @@ export const POST = withJsonError((request: Request) => runWithTiming(request, a
 
 function reportCheckpointFailure(stage: CheckpointFailureStage, error: unknown): void {
   try {
+    const code = stage === "publication" && error instanceof TypeError && "code" in error
+      ? error.code : undefined;
     console.warn("Hosted workspace checkpoint failed.", {
       errorClass: error instanceof TypeError ? "type_error"
         : error instanceof RangeError ? "range_error"
         : error instanceof Error ? "error" : "non_error",
+      ...(code === "HOSTED_WORKSPACE_PROGRESS_REGRESSED"
+        || code === "HOSTED_WORKSPACE_PROGRESS_SKIPPED_INCREMENT"
+        || code === "HOSTED_WORKSPACE_PROGRESS_INVALID_INITIAL"
+        ? { errorCode: code } : {}),
       schema: "murph.hosted-workspace.checkpoint.failure.v1",
       stage,
     });

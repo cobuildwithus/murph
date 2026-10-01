@@ -2481,6 +2481,91 @@ describe("hosted runtime internal web routes", () => {
     });
 
     it.each([
+      [4n, "3", 4n, "rejected", "HOSTED_WORKSPACE_PROGRESS_REGRESSED"],
+      [4n, "6", 4n, "rejected", "HOSTED_WORKSPACE_PROGRESS_SKIPPED_INCREMENT"],
+      [null, "2", 4n, "rejected", "HOSTED_WORKSPACE_PROGRESS_INVALID_INITIAL"],
+      [null, "0", 4n, "updated", null],
+      [null, "1", 4n, "updated", null],
+      [4n, "4", 4n, "updated", null],
+      [4n, "5", 4n, "updated", null],
+      [4n, "3", 5n, "conflict", null],
+      [4n, "6", 5n, "conflict", null],
+      [null, "2", 5n, "conflict", null],
+    ] as const)("observes only rejected store transitions: %s -> %s at version %s (%s)", async (
+      currentGeneration, requestedGeneration, currentVersion, outcome, errorCode,
+    ) => {
+      const { checkpointHostedWorkspaceTx } = await vi.importActual<
+        typeof import("@/src/lib/hosted-workspace/store")
+      >("@/src/lib/hosted-workspace/store");
+      const current = {
+        ...buildWorkspaceRecord({ snapshotRef: null }),
+        createdAt: new Date(FIXED_NOW),
+        updatedAt: new Date(FIXED_NOW),
+        systemMailboxProgressGeneration: currentGeneration,
+        version: currentVersion,
+      };
+      const queryRaw = vi.fn(async (_query: Prisma.Sql) => outcome === "updated" ? [{
+        ...current,
+        replacedSnapshotRef: null,
+        systemMailboxProgressGeneration: BigInt(requestedGeneration),
+        version: 5n,
+      }] : []);
+      const findUnique = vi.fn(async () => current);
+      const tx = Object.assign(Object.create(null), {
+        $queryRaw: queryRaw,
+        hostedWorkspace: { findUnique },
+      }) as Parameters<typeof checkpointHostedWorkspaceTx>[0]["tx"];
+      mocks.checkpointHostedWorkspace.mockImplementationOnce((
+        input: Omit<Parameters<typeof checkpointHostedWorkspaceTx>[0], "tx">,
+      ) => checkpointHostedWorkspaceTx({ ...input, tx }));
+
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest({
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
+        snapshotRef: null,
+        systemMailboxProgressGeneration: requestedGeneration,
+      }));
+      expect(response.status).toBe(outcome === "rejected" ? 400 : 200);
+      expect([...response.headers]).toEqual([
+        ["cache-control", "no-store"],
+        ["content-type", "application/json"],
+      ]);
+      if (outcome === "rejected") {
+        expect(await response.json()).toEqual({
+          error: { code: "INVALID_REQUEST", message: "Invalid request." },
+        });
+        expect(diagnostics()).toEqual([
+          [failureMessage, {
+            schema: failureSchema, stage: "publication", errorClass: "type_error", errorCode,
+          }],
+        ]);
+      } else {
+        expect(parseHostedWorkspaceCheckpointResponse(await response.json())).toMatchObject({
+          checkpointed: outcome === "updated",
+          ...(outcome === "conflict" ? { checkpointConflictReason: "workspace_version" } : {}),
+          workspace: {
+            version: "5",
+            systemMailboxProgressGeneration: outcome === "updated"
+              ? requestedGeneration : currentGeneration?.toString() ?? null,
+          },
+        });
+        expect(diagnostics()).toEqual([]);
+      }
+      expect(queryRaw).toHaveBeenCalledOnce();
+      expect(findUnique).toHaveBeenCalledTimes(outcome === "updated" ? 0 : 1);
+      const sql = queryRaw.mock.calls[0]?.[0].sql;
+      expect(sql).toContain("workspace.version =");
+      expect(sql).toContain("workspace.system_mailbox_progress_generation IS NULL");
+      expect(sql).toContain("IN (0, 1)");
+      expect(sql).toContain("workspace.system_mailbox_progress_generation =");
+      expect(sql).toContain("workspace.system_mailbox_progress_generation + 1 =");
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+      expect(JSON.stringify(diagnostics())).not.toContain(UNSAFE_SENTINEL);
+    });
+
+    it.each([
       ["non-object JSON", "request_body", () => new Request(`https://join.example.test${path}`, {
         method: "POST",
         body: JSON.stringify([UNSAFE_SENTINEL]),
@@ -2546,6 +2631,7 @@ describe("hosted runtime internal web routes", () => {
       ["non_error", { message: UNSAFE_SENTINEL }, 500],
     ] as const)("logs only the %s error class", async (errorClass, error, status) => {
       Object.assign(error, {
+        code: UNSAFE_SENTINEL,
         name: UNSAFE_SENTINEL,
         stack: UNSAFE_SENTINEL,
         cause: { [UNSAFE_SENTINEL]: UNSAFE_SENTINEL },
@@ -2594,18 +2680,26 @@ describe("hosted runtime internal web routes", () => {
       expect(diagnostics()).toEqual([]);
     });
 
-    it("preserves the original failure when the new diagnostic throws", async () => {
+    it.each([
+      undefined,
+      "HOSTED_WORKSPACE_PROGRESS_REGRESSED",
+    ])("preserves the original failure when the diagnostic throws (code: %s)", async (code) => {
       vi.mocked(console.warn).mockImplementation((message) => {
         if (message === failureMessage) throw new Error(UNSAFE_SENTINEL);
       });
-      mocks.checkpointHostedWorkspace.mockRejectedValueOnce(new TypeError(UNSAFE_SENTINEL));
+      mocks.checkpointHostedWorkspace.mockRejectedValueOnce(Object.assign(
+        new TypeError(UNSAFE_SENTINEL), code ? { code } : {},
+      ));
       const response = await workspaceCheckpointRoute.POST(checkpointRequest());
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({
         error: { code: "INVALID_REQUEST", message: "Invalid request." },
       });
       expect(diagnostics()).toEqual([
-        [failureMessage, { schema: failureSchema, stage: "publication", errorClass: "type_error" }],
+        [failureMessage, {
+          schema: failureSchema, stage: "publication", errorClass: "type_error",
+          ...(code ? { errorCode: code } : {}),
+        }],
       ]);
       expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
       expect(mocks.after).not.toHaveBeenCalled();

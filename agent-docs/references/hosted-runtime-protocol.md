@@ -3959,8 +3959,11 @@ path-scoped working deltas, legacy hot producers, Worker-body snapshot uploads,
 or artifact-sidecar v2 producers. `idle_shutdown` is the only new checkpoint
 snapshot producer. `canonical_runtime_commit` instead uploads exact canonical
 write receipts and publishes a receipt-log head ref through a status-only
-workspace checkpoint that retains the prior snapshot ref. Capacity, log shape,
-and payload lengths are validated before
+workspace checkpoint that retains the prior snapshot ref. Web retains its
+workspace-version CAS and equal-or-plus-one generation invariant; rejected
+transitions add only a fixed regression, skipped-increment, or invalid-initial
+error code to the existing publication-failure event, never generation values
+or checkpoint contents. Capacity, log shape, and payload lengths are validated before
 upload. The complete immutable payload, receipt, and log artifact set then
 uploads in small fixed concurrent waves; every started wave settles before a
 failure returns, and the checkpoint publishes the log ref only after the whole
