@@ -5228,6 +5228,10 @@ async function runSystemMailboxMaintenancePhase(
     pendingAssistantInputBlocksMaintenance
     && !foregroundCausalAttempted
     && !hasBackgroundSelection
+    && !hostedSystemMailboxWakeIsDueForModelFreeOwner(
+      initialOwnerWake,
+      resolveHostedAssistantPhaseNowMs(phaseInput),
+    )
     && shouldPreflightHostedAssistantCronWakeBeforeSystemMailbox(phaseInput)
   ) {
     const preflightAssistantCronWakeState = await readAssistantCronWakeState();

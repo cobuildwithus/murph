@@ -32,7 +32,8 @@ Reuse existing mailbox and checkpoint state. No production row edits. Preserve r
 - `pnpm --filter @murphai/assistant-runtime typecheck` passed after final test edits.
 - `pnpm complexity:diff` passed; changed owner complexity decreased from 118 to 115. No new abstraction, persisted state, or dependency.
 - Parent review: preserved foreground selection and delivery deferral, bounded preferences processing, explicit projection correction, and existing system-only refresh ownership. Product UX Patch: Ready for the existing settings/refresh journey; no presentation or prompt changes.
-- ReviewGPT round 1 passed at `ef166c61655e` with no qualifying findings. This closure changes explanatory evidence only; the reviewed runtime and tests are unchanged.
+- ReviewGPT round 1 passed at `ef166c61655e` with no qualifying findings. Subsequent full CI exposed a cron-priority regression: deleting the early return also exposed cron preflight before an already-selected model-free handoff. Preserve that original selection by skipping cron preflight for a due model-free owner, while still probing and draining bounded preferences.
+- Final focused proof includes the existing scheduling regressions: 207 tests across five files passed, followed by the runtime typecheck. The four-line source correction requires another ReviewGPT round before merge.
 - Public implementation is complete. Exact-head CI, merge, deployment, and the requested eight-hour production observation remain release steps; they are not claimed complete by this plan closure. The broader scheduler guard is separately owned in the private orchestration companion checkout.
 
 ## Changelog
