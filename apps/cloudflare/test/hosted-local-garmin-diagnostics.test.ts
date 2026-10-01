@@ -15,7 +15,7 @@ describe("live Garmin provider diagnostics", () => {
         { user_id: "unrelated-user", provider: { garmin: { activity: { newest_data: "2026-08-12T00:00:00Z" } } } },
         { user_id: userId, provider: { garmin: {
           activity: { newest_data: "2026-07-31T00:00:00Z", sent_count: 45 },
-          sleep: { newestData: "2026-08-14T00:00:00Z" },
+          sleep: { newestData: new Date("2026-08-14T00:00:00Z") },
           workouts: { newest_data: "2026-08-16T00:00:00Z" },
           private_resource: { newest_data: "private-value" },
         } } },

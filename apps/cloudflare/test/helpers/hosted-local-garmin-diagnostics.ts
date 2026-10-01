@@ -59,9 +59,12 @@ export function summarizeLiveGarminProviderDiagnostics(input: {
 }
 
 function classifyLatestData(value: unknown, window: { from: string; to: string }) {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T/u.test(value)
-    || !Number.isFinite(Date.parse(value))) return "unknown";
-  const day = value.slice(0, 10);
+  // The SDK decodes timestamps as Date; its raw-response fallback keeps ISO strings.
+  const instant = value instanceof Date ? value.getTime()
+    : typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/u.test(value)
+      ? Date.parse(value) : Number.NaN;
+  if (!Number.isFinite(instant)) return "unknown";
+  const day = new Date(instant).toISOString().slice(0, 10);
   if (day < window.from) return "before_window";
   return day > window.to ? "after_window" : "in_window";
 }
