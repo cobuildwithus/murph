@@ -553,6 +553,41 @@ describe("RunnerContainer slot lifecycle", () => {
     expect(h.destroy).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])("cancels bound cold preparation before exact retirement (stop fails: %s)", async stopFails => {
+    const owner = { claimId: createHostedStandbyClaimId(), userId: "member_background" };
+    const stop = createDeferred<void>();
+    const started = createDeferred<void>();
+    const h = createStandbyContainerHarness({ bound: owner, nativeStatus: "stopped", destroy: async () => { await stop.promise; if (stopFails) throw new Error("synthetic stop failure"); } });
+    const start = vi.fn(async (input: { cancellationOptions: { abort: AbortSignal } }) => {
+      h.setNativeStatus("running");
+      started.resolve(undefined);
+      await new Promise<never>((_resolve, reject) => {
+        input.cancellationOptions.abort.addEventListener("abort", () => reject(input.cancellationOptions.abort.reason), { once: true });
+      });
+    });
+    Object.assign(h.container, { startAndWaitForPorts: start });
+    const readiness = h.container.ensureReadyForProcessing({ userId: owner.userId, timeoutMs: 15_000 });
+    const readinessResult = Promise.allSettled([readiness]);
+    await started.promise;
+    const queuedReadiness = Promise.allSettled([h.container.ensureReadyForProcessing({ userId: owner.userId, timeoutMs: 15_000 })]);
+    const request = { claimId: owner.claimId, target: { slotName: h.slotName, userId: owner.userId } };
+    const retirement = h.container.retireStandbySlot(request);
+    const retired = Promise.allSettled([retirement]);
+    await until(() => h.destroy.mock.calls.length > 0);
+    expect(start.mock.calls[0]?.[0].cancellationOptions.abort.aborted).toBe(true);
+    expect(await h.container.readStandbySlotBinding()).toMatchObject({ state: "retiring" });
+    await expect(h.container.ensureReadyForProcessing({ userId: owner.userId, timeoutMs: 15_000 })).rejects.toThrow();
+    stop.resolve(undefined);
+    const [result] = await retired;
+    expect(result.status).toBe(stopFails ? "rejected" : "fulfilled");
+    expect(await h.container.readStandbySlotBinding()).toMatchObject({ state: stopFails ? "retiring" : "retired" });
+    const [preparation] = await readinessResult;
+    if (preparation.status === "fulfilled") expect(preparation.value.kind).toBe("cleanup_unsettled");
+    expect((await queuedReadiness)[0]?.status).toBe("rejected");
+    expect(start).toHaveBeenCalledOnce();
+    expect(Reflect.get(h.container, "readinessOperations").size).toBe(0);
+  });
+
   it("preserves target and bound claim authority for claimed retirement", async () => {
     const owner = { claimId: createHostedStandbyClaimId(), userId: "member_bound" };
     const h = createStandbyContainerHarness({ bound: owner });

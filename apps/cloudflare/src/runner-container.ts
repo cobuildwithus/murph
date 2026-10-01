@@ -678,6 +678,7 @@ export class RunnerContainer extends Container {
   private pendingCompletionCleanup: RunnerContainerPendingCompletionCleanup | null = null;
   private recordedCompletionCleanup: RunnerContainerRuntimeCompletionRecordedInput | null = null;
   private workspaceInvocationOperations: RunnerWorkspaceInvocationOperation[] = [];
+  private readonly readinessOperations = new Set<AbortController>();
   private workspaceInvocationNoPointerAbort:
     RunnerWorkspaceInvocationNoPointerAbort | null = null;
   private containerInteractionGeneration = 0;
@@ -1250,6 +1251,12 @@ export class RunnerContainer extends Container {
     this.noteContainerInteraction();
     this.pendingCompletionCleanup = null;
     this.recordedCompletionCleanup = null;
+    // Retirement must interrupt preparation before queuing behind its lifecycle
+    // lock. A normal Error forces cold-start cleanup instead of preserving the
+    // startup window used for retryable readiness timeouts.
+    for (const readiness of this.readinessOperations) {
+      readiness.abort(new Error("runner preparation retired"));
+    }
     const operationsAtDestroy = [...this.workspaceInvocationOperations];
     for (const operation of operationsAtDestroy) {
       if (!operation.abortController.signal.aborted) {
@@ -1351,7 +1358,11 @@ export class RunnerContainer extends Container {
     // Start the wall-clock deadline before lifecycle-lock admission. A queued
     // readiness request must not receive a fresh timeout after its caller-side
     // guard has already elapsed.
-    const readinessSignal = AbortSignal.timeout(input.timeoutMs);
+    const readinessAbort = new AbortController();
+    this.readinessOperations.add(readinessAbort);
+    const readinessSignal = combineRunnerContainerAbortSignals(
+      readinessAbort.signal, AbortSignal.timeout(input.timeoutMs),
+    );
     let lifecycleLockAcquired = false;
     let cleanupSettlementTimedOut = false;
     const startupFailureObservation: RunnerContainerStartupFailureObservation = {
@@ -1446,6 +1457,13 @@ export class RunnerContainer extends Container {
         return { kind: "cleanup_unsettled" };
       }
       throw error;
+    } finally {
+      // The caller's timeout can precede native cleanup. Keep cancellation
+      // registered until the actual lifecycle operation settles.
+      void readiness.then(
+        () => this.readinessOperations.delete(readinessAbort),
+        () => this.readinessOperations.delete(readinessAbort),
+      );
     }
   }
 

@@ -370,6 +370,94 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await isHostedRuntimeDeletionReady({ prisma: first, userId })).toBe(true);
   });
 
+  it.each(["foreground", "launch"] as const)("serializes background launch with foreground priority (%s wins)", async winner => {
+    const userId = await member();
+    const background = await claimHostedRuntime({ prisma: first, userId, processingMode: "system_mailbox" });
+    if (background.status === "blocked") throw new Error("Expected admitted background work.");
+    const original = identity(background.owner);
+    const target = "synthetic-starting-background";
+    await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command: {
+      operation: "select_target", ...original, runnerContainerName: target,
+    } });
+    const launch = (prisma: PrismaClient) => prepareHostedRuntimeLaunch({
+      prisma, identity: original, runnerContainerName: target, workspaceVersion: "0",
+      customInferenceEnvelope: null, providerEgressTokenHash: null, platformAiUsageAllowed: true,
+    });
+    const locked = deferred();
+    const release = deferred();
+    const [firstPid, secondPid] = await Promise.all([backendPid(first), backendPid(second)]);
+    const blocker = blockerClient.$transaction(async tx => {
+      await lockHostedMemberRow(tx, userId);
+      locked.resolve();
+      await release.promise;
+    });
+    await locked.promise;
+    const winnerResult = winner === "foreground" ? claim(userId, first) : launch(first);
+    // Attach rejection handlers before releasing either transaction.
+    const winnerSettled = Promise.allSettled([winnerResult]);
+    let loserSettled: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    try {
+      await waitBlocked(observer, firstPid);
+      const loserResult = winner === "foreground" ? launch(second) : claim(userId, second);
+      loserSettled = Promise.allSettled([loserResult]);
+      await waitBlocked(observer, secondPid);
+    } finally {
+      release.resolve();
+      await Promise.all([blocker, winnerSettled, loserSettled]);
+    }
+    expect((await winnerSettled)[0]?.status).toBe("fulfilled");
+    const current = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(current).toMatchObject({ attemptId: original.attemptId, runnerContainerName: target,
+      phase: winner === "foreground" ? "retiring" : "starting",
+      workspaceVersion: winner === "foreground" ? null : 0n,
+    });
+    const [loser] = await loserSettled!;
+    if (winner === "launch") {
+      expect(loser).toMatchObject({ status: "fulfilled", value: { status: "existing", owner: { phase: "starting", workspaceVersion: 0n } } });
+    } else {
+      expect(loser).toMatchObject({ status: "rejected", reason: { code: "HOSTED_RUNTIME_OWNER_STALE" } });
+      expect(await recordHostedRuntimeAccepted({ prisma: first, identity: original })).toBe(false);
+      expect((await claim(userId)).owner.phase).toBe("retiring");
+      expect(await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: original, runnerContainerName: null })).toBe(false);
+      expect(await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: original, runnerContainerName: target })).toBe(true);
+      const successor = (await claim(userId)).owner;
+      expect(successor.generation).toBe(background.owner.generation + 1n);
+      expect(successor.processingMode).toBe("default");
+      await expect(launch(second)).rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+    }
+  });
+
+  it("coalesces a foreground burst behind one exact background retirement and one successor", async () => {
+    const userId = await member();
+    const background = await claimHostedRuntime({ prisma: first, userId, processingMode: "system_mailbox" });
+    if (background.status === "blocked") throw new Error("Expected admitted background work.");
+    const original = identity(background.owner);
+    const burst = () => Promise.all(Array.from({ length: 32 }, (_, index) => claim(userId, index % 2 ? first : second)));
+    const retiring = await burst();
+    for (const result of retiring) {
+      expect(result).toMatchObject({ status: "existing", owner: { phase: "retiring", attemptId: original.attemptId, generation: 1n } });
+    }
+    // No target was selected, so exact null-target release is sufficient.
+    expect(await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: original, runnerContainerName: null })).toBe(true);
+    const successors = await burst();
+    expect(successors.filter(result => result.status === "claimed")).toHaveLength(1);
+    expect(new Set(successors.map(result => result.owner.attemptId)).size).toBe(1);
+    for (const result of successors) expect(result.owner).toMatchObject({ generation: 2n, processingMode: "default", phase: "starting" });
+  });
+
+  it("leaves background startup alone for background claims and denied foreground admission", async () => {
+    const userId = await member();
+    const background = await claimHostedRuntime({ prisma: first, userId, processingMode: "system_mailbox" });
+    expect(background.status).toBe("claimed");
+    expect(await claimHostedRuntime({ prisma: second, userId, processingMode: "system_mailbox" }))
+      .toMatchObject({ status: "existing", owner: { phase: "starting" } });
+    await observer.hostedMember.update({ where: { id: userId }, data: { suspendedAt: new Date() } });
+    expect(await claimHostedRuntime({ prisma: second, userId, processingMode: "default" }))
+      .toMatchObject({ status: "blocked", reason: "admission" });
+    expect(await observer.hostedRuntimeOwner.findUnique({ where: { userId } }))
+      .toMatchObject({ phase: "starting", processingMode: "system_mailbox" });
+  });
+
   it("serializes competing claims on independent connections", async () => {
     const userId = await member();
     const locked = deferred();

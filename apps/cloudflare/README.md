@@ -160,6 +160,12 @@ authenticated request carrying `conversationWorkPending: true` may claim a slot.
 Temporal derives that fact from fresh admitted conversation lag. Background-only
 work reuses its own warm target or starts a cold target in the same fleet.
 A missed or unavailable claim falls back to that same cold allocation lifecycle.
+An admitted foreground claim can retire an unlaunched background owner. The slot
+cancels readiness before acquiring its retirement lifecycle lock; exact native
+stop and Postgres release must settle before foreground obtains a replacement.
+If background launch preparation already won, foreground wakes that same child.
+See [runtime ownership](../../agent-docs/references/hosted-postgres-runtime.md)
+for the transaction boundary and mixed-version deployment order.
 Each claim immediately fills a deficit using any free preparation lane, including
 while another preparation is pending. At most two preparations run concurrently;
 SQLite reservations and recovery alarms retain reset and retry ownership. The
