@@ -23,6 +23,49 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("Twilio Verify SMS transport", () => {
+  it("returns an actionable client error only for an explicitly rejected destination", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    request.mockResolvedValue(Response.json({ code: 60200, message: "Invalid parameter: To" }, { status: 400 }));
+    const error = await hostedAuthSmsVerification().send({ phoneNumber }).catch((failure: unknown) => failure);
+    const response = jsonError(error);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: {
+      code: "AUTH_REQUEST_INVALID",
+      message: "Check your phone number, including its country code, and try again.",
+      retryable: false,
+    } });
+    expect(log).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledOnce();
+    log.mockRestore();
+  });
+
+  it.each(["Channel", "RiskCheck"])("keeps invalid %s configuration diagnosable without blaming the phone number", async (parameter) => {
+    request.mockResolvedValue(Response.json({ code: 60200, message: `Invalid parameter: ${parameter}` }, { status: 400 }));
+    await expect(hostedAuthSmsVerification().send({ phoneNumber })).rejects.toMatchObject({
+      code: "AUTH_DELIVERY_UNAVAILABLE", httpStatus: 503,
+      cause: { message: `Twilio Verify send: provider_http; HTTP 400; code 60200; parameter ${parameter}.` },
+    });
+  });
+
+  it.each([
+    undefined, "Invalid parameter: To +12025550147", "Invalid parameter: private-contact@example.test",
+  ])("does not infer a bad destination or retain private provider messages: %j", async (message) => {
+    request.mockResolvedValue(Response.json({ code: 60200, message }, { status: 400 }));
+    await expect(hostedAuthSmsVerification().send({ phoneNumber })).rejects.toMatchObject({
+      code: "AUTH_DELIVERY_UNAVAILABLE", httpStatus: 503,
+      cause: { message: "Twilio Verify send: provider_http; HTTP 400; code 60200." },
+    });
+  });
+
+  it("does not reinterpret a verification failure or server outage as an invalid send destination", async () => {
+    request.mockResolvedValue(Response.json({ code: 60200, message: "Invalid parameter: To" }, { status: 400 }));
+    await expect(hostedAuthSmsVerification().check({ phoneNumber, verificationSid: sid, code: "123456" }))
+      .rejects.toMatchObject({ code: "AUTH_VERIFICATION_UNAVAILABLE", httpStatus: 503 });
+    request.mockResolvedValue(Response.json({ code: 60200, message: "Invalid parameter: To" }, { status: 500 }));
+    await expect(hostedAuthSmsVerification().send({ phoneNumber }))
+      .rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE", httpStatus: 503 });
+  });
+
   it("keeps the provider status and numeric code in server logs while leaving the public response generic", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     request.mockResolvedValue(Response.json({ code: 60203, message: "synthetic private phone and credential", more_info: "https://example.test/private" }, { status: 429 }));
