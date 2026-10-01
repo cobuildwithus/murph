@@ -82,6 +82,8 @@ describe("live Garmin empty-account boundary", () => {
       client: {
         resolveUser: vi.fn().mockResolvedValue({ userId: "synthetic-provider-user" }),
         listSummary: vi.fn().mockResolvedValue([]),
+        introspectResources: vi.fn().mockResolvedValue({ data: [] }),
+        introspectHistoricalPull: vi.fn().mockResolvedValue({ matchedUser: false, sources: [] }),
       },
       clientUserId: "synthetic-client-user",
       memberId: "synthetic-member",
@@ -103,6 +105,8 @@ describe("live Garmin empty-account boundary", () => {
       .rejects.toThrow("MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING");
     expect(input.client.listSummary).toHaveBeenCalledOnce();
     expect(requestJson).toHaveBeenCalledOnce();
+    expect(input.client.introspectResources).toHaveBeenCalledOnce();
+    expect(input.client.introspectHistoricalPull).toHaveBeenCalledOnce();
   });
 
   it("polls again after an empty initial pull instead of disconnecting before data arrives", async () => {
@@ -123,6 +127,21 @@ describe("live Garmin empty-account boundary", () => {
       .rejects.toThrow("MURPH_E2E_GARMIN_DATA_PROOF_FAILED");
     expect(input.client.listSummary).toHaveBeenCalledTimes(2);
     expect(requestJson).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves the data failure when both diagnostic endpoints reject", async () => {
+    const { input, requestJson } = setup();
+    input.timeoutMs = 30;
+    requestJson.mockResolvedValue(JSON.stringify({
+      inFlight: false, mailboxLag: [], userId: input.memberId, workspace: null,
+    }));
+    vi.mocked(input.client.introspectResources).mockRejectedValue(new Error("private resource body"));
+    vi.mocked(input.client.introspectHistoricalPull).mockRejectedValue(new Error("private history body"));
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    await expect(waitForLiveGarminCanonicalData(input))
+      .rejects.toThrow("MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING");
+    expect(log).toHaveBeenCalledOnce();
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/private|synthetic-member|synthetic-provider/u);
   });
 
   it("does not turn provider errors or missing identities into empty-account success", async () => {
@@ -151,6 +170,7 @@ describe("live Garmin empty-account boundary", () => {
       return [];
     });
     await expect(waitForLiveGarminCanonicalData(input)).rejects.toThrow("MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING");
+    expect(input.client.introspectResources).not.toHaveBeenCalled();
   });
 });
 

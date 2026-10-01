@@ -19,6 +19,7 @@ import {
 } from "@murphai/runtime-state";
 
 import type { HostedLocalFullStackScenario } from "./hosted-local-full-stack-scenario.js";
+import { readLiveGarminProviderDiagnosticsForLog } from "./hosted-local-garmin-diagnostics.js";
 
 type GarminCanaryScenario = {
   harness: Pick<HostedLocalFullStackScenario["harness"], "requestJson">;
@@ -104,7 +105,7 @@ export function formatLiveGarminDataFailure(error: unknown): string {
 }
 
 export async function waitForLiveGarminCanonicalData(input: {
-  client: Pick<JunctionClient, "resolveUser" | "listSummary">;
+  client: Pick<JunctionClient, "resolveUser" | "listSummary" | "introspectResources" | "introspectHistoricalPull">;
   clientUserId: string;
   memberId: string;
   notBefore: number;
@@ -162,6 +163,11 @@ export async function waitForLiveGarminCanonicalData(input: {
     // Provider payloads, canonical health values, status logs and crypto errors
     // must never become CI output, including through an exception cause.
     if (!signal.aborted) throw new Error("MURPH_E2E_GARMIN_DATA_PROOF_FAILED");
+  }
+  if (providerUserId && !input.signal.aborted) {
+    console.info(`MURPH_E2E_GARMIN_PROVIDER_DIAGNOSTICS=${await readLiveGarminProviderDiagnosticsForLog({
+      client: input.client, userId: providerUserId, signal: input.signal, window,
+    })}`);
   }
   throw new Error(observedProviderData
     ? "MURPH_E2E_GARMIN_CANONICAL_DATA_MISSING"
