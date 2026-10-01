@@ -63,6 +63,8 @@ const validationFields = [
   ["event payload-schema", ["kind", "for"]],
   ["knowledge show", ["slug"]],
   ["measurement entry list", ["metric", "from", "to", "limit"]],
+  ["meal add", ["nutritionCalories", "nutritionSource", "occurredAt", "arguments"]],
+  ["meal edit", ["nutritionCalories", "nutritionSource", "occurredAt", "arguments"]],
   ["food search-labels", ["query", "limit"]],
   ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks",
     "relatedSlug", "librarySlug", "sourcePath", "arguments"]],
