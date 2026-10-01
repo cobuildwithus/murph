@@ -23,8 +23,8 @@ jobs:
     name: Temporal Web production admission
     environment: temporal-compatibility
     runs-on: ubuntu-24.04
-    # 15 minutes for setup and the public Web build, then the controller's 58-minute token budget, with
-    # two minutes left for runner cleanup and status publication.
+    # Enforced pre-token budgets: 5m required setup + 10m optional artifact.
+    # Preserve the controller's 58m credential budget and 2m cleanup reserve.
     timeout-minutes: 75
     permissions:
       contents: read
@@ -33,6 +33,7 @@ jobs:
       attempt: ${{ steps.pending.outputs.attempt }}
     steps:
       - name: Publish pending Web admission status
+        timeout-minutes: 1
         id: pending
         env:
           GH_TOKEN: ${{ github.token }}
@@ -47,22 +48,30 @@ jobs:
           echo "attempt=${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
 
       - name: Check out exact public main revision
+        timeout-minutes: 2
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Setup Node
+        timeout-minutes: 1
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
 
       - name: Setup pnpm for public integration Web build
+        id: public-pnpm
+        timeout-minutes: 1
+        continue-on-error: true
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
         with:
           run_install: false
 
       - name: Cache public integration dependencies
+        if: steps.public-pnpm.outcome == 'success'
+        timeout-minutes: 1
+        continue-on-error: true
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
@@ -72,6 +81,8 @@ jobs:
       # Build before minting the private token, so paid integration never waits
       # for compilation and no private assets or credentials reach the archive.
       - name: Build public hosted integration Web dist
+        if: steps.public-pnpm.outcome == 'success'
+        timeout-minutes: 7
         id: public-web-build
         continue-on-error: true
         env:
@@ -96,6 +107,7 @@ jobs:
           node scripts/hosted-integration-web-artifact.mjs
 
       - name: Publish public hosted integration Web dist
+        timeout-minutes: 1
         if: steps.public-web-build.outcome == 'success'
         continue-on-error: true
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -109,6 +121,7 @@ jobs:
           retention-days: 1
 
       - name: Execute exact production wire projection
+        timeout-minutes: 1
         run: >-
           node scripts/temporal-compatibility-producer-fixtures.ts
           --output "${RUNNER_TEMP}/temporal-compatibility-producer-fixtures.json"
