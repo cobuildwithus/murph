@@ -24,8 +24,9 @@ Native email canary work continues separately in its existing PRs.
 - [x] Verify the original receipt changes with regression tests, typechecks, required review and exact-head CI.
 - [x] Verify bounded provider diagnostics for an unsuccessful live data proof.
 - [x] Verify the provider query includes the entire final closed calendar day.
-- [ ] Distinguish missing inventory from absent timestamps and probe the bounded historical range across activity, sleep, and workouts.
+- [x] Distinguish missing inventory from absent timestamps and probe the bounded historical range across activity, sleep, and workouts.
 - [ ] Give canonical ingestion enough time to observe the ordinary fifteen-minute empty-history retry, preserving shorter authorization limits.
+- [ ] Refresh the controller installation token throughout the extended wait before enabling the private deadline.
 - [ ] Run the hosted canary and require canonical ingestion plus cleanup.
 
 ## Evidence and risks
@@ -68,3 +69,12 @@ or member state changes are required.
 Focused live-data oracle tests, private receipt CLI tests, relevant typecheck,
 and a fresh protected-main hosted run. Publish only metadata, never health
 values, dates, provider credentials or account identifiers.
+
+
+The extended controller wait can exceed the one-hour installation-token lifetime.
+A focused fake-clock regression reproduces authentication failure before an exact
+successful receipt at minute sixty-two. Reuse the existing GitHub App token
+supplier for each private request, preserving the same run, digest, repository
+scope, and non-canceling cleanup owner. The public workflow supplies the same
+protected App credentials to that supplier instead of minting one static token.
+The private deadline stays unmerged until this follow-up is reviewed and verified.
