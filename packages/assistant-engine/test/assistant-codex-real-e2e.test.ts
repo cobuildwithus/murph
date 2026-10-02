@@ -1,3 +1,4 @@
+import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
 import { buildHostedVaultShareProjectionScopeKey } from '@murphai/hosted-execution/vault-share'
 import { observesAppointmentConsentMutation } from './support/appointment-consent-observer.js'
 import { seedMurphOnboardingEarlyStallAutomation } from '../src/assistant/onboarding-followup-seed.ts'
@@ -1400,31 +1401,7 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
   'features.multi_agent_v2.max_concurrent_threads_per_session=4',
 ] as const
 
-async function readHostedDelegationHintOverrides(): Promise<string[]> {
-  // Read the production owner without a runtime dependency back to its caller.
-  const source = await readFile(new URL('../../assistant-runtime/src/hosted-runtime/codex-config.ts', import.meta.url), 'utf8')
-  return [
-    ['usage_hint_text', 'HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT'],
-    ['multi_agent_mode_hint_text', 'HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT'],
-    ['subagent_usage_hint_text', 'HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT'],
-  ].map(([key, name]) => {
-    const declaration = new RegExp(`const ${name} =\\s*([\\s\\S]*?);$`, 'mu').exec(source)?.[1]?.trim()
-    if (!declaration) throw new Error(`Missing production delegation hint: ${name}`)
-    if (declaration.startsWith('[') && !declaration.endsWith('].join(" ")')) {
-      throw new Error(`Unsupported production delegation hint: ${name}`)
-    }
-    const values = declaration.startsWith('[')
-      ? declaration.slice(0, declaration.indexOf('].join(" ")')).match(/"(?:[^"\\]|\\.)*"/gu)
-      : [declaration]
-    if (!values?.length) throw new Error(`Invalid production delegation hint: ${name}`)
-    const hint = values.map((value) => {
-      const text: unknown = JSON.parse(value)
-      if (typeof text !== 'string') throw new Error(`Invalid production delegation hint: ${name}`)
-      return text
-    }).join(' ')
-    return `features.multi_agent_v2.${key}=${JSON.stringify(hint)}`
-  })
-}
+
 const REAL_NUTRITION_CARD_CONVERSATION_INPUT = {
   groupConversation: false,
 } as const satisfies Pick<CodexAppServerTurnInput, 'groupConversation'>
@@ -3163,10 +3140,12 @@ describe('real Codex live fixture contracts', () => {
 
   it('loads production delegation hints for the opening identity journey', async () => {
     const overrides = await readHostedDelegationHintOverrides()
-    expect(overrides).toHaveLength(3)
+    expect(overrides).toHaveLength(4)
     expect(overrides[0]).toContain('Keep independent onboarding saves nonblocking.')
     expect(overrides[1]).toContain('Murph bounded delegation mode is active;')
     expect(overrides[2]).toContain('Do not spawn or delegate to another child.')
+    expect(overrides[3]).toContain('bounded one-shot task worker')
+    expect(overrides[3]).toContain('Group tasks may use only explicitly permitted room-owned data')
     for (const override of overrides) {
       expect(typeof JSON.parse(override.slice(override.indexOf('=') + 1))).toBe('string')
     }
@@ -20794,7 +20773,7 @@ describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
 })
 
 describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
-  it('repairs non-travel reminder context timing completion and duplicates without new connections', async () => {
+  it('reviews a bounded instruction inventory and repairs context timing completion and duplicates without new connections', async () => {
     const config = await resolveRealCodexE2eConfig()
     const seed = MURPH_MANAGED_AUTOMATIONS.find(candidate => candidate.slug === 'journal-connected-context-morning')
     if (!seed) throw new Error('Missing morning automation.')
@@ -20845,12 +20824,17 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
           schedule: item.recurring ? { kind: 'dailyLocal', localTime: '17:00', timeZone: 'Europe/Warsaw' }
             : { kind: 'at', at: item.fixed ? '2026-11-12T17:30:00Z' : '2026-11-12T16:00:00Z' },
           contextReferences: item.eventId ? [{ entityKind: 'event', entityId: item.eventId }] : [],
+          plannedOccurrenceOffsetMs: item.eventId === session.eventId ? 3_600_000 : undefined,
         })).record)
       }
       expect(new Set(records.map(record => record.automationId)).size).toBe(12)
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(12)
       const runTurn = async () => executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        abortSignal: AbortSignal.timeout(600_000),
+        onProgress: event => {
+          if (event.kind !== 'reasoning') process.stdout.write(`[morning-inventory-progress] ${JSON.stringify({ kind: event.kind, state: event.state, label: event.safeLabel })}\n`)
+        },
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider,
         fixtureBinDirectory: binDirectory,
@@ -20874,10 +20858,15 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
             if (request.action === 'inspect') inspected.set(before.automationId, before.updatedAt)
             else {
               expect(request.expectedUpdatedAt).toBe(inspected.get(before.automationId))
-              expect(Object.keys(request).every(key => ['action', 'lookup', 'expectedUpdatedAt', 'instructions', 'schedule', 'status', 'title', 'summary', 'contextReferences', 'assistantTargetOverride'].includes(key))).toBe(true)
+              expect(Object.keys(request).every(key => ['action', 'lookup', 'expectedUpdatedAt', 'instructions', 'schedule', 'status', 'title', 'summary', 'contextReferences', 'assistantTargetOverride', 'plannedOccurrenceOffsetMs'].includes(key))).toBe(true)
+              if (request.plannedOccurrenceOffsetMs !== undefined) {
+                expect(request.lookup).toBe(records[1]?.automationId)
+                expect(request.plannedOccurrenceOffsetMs).toBe(3_600_000)
+              }
               await patchAutomation({ vaultRoot: workingDirectory, lookup: request.lookup, expectedUpdatedAt: request.expectedUpdatedAt,
                 instructions: request.instructions, schedule: request.schedule, status: request.status,
                 title: request.title, summary: request.summary, assistantTargetOverride: request.assistantTargetOverride,
+                plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs,
                 contextReferences: request.contextReferences ? [...request.contextReferences] : undefined,
                 now: new Date(now.getTime() + requests.length * 1000),
               })
@@ -20904,6 +20893,27 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
       })
       const first = await runTurn()
       expect(parseAssistantNotificationDecision(first.finalMessage).kind).toBe('skip')
+      const firstInventoryCommands = expandRecordedVaultCommands((await readFile(path.join(workingDirectory, 'commands.log'), 'utf8')).split('\n').filter(Boolean))
+        .filter(line => /^automation list\b/u.test(line) && !isRecordedVaultHelpCommand(line))
+      expect(firstInventoryCommands).toHaveLength(1)
+      expect(firstInventoryCommands[0]).toContain('--include-instructions')
+      // Patch receipts omit instructions. One exact verification read for the
+      // changed instruction is useful; rereading unchanged inventory is not.
+      const inspectedIds = new Set<string>()
+      const instructionPatchedIds = new Set<string>()
+      let instructionVerificationReads = 0
+      for (const request of requests) {
+        if (request.action === 'patch' && request.instructions !== undefined) instructionPatchedIds.add(request.lookup)
+        if (request.action !== 'inspect') continue
+        if (inspectedIds.has(request.lookup)) {
+          expect(instructionPatchedIds.has(request.lookup)).toBe(true)
+          instructionVerificationReads++
+        }
+        inspectedIds.add(request.lookup)
+      }
+      expect(inspectedIds.size).toBeLessThanOrEqual(5)
+      expect(instructionVerificationReads).toBeLessThanOrEqual(1)
+      expect(requests.filter(request => request.action === 'inspect').length).toBeLessThanOrEqual(6)
       const readAll = () => Promise.all(records.map(record => showAutomation({ vaultRoot: workingDirectory, automationId: record.automationId })))
       const after = await readAll()
       expect(requests.filter(request => request.action === 'patch')).toHaveLength(4)
@@ -20913,6 +20923,7 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
       expect(after[0]?.instructions).not.toBe(records[0]?.instructions)
       expect(after[0]?.schedule).toEqual(records[0]?.schedule)
       expect(after[1]?.schedule).toEqual({ kind: 'at', at: '2026-11-12T10:00:00.000Z' })
+      expect(after[1]?.plannedOccurrenceOffsetMs).toBe(3_600_000)
       expect(after[1]?.contextReferences).toEqual(records[1]?.contextReferences)
       expect(after[2]?.status).toBe('archived')
       expect(after.slice(3, 7)).toEqual(records.slice(3, 7))
@@ -20926,16 +20937,21 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
       expect((await readEvent({ vaultRoot: workingDirectory, eventId: session.eventId })).event).toEqual(session.event)
       expect((await readEvent({ vaultRoot: workingDirectory, eventId: collection.eventId })).event).toEqual(collection.event)
       process.stdout.write(`[morning-reminder-reconciliation] ${JSON.stringify({ pass: 'first', decision: first.finalMessage, repairs: 4, preserved: 7 })}\n`)
+      const firstRequestCount = requests.length
       const repeat = await runTurn()
       expect(parseAssistantNotificationDecision(repeat.finalMessage).kind).toBe('skip')
       expect(requests.filter(request => request.action === 'patch')).toHaveLength(4)
       expect(await readAll()).toEqual(after)
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(records.length)
+      const allInventoryCommands = expandRecordedVaultCommands((await readFile(path.join(workingDirectory, 'commands.log'), 'utf8')).split('\n').filter(Boolean))
+        .filter(line => /^automation list\b/u.test(line) && !isRecordedVaultHelpCommand(line))
+      expect(allInventoryCommands).toHaveLength(2)
+      expect(requests.slice(firstRequestCount).filter(request => request.action === 'inspect')).toHaveLength(0)
       process.stdout.write(`[morning-reminder-reconciliation] ${JSON.stringify({ pass: 'repeat', decision: repeat.finalMessage, additionalRepairs: 0 })}\n`)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
-  }, 720_000)
+  }, 1_320_000)
 })
 
 describeRealCodex('real Codex travel reminder location e2e', () => {
@@ -43308,4 +43324,232 @@ describeRealCodex('scheduled phone-call reminder journey', () => {
       }
     } finally { contactLookup.mockRestore(); await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 720_000)
+})
+
+
+describeRealCodex('real Codex fresh multi-pass delegation e2e', () => {
+  it('preserves one canonical identity write in a fresh child without duplicate root effects', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await prepareRealCodexOnboardingDirectory()
+    const childUsages: AssistantProviderUsageDraft[] = []
+    const commandLogPath = path.join(workingDirectory, 'identity-commands.log')
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      await writeFile(path.join(workingDirectory, 'vault-cli'), [
+        '#!/bin/sh', 'set -eu',
+        `printf '%s\\n' "$*" >> "$MURPH_ONBOARDING_TEST_COMMAND_LOG"`,
+        'exec "$MURPH_ONBOARDING_TEST_NODE" --import "$MURPH_ONBOARDING_TEST_LOADER" "$MURPH_ONBOARDING_TEST_CLI" "$@" --vault "$MURPH_ONBOARDING_TEST_VAULT"',
+        '',
+      ].join('\n'), { mode: 0o700 })
+      const turnInput = buildRealCodexOnboardingTurnInput({ config, workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        ...turnInput,
+        abortSignal: AbortSignal.timeout(600_000),
+        onProgress: (event) => {
+          if (event.kind !== 'reasoning') process.stdout.write(`[fresh-identity-progress] ${JSON.stringify({ kind: event.kind, state: event.state })}\n`)
+        },
+        configOverrides: [...CHILD_MODEL_SELECTION_CONFIG_OVERRIDES, ...await readHostedDelegationHintOverrides()],
+        developerInstructions: buildDirectConversationDeveloperInstructions(true, [
+          'Visible direct conversation imported from confirmed Web replies:',
+          `Murph: ${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}`,
+          'Member: Yes, ready.',
+          `Murph: ${MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal}`,
+        ].join('\n\n')),
+        dynamicTools: [],
+        env: {
+          ...turnInput.env,
+          MURPH_ONBOARDING_TEST_COMMAND_LOG: commandLogPath,
+          MURPH_ONBOARDING_TEST_NODE: process.execPath,
+          MURPH_ONBOARDING_TEST_LOADER: HABITAT_VOICE_E2E_TSX_LOADER,
+          MURPH_ONBOARDING_TEST_CLI: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+          MURPH_ONBOARDING_TEST_VAULT: workingDirectory,
+          TSX_TSCONFIG_PATH: path.resolve(path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
+        },
+        onAdditionalUsage: async (usage) => { childUsages.push(usage) },
+        prompt: 'Call me Rowan.',
+      })
+      await waitForWarmCodexBackgroundWork()
+      const memory = await readMemoryDocument(workingDirectory)
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+      process.stdout.write(`[fresh-identity-e2e] ${JSON.stringify({ reply: result.finalMessage.trim(), childCount: childUsages.length })}\n`)
+      expect(childUsages).toHaveLength(1)
+      expect(childUsages[0]?.providerRequestOutcome).toBe('succeeded')
+      expect(commands.filter((command) => /^memory set-name(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
+      expect(memory.records.filter((record) => /Rowan/u.test(record.text))).toHaveLength(1)
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command'
+        && /memory (?:set-name|upsert|update)/u.test(action.command))).toEqual([])
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      expect(result.finalMessage).toMatch(/Rowan/u)
+      expect(result.finalMessage).toMatch(/what.*health/iu)
+      expect(result.finalMessage).not.toMatch(/subagent|spawn|vault-cli|saved|recorded|still working/iu)
+    } finally {
+      await stopWarmCodexAppServer('fresh-identity-e2e-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 660_000)
+
+  it('delegates linked canonical vault reads to one fresh Sol child and integrates one answer without duplicate work', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-fresh-delegation-e2e-'))
+    const childUsages: AssistantProviderUsageDraft[] = []
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    let completedActions = 0
+    let startedProviderTurns = 0
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+      const pages = [
+        { slug: 'outing-brief', title: 'Outing brief', body: '# Outing brief\n\nCompare the river route and hill route using outing-routes. We need the route that fits a three-hour outing. Its current equipment note identifies the packing list. This task is read-only.' },
+        { slug: 'outing-routes', title: 'Outing routes', body: '# Outing routes\n\nThe river route takes two hours. The hill route takes five hours. The current river equipment note is outing-river-kit. No reservations or messages are needed.' },
+        { slug: 'outing-river-kit', title: 'River equipment', body: '# River equipment\n\nBring a folding umbrella and a blue water bottle. These replace the old heavy raincoat suggestion. Return this result without changing saved notes.' },
+      ]
+      for (const page of pages) await upsertKnowledgePage({ vault: workingDirectory, ...page })
+      const before = await Promise.all(pages.map(({ slug }) => getKnowledgePage({ vault: workingDirectory, slug })))
+      // Keep machine paths in inherited environment only, not generated files.
+      await writeFile(path.join(workingDirectory, 'vault-cli'), [
+        '#!/bin/sh', 'set -eu',
+        `printf '%s\\n' "$*" >> "$MURPH_FRESH_TEST_COMMAND_LOG"`,
+        'exec "$MURPH_FRESH_TEST_NODE" --import "$MURPH_FRESH_TEST_LOADER" "$MURPH_FRESH_TEST_CLI" "$@" --vault "$MURPH_FRESH_TEST_VAULT"',
+        '',
+      ].join('\n'), { mode: 0o700 })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        abortSignal: AbortSignal.timeout(600_000),
+        onProviderRequestStarted: () => { startedProviderTurns += 1 },
+        onProgress: (event) => {
+          if (event.kind === 'reasoning') return
+          if (event.state === 'completed') completedActions += 1
+          process.stdout.write(`[fresh-delegation-progress] ${JSON.stringify({ kind: event.kind, state: event.state, completedActions })}\n`)
+        },
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        configOverrides: [
+          ...CHILD_MODEL_SELECTION_CONFIG_OVERRIDES, ...await readHostedDelegationHintOverrides(),
+          'allow_login_shell=false', 'shell_environment_policy.inherit="all"',
+        ],
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          PATH: `${workingDirectory}:${config.env.PATH ?? ''}`,
+          MURPH_FRESH_TEST_COMMAND_LOG: commandLogPath,
+          MURPH_FRESH_TEST_NODE: process.execPath,
+          MURPH_FRESH_TEST_LOADER: HABITAT_VOICE_E2E_TSX_LOADER,
+          MURPH_FRESH_TEST_CLI: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+          MURPH_FRESH_TEST_VAULT: workingDirectory,
+          TSX_TSCONFIG_PATH: path.resolve(path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        onAdditionalUsage: async (usage) => { childUsages.push(usage) },
+        prompt: 'Please work through my saved outing-brief knowledge page and its linked notes, compare the route durations with my three-hour limit, resolve any outdated equipment advice, and tell me the route and what to bring. Use my saved notes. Do not change anything or contact anyone.',
+        reasoningEffort: 'medium', sandbox: 'workspace-write', workingDirectory,
+      })
+      await waitForWarmCodexBackgroundWork()
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+      const reads = commands.filter((command) => /^knowledge show /u.test(command) && !isRecordedVaultHelpCommand(command))
+      process.stdout.write(`[fresh-delegation-e2e] ${JSON.stringify({
+        reply: result.finalMessage.trim(), childCount: childUsages.length, canonicalReads: reads.length,
+        childModel: childUsages[0]?.usage.servedModel,
+        rootSourceReads: readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command' && !/--help\b/u.test(action.command) && /knowledge\s+(?:list|show|search|show-index)\b|derived\/knowledge\//u.test(action.command)).length,
+      })}\n`)
+      expect(childUsages).toHaveLength(1)
+      expect(childUsages[0]).toMatchObject({ providerRequestOutcome: 'succeeded', usage: {
+        requestedModel: 'gpt-6.1-sol', servedModel: 'gpt-6.1-sol',
+        usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
+      } })
+      for (const { slug } of pages) {
+        expect(reads.filter((command) => (command === `knowledge show ${slug}` || command.startsWith(`knowledge show ${slug} `)))).toHaveLength(1)
+      }
+      expect(reads).toHaveLength(3)
+      expect(commands.filter((command) => !isRecordedVaultHelpCommand(command) && !/^knowledge (?:show |show-index|list|search)/u.test(command))).toEqual([])
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command'
+        && !/--help\b/u.test(action.command)
+        && /knowledge\s+(?:list|show|search|show-index)\b|derived\/knowledge\//u.test(action.command)).length).toBe(0)
+      expect(await Promise.all(pages.map(({ slug }) => getKnowledgePage({ vault: workingDirectory, slug })))).toEqual(before)
+      expect(result.finalMessage).toMatch(/river/iu)
+      expect(result.finalMessage).toMatch(/umbrella/iu)
+      expect(result.finalMessage).toMatch(/blue water bottle/iu)
+      expect(result.finalMessage).not.toMatch(/subagent|spawn|vault-cli|canonical|knowledge reads|still working|will (?:send|let you know)|I.ve (?:saved|updated)/iu)
+      expect(result.finalMessage.length).toBeLessThan(800)
+    } finally {
+      process.stdout.write(`[fresh-delegation-boundary] ${JSON.stringify({ startedProviderTurns, completedActions, meteredChildren: childUsages.length })}\n`)
+      await stopWarmCodexAppServer('fresh-delegation-e2e-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 660_000)
+})
+
+
+describeRealCodex('bounded reaction routing journeys', () => {
+  it('usage reaction router live keeps acknowledgments quiet and escalates answers and confusion on priority Luna', async () => {
+    const { classifyAssistantReaction } = await import('../src/assistant/reaction-routing.js')
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config)
+    try {
+      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      for (const scenario of [
+        { name: 'acknowledgment', reaction: 'Reacted with a heart reaction.', targetMessage: 'Your afternoon stretch is logged.', expected: 'quiet' },
+        { name: 'closed-question-answer', reaction: 'Reacted with a like reaction.', targetMessage: 'Would you like me to explain the difference between easy and tempo runs?', expected: 'escalate' },
+        { name: 'confusion', reaction: 'Reacted with a question reaction.', targetMessage: 'An easy run should feel conversational, while tempo is comfortably hard.', expected: 'escalate' },
+        { name: 'disagreement', reaction: 'Reacted with a dislike reaction.', targetMessage: 'I suggest moving the check-in to the evening.', expected: 'escalate' },
+      ] as const) {
+        let providerEntries = 0
+        const decision = await classifyAssistantReaction({
+          reaction: scenario.reaction, targetMessage: scenario.targetMessage,
+          onFallback: (reason) => { process.stdout.write(`[usage-reaction-router-fallback] ${reason}\n`) },
+          codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
+          env: fixture.env, modelProvider: config.modelProvider,
+          beforeProviderEntry: async () => { providerEntries += 1 },
+          onProviderUsage: ({ usage }) => { recordRealCodexProviderUsage(usage.usage) },
+        })
+        expect(providerEntries).toBe(1)
+        expect(decision).toBe(scenario.expected)
+        process.stdout.write(`[usage-reaction-router] ${scenario.name}: ${decision}; no user-facing classifier reply\n`)
+      }
+      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+    } finally {
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 180_000)
+})
+
+
+describeRealCodex('production reaction routing turn journey', () => {
+  it('usage reaction full turn live suppresses appreciation and answers confusion with Sol after Luna', async () => {
+    const { buildAssistantAutoReplyReactionTurnContext } = await import('../src/assistant/automation/reply.js')
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    const fixture = await createCanonicalLiveFixture(config, 'linq')
+    try {
+      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      for (const scenario of [
+        { name: 'quiet', reaction: 'Reacted with a heart reaction.', targetMessage: 'Your afternoon stretch is logged.', requests: 1 },
+        { name: 'clarification', reaction: 'Reacted with a question reaction.', targetMessage: 'An easy run should feel conversational, while tempo is comfortably hard.', requests: 2 },
+      ] as const) {
+        let requests = 0
+        const result = await sendAssistantMessageLocal({
+          approvalPolicy: 'never', channel: 'linq', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
+          deliverResponse: false, includeEarlySessionOnboarding: false, model: 'gpt-6.1-sol', modelProvider: config.modelProvider,
+          prompt: scenario.reaction, reactionRouting: { reaction: scenario.reaction, targetMessage: scenario.targetMessage },
+          turnContext: buildAssistantAutoReplyReactionTurnContext(scenario.targetMessage),
+          acceptedTurnInput: { initialInputs: [{ id: `synthetic-reaction-${scenario.name}`, source: 'manual', acceptedAt: new Date().toISOString() }] },
+          provider: 'codex-cli', reasoningEffort: 'medium', sandbox: 'read-only',
+          threadId: `synthetic-reaction-${scenario.name}`, threadIsDirect: true,
+          turnEnvironment: { currentWorkingDirectory: fixture.vault, env: fixture.env }, vault: fixture.vault, workingDirectory: fixture.vault,
+          onProviderRequestStarted: () => { requests += 1 },
+        })
+        expect(requests).toBe(scenario.requests)
+        if (scenario.name === 'quiet') expect(result.response).toBe('')
+        else {
+          expect(result.response).toMatch(/easy|conversational|talk|sentence/iu)
+          expect(result.response).not.toMatch(/Luna|Sol|classifier|routing|subagent|saved|updated|scheduled/iu)
+          expect(result.response.length).toBeLessThan(900)
+        }
+        process.stdout.write(`[usage-reaction-full-turn] ${JSON.stringify({ scenario: scenario.name, requests, reply: result.response })}\n`)
+      }
+      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+    } finally {
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 240_000)
 })

@@ -264,6 +264,8 @@ export interface AssistantTargetedMessageReactionAction {
 }
 
 export interface AssistantProviderTurnExecutionResult {
+  /** A confined routing leaf completed without starting or resuming the root thread. */
+  providerThreadUnchanged?: true
   codexRolloutRelativePath?: string | null
   additionalUsages?: readonly AssistantProviderUsageDraft[] | null
   provider: AssistantChatProvider

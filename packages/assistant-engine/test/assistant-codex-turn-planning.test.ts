@@ -359,6 +359,27 @@ describe('assistant Codex turn planning', () => {
         }),
       }),
     }
+    // Preserve the weekly audit rule alongside the runtime's wiki guidance;
+    // the complete-plan fingerprints below characterize their composition.
+    for (const plan of [plans.direct, plans.group, plans.scheduledEmail]) {
+      for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
+        expect(instructions).toContain(
+          'A scheduled usage audit instead reports available evidence and coverage limits without asking a question.',
+        )
+      }
+    }
+    for (const plan of [plans.direct, plans.scheduledEmail]) {
+      for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
+        expect(instructions).toContain('vault-cli knowledge show <slug> --format json')
+        expect(instructions).toContain('start from exact supplied page references')
+        expect(instructions).toContain(
+          'let the child do this discovery instead of first loading the index and page bodies in root',
+        )
+        expect(instructions).not.toContain(
+          'For wiki work, use `vault-cli knowledge ...` directly in this turn.',
+        )
+      }
+    }
     const digestPlan = (
       plan: Awaited<ReturnType<typeof resolveAssistantRouteTurnPlan>>,
     ) => {
@@ -421,11 +442,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "faf5d387c93740e4fe7c9fd03704e2ef9956c0ac7cf2caaec3ed1e57ae100b07",
+        "direct": "3b81d5ea06d1b880060e69d575658a5e5314af63034a00979a8093fc9aeaed3d",
         "group": "93803fc4515e313d00569b74e17034a97b39ff64f91084456b8b17a370618811",
         "maintenance": "ac022f98be034bc9bbcfd987fb422a0546cfa1899d4c99b97167d7d22527547e",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "b5b260cf70eba95c629df06ae9a8740094b7e286868b9d687ce8c2e1b0e51ae4",
+        "scheduledEmail": "a4f3b99448e46e0c23ee8995c64bf84c07413b2ae7cb0c754fb402d4de0a4f7e",
       }
     `)
   })

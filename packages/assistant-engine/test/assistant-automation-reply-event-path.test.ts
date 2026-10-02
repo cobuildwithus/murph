@@ -5346,7 +5346,7 @@ describe('assistant auto-reply event-first path', () => {
     )
   })
 
-  it('binds an attested same-session affirmative Linq reaction to the exact older target', async () => {
+  it.each(['like', 'question', 'dislike'])('binds an attested same-session Linq %s reaction to the exact older target', async (reaction) => {
     const vault = await createTempVault()
     const automationId = 'automation_01JQ8PWXP5A68SQM1W0GYM42AA'
     const experimentId = 'exp_01JQ8PWXP5A68SQM1W0GYM42AB'
@@ -5398,7 +5398,7 @@ describe('assistant auto-reply event-first path', () => {
         replyToMessageId: 'linq-msg-same-session-target',
         service: 'iMessage',
       },
-      text: 'Reacted with a like reaction.',
+      text: `Reacted with a ${reaction} reaction.`,
       threadIsDirect: true,
     })
 
@@ -5421,13 +5421,14 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
     const turnContext = sendInput?.turnContext
+    expect(sendInput?.reactionRouting).toEqual({ reaction: `Reacted with a ${reaction} reaction.`, targetMessage: 'Would you like me to continue?' })
     expect(turnContext).toContain([
       'Reaction target:',
-      'The user reacted with a tapback (heart, like, or similar) to this exact assistant message:',
+      'The user reacted to this exact assistant message; the inbound text identifies the actual reaction:',
       '',
       'Would you like me to continue?',
       '',
-      'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. Respond only in relation to this message; a brief acknowledgment-weight reply is fine.',
+      'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. A question reaction may request clarification and a negative reaction may signal disagreement. Respond only when an answer or follow-through is useful; ordinary acknowledgment stays quiet.',
     ].join('\n'))
     expect(turnContext).not.toContain('Canonical experiment reminder context:')
     expect(turnContext).not.toContain(`experiment:${experimentId}`)
