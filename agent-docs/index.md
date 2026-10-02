@@ -967,3 +967,5 @@ Weekly usage review, private bounded ledger diagnostics, and anonymous product
 reports are tracked in [weekly usage optimizer](exec-plans/active/2026-10-01-weekly-usage-optimizer.md).
 Current authority and storage contracts remain in `ARCHITECTURE.md`, `SECURITY.md`,
 and `RELIABILITY.md`.
+
+Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
