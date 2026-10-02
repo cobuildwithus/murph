@@ -1475,6 +1475,24 @@ rows as the existing call denominator, not extra failures, and do not add profil
 counts to overlapping native CLI counts. Unresolved connection loss remains
 unresolved. This rollout grants no automatic rollback or production mutation.
 
+The connected-app port's own response-envelope schema rejection keeps its existing
+`TypeError` name/message and adds one fixed, non-enumerable own data code,
+`CONNECTED_APPS_RESPONSE_SCHEMA_INVALID`. Only that exact code maps to the
+existing private `errorCategory: invalid_result`; `failureStage: execution` and
+`failureReason: handler_exception` remain unchanged. Unclassified transport errors
+remain `unknown`. No response content, schema issues, identifiers, raw code or new
+field is persisted. Non-enumerability preserves the existing enumerable-only RPC
+error projection and ambiguous-write no-retry recovery.
+
+For a future authorized comparison, use fixed consecutive 12-hour windows and
+aggregate only connected-app `diagnosticRole: classification` rows by request kind,
+stage, reason, category and optional HTTP status (at most 200 rows per window;
+report saturation as a lower bound). Distinguish `invalid_result` from
+status-absent `unknown`, retaining completion rows as a separate, overlapping call
+denominator. Verify producer/reader release coverage first; old `unknown` records
+cannot be backfilled. This is evidence for future schema-rejection attribution,
+not proof that any previously observed connected-app failure was schema-related.
+
 ### Finite CLI failure counts (optional, same timing identity)
 
 Each non-successful invocation from a new producer contributes at most one
