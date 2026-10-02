@@ -117,3 +117,23 @@ requests, persisted state, provider mutation, or timeout. Historical range
 overlap and reported data are diagnostic only; neither can satisfy the strict
 canonical-value proof. Verify missing, malformed, disjoint and overlapping
 ranges, zero/positive/unknown counts, identity isolation, and output privacy.
+
+
+## Fresh authentication and permission diagnosis
+
+Fresh provider browsers are now merged and live authorization succeeds without
+restored cookies. A complete twenty-minute attempt still found no activity,
+sleep, or workout summaries in the bounded historical range. Historical requests
+overlapped the proof window and reported success with no days containing data;
+cleanup succeeded. This establishes neither a production-vault failure nor the
+cause of missing canary data.
+
+The next bounded diagnostic uses the existing user-connections API to distinguish
+resource authorization and required-scope denial from resource inventory. It runs
+only after proof failure, uses the same user identity, adds one read within the
+existing ten-second diagnostic limit, and emits only closed categories. No raw
+scope names, provider IDs, health values, credentials, or errors are logged.
+
+- [x] Verify permission classification, privacy, cancellation, and unchanged strict oracle.
+- [ ] Complete focused typecheck, parent review, final review, and exact-head CI.
+- [ ] Inspect a protected-main run with permission diagnostics before deciding on a correction.

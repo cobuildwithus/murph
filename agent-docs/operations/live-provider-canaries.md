@@ -86,6 +86,13 @@ age of an executed run; this system adds no product-state receipt database.
   days with data. Range overlap describes a request, not delivered coverage;
   reported data cannot certify canonical ingestion. Output contains only closed
   categories, never raw dates, counts, errors, account IDs, or health values.
+  The same failure-only diagnostic reads the requested user's Garmin connection
+  permissions: resource authorization and whether required scopes are granted,
+  denied, absent, or unknown. This distinguishes authorization from inventory
+  presence. Scope names and connection payloads never leave the process. The
+  extra connection read uses one attempt with an eight-second request limit;
+  all six diagnostic queries share the existing ten-second deadline. Permissions
+  and historical metadata cannot change the canonical proof result.
 
 
 ## Garmin execution boundary
