@@ -1076,6 +1076,9 @@ withdraw that wait, leaving the actual child tracked until it exits. Only effect
 covered by a successful snapshot may acknowledge exact device revisions. Already
 committed Web updates remain authoritative, and interrupted attempts recover
 through the durable mailbox and existing continuation contract.
+After quiescence, full snapshots derive `systemMailboxProgressGeneration` from
+the checkpoint request builder's latest accepted workspace and advance it only
+for system progress not yet checkpointed.
 
 After a device item records a durable follow-up deadline, that
 `device-sync.reconcile` deadline remains in the canonical model-free
