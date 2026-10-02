@@ -25,7 +25,7 @@ export const CANARY_RESET_TIMEOUT_MS = 300_000;
 // Observe the normal quiet window plus bounded checkpoint/publication time.
 // This budget is independent of the twenty-second reply latency requirement.
 export const CANARY_OUTCOME_WAIT_MS = HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000;
-const CANARY_OUTCOME_POLL_MS = 1_000;
+export const CANARY_OUTCOME_POLL_MS = 5_000;
 
 type LinqProductionCanaryConfig = {
   productionBaseUrl: string;

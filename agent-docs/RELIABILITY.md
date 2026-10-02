@@ -3000,7 +3000,7 @@ to apply after cutover.
   pre-expiry provider evidence delivered later can still qualify; the first
   referrer-serialized expiry boundary after the grace is authoritative
   finality. The immediate ingress handoff for conversational referrals and a
-  bounded Vercel-authenticated minute recovery pass both retry idempotent
+  bounded Vercel-authenticated five-minute recovery pass both retry idempotent
   reward reconciliation. For stable signup-link activations, that recovery
   pass is the normal settlement owner and scans oldest first in a fixed 50-row
   batch; no immediate activation handoff exists. The source mailbox append and

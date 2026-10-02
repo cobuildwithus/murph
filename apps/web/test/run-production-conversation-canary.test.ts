@@ -59,6 +59,7 @@ vi.mock("@spectrum-ts/imessage", () => ({
 }));
 
 import {
+  CANARY_OUTCOME_POLL_MS,
   CANARY_OUTCOME_WAIT_MS,
   CANARY_REPLY_WAIT_MS,
   CANARY_RESET_TIMEOUT_MS,
@@ -391,6 +392,8 @@ describe("production conversation canary runner", () => {
 
     await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity" });
     expect(clock.elapsedMs()).toBe(HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000);
+    expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "GET"))
+      .toHaveLength(CANARY_OUTCOME_WAIT_MS / CANARY_OUTCOME_POLL_MS);
     expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
@@ -458,10 +461,10 @@ describe("production conversation canary runner", () => {
         const response = outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 });
         vi.spyOn(response, "json").mockImplementation(failAfterTimeout);
         return response;
-      });
+    });
 
     await expect(runLinqProductionCanary(TEST_ENV)).resolves.toHaveProperty("canonicalOutcome.proposalGoalCount", 0);
-    expect(clock.elapsedMs()).toBe(11_000);
+    expect(clock.elapsedMs()).toBe(10_000 + CANARY_OUTCOME_POLL_MS);
     expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
   });
 

@@ -251,10 +251,13 @@ export raw JSON or subject identifiers just to investigate a latency span.
 ### Provider request diagnostics
 
 `runner.provider_egress_diagnostic` is the bounded provider-request trace for
-hosted OpenAI Responses traffic and Venice Responses calls explicitly tagged by
-Codex as `request_kind: memory`. Version 4 records request and input byte counts,
-allowlisted shape/model kinds, cache-key presence, and keyed prefix fingerprints.
-For parsed Responses input, it also extends the existing aligned
+Venice Responses calls explicitly tagged by Codex as `request_kind: memory` and
+for Responses WebSocket relay observations. HTTP OpenAI Responses cache
+diagnostics use Worker structured logs with the same bounded, redacted fields
+instead of writing one hosted-runtime-log row per model call. Version 4 records
+request and input byte counts, allowlisted shape/model kinds, cache-key
+presence, and keyed prefix fingerprints. For parsed Responses input, it also
+extends the existing aligned
 `inputNestedMetricKinds`, `inputNestedMetricCounts`, and
 `inputNestedMetricBytes` arrays with fixed function-output metrics. Nonzero
 action metrics use `function_output.action.command.execution`,

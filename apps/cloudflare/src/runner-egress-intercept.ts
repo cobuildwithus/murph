@@ -1472,13 +1472,10 @@ async function maybeHandleOpenAiRequest(input: {
   let diagnosticPromise: Promise<void> | null = null;
   if (endpointKind) {
     diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
-      ctx: input.ctx ?? null,
       endpointKind,
       env: input.env,
       request: input.request,
       upstreamRequestBody: upstreamRequest.clone(),
-      userId: authorization.userId,
-      writeFence: authorization.writeFence,
     });
     if (typeof input.ctx?.waitUntil === "function") {
       input.ctx.waitUntil(diagnosticPromise);
@@ -2235,13 +2232,10 @@ async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
 }
 
 async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
-  ctx: HostedRunnerOutboundContext | null;
   endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   upstreamRequestBody: HostedRunnerDiagnosticBodySource;
-  userId: string | null;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }): Promise<void> {
   let diagnostic: HostedRunnerDiagnosticJson;
   try {
@@ -2272,94 +2266,15 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
     return;
   }
 
-  const runtimeLogScheduled =
-    input.userId !== null
-    && typeof input.ctx?.waitUntil === "function";
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: {
-      runtimeLogScheduled,
+      runtimeLogScheduled: false,
       ...diagnostic,
     },
     message: "Hosted runner provider request diagnostic captured.",
     phase: "wake.running",
   });
-
-  if (!input.userId) {
-    return;
-  }
-
-  await writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog({
-    diagnostic,
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-    writeFence: input.writeFence,
-  }).catch((error) => {
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        endpointKind: input.endpointKind,
-        providerKind: "openai",
-        runtimeLogScheduled,
-      },
-      error,
-      level: "warn",
-      message: "Hosted runner provider request diagnostic runtime-log write failed.",
-      phase: "wake.running",
-    });
-  });
-}
-
-async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
-  diagnostic: HostedRunnerDiagnosticJson;
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  userId: string;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
-}): Promise<void> {
-  const route = HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite;
-  const writeFence = input.writeFence ?? readRuntimeLogWriteFenceMetadata({
-    headers: input.request.headers,
-    userId: input.userId,
-  });
-  const response = await handleRunnerOutboundRequest(
-    new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${route.path}`, {
-      body: JSON.stringify({
-        entries: [{
-          at: new Date().toISOString(),
-          ...(writeFence ? { attemptId: writeFence.attemptId } : {}),
-          component: "runner",
-          eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
-          ...(writeFence ? { leaseGeneration: writeFence.leaseGeneration } : {}),
-          level: "debug",
-          phase: "fetch",
-          redactedJson: input.diagnostic,
-          ...(writeFence?.workspaceVersion ? { workspaceVersion: writeFence.workspaceVersion } : {}),
-        }],
-      }),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        ...(writeFence
-          ? {
-              [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: writeFence.attemptId,
-              [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: writeFence.leaseGeneration,
-              ...(writeFence.workspaceVersion
-                ? { [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: writeFence.workspaceVersion }
-                : {}),
-            }
-          : {}),
-      },
-      method: route.method,
-    }),
-    input.env,
-    input.userId,
-  );
-
-  if (!response.ok) {
-    throw new Error(`Hosted provider request diagnostic runtime-log write returned HTTP ${response.status}.`);
-  }
-  await drainHostedRunnerMetadataResponse(response);
 }
 
 function readOpenAiCacheDiagnosticFingerprintSecret(
@@ -2368,41 +2283,6 @@ function readOpenAiCacheDiagnosticFingerprintSecret(
   const value = env.HOSTED_LOG_FINGERPRINT_SECRET;
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
-}
-
-function readRuntimeLogHeader(headers: Headers, name: string): string | null {
-  const normalized = headers.get(name)?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
-}
-
-function readRuntimeLogWriteFenceMetadata(input: {
-  headers: Headers;
-  userId: string;
-}): HostedProviderEgressWriteFenceMetadata | null {
-  const attemptId = readRuntimeLogHeader(input.headers, HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
-  const leaseGeneration = readRuntimeLogHeader(
-    input.headers,
-    HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
-  );
-  if (!attemptId || !leaseGeneration) {
-    return null;
-  }
-  return {
-    attemptId,
-    leaseGeneration,
-    userId: input.userId,
-    workspaceVersion: readRuntimeLogHeader(
-      input.headers,
-      HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
-    ),
-  };
-}
-
-async function drainHostedRunnerMetadataResponse(response: Response): Promise<void> {
-  if (response.body === null || response.bodyUsed) {
-    return;
-  }
-  await response.arrayBuffer();
 }
 
 async function maybeHandleExaRequest(input: {
