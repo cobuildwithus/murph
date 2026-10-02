@@ -15248,7 +15248,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
                   status: 'queued',
                 }
               }
-              if (request.sourceProvider !== 'garmin') {
+              if (request.action !== 'configure_no_data_outreach' || request.sourceProvider !== 'garmin') {
                 throw new Error('Unsupported no-data outreach source.')
               }
               return {
@@ -42564,4 +42564,137 @@ describeRealCodex('real Codex proactive plan follow-through e2e', () => {
       }
     }, 720_000,
   )
+})
+
+
+describeRealCodex('wearable haptic reminder journey', () => {
+  it.each(['whoop-delay', 'garmin-unknown', 'whoop-useful'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wrist-reminder-'))
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    const calls: AssistantHostedDeviceToolRequest[] = []
+    const saves: AssistantHostedAutomationToolRequest[] = []
+    const now = new Date()
+    now.setUTCSeconds(0, 0) // Match the existing scheduler’s minute-resolution contract.
+    const targetAt = new Date(now.getTime() + 600_000).toISOString()
+    try {
+      await initializeVault({ vaultRoot: workingDirectory })
+      let assistantCliContract: string | null = null
+      if (scenario === 'whoop-useful') {
+        await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+        await upsertAutomation({
+          continuityPolicy: 'preserve', createOnly: true,
+          instructions: 'Remind me to take a five-minute afternoon stretch break.',
+          title: 'Afternoon stretch break', slug: 'afternoon-stretch',
+          schedule: { kind: 'dailyLocal', localTime: '15:00' }, status: 'active', vaultRoot: workingDirectory,
+          route: { channel: 'linq', deliveryTarget: 'synthetic-private-chat', threadIsDirect: true,
+            identityId: 'synthetic-identity', participantId: null, threadId: 'synthetic-private-chat' },
+        })
+        assistantCliContract = buildAssistantCliSurfaceContract(
+          await readAssistantCliLlmsFullManifestFromCliEntry({
+            cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+            workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+          }),
+        )
+      }
+      const remindersBefore = scenario === 'whoop-useful' ? await listAutomations({ vaultRoot: workingDirectory }) : null
+      const context: AssistantHostedToolContext = {
+        computerToolsAvailable: false, vaultFileSendAvailable: false,
+        currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+        currentInvocationScope: () => ({ conversationScope: 'direct', origin: {
+          kind: 'accepted_input', assistantInputId: 'ain_' + 'a'.repeat(32), sessionId: 'synthetic-wrist-session',
+        } }),
+        sendVaultFile: async () => { throw new Error('No file send expected.') },
+        deviceTool: { async request(request, options) {
+          calls.push(request)
+          if (request.action !== 'haptic') throw new Error('Only wrist control expected.')
+          expect(options?.hapticAuthority).toBeDefined()
+          // This also proves the host strips session metadata from strict wire authority.
+          const { wearableHapticRequestSchema } = await import('@murphai/hosted-execution/wearable-haptics')
+          expect(wearableHapticRequestSchema.safeParse({ request, authority: options?.hapticAuthority }).success).toBe(true)
+          return { ...request, status: request.operation === 'status' ? 'ready' : scenario === 'garmin-unknown' ? 'unknown' : 'queued' }
+        } },
+        automationTool: { async request(request) {
+          saves.push(request)
+          if (request.action !== 'save' || request.schedule.kind !== 'at') throw new Error('Only one timer save expected.')
+          const saved = await upsertAutomation({
+            continuityPolicy: 'preserve', createOnly: true, instructions: request.instructions, title: request.title,
+            schedule: request.schedule, status: 'active', vaultRoot: workingDirectory,
+            route: { channel: 'linq', deliveryTarget: 'synthetic-private-chat', threadIsDirect: true,
+              identityId: 'synthetic-identity', participantId: null, threadId: 'synthetic-private-chat' },
+          })
+          return { action: 'save', automationId: saved.record.automationId, created: true,
+            effectiveTimeZone: 'UTC', lookupId: saved.record.slug, occurrenceProjection: { status: 'resolved', nextOccurrenceAt: request.schedule.at },
+            routeBinding: 'current_conversation', schedule: saved.record.schedule, status: 'active', updatedAt: saved.record.updatedAt }
+        } },
+      }
+      const execute = (prompt: string, scheduled: boolean, hostedToolContext = context) => executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract, assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
+          assistantHostedDeviceConnectAvailable: true, assistantHostedDeviceConnectProviders: [],
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: now.toISOString().slice(0, 10),
+          currentInstant: scheduled ? targetAt : now.toISOString(), currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply',
+        }),
+        dynamicTools: [MURPH_DEVICE_TOOL, MURPH_AUTOMATION_TOOL], hostedToolContext,
+        prompt, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const result = await execute(scenario === 'whoop-delay'
+        ? `Please buzz my WHOOP once when my ten-minute meditation ends at ${targetAt}. No buzz now. The band is connected in Murph and I will keep the app open until then.`
+        : scenario === 'whoop-useful'
+          ? 'My WHOOP is connected in Murph. Give it one test buzz and tell me when wrist reminders would be useful for me.'
+          : 'Please buzz my Garmin once now. I know its find-device alert may also sound. Do not retry if the result is unclear.', false)
+      process.stdout.write('[wearable-haptic-live] ' + JSON.stringify({ scenario, reply: result.finalMessage, calls, saves: saves.length }) + '\n')
+      if (scenario === 'whoop-useful') {
+        expect(calls.filter(call => call.action === 'haptic' && call.operation !== 'status')).toEqual([
+          { action: 'haptic', wearable: 'whoop', operation: 'buzz' },
+        ])
+        expect(saves).toEqual([])
+        const commands = await readFile(commandLogPath, 'utf8')
+        expect(commands).toMatch(/automation(?: list|","list)/u)
+        expect(commands).toMatch(/automation(?: show|","show)/u)
+        expect(await listAutomations({ vaultRoot: workingDirectory })).toEqual(remindersBefore)
+        expect(result.finalMessage).toMatch(/stretch/iu)
+        expect(result.finalMessage).toMatch(/five|5/iu)
+        expect(result.finalMessage).toMatch(/queued|sent|requested/iu)
+        expect(result.finalMessage).not.toMatch(/your WHOOP (?:buzzed|vibrated)|has vibrated|I(?:'ve| have) (?:set|created|scheduled)/iu)
+        return
+      }
+      if (scenario === 'garmin-unknown') {
+        expect(calls.filter(call => call.action === 'haptic' && call.operation !== 'status')).toEqual([{ action: 'haptic', wearable: 'garmin', operation: 'buzz' }])
+        expect(saves).toEqual([])
+        expect(result.finalMessage).toMatch(/confirm|unclear|may have|couldn.t tell|cannot tell|not sure/iu)
+        expect(result.finalMessage).not.toMatch(/successfully|your Garmin (?:buzzed|vibrated)|has vibrated/iu)
+        return
+      }
+      expect(calls.every(call => call.action === 'haptic' && call.operation === 'status')).toBe(true)
+      expect(saves).toHaveLength(1)
+      expect(saves[0]).toMatchObject({ action: 'save', schedule: { kind: 'at', at: targetAt } })
+      expect(result.finalMessage).toMatch(/10|ten|meditation|timer/iu)
+      const saved = (await listCanonicalAssistantCronRecords(workingDirectory))[0]
+      if (!saved || saved.kind !== 'automation') throw new Error('Expected saved meditation timer.')
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(saved), now: targetAt })
+      const job = projectCanonicalAssistantCronJob({ source: saved, runtimeState })
+      const instructions = buildAssistantCronExecutionInstructions({ job, kind: 'canonical', runtimeState, source: saved }, { automationId: null, contextReferences: [] })
+      const before = calls.length
+      const fired = await execute(instructions, true, { ...context, currentInvocationScope: () => ({
+        conversationScope: 'direct', origin: { kind: 'automation_occurrence', automationId: saved.automationId, occurrenceAt: targetAt },
+      }) })
+      process.stdout.write('[wearable-haptic-live] ' + JSON.stringify({ scenario: 'whoop-due', reply: fired.finalMessage, calls: calls.slice(before) }) + '\n')
+      expect(calls.slice(before).filter(call => call.action === 'haptic' && call.operation !== 'status')).toEqual([{ action: 'haptic', wearable: 'whoop', operation: 'buzz' }])
+      expect(saves).toHaveLength(1)
+      expect(fired.finalMessage).toMatch(/queued|pending/iu)
+      expect(fired.finalMessage).not.toMatch(/(?:was|is|has been) acknowledged|your WHOOP (?:buzzed|vibrated)|has vibrated/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 720_000)
 })

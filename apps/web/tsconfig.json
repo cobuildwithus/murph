@@ -282,9 +282,6 @@
       "@murphai/query/browser-replica-server": [
         "../../packages/query/src/browser-replica-server.ts"
       ],
-      "@murphai/vault-usecases/clinical-records": [
-        "../../packages/vault-usecases/src/clinical-records.ts"
-      ],
       "@murphai/core": [
         "../../packages/core/src/index.ts"
       ],
@@ -401,6 +398,9 @@
       ],
       "@murphai/device-syncd/types": [
         "../../packages/device-syncd/src/types.ts"
+      ],
+      "@murphai/hosted-execution/wearable-haptics": [
+        "../../packages/hosted-execution/src/wearable-haptics.ts"
       ]
     },
     "sourceMap": false,

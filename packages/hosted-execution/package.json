@@ -206,6 +206,10 @@
     "./observability": {
       "types": "./dist/observability.d.ts",
       "default": "./dist/observability.js"
+    },
+    "./wearable-haptics": {
+      "types": "./dist/wearable-haptics.d.ts",
+      "default": "./dist/wearable-haptics.js"
     }
   },
   "files": [

@@ -573,7 +573,35 @@ enum HostedPhysicalNoteFailureReason {
   unknown
 }
 
+model CompanionWearableSession {
+  userId    String   @map("user_id")
+  wearable  String
+  sessionId String   @map("session_id")
+  expiresAt DateTime @map("expires_at")
+  member    HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, wearable])
+  @@map("companion_wearable_session")
+}
+
+model CompanionWearableCommand {
+  id        String   @id
+  userId    String   @map("user_id")
+  wearable  String
+  sessionId String?  @map("session_id")
+  operation String
+  status    String
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+  member    HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, wearable, sessionId, status, expiresAt], map: "companion_wearable_command_pending_idx")
+  @@map("companion_wearable_command")
+}
+
 model HostedMember {
+  wearableSessions               CompanionWearableSession[]
+  wearableCommands               CompanionWearableCommand[]
   authRecords                    HostedAuthRecord[]
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")

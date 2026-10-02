@@ -68,26 +68,9 @@ export const GET = withJsonError(async (request: Request) => {
       prisma,
     }),
   ]);
+  const contactAction = await readCompanionContactAction({ memberId: auth.member.id, prisma });
   if (state.status === "completed") {
-    return jsonOk(projectCompletedState(state, messagingSetupRequired));
-  }
-
-  let contactAction: MurphContactOption | null = null;
-  try {
-    const contactContext = await readHostedMurphContactContextForMember({
-      memberId: auth.member.id,
-      prisma,
-    });
-    contactAction = resolveMurphContactOptions({
-      contactChannels: contactContext.initialContactChannels,
-      message: INITIAL_MESSAGE,
-      murphEmailAddress: contactContext.murphEmailAddress,
-      murphPhoneNumber: contactContext.murphPhoneNumber,
-    })[0] ?? null;
-  } catch {
-    // Contact-card setup is optional. Never let unavailable encrypted contact
-    // context block the canonical onboarding choices or Health continuation.
-    console.warn("Companion initial onboarding contact projection unavailable.");
+    return jsonOk(projectCompletedState(state, messagingSetupRequired, contactAction));
   }
 
   return jsonOk(projectPendingState({
@@ -123,16 +106,17 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const messagingSetupRequired = await readCompanionMessagingSetupRequired({
-    memberId: auth.member.id,
-    prisma,
-  });
-  return jsonOk(projectCompletedState(result, messagingSetupRequired));
+  const [messagingSetupRequired, contactAction] = await Promise.all([
+    readCompanionMessagingSetupRequired({ memberId: auth.member.id, prisma }),
+    readCompanionContactAction({ memberId: auth.member.id, prisma }),
+  ]);
+  return jsonOk(projectCompletedState(result, messagingSetupRequired, contactAction));
 });
 
 function projectCompletedState(
   state: HostedInitialOnboardingState | HostedInitialOnboardingCompletionResult,
   messagingSetupRequired: boolean,
+  contactAction: MurphContactOption | null,
 ) {
   return {
     schema: COMPANION_INITIAL_ONBOARDING_SCHEMA,
@@ -144,7 +128,9 @@ function projectCompletedState(
     preferences: state.preferences,
     catalog: null,
     contactCard: null,
-    contactAction: null,
+    contactAction: contactAction
+      ? { href: contactAction.href, kind: contactAction.kind, label: contactAction.label }
+      : null,
   };
 }
 
@@ -210,6 +196,29 @@ function projectPendingState(input: {
         }
       : null,
   };
+}
+
+async function readCompanionContactAction(input: {
+  memberId: string;
+  prisma: Parameters<typeof readHostedMurphContactContextForMember>[0]["prisma"];
+}): Promise<MurphContactOption | null> {
+  try {
+    const contactContext = await readHostedMurphContactContextForMember({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+    return resolveMurphContactOptions({
+      contactChannels: contactContext.initialContactChannels,
+      message: INITIAL_MESSAGE,
+      murphEmailAddress: contactContext.murphEmailAddress,
+      murphPhoneNumber: contactContext.murphPhoneNumber,
+    })[0] ?? null;
+  } catch {
+    // Contact-card setup is optional. Never let unavailable encrypted contact
+    // context block the canonical onboarding choices or Health continuation.
+    console.warn("Companion initial onboarding contact projection unavailable.");
+    return null;
+  }
 }
 
 async function readCompanionMessagingSetupRequired(input: {
