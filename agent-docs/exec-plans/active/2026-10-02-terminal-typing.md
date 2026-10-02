@@ -83,3 +83,15 @@ External exact-head review and required CI remain separate pending gates.
 Draft PR #3980 owns this correction. Content-only release-note generation and
 archive proof pass (10 tests); Web typecheck passes. Initial CI rejects draft
 proof explicitly; the task requires retaining draft, so required CI is not green.
+
+## Review blocker
+
+Final independent round 1 on pushed head
+`28d95ec873a8b71530b17499eaf42075e3b3199b` exhausted the 250-minute
+response-capture bound without an assistant response. After the original owner
+exited, exact-metadata export verified the accepted request but recovered zero
+assistant responses and an inactive generation with a service failure.
+No completed review or PASS exists. Keep this plan active and PR #3980 draft;
+resume the final review gate before release. Required CI also remains blocked
+by draft admission. Documentation-only blocker recording and index relocation
+do not change the reviewed production or test candidate. No deployment occurred.

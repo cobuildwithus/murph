@@ -3,9 +3,6 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
-Prepared typing cleanup after committed terminal inputs and synthetic lifecycle
-proof are tracked in [the typing cleanup plan](exec-plans/active/2026-10-02-terminal-typing.md).
-
 Garmin real connection/cleanup and signed synthetic delivery-to-vault proof
 are tracked in
 [`Garmin canary data`](exec-plans/active/2026-10-01-garmin-vault-proof.md).
@@ -868,6 +865,9 @@ storage contract; proof is recorded in
 Early Linq text typing reuses the existing staging-to-turn handoff owned by
 `packages/assistant-runtime/README.md`; implementation and synthetic proof are
 tracked in [`warm typing latency`](exec-plans/completed/2026-09-25-warm-typing-latency.md).
+
+Prepared typing cleanup after committed terminal inputs and synthetic lifecycle
+proof are tracked in [the typing cleanup plan](exec-plans/active/2026-10-02-terminal-typing.md).
 
 Actual message-processing latency reductions in checkpoint wake discovery and
 snapshot cleanup bookkeeping are tracked in
