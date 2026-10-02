@@ -135,5 +135,30 @@ existing ten-second diagnostic limit, and emits only closed categories. No raw
 scope names, provider IDs, health values, credentials, or errors are logged.
 
 - [x] Verify permission classification, privacy, cancellation, and unchanged strict oracle.
-- [ ] Complete focused typecheck, parent review, final review, and exact-head CI.
-- [ ] Inspect a protected-main run with permission diagnostics before deciding on a correction.
+- [x] Complete focused typecheck, parent review, final review, and exact-head CI.
+- [x] Inspect a protected-main run with permission diagnostics before deciding on a correction.
+
+
+## Permission diagnostic outcome
+
+PR 3964 merged as `03f8777a1a3427af16347479606f080e86ecb1eb`. All 36 focused
+tests, Cloudflare typecheck, logging guard, final ReviewGPT, and 36 final-head CI
+checks passed (two CI checks skipped). The complexity guard excludes test helpers;
+parent review checked their bounded calls and local classification directly.
+
+Public run 36947142069 and private run 36947173763 completed unsuccessfully.
+Fresh authorization, persisted connection, and cleanup succeeded. After the full
+twenty-minute wait, all diagnostic queries completed. Activity, sleep, and workouts
+each reported resource authorization available, required scopes unknown, empty
+ninety-day summary collections, and successful historical requests overlapping
+the proof window with no reported days containing data. The broader summary range
+includes open days; the strict closed-day requirement does not explain those
+empty diagnostic collections. Available authorization does not prove detailed
+scope grants or historical delivery.
+
+The canary fails before canonical ingestion because its provider query is empty.
+The existing user-creation request sets only client identity; repository code does
+not set ingestion start/end bounds. Provider-side bounds and backfill delivery
+remain unverified. Investigate those through scoped sandbox access before further
+code or timeout changes. Do not infer production-vault contents from this isolated
+canary. The canonical-ingestion goal remains active and unqualified.
