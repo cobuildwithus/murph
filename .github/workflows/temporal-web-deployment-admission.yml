@@ -23,9 +23,9 @@ jobs:
     name: Temporal Web production admission
     environment: temporal-compatibility
     runs-on: ubuntu-24.04
-    # Enforced pre-token budgets: 5m required setup + 10m optional artifact.
+    # Enforced pre-token budgets: 5m required setup + 15m optional artifact.
     # Preserve the controller's 58m credential budget and 2m cleanup reserve.
-    timeout-minutes: 75
+    timeout-minutes: 80
     permissions:
       contents: read
       statuses: write
@@ -82,7 +82,7 @@ jobs:
       # for compilation and no private assets or credentials reach the archive.
       - name: Build public hosted integration Web dist
         if: steps.public-pnpm.outcome == 'success'
-        timeout-minutes: 7
+        timeout-minutes: 12
         id: public-web-build
         continue-on-error: true
         env:

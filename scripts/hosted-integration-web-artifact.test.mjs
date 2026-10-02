@@ -48,7 +48,7 @@ test("optional setup failures and timeouts leave mandatory private proof reachab
     assert.match(declaration, /continue-on-error: true/u, `${name} must not abort admission`);
     optionalMinutes += Number(declaration.match(/timeout-minutes: ([0-9]+)/u)?.[1]);
   }
-  assert.equal(optionalMinutes, 10);
+  assert.equal(optionalMinutes, 15);
   // A failed pnpm bootstrap skips both dependent setup and compilation. A
   // cache failure still permits compilation; a failed/timed-out build skips upload.
   for (const name of optional.slice(1, 3)) {
