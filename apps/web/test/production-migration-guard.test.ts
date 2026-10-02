@@ -2581,7 +2581,7 @@ fi
       ),
       {
         path: "/api/internal/hosted-growth/usage-referral/cron",
-        schedule: "* * * * *",
+        schedule: "*/5 * * * *",
       },
     );
     assert.deepEqual(

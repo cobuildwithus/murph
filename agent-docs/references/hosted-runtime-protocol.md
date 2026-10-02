@@ -147,7 +147,7 @@ The live ownership split is:
   conversation items and a provisioned workspace. It reads one already-signed
   ingress envelope per batch, never runtime roots or plaintext keys. The Worker
   verifies the supplied context through the existing user/domain/signature and
-  recipient checks, then reuses the bounded encrypted-envelope cache (60-second
+  recipient checks, then reuses the bounded encrypted-envelope cache (five-minute
   ceiling). The extension is stripped before returning the mailbox to the
   container. Cache hits request no envelope read. An old Web response omits the
   extension and retains the existing context callback; old Workers never request

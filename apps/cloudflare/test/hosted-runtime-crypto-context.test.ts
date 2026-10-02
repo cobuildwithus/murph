@@ -460,11 +460,20 @@ test("Cloudflare runtime user crypto context caches verified envelope JSON witho
     const keyVersionName =
       "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
     const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 150 + index);
+    const ingressRoot = Uint8Array.from({ length: 32 }, (_, index) => 50 + index);
     const runtime = await createSignedWorkerEnvelope({
       domain: "runtime",
       keyVersionName,
       publicJwk: cloudflareRecipient.publicJwk,
       rootKey: runtimeRoot,
+      signer: signer.privateKey,
+      userId: "user-1",
+    });
+    const ingress = await createSignedWorkerEnvelope({
+      domain: "ingress",
+      keyVersionName,
+      publicJwk: cloudflareRecipient.publicJwk,
+      rootKey: ingressRoot,
       signer: signer.privateKey,
       userId: "user-1",
     });
@@ -487,7 +496,7 @@ test("Cloudflare runtime user crypto context caches verified envelope JSON witho
       return new Response(JSON.stringify({
         cacheMaxAgeMs: 5 * 60 * 1000,
         cryptoContextVersion: "hccv_test_runtime_context",
-        envelopes: { runtime },
+        envelopes: { ingress, runtime },
         fetchedAt: new Date().toISOString(),
         ignored: "not cached",
         schema: "murph.hosted-runtime-crypto-context.v1",
@@ -508,11 +517,11 @@ test("Cloudflare runtime user crypto context caches verified envelope JSON witho
       userId: "user-1",
     });
 
-    assert.equal(first.cacheMaxAgeMs, 60_000);
+    assert.equal(first.cacheMaxAgeMs, 5 * 60 * 1000);
     assert.deepEqual(first.rootKey, runtimeRoot);
     first.rootKey.fill(0);
 
-    vi.setSystemTime(new Date("2026-05-01T00:00:30.000Z"));
+    vi.setSystemTime(new Date("2026-05-01T00:04:59.000Z"));
     const second = await requireHostedUserCryptoContextFromEnvironment({
       domain: "runtime",
       environment,
@@ -524,7 +533,18 @@ test("Cloudflare runtime user crypto context caches verified envelope JSON witho
     assert.deepEqual(second.rootKey, runtimeRoot);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    vi.setSystemTime(new Date("2026-05-01T00:01:01.000Z"));
+    const ingressContext = await requireHostedUserCryptoContextFromEnvironment({
+      domain: "ingress",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-cache",
+      userId: "user-1",
+    });
+
+    assert.deepEqual(ingressContext.rootKey, ingressRoot);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date("2026-05-01T00:05:01.000Z"));
     await requireHostedUserCryptoContextFromEnvironment({
       domain: "runtime",
       environment,
@@ -549,8 +569,11 @@ test("supplied ingress context verifies before caching and avoids the context re
     const signer = await generateP256SigningKeyPair();
     const keyVersionName = "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
     const rootKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const runtimeRootKey = Uint8Array.from({ length: 32 }, (_, index) => 100 + index);
     const ingress = await createSignedWorkerEnvelope({ domain: "ingress", keyVersionName,
       publicJwk: recipient.publicJwk, rootKey, signer: signer.privateKey, userId: "synthetic-member" });
+    const runtime = await createSignedWorkerEnvelope({ domain: "runtime", keyVersionName,
+      publicJwk: recipient.publicJwk, rootKey: runtimeRootKey, signer: signer.privateKey, userId: "synthetic-member" });
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: keyVersionName,
       HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem.replace(/\n/gu, "\\n"),
@@ -560,7 +583,7 @@ test("supplied ingress context verifies before caching and avoids the context re
     }));
     const input = { domain: "ingress" as const, environment, userId: "synthetic-member" };
     const context = { cacheMaxAgeMs: 300_000, cryptoContextVersion: "synthetic-version",
-      envelopes: { ingress }, fetchedAt: new Date().toISOString(),
+      envelopes: { ingress, runtime }, fetchedAt: new Date().toISOString(),
       schema: "murph.hosted-runtime-crypto-context.v1", userId: input.userId };
     const fetchImpl = vi.fn<typeof fetch>();
     expect(hasCachedHostedUserCryptoContextEnvelope(input)).toBe(false);
@@ -575,13 +598,21 @@ test("supplied ingress context verifies before caching and avoids the context re
     const first = await requireHostedUserCryptoContextFromResponse({ ...input, context, fetchImpl });
     expect(first.rootKey).toEqual(rootKey);
     expect(hasCachedHostedUserCryptoContextEnvelope(input)).toBe(true);
-    expect(hasCachedHostedUserCryptoContextEnvelope({ ...input, domain: "runtime" })).toBe(false);
+    expect(hasCachedHostedUserCryptoContextEnvelope({ ...input, domain: "runtime" })).toBe(true);
     first.rootKey.fill(0);
     const second = await requireHostedUserCryptoContextFromEnvironment({ ...input, fetchImpl, reason: "synthetic-test" });
     expect(second.rootKey).toEqual(rootKey);
+    const runtimeContext = await requireHostedUserCryptoContextFromEnvironment({
+      ...input,
+      domain: "runtime",
+      fetchImpl,
+      reason: "synthetic-test",
+    });
+    expect(runtimeContext.rootKey).toEqual(runtimeRootKey);
     expect(fetchImpl).not.toHaveBeenCalled();
-    vi.setSystemTime(new Date("2026-05-01T00:01:01Z"));
+    vi.setSystemTime(new Date("2026-05-01T00:05:01Z"));
     expect(hasCachedHostedUserCryptoContextEnvelope(input)).toBe(false);
+    expect(hasCachedHostedUserCryptoContextEnvelope({ ...input, domain: "runtime" })).toBe(false);
   } finally {
     vi.useRealTimers();
     clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
@@ -880,7 +911,7 @@ test("Cloudflare runtime user crypto context clamps future fetchedAt before retu
       userId: "user-1",
     });
 
-    assert.equal(context.cacheMaxAgeMs, 60_000);
+    assert.equal(context.cacheMaxAgeMs, 5 * 60 * 1000);
     assert.equal(context.fetchedAtMs, Date.parse("2026-05-01T00:00:00.000Z"));
     assert.deepEqual(context.rootKey, runtimeRoot);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -961,7 +992,7 @@ test("Cloudflare runtime user crypto context does not cache envelopes older than
   vi.useFakeTimers();
 
   try {
-    vi.setSystemTime(new Date("2026-05-01T00:02:00.000Z"));
+    vi.setSystemTime(new Date("2026-05-01T00:06:00.000Z"));
 
     const cloudflareRecipient = await generateP256EcdhKeyPair();
     const signer = await generateP256SigningKeyPair();

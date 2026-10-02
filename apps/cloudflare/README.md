@@ -741,7 +741,8 @@ OpenAI Responses upgrades return the upstream `Response` and unaccepted
 `webSocket` unchanged. Cloudflare forwards the connection; native Codex owns
 continuation, idle reuse, and reconnect/fallback. The Worker owns handshake
 runtime authorization and API-key injection, with no frame relay or socket
-registry. HTTP response diagnostics and native Codex transport diagnostics remain.
+registry. HTTP response diagnostics remain as Worker structured logs, and native
+Codex transport diagnostics remain.
 
 An opaque socket is admitted only after the existing image-access callback
 allows the runtime member. Otherwise HTTP 426 activates native Codex HTTPS
