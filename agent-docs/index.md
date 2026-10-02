@@ -954,3 +954,7 @@ Private scheduled phone-call guidance, authenticated Linq sender context, and
 live setup-to-due proof are recorded in
 [`scheduled phone calls`](exec-plans/completed/2026-10-01-scheduled-phone-calls.md);
 `ARCHITECTURE.md` and the phone-calls skill own the current contract.
+
+Idle snapshot progress generation ownership is specified in the hosted runtime
+protocol reference; regression proof is recorded in
+[`checkpoint progress`](exec-plans/completed/2026-10-02-checkpoint-progress-regression.md).
