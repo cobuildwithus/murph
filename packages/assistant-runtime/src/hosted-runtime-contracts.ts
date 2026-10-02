@@ -49,6 +49,7 @@ export type {
   HostedRuntimePlatform,
   HostedRuntimePhoneCallPort,
   HostedRuntimePlanUsageToolPort,
+  HostedRuntimeUsageDiagnosticsPort,
   HostedRuntimeSubscriptionToolPort,
   HostedRuntimeProviderFileResponse,
   HostedRuntimeProviderTargetKind,

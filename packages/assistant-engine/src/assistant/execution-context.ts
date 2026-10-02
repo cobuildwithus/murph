@@ -80,6 +80,10 @@ import type {
   HostedPhysicalNoteSendResponse,
 } from '@murphai/hosted-execution/physical-notes'
 import type {
+  HostedUsageDiagnosticsRequest,
+  HostedUsageDiagnosticsResponse,
+} from '@murphai/hosted-execution/usage-diagnostics'
+import type {
   HostedPlanUsageStatus,
   HostedPlanUsageToolRequest,
 } from '@murphai/hosted-execution/plan-usage'
@@ -281,6 +285,8 @@ export type AssistantHostedAutomationToolResponse =
       action: 'inspect'
       executionInspection?: AssistantAutomationExecutionInspection
       automationId: string
+      assistantTargetOverride?: AutomationAssistantTargetOverride | null
+      managed?: boolean
       contextReferences?: readonly AutomationContextReference[]
       instructions?: string
       title?: string
@@ -296,6 +302,8 @@ export type AssistantHostedAutomationToolResponse =
   | {
       action: 'patch' | 'save'
       automationId: string
+      assistantTargetOverride?: AutomationAssistantTargetOverride | null
+      managed?: boolean
       contextReferences?: readonly AutomationContextReference[]
       created: boolean
       deliveryChannel?: string
@@ -343,6 +351,8 @@ export interface AssistantHostedActionApprovalPort {
 export interface AssistantHostedProductFeedbackCandidateSink {
   acceptProductFeedbackCandidate(
     feedback: HostedRuntimeProductFeedbackRecord,
+    // Host-created only after the exact private weekly notification commits.
+    authorization?: { committedUsageOptimizerScope: { memberId: string; occurrenceAt: string } },
   ): void
   deliverProductSupportEscalation?(
     feedback: HostedRuntimeProductFeedbackRecord,
@@ -353,6 +363,10 @@ export interface AssistantHostedFamilyPlanTool {
   request(
     request: HostedRuntimeFamilyPlanToolRequest,
   ): Promise<HostedRuntimeFamilyPlanToolResponse>
+}
+
+export interface AssistantHostedUsageDiagnostics {
+  read(request: HostedUsageDiagnosticsRequest): Promise<HostedUsageDiagnosticsResponse>
 }
 
 export interface AssistantHostedPlanUsageTool {
@@ -602,6 +616,7 @@ export interface AssistantHostedExecutionContext {
   groupTool?: AssistantHostedGroupTool | null
   labsTool?: AssistantHostedLabsTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
+  usageDiagnostics?: AssistantHostedUsageDiagnostics | null
   physicalNotes?: AssistantPhysicalNotePort | null
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
@@ -714,7 +729,8 @@ export function normalizeAssistantExecutionContext(
     hosted.groupSharedReader,
   )
   const labsTool = normalizeAssistantLabsTool(hosted.labsTool)
-  const planUsageTool = normalizeAssistantPlanUsageTool(hosted.planUsageTool)
+  const planUsageTool = normalizeAssistantReadTool(hosted.planUsageTool)
+  const usageDiagnostics = normalizeAssistantReadTool(hosted.usageDiagnostics)
   const subscriptionTool = normalizeAssistantSubscriptionTool(
     hosted.subscriptionTool,
   )
@@ -771,6 +787,7 @@ export function normalizeAssistantExecutionContext(
       ...optionalHostedField('groupTool', groupTool),
       ...optionalHostedField('labsTool', labsTool),
       ...optionalHostedField('planUsageTool', planUsageTool),
+      ...optionalHostedField('usageDiagnostics', usageDiagnostics),
       ...optionalHostedField('physicalNotes', physicalNotes),
       ...optionalHostedField('privateImageUrlPublisher', privateImageUrlPublisher),
       ...optionalHostedField('subscriptionTool', subscriptionTool),
@@ -985,9 +1002,9 @@ function normalizeAssistantFamilyPlanTool(
   }
 }
 
-function normalizeAssistantPlanUsageTool(
-  input: AssistantHostedExecutionContext['planUsageTool'] | undefined,
-): AssistantHostedPlanUsageTool | undefined {
+function normalizeAssistantReadTool<Request, Response>(
+  input: { read(request: Request): Promise<Response> } | null | undefined,
+): { read(request: Request): Promise<Response> } | undefined {
   if (!input || typeof input.read !== 'function') {
     return undefined
   }

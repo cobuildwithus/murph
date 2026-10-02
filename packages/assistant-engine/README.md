@@ -393,6 +393,16 @@ again when invoked. Adding a tool therefore requires only:
 
 Do not add per-tool availability booleans to provider or app-server inputs.
 
+`murph.usage_diagnostics` is a separate default-off, read-only private tool for
+usage investigations and the weekly usage review. It requires the bound hosted
+read port and a private accepted-input or scheduled invocation scope. Requests
+select only a bounded window (1–31 days) and top-turn count (1–20), never a
+member identity. Responses validate against the shared aggregate contract:
+recorded allowance costs, model/source totals, bounded expensive turns, model
+rates, and sanitized tool output byte counts. Byte counts are not exact tokens
+or tool-attributed costs; missing profiles and truncated groups remain explicit.
+No raw tool output, command arguments, prompts, or transcripts are returned.
+
 `murph.plan_usage` follows this default-off rule. It is advertised only when a
 hosted plan-usage service exists, accepts no arguments, and returns only the
 web-authorized read projection. Assistant policy limits it to explicit member

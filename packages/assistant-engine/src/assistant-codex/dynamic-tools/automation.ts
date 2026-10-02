@@ -999,6 +999,8 @@ function serializeAutomationToolResponse(
       payload = {
         action: response.action,
         automationId: response.automationId,
+        assistantTargetOverride: response.assistantTargetOverride,
+        managed: response.managed,
         contextReferences: response.contextReferences,
         created: response.created,
         deliveryChannel: response.deliveryChannel,
@@ -1015,6 +1017,8 @@ function serializeAutomationToolResponse(
         action: response.action,
         executionInspection: response.executionInspection,
         automationId: response.automationId,
+        assistantTargetOverride: response.assistantTargetOverride,
+        managed: response.managed,
         contextReferences: response.contextReferences,
         instructions: response.instructions,
         title: response.title,

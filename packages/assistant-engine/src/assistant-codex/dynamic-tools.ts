@@ -87,6 +87,11 @@ import type {
   HostedPhoneCallResultNotificationChannel,
 } from '@murphai/hosted-execution/phone-calls'
 import {
+  hostedUsageDiagnosticsRequestSchema,
+  parseHostedUsageDiagnosticsResponse,
+  type HostedUsageDiagnosticsRequest,
+} from '@murphai/hosted-execution/usage-diagnostics'
+import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
   type HostedPlanUsageStatus,
@@ -355,6 +360,7 @@ import {
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_USAGE_DIAGNOSTICS_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
@@ -1574,6 +1580,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-usage-diagnostics-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-plan-usage-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1607,6 +1617,10 @@ export type MurphDynamicToolRequest =
       messageRef?: string
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
       toolCallId?: string
+    }
+  | {
+      kind: 'usage-diagnostics'
+      request: HostedUsageDiagnosticsRequest
     }
   | {
       kind: 'plan-usage'
@@ -1963,19 +1977,9 @@ export function readMurphDynamicToolRequest(
         request: parsed.request,
       }
     }
-    case MURPH_PLAN_USAGE_TOOL.name: {
-      const parsed = parsePlanUsageArguments(request.arguments)
-      if (!parsed.ok) {
-        return {
-          kind: 'invalid-plan-usage-arguments',
-          validationDigest: parsed.validationDigest,
-        }
-      }
-      return {
-        kind: 'plan-usage',
-        request: parsed.request,
-      }
-    }
+    case MURPH_USAGE_DIAGNOSTICS_TOOL.name:
+    case MURPH_PLAN_USAGE_TOOL.name:
+      return parsePrivateUsageToolRequest(request.tool, request.arguments)
     case MURPH_IMESSAGE_CONTACT_TOOL.name: {
       const parsed = parseIMessageContactArguments(request.arguments)
       if (!parsed.ok) {
@@ -3766,6 +3770,7 @@ async function dispatchMurphDynamicToolRequest(
         hostedToolContext: hostedContext,
         request: input.request.request,
       })
+    case 'usage-diagnostics':
     case 'plan-usage':
     case 'poll':
     case 'imessage-contact':
@@ -3900,7 +3905,7 @@ async function dispatchMurphDynamicToolRequest(
     case 'connected-apps-manage':
     case 'connected-apps-search':
     case 'connected-apps-execute': {
-      const connectedApps = input.hostedToolContext?.connectedApps ?? null
+      const connectedApps = hostedContext?.connectedApps
       if (!connectedApps) {
         return toolTextResult(
           false,
@@ -4181,6 +4186,26 @@ async function executeFamilyPlanTool(input: {
   }
 }
 
+async function executeUsageDiagnosticsTool(
+  context: AssistantHostedToolContext | null,
+  request: HostedUsageDiagnosticsRequest,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (!context?.usageDiagnostics) {
+    return toolTextResult(false, 'usage diagnostics are unavailable for this turn', 'unavailable')
+  }
+  const scope = context.currentInvocationScope?.()?.conversationScope
+    ?? context.currentUserActionScope?.()?.conversationScope
+  if (scope !== 'direct') {
+    return toolTextResult(false, 'usage diagnostics require a private conversation or private scheduled automation', 'authority_rejected')
+  }
+  try {
+    const result = parseHostedUsageDiagnosticsResponse(await context.usageDiagnostics.read(request))
+    return toolTextResult(true, safeToolPayloadText(result))
+  } catch (error) {
+    return toolTextResult(false, 'usage diagnostics could not be read', 'handler_exception', error)
+  }
+}
+
 async function executePlanUsageTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedPlanUsageToolRequest
@@ -4258,10 +4283,11 @@ function projectHostedGroupPlanLabel(label: string): string {
 
 async function executeCurrentConversationTool(
   input: ExecuteMurphDynamicToolRequestInput,
-  request: Extract<MurphDynamicToolRequest, { kind: 'poll' | 'plan-usage' | 'imessage-contact' }>,
+  request: Extract<MurphDynamicToolRequest, { kind: 'poll' | 'plan-usage' | 'usage-diagnostics' | 'imessage-contact' }>,
 ): Promise<MurphDynamicToolExecutionResult> {
   const hostedToolContext = input.hostedToolContext ?? null
   switch (request.kind) {
+    case 'usage-diagnostics': return executeUsageDiagnosticsTool(hostedToolContext, request.request)
     case 'poll': return executeConversationPollTool({ request: request.request, context: hostedToolContext })
     case 'plan-usage': return executePlanUsageTool({ request: request.request, hostedToolContext })
     case 'imessage-contact': return executeIMessageContactTool({ hostedToolContext })
@@ -7495,6 +7521,27 @@ function parseFamilyPlanArguments(
       },
     },
   }
+}
+
+function parsePrivateUsageToolRequest(
+  toolName: string,
+  value: unknown,
+): MurphDynamicToolRequest {
+  if (toolName === MURPH_USAGE_DIAGNOSTICS_TOOL.name) {
+    const parsed = parseDynamicToolArguments({
+      schema: hostedUsageDiagnosticsRequestSchema,
+      value,
+      schemaRootKeys: ['days', 'limit'],
+      toolName: 'murph.usage_diagnostics',
+    })
+    return parsed.ok
+      ? { kind: 'usage-diagnostics', request: parsed.args }
+      : { kind: 'invalid-usage-diagnostics-arguments', validationDigest: parsed.validationDigest }
+  }
+  const parsed = parsePlanUsageArguments(value)
+  return parsed.ok
+    ? { kind: 'plan-usage', request: parsed.request }
+    : { kind: 'invalid-plan-usage-arguments', validationDigest: parsed.validationDigest }
 }
 
 function parsePlanUsageArguments(

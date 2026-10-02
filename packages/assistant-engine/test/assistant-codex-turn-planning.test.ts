@@ -1,3 +1,4 @@
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID } from '../src/assistant/managed-automation-ids.js'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -358,8 +359,15 @@ describe('assistant Codex turn planning', () => {
         }),
       }),
     }
-    // These private routes include wiki guidance. Assert the intended change
-    // explicitly alongside the complete-plan fingerprints below.
+    // Preserve the weekly audit rule alongside the runtime's wiki guidance;
+    // the complete-plan fingerprints below characterize their composition.
+    for (const plan of [plans.direct, plans.group, plans.scheduledEmail]) {
+      for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
+        expect(instructions).toContain(
+          'A scheduled usage audit instead reports available evidence and coverage limits without asking a question.',
+        )
+      }
+    }
     for (const plan of [plans.direct, plans.scheduledEmail]) {
       for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
         expect(instructions).toContain('vault-cli knowledge show <slug> --format json')
@@ -434,11 +442,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "73cc679d89e4865ba5b041f41c38a3f0637b606998e45274e469f1dd52a6ba5a",
-        "group": "59291f8075dcdacaff23f90a0fb0260d4d1fa3a448aa3ca29c5b14ea757f681d",
+        "direct": "3b81d5ea06d1b880060e69d575658a5e5314af63034a00979a8093fc9aeaed3d",
+        "group": "93803fc4515e313d00569b74e17034a97b39ff64f91084456b8b17a370618811",
         "maintenance": "ac022f98be034bc9bbcfd987fb422a0546cfa1899d4c99b97167d7d22527547e",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "0f39a4d19848e36d4848df82569532832ec3178ca5c542a13555ac7107e7a04d",
+        "scheduledEmail": "a4f3b99448e46e0c23ee8995c64bf84c07413b2ae7cb0c754fb402d4de0a4f7e",
       }
     `)
   })
@@ -4432,6 +4440,39 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
+  it.each([true, false])('grants anonymous scheduled feedback only to the exact weekly optimizer (%s)', async (optimizer) => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: false })
+    const occurrenceAt = '2026-10-05T04:00:00.000Z'
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [],
+        productFeedbackCandidateSink: { acceptProductFeedbackCandidate: vi.fn() } } },
+      input: { ...createMessageInput(), turnTrigger: 'automation-cron', scheduledOccurrenceAt: occurrenceAt,
+        scheduledInvocationAuthority: { automationId: optimizer ? MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID : 'automation_other', occurrenceAt } },
+      profile: { promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-10-05', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(), sharedPlan: createPrivateSharedPlan(),
+    })
+    expect(plan.dynamicTools.some(tool => tool.name === 'submit_product_feedback')).toBe(optimizer)
+  })
+
+  it.each([true, false])('offers usage diagnostics in a private turn only with a port (%s)', async (available) => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: false })
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      hostedToolContext: { ...createHostedToolContext(),
+        usageDiagnostics: available ? { read: vi.fn() } : null },
+      input: createMessageInput(),
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-07-18', currentTimeZone: 'America/New_York' },
+      route: createRoute(), session: createSession(), sharedPlan: createPrivateSharedPlan(),
+    })
+    expect(plan.dynamicTools.some((tool) => tool.name === 'usage_diagnostics')).toBe(available)
+  })
+
   it('derives a group-scoped prompt and tool surface from the audience', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -4450,6 +4491,7 @@ describe('assistant Codex turn planning', () => {
       groupEmailEffect: { request: vi.fn() },
       personalizationTool: { request: vi.fn() },
       planUsageTool: { read: vi.fn() },
+      usageDiagnostics: { read: vi.fn() },
       phoneCalls: { start: vi.fn() },
       subscriptionTool: { request: vi.fn() },
     }
@@ -4632,6 +4674,7 @@ describe('assistant Codex turn planning', () => {
       'labs',
       'pending_vault_files',
       'plan_usage',
+      'usage_diagnostics',
       'send_vault_file',
       'subscription',
     ]) {

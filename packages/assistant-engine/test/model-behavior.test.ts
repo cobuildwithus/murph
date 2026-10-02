@@ -2261,11 +2261,12 @@ describe('assistant system prompt cache stability', () => {
     // Direct tool-recovery progress guidance adds 659 characters. Complete
     // native-provider captures measure +660 serialized bytes for direct turns
     // and no group growth; live Sol success/failure journeys verify behavior.
-    // Fresh delegation scope and discovery instructions: complete native
-    // requests grow 1,889 bytes direct and 78 bytes group versus the PR base.
-    // Live Sol verifies that discovery happens in the child, not twice.
-    // Preserve the existing 2-character margin.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_509)
+    // The weekly audit sentence adds 106 characters and private wiki discovery
+    // adds 164: this fixture grows from 78,343 at main 82fa1d78bfc8 to 78,613.
+    // Complete native requests measure the runtime delta from weekly main:
+    // +1,889 UTF-8 bytes private and +78 group; live Sol verifies child discovery.
+    // Retain a 2-character margin for the combined guidance.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_615)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

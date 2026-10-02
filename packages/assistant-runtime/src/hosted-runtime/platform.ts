@@ -113,6 +113,10 @@ import type {
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
 import type {
+  HostedUsageDiagnosticsRequest,
+  HostedUsageDiagnosticsResponse,
+} from "@murphai/hosted-execution/usage-diagnostics";
+import type {
   HostedPlanUsageStatus,
   HostedPlanUsageToolRequest,
 } from "@murphai/hosted-execution/plan-usage";
@@ -654,6 +658,10 @@ export interface HostedRuntimeFamilyPlanToolPort {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>;
 }
 
+export interface HostedRuntimeUsageDiagnosticsPort {
+  read(request: HostedUsageDiagnosticsRequest): Promise<HostedUsageDiagnosticsResponse>;
+}
+
 export interface HostedRuntimePlanUsageToolPort {
   read(request: HostedPlanUsageToolRequest): Promise<HostedPlanUsageStatus>;
 }
@@ -911,6 +919,7 @@ export interface HostedRuntimePlatform {
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
+  usageDiagnosticsPort?: HostedRuntimeUsageDiagnosticsPort | null;
   physicalNotes?: HostedRuntimePhysicalNotePort | null;
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;
   subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;

@@ -12,6 +12,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
+[the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
+
 Private sender contact presentation and retrieval are owned by `ARCHITECTURE.md`;
 implementation proof: [on-demand sender contact](exec-plans/completed/2026-10-01-on-demand-sender-contact.md).
 
@@ -639,6 +642,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-codex-0158-live-port.md` | Codex 0.158.0 public Live patch port, removal review, and native compatibility verification; deployment gates remain. | Historical implementation evidence | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
+| `agent-docs/exec-plans/completed/2026-10-02-otp-parameter-diagnostic.md` | Bounded Verify parameter-hint telemetry and unchanged authentication proof. | OTP diagnostic execution plan | Medium | 2026-10-02 |
 | `agent-docs/exec-plans/completed/2026-09-25-linq-link-delay-notice.md` | Local implementation and delivery proof for one best-effort notice after a partial link send. | Historical delivery evidence | Low | 2026-09-25 |
 | `agent-docs/exec-plans/completed/2026-09-17-research-scout-failure-telemetry.md` | Three exact research error codes, parent-native verification and old-reader compatibility; rollout tracked separately. | Historical implementation evidence | Medium | 2026-09-17 |
 | `agent-docs/exec-plans/completed/2026-09-15-vercel-memory-headroom.md` | Vercel typecheck OOM recovery verification, native compiler memory comparisons, and compilation-only esbuild memory target. | Build memory investigation and local proof | Medium | 2026-09-15 |
@@ -954,3 +958,8 @@ Private scheduled phone-call guidance, authenticated Linq sender context, and
 live setup-to-due proof are recorded in
 [`scheduled phone calls`](exec-plans/completed/2026-10-01-scheduled-phone-calls.md);
 `ARCHITECTURE.md` and the phone-calls skill own the current contract.
+
+Weekly usage review, private bounded ledger diagnostics, and anonymous product
+reports are tracked in [weekly usage optimizer](exec-plans/active/2026-10-01-weekly-usage-optimizer.md).
+Current authority and storage contracts remain in `ARCHITECTURE.md`, `SECURITY.md`,
+and `RELIABILITY.md`.
