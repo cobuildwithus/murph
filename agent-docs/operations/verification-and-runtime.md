@@ -767,6 +767,18 @@ production admission. Inspect its install logs and cache-upload result, then
 remove the temporary variable to restore normal caching. Verify the next cached
 build stays warning-free. See [Vercel's build-cache guidance](https://vercel.com/docs/deployments/troubleshoot-a-build#managing-build-cache).
 
+### Public integration Web build artifact
+
+Production admission builds the Web smoke dist from its exact public main SHA
+using synthetic integration configuration before minting private credentials.
+The `hosted-integration-web-v1` artifact binds source, run, attempt, Linux x64,
+Node 24, and archive digest. It contains only the Web dist plus its manifest,
+excludes compiler caches, and expires after one day. Build/upload failure is
+optional for admission: the private consumer retains its existing local build.
+No private assistant assets or production environment enter this producer.
+Artifact reuse never replaces private runtime proof or deployment admission.
+Monitor artifact bytes and storage billing alongside compute savings.
+
 ## Verification Matrix
 
 The delivery-path rule above governs this matrix. For PR-bound work, each row
