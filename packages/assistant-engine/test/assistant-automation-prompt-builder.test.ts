@@ -783,6 +783,17 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('Message text:\nmorning crew')
   })
 
+  it.each(['+12125550123', 'member@example.test', null])('renders current private Linq sender without inferring a phone: %s', (senderHandle) => {
+    const result = buildAssistantAutoReplyPrompt([createPromptInput({
+      captureOverrides: { source: 'linq', text: 'Call me tomorrow.', threadIsDirect: true },
+      sourceMetadata: { kind: 'linq', externalThreadRouteAuthorityPresent: false,
+        senderHandle, partCount: 1, reactionEligible: false, replyToMessageId: null, service: 'iMessage' },
+    })])
+    if (result.kind !== 'ready') throw new Error('Expected private prompt.')
+    if (senderHandle) expect(result.prompt).toContain(`Sender: ${senderHandle}`)
+    else expect(result.prompt).not.toContain('Sender:')
+  })
+
   it('preserves legacy direct Linq speaker presentation and ignores group-only labels', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({

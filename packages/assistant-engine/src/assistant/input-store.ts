@@ -421,8 +421,7 @@ const assistantInputLinqSourceMetadataSchema = z
     senderDisplayName: safeAssistantInputMetadataTextSchema(
       'sourceMetadata.senderDisplayName',
     ).nullable().optional(),
-    // Group (thread-container) inbound only: the sending participant's handle,
-    // so the assistant can attribute messages and detect being addressed.
+    // Authenticated sender contact/presentation context, never effect authority.
     senderHandle: privateAssistantInputRouteScalarSchema(
       'sourceMetadata.senderHandle',
     ).nullish(),
@@ -1215,29 +1214,21 @@ function assertAssistantInputEventReplayCompatible(input: {
   next: AssistantInputEventRecord
 }): void {
   const existingIdentity = assistantInputEventImmutableIdentity(input.existing)
-  const nextIdentity = assistantInputEventImmutableIdentity(input.next)
+  const next = input.existing.contentRetiredAt
+    ? {
+        ...input.next,
+        content: redactAssistantInputContent(input.next.content),
+        sourceMetadata: redactAssistantInputSourceMetadata(input.next.sourceMetadata),
+      }
+    : input.next
+  const nextIdentity = assistantInputEventImmutableIdentity(next)
   if (stableStringify(existingIdentity) === stableStringify(nextIdentity)) {
-    return
-  }
-  if (
-    input.existing.contentRetiredAt
-    && stableStringify(existingIdentity)
-      === stableStringify(
-        assistantInputEventImmutableIdentity({
-          ...input.next,
-          content: redactAssistantInputContent(input.next.content),
-          sourceMetadata: redactAssistantInputSourceMetadata(
-            input.next.sourceMetadata,
-          ),
-        }),
-      )
-  ) {
     return
   }
   const replayCompatibilityIdentity =
     assistantInputEventReplayCompatibilityIdentity({
       existing: input.existing,
-      next: input.next,
+      next,
     })
   if (stableStringify(existingIdentity) === stableStringify(replayCompatibilityIdentity)) {
     return
@@ -1278,8 +1269,21 @@ function assistantInputEventReplayCompatibilityIdentity(input: {
   existing: AssistantInputEventRecord
   next: AssistantInputEventRecord
 }): unknown {
+  let sourceMetadata = input.next.sourceMetadata
+  if (
+    input.existing.sourceMetadata?.kind === 'linq'
+    && input.existing.sourceMetadata.externalThreadRouteAuthorityPresent === false
+    && input.existing.sourceMetadata.senderHandle === undefined
+    && sourceMetadata?.kind === 'linq'
+  ) {
+    // Deployed private imports omitted senderHandle. Compare their original
+    // shape on replay; the stored event and every other identity field stay intact.
+    sourceMetadata = { ...sourceMetadata }
+    delete sourceMetadata.senderHandle
+  }
   return {
     ...assistantInputEventImmutableIdentity(input.next),
+    sourceMetadata,
     content: assistantInputContentReplayCompatibilitySnapshot({
       existing: input.existing.content,
       next: input.next.content,
