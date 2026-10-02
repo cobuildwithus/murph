@@ -3,8 +3,12 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Garmin real connection/cleanup and signed synthetic delivery-to-vault proof
+are tracked in
+[`Garmin canary data`](exec-plans/active/2026-10-01-garmin-vault-proof.md).
+
 Wearable canary credential binding and fresh browser verification are tracked in
-[`fresh canary login`](exec-plans/active/2026-10-01-garmin-fresh-login.md).
+[`fresh canary login`](exec-plans/completed/2026-10-01-garmin-fresh-login.md).
 
 Hosted-local Temporal compatibility preflight implementation and synthetic proof
 are recorded in [the completed preflight plan](exec-plans/completed/2026-09-25-frog-2661-temporal-preflight.md).
