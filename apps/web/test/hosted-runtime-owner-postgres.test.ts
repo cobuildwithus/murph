@@ -263,8 +263,12 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       await expect(requireHostedRuntimeCallback(second, userId, wrong))
         .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
     }
+    await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime,
+      runnerContainerName: "synthetic-callback-boundaries", workspaceVersion: "0",
+      providerEgressTokenHash: null, customInferenceEnvelope: null, platformAiUsageAllowed: true });
     for (const phase of ["starting", "active", "retiring", "idle"]) {
-      await observer.hostedRuntimeOwner.update({ where: { userId }, data: { phase } });
+      await observer.hostedRuntimeOwner.update({ where: { userId },
+        data: { phase, attemptId: phase === "idle" ? null : runtime.attemptId } });
       if (phase === "starting" || phase === "active") {
         await expect(requireHostedRuntimeCallback(second, userId, runtime)).resolves.toBeUndefined();
       } else {
@@ -272,7 +276,8 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
           .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
       }
     }
-    await observer.hostedRuntimeOwner.update({ where: { userId }, data: { phase: "active" } });
+    await observer.hostedRuntimeOwner.update({ where: { userId },
+      data: { phase: "active", attemptId: runtime.attemptId } });
     try {
       for (const phase of ["legacy", "rolling", "draining", "postgres"]) {
         await observer.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase } });
