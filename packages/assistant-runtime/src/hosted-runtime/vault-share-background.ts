@@ -55,10 +55,10 @@ export async function projectHostedVaultShareCheckpoint(input: {
     });
     if (input.shouldStop()) return { outcome: "preempted" };
     const capture = await captureInWorker({
-      fullyMaterializedByProjectionScopeKey:
-        scopes.fullyMaterializedByProjectionScopeKey,
       generationTokensByProjectionScopeKey: scopes.generationTokensByProjectionScopeKey,
       hasDeferredProjectionWork: scopes.hasDeferredProjectionWork,
+      publishedSourceWorkspaceVersionByProjectionScopeKey:
+        scopes.publishedSourceWorkspaceVersionByProjectionScopeKey,
       ...(scopes.projectionMode ? { projectionMode: scopes.projectionMode } : {}),
       projectionScopes: scopes.projectionScopes,
       sourceWorkspaceVersion: workspace.version,

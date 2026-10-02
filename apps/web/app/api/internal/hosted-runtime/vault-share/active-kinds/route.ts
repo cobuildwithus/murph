@@ -115,17 +115,22 @@ export const GET = withJsonError(async (request: Request) => {
     ),
     ...(supportsProjectionContentDigests
       ? {
-          fullyMaterializedByProjectionScopeKey: Object.fromEntries(
-            supportedGenerations.map((generation) => {
+          publishedSourceWorkspaceVersionByProjectionScopeKey: Object.fromEntries(
+            supportedGenerations.flatMap((generation) => {
               const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
                 generation.projectionScope,
               );
-              return [
-                projectionScopeKey,
-                projectionWork.fullyMaterializedByProjectionScopeKey[
-                  projectionScopeKey
-                ] === true,
-              ] as const;
+              const sourceWorkspaceVersion =
+                projectionWork
+                  .publishedSourceWorkspaceVersionByProjectionScopeKey[
+                    projectionScopeKey
+                  ];
+              return sourceWorkspaceVersion === undefined
+                ? []
+                : [[
+                  projectionScopeKey,
+                  sourceWorkspaceVersion,
+                ] as const];
             }),
           ),
         }

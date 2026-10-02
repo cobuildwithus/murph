@@ -154,13 +154,20 @@ export async function findActiveHostedVaultSharePage(input: {
 }
 
 export interface DeliverableHostedVaultShareProjectionScopeGenerations {
-  fullyMaterializedByProjectionScopeKey: Record<string, boolean>;
+  publishedSourceWorkspaceVersionByProjectionScopeKey: Record<string, string>;
   generations: Array<{
     generationToken: string;
     projectionScope: HostedVaultShareProjectionScope;
   }>;
   hasDeferredProjectionWork: boolean;
 }
+
+type DeliverableHostedVaultShareProjectionScopeGeneration = {
+  pendingShareCount: number;
+  projectionScope: HostedVaultShareProjectionScope;
+  publishedSourceWorkspaceVersion: bigint | null;
+  shareIds: string[];
+};
 
 export async function readDeliverableHostedVaultShareProjectionScopeGenerations(input: {
   grantorMemberId: string;
@@ -195,12 +202,10 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
     memberIds: shares.map((share) => share.destinationMemberId),
     prisma,
   });
-  const generations = new Map<string, {
-    fullyMaterialized: boolean;
-    pendingShareCount: number;
-    projectionScope: HostedVaultShareProjectionScope;
-    shareIds: string[];
-  }>();
+  const generations = new Map<
+    string,
+    DeliverableHostedVaultShareProjectionScopeGeneration
+  >();
   let hasDeferredProjectionWork = false;
   const supportedProjectionScopeKeys = input.supportedProjectionScopeKeys
     ?? new Set(
@@ -230,13 +235,19 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
       hasDeferredProjectionWork ||= hasUnmaterializedShare;
       continue;
     }
+    const sharePublishedSourceWorkspaceVersion =
+      readSharePublishedSourceWorkspaceVersion(share);
     const current = generations.get(projectionScopeKey) ?? {
-      fullyMaterialized: true,
       pendingShareCount: 0,
       projectionScope,
+      publishedSourceWorkspaceVersion: sharePublishedSourceWorkspaceVersion,
       shareIds: [],
     };
-    current.fullyMaterialized &&= !hasUnmaterializedShare;
+    current.publishedSourceWorkspaceVersion =
+      mergePublishedSourceWorkspaceVersion(
+        current.publishedSourceWorkspaceVersion,
+        sharePublishedSourceWorkspaceVersion,
+      );
     current.shareIds.push(share.id);
     current.pendingShareCount += Number(needsPublication);
     generations.set(projectionScopeKey, current);
@@ -261,11 +272,15 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
   }
   const selectedGenerationEntries = [...selectedGenerations.entries()];
   return {
-    fullyMaterializedByProjectionScopeKey: Object.fromEntries(
-      selectedGenerationEntries.map(([projectionScopeKey, generation]) => [
-        projectionScopeKey,
-        generation.fullyMaterialized,
-      ]),
+    publishedSourceWorkspaceVersionByProjectionScopeKey: Object.fromEntries(
+      selectedGenerationEntries.flatMap(([projectionScopeKey, generation]) =>
+        generation.publishedSourceWorkspaceVersion === null
+          ? []
+          : [[
+            projectionScopeKey,
+            generation.publishedSourceWorkspaceVersion.toString(),
+          ]],
+      ),
     ),
     generations: selectedGenerationEntries.map(([, generation]) => ({
       generationToken: buildHostedVaultShareGenerationToken(generation.shareIds),
@@ -273,6 +288,23 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
     })),
     hasDeferredProjectionWork,
   };
+}
+
+function readSharePublishedSourceWorkspaceVersion(share: {
+  projectionSnapshotCiphertext: string | null;
+  projectionSourceWorkspaceVersion?: bigint | null;
+}): bigint | null {
+  return share.projectionSnapshotCiphertext === null
+    || share.projectionSourceWorkspaceVersion == null
+    ? null
+    : share.projectionSourceWorkspaceVersion;
+}
+
+function mergePublishedSourceWorkspaceVersion(
+  current: bigint | null,
+  next: bigint | null,
+): bigint | null {
+  return current !== null && next !== null && current === next ? current : null;
 }
 
 export async function hasUnmaterializedHostedVaultShareProjectionGeneration(input: {

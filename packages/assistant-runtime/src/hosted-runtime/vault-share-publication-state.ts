@@ -11,9 +11,11 @@ import {
 } from "@murphai/runtime-state/node";
 
 const HOSTED_VAULT_SHARE_PUBLICATIONS_SCHEMA =
-  "murph.hosted-vault-share.projection-publications.v1";
-const HOSTED_VAULT_SHARE_PUBLICATIONS_SCHEMA_VERSION = 1;
+  "murph.hosted-vault-share.projection-publications.v2";
+const HOSTED_VAULT_SHARE_PUBLICATIONS_SCHEMA_VERSION = 2;
 const DIGEST_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+const SOURCE_WORKSPACE_VERSION_PATTERN = /^(?:0|[1-9]\d{0,18})$/u;
+const MAX_SOURCE_WORKSPACE_VERSION = 9_223_372_036_854_775_807n;
 
 export const HOSTED_VAULT_SHARE_PUBLICATIONS_RELATIVE_PATH =
   ".runtime/operations/assistant/hosted-vault-share-publications.json";
@@ -28,6 +30,7 @@ const MAX_PUBLICATION_STATE_ENTRIES = KNOWN_PROJECTION_SCOPE_KEYS.size;
 export interface HostedVaultShareProjectionPublication {
   contentDigest: string;
   generationToken: string;
+  sourceWorkspaceVersion: string;
 }
 
 export interface HostedVaultShareProjectionPublicationState {
@@ -92,6 +95,7 @@ export function upsertHostedVaultShareProjectionPublication(
     contentDigest: string;
     generationToken: string;
     projectionScopeKey: string;
+    sourceWorkspaceVersion: string;
   },
 ): HostedVaultShareProjectionPublicationState {
   const next = normalizeHostedVaultShareProjectionPublicationState(state);
@@ -99,12 +103,14 @@ export function upsertHostedVaultShareProjectionPublication(
     !KNOWN_PROJECTION_SCOPE_KEYS.has(input.projectionScopeKey)
     || !isDigestLike(input.generationToken)
     || !isDigestLike(input.contentDigest)
+    || !isSourceWorkspaceVersionLike(input.sourceWorkspaceVersion)
   ) {
     return next;
   }
   next.publicationsByProjectionScopeKey[input.projectionScopeKey] = {
     contentDigest: input.contentDigest,
     generationToken: input.generationToken,
+    sourceWorkspaceVersion: input.sourceWorkspaceVersion,
   };
   return normalizeHostedVaultShareProjectionPublicationState(next);
 }
@@ -132,6 +138,7 @@ function normalizeHostedVaultShareProjectionPublicationState(
       !isPlainObject(publication)
       || !isDigestLike(publication.generationToken)
       || !isDigestLike(publication.contentDigest)
+      || !isSourceWorkspaceVersionLike(publication.sourceWorkspaceVersion)
     ) {
       continue;
     }
@@ -140,6 +147,7 @@ function normalizeHostedVaultShareProjectionPublicationState(
       {
         contentDigest: publication.contentDigest,
         generationToken: publication.generationToken,
+        sourceWorkspaceVersion: publication.sourceWorkspaceVersion,
       },
     ]);
     if (entries.length >= MAX_PUBLICATION_STATE_ENTRIES) {
@@ -154,6 +162,14 @@ function normalizeHostedVaultShareProjectionPublicationState(
 
 function isDigestLike(value: unknown): value is string {
   return typeof value === "string" && DIGEST_PATTERN.test(value);
+}
+
+function isSourceWorkspaceVersionLike(value: unknown): value is string {
+  return (
+    typeof value === "string"
+    && SOURCE_WORKSPACE_VERSION_PATTERN.test(value)
+    && BigInt(value) <= MAX_SOURCE_WORKSPACE_VERSION
+  );
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

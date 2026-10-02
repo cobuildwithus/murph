@@ -104,12 +104,12 @@ describe("hosted vault-share supported projection scopes", () => {
       new Request(
         "https://worker.example.test/internal/vault-share/active-kinds?projectionContentDigest=v1",
       ),
-    )).toBe(true);
+    )).toBe(false);
     expect(supportedProjectionScopes.supportsHostedVaultShareProjectionContentDigests(
       new Request(
         "https://worker.example.test/internal/vault-share/active-kinds?projectionContentDigest=v2",
       ),
-    )).toBe(false);
+    )).toBe(true);
   });
 
   it("reads only the exact first-materialization projection mode", async () => {

@@ -2212,7 +2212,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     await writeFile(
       path.join(assistantRuntimeRoot, "hosted-vault-share-publications.json"),
-      "{\"schema\":\"murph.hosted-vault-share.projection-publications.v1\",\"schemaVersion\":1,\"value\":{\"publicationsByProjectionScopeKey\":{\"profile-name.v0\":{\"contentDigest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generationToken\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}}}\n",
+      "{\"schema\":\"murph.hosted-vault-share.projection-publications.v2\",\"schemaVersion\":2,\"value\":{\"publicationsByProjectionScopeKey\":{\"profile-name.v0\":{\"contentDigest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generationToken\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceWorkspaceVersion\":\"7\"}}}}\n",
     );
     await writeFile(path.join(assistantRuntimeRoot, "outbox", "intent_1.json"), "{\"intent\":\"deliver\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "outbox", ".quarantine", "ignored.json"), "{\"ignored\":true}\n");
@@ -2404,7 +2404,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       },
       {
         expected:
-          "{\"schema\":\"murph.hosted-vault-share.projection-publications.v1\",\"schemaVersion\":1,\"value\":{\"publicationsByProjectionScopeKey\":{\"profile-name.v0\":{\"contentDigest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generationToken\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}}}\n",
+          "{\"schema\":\"murph.hosted-vault-share.projection-publications.v2\",\"schemaVersion\":2,\"value\":{\"publicationsByProjectionScopeKey\":{\"profile-name.v0\":{\"contentDigest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generationToken\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceWorkspaceVersion\":\"7\"}}}}\n",
         path: ".runtime/operations/assistant/hosted-vault-share-publications.json",
         root: "vault",
       },
@@ -2663,7 +2663,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "hosted-vault-share-publications.json"), "utf8"),
-      "{\"schema\":\"murph.hosted-vault-share.projection-publications.v1\",\"schemaVersion\":1,\"value\":{\"publicationsByProjectionScopeKey\":{\"profile-name.v0\":{\"contentDigest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generationToken\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}}}\n",
+      "{\"schema\":\"murph.hosted-vault-share.projection-publications.v2\",\"schemaVersion\":2,\"value\":{\"publicationsByProjectionScopeKey\":{\"profile-name.v0\":{\"contentDigest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generationToken\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceWorkspaceVersion\":\"7\"}}}}\n",
     );
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "status.json"), "utf8"),

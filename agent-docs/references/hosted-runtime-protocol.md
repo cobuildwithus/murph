@@ -757,13 +757,15 @@ retry. Either future retry time lets foreground and independent system controls
 proceed between pages. The ordinary abortable idle projection refresh omits this
 mode and retains its existing all-active-scope behavior, with one optimization:
 when a compatible runner advertises the projection-content-digest capability,
-Web includes a derived boolean per returned scope generation indicating whether
-every active share in that generation already has a snapshot. The runner may
-skip the delivery request only after a fresh capture when that boolean is true
-and its portable local publication state has the same generation token and
-content digest. Missing local state, a stale token, changed content, or any null
-snapshot keeps the existing delivery path, so first materialization, new grants,
-regrants, revocations, and refreshes still publish.
+Web includes the common published source workspace version per returned scope
+generation only when every active share in that generation already has a
+snapshot at that same version. The runner may skip the delivery request only
+after a fresh ordinary-mode capture when that Web-published version and its
+portable local publication state's source version, generation token, and
+content digest all match. Missing local state, a stale token, changed content,
+mixed destination versions, or any null snapshot keeps the existing delivery
+path, so first materialization, new grants, regrants, revocations, and refreshes
+still publish.
 
 A temporary loss of grantor runtime access also returns the acknowledged
 first-materialization mode with only the opaque deferred-work bit and no scopes.

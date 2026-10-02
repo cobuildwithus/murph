@@ -230,9 +230,9 @@ export interface HostedVaultShareProjectionOfferResult {
 export type HostedVaultShareProjectionScopeResolution =
   | {
     generationTokensByProjectionScopeKey: Record<string, string>;
-    fullyMaterializedByProjectionScopeKey: Record<string, boolean>;
     hasDeferredProjectionWork: boolean;
     outcome: "active-scopes";
+    publishedSourceWorkspaceVersionByProjectionScopeKey: Record<string, string>;
     projectionMode?: HostedVaultShareProjectionMode;
     projectionScopes: HostedVaultShareProjectionScope[];
   }
@@ -241,8 +241,8 @@ export type HostedVaultShareProjectionScopeResolution =
   | { outcome: "no-active-share" };
 
 export interface HostedVaultShareProjectionCapture {
-  fullyMaterializedByProjectionScopeKey?: Record<string, boolean>;
   hasDeferredProjectionWork: boolean;
+  publishedSourceWorkspaceVersionByProjectionScopeKey?: Record<string, string>;
   projectionMode?: HostedVaultShareProjectionMode;
   sourceWorkspaceVersion: string;
   snapshots: Array<{
@@ -298,7 +298,7 @@ export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
       };
     }
     const generationTokensByProjectionScopeKey: Record<string, string> = {};
-    const fullyMaterializedByProjectionScopeKey: Record<string, boolean> = {};
+    const publishedSourceWorkspaceVersionByProjectionScopeKey: Record<string, string> = {};
     for (const projectionScope of projectionScopes) {
       const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
         projectionScope,
@@ -311,17 +311,21 @@ export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
         return { outcome: "error" };
       }
       generationTokensByProjectionScopeKey[projectionScopeKey] = generationToken;
-      fullyMaterializedByProjectionScopeKey[projectionScopeKey] =
-        activeProjections.fullyMaterializedByProjectionScopeKey?.[
+      const publishedSourceWorkspaceVersion =
+        activeProjections.publishedSourceWorkspaceVersionByProjectionScopeKey?.[
           projectionScopeKey
-        ] === true;
+        ];
+      if (publishedSourceWorkspaceVersion !== undefined) {
+        publishedSourceWorkspaceVersionByProjectionScopeKey[projectionScopeKey] =
+          publishedSourceWorkspaceVersion;
+      }
     }
     return {
       generationTokensByProjectionScopeKey,
-      fullyMaterializedByProjectionScopeKey,
       hasDeferredProjectionWork:
         activeProjections.hasDeferredProjectionWork === true,
       outcome: "active-scopes",
+      publishedSourceWorkspaceVersionByProjectionScopeKey,
       ...(activeProjections.projectionMode
         ? { projectionMode: activeProjections.projectionMode }
         : {}),
@@ -341,9 +345,9 @@ export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
  * projectable scope, an empty read remains an intentional replacement snapshot.
  */
 export async function captureHostedVaultShareProjectionBestEffort(input: {
-  fullyMaterializedByProjectionScopeKey?: Readonly<Record<string, boolean>>;
   generationTokensByProjectionScopeKey: Readonly<Record<string, string>>;
   hasDeferredProjectionWork: boolean;
+  publishedSourceWorkspaceVersionByProjectionScopeKey?: Readonly<Record<string, string>>;
   projectionMode?: HostedVaultShareProjectionMode;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
   sourceWorkspaceVersion: string;
@@ -398,9 +402,9 @@ export async function captureHostedVaultShareProjectionBestEffort(input: {
     ? { outcome: "no-projectable-records" }
     : {
       capture: {
-        fullyMaterializedByProjectionScopeKey:
-          { ...(input.fullyMaterializedByProjectionScopeKey ?? {}) },
         hasDeferredProjectionWork: input.hasDeferredProjectionWork,
+        publishedSourceWorkspaceVersionByProjectionScopeKey:
+          { ...(input.publishedSourceWorkspaceVersionByProjectionScopeKey ?? {}) },
         ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
         snapshots,
         sourceWorkspaceVersion: input.sourceWorkspaceVersion,
@@ -492,6 +496,7 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
       }
       if (response.status === "delivered") {
         publicationState = await recordHostedVaultShareProjectionPublicationBestEffort({
+          capture: input.capture,
           projectionScopeKey,
           publicationState,
           snapshot,
@@ -523,26 +528,33 @@ function canSkipHostedVaultShareProjectionDelivery(input: {
   recordedPublication: HostedVaultShareProjectionPublication | undefined;
   snapshot: HostedVaultShareProjectionCaptureSnapshot;
 }): boolean {
-  const scopeFullyMaterialized =
-    input.capture.fullyMaterializedByProjectionScopeKey?.[
+  const publishedSourceWorkspaceVersion =
+    input.capture.publishedSourceWorkspaceVersionByProjectionScopeKey?.[
       input.projectionScopeKey
-    ] === true;
+    ];
   return (
     !input.capture.projectionMode
-    && scopeFullyMaterialized
+    && publishedSourceWorkspaceVersion !== undefined
     && input.snapshot.contentDigest !== undefined
     && input.recordedPublication?.generationToken === input.snapshot.generationToken
     && input.recordedPublication.contentDigest === input.snapshot.contentDigest
+    && input.recordedPublication.sourceWorkspaceVersion
+      === publishedSourceWorkspaceVersion
   );
 }
 
 async function recordHostedVaultShareProjectionPublicationBestEffort(input: {
+  capture: HostedVaultShareProjectionCapture;
   projectionScopeKey: string;
   publicationState: HostedVaultShareProjectionPublicationState;
   snapshot: HostedVaultShareProjectionCaptureSnapshot;
   vaultRoot?: string;
 }): Promise<HostedVaultShareProjectionPublicationState> {
-  if (!input.vaultRoot || input.snapshot.contentDigest === undefined) {
+  if (
+    !input.vaultRoot
+    || input.capture.projectionMode
+    || input.snapshot.contentDigest === undefined
+  ) {
     return input.publicationState;
   }
   const next = upsertHostedVaultShareProjectionPublication(
@@ -551,6 +563,7 @@ async function recordHostedVaultShareProjectionPublicationBestEffort(input: {
       contentDigest: input.snapshot.contentDigest,
       generationToken: input.snapshot.generationToken,
       projectionScopeKey: input.projectionScopeKey,
+      sourceWorkspaceVersion: input.capture.sourceWorkspaceVersion,
     },
   );
   await writeHostedVaultShareProjectionPublicationState({

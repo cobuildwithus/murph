@@ -76,8 +76,8 @@ describe("background vault-share checkpoint reader", () => {
               projectionKinds: ["profile-name.v0"],
               projectionScopes: [profileScope],
               generationTokensByProjectionScopeKey: { [profileScopeKey]: generationToken },
-              fullyMaterializedByProjectionScopeKey: {
-                [profileScopeKey]: true,
+              publishedSourceWorkspaceVersionByProjectionScopeKey: {
+                [profileScopeKey]: "7",
               },
             };
           },

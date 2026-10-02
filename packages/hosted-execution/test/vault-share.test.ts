@@ -759,18 +759,18 @@ describe("vault-share contracts", () => {
     ).toThrow(/known vault-share projection kind/u);
   });
 
-  it("parses only opaque tokens for active projection scopes", () => {
+  it("parses only opaque tokens and source versions for active projection scopes", () => {
     const scopeKey = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
     const generationToken = "b".repeat(43);
     expect(parseHostedVaultShareActiveProjectionKindsResponse({
       generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
-      fullyMaterializedByProjectionScopeKey: { [scopeKey]: true },
+      publishedSourceWorkspaceVersionByProjectionScopeKey: { [scopeKey]: "7" },
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     })).toEqual({
-      fullyMaterializedByProjectionScopeKey: { [scopeKey]: true },
       generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
       hasDeferredProjectionWork: false,
+      publishedSourceWorkspaceVersionByProjectionScopeKey: { [scopeKey]: "7" },
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     });
@@ -788,17 +788,19 @@ describe("vault-share contracts", () => {
       projectionScopes: [SLEEP_SCOPE],
     })).toThrow(/SHA-256 base64url digest/u);
     expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
-      fullyMaterializedByProjectionScopeKey: {
-        [buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE)]: true,
+      publishedSourceWorkspaceVersionByProjectionScopeKey: {
+        [buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE)]: "7",
       },
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     })).toThrow(/inactive scope key/u);
     expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
-      fullyMaterializedByProjectionScopeKey: { [scopeKey]: "not-a-boolean" },
+      publishedSourceWorkspaceVersionByProjectionScopeKey: {
+        [scopeKey]: "not-a-version",
+      },
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
-    })).toThrow(/must be boolean/u);
+    })).toThrow(/canonical PostgreSQL bigint version/u);
   });
 
   it("serializes current-state content digests without runtime-controlled occurrence time", () => {

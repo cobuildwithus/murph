@@ -98,7 +98,7 @@ export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM =
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION = "v1";
 export const HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM =
   "projectionContentDigest";
-export const HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION = "v1";
+export const HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION = "v2";
 export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE =
   "first-materialization";
 export const HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM = "projectionMode";
@@ -814,7 +814,7 @@ export interface HostedVaultShareActiveProjectionKindsResponse {
   projectionKinds: HostedVaultShareProjectionKind[];
   projectionScopes: HostedVaultShareProjectionScope[];
   generationTokensByProjectionScopeKey?: Record<string, string>;
-  fullyMaterializedByProjectionScopeKey?: Record<string, boolean>;
+  publishedSourceWorkspaceVersionByProjectionScopeKey?: Record<string, string>;
 }
 
 export interface HostedVaultShareDeliveryPayload {
@@ -2651,11 +2651,11 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
         record.generationTokensByProjectionScopeKey,
         uniqueScopeKeys,
       );
-  const fullyMaterializedByProjectionScopeKey =
-    record.fullyMaterializedByProjectionScopeKey === undefined
+  const publishedSourceWorkspaceVersionByProjectionScopeKey =
+    record.publishedSourceWorkspaceVersionByProjectionScopeKey === undefined
     ? undefined
-    : parseHostedVaultShareFullyMaterializedByProjectionScopeKey(
-        record.fullyMaterializedByProjectionScopeKey,
+    : parseHostedVaultSharePublishedSourceWorkspaceVersionByProjectionScopeKey(
+        record.publishedSourceWorkspaceVersionByProjectionScopeKey,
         uniqueScopeKeys,
       );
 
@@ -2667,8 +2667,8 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
     ...(generationTokensByProjectionScopeKey
       ? { generationTokensByProjectionScopeKey }
       : {}),
-    ...(fullyMaterializedByProjectionScopeKey
-      ? { fullyMaterializedByProjectionScopeKey }
+    ...(publishedSourceWorkspaceVersionByProjectionScopeKey
+      ? { publishedSourceWorkspaceVersionByProjectionScopeKey }
       : {}),
   };
 }
@@ -2716,27 +2716,24 @@ function parseHostedVaultShareGenerationTokensByProjectionScopeKey(
   return result;
 }
 
-function parseHostedVaultShareFullyMaterializedByProjectionScopeKey(
+function parseHostedVaultSharePublishedSourceWorkspaceVersionByProjectionScopeKey(
   value: unknown,
   activeScopeKeys: ReadonlySet<string>,
-): Record<string, boolean> {
+): Record<string, string> {
   const record = requireObject(
     value,
-    "Vault share active projection kinds response fullyMaterializedByProjectionScopeKey",
+    "Vault share active projection kinds response publishedSourceWorkspaceVersionByProjectionScopeKey",
   );
-  const result: Record<string, boolean> = {};
-  for (const [scopeKey, fullyMaterialized] of Object.entries(record)) {
+  const result: Record<string, string> = {};
+  for (const [scopeKey, sourceWorkspaceVersion] of Object.entries(record)) {
     if (!activeScopeKeys.has(scopeKey)) {
       throw new TypeError(
-        "Vault share active projection materialization map contains an inactive scope key.",
+        "Vault share active projection published source version map contains an inactive scope key.",
       );
     }
-    if (typeof fullyMaterialized !== "boolean") {
-      throw new TypeError(
-        "Vault share active projection materialization value must be boolean.",
-      );
-    }
-    result[scopeKey] = fullyMaterialized;
+    result[scopeKey] = requireHostedVaultShareSourceWorkspaceVersion(
+      sourceWorkspaceVersion,
+    );
   }
   return result;
 }

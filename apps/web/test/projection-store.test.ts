@@ -917,9 +917,9 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
 
     await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
       .resolves.toEqual({
-        fullyMaterializedByProjectionScopeKey: {},
         generations: [],
         hasDeferredProjectionWork: false,
+        publishedSourceWorkspaceVersionByProjectionScopeKey: {},
       });
     await expect(readDeliverableHostedVaultShareProjectionScopeGenerations({
       ...input, sourceWorkspaceVersion: undefined,
@@ -933,14 +933,12 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     });
     const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
     expect(discovery).toEqual({
-      fullyMaterializedByProjectionScopeKey: {
-        [SLEEP_SCOPE_KEY]: false,
-      },
       generations: [{
         generationToken: buildHostedVaultShareGenerationToken(rows.map((row) => row.id)),
         projectionScope: SLEEP_SCOPE,
       }],
       hasDeferredProjectionWork: false,
+      publishedSourceWorkspaceVersionByProjectionScopeKey: {},
     });
     const page = await findActiveHostedVaultSharePage({ ...input, projectionScope: SLEEP_SCOPE });
     expect(page.generationToken).toBe(discovery.generations[0]?.generationToken);
@@ -950,7 +948,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     }));
   });
 
-  it("derives full materialization from existing snapshot state for stale generations", async () => {
+  it("derives the common published source version from materialized stale generations", async () => {
     const rows: Array<ReturnType<typeof buildShareRow> & {
       projectionSnapshotCiphertext: string | null;
       projectionSourceWorkspaceVersion: bigint | null;
@@ -965,14 +963,14 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
 
     await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
       .resolves.toEqual({
-        fullyMaterializedByProjectionScopeKey: {
-          [SLEEP_SCOPE_KEY]: true,
-        },
         generations: [{
           generationToken: buildHostedVaultShareGenerationToken(rows.map((row) => row.id)),
           projectionScope: SLEEP_SCOPE,
         }],
         hasDeferredProjectionWork: false,
+        publishedSourceWorkspaceVersionByProjectionScopeKey: {
+          [SLEEP_SCOPE_KEY]: "7",
+        },
       });
 
     rows.push({
@@ -984,14 +982,25 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
 
     await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
       .resolves.toEqual({
-        fullyMaterializedByProjectionScopeKey: {
-          [SLEEP_SCOPE_KEY]: false,
-        },
         generations: [{
           generationToken: buildHostedVaultShareGenerationToken(rows.map((row) => row.id)),
           projectionScope: SLEEP_SCOPE,
         }],
         hasDeferredProjectionWork: false,
+        publishedSourceWorkspaceVersionByProjectionScopeKey: {},
+      });
+
+    rows.pop();
+    rows[1]!.projectionSourceWorkspaceVersion = 6n;
+
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
+      .resolves.toEqual({
+        generations: [{
+          generationToken: buildHostedVaultShareGenerationToken(rows.map((row) => row.id)),
+          projectionScope: SLEEP_SCOPE,
+        }],
+        hasDeferredProjectionWork: false,
+        publishedSourceWorkspaceVersionByProjectionScopeKey: {},
       });
   });
 
@@ -1009,9 +1018,8 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
 
     for (let pageNumber = 0; pageNumber < 3; pageNumber += 1) {
       const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
-      expect(discovery.fullyMaterializedByProjectionScopeKey).toEqual({
-        [SLEEP_SCOPE_KEY]: true,
-      });
+      expect(discovery.publishedSourceWorkspaceVersionByProjectionScopeKey)
+        .toEqual(pageNumber === 0 ? { [SLEEP_SCOPE_KEY]: "7" } : {});
       expect(discovery.generations).toEqual([{
         generationToken: expectedToken,
         projectionScope: SLEEP_SCOPE,
@@ -1028,9 +1036,9 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     expect(pageSizes).toEqual([25, 25, 14]);
     await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
       .resolves.toEqual({
-        fullyMaterializedByProjectionScopeKey: {},
         generations: [],
         hasDeferredProjectionWork: false,
+        publishedSourceWorkspaceVersionByProjectionScopeKey: {},
       });
   });
 
@@ -1051,9 +1059,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
 
     const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
     const page = await findActiveHostedVaultSharePage(input);
-    expect(discovery.fullyMaterializedByProjectionScopeKey).toEqual({
-      [SLEEP_SCOPE_KEY]: false,
-    });
+    expect(discovery.publishedSourceWorkspaceVersionByProjectionScopeKey).toEqual({});
     expect(discovery.generations).toEqual([{
       generationToken: page.generationToken,
       projectionScope: SLEEP_SCOPE,
@@ -1070,6 +1076,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         id: "share_sleep_2",
         projectionKind: SLEEP_SCOPE.projectionKind,
         projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
         projectionScopeJson: SLEEP_SCOPE,
         projectionScopeKey: SLEEP_SCOPE_KEY,
       },
@@ -1078,6 +1085,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         id: "share_invalid",
         projectionKind: "unknown.v0",
         projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
         projectionScopeJson: { projectionKind: "unknown.v0" },
         projectionScopeKey: "unknown.v0",
       },
@@ -1086,6 +1094,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         id: "share_device",
         projectionKind: deviceScope.projectionKind,
         projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
         projectionScopeJson: deviceScope,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(deviceScope),
       },
@@ -1094,6 +1103,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         id: "share_inactive",
         projectionKind: SLEEP_SCOPE.projectionKind,
         projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
         projectionScopeJson: SLEEP_SCOPE,
         projectionScopeKey: SLEEP_SCOPE_KEY,
       },
@@ -1102,6 +1112,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         id: "share_profile",
         projectionKind: profileScope.projectionKind,
         projectionSnapshotCiphertext: "sealed:profile",
+        projectionSourceWorkspaceVersion: 7n,
         projectionScopeJson: profileScope,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(profileScope),
       },
@@ -1110,6 +1121,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         id: "share_sleep_1",
         projectionKind: SLEEP_SCOPE.projectionKind,
         projectionSnapshotCiphertext: "sealed:sleep",
+        projectionSourceWorkspaceVersion: 7n,
         projectionScopeJson: SLEEP_SCOPE,
         projectionScopeKey: SLEEP_SCOPE_KEY,
       },
@@ -1124,10 +1136,6 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
       grantorMemberId: SHARE.grantorMemberId,
       prisma,
     })).resolves.toEqual({
-      fullyMaterializedByProjectionScopeKey: {
-        [buildHostedVaultShareProjectionScopeKey(profileScope)]: true,
-        [SLEEP_SCOPE_KEY]: false,
-      },
       generations: [
         {
           generationToken: buildHostedVaultShareGenerationToken([
@@ -1142,6 +1150,9 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         },
       ],
       hasDeferredProjectionWork: true,
+      publishedSourceWorkspaceVersionByProjectionScopeKey: {
+        [buildHostedVaultShareProjectionScopeKey(profileScope)]: "7",
+      },
     });
     expect(buildHostedVaultShareGenerationToken(["share_b", "share_a"]))
       .toBe(buildHostedVaultShareGenerationToken(["share_a", "share_b"]));
@@ -1182,6 +1193,9 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
           projectionKind: projectionScope.projectionKind,
           projectionSnapshotCiphertext:
             scopeIndex === 0 && destinationIndex === 0 ? null : "sealed:materialized",
+          projectionSourceWorkspaceVersion: scopeIndex === 0 && destinationIndex === 0
+            ? null
+            : 7n,
           projectionScopeJson: projectionScope,
           projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope),
         }),
@@ -1205,9 +1219,9 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
       supportedProjectionScopeKeys,
     })).resolves.toEqual({
-      fullyMaterializedByProjectionScopeKey: {},
       generations: [],
       hasDeferredProjectionWork: true,
+      publishedSourceWorkspaceVersionByProjectionScopeKey: {},
     });
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
@@ -1229,9 +1243,6 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
       supportedProjectionScopeKeys,
     })).resolves.toEqual({
-      fullyMaterializedByProjectionScopeKey: {
-        [buildHostedVaultShareProjectionScopeKey(firstRuntimeScope)]: false,
-      },
       generations: [{
         generationToken: buildHostedVaultShareGenerationToken(
           Array.from(
@@ -1242,6 +1253,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         projectionScope: firstRuntimeScope,
       }],
       hasDeferredProjectionWork: false,
+      publishedSourceWorkspaceVersionByProjectionScopeKey: {},
     });
     expect(mocks.readActiveHostedMemberAccessIds).toHaveBeenNthCalledWith(2, {
       memberIds: rows.map((row) => row.destinationMemberId),
@@ -1259,6 +1271,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
           id: `share_sleep_${index}`,
           projectionKind: SLEEP_SCOPE.projectionKind,
           projectionSnapshotCiphertext: null,
+          projectionSourceWorkspaceVersion: null,
           projectionScopeJson: SLEEP_SCOPE,
           projectionScopeKey: SLEEP_SCOPE_KEY,
         }),
@@ -1268,6 +1281,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         id: "share_trailing_pending",
         projectionKind: trailingScope.projectionKind,
         projectionSnapshotCiphertext: null,
+        projectionSourceWorkspaceVersion: null,
         projectionScopeJson: trailingScope,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(trailingScope),
       },
@@ -1282,9 +1296,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     });
 
     expect(result.generations).toHaveLength(1);
-    expect(result.fullyMaterializedByProjectionScopeKey).toEqual({
-      [SLEEP_SCOPE_KEY]: false,
-    });
+    expect(result.publishedSourceWorkspaceVersionByProjectionScopeKey).toEqual({});
     expect(result.generations[0]).toEqual({
       generationToken: buildHostedVaultShareGenerationToken(
         Array.from(

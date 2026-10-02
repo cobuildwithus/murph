@@ -76,17 +76,12 @@ function projectionWork(
 	...projectionScopes: Array<Parameters<typeof buildHostedVaultShareProjectionScopeKey>[0]>
 ) {
 	return {
-		fullyMaterializedByProjectionScopeKey: Object.fromEntries(
-			projectionScopes.map((projectionScope) => [
-				buildHostedVaultShareProjectionScopeKey(projectionScope),
-				false,
-			]),
-		),
 		generations: projectionScopes.map((projectionScope, index) => ({
 			generationToken: generationToken(index),
 			projectionScope,
 		})),
 		hasDeferredProjectionWork: false,
+		publishedSourceWorkspaceVersionByProjectionScopeKey: {},
 	};
 }
 
@@ -178,29 +173,29 @@ describe("vault-share active-kinds route", () => {
 		}));
 	});
 
-	it("includes materialization state only for compatible runners", async () => {
+	it("includes published source versions only for compatible runners", async () => {
 		const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
 		mocks.readDeliverableHostedVaultShareProjectionScopeGenerations.mockResolvedValue({
-			fullyMaterializedByProjectionScopeKey: {
-				[profileScopeKey]: true,
-			},
 			generations: [{
 				generationToken: generationToken(0),
 				projectionScope: PROFILE_SCOPE,
 			}],
 			hasDeferredProjectionWork: false,
+			publishedSourceWorkspaceVersionByProjectionScopeKey: {
+				[profileScopeKey]: "7",
+			},
 		});
 
 		const compatible = await activeKindsRoute.GET(buildRequest(withContentDigestCapability()));
 		expect(await compatible.json()).toMatchObject({
-			fullyMaterializedByProjectionScopeKey: {
-				[profileScopeKey]: true,
+			publishedSourceWorkspaceVersionByProjectionScopeKey: {
+				[profileScopeKey]: "7",
 			},
 		});
 
 		const legacy = await activeKindsRoute.GET(buildRequest());
 		expect(await legacy.json()).not.toHaveProperty(
-			"fullyMaterializedByProjectionScopeKey",
+			"publishedSourceWorkspaceVersionByProjectionScopeKey",
 		);
 	});
 
