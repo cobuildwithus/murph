@@ -655,10 +655,25 @@ describe("hosted runtime context coverage", () => {
     }
   });
 
-  it("allows both existing and activation bootstrap paths", async () => {
+  it("requires activation bootstrap before device sync and allows initialized vaults", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
     try {
+      await expect(
+        requireHostedBootstrapForWake(
+          vaultRoot,
+          buildLegacyWake({
+            event: {
+              kind: "device-sync.wake",
+              reason: "connected",
+              userId: "member_123",
+            },
+            eventId: "evt_sync_before_activation",
+            occurredAt: "2026-04-08T00:05:00.000Z",
+          }),
+        ),
+      ).rejects.toThrow("requires member.activated bootstrap first");
+
       await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
       await expect(
         requireHostedBootstrapForWake(
