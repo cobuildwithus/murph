@@ -2216,6 +2216,14 @@ export class RunnerContainer extends Container {
       return;
     }
 
+    // Local work and receipt warmth already prevent a stop. Check them before
+    // Web so a retained conversation schedules its deadline without owner polls.
+    if (!await this.canStopWarmContainer({
+      expectedInteractionGeneration: input.expectedInteractionGeneration,
+      lifecycleStagePrefix,
+      userId: input.userId,
+    })) return;
+
     // Control-plane latency must not hold the native lifecycle lock ahead of
     // an arriving message. Only destructive evaluation needs the lock; it
     // rechecks interaction ownership after this external read.
@@ -2337,6 +2345,9 @@ export class RunnerContainer extends Container {
         error,
         input.userId,
       );
+      return false;
+    }
+    if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
       return false;
     }
     if (this.isPlatformContainerDefinitelyStopped() || isRunnerContainerStopped(status)) {
