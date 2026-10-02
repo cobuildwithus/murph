@@ -7,8 +7,14 @@ import { createEmptyMemoryDocument, renderMemoryDocument, setMemoryDisplayName }
 import {
   createDeferred, createPlatform, createVaultSnapshotBundle, createWorkspaceState,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
-import { projectHostedVaultShareCheckpoint } from "../src/hosted-runtime/vault-share-background.ts";
-import type { HostedVaultShareDeliverRequest } from "@murphai/hosted-execution/vault-share";
+import {
+  projectHostedVaultShareCheckpoint,
+} from "../src/hosted-runtime/vault-share-background.ts";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  hostedVaultShareProjectionKindToScope,
+  type HostedVaultShareDeliverRequest,
+} from "@murphai/hosted-execution/vault-share";
 
 async function writeName(vaultRoot: string, displayName: string) {
   const now = new Date("2026-07-01T00:00:00.000Z");
@@ -18,6 +24,74 @@ async function writeName(vaultRoot: string, displayName: string) {
 }
 
 describe("background vault-share checkpoint reader", () => {
+  it("skips delivery for an unchanged materialized restored snapshot with matching local state", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "murph-background-share-digest-"));
+    const vaultRoot = path.join(root, "durable", "vault");
+    const profileScope = hostedVaultShareProjectionKindToScope("profile-name.v0");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(profileScope);
+    const generationToken = "a".repeat(43);
+    try {
+      await initializeVault({ vaultRoot });
+      await writeName(vaultRoot, "Original");
+      const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+      const platform = createPlatform({
+        artifactBytesByHash: new Map([[snapshot.hash, snapshot.bytes]]),
+        mailboxPort: null,
+        workspacePort: null,
+      });
+      const deliveries: HostedVaultShareDeliverRequest[] = [];
+      const first = await projectHostedVaultShareCheckpoint({
+        workspace: createWorkspaceState({ version: "7", snapshotRef: snapshot.snapshotRef }),
+        vaultRoot,
+        signal: new AbortController().signal,
+        shouldStop: () => false,
+        snapshotPort: platform.workspaceSnapshotPort!,
+        vaultSharePort: {
+          async listActiveProjectionScopes() {
+            return {
+              projectionKinds: ["profile-name.v0"],
+              projectionScopes: [profileScope],
+              generationTokensByProjectionScopeKey: { [profileScopeKey]: generationToken },
+            };
+          },
+          async deliver(request) {
+            deliveries.push(request);
+            return { status: "delivered" };
+          },
+        },
+      });
+      expect(first).toEqual({ outcome: "delivered" });
+      expect(deliveries).toHaveLength(1);
+      const deliver = vi.fn();
+
+      const second = await projectHostedVaultShareCheckpoint({
+        workspace: createWorkspaceState({ version: "8", snapshotRef: snapshot.snapshotRef }),
+        vaultRoot,
+        signal: new AbortController().signal,
+        shouldStop: () => false,
+        snapshotPort: platform.workspaceSnapshotPort!,
+        vaultSharePort: {
+          async listActiveProjectionScopes() {
+            return {
+              projectionKinds: ["profile-name.v0"],
+              projectionScopes: [profileScope],
+              generationTokensByProjectionScopeKey: { [profileScopeKey]: generationToken },
+              fullyMaterializedByProjectionScopeKey: {
+                [profileScopeKey]: true,
+              },
+            };
+          },
+          deliver,
+        },
+      });
+
+      expect(second).toEqual({ outcome: "delivered" });
+      expect(deliver).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("finishes on the committed snapshot while live foreground data changes, then removes its read view", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "murph-background-share-"));
     const vaultRoot = path.join(root, "durable", "vault");

@@ -24,6 +24,7 @@ import {
   isHostedVaultShareRecentDateProjectionKind,
   parseHostedVaultShareDeliverRequest,
   parseHostedVaultShareSleepClassification,
+  serializeHostedVaultShareProjectionContentDigestInput,
   getHostedVaultShareProjectionMaxRecords,
   HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES,
   getHostedVaultShareActivityDistanceProjectionSpec,
@@ -82,6 +83,14 @@ import {
 } from "@murphai/query";
 
 import type { HostedRuntimeVaultSharePort } from "./platform.ts";
+import {
+  emptyHostedVaultShareProjectionPublicationState,
+  readHostedVaultShareProjectionPublicationState,
+  type HostedVaultShareProjectionPublication,
+  type HostedVaultShareProjectionPublicationState,
+  upsertHostedVaultShareProjectionPublication,
+  writeHostedVaultShareProjectionPublicationState,
+} from "./vault-share-publication-state.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY_MAX_MINUTES = 24 * 60;
@@ -103,6 +112,16 @@ export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = HOSTED_VAULT_SHA
 export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS;
 
 export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1;
+
+export function buildHostedVaultShareProjectionContentDigest(input: {
+  memberTimeZone?: string;
+  projectionScope: HostedVaultShareProjectionScope;
+  records: readonly HostedVaultShareDeliveryRecord[];
+}): string {
+  return createHash("sha256")
+    .update(serializeHostedVaultShareProjectionContentDigestInput(input))
+    .digest("base64url");
+}
 
 // Canonical source dates can straddle either side of an event-local date.
 // At 90 dates plus two boundary dates, the complete 104-workout/day shape and
@@ -211,6 +230,7 @@ export interface HostedVaultShareProjectionOfferResult {
 export type HostedVaultShareProjectionScopeResolution =
   | {
     generationTokensByProjectionScopeKey: Record<string, string>;
+    fullyMaterializedByProjectionScopeKey: Record<string, boolean>;
     hasDeferredProjectionWork: boolean;
     outcome: "active-scopes";
     projectionMode?: HostedVaultShareProjectionMode;
@@ -221,16 +241,21 @@ export type HostedVaultShareProjectionScopeResolution =
   | { outcome: "no-active-share" };
 
 export interface HostedVaultShareProjectionCapture {
+  fullyMaterializedByProjectionScopeKey?: Record<string, boolean>;
   hasDeferredProjectionWork: boolean;
   projectionMode?: HostedVaultShareProjectionMode;
   sourceWorkspaceVersion: string;
   snapshots: Array<{
+    contentDigest?: string;
     memberTimeZone?: string;
     generationToken: string;
     projectionScope: HostedVaultShareProjectionScope;
     records: HostedVaultShareDeliveryRecord[];
   }>;
 }
+
+type HostedVaultShareProjectionCaptureSnapshot =
+  HostedVaultShareProjectionCapture["snapshots"][number];
 
 export type HostedVaultShareProjectionCaptureResult =
   | {
@@ -273,6 +298,7 @@ export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
       };
     }
     const generationTokensByProjectionScopeKey: Record<string, string> = {};
+    const fullyMaterializedByProjectionScopeKey: Record<string, boolean> = {};
     for (const projectionScope of projectionScopes) {
       const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
         projectionScope,
@@ -285,9 +311,14 @@ export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
         return { outcome: "error" };
       }
       generationTokensByProjectionScopeKey[projectionScopeKey] = generationToken;
+      fullyMaterializedByProjectionScopeKey[projectionScopeKey] =
+        activeProjections.fullyMaterializedByProjectionScopeKey?.[
+          projectionScopeKey
+        ] === true;
     }
     return {
       generationTokensByProjectionScopeKey,
+      fullyMaterializedByProjectionScopeKey,
       hasDeferredProjectionWork:
         activeProjections.hasDeferredProjectionWork === true,
       outcome: "active-scopes",
@@ -310,6 +341,7 @@ export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
  * projectable scope, an empty read remains an intentional replacement snapshot.
  */
 export async function captureHostedVaultShareProjectionBestEffort(input: {
+  fullyMaterializedByProjectionScopeKey?: Readonly<Record<string, boolean>>;
   generationTokensByProjectionScopeKey: Readonly<Record<string, string>>;
   hasDeferredProjectionWork: boolean;
   projectionMode?: HostedVaultShareProjectionMode;
@@ -337,17 +369,25 @@ export async function captureHostedVaultShareProjectionBestEffort(input: {
       if (dated && !memberTimeZone) return { outcome: "error" };
       const records = await readRecords({ context, vaultRoot: input.vaultRoot });
       assertCompleteProjectionRecords(records, getHostedVaultShareProjectionMaxRecords(projectionScope));
-      // Admit the complete result before any captured scope is published.
-      parseHostedVaultShareDeliverRequest({
+      const projectionRequest = parseHostedVaultShareDeliverRequest({
         projectionScope, projectionKind: projectionScope.projectionKind, records,
         expectedGenerationToken: generationToken, sourceWorkspaceVersion: input.sourceWorkspaceVersion,
         ...(dated && memberTimeZone ? { memberTimeZone } : {}),
       });
       snapshots.push({
-        ...(dated && memberTimeZone ? { memberTimeZone } : {}),
+        contentDigest: buildHostedVaultShareProjectionContentDigest({
+          ...(projectionRequest.memberTimeZone
+            ? { memberTimeZone: projectionRequest.memberTimeZone }
+            : {}),
+          projectionScope: projectionRequest.projectionScope,
+          records: projectionRequest.records,
+        }),
+        ...(projectionRequest.memberTimeZone
+          ? { memberTimeZone: projectionRequest.memberTimeZone }
+          : {}),
         generationToken,
-        projectionScope,
-        records,
+        projectionScope: projectionRequest.projectionScope,
+        records: projectionRequest.records,
       });
     } catch {
       return { outcome: "error" };
@@ -358,6 +398,8 @@ export async function captureHostedVaultShareProjectionBestEffort(input: {
     ? { outcome: "no-projectable-records" }
     : {
       capture: {
+        fullyMaterializedByProjectionScopeKey:
+          { ...(input.fullyMaterializedByProjectionScopeKey ?? {}) },
         hasDeferredProjectionWork: input.hasDeferredProjectionWork,
         ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
         snapshots,
@@ -393,15 +435,40 @@ type ProjectableRecordReader = (input: {
  */
 export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
   capture: HostedVaultShareProjectionCapture;
+  publicationStateVaultRoot?: string;
   shouldStop?: () => boolean;
   vaultSharePort: HostedRuntimeVaultSharePort;
 }): Promise<HostedVaultShareProjectionOfferResult> {
   const outcomes: HostedVaultShareOfferOutcome[] = [];
+  let publicationState = emptyHostedVaultShareProjectionPublicationState();
+  if (input.publicationStateVaultRoot) {
+    try {
+      publicationState = await readHostedVaultShareProjectionPublicationState(
+        input.publicationStateVaultRoot,
+      );
+    } catch {
+      publicationState = emptyHostedVaultShareProjectionPublicationState();
+    }
+  }
   for (const snapshot of input.capture.snapshots) {
     if (input.shouldStop?.()) {
       return { outcome: "preempted" };
     }
     try {
+      const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
+        snapshot.projectionScope,
+      );
+      const recordedPublication =
+        publicationState.publicationsByProjectionScopeKey[projectionScopeKey];
+      if (canSkipHostedVaultShareProjectionDelivery({
+        capture: input.capture,
+        projectionScopeKey,
+        recordedPublication,
+        snapshot,
+      })) {
+        outcomes.push("delivered");
+        continue;
+      }
       const request = {
         ...(snapshot.memberTimeZone ? { memberTimeZone: snapshot.memberTimeZone } : {}),
         expectedGenerationToken: snapshot.generationToken,
@@ -423,6 +490,14 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
         outcomes.push("error");
         continue;
       }
+      if (response.status === "delivered") {
+        publicationState = await recordHostedVaultShareProjectionPublicationBestEffort({
+          projectionScopeKey,
+          publicationState,
+          snapshot,
+          vaultRoot: input.publicationStateVaultRoot,
+        });
+      }
       outcomes.push(
         response.status === "delivered" ? "delivered" : "no-active-share",
       );
@@ -440,6 +515,49 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
     };
   }
   return { outcome };
+}
+
+function canSkipHostedVaultShareProjectionDelivery(input: {
+  capture: HostedVaultShareProjectionCapture;
+  projectionScopeKey: string;
+  recordedPublication: HostedVaultShareProjectionPublication | undefined;
+  snapshot: HostedVaultShareProjectionCaptureSnapshot;
+}): boolean {
+  const scopeFullyMaterialized =
+    input.capture.fullyMaterializedByProjectionScopeKey?.[
+      input.projectionScopeKey
+    ] === true;
+  return (
+    !input.capture.projectionMode
+    && scopeFullyMaterialized
+    && input.snapshot.contentDigest !== undefined
+    && input.recordedPublication?.generationToken === input.snapshot.generationToken
+    && input.recordedPublication.contentDigest === input.snapshot.contentDigest
+  );
+}
+
+async function recordHostedVaultShareProjectionPublicationBestEffort(input: {
+  projectionScopeKey: string;
+  publicationState: HostedVaultShareProjectionPublicationState;
+  snapshot: HostedVaultShareProjectionCaptureSnapshot;
+  vaultRoot?: string;
+}): Promise<HostedVaultShareProjectionPublicationState> {
+  if (!input.vaultRoot || input.snapshot.contentDigest === undefined) {
+    return input.publicationState;
+  }
+  const next = upsertHostedVaultShareProjectionPublication(
+    input.publicationState,
+    {
+      contentDigest: input.snapshot.contentDigest,
+      generationToken: input.snapshot.generationToken,
+      projectionScopeKey: input.projectionScopeKey,
+    },
+  );
+  await writeHostedVaultShareProjectionPublicationState({
+    state: next,
+    vaultRoot: input.vaultRoot,
+  }).catch(() => undefined);
+  return next;
 }
 
 function resolveProjectableRecordReader(

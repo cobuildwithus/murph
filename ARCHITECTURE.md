@@ -103,6 +103,11 @@ worker thread captures selected records from that view, keeping synchronous vaul
 queries off the conversation event loop. It never reads the mutable live vault.
 A conversation wake releases the foreground wait without canceling the projection;
 scope lookup, capture, and delivery continue under one invocation-owned promise.
+When Web reports an ordinary refresh generation as fully materialized, the
+runtime compares the captured scope with its own portable publication state
+under `.runtime/operations/assistant/**` and skips the delivery request only
+when the generation token and content digest still match; null first
+materializations and grant generation changes still publish.
 There is at most one projection at a time. Shutdown and exact host abort stop
 new work, terminate the owned capture thread, and drain any active delivery.
 The scratch view is removed only after its reader exits. Web

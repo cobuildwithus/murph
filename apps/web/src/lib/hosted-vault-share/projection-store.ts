@@ -154,6 +154,7 @@ export async function findActiveHostedVaultSharePage(input: {
 }
 
 export interface DeliverableHostedVaultShareProjectionScopeGenerations {
+  fullyMaterializedByProjectionScopeKey: Record<string, boolean>;
   generations: Array<{
     generationToken: string;
     projectionScope: HostedVaultShareProjectionScope;
@@ -195,6 +196,7 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
     prisma,
   });
   const generations = new Map<string, {
+    fullyMaterialized: boolean;
     pendingShareCount: number;
     projectionScope: HostedVaultShareProjectionScope;
     shareIds: string[];
@@ -229,10 +231,12 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
       continue;
     }
     const current = generations.get(projectionScopeKey) ?? {
+      fullyMaterialized: true,
       pendingShareCount: 0,
       projectionScope,
       shareIds: [],
     };
+    current.fullyMaterialized &&= !hasUnmaterializedShare;
     current.shareIds.push(share.id);
     current.pendingShareCount += Number(needsPublication);
     generations.set(projectionScopeKey, current);
@@ -255,8 +259,15 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
     selectedGenerations.set(projectionScopeKey, generation);
     selectedShareCount += generation.pendingShareCount;
   }
+  const selectedGenerationEntries = [...selectedGenerations.entries()];
   return {
-    generations: [...selectedGenerations.values()].map((generation) => ({
+    fullyMaterializedByProjectionScopeKey: Object.fromEntries(
+      selectedGenerationEntries.map(([projectionScopeKey, generation]) => [
+        projectionScopeKey,
+        generation.fullyMaterialized,
+      ]),
+    ),
+    generations: selectedGenerationEntries.map(([, generation]) => ({
       generationToken: buildHostedVaultShareGenerationToken(generation.shareIds),
       projectionScope: generation.projectionScope,
     })),

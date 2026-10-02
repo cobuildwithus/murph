@@ -399,7 +399,7 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
-  it("persists only ciphertext with destination-root AAD bound to the share generation", async () => {
+  it("persists ciphertext with destination-root AAD bound to the share generation", async () => {
     const events: string[] = [];
     const codec = createSnapshotTestCodec(events);
     const { prisma, queryRaw, transaction, updateMany } = createPrisma(events);
@@ -916,7 +916,11 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     const input = { grantorMemberId: SHARE.grantorMemberId, prisma, sourceWorkspaceVersion: "7" };
 
     await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
-      .resolves.toEqual({ generations: [], hasDeferredProjectionWork: false });
+      .resolves.toEqual({
+        fullyMaterializedByProjectionScopeKey: {},
+        generations: [],
+        hasDeferredProjectionWork: false,
+      });
     await expect(readDeliverableHostedVaultShareProjectionScopeGenerations({
       ...input, sourceWorkspaceVersion: undefined,
     })).resolves.toMatchObject({ generations: [{ projectionScope: SLEEP_SCOPE }] });
@@ -929,6 +933,9 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     });
     const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
     expect(discovery).toEqual({
+      fullyMaterializedByProjectionScopeKey: {
+        [SLEEP_SCOPE_KEY]: false,
+      },
       generations: [{
         generationToken: buildHostedVaultShareGenerationToken(rows.map((row) => row.id)),
         projectionScope: SLEEP_SCOPE,
@@ -941,6 +948,51 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     expect(findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
       select: expect.objectContaining({ projectionSourceWorkspaceVersion: true }),
     }));
+  });
+
+  it("derives full materialization from existing snapshot state for stale generations", async () => {
+    const rows: Array<ReturnType<typeof buildShareRow> & {
+      projectionSnapshotCiphertext: string | null;
+      projectionSourceWorkspaceVersion: bigint | null;
+    }> = [1, 2].map((index) => ({
+      ...buildShareRow(index),
+      projectionSnapshotCiphertext: "sealed:materialized",
+      projectionSourceWorkspaceVersion: 7n,
+    }));
+    const findMany = vi.fn(async () => rows);
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
+    const input = { grantorMemberId: SHARE.grantorMemberId, prisma, sourceWorkspaceVersion: "8" };
+
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
+      .resolves.toEqual({
+        fullyMaterializedByProjectionScopeKey: {
+          [SLEEP_SCOPE_KEY]: true,
+        },
+        generations: [{
+          generationToken: buildHostedVaultShareGenerationToken(rows.map((row) => row.id)),
+          projectionScope: SLEEP_SCOPE,
+        }],
+        hasDeferredProjectionWork: false,
+      });
+
+    rows.push({
+      ...buildShareRow(3),
+      id: "share_new_generation",
+      projectionSnapshotCiphertext: null,
+      projectionSourceWorkspaceVersion: null,
+    });
+
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
+      .resolves.toEqual({
+        fullyMaterializedByProjectionScopeKey: {
+          [SLEEP_SCOPE_KEY]: false,
+        },
+        generations: [{
+          generationToken: buildHostedVaultShareGenerationToken(rows.map((row) => row.id)),
+          projectionScope: SLEEP_SCOPE,
+        }],
+        hasDeferredProjectionWork: false,
+      });
   });
 
   it("retains partial destination pages until every row is current without changing the token", async () => {
@@ -957,6 +1009,9 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
 
     for (let pageNumber = 0; pageNumber < 3; pageNumber += 1) {
       const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
+      expect(discovery.fullyMaterializedByProjectionScopeKey).toEqual({
+        [SLEEP_SCOPE_KEY]: true,
+      });
       expect(discovery.generations).toEqual([{
         generationToken: expectedToken,
         projectionScope: SLEEP_SCOPE,
@@ -972,7 +1027,11 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
 
     expect(pageSizes).toEqual([25, 25, 14]);
     await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
-      .resolves.toEqual({ generations: [], hasDeferredProjectionWork: false });
+      .resolves.toEqual({
+        fullyMaterializedByProjectionScopeKey: {},
+        generations: [],
+        hasDeferredProjectionWork: false,
+      });
   });
 
   it("keeps first materialization governed by null snapshots regardless of source version", async () => {
@@ -992,6 +1051,9 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
 
     const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
     const page = await findActiveHostedVaultSharePage(input);
+    expect(discovery.fullyMaterializedByProjectionScopeKey).toEqual({
+      [SLEEP_SCOPE_KEY]: false,
+    });
     expect(discovery.generations).toEqual([{
       generationToken: page.generationToken,
       projectionScope: SLEEP_SCOPE,
@@ -1062,6 +1124,10 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
       grantorMemberId: SHARE.grantorMemberId,
       prisma,
     })).resolves.toEqual({
+      fullyMaterializedByProjectionScopeKey: {
+        [buildHostedVaultShareProjectionScopeKey(profileScope)]: true,
+        [SLEEP_SCOPE_KEY]: false,
+      },
       generations: [
         {
           generationToken: buildHostedVaultShareGenerationToken([
@@ -1139,6 +1205,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
       supportedProjectionScopeKeys,
     })).resolves.toEqual({
+      fullyMaterializedByProjectionScopeKey: {},
       generations: [],
       hasDeferredProjectionWork: true,
     });
@@ -1162,6 +1229,9 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
       supportedProjectionScopeKeys,
     })).resolves.toEqual({
+      fullyMaterializedByProjectionScopeKey: {
+        [buildHostedVaultShareProjectionScopeKey(firstRuntimeScope)]: false,
+      },
       generations: [{
         generationToken: buildHostedVaultShareGenerationToken(
           Array.from(
@@ -1212,6 +1282,9 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     });
 
     expect(result.generations).toHaveLength(1);
+    expect(result.fullyMaterializedByProjectionScopeKey).toEqual({
+      [SLEEP_SCOPE_KEY]: false,
+    });
     expect(result.generations[0]).toEqual({
       generationToken: buildHostedVaultShareGenerationToken(
         Array.from(

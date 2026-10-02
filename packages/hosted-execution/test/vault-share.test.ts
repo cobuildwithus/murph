@@ -34,6 +34,7 @@ import {
   parseHostedVaultShareDeliverResponse,
   parseHostedVaultShareEffectDeadlineAtEpochMs,
   parseHostedVaultShareProjectionScopeKey,
+  serializeHostedVaultShareProjectionContentDigestInput,
 } from "../src/vault-share.ts";
 
 const TEST_SOURCE_WORKSPACE_VERSION = "7";
@@ -763,9 +764,11 @@ describe("vault-share contracts", () => {
     const generationToken = "b".repeat(43);
     expect(parseHostedVaultShareActiveProjectionKindsResponse({
       generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
+      fullyMaterializedByProjectionScopeKey: { [scopeKey]: true },
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     })).toEqual({
+      fullyMaterializedByProjectionScopeKey: { [scopeKey]: true },
       generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
       hasDeferredProjectionWork: false,
       projectionKinds: ["sleep-times.v0"],
@@ -784,6 +787,42 @@ describe("vault-share contracts", () => {
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     })).toThrow(/SHA-256 base64url digest/u);
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      fullyMaterializedByProjectionScopeKey: {
+        [buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE)]: true,
+      },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toThrow(/inactive scope key/u);
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      fullyMaterializedByProjectionScopeKey: { [scopeKey]: "not-a-boolean" },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toThrow(/must be boolean/u);
+  });
+
+  it("serializes current-state content digests without runtime-controlled occurrence time", () => {
+    const older = serializeHostedVaultShareProjectionContentDigestInput({
+      projectionScope: PROFILE_SCOPE,
+      records: [{
+        data: { displayName: "Theo" },
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        recordKey: "profile-name",
+        sourceRevision: "a".repeat(32),
+      }],
+    });
+    const newer = serializeHostedVaultShareProjectionContentDigestInput({
+      projectionScope: PROFILE_SCOPE,
+      records: [{
+        data: { displayName: "Theo" },
+        occurredAt: "2026-10-02T00:00:00.000Z",
+        recordKey: "profile-name",
+        sourceRevision: "a".repeat(32),
+      }],
+    });
+
+    expect(newer).toBe(older);
+    expect(newer).not.toContain("occurredAt");
   });
 
   it("parses the fixed-width deferred-work signal and rejects non-booleans", () => {

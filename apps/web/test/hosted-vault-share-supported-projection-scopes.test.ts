@@ -95,6 +95,23 @@ describe("hosted vault-share supported projection scopes", () => {
     )).toBe(false);
   });
 
+  it("requires the exact projection-content-digest capability version", async () => {
+    const supportedProjectionScopes = await import(
+      "../src/lib/hosted-vault-share/supported-projection-scopes"
+    );
+
+    expect(supportedProjectionScopes.supportsHostedVaultShareProjectionContentDigests(
+      new Request(
+        "https://worker.example.test/internal/vault-share/active-kinds?projectionContentDigest=v1",
+      ),
+    )).toBe(true);
+    expect(supportedProjectionScopes.supportsHostedVaultShareProjectionContentDigests(
+      new Request(
+        "https://worker.example.test/internal/vault-share/active-kinds?projectionContentDigest=v2",
+      ),
+    )).toBe(false);
+  });
+
   it("reads only the exact first-materialization projection mode", async () => {
     const supportedProjectionScopes = await import(
       "../src/lib/hosted-vault-share/supported-projection-scopes"

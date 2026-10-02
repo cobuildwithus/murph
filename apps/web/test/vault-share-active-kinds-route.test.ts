@@ -37,6 +37,8 @@ import {
 	buildHostedVaultShareActivityDistanceProjectionScope,
 	buildHostedVaultShareActivitySessionCountProjectionScope,
 	buildHostedVaultShareProjectionScopeKey,
+	HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+	HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
 	HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
 	HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
 	HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -74,6 +76,12 @@ function projectionWork(
 	...projectionScopes: Array<Parameters<typeof buildHostedVaultShareProjectionScopeKey>[0]>
 ) {
 	return {
+		fullyMaterializedByProjectionScopeKey: Object.fromEntries(
+			projectionScopes.map((projectionScope) => [
+				buildHostedVaultShareProjectionScopeKey(projectionScope),
+				false,
+			]),
+		),
 		generations: projectionScopes.map((projectionScope, index) => ({
 			generationToken: generationToken(index),
 			projectionScope,
@@ -101,6 +109,15 @@ function withDeferredWorkCapability(search = ""): string {
 	params.set(
 		HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
 		HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+	);
+	return `?${params.toString()}`;
+}
+
+function withContentDigestCapability(search = ""): string {
+	const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+	params.set(
+		HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+		HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
 	);
 	return `?${params.toString()}`;
 }
@@ -159,6 +176,32 @@ describe("vault-share active-kinds route", () => {
 			prisma: { kind: "prisma" },
 			sourceWorkspaceVersion: undefined,
 		}));
+	});
+
+	it("includes materialization state only for compatible runners", async () => {
+		const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+		mocks.readDeliverableHostedVaultShareProjectionScopeGenerations.mockResolvedValue({
+			fullyMaterializedByProjectionScopeKey: {
+				[profileScopeKey]: true,
+			},
+			generations: [{
+				generationToken: generationToken(0),
+				projectionScope: PROFILE_SCOPE,
+			}],
+			hasDeferredProjectionWork: false,
+		});
+
+		const compatible = await activeKindsRoute.GET(buildRequest(withContentDigestCapability()));
+		expect(await compatible.json()).toMatchObject({
+			fullyMaterializedByProjectionScopeKey: {
+				[profileScopeKey]: true,
+			},
+		});
+
+		const legacy = await activeKindsRoute.GET(buildRequest());
+		expect(await legacy.json()).not.toHaveProperty(
+			"fullyMaterializedByProjectionScopeKey",
+		);
 	});
 
 	it("passes the optional canonical source version to scope discovery", async () => {

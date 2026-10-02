@@ -55,6 +55,8 @@ export async function projectHostedVaultShareCheckpoint(input: {
     });
     if (input.shouldStop()) return { outcome: "preempted" };
     const capture = await captureInWorker({
+      fullyMaterializedByProjectionScopeKey:
+        scopes.fullyMaterializedByProjectionScopeKey,
       generationTokensByProjectionScopeKey: scopes.generationTokensByProjectionScopeKey,
       hasDeferredProjectionWork: scopes.hasDeferredProjectionWork,
       ...(scopes.projectionMode ? { projectionMode: scopes.projectionMode } : {}),
@@ -66,6 +68,7 @@ export async function projectHostedVaultShareCheckpoint(input: {
     if (capture.outcome !== "captured") return { outcome: capture.outcome };
     return await offerCapturedHostedVaultShareProjectionBestEffort({
       capture: capture.capture,
+      publicationStateVaultRoot: input.vaultRoot,
       shouldStop: input.shouldStop,
       vaultSharePort: input.vaultSharePort,
     });

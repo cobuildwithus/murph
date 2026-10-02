@@ -25,6 +25,7 @@ import {
   readHostedVaultShareProjectionModeFromRequest,
   readHostedVaultShareSupportedProjectionScopeKeysFromRequest,
   supportsHostedVaultShareDeferredProjectionWork,
+  supportsHostedVaultShareProjectionContentDigests,
 } from "@/src/lib/hosted-vault-share/supported-projection-scopes";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -44,6 +45,8 @@ export const GET = withJsonError(async (request: Request) => {
     : requireHostedVaultShareSourceWorkspaceVersion(requestedVersion);
   const supportsDeferredProjectionWork =
     supportsHostedVaultShareDeferredProjectionWork(request);
+  const supportsProjectionContentDigests =
+    supportsHostedVaultShareProjectionContentDigests(request);
 
   try {
     await requireHostedRuntimeActiveAccess(grantorMemberId, { prisma });
@@ -83,6 +86,11 @@ export const GET = withJsonError(async (request: Request) => {
     projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
   );
   const hasDeferredProjectionWork = projectionWork.hasDeferredProjectionWork;
+  const supportedGenerations = generations.filter((generation) =>
+    supportedScopeKeys.has(
+      buildHostedVaultShareProjectionScopeKey(generation.projectionScope),
+    )
+  );
   requireHostedVaultShareDeferredProjectionWorkCapability({
     hasDeferredProjectionWork,
     supportsDeferredProjectionWork,
@@ -99,17 +107,29 @@ export const GET = withJsonError(async (request: Request) => {
         .localeCompare(buildHostedVaultShareProjectionScopeKey(right))
     ),
     generationTokensByProjectionScopeKey: Object.fromEntries(
-      generations
-        .filter((generation) =>
-          supportedScopeKeys.has(
-            buildHostedVaultShareProjectionScopeKey(generation.projectionScope),
-          )
-        )
+      supportedGenerations
         .map((generation) => [
           buildHostedVaultShareProjectionScopeKey(generation.projectionScope),
           generation.generationToken,
         ]),
     ),
+    ...(supportsProjectionContentDigests
+      ? {
+          fullyMaterializedByProjectionScopeKey: Object.fromEntries(
+            supportedGenerations.map((generation) => {
+              const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
+                generation.projectionScope,
+              );
+              return [
+                projectionScopeKey,
+                projectionWork.fullyMaterializedByProjectionScopeKey[
+                  projectionScopeKey
+                ] === true,
+              ] as const;
+            }),
+          ),
+        }
+      : {}),
   } satisfies HostedVaultShareActiveProjectionKindsResponse);
 });
 
