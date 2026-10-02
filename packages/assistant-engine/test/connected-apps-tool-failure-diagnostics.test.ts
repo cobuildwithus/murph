@@ -7,6 +7,7 @@ import {
   readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
+  classifyToolFailureError,
   toolTextResult,
   withConnectedAppsToolFailureDetails,
 } from '../src/assistant-codex/tool-failure-diagnostics.js'
@@ -38,6 +39,14 @@ const baseDiagnostic = {
 const policy = { environment: 'hosted' as const, surface: null, privateIssueCaptureEnabled: true }
 const calendarRecovery = 'calendar event creation failed or returned an ambiguous result. Do not retry the calendar-create call. Search the selected calendar for the event first, then explain the ambiguous outcome to the user before taking any further write action.'
 const emailRecovery = "email sending failed or returned an ambiguous result. Do not retry the email-send call. Search the selected account's Sent mail in a narrow window at or after this attempt for a message matching the exact primary recipient, subject, and substantive body. Older, duplicate, or partial matches do not prove this send completed. If the result remains uncertain, report it as unknown and take no further write action."
+
+function responseSchemaError() {
+  // Mirror the port's own-data contract; its real factory is covered in the
+  // Cloudflare connected-app web-control-policy test owner.
+  return Object.defineProperty(new TypeError('Hosted connected apps returned an invalid response.'), 'code', {
+    value: 'CONNECTED_APPS_RESPONSE_SCHEMA_INVALID', enumerable: false,
+  })
+}
 
 function hostedError(statusFields: object = { status: 413, statusCode: 413 }) {
   return Object.freeze({
@@ -103,7 +112,7 @@ async function dispatch(input: ReturnType<typeof dispatchInput>) {
 }
 
 function expectNoPrivateContent(value: unknown) {
-  expect(JSON.stringify(value)).not.toMatch(/SYNTHETIC_PRIVATE|synthetic-account|synthetic-private-code|HostedWebControlPlaneResponseError/u)
+  expect(JSON.stringify(value)).not.toMatch(/SYNTHETIC_PRIVATE|synthetic-account|synthetic-private-code|HostedWebControlPlaneResponseError|CONNECTED_APPS_RESPONSE_SCHEMA_INVALID|Hosted connected apps returned an invalid response/u)
 }
 
 function annotate(error: unknown) {
@@ -126,12 +135,15 @@ afterEach(async () => {
 describe('connected-app caught failures through dispatch, classification and sanitized issue storage', () => {
   it.each([
     { name: 'transport Error', error: new Error(privateValue), text: 'connected apps API is unavailable' },
-    { name: 'invalid-response TypeError', error: new TypeError(privateValue), text: 'connected apps API is unavailable' },
+    { name: 'invalid-response TypeError', error: new TypeError('Hosted connected apps returned an invalid response.'),
+      text: 'connected apps API is unavailable' },
+    { name: 'port response-schema TypeError', error: responseSchemaError(),
+      errorCategory: 'invalid_result', text: 'connected apps API is unavailable' },
     { name: 'structural HTTP 413', error: hostedError(), status: 413, text: 'connected apps request failed (HTTP 413)' },
     // Existing RPC projection reads status only. The new private fallback must
     // not rewrite that projection or authorize different recovery.
     { name: 'own statusCode only', error: hostedError({ statusCode: 413 }), status: 413, text: 'connected apps API is unavailable' },
-  ])('preserves $name RPC bytes, category and effects', async ({ error, status, text }) => {
+  ])('preserves $name RPC bytes, category and effects', async ({ error, status, text, errorCategory = baseDiagnostic.errorCategory }) => {
     const errorBefore = Object.getOwnPropertyDescriptors(error)
     const args = executeArgs()
     const argsBefore = JSON.stringify(args)
@@ -140,13 +152,14 @@ describe('connected-app caught failures through dispatch, classification and san
     expect(input.request.kind).toBe('connected-apps-execute')
     const result = await dispatch(input)
     expect(request).toHaveBeenCalledExactlyOnceWith({ operation: 'execute', input: args }, { signal: null })
-    const diagnostic = { ...baseDiagnostic, ...(status === undefined ? {} : { connectedAppsHttpStatus: status }) }
+    const diagnostic = { ...baseDiagnostic, errorCategory, ...(status === undefined ? {} : { connectedAppsHttpStatus: status }) }
     expect(result.failureDiagnostic).toEqual(diagnostic)
     const expectedRpc = { success: false, contentItems: [{ type: 'inputText', text }] }
     const wire = JSON.stringify({ id: 1, result: result.rpcResult })
     expect(wire).toBe(JSON.stringify({ id: 1, result: expectedRpc }))
     expect(readCodexRpcSuccessResponse(JSON.parse(wire))?.result).toEqual(expectedRpc)
     expect(wire).not.toMatch(/connectedAppsHttpStatus|failureDiagnostic|runtimeIssueInputs/u)
+    await expect(request.mock.results[0]!.value).rejects.toBe(error)
     expect(Object.getOwnPropertyDescriptors(error)).toEqual(errorBefore)
     expect(JSON.stringify(args)).toBe(argsBefore)
     expectNoPrivateContent(result)
@@ -215,6 +228,52 @@ describe('connected-app caught failures through dispatch, classification and san
     expect(result.runtimeIssueInputs).toHaveLength(1)
     expect(result.runtimeIssueInputs![0]!.details).toMatchObject({ connectedAppsHttpStatus: 413, diagnosticRole: 'classification' })
     expectNoPrivateContent(result)
+  })
+
+  it.each([
+    { toolSlug: 'GOOGLECALENDAR_CREATE_EVENT', text: calendarRecovery },
+    { toolSlug: 'OUTLOOK_CALENDAR_CREATE_EVENT', text: calendarRecovery },
+    { toolSlug: 'GMAIL_SEND_EMAIL', text: emailRecovery },
+    { toolSlug: 'OUTLOOK_SEND_EMAIL', text: emailRecovery },
+  ])('keeps $toolSlug ambiguous-write recovery byte-identical for schema and transport errors', async ({ toolSlug, text }) => {
+    const args = executeArgs(toolSlug)
+    const argsBefore = JSON.stringify(args)
+    for (const { error, errorCategory } of [
+      { error: responseSchemaError(), errorCategory: 'invalid_result' },
+      { error: new Error(privateValue), errorCategory: 'unknown' },
+    ]) {
+      const before = Object.getOwnPropertyDescriptors(error)
+      const request = vi.fn<AssistantConnectedAppsPort['request']>().mockRejectedValue(error)
+      const result = await dispatch(dispatchInput(args, { request }))
+      expect(request).toHaveBeenCalledExactlyOnceWith({ operation: 'execute', input: args }, { signal: null })
+      expect(JSON.stringify(result.rpcResult)).toBe(JSON.stringify({
+        success: false, contentItems: [{ type: 'inputText', text }],
+      }))
+      expect(result.failureDiagnostic).toEqual({ ...baseDiagnostic, errorCategory })
+      expect(result.runtimeIssueInputs).toHaveLength(1)
+      expect(result.runtimeIssueInputs![0]!.details).toEqual({
+        requestKind: 'connected-apps-execute', ...baseDiagnostic, errorCategory, diagnosticRole: 'classification',
+      })
+      await expect(request.mock.results[0]!.value).rejects.toBe(error)
+      expect(Object.getOwnPropertyDescriptors(error)).toEqual(before)
+      expect(JSON.stringify(args)).toBe(argsBefore)
+      expectNoPrivateContent(result)
+    }
+  })
+
+  it('classifies only the exact own-data response-schema code, not prose, accessors or inherited codes', () => {
+    expect(classifyToolFailureError(responseSchemaError())).toBe('invalid_result')
+    const read = vi.fn(() => 'CONNECTED_APPS_RESPONSE_SCHEMA_INVALID')
+    for (const error of [
+      new TypeError('CONNECTED_APPS_RESPONSE_SCHEMA_INVALID'),
+      Object.create({ code: 'CONNECTED_APPS_RESPONSE_SCHEMA_INVALID' }),
+      Object.defineProperty(new TypeError(privateValue), 'code', { get: read }),
+      { code: 'CONNECTED_APPS_RESPONSE_SCHEMA_INVALID_EXTRA' },
+      { code: 'CONNECTED_APPS_RESPONSE_SCHEMA_INVALID ' },
+    ]) {
+      expect(classifyToolFailureError(error)).toBe('unknown')
+    }
+    expect(read).not.toHaveBeenCalled()
   })
 
   it.each([
