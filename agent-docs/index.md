@@ -16,6 +16,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Local idle-cleanup veto ordering and completion-preflight evidence are recorded
+in [owner request reduction](exec-plans/completed/2026-10-02-owner-cleanup-request-reduction.md);
+the current contract remains in `references/hosted-postgres-runtime.md`.
+
 Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
 [the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
 

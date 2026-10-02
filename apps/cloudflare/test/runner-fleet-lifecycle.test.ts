@@ -268,6 +268,79 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
     };
   }
 
+  it.each([false, true])("skips owner polls until the receipt deadline (reactivated=%s)", async (reactivated) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const receipt = Date.parse("2026-10-01T12:00:00Z");
+      vi.setSystemTime(receipt);
+      const health = { conversationActivityReceivedAtEpochMs: receipt };
+      const initial = runnerHarness({ running: true, health });
+      await initial.container.bindStandbySlot(claimInput());
+      vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({
+        cutover: "postgres", status: "observed", owner: owner("active"),
+      });
+      await initial.container.onActivityExpired();
+      const { container, calls } = reactivated
+        ? runnerHarness({ running: true, health, durable: initial }) : initial;
+      for (let elapsed = 60_000; elapsed < 600_000; elapsed += 60_000) {
+        vi.setSystemTime(receipt + elapsed);
+        await container.onActivityExpired();
+        assert.equal(vi.mocked(commandHostedRuntimeOwner).mock.calls.length, 0);
+        assert.equal(calls.destroy, 0);
+        assert.deepEqual((await container.listSchedules("onActivityExpired")).map(s => s.time),
+          [(receipt + 600_000) / 1_000]);
+      }
+      // Once the local deadline expires, denial has no safe longer deadline.
+      for (const elapsed of [600_000, 660_000]) {
+        vi.setSystemTime(receipt + elapsed);
+        await container.onActivityExpired();
+        assert.equal(vi.mocked(commandHostedRuntimeOwner).mock.calls.length, elapsed / 60_000 - 9);
+        assert.equal(calls.destroy, 0);
+        assert.deepEqual((await container.listSchedules("onActivityExpired")).map(s => s.time),
+          [(receipt + elapsed + 60_000) / 1_000]);
+      }
+      vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({
+        cutover: "postgres", status: "observed", owner: owner("idle"),
+      });
+      vi.setSystemTime(receipt + 720_000);
+      await container.onActivityExpired();
+      assert.equal(calls.destroy, 1);
+      assert.deepEqual(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([call]) => call.command.operation),
+        ["reconcile", "reconcile", "reconcile", "target_retired"]);
+      assert.deepEqual(await container.listSchedules("onActivityExpired"), []);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { name: "stopped", running: false, status: "stopped", health: {} },
+    { name: "starting", running: true, status: "starting", health: {} },
+    { name: "active jobs", running: true, status: "running", health: { activeJobCount: 1 } },
+  ])("skips the owner read when local state prevents cleanup: $name", async ({ running, status, health }) => {
+    const { container, calls } = runnerHarness({ running, status, health });
+    await container.bindStandbySlot(claimInput());
+    await container.onActivityExpired();
+    assert.equal(vi.mocked(commandHostedRuntimeOwner).mock.calls.length, 0);
+    assert.equal(calls.destroy, 0);
+  });
+
+  it.each(["jobs", "receipt"] as const)("rechecks local %s under the lock after Web allows cleanup", async (change) => {
+    const health: Record<string, unknown> = {};
+    const { container, calls } = runnerHarness({ running: true, health });
+    await container.bindStandbySlot(claimInput());
+    vi.mocked(commandHostedRuntimeOwner).mockImplementationOnce(async () => {
+      Object.assign(health, change === "jobs"
+        ? { activeJobCount: 1 } : { conversationActivityReceivedAtEpochMs: Date.now() });
+      return { cutover: "postgres", status: "observed", owner: owner("idle") };
+    });
+    await container.onActivityExpired();
+    assert.equal(vi.mocked(commandHostedRuntimeOwner).mock.calls.length, 1);
+    assert.equal(calls.fetch, 2);
+    assert.equal(calls.destroy, 0);
+    assert.equal((await container.listSchedules("onActivityExpired")).length, 1);
+  });
+
   it.each([false, true])("preserves admitted startup between readiness and launch (reactivated=%s)", async (reactivated) => {
     const initial = runnerHarness({ running: true });
     await initial.container.prepareStandbySlot({ releaseId: RELEASE, region: HOSTED_RUNNER_REGION, slotName: GLOBAL_SLOT, timeoutMs: 1_000 });

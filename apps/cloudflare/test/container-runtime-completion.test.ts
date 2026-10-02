@@ -302,6 +302,25 @@ describe("completion client, router, and native receipt composition", () => {
   });
 
   it.each([
+    { reason: "already_completed", owner: { attemptId: null, phase: "idle", completedAt: COMPLETED_AT } },
+    { reason: "owner_unconfirmed", owner: { attemptId: null, phase: "idle", completedAt: null } },
+    { reason: "superseded", owner: { attemptId: "attempt_other_slot", generation: "8", runnerContainerName: "other-slot" } },
+  ] as const)("needs canonical facts for $reason with the same completed native receipt", async ({ owner, reason }) => {
+    const f = createRoutedCompletion();
+    f.receipts.complete(f.identity, false);
+    const receipt = f.receipts.read();
+    f.state.owner = { ...f.owner, ...owner };
+    f.canonicalStatus = "stale";
+    await recordHostedContainerRuntimeCompletionBestEffort({ ...f.input, fetchImpl: f.fetchImpl });
+    expect(f.responses).toEqual([{ completed: false, reason }]);
+    expect(f.receipts.read()).toEqual(receipt);
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledExactlyOnceWith({
+      source: f.env, userId: f.input.job.request.userId, command: { operation: "reconcile" },
+    });
+    expect(f.nativeCompletion).not.toHaveBeenCalled();
+  });
+
+  it.each([
     { name: "missing native receipt", identity: null, status: "updated", reason: "native_receipt_mismatch" },
     { name: "native attempt mismatch", identity: { attemptId: "attempt_other", generation: "7" }, status: "updated", reason: "native_receipt_mismatch" },
     { name: "native generation mismatch", identity: { attemptId: "attempt_runtime_completion", generation: "6" }, status: "updated", reason: "native_receipt_mismatch" },
