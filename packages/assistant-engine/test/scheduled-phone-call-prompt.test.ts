@@ -11,11 +11,8 @@ describe('scheduled phone-call prompt', () => {
       currentTimeZone: 'America/New_York', hostedRuntime: true,
       modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger,
     })
-    expect(prompt).toContain('phone-call reminder is supported')
-    expect(prompt).toContain('phone-formatted `Sender` on the accepted private Linq input')
-    expect(prompt).toContain('use `murph.create_phone_call` once')
-    expect(prompt).toContain('without asking again')
-    expect(prompt).toContain('Scheduled group and email turns cannot place calls')
+    expect(prompt).toContain('Private Linq/Telegram scheduled calls are supported')
+    expect(prompt).toContain('Before calling or scheduling, read `$MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md`')
     expect(prompt).not.toMatch(/(?:cannot|can’t|can not) schedule (?:a )?(?:phone|call)/iu)
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain('scheduled occurrences may place one call')
   })
