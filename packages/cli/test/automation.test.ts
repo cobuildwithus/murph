@@ -1613,6 +1613,80 @@ test("automation compact list preserves empty page semantics", async () => {
   }
 });
 
+test("automation instruction inventory bounds pages and exposes omitted instructions without losing records", async () => {
+  const cli = Cli.create("vault-cli", { version: "0.0.0-test" });
+  const records: AutomationQueryRecord[] = Array.from({ length: 25 }, (_, index) => ({
+    schemaVersion: AUTOMATION_SCHEMA_VERSION, docType: AUTOMATION_DOC_TYPE,
+    automationId: `automation_inventory_${String(index).padStart(3, "0")}`,
+    slug: `inventory-${index}`, title: `Inventory ${index}`, status: index % 2 ? "paused" : "active",
+    summary: null, activeUntil: null, schedule: { kind: "dailyLocal", localTime: "09:00", timeZone: "UTC" },
+    route: { channel: "linq", deliveryTarget: "synthetic-inventory", identityId: null, participantId: null, threadId: null },
+    assistantTargetOverride: { model: "gpt-6-luna", reasoningEffort: "high" },
+    supportKind: null, plannedOccurrenceOffsetMs: null,
+    contextReferences: [{ entityKind: "event", entityId: "evt_synthetic_context" }],
+    continuityPolicy: "fresh", tags: [], createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z",
+    instructions: index === 0 ? "🌿".repeat(20_000) : "Review the exact current plan. ".repeat(200),
+    relativePath: `bank/automations/inventory-${index}.md`, markdown: "must not duplicate the body",
+  }));
+  let queryCalls = 0;
+  registerAutomationCommands(cli, { async listAutomationPage(_vault, options) {
+    queryCalls++;
+    assert.equal(options?.orderById, true);
+    assert.equal(options.limit, 20);
+    const remaining = records.filter(record => !options.cursor || record.automationId.localeCompare(options.cursor) > 0);
+    const items = remaining.slice(0, options.limit);
+    return { items, nextCursor: remaining.length > items.length ? items.at(-1)!.automationId : null, totalCount: records.length };
+  } });
+  type Page = { includeInstructions: true; count: number; totalCount: number; nextCursor: string | null; items: Array<{
+    automationId: string; instructions: string | null; instructionsComplete: boolean; status: string;
+    contextReferences: unknown[]; assistantTargetOverride: unknown; updatedAt: string;
+  }> };
+  let cursor: string | null = null;
+  const seen: Page["items"] = [];
+  let pageCount = 0;
+  do {
+    const listed: Awaited<ReturnType<typeof runInProcessJsonCli<Page>>> = await runInProcessJsonCli<Page>(cli, ["automation", "list", "--include-instructions", "--limit", "200",
+      "--status", "active", "--status", "paused", ...(cursor ? ["--cursor", cursor] : []), "--vault", "/synthetic/inventory"]);
+    assert.equal(listed.envelope.ok, true);
+    const page = listed.envelope.data;
+    assert.ok(page);
+    assert.equal(page.includeInstructions, true);
+    assert.equal(page.totalCount, 25);
+    assert.equal(page.count, page.items.length);
+    assert.ok(page.count > 0 && page.count <= 20);
+    assert.ok(Buffer.byteLength(JSON.stringify(page), "utf8") <= 48 * 1024);
+    for (const item of page.items) assert.equal("markdown" in item, false);
+    seen.push(...page.items);
+    cursor = page.nextCursor;
+    assert.ok(++pageCount < 10, "bounded inventory must make cursor progress");
+  } while (cursor);
+  assert.equal(queryCalls, pageCount, "one canonical list query per page");
+  assert.deepEqual(seen.map(item => item.automationId), records.map(record => record.automationId));
+  assert.equal(seen[0]?.instructions, null);
+  assert.equal(seen[0]?.instructionsComplete, false);
+  for (const [index, item] of seen.slice(1).entries()) {
+    assert.equal(item.instructionsComplete, true);
+    assert.equal(item.instructions, records[index + 1]?.instructions);
+    assert.deepEqual(item.contextReferences, records[index + 1]?.contextReferences);
+    assert.deepEqual(item.assistantTargetOverride, records[index + 1]?.assistantTargetOverride);
+    assert.equal(item.status, records[index + 1]?.status);
+  }
+  const invalid = await runInProcessJsonCli(cli, ["automation", "list", "--include-instructions", "--compact", "--vault", "/synthetic/inventory"]);
+  assert.equal(invalid.envelope.ok, false);
+  assert.equal(queryCalls, pageCount, "reject incompatible projections before querying");
+  const terminal = await runInProcessJsonCli<Page>(cli, ["automation", "list", "--include-instructions", "--limit", "20",
+    "--cursor", records.at(-1)!.automationId, "--vault", "/synthetic/inventory"]);
+  assert.equal(terminal.envelope.ok, true);
+  assert.deepEqual(terminal.envelope.data?.items, []);
+  assert.equal(terminal.envelope.data?.nextCursor, null);
+  const oversizedFilters = await runInProcessJsonCli(cli, ["automation", "list", "--include-instructions", "--limit", "20",
+    "--cursor", records.at(-1)!.automationId, "--text", "x".repeat(50_000), "--vault", "/synthetic/inventory"]);
+  assert.equal(oversizedFilters.envelope.ok, false, "an empty result must still respect the byte budget");
+  records[0]!.summary = "x".repeat(50_000);
+  const oversizedMetadata = await runInProcessJsonCli(cli, ["automation", "list", "--include-instructions", "--limit", "20", "--vault", "/synthetic/inventory"]);
+  assert.equal(oversizedMetadata.envelope.ok, false, "oversized metadata must fail instead of silently dropping its record");
+});
+
 test("automation compact list retains enumeration state and materially reduces a 25-item page", async () => {
   const cli = Cli.create("vault-cli", {
     description: "automation compact fixture test cli",

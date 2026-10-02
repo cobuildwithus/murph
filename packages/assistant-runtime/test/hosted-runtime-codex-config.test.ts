@@ -105,13 +105,13 @@ const CURRENT_TIME_REMINDER_PATTERN =
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
-  "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
+  "When the active route or skill contract permits delegation, proactively spawn a fresh child for bounded multi-pass CLI work that replaces repeated root passes over a large conversation, even when needed for this reply; use fork_turns none and gpt-6.1-sol medium when model overrides are available unless the user selected another child model.",
   "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
-  "For explicitly requested delegation needed to answer, use a bounded child and native wait_agent, then answer in the same turn. Keep independent onboarding saves nonblocking.",
+  "For any delegated result needed to answer, use native wait_agent, then answer in the same turn. Keep independent onboarding saves nonblocking.",
   "Follow the active route or skill contract for the exact leaf assignment and completion proof.",
 ].join(" ");
 const EXPECTED_MULTI_AGENT_MODE_HINT =
-  "Murph bounded delegation mode is active; the root owns the final answer and waits for requested child results when needed.";
+  "Murph bounded delegation mode is active; the root owns the final answer and waits for child results when needed.";
 const EXPECTED_SUBAGENT_USAGE_HINT = [
   "This hosted child is a one-shot leaf.",
   "Complete only the self-contained assignment and stop.",
@@ -680,6 +680,9 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     `multi_agent_mode_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_MODE_HINT)}`,
     `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
   ].join("\n")));
+  assert.match(config, /subagent_developer_instructions = /u);
+  assert.match(config, /Group tasks may use only explicitly permitted room-owned data/u);
+  assert.match(config, /Missing authority is a blocker/u);
   assert.doesNotMatch(config, /Non-blocking delegation:/u);
   assert.doesNotMatch(config, /root_agent_usage_hint_text/u);
   assert.doesNotMatch(config, /Be proactive about delegation/u);
@@ -2609,6 +2612,9 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
   assert.ok(config.includes(
     `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
   ));
+  assert.match(config, /subagent_developer_instructions = /u);
+  assert.match(config, /Group tasks may use only explicitly permitted room-owned data/u);
+  assert.match(config, /Missing authority is a blocker/u);
   assert.doesNotMatch(config, /Non-blocking delegation:/u);
   assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
   assert.match(config, /\[memories\]\nuse_memories = false/u);
@@ -2639,7 +2645,7 @@ test("hosted Codex config promotes permitted leaf delegation with native per-spa
   });
 
   assert.ok(config.includes(
-    "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
+    "When the active route or skill contract permits delegation, proactively spawn a fresh child for bounded multi-pass CLI work that replaces repeated root passes over a large conversation, even when needed for this reply; use fork_turns none and gpt-6.1-sol medium when model overrides are available unless the user selected another child model.",
   ));
   assert.ok(config.includes(
     "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks",

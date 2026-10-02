@@ -208,10 +208,11 @@ export function resolveAssistantResumeStateFromProviderTurn(input: {
 }
 
 export function resolveAssistantProviderResumeStateAction(input: {
+  providerThreadUnchanged?: true
   codexThreadId: string | null
   threadScope: AssistantCodexThreadScope
 }): AssistantProviderResumeStateAction {
-  if (input.threadScope === 'isolated-thread') {
+  if (input.providerThreadUnchanged || input.threadScope === 'isolated-thread') {
     return 'preserve-existing'
   }
 

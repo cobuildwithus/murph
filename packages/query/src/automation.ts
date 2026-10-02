@@ -91,6 +91,8 @@ export interface AutomationListOptions {
 
 export interface AutomationListPageOptions extends AutomationListOptions {
   cursor?: string;
+  /** Use immutable ids from the first page, including unfiltered inventories. */
+  orderById?: boolean;
 }
 
 export interface AutomationListPageResult {
@@ -660,7 +662,7 @@ export async function listAutomationPage(
 ): Promise<AutomationListPageResult> {
   const filtered = await loadAutomationRecords(vaultRoot, options);
   const stablePagination = Boolean(
-    normalizeNullableString(options.exactTag) || normalizeNullableString(options.cursor),
+    options.orderById || normalizeNullableString(options.exactTag) || normalizeNullableString(options.cursor),
   );
   if (stablePagination) {
     filtered.sort((left, right) => left.automationId.localeCompare(right.automationId));

@@ -304,6 +304,12 @@ intact. Event-relative reminders follow verified event changes; exact completed
 or canceled one-offs and verified duplicates can be archived. Correct reminders
 and recurring habits are preserved, including on retries. Source opt-outs still
 apply, and uncertain context does not authorize a mutation.
+The review reads the paginated automation instruction inventory once, following
+every cursor. Each page holds at most 20 records and 48 KiB of data JSON in
+immutable-id order. Oversized instructions are explicitly incomplete and require
+an exact read before judgment. Complete unchanged records need no individual
+inspection; mutation candidates retain an exact read and version check. Ordinary
+compact listings keep their existing projection and ordering.
 Scheduled outdoor reminders independently resolve current member location and
 canonical travel, including recent segments after arrival leaves the upcoming
 projection. Plans remain conditional evidence. Lodging destinations require
@@ -3027,9 +3033,24 @@ Detached MultiAgent V2 work is a bounded path, not a process-memory queue.
 Before the root reply, Murph retains a durable accepted input, canonical fact,
 or raw source and gives each child its exact source words, ids, or refs. A
 loaded skill may assign one independent canonical record family per child; all
-writes remain idempotently attributable to that source. Reply-critical work stays
-in the root by default. Explicitly requested bounded lookups may use a child; the root uses native `wait_agent` when needed and
-synthesizes the result before its final reply. Failure yields an honest blocker,
+writes remain idempotently attributable to that source. In ordinary private
+turns, bounded multi-pass canonical CLI work may run in a fresh native child even
+when its result is needed for the reply; tiny tasks stay in the root unless the
+member requests delegation. The root uses native `wait_agent` and synthesizes the
+result before its final reply. Children replace root work rather than duplicate
+it. The default target for these substantial tasks is GPT-6.1 Sol medium when
+native model overrides are authorized; an explicit member child-model choice
+wins, and runtimes without overrides inherit their authorized model.
+`fork_turns: "none"` excludes conversation history. The native
+`subagent_developer_instructions` override separately replaces the full parent
+Murph prompt and member snapshot with bounded leaf policy. Assignments carry only
+relevant inputs, exact constraints, audience, read/write scope, canonical CLI
+instructions, provenance, and stopping conditions. Native sandbox/provider
+permissions and base instructions remain inherited. Dynamic/server tools,
+browser, phone, external effects, sensitive judgments, and member delivery stay
+parent-owned; unsupported child steps report a blocker rather than bypassing
+that authority. Fresh children still pay their own prompt costs, so savings
+require replacing substantial repeated context or large tool output. Failure yields an honest blocker,
 not a promise of an automatic follow-up. Independent onboarding saves remain
 nonblocking. A child terminal event is only an advisory lifecycle receipt, so canonical readback
 confirms a write before Murph reports it as finished.
@@ -4620,7 +4641,7 @@ by their owning stores. Phone-conflict suppression reads only the blind-index
 owner id, so preserving another member's binding never decrypts that member's
 private identity or requires a second prepared root inside the transaction.
 
-One case is actionable immediately: an affirmative added reaction from the
+An added reaction from the
 active participant is adapted into the existing `message.received` planner
 input, using the reaction event as inbound identity and the reacted-to message
 only as a reply reference. The synthetic text describes the actual reaction
@@ -4632,7 +4653,13 @@ generation. The turn context binds the reaction to that exact message and
 treats a tapback as acknowledgment or appreciation by default, and as agreement
 only when the target asked a single closed yes/no question or proposed one
 specific action whose affirmative answer is unambiguous; a reaction alone never
-establishes user facts, consent, or authorization.
+establishes user facts, consent, or authorization. After normal turn admission,
+a fresh, tool-free Luna request at priority service tier classifies only that
+exact reaction and target. Clear acknowledgments finish quietly without
+changing the root conversation thread. Answers, confusion, disagreement,
+uncertainty, malformed output, oversized evidence, and classifier failures
+continue through the normal assistant. The classifier has a 20-second timeout
+and separately metered usage; it cannot authorize an effect.
 Synthetic reactions stay in one-input automation groups, so an adjacent
 ordinary reply cannot lend them trust or be suppressed with them. This keeps
 the path independent of Linq's short provider-message retention while rendering
@@ -4640,8 +4667,9 @@ the exact same- or cross-session target from existing outbox truth.
 Unmatched targets are terminally silent, and synthetic reaction identities are
 excluded from message read receipts and provider-message cleanup. The reaction
 path adds no mailbox kind, state, or lifecycle. Existing group join-offer
-acceptance remains the earlier exact owner. Removals and nonaffirmative
-reactions remain on the silent group context path above (or ignored outside
+acceptance remains the earlier exact owner. Deploy runtime routing before Web
+expands admission to nonaffirmative added reactions. Removals remain on the
+silent group context path above (or ignored outside
 groups), with one exception: a removal of the exact canonical join offer by a
 nonmember whose phone region has no derivable safe send window is consumed by
 the join-offer owner before that path runs, so a participant the outreach

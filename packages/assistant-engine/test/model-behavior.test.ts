@@ -572,7 +572,7 @@ describe('assistant execution prompt contract', () => {
       'Root keeps safety, permissions, user comms, voice, sensitive reasoning, final synthesis, dynamic/server tools, browser, phone, external actions.',
     )
     expect(prompt).toContain(
-      'Do reply-critical work once in root by default; an explicitly requested bounded lookup may run in a child, with the root waiting and synthesizing its result.',
+      'Delegate only work the child can complete through its available native tools and authorized canonical CLI; it cannot call parent dynamic/server tools.',
     )
     expect(prompt).toContain(
       'On every later ordinary inbound turn, revisit each child you spawned that was still generating when you sent the spawning reply',
@@ -2261,8 +2261,11 @@ describe('assistant system prompt cache stability', () => {
     // Direct tool-recovery progress guidance adds 659 characters. Complete
     // native-provider captures measure +660 serialized bytes for direct turns
     // and no group growth; live Sol success/failure journeys verify behavior.
+    // Fresh delegation scope and discovery instructions: complete native
+    // requests grow 1,889 bytes direct and 78 bytes group versus the PR base.
+    // Live Sol verifies that discovery happens in the child, not twice.
     // Preserve the existing 2-character margin.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_381)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_509)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
