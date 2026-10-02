@@ -57,11 +57,15 @@ it('binds the normal automation tool through hosted morning cron and real turn p
       if (!tool) throw new Error('The hosted scheduler did not provide its automation tool.')
       const inspected = await tool.request({ action: 'inspect', lookup: reminder.automationId })
       if (inspected.action !== 'inspect') throw new Error('Expected automation inspection.')
+      expect(inspected).toMatchObject({ managed: false, assistantTargetOverride: null })
+      const managed = await tool.request({ action: 'inspect', lookup: seed.automationId })
+      expect(managed).toMatchObject({ managed: true, assistantTargetOverride: seed.assistantTargetOverride })
       const desired = '2026-11-12T10:00:00.000Z'
       if (inspected.schedule.kind !== 'at' || inspected.schedule.at !== desired) {
         const repaired = await tool.request({ action: 'patch', lookup: reminder.automationId,
           expectedUpdatedAt: inspected.updatedAt, schedule: { kind: 'at', at: desired } })
         expect(repaired).toMatchObject({ action: 'patch', routeBinding: 'preserved',
+          managed: false, assistantTargetOverride: null,
           occurrenceProjection: { status: 'resolved', nextOccurrenceAt: desired } })
         repairs++
       }

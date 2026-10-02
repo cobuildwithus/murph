@@ -12,6 +12,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
+[the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
+
 Private sender contact presentation and retrieval are owned by `ARCHITECTURE.md`;
 implementation proof: [on-demand sender contact](exec-plans/completed/2026-10-01-on-demand-sender-contact.md).
 
@@ -955,3 +958,8 @@ Private scheduled phone-call guidance, authenticated Linq sender context, and
 live setup-to-due proof are recorded in
 [`scheduled phone calls`](exec-plans/completed/2026-10-01-scheduled-phone-calls.md);
 `ARCHITECTURE.md` and the phone-calls skill own the current contract.
+
+Weekly usage review, private bounded ledger diagnostics, and anonymous product
+reports are tracked in [weekly usage optimizer](exec-plans/active/2026-10-01-weekly-usage-optimizer.md).
+Current authority and storage contracts remain in `ARCHITECTURE.md`, `SECURITY.md`,
+and `RELIABILITY.md`.

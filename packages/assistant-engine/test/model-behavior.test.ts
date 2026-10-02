@@ -2261,8 +2261,11 @@ describe('assistant system prompt cache stability', () => {
     // Direct tool-recovery progress guidance adds 659 characters. Complete
     // native-provider captures measure +660 serialized bytes for direct turns
     // and no group growth; live Sol success/failure journeys verify behavior.
-    // Preserve the existing 2-character margin.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_381)
+    // The weekly audit's no-question sentence adds exactly 106 characters:
+    // this fixture grows from 78,343 at main 82fa1d78bfc8 to 78,449.
+    // Complete private/group provider requests also grow 106 UTF-8 bytes.
+    // The former ceiling had 38 characters of slack; retain only 2 here.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_451)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

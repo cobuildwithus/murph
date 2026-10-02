@@ -50,6 +50,7 @@ import type {
   AssistantHostedGroupEmailEffect,
   AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
+  AssistantHostedUsageDiagnostics,
   AssistantPhysicalNotePort,
   AssistantHostedPrivateImageUrlPublisher,
   AssistantHostedSubscriptionTool,
@@ -154,6 +155,7 @@ export interface AssistantHostedToolContext {
   readonly groupEmailEffect?: AssistantHostedGroupEmailEffect | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
+  readonly usageDiagnostics?: AssistantHostedUsageDiagnostics | null
   readonly physicalNotes?: AssistantPhysicalNotePort | null
   readonly privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   readonly subscriptionTool?: AssistantHostedSubscriptionTool | null
@@ -441,7 +443,7 @@ export function createAssistantHostedToolContext(input: {
       executionContext?.persistGeneratedImageCapture ?? null,
     groupEmailEffect,
     personalizationTool: executionContext?.personalizationTool ?? null,
-    planUsageTool: executionContext?.planUsageTool ?? null,
+    ...readUsageTools(executionContext),
     physicalNotes: executionContext?.physicalNotes ?? null,
     privateImageUrlPublisher:
       executionContext?.privateImageUrlPublisher ?? null,
@@ -716,6 +718,13 @@ function normalizeHostedDeliveryContextValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0
     ? value.trim()
     : null
+}
+
+function readUsageTools(context: AssistantHostedExecutionContext | null) {
+  return {
+    planUsageTool: context?.planUsageTool ?? null,
+    usageDiagnostics: context?.usageDiagnostics ?? null,
+  }
 }
 
 function readPollTool(context: AssistantHostedExecutionContext | null): ConversationPollTool | null {

@@ -2573,6 +2573,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/device-sync/reconcile`
 - `POST /api/internal/hosted-execution/usage/record`
 - `POST /api/internal/hosted-execution/plan-usage/tool`
+- `POST /api/internal/hosted-execution/usage/diagnostics`
 - `POST /api/internal/hosted-execution/subscription/tool`
 - `POST /api/internal/hosted-mailbox/fetch`
 - `POST /api/internal/hosted-mailbox/payload/fetch`
@@ -2793,3 +2794,48 @@ To refresh, review the upstream font and license changes, use FontTools
 `TTFont.flavor = "woff2"` and Brotli. This is asset preparation only, never a
 build step or application dependency. Verify the local loader emits all four
 files without Google responses, then check the rendered families and weights.
+
+### Private usage diagnostics
+
+The signed `usage/diagnostics` callback reads only the callback-bound private
+member's existing `hosted_ai_usage` ledger. Its strict request accepts `days`
+(default 7, maximum 31) and `limit` (default 10, maximum 20); it never accepts
+member identity, SQL, or arbitrary filters. Group runtimes and inactive access
+are denied; exhausted private members may still inspect usage. Operator tasks
+are excluded. One index-bounded SQL window aggregates recorded allowance costs,
+token counts, models, trigger/feature sources, and the most expensive turns.
+A source joins available `triggerKind` and `featureKey` with a colon, keeping
+reaction classification distinguishable from ordinary conversation work. Model/source
+groups are capped at 20 with explicit truncation flags. Costs are allowance
+consumption, not additional card charges; unaccounted rows are identified and
+historical charges are never recalculated using current prices. Only rows whose
+canonical `allowance_counted` flag remains true contribute cost; forgiven or
+otherwise uncounted rows retain their workload counts/tokens but not allowance
+cost. `coverage.allowanceExcludedRecords` reports their count in the window.
+
+The response projects only existing normalized v2 tool-profile labels, counts,
+and output bytes from the latest retained profile of each selected turn. Missing
+or legacy profiles report unavailable; truncated profiles report partial.
+Bytes are not tokens or independently attributable tool cost. The current Sol
+and Luna rate table derives from the canonical allowance-pricing constants,
+including Standard, Flex, and Priority multipliers. No prompts, tool bodies,
+raw usage, member identifiers, or copied vault ledger are returned.
+
+Roll out this Web callback and its shared response reader before enabling the
+Cloudflare runtime port and assistant tool. The capability is absent in local
+runtimes without that port. Keep the compatible Web callback through runner
+convergence and any rollback window.
+
+New managed automation usage records use fixed workflow feature keys (including
+Morning Journal, Personal Patterns, research, and the weekly usage review).
+They derive only from the runtime-bound built-in occurrence identity and do not
+change model selection or pricing. Older generic `assistant_cron` or internal
+reply rows remain generic; diagnostics cannot reconstruct their workflow names.
+
+Weekly usage audits use `/api/internal/hosted-execution/usage/feedback`, the
+existing feedback parser and persistence owner, and the existing app-session
+HMAC key with a separate domain. The persisted id binds the callback member and
+stable occurrence key without storing member linkage or an enumerable unkeyed
+hash. Missing key configuration fails closed. Deploy Web first, then the Worker
+allowlist and runtime producer; older Web returns 404 and the producer must not
+fall back to ordinary member-linked feedback. Ordinary feedback remains unchanged.

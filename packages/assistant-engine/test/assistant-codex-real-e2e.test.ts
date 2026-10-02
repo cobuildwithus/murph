@@ -34,6 +34,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { brotliCompressSync } from 'node:zlib'
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly-usage-optimizer.js'
+import { createAssistantProductFeedbackRecorder } from '../src/assistant/turn-progress.js'
+import { syntheticUsageDiagnostics } from './support/usage-diagnostics.ts'
 
 import {
   MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
@@ -187,6 +190,7 @@ import {
   MURPH_MEMBER_MEMORY_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_USAGE_DIAGNOSTICS_TOOL,
   MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
@@ -34046,6 +34050,187 @@ describeRealCodex('real Codex degraded Knowledge read e2e', () => {
       }
     },
   )
+})
+
+describeRealCodex('real Codex private usage diagnostics e2e', () => {
+  it('reads private usage diagnostics once and distinguishes output bytes from token costs', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-usage-diagnostics-e2e-'))
+    const requests: unknown[] = []
+    try {
+      const response = await executeCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_USAGE_DIAGNOSTICS_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+          currentInvocationScope: () => ({ conversationScope: 'direct', origin: {
+            kind: 'accepted_input', assistantInputId: 'input_synthetic', sessionId: 'session_synthetic',
+          } }),
+          usageDiagnostics: { read: async (request) => {
+            requests.push(request)
+            return syntheticUsageDiagnostics()
+          } },
+          sendVaultFile: async () => { throw new Error('File send is unavailable') },
+        },
+        model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'medium',
+        sandbox: 'read-only', workingDirectory,
+        prompt: 'Check my usage over the last 7 days, with the top 10 turns. Tell me the recorded total and biggest tool-output contributor. Are the tool sizes exact token charges? Keep it brief and do not change anything.',
+      })
+      const actions = readCapabilityRoutingActions(response.jsonEvents)
+      process.stdout.write(`usage-diagnostics-e2e ${JSON.stringify({ model: config.model,
+        calls: requests.length, reply: response.finalMessage.trim() })}\n`)
+      expect(requests).toEqual([{ days: 7, limit: 10 }])
+      const dynamicActions = actions.filter((action) => action.kind === 'dynamic')
+      expect(dynamicActions).toHaveLength(1)
+      expect(dynamicActions[0]).toMatchObject({ tool: MURPH_USAGE_DIAGNOSTICS_TOOL.name })
+      expect(response.finalMessage).toMatch(/1\.25/u)
+      expect(response.finalMessage).toMatch(/connected.?apps|search/iu)
+      expect(response.finalMessage).toMatch(/bytes|kB|KB/u)
+      expect(response.finalMessage).toMatch(/not|aren.t|can.t|cannot/iu)
+      expect(response.finalMessage).not.toMatch(/(?:charged|billed) (?:your |the )?(?:card|credit card)|(?:240,?000|100,?000) tokens/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+
+describeRealCodex('real Codex weekly usage optimizer e2e', () => {
+  it('downgrades suitable reminders, preserves explicit choices, and reports privately', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-weekly-optimizer-e2e-'))
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const definitions = [
+      ['cue', 'Stretch cue', 'Say: Time for a short stretch break.'],
+      ['lookup', 'Weather walk', 'Read the saved approximate city and current weather once; suggest the usual short walk only if weather is suitable. Do not ask for location or make medical recommendations.'],
+      ['pinned', 'Preferred reminder', 'The member explicitly requested GPT-6.1 Sol for this reminder. Keep that model. Say: Time for your break.'],
+      ['research', 'Research review', 'Research new clinical evidence, reconcile conflicting sources against relevant medical history, and verify citations before offering a carefully qualified summary.'],
+    ] as const
+    const records = definitions.map(([slug, title, instructions]) => ({
+      automationId: `automation_synthetic_${slug}`, lookupId: slug, title, instructions,
+      contextReferences: [], effectiveTimeZone: 'UTC',
+      occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: '2026-10-06T09:00:00.000Z' },
+      schedule: { kind: 'dailyLocal' as const, localTime: '09:00', timeZone: 'UTC' },
+      managed: false, status: 'active' as const, updatedAt: '2026-10-01T00:00:00.000Z',
+      assistantTargetOverride: { model: 'gpt-6.1-sol' as const, reasoningEffort: 'medium' as const },
+    }))
+    const changed: string[] = []
+    const usageRequests: unknown[] = []
+    const feedbackRecorder = createAssistantProductFeedbackRecorder({
+      usageOptimizerScope: { memberId: 'synthetic-member', occurrenceAt: '2026-10-05T04:00:00.000Z' },
+      productFeedbackCandidateSink: { acceptProductFeedbackCandidate() {} },
+    })!
+    const fixtures = records.map(current => createVersionedAutomationPatchFixture({
+      current,
+      patch(request, record) {
+        expect(['cue', 'lookup']).toContain(record.lookupId)
+        expect(Object.keys(request).sort()).toEqual(['action', 'assistantTargetOverride', 'expectedUpdatedAt', 'lookup'])
+        expect(request.assistantTargetOverride).toEqual({ model: 'gpt-6-luna', reasoningEffort: 'high' })
+        changed.push(record.lookupId)
+        return { ...record, assistantTargetOverride: request.assistantTargetOverride!, updatedAt: '2026-10-05T04:01:00.000Z' }
+      },
+    }))
+    try {
+      await mkdir(binDirectory, { recursive: true })
+      const inventory = { ok: true, data: { compact: true, count: records.length + 1,
+        totalCount: records.length + 1, nextCursor: null,
+        items: [...records.map(({ instructions: _instructions, ...record }) => record), {
+          automationId: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.automationId,
+          title: 'Weekly usage review', status: 'active', tags: ['murph-managed:weekly-usage-optimizer'],
+          assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' },
+        }],
+      } }
+      const executable = path.join(binDirectory, 'vault-cli')
+      await writeFile(executable, ['#!/bin/sh', 'set -eu', 'case "$*" in',
+        `  automation\\ list*) printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(inventory))} ;;`,
+        '  *) echo "Only the synthetic automation inventory is available." >&2; exit 2 ;;',
+        'esac',
+      ].join('\n') + '\n')
+      await chmod(executable, 0o755)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none', 'linq', true),
+        dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_USAGE_DIAGNOSTICS_TOOL, MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+        env: config.env, fixtureBinDirectory: binDirectory,
+        hostedToolContext: {
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+          currentInvocationScope: () => ({ conversationScope: 'direct', originSessionId: 'synthetic-weekly-session',
+            origin: { kind: 'automation_occurrence', automationId: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.automationId, occurrenceAt: '2026-10-05T04:00:00.000Z' } }),
+          automationTool: { async request(request, options) {
+            if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Unexpected automation action.')
+            const index = records.findIndex(record => record.automationId === request.lookup)
+            if (index < 0) throw new Error('Managed automation must be preserved.')
+            return fixtures[index]!.request(request, options)
+          } },
+          usageDiagnostics: { async read(request) { usageRequests.push(request); return syntheticUsageDiagnostics() } },
+          sendVaultFile: async () => { throw new Error('Unexpected file send.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        productFeedbackRecorder: feedbackRecorder,
+        prompt: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.instructions,
+        reasoningEffort: 'medium', sandbox: 'workspace-write', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const feedback = feedbackRecorder.readProductFeedback()
+      process.stdout.write('[weekly-optimizer-live] ' + JSON.stringify({ model: config.model, changed,
+        reply: result.finalMessage, feedback: feedback?.summary }) + '\n')
+      expect(usageRequests).toEqual([{ days: 7, limit: 10 }])
+      expect(changed.sort()).toEqual(['cue', 'lookup'])
+      expect(fixtures.every(fixture => fixture.requests.filter(request => request.action === 'inspect').length === 1)).toBe(true)
+      expect(actions.filter(action => action.kind === 'dynamic' && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name)).toHaveLength(1)
+      expect(feedback).toMatchObject({ kind: 'feature_request', relatedChangelogItemIds: [] })
+      expect(feedback?.summary).toMatch(/^Usage optimization audit:/u)
+      expect(feedback?.summary).toMatch(/bytes|KB|kB/u)
+      expect(feedback?.summary).toMatch(/1\.25/u)
+      expect(feedback?.summary).toMatch(/(?:two|2) (?:confirmed |verified |successful |model-only )?(?:model )?(?:changes|downgrades|patches|reminders|automations)/iu)
+      expect(feedback?.summary).not.toMatch(/zero model changes|omitted model|obscured|result.*truncation/iu)
+      expect(feedback?.summary).not.toMatch(/automation_synthetic|synthetic-member|turn_|session_|Weather walk|Research review/iu)
+      expect(JSON.parse(result.finalMessage.trim())).toMatchObject({ kind: 'skip' })
+      expect(result.runtimeIssueInputs).toEqual([])
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 720_000)
+})
+
+describeRealCodex('real Codex Luna bounded reminder lookup e2e', () => {
+  it('reads one completion record and skips a completed reminder without rewriting it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-luna-reminder-e2e-'))
+    const binDirectory = path.join(workingDirectory, 'bin')
+    try {
+      await mkdir(binDirectory, { recursive: true })
+      const executable = path.join(binDirectory, 'vault-cli')
+      await writeFile(executable, ['#!/bin/sh', 'set -eu', 'case "$*" in',
+        `  knowledge\\ show\\ reminder-completion*) printf '%s\\n' '{"ok":true,"data":{"slug":"reminder-completion","body":"The stretch break for the current scheduled occurrence is already completed."}}' ;;`,
+        '  *) echo "Unexpected operation." >&2; exit 2 ;;', 'esac',
+      ].join('\n') + '\n')
+      await chmod(executable, 0o755)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none'),
+        dynamicTools: [], env: config.env, fixtureBinDirectory: binDirectory,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Scheduled stretch reminder: read vault-cli knowledge show reminder-completion --format json once. If the current occurrence is already completed, return {"kind":"skip","privateSummary":"Already completed."}. Otherwise return {"kind":"send","message":"Time for a short stretch break."}. Do not edit records or read anything else.',
+        reasoningEffort: 'high', sandbox: 'workspace-write', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const reads = actions.filter(action => action.kind === 'command' && action.command.includes('vault-cli knowledge show reminder-completion'))
+      process.stdout.write('[luna-reminder-live] ' + JSON.stringify({ model: config.model, reads: reads.length, reply: result.finalMessage }) + '\n')
+      expect(reads).toHaveLength(1)
+      expect(actions.filter(action => action.kind === 'dynamic')).toHaveLength(0)
+      expect(actions.filter(action => action.kind === 'command')).toHaveLength(1)
+      expect(JSON.parse(result.finalMessage.trim())).toMatchObject({ kind: 'skip' })
+      expect(result.runtimeIssueInputs).toEqual([])
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
 })
 
 describeRealCodex('real Codex automatic meal clarification e2e', () => {

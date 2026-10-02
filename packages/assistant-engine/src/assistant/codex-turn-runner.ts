@@ -1,3 +1,4 @@
+import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import {
   assistantReasoningEffortValues,
   type AssistantReasoningEffort,
@@ -364,6 +365,8 @@ function createAssistantProviderUsageAttribution(input: {
     credentialSource,
     environment: resolveAssistantUsageEnvironment(input.env),
     featureKey: resolveAssistantUsageFeatureKey({
+      scheduledInvocationAuthority: input.executionPlan.input.scheduledInvocationAuthority,
+      scheduledOccurrenceAt: input.executionPlan.input.scheduledOccurrenceAt,
       deliverResponse: input.executionPlan.input.deliverResponse,
       promptProfile: input.executionPlan.profile.promptProfile,
       turnTrigger: input.executionPlan.input.turnTrigger ?? 'manual-ask',
@@ -884,6 +887,11 @@ function buildCodexAttemptProviderInput(
       },
       onTraceEvent: executionPlan.input.onTraceEvent,
       productFeedbackRecorder: createAssistantProductFeedbackRecorder({
+        usageOptimizerScope: resolveUsageOptimizerFeedbackScope({
+          conversationScope: resolveAssistantConversationScope(executionPlan.sharedPlan.conversationPolicy.audience),
+          executionContext: executionPlan.executionContext,
+          messageInput: executionPlan.input,
+        }),
         acceptedInputItems: executionPlan.acceptedInputItems ?? [],
         ...(executionPlan.hostedToolContext
             ?.currentProductFeedbackAcceptedInputIds

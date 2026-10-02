@@ -18,6 +18,7 @@ import {
 import type {
   RuntimeAssistantConfigurationToolPort,
   RuntimeLabsToolPort,
+  RuntimeUsageDiagnosticsPort,
   RuntimeSubscriptionToolPort,
   RuntimeUsageRecordPort,
 } from "./hosted-runtime-workspace-assistant-phase.harness.ts";
@@ -751,6 +752,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           subscriptionTool: subscriptionToolPort,
         }),
       },
+      expect.any(Object),
+    );
+  });
+
+  it("passes the hosted usage diagnostics port into assistant execution", async () => {
+    const usageDiagnosticsPort: RuntimeUsageDiagnosticsPort = { read: vi.fn() };
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeUsageDiagnosticsPort: usageDiagnosticsPort,
+    }));
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      { hosted: expect.objectContaining({ usageDiagnostics: usageDiagnosticsPort }) },
+      expect.any(Object),
+    );
+  });
+
+  it("omits hosted usage diagnostics when unavailable", async () => {
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      { hosted: expect.not.objectContaining({ usageDiagnostics: expect.anything() }) },
       expect.any(Object),
     );
   });
