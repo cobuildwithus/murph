@@ -697,6 +697,24 @@ describe("heart-rate-zones-days.v0 snapshot bounds", () => {
 });
 
 describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
+  it("adds only consented Apple Health app contact for capable group readers", async () => {
+    const contact = new Date("2026-10-01T12:00:00.000Z");
+    const share = { ...shareRow({ id: "share_steps_a", memberId: "member_a", projectionScope: STEPS_SCOPE }),
+      grantor: { companionLastContactAt: contact } };
+    const { prisma, deviceConnectionFindMany } = createPrisma({ shares: [share], connections: [{ userId: "member_a" }] });
+    const input = { prisma, projectionScopes: [STEPS_SCOPE], runtimeMemberId: RUNTIME_MEMBER_ID };
+    const legacy = await readHostedGroupSharedDataByRuntimeMemberId(input);
+    expect(legacy.status).toBe("ok");
+    if (legacy.status !== "ok") throw new Error("expected shared result");
+    expect(legacy.members.every((member) => member.companionLastContactAt === undefined)).toBe(true);
+    expect(deviceConnectionFindMany).not.toHaveBeenCalled();
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({ ...input, includeCompanionPresence: true });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected shared result");
+    expect(result.members.find((member) => member.memberId === "member_a")?.companionLastContactAt).toBe(contact.toISOString());
+    expect(result.members.find((member) => member.memberId === "member_b")).not.toHaveProperty("companionLastContactAt");
+  });
+
   it("reads only group-safe profile names when no health scopes are requested", async () => {
     const profile = snapshot({
       id: "share_profile_a",

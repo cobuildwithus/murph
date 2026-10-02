@@ -756,3 +756,22 @@ unrelated message, or add a second queue.
   data grant but requires ordinary challenge confirmation.
 - No output exposes provider keys, account/device identifiers, raw errors,
   health values, or private 1:1 context.
+
+## Companion last-contact evidence
+
+Model-facing group read_shared calls negotiate includeCompanionPresence=true;
+email composition and other ordinary readers do not request this metadata.
+For a current member with a readable wearable-metric grant (or device-sync-status
+grant) and an active Apple Health source, Web may attach companionLastContactAt
+to that member. Nutrition, profile, email and timezone grants alone do not qualify.
+This is the most recent authenticated app contact, including opportunistic
+background contact, and can be null for an app with no heartbeat support. It is
+not Health receipt time, permission evidence, Bluetooth status, or proof the app
+is currently open or was quit. Existing metric values and missing-data meaning
+are unchanged. New sharing copy discloses this freshness metadata.
+
+The timestamp is read through the exact live grant and membership checks, with
+active health access, in one bounded database-only transaction after snapshot
+readability is established. The query returns no account, device, app version,
+private diagnostic or foreground-use history. Group-email composition omits the
+field. Missing capability flags preserve the legacy strict response shape.

@@ -49,6 +49,39 @@ five-second lock/operation limits, and contain no external I/O. Each tool reques
 adds one signed callback; it does not wait or repeatedly poll for a receipt.
 Normal conversation turns that do not call this tool add no database requests.
 
+## App contact and unavailable reasons
+
+The companion presence owner stores server receipt timestamps for last contact
+and last foreground contact on HostedMember. POST /api/companion/heartbeat
+accepts only foreground/background state under bearer member, active access and
+historical consent. The native task sends every 15 seconds while execution is
+available, with a three-second network idle timeout and no disk queue. It continues
+opportunistically in the background; it does not keep iOS awake or prove that a
+suspended app was quit. Member or consent loss cancels the task. Timestamps
+survive process restarts and disappear with account deletion.
+
+The private read-only `murph.device` action `companion_status` reports lastContactAt,
+lastForegroundAt, and 45-second recent-contact freshness. Unknown includes legacy
+apps with no observation. Read this alongside list_accounts and existing sync
+diagnostics: contact proves neither Health authorization nor successful ingestion.
+No conversation-start query or unsolicited message is added.
+
+A modern host sends includeAvailability=true with wrist requests. Only those
+callers receive unavailableReason: app_unreachable when no recent foreground
+contact exists or the latest contact was background, device_disconnected when
+the latest contact is recent foreground activity but the band session is absent, and busy when another command occupies the session.
+Each unavailable command stores its original reason, preserving retry truth.
+Legacy callers receive exactly the original strict response shape. Lease and
+presence freshness are observations with bounded lag, not process-state proof.
+
+Deploy the additive migration and Web consumers before native heartbeat senders
+and the new hosted runtime. Older apps remain usable for wrist delivery through
+their existing leases; no heartbeat is required to admit a ready band. Older
+runtime requests omit both new capability flags, so new Web never sends them
+unknown response fields. After producer deployment, rollback requires a Web
+version accepting the new request flags and endpoints; a forward fix preserves
+this compatibility floor.
+
 ## Test-to-message handoff
 
 The companion uses one Test buzz action. After a correlated protocol receipt it

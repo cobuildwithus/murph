@@ -40,6 +40,19 @@ const actionOnlyRequests = [
 ];
 
 describe("group tool dispatch wire contracts", () => {
+  it("negotiates app contact metadata and validates its timestamp without changing legacy requests", () => {
+    const request = { action: "read_shared", projectionScopes: [{ projectionKind: "steps-days.v0" }] };
+    expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request);
+    expect(parseHostedRuntimeGroupToolRequest({ ...request, includeCompanionPresence: true })).toEqual({ ...request, includeCompanionPresence: true });
+    expect(() => parseHostedRuntimeGroupToolRequest({ ...request, includeCompanionPresence: "yes" })).toThrow();
+    const member = { memberId: "member-a", participantId: "participant-a", displayName: null, currentTurnHandles: [],
+      companionLastContactAt: "2026-10-01T12:00:00.000Z", projections: [{ projectionScope: request.projectionScopes[0],
+        projectionScopeKey: "steps-days.v0", grantStatus: "granted", dataStatus: "pending", records: [] }] };
+    const response = { action: "read_shared", result: { status: "ok", requestedProjectionScopeKeys: ["steps-days.v0"], members: [member] } };
+    expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(() => parseHostedRuntimeGroupToolResponse({ ...response, result: { ...response.result, members: [{ ...member, companionLastContactAt: "yesterday" }] } })).toThrow();
+  });
+
   it.each(actionOnlyRequests)("retains omitted options for %s", (action) => {
     expect(parseHostedRuntimeGroupToolRequest({ action })).toEqual({ action });
     expect(() => parseHostedRuntimeGroupToolRequest({ action, extra: true }))

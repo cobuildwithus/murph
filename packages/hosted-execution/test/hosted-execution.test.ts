@@ -810,6 +810,7 @@ describe("hosted execution coverage gaps", () => {
       "./bundles",
       "./clinical-records",
       "./clinical-records-boundary",
+      "./companion-presence",
       "./computer-use",
       "./connected-apps",
       "./contracts",

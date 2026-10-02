@@ -1178,6 +1178,7 @@ function parseHostedRuntimeGroupSharedDataRequest(
       new Set([
         "action",
         "freshness",
+        "includeCompanionPresence",
         "participantId",
         "history",
         "linqSenderHandles",
@@ -1186,6 +1187,9 @@ function parseHostedRuntimeGroupSharedDataRequest(
       ]),
       "Hosted runtime group tool read_shared request",
     );
+    if (record.includeCompanionPresence !== undefined && record.includeCompanionPresence !== true) {
+      throw new TypeError("Invalid companion presence capability.");
+    }
     const senderHandles = parseHostedRuntimeGroupSenderHandlesRequest(record);
     const projectionScopes = parseHostedRuntimeGroupSharedRequestedProjectionScopes(
       record.projectionScopes,
@@ -1193,6 +1197,7 @@ function parseHostedRuntimeGroupSharedDataRequest(
     );
     return {
       action,
+      ...(record.includeCompanionPresence === true ? { includeCompanionPresence: true as const } : {}),
       ...senderHandles,
       ...parseHostedGroupSharedReadOptions(record, projectionScopes),
       projectionScopes,
@@ -2420,6 +2425,7 @@ function parseHostedRuntimeGroupSharedMember(
       "memberId",
       "participantId",
       "projections",
+      "companionLastContactAt",
     ]),
     label,
   );
@@ -2491,6 +2497,10 @@ function parseHostedRuntimeGroupSharedMember(
   });
 
   return {
+    ...(member.companionLastContactAt === undefined ? {} : {
+      companionLastContactAt: member.companionLastContactAt === null ? null
+        : parseHostedRuntimeGroupCanonicalTimestamp(member.companionLastContactAt, `${label}.companionLastContactAt`),
+    }),
     currentTurnHandles,
     displayName,
     memberId,

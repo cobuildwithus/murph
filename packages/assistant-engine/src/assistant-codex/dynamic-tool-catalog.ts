@@ -869,7 +869,7 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read 1–3 consent-aware projections in this group; the host binds authority. Ordinary reads cover seven days; history needs participantId, an inclusive range of up to 90 dates, and one metric scope. status="partial" means omittedParticipantIds have omitted rows: the result is incomplete and cannot prove departure, score, diagnosis or permission state.',
+    'Read 1–3 host-bound scopes (7 days; history: participantId, ≤90 dates, one metric). status="partial" means omittedParticipantIds have omitted rows; result is incomplete, not proof of departure, scores, diagnosis or permissions. companionLastContactAt is app contact, possibly background, not proof of sync, closure, Health access or missing-data cause.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1466,7 +1466,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
   name: 'group_data',
   description:
-    'Read shared data, record sender metrics, or manage disclosure/access.',
+    'Read shared data, record sender metrics, or manage disclosure/access. read_shared may include companionLastContactAt for members sharing wearable data with an active Apple Health source. It means last app contact, including opportunistic background contact; never infer app closure, Health permission denial, sync success, or the cause of missing steps from its age. Missing means unavailable, not closed.',
 })
 
 const MURPH_GROUP_DATA_EAGER_TOOL = {

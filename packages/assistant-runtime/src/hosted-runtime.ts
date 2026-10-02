@@ -8910,6 +8910,9 @@ function createAbortGuardedDeviceSyncPort(
   guard: <T>(run: () => Promise<T>) => Promise<T>,
 ): NonNullable<HostedRuntimePlatform["deviceSyncPort"]> {
   return {
+    ...(port.companionStatus ? {
+      companionStatus: (statusInput) => guard(() => port.companionStatus!(statusInput)),
+    } : {}),
     ...(port.haptic ? {
       haptic: (hapticInput) => guard(() => port.haptic!(hapticInput)),
     } : {}),
