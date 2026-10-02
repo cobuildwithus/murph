@@ -1,3 +1,4 @@
+import { MURPH_GET_SENDER_CONTACT_TOOL } from './dynamic-tools/sender-contact.js'
 import { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 export { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 import { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
@@ -884,7 +885,7 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read 1–3 consent-aware projections in this group; the host binds authority. Ordinary reads cover seven days; history needs participantId, an inclusive range of up to 90 dates, and one metric scope. status="partial" means omittedParticipantIds have omitted rows: the result is incomplete and cannot prove departure, score, diagnosis or permission state.',
+    'Read 1–3 host-bound scopes (7 days; history: participantId, ≤90 dates, one metric). status="partial" means omittedParticipantIds have omitted rows; result is incomplete, not proof of departure, scores, diagnosis or permissions. companionLastContactAt is app contact, possibly background, not proof of sync, closure, Health access or missing-data cause.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1481,7 +1482,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
   name: 'group_data',
   description:
-    'Read shared data, record sender metrics, or manage disclosure/access.',
+    'Read shared data, record sender metrics, or manage disclosure/access. read_shared may include companionLastContactAt for members sharing wearable data with an active Apple Health source. It means last app contact, including opportunistic background contact; never infer app closure, Health permission denial, sync success, or the cause of missing steps from its age. Missing means unavailable, not closed.',
 })
 
 const MURPH_GROUP_DATA_EAGER_TOOL = {
@@ -1798,6 +1799,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
+  MURPH_GET_SENDER_CONTACT_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
   MURPH_GET_PHONE_CALL_STATUS_TOOL,
   MURPH_STOP_PHONE_CALL_TOOL,
@@ -1867,6 +1869,7 @@ export interface MurphDynamicToolAvailability {
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
   physicalNoteRecoveryAvailable?: boolean | null
+  senderContactAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   phoneCallStatusAvailable?: boolean | null
   phoneCallStopAvailable?: boolean | null
@@ -1933,6 +1936,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_PENDING_VAULT_FILES_TOOL, defaultOff((a) => a.pendingVaultFilesAvailable)],
+    [MURPH_GET_SENDER_CONTACT_TOOL, defaultOff((a) => a.senderContactAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
     [MURPH_GET_PHONE_CALL_STATUS_TOOL, defaultOff((a) =>
       a.phoneCallStatusAvailable)],

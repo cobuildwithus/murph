@@ -207,6 +207,10 @@
       "types": "./dist/observability.d.ts",
       "default": "./dist/observability.js"
     },
+    "./companion-presence": {
+      "types": "./dist/companion-presence.d.ts",
+      "default": "./dist/companion-presence.js"
+    },
     "./wearable-haptics": {
       "types": "./dist/wearable-haptics.d.ts",
       "default": "./dist/wearable-haptics.js"

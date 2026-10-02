@@ -87,6 +87,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantVoiceCausalSeq BigInt? @map("assistant_voice_causal_seq")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
+    'companionLastContactAt DateTime? @map("companion_last_contact_at")',
+    'companionLastForegroundAt DateTime? @map("companion_last_foreground_at")',
     "conversationPolls HostedConversationPoll[]",
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
@@ -1228,6 +1230,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260922170000_hosted_sponsorship_topup_margin",
       "20260922220000_poll_result_notifications",
       "20261001140000_companion_wearable_haptics",
+      "20261002010000_companion_presence",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

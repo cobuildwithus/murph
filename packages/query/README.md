@@ -83,6 +83,14 @@ this event-only read. Explicit global readers retain their existing strict error
 and rebuild policy. No other collection endpoint changes. Manifest/status checks
 still inspect shared freshness, and repeated stale event reads reread the ledger.
 
+Experiment listing reads `readCanonicalEntityFamilySource(vaultRoot, "experiment")`
+under core's reentrant canonical write lock, including when a global index is
+fresh. It preserves strict experiment-source validation, ordering, status-before-
+limit and the existing list envelope. Malformed unrelated families no longer
+block this list; global readers keep their strict policy. No query cache is read,
+published or certified fresh. Repeated lists rescan experiments; a later global
+read still performs its own work. Progress, journal and lifecycle APIs are unchanged.
+
 Narrow health collection reads should query that projection by family/kind/date
 before decoding records. Exact blood-test and immunization lookups use the
 bounded event-family source reader so a stale projection cannot turn one-record

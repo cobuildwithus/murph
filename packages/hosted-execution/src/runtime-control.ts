@@ -1472,6 +1472,7 @@ export interface HostedRuntimeGroupSharedFreshness {
 }
 
 export interface HostedRuntimeGroupSharedReadRequest extends HostedGroupSharedReadOptions {
+  includeCompanionPresence?: true;
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
   /** Only missing, currently consented wearable dates can request existing sync work. */
   freshness?: readonly HostedRuntimeGroupSharedFreshnessRequirement[];
@@ -1502,6 +1503,7 @@ export interface HostedRuntimeGroupSharedProjection {
 }
 
 export interface HostedRuntimeGroupSharedMember {
+  companionLastContactAt?: string | null;
   currentTurnHandles: readonly string[];
   displayName: string | null;
   memberId: string;

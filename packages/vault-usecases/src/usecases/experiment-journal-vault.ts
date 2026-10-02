@@ -1512,19 +1512,22 @@ export async function listExperimentRecords(input: {
   limit: number
 }) {
   const query = await loadExperimentJournalVaultQueryRuntime()
-  const readModel = await readExperimentJournalVault(input.vault)
-  const items = query
-    .listEntities(readModel, {
-      families: ['experiment'],
-      statuses: input.status ? [input.status] : undefined,
-    })
-    .slice(0, input.limit)
-    .map(toListItem)
+  try {
+    return await withCanonicalWriteLock(input.vault, async () => {
+      const entities = await query.readCanonicalEntityFamilySource(input.vault, 'experiment')
+      const items = entities
+        .filter((entity) => !input.status || entity.status === input.status)
+        .slice(0, input.limit)
+        .map(toListItem)
 
-  return asListEnvelope(input.vault, {
-    status: input.status ?? null,
-    limit: input.limit,
-  }, items)
+      return asListEnvelope(input.vault, {
+        status: input.status ?? null,
+        limit: input.limit,
+      }, items)
+    })
+  } catch (error) {
+    throw toVaultMetadataCliError(error)
+  }
 }
 
 /**

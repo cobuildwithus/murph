@@ -2351,11 +2351,11 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.159.1-live1`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.160.0-live1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-The base Dockerfile builds the CLI from the checksum-pinned Codex 0.159.1 source
+The base Dockerfile builds the CLI from the checksum-pinned Codex 0.160.0 source
 with `patches/codex-public-live.patch`. It keeps the same release's bundled
 Code Mode host and sandbox resources. The patch adds public API-key Live
 compatibility, owned-session shutdown, and opt-in app-server input ownership.
@@ -2370,7 +2370,7 @@ that exact binary before its final-image sandbox proof.
 
 To update the patch, retain the pinned release as its base, run the affected
 upstream tests, and run `pnpm --dir apps/cloudflare verify:codex-upstream-source`
-to verify applicability. Codex 0.159.1 supplies the policy-aware websocket transport;
+to verify applicability. Codex 0.160.0 supplies the policy-aware websocket transport;
 the patch retains that transport and only adds the public Live wire adapter,
 client-managed input ownership, and owned-session finalization. It does not
 restore a separate model catalog or websocket stack. Update the source revision and archive checksum
@@ -2383,7 +2383,7 @@ rule. The protected deployment workflow must provide that cache before this
 patch is considered operationally ready; its current fresh-runner forced
 build would otherwise recompile Codex for each deployment.
 
-Codex CLI 0.159.1 supplies native Sol, Luna and Astra entries. Its bundled
+Codex CLI 0.160.0 supplies native Sol, Luna and Astra entries. Its bundled
 Sol/Luna entries match the former pinned launch supplement, which is removed
 along with its bundle staging and fingerprint input. The native bundled catalog
 is the sole model-entry source.

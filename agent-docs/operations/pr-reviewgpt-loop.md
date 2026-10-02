@@ -323,6 +323,10 @@ the current user explicitly asks for it.
    the full PR body, current patch,
    exact round metadata, and guarded repository snapshot to `codebase.zip`:
 
+   Full snapshots include `patches/codex-public-live.patch` even when unchanged,
+   because the hosted runner applies that production-source patch during its
+   native Codex build. Keep it with the Dockerfiles in the mandatory snapshot paths.
+
    - `review-gpt-pr-context/pr-body.md`
    - `review-gpt-pr-context/pr.diff`
    - `review-gpt-pr-context/changed-files.txt`

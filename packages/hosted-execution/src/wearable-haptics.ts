@@ -18,12 +18,15 @@ export type WearableHapticAuthority = z.infer<typeof wearableHapticAuthoritySche
 export const wearableHapticRequestSchema = z.object({
   request: wearableHapticActionSchema,
   authority: wearableHapticAuthoritySchema,
+  includeAvailability: z.literal(true).optional(),
 }).strict();
 export type WearableHapticRequest = z.infer<typeof wearableHapticRequestSchema>;
+export const wearableUnavailableReasonSchema = z.enum(["app_unreachable", "device_disconnected", "busy"]);
 export const wearableHapticResponseSchema = z.object({
   action: z.literal("haptic"),
   wearable: wearableKindSchema,
   operation: z.enum(["status", "buzz", "stop"]),
+  unavailableReason: wearableUnavailableReasonSchema.optional(),
   status: z.enum(["ready", "unavailable", "queued", "claimed", "acknowledged", "unknown", "expired", "cancelled"]),
 }).strict();
 export type WearableHapticResponse = z.infer<typeof wearableHapticResponseSchema>;

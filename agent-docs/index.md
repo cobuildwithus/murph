@@ -1,14 +1,33 @@
+Native Codex patch inclusion in full review snapshots is owned by
+[the ReviewGPT loop](operations/pr-reviewgpt-loop.md).
+
+Codex 0.160.0 reconciliation for the current PR is recorded in
+[the PR preparation plan](exec-plans/active/2026-10-01-codex-cli-0160-pr.md).
+
+Codex CLI 0.160.0 upgrade verification is recorded in
+[the completed upgrade plan](exec-plans/completed/2026-10-01-codex-cli-0160.md).
+
 Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
 # Murph Agent Docs Index
 
 Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
-[the remediation plan](exec-plans/active/2026-10-02-weekly-usage-review-remediation.md).
+[the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
 
-Garmin real connection/cleanup and signed synthetic delivery-to-vault proof
-are tracked in
-[`Garmin canary data`](exec-plans/active/2026-10-01-garmin-vault-proof.md).
+Private sender contact presentation and retrieval are owned by `ARCHITECTURE.md`;
+implementation proof: [on-demand sender contact](exec-plans/completed/2026-10-01-on-demand-sender-contact.md).
+
+Experiment-list family-local read implementation and local proof are recorded in
+[the completed latency plan](exec-plans/completed/2026-10-02-experiment-list-latency.md).
+[PR #3969](https://github.com/cobuildwithus/murph/pull/3969) owns final review,
+required finding disposition and exact-head CI evidence. The durable contract
+and runnable proof commands remain in
+[`packages/vault-usecases/README.md`](../packages/vault-usecases/README.md#focused-experiment-lists).
+
+Garmin real connection/cleanup and passing hosted synthetic delivery-to-vault proof
+are recorded in
+[`Garmin canary data`](exec-plans/completed/2026-10-01-garmin-vault-proof.md).
 
 Wearable canary credential binding and fresh browser verification are tracked in
 [`fresh canary login`](exec-plans/completed/2026-10-01-garmin-fresh-login.md).
@@ -929,6 +948,10 @@ Clinical raw validation repair plan: [`2026-09-29-frog-3895-clinical-validation.
 
 Mailbox startup dependency reduction and single-query ingress context proof are tracked in
 [mailbox startup simplification](exec-plans/completed/2026-09-30-mailbox-startup-simplification.md).
+
+Companion app contact and wrist failure feedback are owned by
+[`wearable haptics`](references/wearable-haptics.md); consented group timestamp
+projection is owned by the group challenge data diagnostics spec.
 
 Private scheduled phone-call guidance, authenticated Linq sender context, and
 live setup-to-due proof are recorded in

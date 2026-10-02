@@ -20,11 +20,14 @@ import {
   JunctionClient,
 } from "@murphai/device-syncd/providers/junction-client";
 import {
+  buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
   createHostedMailboxAssistantInputId,
 } from "@murphai/hosted-execution/assistant-identifiers";
+
+import { signalHostedMailboxAppendRuntimeForTest } from "#hosted-web-testing";
 
 import {
   readHostedExecutionEnvironment,
@@ -53,6 +56,7 @@ import {
 
 import { proveSyntheticGarminDelivery } from "./helpers/hosted-local-garmin-synthetic-delivery.js";
 
+const wearableActivationTimeoutMs = 300_000;
 const garminWebhookSecret = `whsec_${randomBytes(32).toString("base64")}`;
 const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -412,7 +416,8 @@ describe("hosted local device connect e2e", () => {
       });
     },
     Math.max(1_320_000, (liveJunctionWearableConfig?.timeoutMs ?? 0)
-      + (liveJunctionWearableConfig?.dataTimeoutMs ?? 0) + 180_000),
+      + (liveJunctionWearableConfig?.dataTimeoutMs ?? 0) + 180_000
+      + (liveJunctionWearableConfig?.dataMode ? wearableActivationTimeoutMs : 0)),
   );
 
   it.runIf(liveJunctionWearableConfig?.sources.includes("oura") ?? false)(
@@ -736,6 +741,31 @@ async function runLiveJunctionWearableProof(
   await resetLiveJunctionProvider(config, source);
   await requireScenario().seedActiveHostedMember({ memberId });
   if (config.dataMode) {
+    // An active control account has no canonical vault until member.activated
+    // completes. Use the normal mailbox and managed Temporal path before sync.
+    console.info("MURPH_E2E_GARMIN_ACTIVATION_STARTED=1");
+    try {
+      const activeScenario = requireScenario();
+      const append = await activeScenario.enqueueWake(buildHostedExecutionMemberActivatedWake({
+        eventId: `member.activated:wearable-canary:${memberId}:${runId}`,
+        memberChannels: { email: false, linq: false, telegram: false },
+        memberId,
+        occurredAt: new Date().toISOString(),
+        timeZone: "UTC",
+      }), memberId);
+      await signalHostedMailboxAppendRuntimeForTest({
+        environment: activeScenario.runtimeEnv,
+        expectedUserId: memberId,
+        mailboxItemId: append.wake.id,
+      });
+      const status = await activeScenario.waitForHostedCompletion(memberId, {
+        timeoutMs: wearableActivationTimeoutMs,
+      });
+      if (status.lastErrorCode) throw new Error("Activation failed.");
+    } catch {
+      throw new Error("MURPH_E2E_GARMIN_ACTIVATION_FAILED");
+    }
+    console.info("MURPH_E2E_GARMIN_ACTIVATION_COMPLETED=1");
     await assertEmptyGarminCanaryWorkspace({ memberId, scenario: requireScenario() });
   }
   const hostedSessionCookie = await issueHostedBrowserSession({ memberId });

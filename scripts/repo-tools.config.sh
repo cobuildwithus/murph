@@ -108,6 +108,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "ARCHITECTURE.md" \
   "Dockerfile.cloudflare-hosted-runner" \
   "Dockerfile.cloudflare-hosted-runner-base" \
+  "patches/codex-public-live.patch" \
   "README.md" \
   "PRODUCT.md" \
   "DESIGN.md" \

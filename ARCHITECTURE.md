@@ -1472,8 +1472,10 @@ bounds; the private Linq or Telegram route carries status and results rather
 than restricting the action to a message. Due turns use the existing exact
 occurrence phone-call authority and occurrence request key, with no fresh input
 or extra consent turn. Direct Linq imports retain the authenticated sender handle in existing source
-metadata, so the accepted input renders its phone number for "call me" without
-requiring repetition. Email handles and opaque identifiers are not phone numbers.
+metadata. Private message prompts omit the sender handle; the deferred
+`get_sender_contact` tool reads only the latest current accepted private Linq
+input when needed, using the existing invocation scope and input store. No
+contact cache, seen-once state, provider request, or database query is added. Email handles and opaque identifiers are not phone numbers.
 Unknown destinations are resolved before saving; scheduled
 group and email turns remain ineligible. Input-event replay tolerates the new
 sender field only when an existing private Linq event omitted it; the original
@@ -1654,7 +1656,7 @@ Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority and custom inference fail closed.
 The production image defaults to a catalog containing GPT-6.1 Sol and GPT-6 Luna plus
-GPT-5.6 Luna and Sol, retaining GPT-6 Sol for saved conversation preferences. CLI 0.159.1 supplies every entry from its native catalog;
+GPT-5.6 Luna and Sol, retaining GPT-6 Sol for saved conversation preferences. CLI 0.160.0 supplies every entry from its native catalog;
 there is no separate launch-catalog supplement. All GPT-6 and GPT-6.1 entries retain
 the native 272K context limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the
