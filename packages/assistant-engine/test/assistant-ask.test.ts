@@ -611,6 +611,9 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
       })
       expect(turnInput.env.ELEVENLABS_API_KEY).toBeUndefined()
     }
+    expect(answerInput.environments).toBeUndefined()
+    expect(reviewInput.environments).toEqual([])
+    expect(answerInput.threadConfig).toMatchObject({ 'agents.enabled': false, 'features.goals': false })
     expect(answerInput.threadConfig).toBe(READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG)
     expect(answerInput.threadConfig).not.toHaveProperty('features.shell_tool')
     expect(answerInput.workingDirectory).not.toBe(workspaceRoot)
