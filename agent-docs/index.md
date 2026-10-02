@@ -3,6 +3,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Private sender contact presentation and retrieval are owned by `ARCHITECTURE.md`;
+implementation proof: [on-demand sender contact](exec-plans/active/2026-10-01-on-demand-sender-contact.md).
+
 Garmin real connection/cleanup and signed synthetic delivery-to-vault proof
 are tracked in
 [`Garmin canary data`](exec-plans/active/2026-10-01-garmin-vault-proof.md).

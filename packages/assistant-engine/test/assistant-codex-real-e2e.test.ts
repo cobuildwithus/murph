@@ -42705,6 +42705,9 @@ describeRealCodex('scheduled phone-call reminder journey', () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-scheduled-call-'))
     const skillsRoot = path.join(workingDirectory, 'skills')
+    const contactTool = await import('../src/assistant-codex/dynamic-tools/sender-contact.js')
+    const contactLookup = vi.spyOn(contactTool, 'executeGetSenderContactDynamicTool')
+    const { upsertAssistantInputEvent } = await import('../src/assistant/input-store.js')
     const { MURPH_CREATE_PHONE_CALL_TOOL } = await import('../src/assistant-codex/dynamic-tools/phone-calls.js')
     const { resolveAssistantHostedScheduledPhoneCallScope } = await import('../src/assistant/hosted-tool-context.js')
     const calls: Array<Parameters<NonNullable<AssistantHostedToolContext['phoneCalls']>['start']>[0]> = []
@@ -42715,11 +42718,19 @@ describeRealCodex('scheduled phone-call reminder journey', () => {
     try {
       await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
       await materializeAssistantSkill({ skillsRoot, slug: 'phone-calls' })
+      const acceptedInput = await upsertAssistantInputEvent({ vault: workingDirectory, event: {
+        occurredAt: now, sourceRef: { kind: 'inbox-capture', source: 'linq', captureId: 'synthetic-call-contact', version: null },
+        conversation: { accountId: null, actorId: 'synthetic-sender', actorIsSelf: false,
+          source: 'linq', threadId: 'synthetic-private-chat', threadIsDirect: true },
+        sourceMetadata: { kind: 'linq', externalThreadRouteAuthorityPresent: false, senderHandle,
+          partCount: 1, reactionEligible: false, replyToMessageId: null, service: 'iMessage' },
+        content: { text: 'Synthetic call reminder request.' },
+      } })
       const context: AssistantHostedToolContext = {
         computerToolsAvailable: false, vaultFileSendAvailable: false,
         currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
         sendVaultFile: async () => { throw new Error('No file send authorized.') },
-        currentUserActionScope: () => ({ acceptedInputIds: ['ain_' + 'a'.repeat(32)],
+        currentUserActionScope: () => ({ acceptedInputIds: [acceptedInput.inputId],
           conversationId: 'synthetic-private-call', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient',
           conversationScope: 'direct', originSessionId: 'synthetic-call-setup', resultNotificationChannel: 'linq' }),
         phoneCalls: { async start(request) {
@@ -42760,22 +42771,24 @@ describeRealCodex('scheduled phone-call reminder journey', () => {
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
           turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply',
         }),
-        dynamicTools: scheduled ? [MURPH_CREATE_PHONE_CALL_TOOL] : [MURPH_AUTOMATION_TOOL, MURPH_CREATE_PHONE_CALL_TOOL],
-        hostedToolContext, prompt, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        dynamicTools: scheduled ? [MURPH_CREATE_PHONE_CALL_TOOL] : [MURPH_AUTOMATION_TOOL, MURPH_CREATE_PHONE_CALL_TOOL, contactTool.MURPH_GET_SENDER_CONTACT_TOOL],
+        hostedToolContext, prompt, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory, vaultRoot: workingDirectory,
       })
       const prompt = buildAssistantAutoReplyPrompt([{
         actorIsSelf: false, attachmentDescriptors: [],
         attachmentEvidence: { attachments: [], optionalInboxCaptureId: null, reasonCode: null, source: null, status: 'not_attempted', updatedAt: null },
         conversation: { accountId: null, actorId: 'synthetic-sender', actorIsSelf: false,
           source: 'linq', threadId: 'synthetic-private-chat', threadIsDirect: true },
-        inputId: 'ain_' + 'a'.repeat(32), occurredAt: now, receivedAt: now,
+        inputId: acceptedInput.inputId, occurredAt: now, receivedAt: now,
         projection: null, replyContext: null, replyTarget: null, source: 'linq', telegramMetadata: null,
         sourceMetadata: { kind: 'linq', externalThreadRouteAuthorityPresent: false, senderHandle,
           partCount: 1, reactionEligible: false, replyToMessageId: null, service: 'iMessage' },
         text: 'Could you call me tomorrow at 10:20 AM Eastern to remind me to collect the museum tickets?',
       }], { timeZone: 'America/New_York' })
       if (prompt.kind !== 'ready') throw new Error('Expected accepted private request.')
+      expect(prompt.prompt).not.toContain(senderHandle)
       const setup = await execute(prompt.prompt, false)
+      expect(contactLookup).toHaveBeenCalledTimes(1)
       process.stdout.write('[scheduled-call-live] ' + JSON.stringify({ scenario, phase: 'setup', reply: setup.finalMessage, saves: saves.length, calls: calls.length }) + '\n')
       expect(calls).toHaveLength(0)
       if (scenario === 'email-handle') {
@@ -42806,6 +42819,7 @@ describeRealCodex('scheduled phone-call reminder journey', () => {
       const fired = await execute(instructions, true, { ...context, automationTool: null,
         currentUserActionScope: () => null, currentScheduledPhoneCallScope: () => scheduledScope })
       process.stdout.write('[scheduled-call-live] ' + JSON.stringify({ scenario, phase: 'due', reply: fired.finalMessage, calls: calls.length }) + '\n')
+      expect(contactLookup).toHaveBeenCalledTimes(1)
       expect(calls).toHaveLength(1)
       expect(calls[0]).toMatchObject({ brief: { to: { phoneNumber: '+12125550123' }, allowTransferToUser: false, timeZone: 'America/New_York' }, resultNotificationChannel: 'linq' })
       expect(calls[0]?.requestKey).toMatch(/^phone_call_scheduled_[a-f0-9]{64}$/u)
@@ -42816,6 +42830,6 @@ describeRealCodex('scheduled phone-call reminder journey', () => {
         expect(fired.finalMessage).toMatch(/confirm|unclear|sure|couldn.t tell/iu)
         expect(fired.finalMessage).not.toMatch(/(?:I.ve|I have) (?:placed|made) the call|no call (?:was|has been) (?:placed|made)|will retry/iu)
       }
-    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+    } finally { contactLookup.mockRestore(); await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 720_000)
 })

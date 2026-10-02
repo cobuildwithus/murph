@@ -68,9 +68,10 @@ success criteria, and any disclosure or transfer limits in its instructions.
 The conversation route is for status and results, not a text-only action limit.
 Never call immediately or silently replace the requested call with a text.
 
-For "call me", use the requesting member's known phone number from trusted
-private conversation context (the engine-rendered `Sender: +...` on an accepted
-private Linq input is that sender's number) or their explicitly supplied number.
+For "call me", use the member's explicitly supplied or already known phone number.
+If it is unknown in a private iMessage turn, discover and call
+`murph.get_sender_contact` once before asking. It reads the authenticated current
+sender on demand; ordinary private message prompts omit that handle.
 Never infer a number from a thread id, an email handle, a Telegram user id, another
 participant, or an unrelated contact. A sender handle is contact context, not
 permission to call without the member's request. If no number is known, ask for it before saving. The explicit bounded request is

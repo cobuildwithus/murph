@@ -5021,6 +5021,27 @@ describe('assistant Codex turn planning', () => {
   })
 
   it.each([
+    ['linq', true, true, false, true],
+    ['linq', false, true, false, false],
+    ['telegram', true, true, false, false],
+    ['email', true, true, false, false],
+    ['linq', true, false, false, false],
+    ['linq', true, true, true, false],
+  ] as const)('gates sender contact for %s direct=%s hosted=%s scheduled=%s', async (channel, threadIsDirect, hosted, scheduled, available) => {
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: scheduled ? [] : [{ id: `ain_${'d'.repeat(32)}`, source: 'assistant-input' }],
+      executionContext: hosted ? { hosted: { memberId: 'synthetic-contact-member', userEnvKeys: [] } } : null,
+      hostedToolContext: hosted ? createHostedToolContext() : null,
+      input: { ...createMessageInput(), channel, threadIsDirect, turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply' },
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2030-04-01', currentTimeZone: 'America/New_York' },
+      route: createRoute(), session: createSession(),
+      sharedPlan: createSharedPlan({}, { channel, threadIsDirect, threadId: 'synthetic-contact-thread' }),
+    })
+    expect(plan.dynamicTools.some(tool => tool.name === 'get_sender_contact')).toBe(available)
+  })
+
+  it.each([
     ['direct Linq', 'linq', true, true],
     ['group Linq', 'linq', false, false],
     ['direct email', 'email', true, false],
