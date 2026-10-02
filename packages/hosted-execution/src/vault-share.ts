@@ -90,10 +90,18 @@ const HOSTED_VAULT_SHARE_DAY_MAX_MINUTES = 24 * 60;
 const HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS = 1_000_000;
 const HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS = 100;
 const HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+const HOSTED_VAULT_SHARE_PROJECTION_CONTENT_DIGEST_SCHEMA =
+  "murph.hosted-vault-share.projection-content-digest.v1";
+// Digest input reuses the deliver-request parser, which requires a
+// well-formed generation field; the value never leaves this function.
+const HOSTED_VAULT_SHARE_DIGEST_INPUT_PLACEHOLDER = "a".repeat(43);
 
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM =
   "deferredProjectionWork";
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION = "v1";
+export const HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM =
+  "projectionContentDigest";
+export const HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION = "v2";
 export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE =
   "first-materialization";
 export const HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM = "projectionMode";
@@ -809,6 +817,7 @@ export interface HostedVaultShareActiveProjectionKindsResponse {
   projectionKinds: HostedVaultShareProjectionKind[];
   projectionScopes: HostedVaultShareProjectionScope[];
   generationTokensByProjectionScopeKey?: Record<string, string>;
+  publishedSourceWorkspaceVersionByProjectionScopeKey?: Record<string, string>;
 }
 
 export interface HostedVaultShareDeliveryPayload {
@@ -2484,6 +2493,37 @@ export function parseHostedVaultShareDeliverRequest(
   };
 }
 
+export function serializeHostedVaultShareProjectionContentDigestInput(input: {
+  memberTimeZone?: string;
+  projectionScope: HostedVaultShareProjectionScope;
+  records: readonly HostedVaultShareDeliveryRecord[];
+}): string {
+  const parsed = parseHostedVaultShareDeliverRequest({
+    ...(input.memberTimeZone ? { memberTimeZone: input.memberTimeZone } : {}),
+    expectedGenerationToken: HOSTED_VAULT_SHARE_DIGEST_INPUT_PLACEHOLDER,
+    projectionKind: input.projectionScope.projectionKind,
+    projectionScope: input.projectionScope,
+    records: input.records,
+    sourceWorkspaceVersion: "0",
+  });
+  const records = isHostedVaultShareCurrentStateProjectionKind(parsed.projectionKind)
+    ? parsed.records.map((record) => ({
+        data: record.data,
+        recordKey: record.recordKey,
+        ...(record.source ? { source: record.source } : {}),
+        ...(record.sourceRevision
+          ? { sourceRevision: record.sourceRevision }
+          : {}),
+      }))
+    : parsed.records;
+  return JSON.stringify({
+    ...(parsed.memberTimeZone ? { memberTimeZone: parsed.memberTimeZone } : {}),
+    projectionScope: parsed.projectionScope,
+    records,
+    schema: HOSTED_VAULT_SHARE_PROJECTION_CONTENT_DIGEST_SCHEMA,
+  });
+}
+
 function assertHostedVaultSharePublicSourceCapacity(parsedRecords: readonly HostedVaultShareDeliveryRecord[]): void {
   const publicSources = new Set<string>();
   for (const record of parsedRecords) {
@@ -2614,6 +2654,13 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
         record.generationTokensByProjectionScopeKey,
         uniqueScopeKeys,
       );
+  const publishedSourceWorkspaceVersionByProjectionScopeKey =
+    record.publishedSourceWorkspaceVersionByProjectionScopeKey === undefined
+    ? undefined
+    : parseHostedVaultSharePublishedSourceWorkspaceVersionByProjectionScopeKey(
+        record.publishedSourceWorkspaceVersionByProjectionScopeKey,
+        uniqueScopeKeys,
+      );
 
   return {
     hasDeferredProjectionWork,
@@ -2622,6 +2669,9 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
     projectionScopes: uniqueProjectionScopes,
     ...(generationTokensByProjectionScopeKey
       ? { generationTokensByProjectionScopeKey }
+      : {}),
+    ...(publishedSourceWorkspaceVersionByProjectionScopeKey
+      ? { publishedSourceWorkspaceVersionByProjectionScopeKey }
       : {}),
   };
 }
@@ -2665,6 +2715,28 @@ function parseHostedVaultShareGenerationTokensByProjectionScopeKey(
       );
     }
     result[scopeKey] = token;
+  }
+  return result;
+}
+
+function parseHostedVaultSharePublishedSourceWorkspaceVersionByProjectionScopeKey(
+  value: unknown,
+  activeScopeKeys: ReadonlySet<string>,
+): Record<string, string> {
+  const record = requireObject(
+    value,
+    "Vault share active projection kinds response publishedSourceWorkspaceVersionByProjectionScopeKey",
+  );
+  const result: Record<string, string> = {};
+  for (const [scopeKey, sourceWorkspaceVersion] of Object.entries(record)) {
+    if (!activeScopeKeys.has(scopeKey)) {
+      throw new TypeError(
+        "Vault share active projection published source version map contains an inactive scope key.",
+      );
+    }
+    result[scopeKey] = requireHostedVaultShareSourceWorkspaceVersion(
+      sourceWorkspaceVersion,
+    );
   }
   return result;
 }

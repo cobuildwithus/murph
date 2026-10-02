@@ -346,14 +346,18 @@ describe("plain metric grant lifecycle", () => {
     }) }));
     await revokeHostedVaultSharesTx({ ...input, projectionScopes: [scope] });
     expect(tx.hostedVaultShare.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ projectionSnapshotCiphertext: null, status: "revoked" }),
+      data: expect.objectContaining({
+        projectionSnapshotCiphertext: null,
+        status: "revoked",
+      }),
       where: expect.objectContaining({ projectionScopeKey: { in: [scopeKey] } }),
     }));
     tx.hostedVaultShare.findUnique.mockResolvedValue({ id: first.id, status: "revoked", projectionSnapshotCiphertext: null });
     const next = await grantHostedVaultShareTx(input);
     expect(next.id).not.toBe(first.id);
     expect(tx.hostedVaultShare.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
-      id: next.id, projectionSnapshotCiphertext: null, projectionSourceWorkspaceVersion: null,
+      id: next.id, projectionSnapshotCiphertext: null,
+      projectionSourceWorkspaceVersion: null,
     }) }));
   });
 });

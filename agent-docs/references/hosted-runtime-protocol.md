@@ -755,7 +755,17 @@ recording item continues after one second; if no page is deliverable because
 remaining null work is inactive or unsupported, it uses the five-minute deferred
 retry. Either future retry time lets foreground and independent system controls
 proceed between pages. The ordinary abortable idle projection refresh omits this
-mode and retains its existing all-active-scope behavior.
+mode and retains its existing all-active-scope behavior, with one optimization:
+when a compatible runner advertises the projection-content-digest capability,
+Web includes the common published source workspace version per returned scope
+generation only when every active share in that generation already has a
+snapshot at that same version. The runner may skip the delivery request only
+after a fresh ordinary-mode capture when that Web-published version and its
+portable local publication state's source version, generation token, and
+content digest all match. Missing local state, a stale token, changed content,
+mixed destination versions, or any null snapshot keeps the existing delivery
+path, so first materialization, new grants, regrants, revocations, and refreshes
+still publish.
 
 A temporary loss of grantor runtime access also returns the acknowledged
 first-materialization mode with only the opaque deferred-work bit and no scopes.

@@ -37,6 +37,8 @@ import {
 	buildHostedVaultShareActivityDistanceProjectionScope,
 	buildHostedVaultShareActivitySessionCountProjectionScope,
 	buildHostedVaultShareProjectionScopeKey,
+	HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+	HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
 	HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
 	HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
 	HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -79,6 +81,7 @@ function projectionWork(
 			projectionScope,
 		})),
 		hasDeferredProjectionWork: false,
+		publishedSourceWorkspaceVersionByProjectionScopeKey: {},
 	};
 }
 
@@ -101,6 +104,15 @@ function withDeferredWorkCapability(search = ""): string {
 	params.set(
 		HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
 		HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+	);
+	return `?${params.toString()}`;
+}
+
+function withContentDigestCapability(search = ""): string {
+	const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+	params.set(
+		HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_PARAM,
+		HOSTED_VAULT_SHARE_CONTENT_DIGEST_CAPABILITY_VERSION,
 	);
 	return `?${params.toString()}`;
 }
@@ -159,6 +171,32 @@ describe("vault-share active-kinds route", () => {
 			prisma: { kind: "prisma" },
 			sourceWorkspaceVersion: undefined,
 		}));
+	});
+
+	it("includes published source versions only for compatible runners", async () => {
+		const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+		mocks.readDeliverableHostedVaultShareProjectionScopeGenerations.mockResolvedValue({
+			generations: [{
+				generationToken: generationToken(0),
+				projectionScope: PROFILE_SCOPE,
+			}],
+			hasDeferredProjectionWork: false,
+			publishedSourceWorkspaceVersionByProjectionScopeKey: {
+				[profileScopeKey]: "7",
+			},
+		});
+
+		const compatible = await activeKindsRoute.GET(buildRequest(withContentDigestCapability()));
+		expect(await compatible.json()).toMatchObject({
+			publishedSourceWorkspaceVersionByProjectionScopeKey: {
+				[profileScopeKey]: "7",
+			},
+		});
+
+		const legacy = await activeKindsRoute.GET(buildRequest());
+		expect(await legacy.json()).not.toHaveProperty(
+			"publishedSourceWorkspaceVersionByProjectionScopeKey",
+		);
 	});
 
 	it("passes the optional canonical source version to scope discovery", async () => {
