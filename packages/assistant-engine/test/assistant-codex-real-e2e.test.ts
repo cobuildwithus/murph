@@ -20641,6 +20641,7 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
           schedule: item.recurring ? { kind: 'dailyLocal', localTime: '17:00', timeZone: 'Europe/Warsaw' }
             : { kind: 'at', at: item.fixed ? '2026-11-12T17:30:00Z' : '2026-11-12T16:00:00Z' },
           contextReferences: item.eventId ? [{ entityKind: 'event', entityId: item.eventId }] : [],
+          plannedOccurrenceOffsetMs: item.eventId === session.eventId ? 3_600_000 : undefined,
         })).record)
       }
       expect(new Set(records.map(record => record.automationId)).size).toBe(12)
@@ -20674,10 +20675,15 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
             if (request.action === 'inspect') inspected.set(before.automationId, before.updatedAt)
             else {
               expect(request.expectedUpdatedAt).toBe(inspected.get(before.automationId))
-              expect(Object.keys(request).every(key => ['action', 'lookup', 'expectedUpdatedAt', 'instructions', 'schedule', 'status', 'title', 'summary', 'contextReferences', 'assistantTargetOverride'].includes(key))).toBe(true)
+              expect(Object.keys(request).every(key => ['action', 'lookup', 'expectedUpdatedAt', 'instructions', 'schedule', 'status', 'title', 'summary', 'contextReferences', 'assistantTargetOverride', 'plannedOccurrenceOffsetMs'].includes(key))).toBe(true)
+              if (request.plannedOccurrenceOffsetMs !== undefined) {
+                expect(request.lookup).toBe(records[1]?.automationId)
+                expect(request.plannedOccurrenceOffsetMs).toBe(3_600_000)
+              }
               await patchAutomation({ vaultRoot: workingDirectory, lookup: request.lookup, expectedUpdatedAt: request.expectedUpdatedAt,
                 instructions: request.instructions, schedule: request.schedule, status: request.status,
                 title: request.title, summary: request.summary, assistantTargetOverride: request.assistantTargetOverride,
+                plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs,
                 contextReferences: request.contextReferences ? [...request.contextReferences] : undefined,
                 now: new Date(now.getTime() + requests.length * 1000),
               })
@@ -20734,6 +20740,7 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
       expect(after[0]?.instructions).not.toBe(records[0]?.instructions)
       expect(after[0]?.schedule).toEqual(records[0]?.schedule)
       expect(after[1]?.schedule).toEqual({ kind: 'at', at: '2026-11-12T10:00:00.000Z' })
+      expect(after[1]?.plannedOccurrenceOffsetMs).toBe(3_600_000)
       expect(after[1]?.contextReferences).toEqual(records[1]?.contextReferences)
       expect(after[2]?.status).toBe('archived')
       expect(after.slice(3, 7)).toEqual(records.slice(3, 7))

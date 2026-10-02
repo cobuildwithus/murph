@@ -1,8 +1,8 @@
 # Reduce assistant context and repeated automation work
 
-Status: active
+Status: completed
 Created: 2026-10-01
-Updated: 2026-10-01
+Updated: 2026-10-02
 
 ## Goal
 
@@ -68,7 +68,12 @@ Updated: 2026-10-01
 - Frozen dependency install, incremental workspace build, Assistant Engine/Runtime/CLI/Query/Web typechecks, and changelog archive checks pass.
 - Reaction proof: 194 engine and 33 Web tests; real priority Luna classifies four scenarios correctly. A real production quiet turn uses one Luna request and no reply; confusion uses Luna plus Sol and one useful reply, with no canonical writes. Quiet routing preserves resume identity and fingerprint.
 - Fresh delegation proof: 109 prompt tests, 25 hosted config checks, and real pinned native child capture. Real Sol read workflow uses one child, exactly three canonical reads, zero root source reads and no writes. Real onboarding write uses one child and one canonical write, without duplicate root effects. Both user-visible journeys are Ready.
-- Inventory proof: 39 CLI tests, three pagination tests and ten prompt contracts; count/byte caps, oversize fallback, cursor completeness and existing compact projection preserved. Morning live found a conflicting model-selection instruction and a necessary readback inspection because current patch receipts omit instructions. Correct the owning model rule, account for that exact verification read, and rerun before readiness.
-- Complete initial provider input: private 165,247 to 167,136 bytes; group 142,993 to 143,071 bytes on identical synthetic fixtures. Exact target tokenizer unavailable. Shared automation-tool wording needs final base/head remeasurement after the live fix.
+- Inventory proof: 39 CLI tests, three pagination tests and ten prompt contracts; count/byte caps, oversize fallback, cursor completeness and existing compact projection preserved. Model guidance now preserves factual/timing repair settings. Live Luna two-pass journey is Ready: one instruction page and four correct canonical repairs; repeat one page, zero inspections and zero patches. Exact candidate/readback bounds, event-relative offset, models, audiences and unrelated reminders are preserved. The synthetic adapter now forwards the supported offset field. Final connected prompt/schema coverage passes 61 tests.
+- Complete initial provider input: private 165,247 to 167,136 bytes; group 142,993 to 143,071 bytes on identical synthetic fixtures. Exact target tokenizer unavailable. Final base/head remeasurement after shared automation-tool wording passes both fixtures; deferred registration grows 180 bytes outside the first request.
 - Native child fixture: 44,803 bytes versus 137,607 parent bytes, with parent transcript/member snapshot and parent dynamic schemas absent. This is distinct-request size evidence, not measured dollar savings.
 - No Codex CLI source, production configuration, private vault, or production data was changed.
+
+## Implementation completion
+
+All focused user journeys and local owner checks are Ready. Parent diff, privacy and architecture review is complete. Required external review and exact-head CI remain PR gates; neither deployment nor merge is part of this task.
+Completed: 2026-10-02
