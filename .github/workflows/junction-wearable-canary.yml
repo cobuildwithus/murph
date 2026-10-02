@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   connect:
-    name: Prove Garmin data through the private hosted runtime
+    name: Prove Garmin connection and check available data
     if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}
     environment: temporal-compatibility
     runs-on: ubuntu-24.04
@@ -33,7 +33,7 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - name: Require completed canonical Garmin data proof
+      - name: Require completed Garmin journey and cleanup
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REF_PROTECTED: ${{ github.ref_protected }}

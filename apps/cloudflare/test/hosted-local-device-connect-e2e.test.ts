@@ -394,7 +394,7 @@ describe("hosted local device connect e2e", () => {
   // only selected hosted-local scenario so no unrelated process inherits login
   // credentials.
   it.runIf(liveJunctionWearableConfig?.sources.includes("garmin") ?? false)(
-    "connects Garmin through Junction Link and requires canonical data when the data proof is enabled",
+    "connects Garmin through Junction Link and checks available canonical data when the data proof is enabled",
     async () => {
       await expect(runLiveJunctionWearableProof("garmin")).resolves.toEqual({
         callbackAutoCompleted: true,
@@ -735,7 +735,7 @@ async function runLiveJunctionWearableProof(
     );
   }
 
-  let dataOutcome: "matched" | null = null;
+  let dataOutcome: Awaited<ReturnType<typeof waitForLiveGarminCanonicalData>> | null = null;
   const connectedNotBefore = Date.now();
   const result = await runJunctionWearableBrowser({
     config,
@@ -751,7 +751,11 @@ async function runLiveJunctionWearableProof(
           signal,
           timeoutMs: config.dataTimeoutMs,
         });
-        console.info("MURPH_E2E_GARMIN_CANONICAL_DATA_MATCHED=1");
+        if (dataOutcome === "matched") {
+          console.info("MURPH_E2E_GARMIN_CANONICAL_DATA_MATCHED=1");
+        } else {
+          console.warn("MURPH_E2E_GARMIN_INGESTION_UNVERIFIED=1");
+        }
       },
     } : {}),
     hostedSessionCookie,

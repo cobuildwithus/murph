@@ -1,4 +1,4 @@
-# Require real Garmin data in the canary vault
+# Verify Garmin connection and available vault data
 
 Status: active
 Created: 2026-10-01
@@ -6,14 +6,16 @@ Updated: 2026-10-01
 
 ## Goal
 
-A successful Garmin canary must prove real provider data reached its canonical
-vault through the ordinary hosted sync path, followed by successful cleanup.
+A successful Garmin canary must prove authorization, persisted connection, and
+cleanup. When its selected provider window contains records, require the ordinary
+hosted sync path to produce an exact canonical match. Successful empty reads may
+pass with ingestion explicitly unverified under the revised acceptance scope.
 
 ## Scope and ownership
 
 Public Murph owns the bounded provider-to-vault comparison. Murph Cloud consumes
-its private receipt and owns hosted execution and final attestation. Change the
-producer first, then reject empty-data receipts in the consumer. No production
+its private receipt and owns hosted execution and final attestation. For the revised policy, update the
+private receipt consumer before enabling empty outcomes in the public producer. No production
 member mutations, synthetic live samples, or forced processing shortcuts.
 Native email canary work continues separately in its existing PRs.
 
@@ -27,7 +29,9 @@ Native email canary work continues separately in its existing PRs.
 - [x] Distinguish missing inventory from absent timestamps and probe the bounded historical range across activity, sleep, and workouts.
 - [x] Give canonical ingestion enough time to observe the ordinary fifteen-minute empty-history retry, preserving shorter authorization limits.
 - [x] Refresh the controller installation token throughout the extended wait before enabling the private deadline.
-- [ ] Run the hosted canary and require canonical ingestion plus cleanup.
+- [x] Run the strict hosted canary; record missing provider data without claiming ingestion.
+- [ ] Deliver the authorized optional-empty-data policy through both receipt owners.
+- [ ] Verify the protected hosted journey with an explicit ingestion outcome.
 
 ## Evidence and risks
 
@@ -162,3 +166,29 @@ not set ingestion start/end bounds. Provider-side bounds and backfill delivery
 remain unverified. Investigate those through scoped sandbox access before further
 code or timeout changes. Do not infer production-vault contents from this isolated
 canary. The canonical-ingestion goal remains active and unqualified.
+
+
+## Revised acceptance scope
+
+Canonical ingestion is optional when the provider activity window remains empty.
+This supersedes the earlier mandatory-ingestion acceptance requirement, not the
+recorded failed attempts or the exact-match assertion when records exist.
+A further provider consultation identified delayed initial delivery as plausible,
+but no cause or provider restriction is established. A long-lived sandbox probe
+would distinguish latency; it is deferred rather than extending ordinary waits
+or changing production connections.
+
+Reuse the existing version-2 outcome receipt. Land the private reader first:
+accept `no_provider_data` with a visible ingestion-unverified warning, retaining
+legacy matched receipts and exact-field validation. Then update the public
+producer to permit only successful empty reads through the existing deadline.
+Nonempty records, API/status failures, pending-request timeouts, cancellation,
+and cleanup failures must never enter the tolerated outcome. No new service,
+configuration toggle, provider mutation, or timeout increase is needed.
+
+Focused evidence: empty success remains distinct from matched ingestion; pending
+provider/status requests and cancellation during diagnostics fail; nonempty
+unmatched records fail; private receipt CLI rejects missing/malformed/extra
+fields and emits different messages for the two admitted outcomes. Product UX
+is not applicable: these changes affect test infrastructure only. No changelog
+entry is needed because member behavior is unchanged.

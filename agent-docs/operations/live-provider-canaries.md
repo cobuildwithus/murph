@@ -3,8 +3,9 @@
 Last verified: 2026-09-17
 
 A passing live canary means its actual journey and business assertions completed.
-A successful scheduler, skipped job, connection-only result, or unavailable
-credential is not equivalent evidence. GitHub completion timestamps identify the
+A successful scheduler, skipped job, or unavailable credential is not equivalent
+evidence. Garmin permits an explicitly unverified ingestion outcome when its
+provider window stays empty; that result proves connection and cleanup only. GitHub completion timestamps identify the
 age of an executed run; this system adds no product-state receipt database.
 
 ## Existing journeys
@@ -73,26 +74,30 @@ age of an executed run; this system adds no product-state receipt database.
   callback-owned Temporal/runtime pipeline imports data. Provider day/value/unit
   and Garmin activity-summary provenance must match canonical query output.
   Empty provider reads are retried within the existing bounded deadline so the
-  initial provider pull can finish. Missing real data fails; a connection-only
-  or empty-data result cannot pass the canary. The test invents no samples and
-  forces no ensure-processing call. Only after a canonical match, UI disconnect,
-  and final owned cleanup does the suite write its version-2 private receipt
-  with `dataOutcome: matched`. This proves pull and canonical ingestion, not
-  provider webhook delivery. The proof uses positive steps from the fourteen
+  initial provider pull can finish. Successful empty reads through the deadline
+  yield `dataOutcome: no_provider_data`, with an ingestion-unverified warning.
+  That outcome refers only to the selected activity window and does not establish
+  ingestion. Any nonempty response still requires a canonical match, including
+  malformed or ineligible records. Provider/status errors, request timeouts, and
+  caller cancellation fail; only deadline expiration between successful reads
+  can establish the empty outcome. The test invents no samples and forces no
+  ensure-processing call. Both outcomes require UI disconnect and final owned
+  cleanup before writing the version-2 private receipt. `dataOutcome: matched`
+  proves pull and canonical ingestion, not provider webhook delivery. The proof uses positive steps from the fourteen
   completed UTC days ending two days before the run; today's activity alone
   does not satisfy this stable-value comparison.
-  Failure-only diagnostics classify the already-fetched historical request
+  Unmatched-data diagnostics classify the already-fetched historical request
   range relative to that oracle window and whether the provider reports any
   days with data. Range overlap describes a request, not delivered coverage;
   reported data cannot certify canonical ingestion. Output contains only closed
   categories, never raw dates, counts, errors, account IDs, or health values.
-  The same failure-only diagnostic reads the requested user's Garmin connection
+  The same unmatched-data diagnostic reads the requested user's Garmin connection
   permissions: resource authorization and whether required scopes are granted,
   denied, absent, or unknown. This distinguishes authorization from inventory
   presence. Scope names and connection payloads never leave the process. The
   extra connection read uses one attempt with an eight-second request limit;
   all six diagnostic queries share the existing ten-second deadline. Permissions
-  and historical metadata cannot change the canonical proof result.
+  and historical metadata cannot certify a canonical match.
 
 
 ## Garmin execution boundary
@@ -112,7 +117,7 @@ private revision on attempt one, and requires exactly one successful final job:
 `Junction wearable canary proof / <digest>`. The digest is SHA-256 of version,
 public SHA, private SHA, and request id, each newline terminated. Completion
 must be from this dispatch, not an old run or a skipped proof. Private main is
-revalidated before acceptance. The controller polls boundedly for 54 minutes
+revalidated before acceptance. The controller polls boundedly for 74 minutes
 and never retries an ambiguous dispatch or cancels provider work.
 
 The private executor owns managed Temporal, the worker package, local PostgreSQL,
@@ -126,8 +131,9 @@ reported separately from matched canonical data.
 ## Safe rollout and recovery
 
 1. Land the private receipt reader before the public producer. The reader
-   accepts the deployed version-1 matched receipt and version-2 explicit data
-   outcomes; it rejects connection-only receipts and extra provider fields.
+   accepts the deployed version-1 matched receipt and version-2 `matched` or
+   `no_provider_data` outcomes; it rejects bare connection receipts and extra
+   provider fields. Empty-data outcomes emit a warning and never claim ingestion.
    Then land the public version-2 producer. Rolling the reader back requires
    rolling back the producer first; old readers reject version-2 receipts.
 2. Let every prior provider-bearing public Garmin run finish naturally before
