@@ -101,7 +101,7 @@ describe("createHostedGroupSharedReader", () => {
   });
 
   it("requests contact metadata only when the caller opts in", async () => {
-    const request = vi.fn(async () => ({ action: "read_shared" as const, result: { status: "none" as const, members: [], requestedProjectionScopeKeys: ["steps-days.v0"] } }));
+    const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => ({ action: "read_shared", result: { status: "none", members: [], requestedProjectionScopeKeys: ["steps-days.v0"] } }));
     const reader = createHostedGroupSharedReader({ groupToolPort: { request } as HostedRuntimeGroupToolPort });
     await reader.request({ projectionScopes: [STEPS_SCOPE], includeCompanionPresence: true });
     expect(request).toHaveBeenCalledExactlyOnceWith({ action: "read_shared", projectionScopes: [STEPS_SCOPE], includeCompanionPresence: true });

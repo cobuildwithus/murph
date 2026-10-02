@@ -1,6 +1,6 @@
 # Companion presence and device failure feedback
 
-Status: active
+Status: completed
 Created: 2026-10-01
 Updated: 2026-10-01
 
@@ -59,7 +59,7 @@ and receive no new haptic fields. No queued effect is replayed after reconnect.
 2. Wire native foreground task and lifecycle cancellation; compile and test.
 3. Verify assistant failure explanations with focused synthetic real-model tests.
 4. Parent review, typechecks, complexity/input measurement, final ReviewGPT and CI.
-5. Deploy Web then hosted runtime through existing gates; verify live reachability.
+5. Prepare the ordered Web/runtime/native rollout and its production verification checklist; execute it after merge.
 
 ## Verification
 
@@ -105,9 +105,26 @@ lease takeover for the existing bounded re-registration delay. Garmin may sound
 and is never advertised as silent. Tiny cross-server clock skew can briefly
 classify contact as stale; contact remains advisory.
 
-## Remaining rollout
+## Final review and CI follow-up
 
-Final external review and exact-head CI, additive Web migration/routes, hosted
-runtime deployment, compatible native install and physical presence verification.
+Round 1 final external review passed on d8793896c7e45e6b372d5801bc14dd2c7f9a8f49:
+zero qualifying serious bugs or material complexity-collapse findings. The Eragon
+lane selected 6Pro, confirmed the guarded snapshot, and captured the exact
+completed turn after 627 seconds. The initial Apollo browser startup failed
+before submission; that attempt did not count as a round. The accepted review
+covered all 52 changed postimages and the cross-owner authority/data flow.
+
+CI exposed only stale test expectations and a fixture type annotation: new
+package export, two scalar timestamps and migration inventory, model-facing
+contact opt-in, and the empty member tuple. Corrections preserve production
+behavior. Focused tests and affected package/Web typechecks pass; final-head CI
+must pass before merge. Native counterpart #173 is merged and main CI is running.
+
+## Rollout handoff
+
+Implementation and focused proof are complete. The PR completion owner retains
+responsibility for exact-head CI, additive Web migration/routes, hosted runtime
+deployment, compatible native install and physical presence verification.
 The authorized member sends any real message-to-buzz request; synthetic checks
 never vibrate hardware. Background execution remains opportunistic.
+Completed: 2026-10-01
