@@ -969,5 +969,5 @@ Current authority and storage contracts remain in `ARCHITECTURE.md`, `SECURITY.m
 and `RELIABILITY.md`.
 
 SMS invalid-destination recovery format support is tracked in
-[sign-in destination recovery](exec-plans/active/2026-10-02-otp-destination-error.md);
+[sign-in destination recovery](exec-plans/completed/2026-10-02-otp-destination-error.md);
 `../docs/hosted-auth-migration.md` remains the contract owner.
