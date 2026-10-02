@@ -3905,7 +3905,7 @@ async function dispatchMurphDynamicToolRequest(
     case 'connected-apps-manage':
     case 'connected-apps-search':
     case 'connected-apps-execute': {
-      const connectedApps = input.hostedToolContext?.connectedApps ?? null
+      const connectedApps = hostedContext?.connectedApps
       if (!connectedApps) {
         return toolTextResult(
           false,
