@@ -92,6 +92,9 @@ const HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS = 100;
 const HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const HOSTED_VAULT_SHARE_PROJECTION_CONTENT_DIGEST_SCHEMA =
   "murph.hosted-vault-share.projection-content-digest.v1";
+// Digest input reuses the deliver-request parser, which requires a
+// well-formed generation field; the value never leaves this function.
+const HOSTED_VAULT_SHARE_DIGEST_INPUT_PLACEHOLDER = "a".repeat(43);
 
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM =
   "deferredProjectionWork";
@@ -2497,7 +2500,7 @@ export function serializeHostedVaultShareProjectionContentDigestInput(input: {
 }): string {
   const parsed = parseHostedVaultShareDeliverRequest({
     ...(input.memberTimeZone ? { memberTimeZone: input.memberTimeZone } : {}),
-    expectedGenerationToken: "a".repeat(43),
+    expectedGenerationToken: HOSTED_VAULT_SHARE_DIGEST_INPUT_PLACEHOLDER,
     projectionKind: input.projectionScope.projectionKind,
     projectionScope: input.projectionScope,
     records: input.records,
