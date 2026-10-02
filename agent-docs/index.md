@@ -1,3 +1,6 @@
+Codex CLI 0.160.0 upgrade verification is recorded in
+[the completed upgrade plan](exec-plans/completed/2026-10-01-codex-cli-0160.md).
+
 Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
