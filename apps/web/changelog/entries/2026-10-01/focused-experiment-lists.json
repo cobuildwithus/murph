@@ -11,7 +11,9 @@
     "relevanceTags": [
       "experiments"
     ],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [
+      3969
+    ],
     "tryIt": {
       "label": "Review active experiments",
       "prompt": "Which experiments are active?"

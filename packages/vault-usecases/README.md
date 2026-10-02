@@ -213,11 +213,35 @@ hashes and counts must agree; no output fields are stripped for comparison.
 Artifacts omit raw envelopes and temporary paths. They include inclusive timing
 phases, native SQLite method-call counts, bytes and min/median/max samples.
 
-Cold, 1-3 list reads, fresh-global, relevant-edit and list/global workflows expose
-both avoided and deferred work. Totals include global setup and canonical edits;
-read-only and individual-step costs are separate. Process time includes imports;
-fixture preparation is outside read timing. Fresh/repeated lists pay a canonical
-scan and lock rather than an indexed lookup. Mixed workflows still owe global
-work: do not claim a gain from the first list alone. No fresh-index extension or
-production speedup is claimed. Parent measurements and live reply review remain
-pending; the delivery plan distinguishes the prior baseline from this candidate.
+Parent-run base/base and base/candidate benchmarks completed all six scenarios
+at candidate `9ab1ee8fd26787de44d024149eb6520a44565017`. Complete list/global
+envelopes matched, including the 14,042-byte cold list on both revisions. Median
+synthetic wall times in milliseconds (totals include global setup and edits):
+
+| Scenario | Base | Candidate |
+| --- | ---: | ---: |
+| Cold list | 577.88 | 358.30 |
+| Two consecutive lists, total | 576.21 | 371.05 |
+| Three consecutive lists, total | 623.44 | 389.18 |
+| Fresh global + three lists | 671.53 | 692.57 |
+| Global setup + edit + two lists + global | 878.56 | 893.96 |
+| List/global mixed, total | 697.98 | 699.28 |
+
+Cold-list paired median delta was -212.35 ms (range -231.30 to -177.30 ms).
+Base/base control paired median ratios were 0.979-1.008 across scenarios;
+individual ratios ranged 0.864-1.103. Cold-list native SQLite method calls fell
+from 1,437 to zero (not unique SQL). Global rebuild/source/dataset/metric/summary/
+search/publication phases were removed from list calls; global reads retain work.
+
+There is no demonstrated warm/mixed total gain. Fresh-global first-list time
+fell from 6.59 to 4.65 ms, but the total was noisy. After a relevant edit, the
+first list fell from 151.01 to 4.07 ms while the later global read rose from
+52.24 to 198.39 ms: work was deferred, not removed from that workflow. Repeated
+lists still rescan experiments under the canonical lock; no fresh-index reuse
+was added. Step wall includes actual public-service imports and native-call
+observation, excludes fixture setup and process launch, and is distinct from
+separately reported process wall. These synthetic results show neither a precise
+production speedup nor smaller results or a mixed-workflow gain. Focused local
+checks and live reply review passed; final ReviewGPT, exact-head CI, plan closeout
+and final mergeability remain pending in the
+[active plan](../../agent-docs/exec-plans/active/2026-10-02-experiment-list-latency.md).
