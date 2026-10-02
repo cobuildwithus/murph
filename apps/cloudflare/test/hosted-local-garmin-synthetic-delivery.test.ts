@@ -44,6 +44,7 @@ describe("synthetic Garmin delivery proof", () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   function setup() {
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ accepted: true, duplicate: false }));
     vi.stubGlobal("fetch", fetchMock);
     const status = replicaStatus(emptyReplica.generatedAt);
@@ -60,7 +61,7 @@ describe("synthetic Garmin delivery proof", () => {
       timeoutMs: 40,
       webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
     };
-    return { input, fetchMock };
+    return { input, fetchMock, log };
   }
 
   it.each(["match", "wrong_value", "wrong_source", "stale", "already_present"])("checks the delivered fixture through the real importer and canonical query: %s", async (variant) => {
@@ -126,9 +127,38 @@ describe("synthetic Garmin delivery proof", () => {
   });
 
   it("cannot pass with a webhook acknowledgement but no published vault data", async () => {
-    const { input, fetchMock } = setup();
+    const { input, fetchMock, log } = setup();
     await expect(proveSyntheticGarminDelivery(input)).rejects.toThrow(failure);
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledOnce();
+    const [line] = log.mock.calls[0]!;
+    expect(String(line)).toMatch(/^MURPH_E2E_GARMIN_SYNTHETIC_DELIVERY_DIAGNOSTICS=/u);
+    expect(JSON.parse(String(line).split("=")[1]!)).toEqual({
+      phase: "wait_for_replica", aborted: true, statusReads: expect.any(Number),
+      workspace: true, replica: true, freshReplica: false,
+      runtimeInFlight: false, runtimeError: false,
+      webhookAccepted: true, webhookQueued: false,
+    });
+  });
+
+  it("reports queued delivery and runtime state without exposing the status or provider identity", async () => {
+    const { input, fetchMock, log } = setup();
+    fetchMock.mockResolvedValue(Response.json({ accepted: true, queued: true }));
+    input.scenario.harness.requestJson = async <T>() => JSON.parse(JSON.stringify({
+      userId: "private-user-identity", inFlight: true, mailboxLag: [], workspace: null,
+      lastErrorCode: "private-runtime-error-details",
+    })) as T;
+    await expect(proveSyntheticGarminDelivery(input)).rejects.toThrow(failure);
+    const output = String(log.mock.calls[0]![0]);
+    expect(JSON.parse(output.split("=")[1]!)).toEqual({
+      phase: "wait_for_replica", aborted: true, statusReads: expect.any(Number),
+      workspace: false, replica: false, freshReplica: false,
+      runtimeInFlight: true, runtimeError: true,
+      webhookAccepted: true, webhookQueued: true,
+    });
+    expect(output).not.toContain("private-");
+    expect(output).not.toContain(input.webhookSecret);
+    expect(output).not.toContain(input.clientUserId);
   });
 
   it.each([{ accepted: false }, { accepted: true, orphaned: true }, { accepted: true, duplicate: true }, null])(
@@ -150,7 +180,7 @@ describe("synthetic Garmin delivery proof", () => {
   );
 
   it("does not deliver after cancellation or expose provider errors", async () => {
-    const { input, fetchMock } = setup();
+    const { input, fetchMock, log } = setup();
     input.signal = AbortSignal.abort(new Error("private cancellation details"));
     await expect(proveSyntheticGarminDelivery(input)).rejects.toThrow(failure);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -158,5 +188,8 @@ describe("synthetic Garmin delivery proof", () => {
     vi.mocked(input.client.resolveUser).mockRejectedValue(new Error("private provider details"));
     await expect(proveSyntheticGarminDelivery(input)).rejects.toThrow(failure);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(log.mock.calls).toHaveLength(2);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private cancellation details");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private provider details");
   });
 });

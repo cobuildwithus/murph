@@ -871,6 +871,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.react_to_message"
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
+      && name !== "murph.get_sender_contact"
       && name !== "murph.pending_vault_files"
       && name !== "murph.resolve_physical_note"
       && name !== "murph.send_physical_note"
@@ -896,6 +897,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       messageTargetingAvailable: true,
       pendingVaultFilesAvailable: true,
       phoneCallsAvailable: true,
+      senderContactAvailable: true,
       physicalNoteRecoveryAvailable: true,
       physicalNotesAvailable: true,
       progressUpdatesAvailable: true,
@@ -909,6 +911,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.computer_open");
     expect(allToolNames).toContain("murph.connected_apps_manage");
     expect(allToolNames).toContain("murph.create_phone_call");
+    expect(allToolNames).toContain("murph.get_sender_contact");
     expect(allToolNames).toContain("murph.create_calendar_link");
     expect(hostedGroupFamilyToolNames).toHaveLength(6);
     expect(allToolNames)
@@ -1225,6 +1228,7 @@ function buildResponsesRequest(
         && name !== "murph.submit_product_feedback"
         && name !== "murph.family_plan"
         && name !== "murph.create_phone_call"
+        && name !== "murph.get_sender_contact"
         && name !== "murph.send_physical_note"
         && name !== "murph.resolve_physical_note"
         && !hostedGroupFamilyToolNames.includes(name)

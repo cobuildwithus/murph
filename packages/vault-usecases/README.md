@@ -170,3 +170,81 @@ reply, no unrelated data commands, no canonical writes or delivery, and no repai
 claims. The [completed verification record](../../agent-docs/exec-plans/completed/2026-09-25-event-list-candidate.md)
 contains the accepted isolated measurements and full-context live PASS with
 parent UX `Ready` review. Reruns still require inspection of the synthetic reply.
+
+## Focused experiment lists
+
+`query.listExperiments` uses query's strict experiment-family source under the
+existing reentrant canonical lock; query remains the projection owner. Status
+filtering precedes the limit and the mapper/envelope are unchanged. Selected
+source errors stay strict; unrelated malformed families do not block this list.
+
+With the supported Node runtime and installed dependencies, set BASE to a
+baseline checkout at `3d2ba92f9035ea19a3be04450517c6d7086f32d9` and CANDIDATE to
+this PR checkout, using distinct absolute paths. Copy only the three experiment
+benchmark files and bench tsconfig below into BASE; leave its runtime source
+unchanged. The existing `wearable-sleep-fixture.ts` must match in both checkouts.
+No separate baseline-proof patch is required.
+
+```sh
+for file in experiment-list.ts experiment-list-fixture.ts experiment-list-pairs.ts tsconfig.json; do
+  cp "$CANDIDATE/packages/vault-usecases/bench/$file" "$BASE/packages/vault-usecases/bench/$file"
+done
+(cd "$BASE" && pnpm --filter @murphai/vault-usecases... build)
+cd "$CANDIDATE"
+pnpm --filter @murphai/vault-usecases... build
+pnpm exec vitest run --config packages/vault-usecases/vitest.config.ts packages/vault-usecases/test/experiment-list-contract.test.ts
+pnpm --dir packages/vault-usecases typecheck
+pnpm exec tsc -p packages/vault-usecases/bench/tsconfig.json --pretty false
+pnpm --dir packages/assistant-engine typecheck
+pnpm exec vitest run --config packages/assistant-engine/vitest.config.ts packages/assistant-engine/test/assistant-codex-real-e2e.test.ts -t 'focused experiment list production contract'
+node packages/vault-usecases/bench/experiment-list-pairs.ts "$BASE" "$BASE" full > experiment-base-base.jsonl
+node packages/vault-usecases/bench/experiment-list-pairs.ts "$BASE" "$CANDIDATE" focused > experiment-pairs.jsonl
+# Only after deterministic checks/builds and review of their results:
+pnpm test:assistant:live -- --test 'real Codex focused experiment list e2e'
+```
+
+The identical harness reuses `wearable-sleep-fixture.ts`: 30 days, 3 providers,
+720 observations, 90 sleep sessions, 30 notes, plus 12 sparse/rich experiments
+covering every status and unrelated event revisions/tombstones. Each scenario
+uses a fresh process and a reset copy at one shared temporary path. Two warmup
+pairs precede seven alternating measured pairs; JIT state is isolated per process.
+Complete list/global JSON bytes,
+hashes and counts must agree; no output fields are stripped for comparison.
+Artifacts omit raw envelopes and temporary paths. They include inclusive timing
+phases, native SQLite method-call counts, bytes and min/median/max samples.
+
+Parent-run base/base and base/candidate benchmarks completed all six scenarios
+at candidate `9ab1ee8fd26787de44d024149eb6520a44565017`. Complete list/global
+envelopes matched, including the 14,042-byte cold list on both revisions. Median
+synthetic wall times in milliseconds (totals include global setup and edits):
+
+| Scenario | Base | Candidate |
+| --- | ---: | ---: |
+| Cold list | 577.88 | 358.30 |
+| Two consecutive lists, total | 576.21 | 371.05 |
+| Three consecutive lists, total | 623.44 | 389.18 |
+| Fresh global + three lists | 671.53 | 692.57 |
+| Global setup + edit + two lists + global | 878.56 | 893.96 |
+| List/global mixed, total | 697.98 | 699.28 |
+
+Cold-list paired median delta was -212.35 ms (range -231.30 to -177.30 ms).
+Base/base control paired median ratios were 0.979-1.008 across scenarios;
+individual ratios ranged 0.864-1.103. Cold-list native SQLite method calls fell
+from 1,437 to zero (not unique SQL). Global rebuild/source/dataset/metric/summary/
+search/publication phases were removed from list calls; global reads retain work.
+
+There is no demonstrated warm/mixed total gain. Fresh-global first-list time
+fell from 6.59 to 4.65 ms, but the total was noisy. After a relevant edit, the
+first list fell from 151.01 to 4.07 ms while the later global read rose from
+52.24 to 198.39 ms: work was deferred, not removed from that workflow. Repeated
+lists still rescan experiments under the canonical lock; no fresh-index reuse
+was added. Step wall includes actual public-service imports and native-call
+observation, excludes fixture setup and process launch, and is distinct from
+separately reported process wall. These synthetic results show neither a precise
+production speedup nor smaller results or a mixed-workflow gain. Focused local
+checks and live reply review passed; see the
+[completed plan](../../agent-docs/exec-plans/completed/2026-10-02-experiment-list-latency.md)
+for implementation and local proof.
+[PR #3969](https://github.com/cobuildwithus/murph/pull/3969) owns final ReviewGPT,
+required finding disposition, exact-head CI (including any closeout head) and
+final mergeability. Local proof does not establish completion of those gates.

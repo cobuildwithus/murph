@@ -51,7 +51,7 @@ exit ${status}
   });
 }
 
-test("full audit packaging includes unchanged skill imports and preserves exclusions", () => {
+test("full audit packaging includes unchanged native patch and skill imports and preserves exclusions", () => {
   const root = mkdtempSync(path.join(tmpdir(), "murph-skill-audit-proof-"));
   const env = { ...process.env, PATH: `${root}/bin:${process.env.PATH}` };
   for (const key of Object.keys(env)) {
@@ -80,7 +80,10 @@ test("full audit packaging includes unchanged skill imports and preserves exclus
     const skillRoot = ".agents/skills/example/scripts";
     const changedSource = `${skillRoot}/preview.mjs`;
     const changedTest = "packages/example/test/preview.test.mjs";
-    const dependencies = ["normalize", "fetch-preview", "ocr-preview"].map(name => `${skillRoot}/${name}.mjs`);
+    const dependencies = [
+      ...["normalize", "fetch-preview", "ocr-preview"].map(name => `${skillRoot}/${name}.mjs`),
+      "patches/codex-public-live.patch",
+    ];
     const excluded = [
       ".agents/skills/example/.env",
       ".agents/skills/example/cache/residue.mjs",

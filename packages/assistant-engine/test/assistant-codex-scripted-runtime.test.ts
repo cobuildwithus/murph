@@ -8502,6 +8502,7 @@ text(JSON.stringify(result));
       },
     })
     expect(groupSharedRequests).toEqual([{
+      includeCompanionPresence: true,
       projectionScopes: [{ projectionKind: 'steps-days.v0' }],
     }])
     const groupOutput = summaries[1]?.customToolCallOutputs?.join('\n') ?? ''

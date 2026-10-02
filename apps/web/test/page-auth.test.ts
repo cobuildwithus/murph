@@ -536,6 +536,8 @@ describe("hosted dashboard page auth", () => {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    companionLastContactAt: null,
+    companionLastForegroundAt: null,
     groupJournalCaptureConsentRequestedAt: null,
     groupJournalCaptureEnabled: null,
     assistantPersona: null,

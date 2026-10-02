@@ -8661,12 +8661,17 @@ function resolveHostedWorkspaceDeviceTool(input: {
 
   return {
     async request(request, context) {
-      context?.signal?.throwIfAborted();
+      const signal = context?.signal ?? null;
+      signal?.throwIfAborted();
       if (request.action === "haptic") {
         return requestHostedWearableHaptic(deviceSyncPort, request, context);
       }
+      if (request.action === "companion_status") {
+        if (!deviceSyncPort.companionStatus) throw new VaultCliError("companion_status_unavailable", "App presence is unavailable right now.");
+        return { action: "companion_status", ...await deviceSyncPort.companionStatus({ signal }) };
+      }
       if (request.action === "list_accounts") {
-        return readHostedDeviceAccounts(deviceSyncPort, request, context?.signal ?? null);
+        return readHostedDeviceAccounts(deviceSyncPort, request, signal);
       }
 
       if (request.action === "reconcile") {
@@ -8678,7 +8683,7 @@ function resolveHostedWorkspaceDeviceTool(input: {
         }
         const result = await deviceSyncPort.reconcileAccount({
           connectionId: request.accountId,
-          signal: context?.signal ?? null,
+          signal,
         });
         return {
           accountId: result.connectionId,
@@ -8700,7 +8705,7 @@ function resolveHostedWorkspaceDeviceTool(input: {
         }
         const common = {
           assistantInputId: context.acceptedInputAuthority.assistantInputId,
-          signal: context.signal ?? null,
+          signal,
           sourceProviderSlug: request.sourceProvider,
         };
         const result = request.mode === "after_days"

@@ -1,3 +1,4 @@
+import { executeGetSenderContactDynamicTool, readSenderContactDynamicToolRequest, type SenderContactDynamicToolRequest } from './dynamic-tools/sender-contact.js'
 import { type ConversationPollAction } from '@murphai/hosted-execution/conversation-polls'
 import { readConversationPollDynamicToolRequest, executeConversationPollTool } from './dynamic-tools/conversation-polls.js'
 import { nutritionCardAttachmentGuidance } from '../assistant/nutrition-card-introduction.js'
@@ -1486,6 +1487,7 @@ export type MurphDynamicToolRequest =
       kind: 'computer-finish-run'
       args: HostedComputerFinishRunRequest & { runId: string }
     }
+  | SenderContactDynamicToolRequest
   | PhoneCallDynamicToolRequest
   | PhysicalNoteDynamicToolRequest
   | ClinicalRecordsConnectLinkDynamicToolRequest
@@ -1745,6 +1747,7 @@ export function readMurphDynamicToolRequest(
     readMemberMemoryDynamicToolRequest,
     readConnectedAppsDynamicToolRequest,
     readAssistantStyleDynamicToolRequest,
+    readSenderContactDynamicToolRequest,
     readPhoneCallDynamicToolRequest,
     readPhysicalNoteDynamicToolRequest,
     readClinicalRecordsConnectLinkDynamicToolRequest,
@@ -3587,6 +3590,7 @@ async function executeComputerRequestDynamicTool(
 async function dispatchMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
+  const hostedContext = input.hostedToolContext ?? null
   const hostedImageCompletionEffectScope =
     input.hostedToolContext?.currentHostedImageCompletionEffectScope?.() ?? null
   if (
@@ -3604,7 +3608,7 @@ async function dispatchMurphDynamicToolRequest(
   }
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
-    !canExecuteComputerDynamicTools(input.hostedToolContext ?? null)
+    !canExecuteComputerDynamicTools(hostedContext)
   ) {
     return toolTextResult(
       false,
@@ -3718,7 +3722,7 @@ async function dispatchMurphDynamicToolRequest(
         vaultRoot: input.vaultRoot?.trim() || null,
       })
     case 'assistant-style': {
-      const hostedToolContext = input.hostedToolContext ?? null
+      const hostedToolContext = hostedContext
       return await executeAssistantStyleDynamicTool({
         authority: resolveHostedAssistantPersonalizationToolAuthority(
           hostedToolContext,
@@ -3738,6 +3742,11 @@ async function dispatchMurphDynamicToolRequest(
       return await executeResolvePhysicalNoteDynamicTool(input, input.request)
     case 'send-physical-note':
       return await executeSendPhysicalNoteDynamicTool(input, input.request)
+    case 'get-sender-contact':
+      return await executeGetSenderContactDynamicTool({
+        userActionScope: input.hostedToolContext?.currentUserActionScope?.() ?? null,
+        vaultRoot: input.vaultRoot ?? null,
+      })
     case 'create-phone-call':
       return await executeCreatePhoneCallDynamicTool(input, input.request)
     case 'get-phone-call-status':
@@ -3749,12 +3758,12 @@ async function dispatchMurphDynamicToolRequest(
     case 'submit-product-feedback':
       return await executeSubmitProductFeedbackTool({
         feedback: input.request.feedback,
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         productFeedbackRecorder: input.productFeedbackRecorder ?? null,
       })
     case 'family-plan':
       return await executeFamilyPlanTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         request: input.request.request,
       })
     case 'plan-usage':
@@ -3763,19 +3772,19 @@ async function dispatchMurphDynamicToolRequest(
       return await executeCurrentConversationTool(input, input.request)
     case 'subscription':
       return await executeSubscriptionTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         request: input.request.request,
       })
     case 'personalization':
       return await executePersonalizationTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         messageRef: input.request.messageRef,
         request: input.request.request,
         toolCallId: input.request.toolCallId ?? null,
       })
     case 'assistant-configuration':
       return await executeAssistantConfigurationTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         request: input.request.request,
       })
     case 'group':
@@ -3786,7 +3795,7 @@ async function dispatchMurphDynamicToolRequest(
         deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         groupSharedReadTurnState: input.groupSharedReadTurnState ?? null,
         materializeWorkspaceArtifacts:
           input.materializeWorkspaceArtifacts ?? null,
@@ -4669,6 +4678,7 @@ function groupSharedModelResult(
         ? {}
         : { displayName: member.displayName }),
       participantId: member.participantId,
+      ...(member.companionLastContactAt === undefined ? {} : { companionLastContactAt: member.companionLastContactAt }),
       // Keyed by scope so each projection no longer restates its own key, and
       // the scope reads as a heading rather than a field to hunt for.
       projections: Object.fromEntries(member.projections.map((projection) => [
@@ -5109,6 +5119,7 @@ async function executeGroupSharedRead(input: {
 
   try {
     const result = await groupSharedReader.request({
+      includeCompanionPresence: true,
       projectionScopes: input.request.projectionScopes,
       ...(input.request.participantId ? { participantId: input.request.participantId } : {}),
       ...(input.request.history ? { history: input.request.history } : {}),
@@ -6731,7 +6742,10 @@ async function readGroupEmailSharedData(input: {
         const existing = members.get(member.memberId)
         if (!existing) {
           members.set(member.memberId, {
-            ...member,
+            currentTurnHandles: member.currentTurnHandles,
+            displayName: member.displayName,
+            memberId: member.memberId,
+            participantId: member.participantId,
             projections: [...projections],
           })
           continue

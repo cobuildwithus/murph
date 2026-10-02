@@ -36,6 +36,18 @@ export async function proveSyntheticGarminDelivery(input: {
   webhookSecret: string;
 }): Promise<"synthetic_webhook_matched"> {
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(input.timeoutMs)]);
+  let phase: "validate_target" | "resolve_user" | "read_initial_replica"
+    | "deliver_webhook" | "wait_for_replica" | "read_replica" = "validate_target";
+  const observed = {
+    statusReads: 0,
+    workspace: false,
+    replica: false,
+    freshReplica: false,
+    runtimeInFlight: false,
+    runtimeError: false,
+    webhookAccepted: false,
+    webhookQueued: false,
+  };
   try {
     signal.throwIfAborted();
     const base = new URL(input.scenario.harness.webBaseUrl);
@@ -43,6 +55,7 @@ export async function proveSyntheticGarminDelivery(input: {
       || base.username || base.password || base.pathname !== "/" || base.search || base.hash) {
       throw new Error("Synthetic delivery requires a local harness.");
     }
+    phase = "resolve_user";
     const user = await input.client.resolveUser(input.clientUserId, { signal });
     signal.throwIfAborted();
     if (!user?.userId) throw new Error("Connected Junction user missing.");
@@ -70,10 +83,16 @@ export async function proveSyntheticGarminDelivery(input: {
         `${buildCloudflareHostedControlUserStatusPath(input.memberId)}?logLimit=0`,
         { headers: { [HOSTED_EXECUTION_USER_ID_HEADER]: input.memberId }, signal },
       ));
+      observed.statusReads += 1;
+      observed.workspace ||= Boolean(status.workspace);
+      observed.replica ||= Boolean(status.workspace?.browserVaultReplicaRef);
+      observed.runtimeInFlight ||= status.inFlight;
+      observed.runtimeError ||= Boolean(status.lastErrorCode);
       return status.workspace?.browserVaultReplicaRef;
     };
     // The scenario owns a fresh member and isolated vault. If its initial
     // replica already exists, reject a matching value before injecting too.
+    phase = "read_initial_replica";
     const baselineRef = await readReplicaRef();
     if (baselineRef) {
       const baseline = await readCanaryBrowserVaultReplica({ ...input, ref: baselineRef, signal });
@@ -81,6 +100,7 @@ export async function proveSyntheticGarminDelivery(input: {
     }
     signal.throwIfAborted();
     const notBefore = Date.now();
+    phase = "deliver_webhook";
     const response = await fetch(new URL("/api/device-sync/webhooks/junction", base), {
       body: webhook.rawBody.toString("utf8"),
       headers: webhook.headers,
@@ -92,17 +112,26 @@ export async function proveSyntheticGarminDelivery(input: {
     if (!response.ok || receipt.accepted !== true || receipt.duplicate === true || receipt.orphaned === true) {
       throw new Error("Synthetic webhook was not admitted.");
     }
+    observed.webhookAccepted = true;
+    observed.webhookQueued = receipt.queued === true;
+    phase = "wait_for_replica";
     while (!signal.aborted) {
       const ref = await readReplicaRef();
       if (ref && Date.parse(ref.generatedAt) >= notBefore) {
+        observed.freshReplica = true;
+        phase = "read_replica";
         const replica = await readCanaryBrowserVaultReplica({ ...input, ref, signal });
         signal.throwIfAborted();
         if (hasCanonicalGarminSteps(replica, expected)) return "synthetic_webhook_matched";
+        phase = "wait_for_replica";
       }
       await delay(3_000, undefined, { signal });
     }
   } catch {
     // Never expose real account identity, provider errors, or vault contents.
   }
+  console.info(`MURPH_E2E_GARMIN_SYNTHETIC_DELIVERY_DIAGNOSTICS=${JSON.stringify({
+    phase, aborted: signal.aborted, ...observed,
+  })}`);
   throw new Error("MURPH_E2E_GARMIN_SYNTHETIC_DELIVERY_PROOF_FAILED");
 }

@@ -1,4 +1,5 @@
 import "server-only";
+import { sharesCompanionContact } from "@murphai/hosted-execution/vault-share";
 
 import { readHostedGroupSharedDataWithFreshness } from "./shared-freshness";
 
@@ -666,6 +667,7 @@ export async function handleHostedRuntimeGroupTool(
           participantId: input.request.participantId,
           history: input.request.history,
           freshness: input.request.freshness,
+          includeCompanionPresence: input.request.includeCompanionPresence,
           telegramSenderHandles: input.request.telegramSenderHandles ?? [],
           runtimeMemberId: input.memberId,
         }),
@@ -2063,6 +2065,9 @@ function renderHostedGroupJoinOfferScopeSentence(
         ];
   const sentence = `your ${formatHumanList(shareScopeLabels)}`;
   const disclosures: string[] = [];
+  if (projectionScopes.some((scope) => sharesCompanionContact(scope.projectionKind))) {
+    disclosures.push("Apple Health sharing includes when the Murph app last checked in");
+  }
   if (projectionScopes.some((scope) =>
     isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)
   )) {
