@@ -6,7 +6,7 @@ const statuses = ["success", "pending", "running", "retrying", "failed", "error"
 // Introspection is diagnostic only: Garmin's completed history pull is not
 // evidence that data was delivered, much less imported into the vault.
 export async function readLiveGarminProviderDiagnosticsForLog(input: {
-  client: Pick<JunctionClient, "introspectResources" | "introspectHistoricalPull" | "listSummary">;
+  client: Pick<JunctionClient, "introspectResources" | "introspectHistoricalPull" | "listSummary" | "listUserProviders">;
   userId: string;
   signal: AbortSignal;
   window: { from: string; to: string };
@@ -14,9 +14,13 @@ export async function readLiveGarminProviderDiagnosticsForLog(input: {
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(10_000)]);
   const query = { signal, sourceProviderSlug: "garmin", userId: input.userId, userLimit: 1 };
   const now = Date.now();
-  const [availability, history, ...summaries] = await Promise.allSettled([
+  const [availability, history, connections, ...summaries] = await Promise.allSettled([
     input.client.introspectResources(query),
     input.client.introspectHistoricalPull(query),
+    input.client.listUserProviders(input.userId, {
+      collectionWorkLimit: { maxAttemptsPerPage: 1, maxPages: 1, requestTimeoutMs: 8_000 },
+      signal,
+    }),
     // Garmin's default historical range is 90 days. Include open days here:
     // these reads diagnose availability only and can never pass the oracle.
     ...resources.map((resource) => input.client.listSummary({
@@ -31,9 +35,13 @@ export async function readLiveGarminProviderDiagnosticsForLog(input: {
       windowEnd: new Date(now).toISOString(),
     })),
   ]);
+  const connection = connections.status === "fulfilled"
+    ? connections.value.find((provider) => (provider.origin.sourceProviderSlug ?? provider.slug) === "garmin")
+    : undefined;
   return JSON.stringify({
     resourcesQuery: availability.status,
     historyQuery: history.status,
+    connectionsQuery: connections.status,
     resources: summarizeLiveGarminProviderDiagnostics({
       availability: availability.status === "fulfilled" ? availability.value : null,
       history: history.status === "fulfilled" ? history.value : null,
@@ -41,6 +49,7 @@ export async function readLiveGarminProviderDiagnosticsForLog(input: {
       window: input.window,
     }).map((resource, index) => ({
       ...resource,
+      ...classifyPermission(connection?.resourceAvailability[resource.resource]),
       historyRangeData: classifySummary(summaries[index]),
     })),
   });
@@ -117,4 +126,21 @@ function classifyLatestData(value: unknown, window: { from: string; to: string }
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : null;
+}
+
+// Connection permissions describe authorization, not data delivery. Never emit
+// provider scope names, connection identifiers, or arbitrary status strings.
+function classifyPermission(value: unknown) {
+  const permission = record(value);
+  const scopes = record(permission?.scope_requirements ?? permission?.scopeRequirements);
+  const granted = record(scopes?.user_granted ?? scopes?.userGranted)?.required;
+  const denied = record(scopes?.user_denied ?? scopes?.userDenied)?.required;
+  return {
+    authorization: permission?.status === "available" ? "available"
+      : permission?.status === "unavailable" ? "unavailable" : "unknown",
+    requiredScopes: !Array.isArray(granted) || !Array.isArray(denied)
+      || !granted.every((scope) => typeof scope === "string")
+      || !denied.every((scope) => typeof scope === "string") ? "unknown"
+      : denied.length > 0 ? "denied" : granted.length > 0 ? "granted" : "none",
+  };
 }

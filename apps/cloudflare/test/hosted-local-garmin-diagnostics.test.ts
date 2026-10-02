@@ -94,6 +94,7 @@ describe("live Garmin provider diagnostics", () => {
   it("keeps either API failure private while preserving the other diagnostic", async () => {
     const client = {
       listSummary: vi.fn().mockResolvedValue([]),
+      listUserProviders: vi.fn().mockRejectedValue(new Error("private connection body")),
       introspectResources: vi.fn().mockRejectedValue(new Error("private API body")),
       introspectHistoricalPull: vi.fn().mockResolvedValue({ matchedUser: true, sources: [{
         sourceProviderSlug: "garmin", notPulledResources: ["activity"], pulledResources: [],
@@ -102,9 +103,10 @@ describe("live Garmin provider diagnostics", () => {
     const result = JSON.parse(await readLiveGarminProviderDiagnosticsForLog({
       client, userId, window, signal: new AbortController().signal,
     }));
+    expect(result.connectionsQuery).toBe("rejected");
     expect(result.resourcesQuery).toBe("rejected");
     expect(result.historyQuery).toBe("fulfilled");
-    expect(result.resources[0]).toEqual({ resource: "activity", inventory: "invalid_response", latestData: "unknown", history: "not_pulled", historyRequestedWindow: "unknown", historyReportedData: "unknown", historyRangeData: "empty" });
+    expect(result.resources[0]).toEqual({ resource: "activity", inventory: "invalid_response", latestData: "unknown", history: "not_pulled", historyRequestedWindow: "unknown", historyReportedData: "unknown", historyRangeData: "empty", authorization: "unknown", requiredScopes: "unknown" });
     expect(client.introspectResources).toHaveBeenCalledWith({
       userId, userLimit: 1, sourceProviderSlug: "garmin", signal: expect.any(AbortSignal),
     });
@@ -135,6 +137,7 @@ describe("live Garmin provider diagnostics", () => {
     const serialized = await readLiveGarminProviderDiagnosticsForLog({
       client: {
         listSummary,
+        listUserProviders: vi.fn().mockResolvedValue([]),
         introspectResources: vi.fn().mockResolvedValue({ data: [] }),
         introspectHistoricalPull: vi.fn().mockResolvedValue({ matchedUser: false, sources: [] }),
       },
@@ -155,6 +158,57 @@ describe("live Garmin provider diagnostics", () => {
     expect(serialized).not.toMatch(/private|2026|synthetic|oura/u);
   });
 
+  it.each([
+    ["available", ["private-granted"], [], "available", "granted"],
+    ["unavailable", ["private-granted"], ["private-denied"], "unavailable", "denied"],
+    ["available", [], [], "available", "none"],
+    ["private-status", null, [], "unknown", "unknown"],
+    ["available", [false], [], "available", "unknown"],
+    ["available", [], [42], "available", "unknown"],
+  ])("reports requested-provider permissions without exposing scopes (%s)", async (status, granted, denied, authorization, requiredScopes) => {
+    const permission = { status, scope_requirements: {
+      user_granted: { required: granted }, user_denied: { required: denied },
+    } };
+    const listUserProviders = vi.fn().mockResolvedValue([
+      { slug: "oura", origin: {}, resourceAvailability: { activity: { status: "unavailable" } } },
+      { slug: "garmin", origin: {}, resourceAvailability: { activity: permission } },
+    ]);
+    const serialized = await readLiveGarminProviderDiagnosticsForLog({
+      client: { listUserProviders, listSummary: vi.fn().mockResolvedValue([]),
+        introspectResources: vi.fn().mockResolvedValue({ data: [] }),
+        introspectHistoricalPull: vi.fn().mockResolvedValue({ matchedUser: false, sources: [] }),
+      }, userId, window, signal: new AbortController().signal,
+    });
+    const result = JSON.parse(serialized);
+    expect(result.connectionsQuery).toBe("fulfilled");
+    expect(result.resources[0]).toMatchObject({ authorization, requiredScopes });
+    expect(result.resources[1]).toMatchObject({ authorization: "unknown", requiredScopes: "unknown" });
+    expect(listUserProviders).toHaveBeenCalledExactlyOnceWith(userId, {
+      collectionWorkLimit: { maxAttemptsPerPage: 1, maxPages: 1, requestTimeoutMs: 8_000 },
+      signal: expect.any(AbortSignal),
+    });
+    expect(serialized).not.toMatch(/private|synthetic|2026|oura|42/u);
+  });
+
+  it("does not attribute another provider's permission report to Garmin", async () => {
+    const permissions = { activity: { status: "available", scopeRequirements: {
+      userGranted: { required: ["private-scope"] }, userDenied: { required: [] },
+    } } };
+    const result = JSON.parse(await readLiveGarminProviderDiagnosticsForLog({
+      client: {
+        listUserProviders: vi.fn().mockResolvedValue([
+          { slug: "oura", origin: {}, resourceAvailability: permissions },
+          { slug: "garmin", origin: { sourceProviderSlug: "oura" }, resourceAvailability: permissions },
+        ]),
+        listSummary: vi.fn().mockResolvedValue([]),
+        introspectResources: vi.fn().mockResolvedValue({ data: [] }),
+        introspectHistoricalPull: vi.fn().mockResolvedValue({ matchedUser: false, sources: [] }),
+      }, userId, window, signal: new AbortController().signal,
+    }));
+    expect(result.resources.every((row: { authorization: string; requiredScopes: string }) =>
+      row.authorization === "unknown" && row.requiredScopes === "unknown")).toBe(true);
+  });
+
   it("bounds stalled introspection within the browser cleanup grace period", async () => {
     const timeout = AbortSignal.timeout(20);
     const deadline = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeout);
@@ -165,11 +219,14 @@ describe("live Garmin provider diagnostics", () => {
       throw new Error("unreachable");
     });
     const result = JSON.parse(await readLiveGarminProviderDiagnosticsForLog({
-      client: { introspectResources: query, introspectHistoricalPull: query, listSummary: query },
+      client: { introspectResources: query, introspectHistoricalPull: query, listSummary: query,
+        listUserProviders: (_userId, options) => query(options ?? {}),
+      },
       userId, window, signal: new AbortController().signal,
     }));
     expect(deadline).toHaveBeenCalledWith(10_000);
-    expect(query).toHaveBeenCalledTimes(5);
+    expect(query).toHaveBeenCalledTimes(6);
+    expect(result.connectionsQuery).toBe("rejected");
     expect(result.resources.every((row: { historyRangeData: string }) => row.historyRangeData === "unavailable")).toBe(true);
     expect(result.resourcesQuery).toBe("rejected");
     expect(result.historyQuery).toBe("rejected");

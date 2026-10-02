@@ -105,7 +105,7 @@ export function formatLiveGarminDataFailure(error: unknown): string {
 }
 
 export async function waitForLiveGarminCanonicalData(input: {
-  client: Pick<JunctionClient, "resolveUser" | "listSummary" | "introspectResources" | "introspectHistoricalPull">;
+  client: Pick<JunctionClient, "resolveUser" | "listSummary" | "introspectResources" | "introspectHistoricalPull" | "listUserProviders">;
   clientUserId: string;
   memberId: string;
   notBefore: number;
