@@ -19,7 +19,7 @@ Prefer deriving from the existing canonical builder after quiescence. Add no sta
 
 ## Status
 
-The composed base reproduction rejects generation 7 after 8 at current workspace version 15; quiesced and no-progress controls pass. ReviewGPT removed the redundant fallback after proving the request builder is seeded from the active workspace and only advances through accepted checkpoints. The final correction passes all three local scenarios and package typecheck. Complexity passes with unchanged debt (465); the affected existing snapshot publisher remains at complexity 35. Six adjacent runtime race tests and four Web generation-guard tests pass. Parent candidate review confirms unchanged CAS, progress advancement, quiescence and dirty acknowledgment ordering. Final review and exact-head CI remain pending.
+The composed base reproduction rejects generation 7 after 8 at current workspace version 15; quiesced and no-progress controls pass. ReviewGPT removed the redundant fallback after proving the request builder is seeded from the active workspace and only advances through accepted checkpoints. The final correction passes all three local scenarios and package typecheck. Complexity passes with unchanged debt (465); the affected existing snapshot publisher remains at complexity 35. Six adjacent runtime race tests and four Web generation-guard tests pass. Parent candidate review confirms unchanged CAS, progress advancement, quiescence and dirty acknowledgment ordering. Validated final ReviewGPT round 1 passed on 1df00e251e9a8a8e36566411145bd715252928b9 with zero findings. Parent final review confirms version/generation share the accepted builder, the read remains after quiescence, rejected checkpoints do not advance ownership, and dirty acknowledgment remains after successful publication. Required CI on the final plan-closure head remains a handoff gate.
 
 ## Product UX patch
 
@@ -30,3 +30,10 @@ Proof: Two foreground inputs finish before the real snapshot bundle is construct
 ## Ownership and privacy
 
 Current typing and usage-efficiency PR diffs do not alter checkpoint generation selection. Device-sync investigation completed without a competing patch. This correction addresses the shared default runtime snapshot after foreground canonical writes. Fixtures are synthetic; no private production rows or messages enter this branch.
+
+## Completion and follow-up
+
+Implementation and focused verification are complete in PR #3987, including a content-only reliability changelog entry. Current-base mergeability passes. This plan closes the correction work, not the original production episode. Leave the functional PR for human merge and canonical runtime deployment; subsequently verify the effective runtime revision and a naturally exercised accepted snapshot with the intended durable outcome.
+Status: completed
+Updated: 2026-10-02
+Completed: 2026-10-02
