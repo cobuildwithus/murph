@@ -398,6 +398,9 @@ describe('assistant input event store', () => {
         await expect(upsertAssistantInputEvent({ event: conflicting, vault: vaultRoot }))
           .rejects.toMatchObject({ code: 'ASSISTANT_INPUT_EVENT_CONFLICT' })
       }
+      const retired = await retireAssistantInputEventContent({ inputId: first.inputId, vault: vaultRoot })
+      expect(await upsertAssistantInputEvent({ event: enriched, vault: vaultRoot })).toEqual(retired.event)
+      expect(retired.event?.content.text).toBeNull()
     },
   )
 

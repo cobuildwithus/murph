@@ -1325,7 +1325,7 @@ describe("hosted mailbox conversation import adapter", () => {
             },
           },
         }),
-        async importConversationWake() { return { captureId: "cap_following_audio_retry", metrics: {} }; },
+        async importConversationWake() { return { captureId: "cap_following_audio_retry", metrics: { nextWakeAt: null, parserProcessed: 0 } }; },
         async prepareWakeContext() {},
         item: createResolvedConversationMailboxItem({
           ...item.item,

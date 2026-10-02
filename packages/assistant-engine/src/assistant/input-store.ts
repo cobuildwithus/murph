@@ -1214,29 +1214,21 @@ function assertAssistantInputEventReplayCompatible(input: {
   next: AssistantInputEventRecord
 }): void {
   const existingIdentity = assistantInputEventImmutableIdentity(input.existing)
-  const nextIdentity = assistantInputEventImmutableIdentity(input.next)
+  const next = input.existing.contentRetiredAt
+    ? {
+        ...input.next,
+        content: redactAssistantInputContent(input.next.content),
+        sourceMetadata: redactAssistantInputSourceMetadata(input.next.sourceMetadata),
+      }
+    : input.next
+  const nextIdentity = assistantInputEventImmutableIdentity(next)
   if (stableStringify(existingIdentity) === stableStringify(nextIdentity)) {
-    return
-  }
-  if (
-    input.existing.contentRetiredAt
-    && stableStringify(existingIdentity)
-      === stableStringify(
-        assistantInputEventImmutableIdentity({
-          ...input.next,
-          content: redactAssistantInputContent(input.next.content),
-          sourceMetadata: redactAssistantInputSourceMetadata(
-            input.next.sourceMetadata,
-          ),
-        }),
-      )
-  ) {
     return
   }
   const replayCompatibilityIdentity =
     assistantInputEventReplayCompatibilityIdentity({
       existing: input.existing,
-      next: input.next,
+      next,
     })
   if (stableStringify(existingIdentity) === stableStringify(replayCompatibilityIdentity)) {
     return
