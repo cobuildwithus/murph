@@ -1,3 +1,4 @@
+import { MURPH_GET_SENDER_CONTACT_TOOL } from './dynamic-tools/sender-contact.js'
 import { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 export { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 import { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
@@ -1781,6 +1782,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
+  MURPH_GET_SENDER_CONTACT_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
   MURPH_GET_PHONE_CALL_STATUS_TOOL,
   MURPH_STOP_PHONE_CALL_TOOL,
@@ -1849,6 +1851,7 @@ export interface MurphDynamicToolAvailability {
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
   physicalNoteRecoveryAvailable?: boolean | null
+  senderContactAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   phoneCallStatusAvailable?: boolean | null
   phoneCallStopAvailable?: boolean | null
@@ -1914,6 +1917,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_PENDING_VAULT_FILES_TOOL, defaultOff((a) => a.pendingVaultFilesAvailable)],
+    [MURPH_GET_SENDER_CONTACT_TOOL, defaultOff((a) => a.senderContactAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
     [MURPH_GET_PHONE_CALL_STATUS_TOOL, defaultOff((a) =>
       a.phoneCallStatusAvailable)],

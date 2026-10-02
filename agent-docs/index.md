@@ -3,6 +3,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Private sender contact presentation and retrieval are owned by `ARCHITECTURE.md`;
+implementation proof: [on-demand sender contact](exec-plans/completed/2026-10-01-on-demand-sender-contact.md).
+
 Experiment-list family-local read implementation and local proof are recorded in
 [the completed latency plan](exec-plans/completed/2026-10-02-experiment-list-latency.md).
 [PR #3969](https://github.com/cobuildwithus/murph/pull/3969) owns final review,
