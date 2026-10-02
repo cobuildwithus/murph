@@ -3,6 +3,13 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Experiment-list family-local read implementation and local proof are recorded in
+[the completed latency plan](exec-plans/completed/2026-10-02-experiment-list-latency.md).
+[PR #3969](https://github.com/cobuildwithus/murph/pull/3969) owns final review,
+required finding disposition and exact-head CI evidence. The durable contract
+and runnable proof commands remain in
+[`packages/vault-usecases/README.md`](../packages/vault-usecases/README.md#focused-experiment-lists).
+
 Garmin real connection/cleanup and signed synthetic delivery-to-vault proof
 are tracked in
 [`Garmin canary data`](exec-plans/active/2026-10-01-garmin-vault-proof.md).

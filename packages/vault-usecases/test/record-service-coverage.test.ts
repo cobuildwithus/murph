@@ -1675,7 +1675,14 @@ describe("record service seams", () => {
               title: "Core",
               occurredAt: "2026-04-08T11:00:00.000Z",
             })]
-          : []),
+          : family === "experiment"
+            ? [sampleQueryRecord({
+                entityId: "exp_1",
+                primaryLookupId: "exp_1",
+                family: "experiment",
+                kind: "experiment",
+              })]
+            : []),
       listEntities: vi.fn(() => [sampleQueryRecord({
         entityId: "exp_1",
         primaryLookupId: "exp_1",
