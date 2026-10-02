@@ -1668,7 +1668,8 @@ test("Web production admission runs only for exact public main", async () => {
   );
   assert.doesNotMatch(workflow, /pull_request:/u);
   assert.doesNotMatch(admissionJob, /\n    needs:/u);
-  assert.doesNotMatch(workflow, /\n  producer:|upload-artifact|download-artifact/u);
+  assert.doesNotMatch(workflow, /\n  producer:|download-artifact/u);
+  assert.ok(admissionJob.indexOf("name: Publish public hosted integration Web dist") < tokenIndex);
   assert.ok(checkoutIndex >= 0);
   assert.ok(admissionJob.indexOf("name: Publish pending Web admission status") < checkoutIndex);
   assert.ok(setupIndex > checkoutIndex);
