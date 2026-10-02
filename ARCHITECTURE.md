@@ -4672,12 +4672,19 @@ treats a tapback as acknowledgment or appreciation by default, and as agreement
 only when the target asked a single closed yes/no question or proposed one
 specific action whose affirmative answer is unambiguous; a reaction alone never
 establishes user facts, consent, or authorization. After normal turn admission,
-a fresh, tool-free Luna request at priority service tier classifies only that
-exact reaction and target. Clear acknowledgments finish quietly without
+explicit question-mark, negative, and unidentified reaction labels continue
+directly to normal assistant interpretation without a classifier request.
+Other reactions use a fresh, confined Luna request at low reasoning and
+priority service tier that classifies only that exact reaction and target.
+Detached asks explicitly disable agents and goals; classifier and disclosure
+review turns also select no native environment, removing shell, patch, and image
+access. The pinned CLI still advertises generic execution wrappers, input, and
+clock helpers; no Murph effect tools are supplied. Clear acknowledgments finish quietly without
 changing the root conversation thread. Answers, confusion, disagreement,
 uncertainty, malformed output, oversized evidence, and classifier failures
-continue through the normal assistant. The classifier has a 20-second timeout
-and separately metered usage; it cannot authorize an effect.
+continue through the normal assistant. Laughter at failed work or bad news is
+ambiguous rather than automatically quiet. The classifier has an eight-second
+timeout and separately metered usage; it cannot authorize an effect.
 Synthetic reactions stay in one-input automation groups, so an adjacent
 ordinary reply cannot lend them trust or be suppressed with them. This keeps
 the path independent of Linq's short provider-message retention while rendering

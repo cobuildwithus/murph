@@ -971,3 +971,5 @@ and `RELIABILITY.md`.
 SMS invalid-destination recovery format support is tracked in
 [sign-in destination recovery](exec-plans/completed/2026-10-02-otp-destination-error.md);
 `../docs/hosted-auth-migration.md` remains the contract owner.
+
+Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
