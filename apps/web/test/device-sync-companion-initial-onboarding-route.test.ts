@@ -174,7 +174,7 @@ describe("companion initial onboarding routes", () => {
     });
   });
 
-  it("short-circuits completed onboarding before optional contact projection", async () => {
+  it("retains the assigned contact route after onboarding completes", async () => {
     mocks.readHostedInitialOnboardingState.mockResolvedValue({
       completedAt: new Date("2026-08-04T12:00:00.000Z"),
       preferences: { persona: "classic", tone: "formal", voice: "murph" },
@@ -191,10 +191,28 @@ describe("companion initial onboarding routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       status: "completed",
       catalog: null,
-      contactAction: null,
+      contactAction: { kind: "text", href: expect.stringContaining("sms:+15555550123") },
       contactCard: null,
     });
-    expect(mocks.readHostedMurphContactContextForMember).not.toHaveBeenCalled();
+    expect(mocks.readHostedMurphContactContextForMember).toHaveBeenCalledWith({
+      memberId: "member_123", prisma: expect.anything(),
+    });
+  });
+
+  it("keeps completed onboarding available when its contact route is unavailable", async () => {
+    mocks.readHostedInitialOnboardingState.mockResolvedValue({
+      preferences: { persona: null, tone: null, voice: null }, status: "completed",
+    });
+    mocks.readHostedMurphContactContextForMember.mockRejectedValue(new Error("contact unavailable"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const method of ["GET", "POST"] as const) {
+      const response = await route[method](new Request(
+        "https://app.example.test/api/device-sync/companion/initial-onboarding",
+        { method, ...(method === "POST" ? { body: JSON.stringify({ action: "skip" }) } : {}) },
+      ));
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ status: "completed", contactAction: null });
+    }
   });
 
   it("keeps bearer authentication and canonical state reads fail-closed", async () => {
@@ -241,6 +259,7 @@ describe("companion initial onboarding routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       completedNow: true,
       status: "completed",
+      contactAction: { kind: "text", href: expect.stringContaining("sms:+15555550123") },
     });
     expect(mocks.completeHostedInitialOnboardingTx).toHaveBeenCalledWith({
       memberId: "member_123",

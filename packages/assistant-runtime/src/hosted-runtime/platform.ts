@@ -1,3 +1,4 @@
+import type { WearableHapticRequest, WearableHapticResponse } from "@murphai/hosted-execution/wearable-haptics";
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type {
   HostedClinicalRecordsConnectLinkRequest,
@@ -564,6 +565,7 @@ export type HostedRuntimeEffectsPort = HostedRuntimeEffectsPortBase;
 export type HostedRuntimeDeviceSyncMessagingReturnTarget = "imessage" | "telegram";
 
 export interface HostedRuntimeDeviceSyncPort {
+  haptic?(input: WearableHapticRequest & { signal?: AbortSignal | null }): Promise<WearableHapticResponse>;
   applyUpdates(input: {
     occurredAt?: string | null;
     signal?: AbortSignal | null;

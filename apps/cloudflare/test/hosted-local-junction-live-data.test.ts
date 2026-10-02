@@ -81,6 +81,7 @@ describe("live Garmin empty-account boundary", () => {
     const requestJson = vi.fn(async (): Promise<string> => { throw new Error("synthetic status failure"); });
     const input: Parameters<typeof waitForLiveGarminCanonicalData>[0] = {
       client: {
+        listUserProviders: vi.fn().mockResolvedValue([]),
         resolveUser: vi.fn().mockResolvedValue({ userId: "synthetic-provider-user" }),
         listSummary: vi.fn().mockResolvedValue([]),
         introspectResources: vi.fn().mockResolvedValue({ data: [] }),
@@ -152,27 +153,36 @@ describe("live Garmin empty-account boundary", () => {
     expect(requestJson).toHaveBeenCalledTimes(2);
   });
 
-  it("cannot use records found by broader diagnostics as canonical ingestion proof", async () => {
+  it("cannot use authorized resources or broader diagnostic records as canonical ingestion proof", async () => {
     const { input, requestJson } = setup();
     input.timeoutMs = 30;
     requestJson.mockResolvedValue(JSON.stringify({
       inFlight: false, mailboxLag: [], userId: input.memberId, workspace: null,
     }));
     vi.mocked(input.client.listSummary).mockResolvedValueOnce([]).mockResolvedValue([activity]);
+    vi.mocked(input.client.listUserProviders).mockResolvedValue([{
+      id: null, slug: "garmin", name: null, status: "connected", source: null, origin: {}, errorDetails: null,
+      resourceAvailability: { activity: { status: "available", scope_requirements: {
+        user_granted: { required: ["private-scope"] }, user_denied: { required: [] },
+      } } },
+    }]);
     const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
     await expect(waitForLiveGarminCanonicalData(input))
       .rejects.toThrow("MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING");
     expect(input.client.listSummary).toHaveBeenCalledTimes(4);
     expect(JSON.stringify(log.mock.calls)).toContain("historyRangeData");
+    expect(JSON.stringify(log.mock.calls)).toContain("granted");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private-scope");
     expect(JSON.stringify(log.mock.calls)).not.toContain("CANONICAL_DATA_MATCHED");
   });
 
-  it("preserves the data failure when both diagnostic endpoints reject", async () => {
+  it("preserves the data failure when diagnostic endpoints reject", async () => {
     const { input, requestJson } = setup();
     input.timeoutMs = 30;
     requestJson.mockResolvedValue(JSON.stringify({
       inFlight: false, mailboxLag: [], userId: input.memberId, workspace: null,
     }));
+    vi.mocked(input.client.listUserProviders).mockRejectedValue(new Error("private connection body"));
     vi.mocked(input.client.introspectResources).mockRejectedValue(new Error("private resource body"));
     vi.mocked(input.client.introspectHistoricalPull).mockRejectedValue(new Error("private history body"));
     const log = vi.spyOn(console, "info").mockImplementation(() => undefined);

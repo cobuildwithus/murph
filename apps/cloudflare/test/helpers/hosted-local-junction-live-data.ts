@@ -100,12 +100,13 @@ export function formatLiveGarminDataFailure(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   return [
     "MURPH_E2E_GARMIN_CANONICAL_DATA_MISSING",
+    "MURPH_E2E_GARMIN_SYNTHETIC_DELIVERY_PROOF_FAILED",
     "MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING",
   ].includes(message) ? message : "MURPH_E2E_GARMIN_DATA_PROOF_FAILED";
 }
 
 export async function waitForLiveGarminCanonicalData(input: {
-  client: Pick<JunctionClient, "resolveUser" | "listSummary" | "introspectResources" | "introspectHistoricalPull">;
+  client: Pick<JunctionClient, "resolveUser" | "listSummary" | "introspectResources" | "introspectHistoricalPull" | "listUserProviders">;
   clientUserId: string;
   memberId: string;
   notBefore: number;
@@ -176,7 +177,7 @@ export async function waitForLiveGarminCanonicalData(input: {
     : "MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING");
 }
 
-async function readCanaryBrowserVaultReplica(input: {
+export async function readCanaryBrowserVaultReplica(input: {
   memberId: string;
   ref: HostedBrowserVaultReplicaRef;
   scenario: GarminCanaryScenario;

@@ -1,3 +1,4 @@
+import type { WearableHapticAction } from "@murphai/hosted-execution/wearable-haptics";
 import { HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./workspace-system-work.ts";
 import { createHash } from "node:crypto";
 
@@ -8609,6 +8610,46 @@ function buildHostedAssistantCronStatusOptions(
   };
 }
 
+async function requestHostedWearableHaptic(
+  port: NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]>,
+  request: WearableHapticAction,
+  context: Parameters<NonNullable<NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]>["request"]>[1],
+) {
+  if (!port.haptic || !context?.hapticAuthority) {
+    throw new VaultCliError("device_haptic_unavailable", "Wrist reminders are unavailable for this turn.");
+  }
+  return port.haptic({ request, authority: context.hapticAuthority, signal: context.signal ?? null });
+}
+
+async function readHostedDeviceAccounts(
+  deviceSyncPort: NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]>,
+  request: { action: "list_accounts"; provider?: string | null; sourceProvider?: string | null },
+  signal: AbortSignal | null,
+) {
+  const provider = normalizeAssistantRouteString(request.provider);
+  const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
+  const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+    deviceSyncPort,
+    includeCredentialMaterial: false,
+    ...(provider ? { provider } : {}),
+    signal,
+    ...(sourceProvider ? { sourceProviderSlug: sourceProvider } : {}),
+  });
+  return {
+    accounts: snapshot.connections.map(({ connection, localState }) => ({
+      accountId: connection.id,
+      displayName: connection.displayName,
+      lastErrorCode: localState.lastErrorCode,
+      lastSyncCompletedAt: localState.lastSyncCompletedAt,
+      provider: connection.provider,
+      status: connection.status,
+    })),
+    action: request.action,
+    provider,
+    sourceProvider,
+  };
+}
+
 function resolveHostedWorkspaceDeviceTool(input: {
   deviceConnectProviders: readonly { label: string; provider: string }[];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -8621,29 +8662,11 @@ function resolveHostedWorkspaceDeviceTool(input: {
   return {
     async request(request, context) {
       context?.signal?.throwIfAborted();
+      if (request.action === "haptic") {
+        return requestHostedWearableHaptic(deviceSyncPort, request, context);
+      }
       if (request.action === "list_accounts") {
-        const provider = normalizeAssistantRouteString(request.provider);
-        const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
-        const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
-          deviceSyncPort,
-          includeCredentialMaterial: false,
-          ...(provider ? { provider } : {}),
-          signal: context?.signal ?? null,
-          ...(sourceProvider ? { sourceProviderSlug: sourceProvider } : {}),
-        });
-        return {
-          accounts: snapshot.connections.map(({ connection, localState }) => ({
-            accountId: connection.id,
-            displayName: connection.displayName,
-            lastErrorCode: localState.lastErrorCode,
-            lastSyncCompletedAt: localState.lastSyncCompletedAt,
-            provider: connection.provider,
-            status: connection.status,
-          })),
-          action: request.action,
-          provider,
-          sourceProvider,
-        };
+        return readHostedDeviceAccounts(deviceSyncPort, request, context?.signal ?? null);
       }
 
       if (request.action === "reconcile") {

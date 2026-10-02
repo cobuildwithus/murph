@@ -208,6 +208,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
     "device_sync_pending_dirty_state",
     HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
   ),
+  wearableHaptics: defineHostedRunnerWebControlPostRoute(
+    "wearable_haptics",
+    "/api/internal/companion/wearables",
+  ),
   deviceSyncReconcile: defineHostedRunnerWebControlPostRoute(
     "device_sync_reconcile",
     HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
