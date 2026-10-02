@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-02",
+  "order": 100,
+  "item": {
+    "id": "typing-after-quiet-inputs",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Typing recovers after quiet messages",
+    "summary": "Murph releases unused typing sessions after messages that don't need an answer, so later iMessage replies can show typing again.",
+    "details": "Typing that already belongs to an active reply keeps working, and the normal session limit still applies.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3980
+    ]
+  }
+}

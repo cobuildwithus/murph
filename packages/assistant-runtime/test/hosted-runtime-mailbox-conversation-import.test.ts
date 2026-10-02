@@ -51,11 +51,16 @@ import {
 import {
   serializeHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
-import { VaultError } from "@murphai/core";
+import { initializeVault, VaultError } from "@murphai/core";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
+import { ensureHostedAssistantOperatorDefaults } from "@murphai/operator-config/hosted-assistant-config";
 
-import { createHostedAssistantChannelTypingDependencies } from "../src/hosted-runtime/channel-activity.ts";
+import { runHostedAssistantAutomationLane } from "../src/hosted-runtime/maintenance.ts";
+import {
+  createHostedAssistantChannelTypingDependencies,
+  stopHostedLinqInputTyping,
+} from "../src/hosted-runtime/channel-activity.ts";
 import {
   createHostedConversationMailboxImportItem,
   importHostedConversationMailboxItem,
@@ -6040,6 +6045,427 @@ describe("hosted mailbox conversation import adapter", () => {
     );
   });
 });
+
+describe("prepared Linq typing terminal lifecycle", () => {
+  test.each([
+    { acceptance: "pending", instrumented: true },
+    { acceptance: "accepted", instrumented: true },
+    { acceptance: "pending", instrumented: false },
+  ] as const)(
+    "terminal non-reply retires prepared typing ($acceptance, instrumented: $instrumented)",
+    async ({ acceptance, instrumented }) => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"], now: new Date(TEST_NOW) });
+      const fixture = await createPreparedTypingLifecycleFixture(
+        `terminal_${acceptance}_${instrumented}`, { instrumented },
+      );
+      const importerAbort = new AbortController();
+      const replyAbort = new AbortController();
+      let replyTyping: AssistantChannelActivityHandle | void = undefined;
+      try {
+        // A reaction without an attested sent target is suppressed locally.
+        // This fresh vault has no delivery history; keep real import, selection,
+        // terminal commit and onTerminalNonReplyCommitted owners in the path.
+        const reactionTarget = "synthetic_unattested_message";
+        const imported = await fixture.importInput(
+          1, "Reacted with a like reaction.", importerAbort.signal, reactionTarget,
+        );
+        const staged = await readAssistantInputEvent({
+          inputId: imported.assistantInputId, vault: fixture.vaultRoot,
+        });
+        expect(staged?.sourceMetadata).toMatchObject({
+          affirmativeReaction: true, kind: "linq", replyToMessageId: reactionTarget,
+        });
+        assert.equal(await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+          fixture.vaultRoot, imported.assistantInputId,
+        ), null, "import alone must not have committed suppression");
+        const firstSignal = await fixture.firstRequest.promise;
+        const typing = fixture.typing(imported, replyAbort.signal);
+        const takeTyping = vi.spyOn(typing, "startLinqTyping");
+        const beforeProvider = vi.fn(() => {
+          assert.fail("The synthetic terminal input must never enter provider execution.");
+        });
+        const providerStarted = vi.fn();
+        const latencyTraceRecord = vi.fn(async () => ({
+          matchedCount: 1, recorded: true, unmatchedCount: 0,
+        }));
+        if (acceptance === "accepted") {
+          fixture.acceptFirstRequest();
+          await vi.advanceTimersByTimeAsync(0);
+        }
+
+        const result = await runHostedAssistantAutomationLane({
+          beforeProviderAcceptedInputs: beforeProvider,
+          executionContext: { hosted: {
+            channelTypingDependencies: typing,
+            defaultTarget: TEST_ASSISTANT_TARGET,
+            memberId: TEST_USER_ID,
+            userEnvKeys: [],
+          } },
+          freshAssistantInputIds: [imported.assistantInputId],
+          onProviderRequestStarted: providerStarted,
+          operatorHomeRoot: fixture.operatorHomeRoot,
+          requestId: "synthetic_terminal_request",
+          runtime: {
+            ...fixture.runtime,
+            commitTimeoutMs: 1_000,
+            platform: {
+              ...fixture.runtime.platform,
+              latencyTracePort: instrumented ? { record: latencyTraceRecord } : null,
+            },
+          },
+          runtimeAttemptId: fixture.runtimeAttemptId,
+          runtimeEnv: HOSTED_ASSISTANT_SEED_ENV,
+          signal: importerAbort.signal,
+          vaultRoot: fixture.vaultRoot,
+          wake: imported.wake,
+        });
+        const evidence = await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+          fixture.vaultRoot, imported.assistantInputId,
+        );
+        assert.ok(evidence, "the real terminal owner must commit suppression before cleanup assertions");
+        assert.deepEqual(evidence.groupInputIds, [imported.assistantInputId]);
+        assert.deepEqual(evidence.terminal, {
+          kind: "suppressed",
+          reason: "affirmative Linq reaction target is not an attested assistant delivery",
+        });
+        assert.equal(result.assistantAutomationReplyFailed, 0);
+        expect(beforeProvider).not.toHaveBeenCalled();
+        expect(providerStarted).not.toHaveBeenCalled();
+        expect(takeTyping).not.toHaveBeenCalled();
+        if (instrumented) {
+          expect(latencyTraceRecord).toHaveBeenCalledWith({
+            event: expect.objectContaining({
+              assistantInputIds: [imported.assistantInputId],
+              at: evidence.recordedAt,
+              milestone: "terminal_non_reply_committed",
+              runtimeAttemptId: fixture.runtimeAttemptId,
+              source: "linq",
+              type: "assistant_milestone",
+            }),
+          });
+        } else {
+          assert.equal(fixture.runtimeAttemptId, undefined);
+          expect(latencyTraceRecord).not.toHaveBeenCalled();
+        }
+        assert.equal(importerAbort.signal.aborted, false, "the resident invocation is still live");
+
+        // Keep going after the causal assertion so the same regression also
+        // proves late acceptance cleanup and a fresh reply in this process.
+        expect.soft(firstSignal.aborted, "terminal outcome must cancel unclaimed preparation").toBe(true);
+        if (acceptance === "pending") {
+          expect(fixture.methods()).toEqual(["POST"]);
+          fixture.acceptFirstRequest(); // Transport may finish despite cancellation.
+        }
+        await vi.advanceTimersByTimeAsync(0);
+        expect.soft(fixture.methods(), "late acceptance must be followed by one stop").toEqual(["POST", "DELETE"]);
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect.soft(fixture.methods(), "terminal input must not retain the refresh loop").toEqual(["POST", "DELETE"]);
+        await vi.advanceTimersByTimeAsync(5 * 60_000 - 45_000 + 1);
+        expect.soft(fixture.methods(), "a terminal preparation must not run to the max-session cutoff").toEqual(["POST", "DELETE"]);
+
+        const startsBeforeReply = fixture.methods().filter(method => method === "POST").length;
+        const nextInput = await fixture.importInput(2, "Synthetic follow-up.", replyAbort.signal);
+        replyTyping = await fixture.typing(nextInput, replyAbort.signal).startLinqTyping?.({ target: fixture.target });
+        expect.soft(replyTyping, "the later legitimate reply must not inherit an orphan's cooldown").toBeDefined();
+        expect.soft(fixture.methods().filter(method => method === "POST").length,
+          "the later reply must start a new session").toBe(startsBeforeReply + 1);
+        expect.soft(replyTyping?.acceptedAt).toBe(new Date().toISOString());
+        await replyTyping?.stop();
+      } finally {
+        fixture.acceptFirstRequest();
+        importerAbort.abort();
+        replyAbort.abort();
+        await vi.advanceTimersByTimeAsync(0);
+        await replyTyping?.stop();
+      }
+    },
+  );
+
+  test.each(["import-abort", "turn-abort", "max-session"] as const)(
+    "prepared typing preserves %s ownership and cooldown",
+    async (scenario) => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"], now: new Date(TEST_NOW) });
+      const fixture = await createPreparedTypingLifecycleFixture(scenario);
+      const importerAbort = new AbortController();
+      const turnAbort = new AbortController();
+      let handle: AssistantChannelActivityHandle | void = undefined;
+      let successor: AssistantChannelActivityHandle | void = undefined;
+      try {
+        const imported = await fixture.importInput(1, "Synthetic direct input.", importerAbort.signal);
+        const firstSignal = await fixture.firstRequest.promise;
+        const typing = fixture.typing(imported, turnAbort.signal);
+        if (scenario === "import-abort") {
+          importerAbort.abort();
+          assert.equal(firstSignal.aborted, true);
+          fixture.acceptFirstRequest();
+          await vi.advanceTimersByTimeAsync(0);
+          expect(fixture.methods()).toEqual(["POST", "DELETE"]);
+        } else {
+          // Take before the deferred POST settles: no second provider session.
+          const handoff = typing.startLinqTyping?.({ target: fixture.target });
+          importerAbort.abort();
+          assert.equal(firstSignal.aborted, false, "handoff detached the importer signal");
+          fixture.acceptFirstRequest();
+          handle = await handoff;
+          assert.ok(handle);
+          expect(fixture.methods()).toEqual(["POST"]);
+          if (scenario === "turn-abort") {
+            turnAbort.abort();
+            await vi.advanceTimersByTimeAsync(0);
+            assert.equal(handle.isActive?.(), false);
+            expect(fixture.methods()).toEqual(["POST", "DELETE"]);
+          } else {
+            await vi.advanceTimersByTimeAsync(45_000);
+            expect(fixture.methods()).toEqual(["POST", "DELETE", "POST"]);
+            await vi.advanceTimersByTimeAsync(5 * 60_000 - 45_000 - 1);
+            assert.equal(handle.isActive?.(), true);
+            await vi.advanceTimersByTimeAsync(1);
+            assert.equal(handle.isActive?.(), false, "the real session timer still stops at five minutes");
+            assert.equal(fixture.methods().filter(method => method === "POST").length, 7);
+            assert.equal(fixture.methods().filter(method => method === "DELETE").length, 7);
+            await handle.stop();
+            await expect(typing.startLinqTyping?.({ target: fixture.target })).resolves.toBeUndefined();
+            await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
+            await handle.stop(); // Repeated cleanup must not extend the real-session cooldown.
+            await expect(typing.startLinqTyping?.({ target: fixture.target })).resolves.toBeUndefined();
+            await vi.advanceTimersByTimeAsync(1);
+          }
+        }
+        const starts = fixture.methods().filter(method => method === "POST").length;
+        successor = await fixture.typing(imported).startLinqTyping?.({ target: fixture.target });
+        assert.ok(successor, "early abort releases immediately; a full session releases after cooldown");
+        assert.equal(fixture.methods().filter(method => method === "POST").length, starts + 1);
+        await successor.stop({ providerStop: false });
+      } finally {
+        fixture.acceptFirstRequest();
+        importerAbort.abort();
+        turnAbort.abort();
+        await vi.advanceTimersByTimeAsync(0);
+        await handle?.stop();
+        await successor?.stop();
+      }
+    },
+  );
+
+  test.each(["pending", "accepted"] as const)(
+    "terminal cleanup respects input, target, provider and handoff identity (%s)",
+    async (acceptance) => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"], now: new Date(TEST_NOW) });
+      const fixture = await createPreparedTypingLifecycleFixture(`identity_${acceptance}`);
+      const other = await createPreparedTypingLifecycleFixture(`other_${acceptance}`);
+      const abort = new AbortController();
+      let handle: AssistantChannelActivityHandle | void = undefined;
+      try {
+        const imported = await fixture.importInput(1, "Synthetic direct input.", abort.signal);
+        const otherInput = await other.importInput(1, "Synthetic other input.", abort.signal);
+        const later = await fixture.importInput(2, "Synthetic later input.", abort.signal);
+        const signal = await fixture.firstRequest.promise;
+        const otherSignal = await other.firstRequest.promise;
+        const terminal = {
+          assistantInputIds: [imported.assistantInputId],
+          providerFetch: fixture.runtime.platform.providerFetch,
+        };
+        stopHostedLinqInputTyping({ ...terminal, providerFetch: null });
+        stopHostedLinqInputTyping({ ...terminal, providerFetch: other.runtime.platform.providerFetch });
+        stopHostedLinqInputTyping({ ...terminal, assistantInputIds: [later.assistantInputId, otherInput.assistantInputId] });
+        assert.equal(signal.aborted, false, "a different input or provider cannot retire this preparation");
+        assert.equal(otherSignal.aborted, false, "a different target and provider remain untouched");
+        if (acceptance === "accepted") {
+          fixture.acceptFirstRequest();
+          await vi.advanceTimersByTimeAsync(0);
+        }
+        const handoff = fixture.typing(imported, abort.signal).startLinqTyping?.({ target: fixture.target });
+        stopHostedLinqInputTyping(terminal);
+        assert.equal(signal.aborted, false, "handoff removes terminal cleanup authority before acceptance");
+        fixture.acceptFirstRequest();
+        handle = await handoff;
+        assert.ok(handle);
+        other.acceptFirstRequest();
+        stopHostedLinqInputTyping({
+          assistantInputIds: [otherInput.assistantInputId],
+          providerFetch: other.runtime.platform.providerFetch,
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(other.methods()).toEqual(["POST", "DELETE"]);
+        expect(fixture.methods()).toEqual(["POST"]);
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(fixture.methods()).toEqual(["POST", "DELETE", "POST"]);
+        assert.equal(handle.isActive?.(), true);
+      } finally {
+        fixture.acceptFirstRequest();
+        other.acceptFirstRequest();
+        abort.abort();
+        await vi.advanceTimersByTimeAsync(0);
+        await handle?.stop();
+      }
+    },
+  );
+
+  test("terminal cleanup after a real unclaimed max session retains cooldown", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"], now: new Date(TEST_NOW) });
+    const fixture = await createPreparedTypingLifecycleFixture("terminal_max_session");
+    const abort = new AbortController();
+    let successor: AssistantChannelActivityHandle | void = undefined;
+    try {
+      const imported = await fixture.importInput(1, "Synthetic direct input.", abort.signal);
+      await fixture.firstRequest.promise;
+      fixture.acceptFirstRequest();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      assert.equal(fixture.methods().filter(method => method === "POST").length, 7);
+      assert.equal(fixture.methods().filter(method => method === "DELETE").length, 7);
+      const terminal = {
+        assistantInputIds: [imported.assistantInputId],
+        providerFetch: fixture.runtime.platform.providerFetch,
+      };
+      stopHostedLinqInputTyping(terminal);
+      await vi.advanceTimersByTimeAsync(0);
+      const typing = fixture.typing(imported, abort.signal);
+      await expect(typing.startLinqTyping?.({ target: fixture.target })).resolves.toBeUndefined();
+      await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
+      stopHostedLinqInputTyping(terminal);
+      await expect(typing.startLinqTyping?.({ target: fixture.target })).resolves.toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      successor = await typing.startLinqTyping?.({ target: fixture.target });
+      assert.ok(successor, "repeated terminal cleanup does not extend a real-session cooldown");
+    } finally {
+      fixture.acceptFirstRequest();
+      abort.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      await successor?.stop();
+    }
+  });
+
+  test.each([204, 400])(
+    "terminal cleanup fences late acceptance and stop (%s) before a successor",
+    async (stopStatus) => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"], now: new Date(TEST_NOW) });
+      const fixture = await createPreparedTypingLifecycleFixture(`late_stop_${stopStatus}`, { deferStop: true });
+      const abort = new AbortController();
+      let successor: AssistantChannelActivityHandle | void = undefined;
+      try {
+        const imported = await fixture.importInput(1, "Synthetic direct input.", abort.signal);
+        const signal = await fixture.firstRequest.promise;
+        const terminal = {
+          assistantInputIds: [imported.assistantInputId],
+          providerFetch: fixture.runtime.platform.providerFetch,
+        };
+        stopHostedLinqInputTyping(terminal);
+        assert.equal(signal.aborted, true);
+        // The transport deliberately ignores cancellation. Move only the clock
+        // to test claim expiry independently of provider timeout implementation.
+        vi.setSystemTime(Date.now() + 16 * 60_000);
+        await expect(fixture.typing(imported).startLinqTyping?.({ target: fixture.target })).resolves.toBeUndefined();
+        fixture.acceptFirstRequest();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(fixture.methods()).toEqual(["POST", "DELETE"]);
+        vi.setSystemTime(Date.now() + 16 * 60_000);
+        await expect(fixture.typing(imported).startLinqTyping?.({ target: fixture.target })).resolves.toBeUndefined();
+        fixture.finishFirstStop(stopStatus);
+        await vi.advanceTimersByTimeAsync(0);
+        const later = await fixture.importInput(2, "Synthetic follow-up.", abort.signal);
+        successor = await fixture.typing(later, abort.signal).startLinqTyping?.({ target: fixture.target });
+        assert.ok(successor, "early cancellation must not become cooldown while cleanup settles");
+        expect(fixture.methods()).toEqual(["POST", "DELETE", "POST"]);
+        stopHostedLinqInputTyping(terminal);
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(fixture.methods()).toEqual(["POST", "DELETE", "POST", "DELETE", "POST"]);
+        assert.equal(successor.isActive?.(), true, "repeated old cleanup cannot touch the successor");
+      } finally {
+        fixture.acceptFirstRequest();
+        fixture.finishFirstStop(204);
+        abort.abort();
+        await vi.advanceTimersByTimeAsync(0);
+        await successor?.stop();
+      }
+    },
+  );
+});
+
+async function createPreparedTypingLifecycleFixture(
+  suffix: string, fixtureOptions: { instrumented?: boolean; deferStop?: boolean } = {},
+) {
+  const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-prepared-typing-"));
+  tempRoots.push(parentRoot);
+  const vaultRoot = path.join(parentRoot, "vault");
+  const operatorHomeRoot = path.join(parentRoot, "home");
+  await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+  const assistantBootstrap = await ensureHostedAssistantOperatorDefaults({
+    allowMissing: false, env: HOSTED_ASSISTANT_SEED_ENV, homeDirectory: operatorHomeRoot,
+  });
+  const target = `synthetic_typing_${suffix}`;
+  const runtimeAttemptId = fixtureOptions.instrumented === false ? undefined : `synthetic_typing_attempt_${suffix}`;
+  const firstRequest = createDeferred<AbortSignal>();
+  const firstResponse = createDeferred<Response>();
+  const firstStopResponse = createDeferred<Response>();
+  let stopDeferred = false;
+  const providerFetch = vi.fn<typeof fetch>(async (request, options) => {
+    const url = new URL(String(request));
+    assert.equal(url.origin, "https://provider.invalid");
+    assert.ok(url.pathname.endsWith(`/chats/${target}/typing`));
+    assert.ok(options?.method === "POST" || options?.method === "DELETE");
+    if (providerFetch.mock.calls.length === 1) {
+      assert.equal(options.method, "POST");
+      assert.ok(options.signal);
+      firstRequest.resolve(options.signal);
+      return firstResponse.promise;
+    }
+    if (fixtureOptions.deferStop && !stopDeferred && options?.method === "DELETE") {
+      stopDeferred = true;
+      return firstStopResponse.promise;
+    }
+    return new Response(null, { status: 204 });
+  });
+  const runtime = createRuntime({
+    forwardedEnv: { LINQ_API_BASE_URL: "https://provider.invalid/v3", LINQ_API_TOKEN: "synthetic-token" },
+    platform: { providerFetch },
+    userEnv: HOSTED_ASSISTANT_SEED_ENV,
+  });
+  async function importInput(
+    ordinal: number, text: string, signal?: AbortSignal, affirmativeReactionTarget?: string,
+  ) {
+    const eventId = `synthetic_typing_${suffix}_${ordinal}`;
+    const wake = createConversationWake({
+      eventId, occurredAt: new Date().toISOString(),
+      message: { channel: "linq", phoneLookupKey: "synthetic_typing_lookup", linqMessage: {
+        chatId: target, from: "synthetic_typing_sender", isFromMe: false,
+        messageId: eventId, parts: [{ type: "text", value: text }], threadIsDirect: true,
+        ...(affirmativeReactionTarget ? {
+          affirmativeReaction: true, replyToMessageId: affirmativeReactionTarget,
+        } : {}),
+      } },
+    });
+    const imported = await importHostedConversationMailboxItem({
+      assistantBootstrap, decodePayload: createDecodedPayloadDecoder(wake),
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: eventId, id: `synthetic_mailbox_${suffix}_${ordinal}`,
+        laneSeq: String(ordinal), occurredAt: wake.occurredAt,
+      }),
+      runtime, runtimeAttemptId, signal, vaultRoot,
+    });
+    if (imported.status !== "imported") {
+      throw new Error(`Synthetic typing input was not imported: ${imported.status}`);
+    }
+    assert.ok(imported.assistantInputId);
+    assert.ok(imported.linqDeliveryContext);
+    return {
+      ...imported, assistantInputId: imported.assistantInputId,
+      linqDeliveryContext: imported.linqDeliveryContext, wake,
+    };
+  }
+  return {
+    acceptFirstRequest: () => firstResponse.resolve(new Response(null, { status: 204 })),
+    finishFirstStop: (status: number) => firstStopResponse.resolve(new Response(null, { status })),
+    firstRequest, importInput,
+    methods: () => providerFetch.mock.calls.map(([, options]) => options?.method),
+    operatorHomeRoot, runtime, runtimeAttemptId, target, vaultRoot,
+    typing: (imported: Awaited<ReturnType<typeof importInput>>, signal?: AbortSignal) =>
+      createHostedAssistantChannelTypingDependencies({
+        forwardedEnv: runtime.forwardedEnv, userEnv: runtime.userEnv, providerFetch, signal,
+        linqDeliveryContexts: [imported.linqDeliveryContext],
+      }),
+  };
+}
 
 function createDeferred<T = void>(): {
   promise: Promise<T>;

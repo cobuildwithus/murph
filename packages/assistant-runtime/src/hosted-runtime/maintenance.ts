@@ -61,6 +61,7 @@ import {
 } from "./runtime-logs.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
 import { emitHostedAssistantTurnTimingTraceLog } from "./turn-timing-diagnostics.ts";
+import { stopHostedLinqInputTyping } from "./channel-activity.ts";
 import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
@@ -223,6 +224,7 @@ export async function runHostedAssistantAutomationLane(input: {
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
+          providerFetch: input.runtime.platform.providerFetch,
           commitTimeoutMs: input.runtime.commitTimeoutMs,
           runnerIdleTtlMs: input.runnerIdleTtlMs ?? null,
           now: input.now ?? null,
@@ -309,6 +311,7 @@ export async function runHostedAssistantAutomation(
     commitTimeoutMs?: number | null;
     runnerIdleTtlMs?: number | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+    providerFetch?: typeof fetch | null;
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
@@ -566,6 +569,12 @@ export async function runHostedAssistantAutomation(
         });
       },
       onTerminalNonReplyCommitted: (event) => {
+        if (event.source === "linq") {
+          stopHostedLinqInputTyping({
+            assistantInputIds: event.inputIds,
+            providerFetch: options?.providerFetch,
+          });
+        }
         recordHostedAssistantTerminalNonReplyBestEffort({
           commitTimeoutMs: options?.commitTimeoutMs ?? null,
           event,
