@@ -13,9 +13,9 @@ required finding disposition and exact-head CI evidence. The durable contract
 and runnable proof commands remain in
 [`packages/vault-usecases/README.md`](../packages/vault-usecases/README.md#focused-experiment-lists).
 
-Garmin real connection/cleanup and signed synthetic delivery-to-vault proof
-are tracked in
-[`Garmin canary data`](exec-plans/active/2026-10-01-garmin-vault-proof.md).
+Garmin real connection/cleanup and passing hosted synthetic delivery-to-vault proof
+are recorded in
+[`Garmin canary data`](exec-plans/completed/2026-10-01-garmin-vault-proof.md).
 
 Wearable canary credential binding and fresh browser verification are tracked in
 [`fresh canary login`](exec-plans/completed/2026-10-01-garmin-fresh-login.md).
