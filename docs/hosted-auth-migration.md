@@ -118,7 +118,18 @@ cannot be treated as approved. Start/check calls have a ten-second deadline,
 propagate request cancellation and do not retry automatically. Missing service
 configuration, rejected provider authority and malformed responses fail closed.
 Server-side failure causes retain only the operation, fixed failure stage,
-HTTP status and a five-digit numeric Twilio code read from at most 4 KiB.
+HTTP status, a five-digit numeric Twilio code and finite response/parameter
+diagnostics read from at most 4 KiB. For code `60200`, `parameter` and
+`parameterKind` retain the exact `Invalid parameter: LABEL` classifier for
+`To`, `Channel`, `RiskCheck`, `Code` and `VerificationSid`. Only an exact `To`
+rejection on send with HTTP 400 maps to the existing invalid-request response.
+For HTTP 400/code `60200` with `parameterKind unrecognized`, an optional
+`parameterHint` retains only one of those five labels. It recognizes a leading
+`Invalid parameter: LABEL`, or a backtick-delimited label after
+`Invalid parameter ` or `Invalid parameter: `. End of input, ASCII space, tab
+or colon must follow the bare label or closing backtick. The hint indicates a
+known label in a different format; its absence leaves the label unresolved,
+not proven unknown. It is log-only and never participates in classification.
 Provider prose, contacts, response bodies and original exceptions are discarded;
 the public authentication error remains unchanged. Use these diagnostics to
 distinguish configuration, transport and provider rejection before changing

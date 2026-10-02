@@ -7,6 +7,7 @@ const account = `AC${"a".repeat(32)}`;
 const service = `VA${"b".repeat(32)}`;
 const sid = `VE${"c".repeat(32)}`;
 const phoneNumber = "+12025550147";
+const privateSuffix = `${phoneNumber} private-contact@example.test https://example.test/private synthetic-private-token`;
 const request = vi.fn<typeof fetch>();
 const payload = (status: string, fields = {}) => ({
   account_sid: account, service_sid: service, sid, to: phoneNumber, channel: "sms", status, ...fields,
@@ -21,6 +22,26 @@ beforeEach(() => {
   vi.stubGlobal("fetch", request);
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+async function expectSendUnavailable(providerResponse: Response, causeMessage: string) {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    request.mockResolvedValueOnce(providerResponse);
+    const error = await hostedAuthSmsVerification().send({ phoneNumber }).catch((failure: unknown) => failure);
+    expect(error).toMatchObject({ cause: { message: causeMessage } });
+    const response = jsonError(error);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: {
+      code: "AUTH_DELIVERY_UNAVAILABLE", message: "We could not send a sign-in code. Try again shortly.", retryable: false,
+    } });
+    expect(log).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({ errorCauseMessage: causeMessage }));
+    const logged = JSON.stringify(log.mock.calls);
+    for (const privateValue of [phoneNumber, "private-contact@example.test", "example.test/private", "synthetic-private", "synthetic-twilio-secret"]) {
+      expect(logged).not.toContain(privateValue);
+    }
+  } finally { log.mockRestore(); }
+}
 
 describe("Twilio Verify SMS transport", () => {
   it("returns an actionable client error only for an explicitly rejected destination", async () => {
@@ -39,85 +60,92 @@ describe("Twilio Verify SMS transport", () => {
     log.mockRestore();
   });
 
-  it.each(["Channel", "RiskCheck"])("keeps invalid %s configuration diagnosable without blaming the phone number", async (parameter) => {
-    request.mockResolvedValue(Response.json({ code: 60200, message: `Invalid parameter: ${parameter}` }, { status: 400 }));
-    await expect(hostedAuthSmsVerification().send({ phoneNumber })).rejects.toMatchObject({
-      code: "AUTH_DELIVERY_UNAVAILABLE", httpStatus: 503,
-      cause: { message: `Twilio Verify send: provider_http; HTTP 400; code 60200; parameter ${parameter}; response parsed; parameterKind recognized.` },
-    });
+  it.each(["Channel", "RiskCheck", "Code", "VerificationSid"])("keeps invalid %s configuration diagnosable without blaming the phone number", async (parameter) => {
+    await expectSendUnavailable(Response.json({ code: 60200, message: `Invalid parameter: ${parameter}` }, { status: 400 }),
+      `Twilio Verify send: provider_http; HTTP 400; code 60200; parameter ${parameter}; response parsed; parameterKind recognized.`);
   });
 
   it.each([
-    undefined, "Invalid parameter: To +12025550147", "Invalid parameter: private-contact@example.test",
-  ])("does not infer a bad destination or retain private provider messages: %j", async (message) => {
-    request.mockResolvedValue(Response.json({ code: 60200, message }, { status: 400 }));
-    await expect(hostedAuthSmsVerification().send({ phoneNumber })).rejects.toMatchObject({
-      code: "AUTH_DELIVERY_UNAVAILABLE", httpStatus: 503,
-      cause: { message: `Twilio Verify send: provider_http; HTTP 400; code 60200; response parsed; parameterKind ${message ? "unrecognized" : "missing"}.` },
-    });
+    undefined, "", null, 123, "Invalid parameter: private-contact@example.test",
+    "Invalid parameter: ServiceSid", "Invalid parameter `ServiceSid`",
+    "Invalid parameter: To@example.test", "Invalid parameter: To.name@example.test",
+    "Invalid parameter: To+12025550147", "Invalid parameter: To_private", "Invalid parameter: To-private",
+    "Invalid parameter `To", "Invalid parameter: `To", "Invalid parameter `To`Suffix",
+    "Invalid parameter: To`", "Invalid parameter: to", "Invalid parameter To",
+    "Synthetic private prose mentions Invalid parameter: To",
+    "\nInvalid parameter: To", "Invalid parameter: To\nsynthetic-private-token",
+  ])("leaves unknown, unanchored or incomplete labels unresolved: %j", async (message) => {
+    await expectSendUnavailable(Response.json({ code: 60200, message }, { status: 400 }),
+      `Twilio Verify send: provider_http; HTTP 400; code 60200; response parsed; parameterKind ${typeof message === "string" && message ? "unrecognized" : "missing"}.`);
   });
 
-  it("logs unrecognized parameter diagnostics without retaining the rejected value", async () => {
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      request.mockResolvedValue(Response.json({ code: 60200, message: `Invalid parameter: To ${phoneNumber}` }, { status: 400 }));
-      const error = await hostedAuthSmsVerification().send({ phoneNumber }).catch((failure: unknown) => failure);
-      const response = jsonError(error);
-      expect(response.status).toBe(503);
-      expect(log).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
-        errorCauseMessage: "Twilio Verify send: provider_http; HTTP 400; code 60200; response parsed; parameterKind unrecognized.",
-      }));
-      expect(JSON.stringify(log.mock.calls)).not.toContain(phoneNumber);
-      expect(JSON.stringify(await response.json())).not.toContain("parameterKind");
-    } finally { log.mockRestore(); }
+  it.each(["To", "Channel", "RiskCheck", "Code", "VerificationSid"])("logs an observation-only %s hint for anchored formats without retaining suffixes", async (parameter) => {
+    for (const message of [
+      `Invalid parameter: ${parameter} ${privateSuffix}`,
+      `Invalid parameter \`${parameter}\`: ${privateSuffix}`,
+      `Invalid parameter: \`${parameter}\`\t${privateSuffix}`,
+    ]) {
+      await expectSendUnavailable(Response.json({ code: 60200, message, more_info: privateSuffix }, { status: 400 }),
+        `Twilio Verify send: provider_http; HTTP 400; code 60200; response parsed; parameterKind unrecognized; parameterHint ${parameter}.`);
+    }
+    for (const message of [`Invalid parameter: ${parameter}Extra ${privateSuffix}`, `Invalid parameter \`${parameter}Extra\`: ${privateSuffix}`]) {
+      await expectSendUnavailable(Response.json({ code: 60200, message }, { status: 400 }),
+        "Twilio Verify send: provider_http; HTTP 400; code 60200; response parsed; parameterKind unrecognized.");
+    }
+    expect(request).toHaveBeenCalledTimes(5);
+  });
+
+  it.each(["Invalid parameter: To:", "Invalid parameter: To\t", "Invalid parameter `To`", "Invalid parameter: `To`"])("accepts only complete label delimiters: %s", async (message) => {
+    await expectSendUnavailable(Response.json({ code: 60200, message }, { status: 400 }),
+      "Twilio Verify send: provider_http; HTTP 400; code 60200; response parsed; parameterKind unrecognized; parameterHint To.");
   });
 
   it("does not reinterpret a verification failure or server outage as an invalid send destination", async () => {
     request.mockResolvedValue(Response.json({ code: 60200, message: "Invalid parameter: To" }, { status: 400 }));
     await expect(hostedAuthSmsVerification().check({ phoneNumber, verificationSid: sid, code: "123456" }))
       .rejects.toMatchObject({ code: "AUTH_VERIFICATION_UNAVAILABLE", httpStatus: 503 });
+    request.mockResolvedValue(Response.json({ code: 60200, message: `Invalid parameter \`To\`: ${privateSuffix}` }, { status: 400 }));
+    await expect(hostedAuthSmsVerification().check({ phoneNumber, verificationSid: sid, code: "123456" }))
+      .rejects.toMatchObject({
+        code: "AUTH_VERIFICATION_UNAVAILABLE", httpStatus: 503, retryable: false,
+        message: "We could not verify your sign-in code. Try again shortly.",
+        cause: { message: "Twilio Verify check: provider_http; HTTP 400; code 60200; response parsed; parameterKind unrecognized; parameterHint To." },
+      });
     request.mockResolvedValue(Response.json({ code: 60200, message: "Invalid parameter: To" }, { status: 500 }));
     await expect(hostedAuthSmsVerification().send({ phoneNumber }))
       .rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE", httpStatus: 503 });
+    await expectSendUnavailable(Response.json({ code: 60200, message: `Invalid parameter: To ${privateSuffix}` }, { status: 500 }),
+      "Twilio Verify send: provider_http; HTTP 500; code 60200; response parsed; parameterKind unrecognized.");
   });
 
-  it("keeps the provider status and numeric code in server logs while leaving the public response generic", async () => {
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    request.mockResolvedValue(Response.json({ code: 60203, message: "synthetic private phone and credential", more_info: "https://example.test/private" }, { status: 429 }));
-    const error = await hostedAuthSmsVerification().send({ phoneNumber }).catch((failure: unknown) => failure);
-    const response = jsonError(error);
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: {
-      code: "AUTH_DELIVERY_UNAVAILABLE", message: "We could not send a sign-in code. Try again shortly.", retryable: false,
-    } });
-    expect(log).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
-      errorCauseMessage: "Twilio Verify send: provider_http; HTTP 429; code 60203; response parsed.",
-    }));
-    expect(JSON.stringify(log.mock.calls)).not.toContain("synthetic private");
-    expect(JSON.stringify(log.mock.calls)).not.toContain("example.test/private");
+  it.each([400, 429])("keeps nonmatching codes unchanged at HTTP %s despite a recognized label form", async (status) => {
+    await expectSendUnavailable(Response.json({ code: 60203, message: `Invalid parameter: To ${privateSuffix}`, more_info: privateSuffix }, { status }),
+      `Twilio Verify send: provider_http; HTTP ${status}; code 60203; response parsed.`);
     expect(request).toHaveBeenCalledOnce();
   });
 
-  it.each(["private-code", 12, 60203.5, 100000, null])("omits invalid provider error codes: %j", async (code) => {
-    request.mockResolvedValue(Response.json({ code, message: "synthetic private detail" }, { status: 403 }));
-    await expect(hostedAuthSmsVerification().send({ phoneNumber })).rejects.toMatchObject({
-      cause: { message: "Twilio Verify send: provider_http; HTTP 403; response parsed." },
-    });
+  it.each([undefined, "60200", "private-code", 12, 60200.5, 100000, null])("omits invalid provider error codes: %j", async (code) => {
+    await expectSendUnavailable(Response.json({ code, message: `Invalid parameter: To ${privateSuffix}` }, { status: 400 }),
+      "Twilio Verify send: provider_http; HTTP 400; response parsed.");
   });
 
   it("bounds rejected response reads and preserves HTTP failures after invalid JSON or a failed body read", async () => {
     const cancel = vi.fn();
+    const bodyWithHint = JSON.stringify({ code: 60200, message: `Invalid parameter: To ${privateSuffix}` });
     const oversized = new ReadableStream<Uint8Array>({
-      start(controller) { controller.enqueue(new Uint8Array(4097)); }, cancel,
+      start(controller) { controller.enqueue(new TextEncoder().encode(bodyWithHint.padEnd(4097, " "))); }, cancel,
     });
-    const broken = new ReadableStream<Uint8Array>({ start(controller) { controller.error(new Error("synthetic private detail")); } });
-    for (const [body, kind] of [[oversized, "oversized"], ["invalid JSON", "invalid_json"], [broken, "read_failed"], [null, "missing"], ["[]", "invalid_shape"]] as const) {
-      request.mockResolvedValue(new Response(body, { status: 502 }));
-      await expect(hostedAuthSmsVerification().send({ phoneNumber })).rejects.toMatchObject({
-        cause: { message: `Twilio Verify send: provider_http; HTTP 502; response ${kind}.` },
-      });
+    const broken = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode(bodyWithHint)); },
+      pull(controller) { controller.error(new Error(privateSuffix)); },
+    });
+    for (const [body, kind] of [[oversized, "oversized"], [bodyWithHint.slice(0, -1), "invalid_json"], [broken, "read_failed"], [null, "missing"], ["[]", "invalid_shape"]] as const) {
+      await expectSendUnavailable(new Response(body, { status: 400 }),
+        `Twilio Verify send: provider_http; HTTP 400; response ${kind}.`);
     }
     expect(cancel).toHaveBeenCalledOnce();
+    await expectSendUnavailable(new Response(bodyWithHint.padEnd(4096, " "), { status: 400 }),
+      "Twilio Verify send: provider_http; HTTP 400; code 60200; response parsed; parameterKind unrecognized; parameterHint To.");
   });
 
   it("distinguishes missing configuration, transport, timeout and cancellation without retaining private causes", async () => {
