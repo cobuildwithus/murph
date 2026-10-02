@@ -42811,3 +42811,124 @@ describeRealCodex('wearable haptic reminder journey', () => {
     }
   }, 720_000)
 })
+
+// Synthetic errand and contact details; exercise the same future-call intent.
+describeRealCodex('scheduled phone-call reminder journey', () => {
+  it.each(['known-number', 'email-handle', 'uncertain-start'] as const)('%s schedules and executes only the authorized call', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-scheduled-call-'))
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    const { MURPH_CREATE_PHONE_CALL_TOOL } = await import('../src/assistant-codex/dynamic-tools/phone-calls.js')
+    const { resolveAssistantHostedScheduledPhoneCallScope } = await import('../src/assistant/hosted-tool-context.js')
+    const calls: Array<Parameters<NonNullable<AssistantHostedToolContext['phoneCalls']>['start']>[0]> = []
+    const saves: AssistantHostedAutomationToolRequest[] = []
+    const now = '2030-04-01T16:00:00.000Z'
+    const due = '2030-04-02T14:20:00.000Z'
+    const senderHandle = scenario === 'email-handle' ? 'member@example.test' : '+12125550123'
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      await materializeAssistantSkill({ skillsRoot, slug: 'phone-calls' })
+      const context: AssistantHostedToolContext = {
+        computerToolsAvailable: false, vaultFileSendAvailable: false,
+        currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        currentUserActionScope: () => ({ acceptedInputIds: ['ain_' + 'a'.repeat(32)],
+          conversationId: 'synthetic-private-call', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient',
+          conversationScope: 'direct', originSessionId: 'synthetic-call-setup', resultNotificationChannel: 'linq' }),
+        phoneCalls: { async start(request) {
+          calls.push(request)
+          if (scenario === 'uncertain-start') throw new Error('Synthetic ambiguous transport failure')
+          return { phoneCallId: 'synthetic-call-result', status: 'calling' }
+        } },
+        automationTool: { async request(request) {
+          saves.push(request)
+          if (request.action !== 'save' || request.schedule.kind !== 'at') throw new Error('Expected one saved call reminder.')
+          const saved = await upsertAutomation({
+            continuityPolicy: request.continuityPolicy ?? 'preserve', createOnly: true, instructions: request.instructions,
+            title: request.title, schedule: request.schedule, status: 'active', vaultRoot: workingDirectory,
+            assistantTargetOverride: request.assistantTargetOverride,
+            route: { channel: 'linq', deliveryTarget: 'synthetic-private-chat', threadIsDirect: true,
+              identityId: null, participantId: null, threadId: 'synthetic-private-chat' },
+            now: new Date(now),
+          })
+          return { action: 'save', automationId: saved.record.automationId, created: true,
+            effectiveTimeZone: 'America/New_York', lookupId: saved.record.slug,
+            occurrenceProjection: { status: 'resolved', nextOccurrenceAt: request.schedule.at },
+            routeBinding: 'current_conversation', schedule: saved.record.schedule, status: 'active', updatedAt: saved.record.updatedAt }
+        } },
+      }
+      const execute = (prompt: string, scheduled: boolean, hostedToolContext = context) => executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+        model: config.model, modelProvider: config.modelProvider,
+        automationRelativeDateReferenceWindow: { earliestAt: now, latestAt: now },
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          assistantHostedAutomationAvailable: !scheduled,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: scheduled ? '2030-04-02' : '2030-04-01',
+          currentInstant: scheduled ? due : now, currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply',
+        }),
+        dynamicTools: scheduled ? [MURPH_CREATE_PHONE_CALL_TOOL] : [MURPH_AUTOMATION_TOOL, MURPH_CREATE_PHONE_CALL_TOOL],
+        hostedToolContext, prompt, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const prompt = buildAssistantAutoReplyPrompt([{
+        actorIsSelf: false, attachmentDescriptors: [],
+        attachmentEvidence: { attachments: [], optionalInboxCaptureId: null, reasonCode: null, source: null, status: 'not_attempted', updatedAt: null },
+        conversation: { accountId: null, actorId: 'synthetic-sender', actorIsSelf: false,
+          source: 'linq', threadId: 'synthetic-private-chat', threadIsDirect: true },
+        inputId: 'ain_' + 'a'.repeat(32), occurredAt: now, receivedAt: now,
+        projection: null, replyContext: null, replyTarget: null, source: 'linq', telegramMetadata: null,
+        sourceMetadata: { kind: 'linq', externalThreadRouteAuthorityPresent: false, senderHandle,
+          partCount: 1, reactionEligible: false, replyToMessageId: null, service: 'iMessage' },
+        text: 'Could you call me tomorrow at 10:20 AM Eastern to remind me to collect the museum tickets?',
+      }], { timeZone: 'America/New_York' })
+      if (prompt.kind !== 'ready') throw new Error('Expected accepted private request.')
+      const setup = await execute(prompt.prompt, false)
+      process.stdout.write('[scheduled-call-live] ' + JSON.stringify({ scenario, phase: 'setup', reply: setup.finalMessage, saves: saves.length, calls: calls.length }) + '\n')
+      expect(calls).toHaveLength(0)
+      if (scenario === 'email-handle') {
+        expect(saves).toHaveLength(0)
+        expect(setup.finalMessage).toMatch(/(?:phone|number)/iu)
+        expect(setup.finalMessage).toContain('?')
+        expect(setup.finalMessage).not.toMatch(/(?:can.t|cannot|unable to) (?:schedule|place|make) (?:a )?(?:phone )?call|scheduled|all set/iu)
+        return
+      }
+      expect(saves).toHaveLength(1)
+      expect(saves[0]).toMatchObject({ action: 'save', schedule: { kind: 'at', at: due }, assistantTargetOverride: { model: 'gpt-6.1-sol' } })
+      expect(setup.finalMessage).toMatch(/call/iu)
+      expect(setup.finalMessage).toMatch(/10:20/iu)
+      expect(setup.finalMessage).not.toMatch(/(?:can.t|cannot) (?:schedule|call)|iMessage instead|what.*number/iu)
+      const saved = (await listCanonicalAssistantCronRecords(workingDirectory))[0]
+      if (!saved || saved.kind !== 'automation') throw new Error('Expected canonical call reminder.')
+      expect(saved.instructions).toContain('+12125550123')
+      expect(saved.instructions).toMatch(/museum tickets/iu)
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(saved), now: due })
+      const job = projectCanonicalAssistantCronJob({ source: saved, runtimeState })
+      const instructions = buildAssistantCronExecutionInstructions({ job, kind: 'canonical', runtimeState, source: saved }, { automationId: null, contextReferences: [] })
+      const scheduledScope = resolveAssistantHostedScheduledPhoneCallScope({
+        channel: 'linq', conversationScope: 'direct', originSessionId: 'synthetic-call-due',
+        messageInput: { turnTrigger: 'automation-cron', scheduledOccurrenceAt: due,
+          scheduledInvocationAuthority: { automationId: saved.automationId, occurrenceAt: due } },
+      })
+      expect(scheduledScope).not.toBeNull()
+      const fired = await execute(instructions, true, { ...context, automationTool: null,
+        currentUserActionScope: () => null, currentScheduledPhoneCallScope: () => scheduledScope })
+      process.stdout.write('[scheduled-call-live] ' + JSON.stringify({ scenario, phase: 'due', reply: fired.finalMessage, calls: calls.length }) + '\n')
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toMatchObject({ brief: { to: { phoneNumber: '+12125550123' }, allowTransferToUser: false, timeZone: 'America/New_York' }, resultNotificationChannel: 'linq' })
+      expect(calls[0]?.requestKey).toMatch(/^phone_call_scheduled_[a-f0-9]{64}$/u)
+      expect(calls[0]?.brief.goal).toMatch(/museum tickets/iu)
+      expect(saves).toHaveLength(1)
+      expect(fired.finalMessage).not.toMatch(/you answered|reminded you|successfully reminded|tickets (?:collected|picked up)|call completed/iu)
+      if (scenario === 'uncertain-start') {
+        expect(fired.finalMessage).toMatch(/confirm|unclear|sure|couldn.t tell/iu)
+        expect(fired.finalMessage).not.toMatch(/(?:I.ve|I have) (?:placed|made) the call|no call (?:was|has been) (?:placed|made)|will retry/iu)
+      }
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 720_000)
+})

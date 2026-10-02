@@ -51,6 +51,7 @@ export const MURPH_CREATE_PHONE_CALL_TOOL = {
   description: [
     'Before placing a real call, read $MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md.',
     'Use the same explicit-consent or ready-to-act flow in private and hosted group conversations. A group request does not require a special structured preview or a later confirmation solely because it is a group; ask one narrow question only when material terms are still unclear.',
+    'Private Linq and Telegram scheduled occurrences may place one call authorized by their saved instructions. For a future call reminder, save murph.automation with the approved destination and call brief instead of calling now; its messaging route carries results, not a text-only restriction. Scheduled group and email calls are unavailable.',
     'Resolve relative dates and times before creating the brief.',
     'Before a real health care appointment booking, rescheduling, cancellation, or waitlist call, read $MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md and satisfy its ready-to-act gate with a completed, user-approved readiness brief; an information-only or connectivity-test call must stay non-mutating, remain separate, and never count as appointment readiness.',
     'Put only requester-approved, call-relevant, disclosable facts in shareableFacts.',

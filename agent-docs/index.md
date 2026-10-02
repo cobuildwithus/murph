@@ -3,8 +3,12 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Garmin real connection/cleanup and signed synthetic delivery-to-vault proof
+are tracked in
+[`Garmin canary data`](exec-plans/active/2026-10-01-garmin-vault-proof.md).
+
 Wearable canary credential binding and fresh browser verification are tracked in
-[`fresh canary login`](exec-plans/active/2026-10-01-garmin-fresh-login.md).
+[`fresh canary login`](exec-plans/completed/2026-10-01-garmin-fresh-login.md).
 
 Hosted-local Temporal compatibility preflight implementation and synthetic proof
 are recorded in [the completed preflight plan](exec-plans/completed/2026-09-25-frog-2661-temporal-preflight.md).
@@ -926,3 +930,8 @@ Mailbox startup dependency reduction and single-query ingress context proof are 
 Companion app contact and wrist failure feedback are owned by
 [`wearable haptics`](references/wearable-haptics.md); consented group timestamp
 projection is owned by the group challenge data diagnostics spec.
+
+Private scheduled phone-call guidance, authenticated Linq sender context, and
+live setup-to-due proof are recorded in
+[`scheduled phone calls`](exec-plans/completed/2026-10-01-scheduled-phone-calls.md);
+`ARCHITECTURE.md` and the phone-calls skill own the current contract.

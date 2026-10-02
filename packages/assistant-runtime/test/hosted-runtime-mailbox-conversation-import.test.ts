@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -52,6 +52,7 @@ import {
   serializeHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
 import { VaultError } from "@murphai/core";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 
 import { createHostedAssistantChannelTypingDependencies } from "../src/hosted-runtime/channel-activity.ts";
@@ -399,6 +400,7 @@ describe("hosted mailbox conversation import adapter", () => {
       partCount: 2,
       reactionEligible: false,
       replyToMessageId: null,
+      senderHandle: "redacted-contact-sentinel",
       service: null,
     });
     assert.ok(replyTarget);
@@ -1139,7 +1141,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(events[0]?.receivedAt, item.item.createdAt);
   });
 
-  test("admits an audio attachment exactly once after its parser retry settles", async () => {
+  test.each(["current", "legacy-private-sender"] as const)("admits restored %s audio exactly once after its parser retry settles", async (snapshotShape) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-26T12:00:00.000Z"));
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-audio-parser-retry-"));
@@ -1189,7 +1191,7 @@ describe("hosted mailbox conversation import adapter", () => {
         notificationCount += 1;
         assert.equal(
           (await readHostedPendingAssistantInputIds({ vaultRoot })).length,
-          1,
+          notificationCount,
         );
         return {
           kind: "no-new-input",
@@ -1266,6 +1268,20 @@ describe("hosted mailbox conversation import adapter", () => {
         [],
       );
 
+      if (snapshotShape === "legacy-private-sender") {
+        const pending = listed.events[0];
+        assert.ok(pending);
+        const inputPath = path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "input-events", `${pending.inputId}.json`);
+        const persisted = JSON.parse(await readFile(inputPath, "utf8"));
+        // The deployed importer omitted this field for private messages.
+        delete persisted.value.sourceMetadata.senderHandle;
+        await writeFile(inputPath, JSON.stringify(persisted));
+      }
+      const snapshotRoot = path.join(parentRoot, "snapshot");
+      await cp(vaultRoot, snapshotRoot, { recursive: true });
+      await rm(vaultRoot, { recursive: true });
+      await cp(snapshotRoot, vaultRoot, { recursive: true });
+
       const replay = await importItem();
       assert.equal(replay.status, "imported");
       if (replay.status !== "imported") {
@@ -1284,11 +1300,42 @@ describe("hosted mailbox conversation import adapter", () => {
         [replay.assistantInputId],
       );
       const replayed = await listAssistantInputEvents({ vault: vaultRoot });
+      assert.equal(replayed.events.length, 1);
       assert.equal(replayed.events[0]?.attachmentEvidence.status, "available");
       assert.equal(
         replayed.events[0]?.attachmentEvidence.attachments[0]?.inlineFragments[0]?.text,
         "Synthetic settled voice memo transcript.",
       );
+      if (snapshotShape === "legacy-private-sender") {
+        assert.equal(replayed.events[0]?.sourceMetadata?.kind, "linq");
+        assert.ok(!Object.hasOwn(replayed.events[0]?.sourceMetadata ?? {}, "senderHandle"));
+      }
+      assert.equal(decodedWake.message.channel, "linq");
+      if (decodedWake.message.channel !== "linq") throw new Error("Expected Linq fixture.");
+      const following = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder({
+          ...decodedWake,
+          eventId: "evt_following_audio_retry",
+          message: {
+            ...decodedWake.message,
+            linqMessage: {
+              ...decodedWake.message.linqMessage,
+              messageId: "msg_following_audio_retry",
+              parts: [{ type: "text", value: "Synthetic follow-up message." }],
+            },
+          },
+        }),
+        async importConversationWake() { return { captureId: "cap_following_audio_retry", metrics: { nextWakeAt: null, parserProcessed: 0 } }; },
+        async prepareWakeContext() {},
+        item: createResolvedConversationMailboxItem({
+          ...item.item,
+          id: "mailbox_following_audio_retry", dedupeKey: "evt_following_audio_retry", laneSeq: "2",
+        }),
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+      assert.equal(following.status, "imported", JSON.stringify(following));
+      assert.equal((await listAssistantInputEvents({ vault: vaultRoot })).events.length, 2);
     } finally {
       controller.close();
     }
@@ -3043,6 +3090,7 @@ describe("hosted mailbox conversation import adapter", () => {
       partCount: 1,
       reactionEligible: false,
       replyToMessageId: "msg_murph_123",
+      senderHandle: "buddy@example.test",
       service: "iMessage",
     });
     assert.equal(JSON.stringify(event).includes(groupReactionContext), false);
@@ -3150,6 +3198,39 @@ describe("hosted mailbox conversation import adapter", () => {
       false,
     );
   });
+
+  test.each(["+12125550123", "member@example.test", null])(
+    "preserves private Linq sender contact context: %s", async (senderHandle) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-private-sender-"));
+      tempRoots.push(vaultRoot);
+      const decodedWake = createConversationWake({ message: {
+        channel: "linq", phoneLookupKey: "synthetic-private-lookup",
+        linqMessage: {
+          chatId: "synthetic-private-chat", from: senderHandle ?? "",
+          isFromMe: false, messageId: "synthetic-private-message",
+          parts: [{ type: "text", value: "Call me tomorrow." }],
+          service: "iMessage", threadIsDirect: true,
+        },
+      } });
+      await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          throw new HostedConversationInboxProjectionError("Synthetic projection unavailable");
+        },
+        async prepareWakeContext() {},
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: decodedWake.eventId, id: "synthetic-private-mailbox",
+        }),
+        runtime: createRuntime(), vaultRoot,
+      });
+      const event = (await listAssistantInputEvents({ vault: vaultRoot })).events[0];
+      expect(event?.sourceMetadata).toMatchObject({
+        kind: "linq", senderHandle, externalThreadRouteAuthorityPresent: false,
+      });
+      expect(event?.conversation?.threadId).toMatch(HASHED_IDENTIFIER_PATTERN);
+      expect(event?.conversation?.threadIsDirect).toBe(true);
+    },
+  );
 
   test("keeps direct Telegram threads free of group sender attribution", async () => {
     const parentRoot = await mkdtemp(

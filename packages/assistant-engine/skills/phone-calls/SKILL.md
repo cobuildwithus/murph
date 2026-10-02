@@ -1,15 +1,15 @@
 ---
 name: phone-calls
-description: Use when Murph may place one authorized outbound call for a health task, or when hosted group Murph may call a public venue or service business for an ordinary shared-life logistics task. Covers call choice, consent, health appointment handoff, reservation bounds, minimal disclosure, group requester attribution, transfer policy, and truthful interpretation of call lifecycle results.
+description: Use when Murph may place one authorized outbound call for a health task or an explicitly requested private phone-call reminder, or when hosted group Murph may call a public venue or service business for an ordinary shared-life logistics task. Covers call choice, consent, health appointment handoff, reservation bounds, minimal disclosure, group requester attribution, transfer policy, and truthful interpretation of call lifecycle results.
 ---
 
 # Phone Calls
 
 Use `murph.create_phone_call` for one authorized outbound call on the user's
-behalf for an in-scope health task, or on the current room's behalf for an
-in-scope shared-life logistics task, when a human call is genuinely faster or
-the only workable path. Prefer a structured integration or browser action when
-either can complete the operation without a call.
+behalf for an explicitly requested private reminder (including an ordinary
+non-health task). For in-scope health tasks or the current room's shared-life
+logistics, use a call when it is faster or the only workable path; prefer a
+structured integration or browser action when either can complete that task.
 
 Never call emergency services. For urgent or emergency symptoms, follow Murph's
 health-safety guidance and direct the user to the appropriate immediate help.
@@ -58,9 +58,40 @@ official site; identity alone is incomplete. Information-only and
 connectivity-test calls must remain non-mutating, separate, and never count as
 appointment readiness.
 
+## Scheduled private calls
+
+A private Linq or Telegram automation can place one call at its exact scheduled
+occurrence. For an explicit request to call later, save one `murph.automation`
+with the requested local time and timezone and Sol as its model. Store the
+approved destination number, concrete call goal, minimal shareable facts,
+success criteria, and any disclosure or transfer limits in its instructions.
+The conversation route is for status and results, not a text-only action limit.
+Never call immediately or silently replace the requested call with a text.
+
+For "call me", use the requesting member's known phone number from trusted
+private conversation context (the engine-rendered `Sender: +...` on an accepted
+private Linq input is that sender's number) or their explicitly supplied number.
+Never infer a number from a thread id, an email handle, a Telegram user id, another
+participant, or an unrelated contact. A sender handle is contact context, not
+permission to call without the member's request. If no number is known, ask for it before saving. The explicit bounded request is
+consent: no extra preview or confirmation is needed for a simple reminder.
+Set `allowTransferToUser: false` for a reminder call to the member. Confirm the
+saved local time and call reminder without promising that they will answer.
+
+When due, the saved instructions authorize the call; no fresh message or second
+confirmation is needed. Read this skill and call `murph.create_phone_call` once.
+Never invent a `message_ref`. Occurrence replay is deduplicated by the host;
+never create another automation or retry an ambiguous attempt to force a ring.
+Report only confirmed start/result evidence. For a confirmed start, a brief
+"I have started the reminder call" is enough; do not recite provider states or
+claim that the member answered or heard the reminder. Scheduled group and email
+turns have no call authority. A missing tool or unavailable route is a real blocker;
+explain it truthfully without claiming a call happened.
+
 ## Build a minimized call brief
 
-- Set `to` to the verified official destination.
+- Set `to` to the verified official destination, or the member-approved number
+  for a private reminder call.
 - Resolve relative dates and times to concrete dates and pass the user's
   timezone.
 - Set `callerName` to the user-approved first name or other name Murph may use

@@ -2071,16 +2071,11 @@ function createHostedConversationAssistantInputSourceMetadata(
       replyToMessageId: normalizeHostedAssistantInputSourceMetadataToken(
         wake.message.linqMessage.replyToMessageId ?? null,
       ),
-      // Thread-container (group) inbound carries the sending participant's
-      // handle so the assistant can attribute messages; 1:1 home threads have
-      // a single known sender and stay handle-free.
-      ...(externalThreadRouteAuthorityPresent
-        ? {
-            senderHandle: normalizeHostedAssistantInputSourceMetadataToken(
-              wake.message.linqMessage.from ?? null,
-            ),
-          }
-        : {}),
+      // Preserve the authenticated sender for private "call me" requests too.
+      // This is contact context, never a replacement for runtime authority.
+      senderHandle: normalizeHostedAssistantInputSourceMetadataToken(
+        wake.message.linqMessage.from ?? null,
+      ),
       service: normalizeHostedAssistantInputSourceMetadataToken(
         wake.message.linqMessage.service ?? null,
       ),
