@@ -325,6 +325,17 @@ fetch to attachment typing. Preparation and the foreground turn must retain
 that same function identity so the existing typing claim can transfer without
 another provider start. An explicitly absent invocation provider overrides the
 bridge's original provider; standalone imports retain their supplied provider.
+The preparation also retains its staged assistant input ID independently of
+latency tracing. A committed Linq terminal non-reply cancels only an unclaimed
+preparation matching both that input and the invocation's provider function.
+Handoff removes terminal cancellation authority. Cancellation aborts immediately
+and uses the existing session stop without awaiting provider work in the terminal
+callback. Its target claim remains reserved until the pending start and stop
+settle, so late cleanup cannot stop a successor. Cooldown classification uses the
+cancellation time, not late transport settlement; a real max-length session still
+retains its ten-minute cooldown. Provider failure remains best-effort and releases
+only the matching claim. This state is process-local, with no snapshot or protocol
+change; an old resident runtime retains its old behavior until replaced.
 
 ## Prompt and copy guidance
 

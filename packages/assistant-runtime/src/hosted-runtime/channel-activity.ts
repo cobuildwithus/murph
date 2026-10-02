@@ -35,9 +35,12 @@ const HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS = 10 * 60_000;
 type HostedLinqTypingTargetState = {
   activeUntilMs: number;
   cooldownUntilMs: number;
+  stoppingAtMs?: number;
   cleanup?: () => void;
   preparation?: {
+    assistantInputId: string;
     providerFetch: typeof fetch;
+    stop(): void;
     take(signal?: AbortSignal): Promise<HostedLinqTypingHandle | undefined>;
   };
 };
@@ -165,11 +168,28 @@ export function createHostedAssistantChannelTypingDependencies(input: {
   };
 }
 
+// Terminal evidence owns the input identity; the invocation's original guarded
+// fetch owns provider authority. Neither identity comes from optional telemetry.
+export function stopHostedLinqInputTyping(input: {
+  assistantInputIds: readonly string[];
+  providerFetch?: typeof fetch | null;
+}): void {
+  if (!input.providerFetch || input.assistantInputIds.length === 0) return;
+  for (const state of hostedLinqTypingTargets.values()) {
+    const preparation = state.preparation;
+    if (preparation?.providerFetch === input.providerFetch
+      && input.assistantInputIds.includes(preparation.assistantInputId)) {
+      preparation.stop();
+    }
+  }
+}
+
 // The existing per-chat claim owns preparation and the turn's single refresh
 // loop. The importer can cancel only until a validated turn takes the handle.
 export function startHostedLinqInputTyping(input: Omit<
   HostedChannelTypingInput, "linqDeliveryContexts"
 > & {
+  assistantInputId: string;
   linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
 }): (() => void) | null {
   const context = input.linqDeliveryContext;
@@ -191,11 +211,11 @@ export function startHostedLinqInputTyping(input: Omit<
   if (!typingTarget) {
     return null;
   }
+  const typingTargetState = typingTarget.state;
 
   const controller = new AbortController();
   let ownerSignal: AbortSignal | undefined;
   let handedOff = false;
-  let stopped = false;
   const detach = () => ownerSignal?.removeEventListener("abort", stop);
   typingTarget.state.cleanup = detach;
   const ready = startHostedLinqTypingForTarget({
@@ -204,8 +224,11 @@ export function startHostedLinqInputTyping(input: Omit<
   }, typingTarget).catch(() => undefined);
 
   function stop(): void {
-    if (stopped) return;
-    stopped = true;
+    if (controller.signal.aborted) return;
+    // Retain the claim until start and stop settle, even across its old expiry.
+    // A cancelled request is not a max-length session just because it settles late.
+    typingTargetState.stoppingAtMs = Date.now();
+    delete typingTargetState.preparation;
     detach();
     controller.abort(ownerSignal?.reason);
     void ready.then((handle) => handle?.stop()).catch(() => {});
@@ -213,18 +236,20 @@ export function startHostedLinqInputTyping(input: Omit<
   function bindSignal(signal?: AbortSignal): void {
     detach();
     ownerSignal = signal;
-    if (stopped) return;
+    if (controller.signal.aborted) return;
     if (signal?.aborted) stop();
     else signal?.addEventListener("abort", stop, { once: true });
   }
 
   typingTarget.state.preparation = {
+    assistantInputId: input.assistantInputId,
     providerFetch: input.providerFetch,
+    stop,
     take(signal) {
       handedOff = true;
       delete typingTarget.state.preparation;
       bindSignal(signal);
-      return ready.then((handle) => stopped ? undefined : handle);
+      return ready.then((handle) => controller.signal.aborted ? undefined : handle);
     },
   };
   bindSignal(input.signal);
@@ -234,7 +259,7 @@ export function startHostedLinqInputTyping(input: Omit<
       return;
     }
     // After handoff, only the turn can observe acceptance for its admitted inputs.
-    if (handedOff || stopped || handle.isActive?.() === false || !handle.acceptedAt) return;
+    if (handedOff || controller.signal.aborted || handle.isActive?.() === false || !handle.acceptedAt) return;
     recordHostedAssistantMilestonesBestEffort({
       context: input.latencyTraceContext,
       milestones: [{ at: handle.acceptedAt, milestone: "linq_typing_accepted" }],
@@ -303,14 +328,15 @@ function claimHostedLinqTypingTarget(target: string): HostedLinqTypingClaim | nu
 
   const now = Date.now();
   for (const [key, state] of hostedLinqTypingTargets) {
-    if (state.activeUntilMs <= now && state.cooldownUntilMs <= now) {
+    if (state.stoppingAtMs === undefined && state.activeUntilMs <= now && state.cooldownUntilMs <= now) {
       state.cleanup?.();
       hostedLinqTypingTargets.delete(key);
     }
   }
 
   const existing = hostedLinqTypingTargets.get(normalized);
-  if (existing && (existing.activeUntilMs > now || existing.cooldownUntilMs > now)) {
+  if (existing && (existing.stoppingAtMs !== undefined
+    || existing.activeUntilMs > now || existing.cooldownUntilMs > now)) {
     return null;
   }
 
@@ -333,7 +359,8 @@ function wrapHostedLinqTypingHandle(input: {
     stop: async (options) => {
       const ownsTarget = !released
         && hostedLinqTypingTargets.get(input.target.target) === input.target.state;
-      const completedMaxSession = Date.now() >= input.target.state.activeUntilMs;
+      const completedMaxSession = (input.target.state.stoppingAtMs ?? Date.now())
+        >= input.target.state.activeUntilMs;
       try {
         await input.handle.stop(ownsTarget ? options : { ...options, providerStop: false });
       } finally {
@@ -358,6 +385,7 @@ function releaseHostedLinqTypingTarget(input: HostedLinqTypingClaim, options: {
     return;
   }
 
+  delete input.state.stoppingAtMs;
   input.state.activeUntilMs = Date.now();
   input.state.cooldownUntilMs = Date.now() + HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS;
 }

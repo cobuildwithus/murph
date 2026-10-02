@@ -218,6 +218,7 @@ function createFixture(name: string) {
   const handle: AssistantChannelActivityHandle = { isActive: () => true, stop };
   mocks.startLinqTypingIndicator.mockResolvedValue(handle);
   const input = {
+    assistantInputId: `input_${name}`,
     forwardedEnv: {}, userEnv: {}, providerFetch: vi.fn<typeof fetch>(),
     linqDeliveryContext: context,
     latencyTraceContext: {

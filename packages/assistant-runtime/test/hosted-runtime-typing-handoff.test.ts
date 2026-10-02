@@ -39,6 +39,7 @@ vi.mock("../src/hosted-runtime/mailbox-conversation-import.ts", async (importOri
     ) => async () => {
       mocks.importedFetch = input.runtime.platform.providerFetch;
       mocks.cancel = startHostedLinqInputTyping({
+        assistantInputId: "synthetic_typing_handoff_input",
         forwardedEnv: input.runtime.forwardedEnv, userEnv: input.runtime.userEnv,
         providerFetch: input.runtime.platform.providerFetch, linqDeliveryContext: route,
       });
