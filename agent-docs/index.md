@@ -1,3 +1,12 @@
+Native Codex patch inclusion in full review snapshots is owned by
+[the ReviewGPT loop](operations/pr-reviewgpt-loop.md).
+
+Codex 0.160.0 reconciliation for the current PR is recorded in
+[the PR preparation plan](exec-plans/active/2026-10-01-codex-cli-0160-pr.md).
+
+Codex CLI 0.160.0 upgrade verification is recorded in
+[the completed upgrade plan](exec-plans/completed/2026-10-01-codex-cli-0160.md).
+
 Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
