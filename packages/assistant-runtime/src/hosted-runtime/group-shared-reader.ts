@@ -13,6 +13,7 @@ import {
   hostedGroupSharedNeedsWearableRecovery,
   parseHostedGroupSharedReadOptions,
   type HostedGroupSharedReadOptions,
+  type HostedRuntimeGroupSharedReadRequest,
   parseHostedGroupSharedFreshnessRequirements,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -109,9 +110,11 @@ export function createHostedGroupSharedReader(input: {
         return unavailable(GROUP_SHARED_REQUEST_INVALID);
       }
       let requirements;
-      let options: HostedGroupSharedReadOptions;
+      let options: HostedGroupSharedReadOptions & Pick<HostedRuntimeGroupSharedReadRequest, "includeCompanionPresence">;
       try {
-        options = parseHostedGroupSharedReadOptions(request, projectionScopes);
+        options = { ...parseHostedGroupSharedReadOptions(request, projectionScopes),
+          ...(request.includeCompanionPresence ? { includeCompanionPresence: true } : {}),
+        };
         requirements = request.freshness === undefined ? undefined
           : parseHostedGroupSharedFreshnessRequirements(request.freshness, projectionScopes);
       } catch {
@@ -147,7 +150,7 @@ export function createHostedGroupSharedReader(input: {
 
 /** One refresh request per operation; polling only rereads the authorized snapshot. */
 async function readSharedGroupWithFreshness(input: {
-  options: HostedGroupSharedReadOptions;
+  options: HostedGroupSharedReadOptions & Pick<HostedRuntimeGroupSharedReadRequest, "includeCompanionPresence">;
   groupToolPort: HostedRuntimeGroupToolPort;
   projectionScopes: HostedVaultShareSelectableProjectionScope[];
   requirements: ReturnType<typeof parseHostedGroupSharedFreshnessRequirements> | undefined;

@@ -42606,7 +42606,7 @@ describeRealCodex('wearable haptic reminder journey', () => {
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 360_000)
 
-  it.each(['whoop-delay', 'garmin-unknown', 'whoop-useful', 'app-unreachable', 'device-disconnected', 'health-active', 'health-stale'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
+  it.each(['whoop-delay', 'garmin-unknown', 'whoop-useful', 'app-unreachable', 'device-disconnected', 'health-active', 'health-stale', 'offer-whoop', 'offer-garmin', 'offer-none', 'offer-declined'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wrist-reminder-'))
     const binDirectory = path.join(workingDirectory, 'bin')
@@ -42686,6 +42686,10 @@ describeRealCodex('wearable haptic reminder journey', () => {
         env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
         model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({
+          assistantContextSnapshotPrompt: scenario === 'offer-whoop'
+            ? 'Saved member context: The member previously reported wearing a WHOOP band.'
+            : scenario === 'offer-declined'
+              ? 'Saved member context: The member wears WHOOP. In an earlier conversation they declined wrist buzz offers and asked not to be offered them again.' : null,
           assistantCliContract, assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
           assistantHostedDeviceConnectAvailable: true, assistantHostedDeviceConnectProviders: [],
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
@@ -42697,14 +42701,55 @@ describeRealCodex('wearable haptic reminder journey', () => {
         dynamicTools: [MURPH_DEVICE_TOOL, MURPH_AUTOMATION_TOOL], hostedToolContext,
         prompt, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
-      const result = await execute(scenario === 'health-active' || scenario === 'health-stale'
+      const offerPrompt = scenario === 'offer-whoop'
+        ? `Remind me at ${targetAt} to take a seven-minute breathing break. I will tell you when I actually start.`
+        : scenario === 'offer-garmin'
+          ? `I wear a Garmin. Remind me at ${targetAt} to take a brief personal break. I prefer to keep the reminder discreet around coworkers.`
+          : scenario === 'offer-none'
+            ? `Remind me at ${targetAt} to take a seven-minute breathing break.`
+            : scenario === 'offer-declined'
+              ? `Remind me at ${targetAt} to take a seven-minute breathing break.` : null
+      const result = await execute(offerPrompt ?? (scenario === 'health-active' || scenario === 'health-stale'
         ? 'My Apple Health steps have not updated. Can you check when the app last contacted Murph and the sync status? Does that prove I closed it? Inspect only app contact and account sync metadata, not step records. Please just diagnose; do not change anything.'
         : scenario === 'whoop-delay'
         ? `Please buzz my WHOOP once when my ten-minute meditation ends at ${targetAt}. No buzz now. The band is connected in Murph and I will keep the app open until then.`
         : scenario === 'whoop-useful'
           ? 'My WHOOP is connected in Murph. Give it one test buzz and tell me when wrist reminders would be useful for me.'
-          : 'Please buzz my Garmin once now. I know its find-device alert may also sound. Do not retry if the result is unclear.', false)
+          : 'Please buzz my Garmin once now. I know its find-device alert may also sound. Do not retry if the result is unclear.'), false)
       process.stdout.write('[wearable-haptic-live] ' + JSON.stringify({ scenario, reply: result.finalMessage, calls, saves: saves.length }) + '\n')
+      if (offerPrompt) {
+        expect(calls).toEqual([])
+        expect(saves).toHaveLength(1)
+        expect(saves[0]).toMatchObject({ action: 'save', schedule: { kind: 'at', at: targetAt } })
+        if (saves[0]?.action !== 'save') throw new Error('Expected one reminder save.')
+        const reminders = await listAutomations({ vaultRoot: workingDirectory })
+        expect(reminders.items).toHaveLength(1)
+        const saved = (await listCanonicalAssistantCronRecords(workingDirectory))[0]
+        if (!saved || saved.kind !== 'automation') throw new Error('Expected the requested break reminder.')
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(saved), now: targetAt })
+        const job = projectCanonicalAssistantCronJob({ source: saved, runtimeState })
+        const instructions = buildAssistantCronExecutionInstructions({ job, kind: 'canonical', runtimeState, source: saved }, { automationId: null, contextReferences: [] })
+        const fired = await execute(instructions, true, { ...context, currentInvocationScope: () => ({
+          conversationScope: 'direct', origin: { kind: 'automation_occurrence', automationId: saved.automationId, occurrenceAt: targetAt },
+        }) })
+        process.stdout.write('[wearable-offer-due] ' + JSON.stringify({ scenario, reply: fired.finalMessage, calls, saves: saves.length }) + '\n')
+        expect(calls).toEqual([])
+        expect(saves).toHaveLength(1)
+        expect(fired.finalMessage).toMatch(/break/iu)
+
+        expect(result.finalMessage).toMatch(/remind|reminder|scheduled|set/iu)
+        if (scenario === 'offer-whoop' || scenario === 'offer-garmin') {
+          expect(result.finalMessage).toMatch(/buzz|wrist|vibrat/iu)
+          expect(result.finalMessage).toMatch(/if you|want|would you|can also|could also/iu)
+          expect(result.finalMessage).toMatch(/open/iu)
+          expect(result.finalMessage).not.toMatch(/I(?:['’]ll| will| have) (?:also )?(?:buzz|vibrate|connect)|(?:buzz|wrist cue) (?:is|has been) (?:set|scheduled)/iu)
+          if (scenario === 'offer-garmin') expect(result.finalMessage).toMatch(/sound|not (?:always )?silent/iu)
+          else expect(result.finalMessage).toMatch(/start|begin/iu)
+        } else {
+          expect(result.finalMessage).not.toMatch(/(?:want|could|can|offer).{0,70}(?:buzz|vibrat|wrist)/iu)
+        }
+        return
+      }
       if (scenario === 'health-active' || scenario === 'health-stale') {
         expect(calls.filter(call => call.action === 'companion_status')).toHaveLength(1)
         expect(calls.some(call => call.action === 'list_accounts')).toBe(true)

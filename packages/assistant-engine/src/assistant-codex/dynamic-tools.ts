@@ -5110,6 +5110,7 @@ async function executeGroupSharedRead(input: {
 
   try {
     const result = await groupSharedReader.request({
+      includeCompanionPresence: true,
       projectionScopes: input.request.projectionScopes,
       ...(input.request.participantId ? { participantId: input.request.participantId } : {}),
       ...(input.request.history ? { history: input.request.history } : {}),

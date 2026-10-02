@@ -868,7 +868,7 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read 1–3 consent-aware projections in this group; the host binds authority. Ordinary reads cover seven days; history needs participantId, an inclusive range of up to 90 dates, and one metric scope. status="partial" means omittedParticipantIds have omitted rows: the result is incomplete and cannot prove departure, score, diagnosis or permission state. companionLastContactAt, when shared, is last app contact including opportunistic background activity; it proves neither sync success nor app closure, Health permission denial, or the cause of missing data.',
+    'Read 1–3 host-bound scopes (7 days; history: participantId, ≤90 dates, one metric). status="partial" means omittedParticipantIds have omitted rows; result is incomplete, not proof of departure, scores, diagnosis or permissions. companionLastContactAt is app contact, possibly background, not proof of sync, closure, Health access or missing-data cause.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

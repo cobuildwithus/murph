@@ -759,7 +759,8 @@ unrelated message, or add a second queue.
 
 ## Companion last-contact evidence
 
-Current group read_shared consumers negotiate includeCompanionPresence=true.
+Model-facing group read_shared calls negotiate includeCompanionPresence=true;
+email composition and other ordinary readers do not request this metadata.
 For a current member with a readable wearable-metric grant (or device-sync-status
 grant) and an active Apple Health source, Web may attach companionLastContactAt
 to that member. Nutrition, profile, email and timezone grants alone do not qualify.

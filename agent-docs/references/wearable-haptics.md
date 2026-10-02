@@ -55,7 +55,7 @@ The companion presence owner stores server receipt timestamps for last contact
 and last foreground contact on HostedMember. POST /api/companion/heartbeat
 accepts only foreground/background state under bearer member, active access and
 historical consent. The native task sends every 15 seconds while execution is
-available, with a three-second request deadline and no disk queue. It continues
+available, with a three-second network idle timeout and no disk queue. It continues
 opportunistically in the background; it does not keep iOS awake or prove that a
 suspended app was quit. Member or consent loss cancels the task. Timestamps
 survive process restarts and disappear with account deletion.

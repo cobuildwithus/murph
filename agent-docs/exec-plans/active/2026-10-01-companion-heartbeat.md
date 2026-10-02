@@ -63,24 +63,51 @@ and receive no new haptic fields. No queued effect is replayed after reconnect.
 
 ## Verification
 
-Implemented bounded server-receipt timestamps, strict private routes, optional
-wire capabilities, group grant/source checks, and native lifecycle cancellation.
-Focused backend coverage: 63 Web contact/haptic/group tests, 54 wire-parser tests,
-11 assistant tool tests, 34 Cloudflare port tests. Package/Web/Cloudflare
-checks pass. Native: 325 distinct simulator checks, XcodeGen and SwiftFormat lint.
+Focused Web presence, wrist admission, shared privacy, join-policy and group-tool
+coverage passes, including a newer background heartbeat retiring an older wrist
+lease. Wire parser, runtime reader, Cloudflare port and assistant tool suites
+pass. Web, Cloudflare, engine and runtime typechecks pass. Complexity guard
+passes with no increased debt across 24 changed source files. Browser proof
+passes at 390px and 1280px with the real group join permission component.
 
-Five new real-model journeys passed with the production tool contracts and local
-subscription: app unreachable, disconnected band, recent/stale Health contact,
-and shared group contact. Reviewed replies are Ready: no duplicate buzz, mutation,
-or inference that silence proves closure; private diagnostics remain private.
-Complete initial provider input: direct 33,938 -> 34,130 o200k tokens
-(156,655 -> 157,655 bytes); group 29,012 -> 29,050 tokens
-(131,894 -> 132,100 bytes). Fixed synthetic fixtures and normalized temporary
-paths/UUIDs; excluded transport prompt-cache key only. Instructions unchanged.
-Complexity guard passes with no increased debt; normalize the existing request
-signal once rather than introduce another dispatch abstraction.
+Nine new production-tool real-model journeys cover app unreachable, band
+unavailable, recent/stale Health contact, shared group contact, WHOOP/Garmin
+wrist offers, unknown ownership and a declined offer. Offers preserve exactly
+one requested reminder and produce no wrist command, including when the saved
+reminder fires. WHOOP ownership and prior decline are also tested from saved
+context. The model never infers sync success or app closure from contact alone.
 
-Independent native review found no concrete issue. User-requested Opus review,
-remaining group consent fixtures, final external review, CI, deployment, and
-physical presence verification are pending. Physical effects require the
-authorized member journey; synthetic tests never vibrate hardware.
+Complete initial provider input: direct 33,938 -> 34,287 o200k tokens
+(156,655 -> 158,458 bytes); group 29,012 -> 29,017 tokens
+(131,894 -> 131,896 bytes). Identical synthetic fixtures, normalized temporary
+paths/UUIDs, transport prompt-cache key excluded. Instructions unchanged.
+
+Native counterpart: 326 full-suite simulator tests plus one API heartbeat test,
+light/dark rendered proof, XcodeGen, SwiftFormat lint and signed iPhone build.
+No automated physical buzz or Stop. Independent native review completed.
+
+## Opus review dispositions
+
+Claude Opus 5.5 reviewed the backend/native patch and the corrections. Accepted:
+use the existing member/consent error handler for heartbeat failures; avoid
+initial active-scene duplicate work and duplicate background reports; disclose
+app contact on the Web sharing page; restrict contact metadata to model-facing
+group reads; use an explicit wearable-kind allowlist; retire stale foreground
+leases after a newer background report; clarify read-only tool failure hints.
+Follow-up confirmed those corrections and exposed a test fixture expectation,
+which was corrected. Prior-context ownership/decline proof was strengthened.
+
+Do not add a new consent date gate: the requested outcome explicitly includes
+existing authorized Apple Health metric sharing. Do not collapse the optional
+contact transaction into the required health read: metadata failure should not
+block health data, and current authority is revalidated. Do not add cross-phone
+lease takeover for the existing bounded re-registration delay. Garmin may sound
+and is never advertised as silent. Tiny cross-server clock skew can briefly
+classify contact as stale; contact remains advisory.
+
+## Remaining rollout
+
+Final external review and exact-head CI, additive Web migration/routes, hosted
+runtime deployment, compatible native install and physical presence verification.
+The authorized member sends any real message-to-buzz request; synthetic checks
+never vibrate hardware. Background execution remains opportunistic.

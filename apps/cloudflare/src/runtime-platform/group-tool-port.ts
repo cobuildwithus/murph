@@ -108,7 +108,7 @@ function encodeHostedRuntimeGroupToolRequest(
         [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
           HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
       }
-     : request.action === "read_shared" ? { ...request, includeCompanionPresence: true } : request;
+    : request;
 }
 
 function isHostedReplaySafeGroupToolRequest(

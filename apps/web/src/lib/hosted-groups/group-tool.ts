@@ -1,5 +1,5 @@
 import "server-only";
-import { sharesCompanionContact } from "./shared-companion-presence";
+import { sharesCompanionContact } from "@murphai/hosted-execution/vault-share";
 
 import { readHostedGroupSharedDataWithFreshness } from "./shared-freshness";
 

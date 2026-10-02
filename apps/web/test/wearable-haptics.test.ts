@@ -50,6 +50,16 @@ describe("wearable command admission and claims", () => {
     tx.hostedMember.findUniqueOrThrow.mockResolvedValue({ companionLastContactAt: new Date(), companionLastForegroundAt: new Date(Date.now() - 1_000) });
     expect(await send({ ...request, includeAvailability: true })).toMatchObject({ unavailableReason: "app_unreachable" });
   });
+  it("retires a foreground lease on newer background contact but accepts a newer lease", async () => {
+    const { sessions, tx } = store();
+    const now = Date.now();
+    const modernStatus: WearableHapticRequest = { ...request, includeAvailability: true, request: { ...request.request, operation: "status" } };
+    tx.hostedMember.findUniqueOrThrow.mockResolvedValue({ companionLastContactAt: new Date(now - 1_000), companionLastForegroundAt: new Date(now - 3_000) });
+    sessions.findUnique.mockResolvedValue({ sessionId, expiresAt: new Date(now + 18_000) });
+    expect(await send(modernStatus)).toMatchObject({ status: "unavailable", unavailableReason: "app_unreachable" });
+    sessions.findUnique.mockResolvedValue({ sessionId, expiresAt: new Date(now + 20_000) });
+    expect(await send(modernStatus)).toMatchObject({ status: "ready" });
+  });
   it.each(["whoop", "garmin"] as const)("queues one immediate command for %s and deduplicates a lost response", async (wearable) => {
     const { commands } = store();
     const value = { ...request, request: { ...request.request, wearable } };

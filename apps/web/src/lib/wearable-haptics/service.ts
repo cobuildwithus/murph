@@ -1,5 +1,5 @@
 import "server-only";
-import { COMPANION_FOREGROUND_TTL_MS } from "@murphai/hosted-execution/companion-presence";
+import { COMPANION_FOREGROUND_TTL_MS, type CompanionPresence } from "@murphai/hosted-execution/companion-presence";
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import {
@@ -46,6 +46,15 @@ async function requireHapticAuthority(tx: Prisma.TransactionClient, memberId: st
   if (!authority || !direct) throw new TypeError("Wrist reminders require current private member input.");
 }
 
+function isWearableSessionReady(session: { expiresAt: Date } | null, presence: CompanionPresence, now: Date): session is { expiresAt: Date } {
+  if (!session || session.expiresAt <= now) return false;
+  // A background report retires an older foreground lease. A newer lease still
+  // works for legacy apps and after returning to the foreground.
+  const backgroundAt = presence.lastContactAt !== presence.lastForegroundAt
+    ? Date.parse(presence.lastContactAt ?? "") : NaN;
+  return !(backgroundAt >= session.expiresAt.getTime() - WEARABLE_SESSION_TTL_MS);
+}
+
 export async function requestWearableHaptic(input: {
   memberId: string;
   runtimeIdentity: HostedRuntimeIdentity | null;
@@ -60,20 +69,20 @@ export async function requestWearableHaptic(input: {
     const session = await tx.companionWearableSession.findUnique({
       where: { userId_wearable: { userId: input.memberId, wearable } },
     });
-    const ready = session !== null && session.expiresAt > now;
+    const presence = await readCompanionPresenceTx(tx, input.memberId, now);
+    const ready = isWearableSessionReady(session, presence, now);
     const response = (status: WearableHapticResponse["status"], reason?: string | null): WearableHapticResponse => ({
       action: "haptic", wearable, operation, status,
       ...(status === "unavailable" && reason && input.request.includeAvailability
         ? { unavailableReason: wearableUnavailableReasonSchema.parse(reason) } : {}),
     });
-    const unavailableReason = async () => {
-      const presence = await readCompanionPresenceTx(tx, input.memberId, now);
+    const unavailableReason = () => {
       const foregroundAt = presence.lastForegroundAt ? Date.parse(presence.lastForegroundAt) : NaN;
       return presence.lastContactAt === presence.lastForegroundAt
         && foregroundAt <= now.getTime() && now.getTime() - foregroundAt < COMPANION_FOREGROUND_TTL_MS
         ? "device_disconnected" as const : "app_unreachable" as const;
     };
-    if (operation === "status") return response(ready ? "ready" : "unavailable", ready ? null : await unavailableReason());
+    if (operation === "status") return response(ready ? "ready" : "unavailable", ready ? null : unavailableReason());
     const id = wearableCommandId(input.memberId, input.request);
     const previous = await tx.companionWearableCommand.findUnique({ where: { id } });
     if (previous) {
@@ -93,7 +102,7 @@ export async function requestWearableHaptic(input: {
     }
     const occupied = pending.some((command) => operation === "buzz" || command.operation === "stop");
     const status = ready && !occupied ? "queued" : "unavailable";
-    const reason = status === "unavailable" ? (ready ? "busy" : await unavailableReason()) : null;
+    const reason = status === "unavailable" ? (ready ? "busy" : unavailableReason()) : null;
     await tx.companionWearableCommand.create({ data: {
       id, userId: input.memberId, wearable, operation, status, unavailableReason: reason,
       sessionId: ready ? session.sessionId : null,

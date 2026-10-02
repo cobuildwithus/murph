@@ -1,16 +1,10 @@
 import "server-only";
 import type { PrismaClient } from "@prisma/client";
-import { isHostedVaultShareRecentDateProjectionKind, type HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
+import { sharesCompanionContact, type HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
 import { HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS } from "@murphai/hosted-execution/runtime-control";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import { hostedHealthDataConsentNotRevokedWhere } from "../legal/consent";
-
-const nutrition = new Set(["protein-days.v0", "calories-days.v0", "carbs-days.v0", "fat-days.v0", "fiber-days.v0"]);
-
-export function sharesCompanionContact(kind: HostedVaultShareProjectionKind): boolean {
-  return kind === "device-sync-status.v0" || (isHostedVaultShareRecentDateProjectionKind(kind) && !nutrition.has(kind));
-}
 
 /** Shared source freshness only; account details and private diagnostics stay private. */
 export async function readSharedCompanionContact(input: {
