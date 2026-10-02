@@ -922,3 +922,8 @@ Clinical raw validation repair plan: [`2026-09-29-frog-3895-clinical-validation.
 
 Mailbox startup dependency reduction and single-query ingress context proof are tracked in
 [mailbox startup simplification](exec-plans/completed/2026-09-30-mailbox-startup-simplification.md).
+
+Private scheduled phone-call guidance, authenticated Linq sender context, and
+live setup-to-due proof are recorded in
+[`scheduled phone calls`](exec-plans/completed/2026-10-01-scheduled-phone-calls.md);
+`ARCHITECTURE.md` and the phone-calls skill own the current contract.

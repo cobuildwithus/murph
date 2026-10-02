@@ -399,6 +399,7 @@ describe("hosted mailbox conversation import adapter", () => {
       partCount: 2,
       reactionEligible: false,
       replyToMessageId: null,
+      senderHandle: "redacted-contact-sentinel",
       service: null,
     });
     assert.ok(replyTarget);
@@ -3043,6 +3044,7 @@ describe("hosted mailbox conversation import adapter", () => {
       partCount: 1,
       reactionEligible: false,
       replyToMessageId: "msg_murph_123",
+      senderHandle: "buddy@example.test",
       service: "iMessage",
     });
     assert.equal(JSON.stringify(event).includes(groupReactionContext), false);
@@ -3150,6 +3152,39 @@ describe("hosted mailbox conversation import adapter", () => {
       false,
     );
   });
+
+  test.each(["+12125550123", "member@example.test", null])(
+    "preserves private Linq sender contact context: %s", async (senderHandle) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-private-sender-"));
+      tempRoots.push(vaultRoot);
+      const decodedWake = createConversationWake({ message: {
+        channel: "linq", phoneLookupKey: "synthetic-private-lookup",
+        linqMessage: {
+          chatId: "synthetic-private-chat", from: senderHandle ?? "",
+          isFromMe: false, messageId: "synthetic-private-message",
+          parts: [{ type: "text", value: "Call me tomorrow." }],
+          service: "iMessage", threadIsDirect: true,
+        },
+      } });
+      await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          throw new HostedConversationInboxProjectionError("Synthetic projection unavailable");
+        },
+        async prepareWakeContext() {},
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: decodedWake.eventId, id: "synthetic-private-mailbox",
+        }),
+        runtime: createRuntime(), vaultRoot,
+      });
+      const event = (await listAssistantInputEvents({ vault: vaultRoot })).events[0];
+      expect(event?.sourceMetadata).toMatchObject({
+        kind: "linq", senderHandle, externalThreadRouteAuthorityPresent: false,
+      });
+      expect(event?.conversation?.threadId).toMatch(HASHED_IDENTIFIER_PATTERN);
+      expect(event?.conversation?.threadIsDirect).toBe(true);
+    },
+  );
 
   test("keeps direct Telegram threads free of group sender attribution", async () => {
     const parentRoot = await mkdtemp(

@@ -1452,6 +1452,17 @@ replayed votes must not produce a second announcement.
 
 ## Hosted Phone Calls
 
+Explicit private phone-call reminders reuse canonical automations. Their saved
+instructions carry the member-approved destination, call goal and disclosure
+bounds; the private Linq or Telegram route carries status and results rather
+than restricting the action to a message. Due turns use the existing exact
+occurrence phone-call authority and occurrence request key, with no fresh input
+or extra consent turn. Direct Linq imports retain the authenticated sender handle in existing source
+metadata, so the accepted input renders its phone number for "call me" without
+requiring repetition. Email handles and opaque identifiers are not phone numbers.
+Unknown destinations are resolved before saving; scheduled
+group and email turns remain ineligible.
+
 Outbound hosted phone calls are a web-owned Retell side effect reached through
 one bounded hosted runtime port. The assistant may expose
 `murph.create_phone_call` only when a hosted phone-call port is present, and

@@ -1088,3 +1088,63 @@ describe('native poll input measurement', () => {
     },
   )
 })
+
+describe('scheduled call input measurement', () => {
+  it.skipIf(process.env.MURPH_MEASURE_SCHEDULED_CALL_INPUT !== '1').each(['direct', 'group'] as const)(
+    'scheduled calls: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const measurements = []
+      for (const phase of ['base', 'head'] as const) {
+        const layers = buildAssistantSystemPromptLayers({
+          assistantCliContract: null, assistantHostedAutomationAvailable: true,
+          assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: scope, currentLocalDate: '2030-04-01',
+          currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+        })
+        let developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+        let tools: readonly AssistantProviderDynamicTool[] = resolveMurphDynamicTools({
+          allowFinishWithoutReply: true, automationAvailable: true, phoneCallsAvailable: true,
+          groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+        })
+        // Exact base b0d5cb5ac7 ablation: remove only this PR's guidance and
+        // direct sender line. All other composed provider input is identical.
+        if (phase === 'base') {
+          developerInstructions = developerInstructions.replace(/^- In private Linq or Telegram conversations, an explicitly requested phone-call reminder is supported:.*\n/mu, '')
+          tools = tools.map(tool => tool.name === 'create_phone_call' ? { ...tool,
+            description: tool.description.replace(/Private Linq and Telegram scheduled occurrences may place one call.*?Scheduled group and email calls are unavailable\. /u, ''),
+          } : tool)
+        }
+        const sender = phase === 'head' || scope === 'group' ? 'Sender: +12125550123\n\n' : ''
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          developerInstructions, dynamicTools: tools,
+          prompt: [layers.dynamicTurnContextPrompt, sender + 'Message text:\nCould you call me tomorrow at 10:20 AM Eastern to remind me to collect the museum tickets?'].join('\n\n'),
+          groupConversation: scope === 'group',
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        measurements.push({ phase, bytes: Buffer.byteLength(JSON.stringify(body)),
+          toolsBytes: Buffer.byteLength(JSON.stringify(tools)), instructionsBytes: Buffer.byteLength(developerInstructions),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])] })
+      }
+      process.stdout.write('[scheduled-call-input-proof] ' + JSON.stringify({ scope, measurements,
+        tokens: null, tokenLimitation: 'No exact Sol tokenizer configured; bytes cover the complete captured provider input.',
+      }) + '\n')
+    },
+  )
+})
