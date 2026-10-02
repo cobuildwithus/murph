@@ -3,8 +3,8 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
-Garmin optional empty-window acceptance, required connection/cleanup, and
-conditional canonical proof are tracked in
+Garmin real connection/cleanup and signed synthetic delivery-to-vault proof
+are tracked in
 [`Garmin canary data`](exec-plans/active/2026-10-01-garmin-vault-proof.md).
 
 Wearable canary credential binding and fresh browser verification are tracked in

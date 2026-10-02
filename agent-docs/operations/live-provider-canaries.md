@@ -3,9 +3,8 @@
 Last verified: 2026-09-17
 
 A passing live canary means its actual journey and business assertions completed.
-A successful scheduler, skipped job, or unavailable credential is not equivalent
-evidence. Garmin permits an explicitly unverified ingestion outcome when its
-provider window stays empty; that result proves connection and cleanup only. GitHub completion timestamps identify the
+A successful scheduler, skipped job, connection-only result, or unavailable
+credential is not equivalent evidence. GitHub completion timestamps identify the
 age of an executed run; this system adds no product-state receipt database.
 
 ## Existing journeys
@@ -69,35 +68,26 @@ age of an executed run; this system adds no product-state receipt database.
   ordinary browser/application clocks remain unchanged. Cleanup waits for clock
   settlement before deleting dependent objects, and failed clocks cannot be
   silently abandoned as successful cleanup.
-- Garmin uses actual positive completed-day provider activity, with an initially
-  empty canonical steps view. The browser stays connected while the ordinary
-  callback-owned Temporal/runtime pipeline imports data. Provider day/value/unit
-  and Garmin activity-summary provenance must match canonical query output.
-  Empty provider reads are retried within the existing bounded deadline so the
-  initial provider pull can finish. Successful empty reads through the deadline
-  yield `dataOutcome: no_provider_data`, with an ingestion-unverified warning.
-  That outcome refers only to the selected activity window and does not establish
-  ingestion. Any nonempty response still requires a canonical match, including
-  malformed or ineligible records. Provider/status errors, request timeouts, and
-  caller cancellation fail; only deadline expiration between successful reads
-  can establish the empty outcome. The test invents no samples and forces no
-  ensure-processing call. Both outcomes require UI disconnect and final owned
-  cleanup before writing the version-2 private receipt. `dataOutcome: matched`
-  proves pull and canonical ingestion, not provider webhook delivery. The proof uses positive steps from the fourteen
-  completed UTC days ending two days before the run; today's activity alone
-  does not satisfy this stable-value comparison.
-  Unmatched-data diagnostics classify the already-fetched historical request
-  range relative to that oracle window and whether the provider reports any
-  days with data. Range overlap describes a request, not delivered coverage;
-  reported data cannot certify canonical ingestion. Output contains only closed
-  categories, never raw dates, counts, errors, account IDs, or health values.
-  The same unmatched-data diagnostic reads the requested user's Garmin connection
-  permissions: resource authorization and whether required scopes are granted,
-  denied, absent, or unknown. This distinguishes authorization from inventory
-  presence. Scope names and connection payloads never leave the process. The
-  extra connection read uses one attempt with an eight-second request limit;
-  all six diagnostic queries share the existing ten-second deadline. Permissions
-  and historical metadata cannot certify a canonical match.
+- Garmin requires real provider login, callback completion, persisted connection
+  reload, and cleanup. The scheduled private executor selects
+  `MURPH_E2E_JUNCTION_WEARABLE_DATA=synthetic_webhook` to replace asynchronous
+  Garmin delivery with a signed synthetic activity sent to the harness's local
+  public Junction webhook route. An ephemeral harness-only signing secret
+  exercises normal signature verification. The existing control plane, managed
+  Temporal worker, importer, canonical mutation path, replica publication, and
+  encrypted member readback remain real. No direct vault writes or forced wakes
+  are used. The initial canonical steps view must be empty; success requires a
+  fresh replica with the fixture's day/value/unit and Garmin activity-summary
+  provenance, followed by UI disconnect and final provider cleanup.
+  The version-3 private receipt uses `dataOutcome: synthetic_webhook_matched`;
+  output explicitly identifies synthetic delivery. It does not prove live Garmin
+  delivery latency or live upstream data availability. Missing persisted data,
+  malformed proof, auth failure, cancellation, and cleanup failure still fail.
+  Optional manual mode `MURPH_E2E_JUNCTION_WEARABLE_DATA=1` retains the strict
+  independent live-provider oracle and bounded closed-category diagnostics.
+  That mode requires a real provider/canonical match and writes a version-2
+  `matched` receipt. Empty live provider reads still fail. Both modes require
+  sole Garmin selection, sandbox authority, and the real managed private worker.
 
 
 ## Garmin execution boundary
@@ -125,17 +115,16 @@ runner, a fresh provider browser without saved login state, and sandbox provider
 authority. Its
 new `junction-wearable-canary` Environment must be separately provisioned by an
 authorized operator with the existing dedicated sandbox credentials. Local
-agents must not retrieve or copy those credentials. Missing configuration fails closed. A successful empty provider result is
-reported separately from matched canonical data.
+agents must not retrieve or copy those credentials. Missing configuration fails closed. The synthetic-delivery result is explicit;
+empty provider results cannot establish canonical persistence.
 
 ## Safe rollout and recovery
 
-1. Land the private receipt reader before the public producer. The reader
-   accepts the deployed version-1 matched receipt and version-2 `matched` or
-   `no_provider_data` outcomes; it rejects bare connection receipts and extra
-   provider fields. Empty-data outcomes emit a warning and never claim ingestion.
-   Then land the public version-2 producer. Rolling the reader back requires
-   rolling back the producer first; old readers reject version-2 receipts.
+1. Land public synthetic-mode support while the private executor still uses the
+   existing strict live-data mode. Then enable the private synthetic workflow
+   together with its version-3 receipt reader. The reader retains legacy matched
+   receipts and rejects empty/connection-only proof. To roll back public support,
+   first restore the private workflow's live-data mode.
 2. Let every prior provider-bearing public Garmin run finish naturally before
    the first private provider run. Cross-repository concurrency group names alone
    do not serialize an old public executor with the new private executor.

@@ -100,6 +100,7 @@ export function formatLiveGarminDataFailure(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   return [
     "MURPH_E2E_GARMIN_CANONICAL_DATA_MISSING",
+    "MURPH_E2E_GARMIN_SYNTHETIC_DELIVERY_PROOF_FAILED",
     "MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING",
   ].includes(message) ? message : "MURPH_E2E_GARMIN_DATA_PROOF_FAILED";
 }
@@ -112,7 +113,7 @@ export async function waitForLiveGarminCanonicalData(input: {
   scenario: GarminCanaryScenario;
   signal: AbortSignal;
   timeoutMs: number;
-}): Promise<"matched" | "no_provider_data"> {
+}): Promise<"matched"> {
   const deadline = Date.now() + input.timeoutMs;
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(input.timeoutMs)]);
   const closedDay = new Date();
@@ -124,13 +125,10 @@ export async function waitForLiveGarminCanonicalData(input: {
   let nextProviderRead = 0;
   let providerUserId: string | null = null;
   let observedProviderData = false;
-  let completedProviderRead = false;
-  let requestPending = false;
 
   try {
     while (Date.now() < deadline) {
       signal.throwIfAborted();
-      requestPending = true;
       if (Date.now() >= nextProviderRead) {
         providerUserId ??= (await input.client.resolveUser(input.clientUserId, { signal }))?.userId ?? null;
         if (!providerUserId) throw new Error("MURPH_E2E_GARMIN_PROVIDER_USER_MISSING");
@@ -148,47 +146,38 @@ export async function waitForLiveGarminCanonicalData(input: {
         });
         signal.throwIfAborted();
         // An empty response can precede Junction's initial provider pull.
-        // Keep polling through the deadline before reporting an empty window.
+        // Keep polling within the same deadline; only a canonical match passes.
         expected = readGarminStepExpectations(records, window);
         observedProviderData ||= records.length > 0;
-        completedProviderRead = true;
         nextProviderRead = Date.now() + 15_000;
       }
       const status = parseHostedRunnerStatusResponse(await input.scenario.harness.requestJson<unknown>(
         `${buildCloudflareHostedControlUserStatusPath(input.memberId)}?logLimit=0`,
         { headers: { [HOSTED_EXECUTION_USER_ID_HEADER]: input.memberId }, signal },
       ));
-      signal.throwIfAborted();
       const ref = status.workspace?.browserVaultReplicaRef;
       if (expected.length > 0 && ref && Date.parse(ref.generatedAt) >= input.notBefore) {
         const replica = await readCanaryBrowserVaultReplica({ ...input, ref, signal });
         if (hasCanonicalGarminSteps(replica, expected)) return "matched";
       }
-      requestPending = false;
       await delay(3_000, undefined, { signal });
     }
   } catch {
     // Provider payloads, canonical health values, status logs and crypto errors
     // must never become CI output, including through an exception cause.
-    // Only expiration between successful reads can establish an empty window.
-    // Request timeouts and caller cancellation are never empty-data evidence.
-    if (!signal.aborted || input.signal.aborted || requestPending) {
-      throw new Error("MURPH_E2E_GARMIN_DATA_PROOF_FAILED");
-    }
+    if (!signal.aborted) throw new Error("MURPH_E2E_GARMIN_DATA_PROOF_FAILED");
   }
   if (providerUserId && !input.signal.aborted) {
     console.info(`MURPH_E2E_GARMIN_PROVIDER_DIAGNOSTICS=${await readLiveGarminProviderDiagnosticsForLog({
       client: input.client, userId: providerUserId, signal: input.signal, window,
     })}`);
   }
-  if (input.signal.aborted) throw new Error("MURPH_E2E_GARMIN_DATA_PROOF_FAILED");
-  if (completedProviderRead && !observedProviderData) return "no_provider_data";
   throw new Error(observedProviderData
     ? "MURPH_E2E_GARMIN_CANONICAL_DATA_MISSING"
     : "MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING");
 }
 
-async function readCanaryBrowserVaultReplica(input: {
+export async function readCanaryBrowserVaultReplica(input: {
   memberId: string;
   ref: HostedBrowserVaultReplicaRef;
   scenario: GarminCanaryScenario;
