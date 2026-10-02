@@ -3533,6 +3533,9 @@ text(result.output);
     )
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      // Match the hosted runtime and other native shell fixtures. OS sandbox
+      // enforcement has its own Linux-capable runner; this proves delegation.
+      sandbox: 'danger-full-access',
       configOverrides: await readHostedDelegationHintOverrides(),
       baseInstructions: 'Follow the task and tools. Preserve scope and privacy.',
       developerInstructions: buildScriptedHostedSystemPrompt('direct') + '\n' + snapshotSentinel,

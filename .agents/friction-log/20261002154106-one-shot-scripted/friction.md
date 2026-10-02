@@ -22,3 +22,22 @@ In the fresh Sol child scripted-runtime test, delay the child's final local resp
 ## Context
 
 Runtime PR CI failed this proof under load although focused local runs passed. This entry records a fixture scheduling defect, not a production provider outage.
+
+## Follow-up Evidence
+
+The bounded wait correction alone did not resolve Linux CI. The full scripted
+file passed locally with V8 coverage and the CI worker setting. Separately,
+injecting a failed native child shell command reproduced the later failure:
+the first unmatched child request lacked the expected read result while parent
+wait responses were still available. The resulting local HTTP 500 retries then
+exhausted those waits and surfaced as the same generic high-demand error.
+
+The new native shell fixture retained the shared helper's workspace-write mode,
+whereas neighboring native shell fixtures and the hosted default explicitly use
+danger-full-access. The dedicated Linux permission workflow enables the needed
+namespace support; generic coverage CI does not. Align the synthetic delegation
+fixture with the hosted default, retaining its read-result and isolation checks.
+The Linux sandbox explanation is inferred from these configuration differences;
+no native CI trace was retained to prove the exact shell error. Add one bounded,
+structural unmatched-request diagnostic so future failures expose matcher and
+fixed error-category evidence without raw requests, outputs, or identifiers.
