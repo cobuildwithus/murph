@@ -3492,6 +3492,11 @@ text(result.output);
     const snapshotSentinel = 'PARENT_SNAPSHOT_ONLY_cobalt_kite'
     const childResult = 'The blue parcel weighs 7 kilograms.'
     const childUsages: unknown[] = []
+    let releaseChildCompletion!: () => void
+    const childCompletionGate = new Promise<void>((resolve) => {
+      releaseChildCompletion = resolve
+    })
+    let parentWaitCount = 0
     await writeFile(path.join(scenario.turnInput.workingDirectory, 'parcel.txt'), childResult)
     scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
     scenario.stub.queue(
@@ -3508,14 +3513,22 @@ text(result.output);
         customToolCall: { name: 'exec', input: 'text(await tools.exec_command({cmd: "cat parcel.txt", max_output_tokens: 100}));' },
       },
       {
+        beforeRespond: () => childCompletionGate,
         requestIncludes: ['Message Type: NEW_TASK', childResult],
         requestExcludes: [historySentinel, snapshotSentinel],
         text: childResult,
       },
-      {
-        requestIncludes: [historySentinel], requestExcludes: ['Message Type: FINAL_ANSWER'],
+      // Native waits can time out or wake before the child finishes. Keep a
+      // bounded scripted wait loop, and force one timeout to prove this path.
+      // A one-shot response instead makes the local provider return HTTP 500.
+      ...Array.from({ length: 6 }, (): ScriptedResponse => ({
+        beforeRespond: async () => {
+          parentWaitCount += 1
+          if (parentWaitCount === 2) releaseChildCompletion()
+        },
+        requestIncludes: [historySentinel], requestExcludes: [childResult],
         functionCall: { namespace: 'collaboration', name: 'wait_agent', arguments: { timeout_ms: 10000 } },
-      },
+      })),
       { requestIncludes: [historySentinel, childResult], text: childResult },
     )
     const result = await executeCodexAppServerTurn({
@@ -3530,6 +3543,10 @@ text(result.output);
     })
     expect(result.finalMessage).toBe(childResult)
     const requests = scenario.stub.requestSummariesSinceBaseline()
+    expect(parentWaitCount).toBeGreaterThanOrEqual(2)
+    expect(requests.some((request) => request.functionCallOutputs?.some((output) =>
+      output.includes('"timed_out":true'),
+    ))).toBe(true)
     const children = requests.filter((request) => request.model === 'gpt-6.1-sol')
     expect(children).toHaveLength(2)
     for (const request of children) {
