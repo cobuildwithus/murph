@@ -1465,6 +1465,7 @@ describe("murph.group dynamic tool", () => {
       nextUsageOrdinal: () => 1, progressDelivery: null, request, vaultRoot: null,
     });
     expect(groupSharedReadRequest).toHaveBeenCalledExactlyOnceWith({
+      includeCompanionPresence: true,
       projectionScopes: args.projectionScopes, participantId: args.participantId, history: args.history,
     });
   });
@@ -1511,7 +1512,7 @@ describe("murph.group dynamic tool", () => {
       env: {}, fetchImpl: fetch, hostedToolContext: createGroupHostedToolContext({ groupSharedReadRequest, groupToolAvailable: false }),
       nextUsageOrdinal: () => 1, progressDelivery: null, request, vaultRoot: null,
     });
-    expect(groupSharedReadRequest).toHaveBeenCalledWith({ projectionScopes, freshness });
+    expect(groupSharedReadRequest).toHaveBeenCalledWith({ includeCompanionPresence: true, projectionScopes, freshness });
     expect(readGroupToolPayload(result)).toMatchObject({ result: { freshness: metadata } });
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.inputSchema.properties).toHaveProperty("freshness");
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties).not.toHaveProperty("freshness");
@@ -1746,6 +1747,7 @@ describe("murph.group dynamic tool", () => {
 
     expect(result.rpcResult.success).toBe(true);
     expect(groupSharedReadRequest).toHaveBeenCalledWith({
+      includeCompanionPresence: true,
       projectionScopes: [
         { projectionKind: "steps-days.v0" },
         { projectionKind: "device-sync-status.v0" },

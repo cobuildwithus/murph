@@ -402,8 +402,8 @@
       "@murphai/device-syncd/types": [
         "../../packages/device-syncd/src/types.ts"
       ],
-      "@murphai/vault-usecases/clinical-records": [
-        "../../packages/vault-usecases/src/clinical-records.ts"
+      "@murphai/hosted-execution/companion-presence": [
+        "../../packages/hosted-execution/src/companion-presence.ts"
       ],
       "@murphai/hosted-execution/wearable-haptics": [
         "../../packages/hosted-execution/src/wearable-haptics.ts"

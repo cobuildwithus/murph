@@ -1,3 +1,4 @@
+import type { CompanionPresence } from "@murphai/hosted-execution/companion-presence";
 import type { WearableHapticRequest, WearableHapticResponse } from "@murphai/hosted-execution/wearable-haptics";
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type {
@@ -565,6 +566,7 @@ export type HostedRuntimeEffectsPort = HostedRuntimeEffectsPortBase;
 export type HostedRuntimeDeviceSyncMessagingReturnTarget = "imessage" | "telegram";
 
 export interface HostedRuntimeDeviceSyncPort {
+  companionStatus?(input: { signal?: AbortSignal | null }): Promise<CompanionPresence>;
   haptic?(input: WearableHapticRequest & { signal?: AbortSignal | null }): Promise<WearableHapticResponse>;
   applyUpdates(input: {
     occurredAt?: string | null;

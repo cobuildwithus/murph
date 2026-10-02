@@ -1,4 +1,5 @@
 import "server-only";
+import { sharesCompanionContact } from "@murphai/hosted-execution/vault-share";
 
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -451,9 +452,12 @@ function hostedVaultShareProjectionScopeDisplay(
   scope: HostedVaultShareProjectionScope,
 ): { description: string; label: string } {
   const display = baseHostedVaultShareProjectionScopeDisplay(scope);
-  if (!isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)) return display;
-  return {
-    ...display,
-    description: `${display.description} Includes today and the previous 89 days. Only available data is shared.`,
-  };
+  const descriptions = [display.description];
+  if (isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)) {
+    descriptions.push("Includes today and the previous 89 days. Only available data is shared.");
+  }
+  if (sharesCompanionContact(scope.projectionKind)) {
+    descriptions.push("Apple Health sharing includes when the Murph app last checked in.");
+  }
+  return { ...display, description: descriptions.join(" ") };
 }
