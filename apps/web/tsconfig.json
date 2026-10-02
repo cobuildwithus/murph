@@ -162,6 +162,9 @@
       "@murphai/hosted-execution/physical-notes": [
         "../../packages/hosted-execution/src/physical-notes.ts"
       ],
+      "@murphai/hosted-execution/usage-diagnostics": [
+        "../../packages/hosted-execution/src/usage-diagnostics.ts"
+      ],
       "@murphai/hosted-execution/plan-usage": [
         "../../packages/hosted-execution/src/plan-usage.ts"
       ],

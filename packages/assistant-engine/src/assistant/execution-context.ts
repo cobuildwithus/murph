@@ -348,6 +348,8 @@ export interface AssistantHostedActionApprovalPort {
 export interface AssistantHostedProductFeedbackCandidateSink {
   acceptProductFeedbackCandidate(
     feedback: HostedRuntimeProductFeedbackRecord,
+    // Host-created only after the exact private weekly notification commits.
+    authorization?: { committedUsageOptimizerScope: { memberId: string; occurrenceAt: string } },
   ): void
   deliverProductSupportEscalation?(
     feedback: HostedRuntimeProductFeedbackRecord,

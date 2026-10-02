@@ -3,6 +3,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
+[the remediation plan](exec-plans/active/2026-10-02-weekly-usage-review-remediation.md).
+
 Garmin real connection/cleanup and signed synthetic delivery-to-vault proof
 are tracked in
 [`Garmin canary data`](exec-plans/active/2026-10-01-garmin-vault-proof.md).

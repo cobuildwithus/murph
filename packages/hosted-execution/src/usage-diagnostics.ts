@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 import {
   ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES,
   isAssistantTurnProfileToolIdentityLabel,

@@ -1,3 +1,4 @@
+import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import { prepareAssistantFollowUpEvaluationInput } from './follow-ups.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import type {
@@ -721,7 +722,7 @@ export async function sendAssistantNotificationLocal(
             turnCreatedAt,
             turnId,
           })
-          acceptCommittedNotificationProductFeedback(executionContext, providerResult)
+          acceptCommittedNotificationProductFeedback(executionContext, providerResult, { conversationScope, messageInput })
           return withPostTurnDeliveryExpectations({
             decision,
             response: null,
@@ -843,7 +844,7 @@ export async function sendAssistantNotificationLocal(
             )
           }
 
-          acceptCommittedNotificationProductFeedback(executionContext, providerResult)
+          acceptCommittedNotificationProductFeedback(executionContext, providerResult, { conversationScope, messageInput })
           return withPostTurnDeliveryExpectations({
             decision: {
               ...decision,
@@ -946,7 +947,7 @@ export async function sendAssistantNotificationLocal(
           })
         })
 
-        acceptCommittedNotificationProductFeedback(executionContext, providerResult)
+        acceptCommittedNotificationProductFeedback(executionContext, providerResult, { conversationScope, messageInput })
         return withPostTurnDeliveryExpectations({
           decision: {
             ...decision,
@@ -970,12 +971,15 @@ export async function sendAssistantNotificationLocal(
 function acceptCommittedNotificationProductFeedback(
   executionContext: AssistantExecutionContext | null | undefined,
   providerResult: Pick<ExecutedAssistantProviderTurnResult, 'productFeedbackCandidate'>,
+  context: Omit<Parameters<typeof resolveUsageOptimizerFeedbackScope>[0], 'executionContext'>,
 ): void {
   const candidate = providerResult.productFeedbackCandidate
   const sink = executionContext?.hosted?.productFeedbackCandidateSink
   if (!candidate || !sink) return
   try {
-    sink.acceptProductFeedbackCandidate(candidate)
+    const scope = resolveUsageOptimizerFeedbackScope({ ...context, executionContext })
+    if (scope) sink.acceptProductFeedbackCandidate(candidate, { committedUsageOptimizerScope: scope })
+    else sink.acceptProductFeedbackCandidate(candidate)
   } catch {
     // Optional feedback cannot affect a committed notification turn.
   }

@@ -133,7 +133,12 @@ describe('cron notification product feedback commit boundary', () => {
     expect(result.run.outcome).not.toBe('failed')
     expect(boundary.provider.mock.calls[0]?.[0].input.scheduledInvocationAuthority?.automationId)
       .toBe(MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.automationId)
-    expect(accept).toHaveBeenCalledExactlyOnceWith(candidate)
+    expect(accept).toHaveBeenCalledExactlyOnceWith(candidate, {
+      committedUsageOptimizerScope: {
+        memberId: 'member_synthetic',
+        occurrenceAt: boundary.provider.mock.calls[0]?.[0].input.scheduledOccurrenceAt,
+      },
+    })
     expect(order.indexOf('feedback')).toBeGreaterThan(order.indexOf('commit'))
     if (kind === 'send_message') expect(order.indexOf('feedback')).toBeGreaterThan(order.indexOf('finalize'))
     else expect(boundary.deliver).not.toHaveBeenCalled()
@@ -160,14 +165,24 @@ describe('cron notification product feedback commit boundary', () => {
     expect(accept).not.toHaveBeenCalled()
     commit.resolve()
     await running
-    expect(accept).toHaveBeenCalledExactlyOnceWith(candidate)
+    expect(accept).toHaveBeenCalledExactlyOnceWith(candidate, {
+      committedUsageOptimizerScope: {
+        memberId: 'member_synthetic',
+        occurrenceAt: boundary.provider.mock.calls[0]?.[0].input.scheduledOccurrenceAt,
+      },
+    })
   })
   it('accepts once after an immediate send is finalized', async () => {
     decision = 'send_message'
     const accept = vi.fn(() => { order.push('feedback') })
     const result = await runCron(accept, false)
     expect(result.run.outcome).not.toBe('failed')
-    expect(accept).toHaveBeenCalledExactlyOnceWith(candidate)
+    expect(accept).toHaveBeenCalledExactlyOnceWith(candidate, {
+      committedUsageOptimizerScope: {
+        memberId: 'member_synthetic',
+        occurrenceAt: boundary.provider.mock.calls[0]?.[0].input.scheduledOccurrenceAt,
+      },
+    })
     expect(order).toEqual(['provider', 'commit', 'delivery', 'finalize', 'feedback'])
   })
   it('keeps an optional sink failure from undoing a committed run', async () => {

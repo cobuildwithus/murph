@@ -456,7 +456,12 @@ to apply after cutover.
   profile per returned turn and is measured in bytes, never invented token cost.
   The weekly optimizer makes bounded version-checked model-only edits and one
   member/occurrence-idempotent anonymous report; failed feedback cannot prevent
-  cron completion. Web callback consumers deploy before runtime producers;
+  cron completion. Only host-authorized, successfully committed weekly audit
+  candidates can schedule feedback without member delivery. They keep the
+  existing post-checkpoint hook active with no delivery or cleanup work; ordinary
+  feedback still requires a sent current-turn delivery. Cancellation or failure
+  before checkpoint prevents the audit callback.
+  Web callback consumers deploy before runtime producers;
   absent ports or older callback routes return unavailable without retries or
   an alternate ledger owner.
 - The operator `/ops/usage` collection is bounded independently of lifetime
