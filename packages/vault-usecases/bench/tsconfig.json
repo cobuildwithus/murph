@@ -7,5 +7,5 @@
     "incremental": false,
     "noEmit": true
   },
-  "include": ["wearable-sources.ts", "event-list.ts", "wearable-sleep.ts", "wearable-sleep-fixture.ts", "wearable-sleep.test.ts"]
+  "include": ["wearable-sources.ts", "event-list.ts", "experiment-list.ts", "experiment-list-fixture.ts", "wearable-sleep.ts", "wearable-sleep-fixture.ts", "wearable-sleep.test.ts", "experiment-list-pairs.ts"]
 }

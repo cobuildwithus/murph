@@ -170,3 +170,54 @@ reply, no unrelated data commands, no canonical writes or delivery, and no repai
 claims. The [completed verification record](../../agent-docs/exec-plans/completed/2026-09-25-event-list-candidate.md)
 contains the accepted isolated measurements and full-context live PASS with
 parent UX `Ready` review. Reruns still require inspection of the synthetic reply.
+
+## Focused experiment lists
+
+`query.listExperiments` uses query's strict experiment-family source under the
+existing reentrant canonical lock; query remains the projection owner. Status
+filtering precedes the limit and the mapper/envelope are unchanged. Selected
+source errors stay strict; unrelated malformed families do not block this list.
+
+With the supported Node runtime and installed dependencies, set BASE to a
+baseline checkout at `3d2ba92f9035ea19a3be04450517c6d7086f32d9` and CANDIDATE to
+this PR checkout, using distinct absolute paths. Copy only the three experiment
+benchmark files and bench tsconfig below into BASE; leave its runtime source
+unchanged. The existing `wearable-sleep-fixture.ts` must match in both checkouts.
+No separate baseline-proof patch is required.
+
+```sh
+for file in experiment-list.ts experiment-list-fixture.ts experiment-list-pairs.ts tsconfig.json; do
+  cp "$CANDIDATE/packages/vault-usecases/bench/$file" "$BASE/packages/vault-usecases/bench/$file"
+done
+(cd "$BASE" && pnpm --filter @murphai/vault-usecases... build)
+cd "$CANDIDATE"
+pnpm --filter @murphai/vault-usecases... build
+pnpm exec vitest run --config packages/vault-usecases/vitest.config.ts packages/vault-usecases/test/experiment-list-contract.test.ts
+pnpm --dir packages/vault-usecases typecheck
+pnpm exec tsc -p packages/vault-usecases/bench/tsconfig.json --pretty false
+pnpm --dir packages/assistant-engine typecheck
+pnpm exec vitest run --config packages/assistant-engine/vitest.config.ts packages/assistant-engine/test/assistant-codex-real-e2e.test.ts -t 'focused experiment list production contract'
+node packages/vault-usecases/bench/experiment-list-pairs.ts "$BASE" "$BASE" full > experiment-base-base.jsonl
+node packages/vault-usecases/bench/experiment-list-pairs.ts "$BASE" "$CANDIDATE" focused > experiment-pairs.jsonl
+# Only after deterministic checks/builds and review of their results:
+pnpm test:assistant:live -- --test 'real Codex focused experiment list e2e'
+```
+
+The identical harness reuses `wearable-sleep-fixture.ts`: 30 days, 3 providers,
+720 observations, 90 sleep sessions, 30 notes, plus 12 sparse/rich experiments
+covering every status and unrelated event revisions/tombstones. Each scenario
+uses a fresh process and a reset copy at one shared temporary path. Two warmup
+pairs precede seven alternating measured pairs; JIT state is isolated per process.
+Complete list/global JSON bytes,
+hashes and counts must agree; no output fields are stripped for comparison.
+Artifacts omit raw envelopes and temporary paths. They include inclusive timing
+phases, native SQLite method-call counts, bytes and min/median/max samples.
+
+Cold, 1-3 list reads, fresh-global, relevant-edit and list/global workflows expose
+both avoided and deferred work. Totals include global setup and canonical edits;
+read-only and individual-step costs are separate. Process time includes imports;
+fixture preparation is outside read timing. Fresh/repeated lists pay a canonical
+scan and lock rather than an indexed lookup. Mixed workflows still owe global
+work: do not claim a gain from the first list alone. No fresh-index extension or
+production speedup is claimed. Parent measurements and live reply review remain
+pending; the delivery plan distinguishes the prior baseline from this candidate.

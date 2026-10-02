@@ -940,6 +940,184 @@ describeRealCodex('real Codex event-list family isolation', () => {
   }, 360_000)
 })
 
+async function seedFocusedExperimentListVault(vaultRoot: string): Promise<void> {
+  await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-04-01T00:00:00Z' })
+  const { createExperiment } = await import('@murphai/core')
+  // The paused document sorts first: selection must happen before limit.
+  for (const [slug, title, startedOn, status] of [
+    ['synthetic-cold-shower', 'Cold shower', '2026-04-01', 'paused'],
+    ['synthetic-evening-walk', 'Evening walk', '2026-04-02', 'active'],
+    ['synthetic-reading', 'Reading before bed', '2026-04-03', 'active'],
+  ] as const) {
+    await createExperiment({ vaultRoot, slug, title, startedOn, status,
+      hypothesis: 'A consistent routine may help.', body: `# ${title}\n\nSynthetic saved plan.\n` })
+  }
+  const relativePath = 'bank/goals/synthetic-broken.md'
+  await mkdir(path.dirname(path.join(vaultRoot, relativePath)), { recursive: true })
+  await writeFile(path.join(vaultRoot, relativePath), '---\ntitle: Synthetic incomplete goal\n')
+  await expect(createIntegratedVaultServices().query.list({
+    vault: vaultRoot, requestId: 'synthetic-experiment-list-preflight', limit: 40,
+  })).rejects.toMatchObject({ code: 'QUERY_SOURCE_INVALID', details: {
+    querySource: true, relativePath, issue: 'frontmatter_invalid',
+  } })
+}
+
+async function buildFocusedExperimentListInstructions() {
+  const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+    workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+  })
+  expect(manifest.commands.find(command => command.name === 'experiment list')?.schema?.options?.properties)
+    .toMatchObject({ status: expect.any(Object), limit: expect.any(Object) })
+  const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+  if (!assistantCliContract) throw new Error('Expected the generated experiment CLI contract.')
+  const instructions = buildAssistantSystemPrompt({
+    assistantCliContract, assistantHostedAutomationAvailable: false,
+    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    conversationScope: 'direct', currentInstant: '2026-04-11T12:00:00.000Z',
+    currentLocalDate: '2026-04-11', currentTimeZone: 'UTC', hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+  })
+  expect(instructions).toContain(assistantCliContract)
+  for (const text of [assistantCliContract, instructions]) {
+    expect(text).toMatch(/^- `experiment`: .*`list`/mu)
+    expect(text).toContain('read `vault-cli <command> --help`')
+  }
+  return instructions
+}
+
+function expectFocusedExperimentListOutput(output: string): void {
+  if (output.trimStart().startsWith('{')) {
+    const document = readRecord(JSON.parse(output))
+    expect(document?.ok === true ? document.data : document).toMatchObject({
+      filters: { status: 'active', limit: 2 }, count: 2, nextCursor: null,
+      items: [{ title: 'Evening walk', data: { status: 'active' } },
+        { title: 'Reading before bed', data: { status: 'active' } }],
+    })
+  } else {
+    // Default TOON is not JSON. Accept its nested/table array representation.
+    expect(output).toMatch(/^\s*count: 2$/mu)
+    expect(output).toMatch(/^\s*items\[2\](?::|\{)/mu)
+    expect(output).toContain('Evening walk')
+    expect(output).toContain('Reading before bed')
+  }
+  expect(output).not.toContain('Cold shower')
+}
+
+function readFocusedExperimentListCommand(command: string): string {
+  // Same single native wrapper as the focused sleep journey; reject shell effects.
+  expect(command).not.toMatch(/[\r\n]/u)
+  const unwrapped = command.match(/^\/bin\/zsh -c '([^']+)'$/u)?.[1] ?? command
+  expect(unwrapped).toMatch(/^[ \t]*vault-cli[ \t]+experiment[ \t]+list(?:[ \t]|$)/u)
+  expect(unwrapped).not.toMatch(/[^A-Za-z0-9_= \t-]/u)
+  return unwrapped
+}
+
+describe('focused experiment list production contract', () => {
+  it('rejects unrelated commands and shell effects without rejecting native list/help', () => {
+    for (const direct of ['vault-cli experiment list --help', 'vault-cli experiment list --status active --limit=2']) {
+      expect(readFocusedExperimentListCommand(direct)).toBe(direct)
+      expect(readFocusedExperimentListCommand(`/bin/zsh -c '${direct}'`)).toBe(direct)
+    }
+    for (const command of ['vault-cli experiment update', 'vault-cli experiment list-extra',
+      'cat synthetic-source', 'vault-cli experiment list; touch synthetic-marker',
+      'vault-cli experiment list $(touch synthetic-marker)', 'vault-cli experiment list > synthetic-output',
+      'vault-cli experiment list && vault-cli event list', 'vault-cli experiment list\ncat synthetic-source']) {
+      expect(() => readFocusedExperimentListCommand(command)).toThrow()
+    }
+  })
+
+  it('assembles production instructions and reads active experiments in JSON and default TOON', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-experiment-list-contract-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    try {
+      await seedFocusedExperimentListVault(vaultRoot)
+      await buildFocusedExperimentListInstructions()
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath: path.join(root, 'commands.log'), vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const args = ['experiment', 'list', '--status', 'active', '--limit', '2']
+      expectFocusedExperimentListOutput((await execFileAsync(path.join(binDirectory, 'vault-cli'), [...args, '--format', 'json'])).stdout)
+      const toon = (await execFileAsync(path.join(binDirectory, 'vault-cli'), args)).stdout
+      expect(toon.trim()).not.toMatch(/^\{/u)
+      expectFocusedExperimentListOutput(toon)
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect((await getQueryProjectionStatus(vaultRoot)).exists).toBe(false)
+    } finally { await removeRealCodexTemporaryPaths([root]) }
+  }, 120_000)
+})
+
+describeRealCodex('real Codex focused experiment list e2e', () => {
+  it('recalls two active experiments from one real list read without unrelated reads or effects', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-experiment-list-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await seedFocusedExperimentListVault(vaultRoot)
+      const developerInstructions = await buildFocusedExperimentListInstructions()
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions,
+        // Use the production dynamic-tool contracts; no fabricated list results.
+        env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Which two experiments are active? Read my experiment list with status active and limit two, and briefly remind me of both names. No advice, other lookups, messages to anyone, or changes.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      const help = commands.filter(isRecordedVaultHelpCommand)
+      const reads = commands.filter(command => !isRecordedVaultHelpCommand(command))
+      expect(help.length).toBeLessThanOrEqual(1)
+      expect(commands.every(command => /^experiment list(?:\s|$)/u.test(command))).toBe(true)
+      expect(reads).toHaveLength(1)
+      const tokens = reads[0]!.split(/\s+/u).slice(2)
+      const options = new Map<string, string>()
+      while (tokens.length) {
+        const [flag, inline] = tokens.shift()!.split('=')
+        expect(['--status', '--limit', '--format']).toContain(flag)
+        expect(options.has(flag!)).toBe(false)
+        const value = inline ?? tokens.shift()
+        expect(value).toBeDefined()
+        options.set(flag!, value!)
+      }
+      expect(options.get('--status')).toBe('active')
+      expect(options.get('--limit')).toBe('2')
+      if (options.has('--format')) expect(['json', 'toon']).toContain(options.get('--format'))
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions).toHaveLength(commands.length)
+      for (const action of actions) {
+        if (action.kind !== 'command') throw new Error('Only the focused experiment list/help is permitted.')
+        expect(action.ok).toBe(true)
+        const command = readFocusedExperimentListCommand(action.command)
+        if (!isRecordedVaultHelpCommand(command)) expectFocusedExperimentListOutput(action.output)
+      }
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect((await getQueryProjectionStatus(vaultRoot)).exists).toBe(false)
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[focused-experiment-list-e2e] ${JSON.stringify({ scenario: 'two-active-malformed-goal', reads: reads.length, reply })}\n`)
+      expect(reply).toMatch(/evening walk/iu)
+      expect(reply).toMatch(/reading before bed/iu)
+      expect(reply).not.toMatch(/cold shower|repair|rebuild|malformed|frontmatter|QUERY_SOURCE_INVALID|bank\/|sqlite|projection|unable|cannot|can['’]t|\b(?:updated|changed|deleted|sent|scheduled)\b|\?/iu)
+      expect(reply.length).toBeLessThanOrEqual(400)
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+  }, 360_000)
+})
+
 describeRealCodex('real model canonical production journeys', () => {
   it('real model canonical meal persists across assistant restart', async () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })
