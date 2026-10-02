@@ -254,9 +254,11 @@ Deploy the Web recovery reader before enabling protected recovery workflow modes
 
 Canonical publication locks return the current row and read member existence
 from the member lock itself. These mutations retain three ordered lock queries.
-External-effect preflights use a single committed-state snapshot instead: their
-former locks ended before provider I/O and could not make the external effect
-atomic with revocation. An already admitted in-flight effect may finish; a read
+External-effect and signed callback preflights use the same single committed-state
+snapshot instead: their former locks ended before the handler or provider I/O
+and could not make subsequent work atomic with revocation. Callback handlers
+that publish canonical state still check ownership inside their own transaction.
+An already admitted in-flight effect may finish; a read
 after committed retirement or deletion is denied. Generations and workspace
 versions retain native bigint precision. Deleted members remain unauthorized
 even when cleanup retains their owner row.

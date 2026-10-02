@@ -1,4 +1,8 @@
 Native Codex patch inclusion in full review snapshots is owned by
+
+Callback preflight snapshots and shared mailbox progress reads are owned by
+`references/hosted-postgres-runtime.md` and `../apps/web/README.md`; focused proof
+is recorded in `exec-plans/completed/2026-10-02-db-pool-pressure.md`.
 [the ReviewGPT loop](operations/pr-reviewgpt-loop.md).
 
 Codex 0.160.0 reconciliation for the current PR is recorded in

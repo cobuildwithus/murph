@@ -3361,6 +3361,7 @@ async function resolveHostedMailboxEffectiveConsumedSeq(input: {
 }): Promise<bigint> {
   const now = new Date();
   const oldestRetained = await input.prisma.hostedMailboxItem.findFirst({
+    select: { laneSeq: true },
     orderBy: {
       laneSeq: "asc",
     },

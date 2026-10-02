@@ -1257,6 +1257,14 @@ Hosted AI usage metering:
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
 - Web applies the composed access-and-usage gate in runtime reconciliation and
   mailbox fetch/payload routes before exhausted work reaches the runner.
+  Reconciliation uses the existing read-first allowance gate: successful checks
+  neither lock members nor create usage periods, while denials are confirmed
+  through the mutating owner before notices or blocked decisions. Spend
+  accounting remains responsible for creating missing periods.
+  Reconciliation reads both mailbox lanes' high-water and effective consumed
+  sequences in one payload-free statement using the mailbox fetch projection's
+  existing retention and expiry predicates. Its four indexed, one-row lane
+  probes use one checkout; the system frontier retains its separate live read.
   Temporal owns only the resulting blocked orchestration facts; Cloudflare
   receives no billing or credit projection. Runtime usage is recorded after it
   exists.
