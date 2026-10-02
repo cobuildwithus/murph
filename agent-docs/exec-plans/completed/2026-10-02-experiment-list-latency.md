@@ -1,10 +1,12 @@
 # Experiment-list family-local read
 
-Status: active; local proof complete, final ReviewGPT and exact-head CI pending.
+Status: completed
 Base: `3d2ba92f9035ea19a3be04450517c6d7086f32d9` (parent-confirmed).
 Tracking: [issue #3965](https://github.com/cobuildwithus/murph/issues/3965),
-[draft PR #3969](https://github.com/cobuildwithus/murph/pull/3969).
-Parent-reported proof head: `9ab1ee8fd26787de44d024149eb6520a44565017`.
+[PR #3969](https://github.com/cobuildwithus/murph/pull/3969).
+Parent-reported local-proof head: `9ab1ee8fd26787de44d024149eb6520a44565017`.
+Review/CI input head at closeout preparation (parent-reported):
+`f6277fe27cb2d918b72ed8ad15ef3061e5c3a928`.
 
 ## Outcome and boundary
 
@@ -13,7 +15,7 @@ strict experiment-family reader under core's reentrant canonical write lock.
 Keep status-before-limit, canonical ordering, complete envelopes, error mapping
 and query ownership. No cache, schema, dependency or other reader changes.
 
-## Evidence and remaining gates
+## Evidence and completion gates
 
 - Parent established the pre-implementation integrated-service baseline on Node
   >=24 with built public entrypoints: 28 days, 3 providers, 672 observations,
@@ -24,7 +26,7 @@ and query ownership. No cache, schema, dependency or other reader changes.
 - Authored: usecase substitution, focused contracts, reusable synthetic paired
   benchmark, canonical real-Codex journey and owner/changelog documentation.
   The benchmark uses the existing sleep data factory and TypeScript bench layout.
-- Independent final focused proof, supplied by the parent for the head above:
+- Independent final focused proof, supplied by the parent for the local-proof head above:
   usecase contract 22 PASS; existing reader/lifecycle 39 PASS; query reader/lock
   18 PASS; production CLI with assembled manifest, JSON and default TOON 2 PASS;
   changelog 10 PASS. Dependency build, usecase and assistant-engine typechecks,
@@ -45,10 +47,14 @@ and query ownership. No cache, schema, dependency or other reader changes.
   metric/summary/search/publication phases disappeared from lists, not global
   reads. Measured timings, control variation and warm/mixed limitations are in
   the [usecase README](../../../packages/vault-usecases/README.md#focused-experiment-lists).
-- The results above are parent-run proof, not remote reruns. Final ReviewGPT,
-  exact-head CI after this evidence update, plan closeout and final mergeability
-  remain pending. Parent owns verification, overlap, commits and PR/CI handling.
-  Keep this plan active; no merge, deploy or production operations are authorized.
+- The results above are parent-run local proof, not remote reruns.
+  [PR #3969](https://github.com/cobuildwithus/murph/pull/3969) is authoritative
+  for the validated final ReviewGPT result, required finding disposition,
+  exact-head CI (including any closeout head) and final mergeability.
+  Archiving this local-proof record does not assert those gates passed or
+  authorize merge, deploy or production operations.
 
 Changelog: updated, `2026-10-01 / focused-experiment-lists`, source PR #3969;
 no numeric production speed claim or new visual.
+Updated: 2026-10-01
+Completed: 2026-10-01

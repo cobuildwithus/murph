@@ -242,6 +242,9 @@ was added. Step wall includes actual public-service imports and native-call
 observation, excludes fixture setup and process launch, and is distinct from
 separately reported process wall. These synthetic results show neither a precise
 production speedup nor smaller results or a mixed-workflow gain. Focused local
-checks and live reply review passed; final ReviewGPT, exact-head CI, plan closeout
-and final mergeability remain pending in the
-[active plan](../../agent-docs/exec-plans/active/2026-10-02-experiment-list-latency.md).
+checks and live reply review passed; see the
+[completed plan](../../agent-docs/exec-plans/completed/2026-10-02-experiment-list-latency.md)
+for implementation and local proof.
+[PR #3969](https://github.com/cobuildwithus/murph/pull/3969) owns final ReviewGPT,
+required finding disposition, exact-head CI (including any closeout head) and
+final mergeability. Local proof does not establish completion of those gates.

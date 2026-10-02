@@ -92,6 +92,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   else {
     assert.equal(mode, "trial");
     assert.ok(scenario && Object.hasOwn(experimentScenarios, scenario));
-    console.log(JSON.stringify(await runExperimentTrial(vault, scenario as ExperimentScenario)));
+    const report = await runExperimentTrial(vault, scenario as ExperimentScenario);
+    console.log(JSON.stringify(report));
   }
 }

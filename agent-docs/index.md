@@ -3,9 +3,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
-Experiment-list family-local read implementation and open empirical gates are
-tracked in [the latency plan](exec-plans/active/2026-10-02-experiment-list-latency.md).
-The durable contract and runnable proof commands remain in
+Experiment-list family-local read implementation and local proof are recorded in
+[the completed latency plan](exec-plans/completed/2026-10-02-experiment-list-latency.md).
+[PR #3969](https://github.com/cobuildwithus/murph/pull/3969) owns final review,
+required finding disposition and exact-head CI evidence. The durable contract
+and runnable proof commands remain in
 [`packages/vault-usecases/README.md`](../packages/vault-usecases/README.md#focused-experiment-lists).
 
 Wearable canary credential binding and fresh browser verification are tracked in
