@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
 import type { JunctionClient } from "@murphai/device-syncd/providers/junction-client";
@@ -19,7 +19,7 @@ export function buildSyntheticGarminActivity(now: Date) {
     date: `${date}T00:00:00.000Z`,
     id: `synthetic-garmin-${randomUUID()}`,
     source: { provider: "garmin", type: "watch" },
-    steps: 4321,
+    steps: randomInt(2000, 20000),
     timezone_offset: 0,
   };
 }
@@ -64,6 +64,22 @@ export async function proveSyntheticGarminDelivery(input: {
       webhookSecret: input.webhookSecret,
     });
     webhook.headers.set("content-type", "application/json");
+    const expected = [{ date: record.calendar_date, value: record.steps }];
+    const readReplicaRef = async () => {
+      const status = parseHostedRunnerStatusResponse(await input.scenario.harness.requestJson<unknown>(
+        `${buildCloudflareHostedControlUserStatusPath(input.memberId)}?logLimit=0`,
+        { headers: { [HOSTED_EXECUTION_USER_ID_HEADER]: input.memberId }, signal },
+      ));
+      return status.workspace?.browserVaultReplicaRef;
+    };
+    // The scenario owns a fresh member and isolated vault. If its initial
+    // replica already exists, reject a matching value before injecting too.
+    const baselineRef = await readReplicaRef();
+    if (baselineRef) {
+      const baseline = await readCanaryBrowserVaultReplica({ ...input, ref: baselineRef, signal });
+      if (hasCanonicalGarminSteps(baseline, expected)) throw new Error("Fixture already present.");
+    }
+    signal.throwIfAborted();
     const notBefore = Date.now();
     const response = await fetch(new URL("/api/device-sync/webhooks/junction", base), {
       body: webhook.rawBody.toString("utf8"),
@@ -76,13 +92,8 @@ export async function proveSyntheticGarminDelivery(input: {
     if (!response.ok || receipt.accepted !== true || receipt.duplicate === true || receipt.orphaned === true) {
       throw new Error("Synthetic webhook was not admitted.");
     }
-    const expected = [{ date: record.calendar_date, value: record.steps }];
     while (!signal.aborted) {
-      const status = parseHostedRunnerStatusResponse(await input.scenario.harness.requestJson<unknown>(
-        `${buildCloudflareHostedControlUserStatusPath(input.memberId)}?logLimit=0`,
-        { headers: { [HOSTED_EXECUTION_USER_ID_HEADER]: input.memberId }, signal },
-      ));
-      const ref = status.workspace?.browserVaultReplicaRef;
+      const ref = await readReplicaRef();
       if (ref && Date.parse(ref.generatedAt) >= notBefore) {
         const replica = await readCanaryBrowserVaultReplica({ ...input, ref, signal });
         signal.throwIfAborted();

@@ -6,20 +6,48 @@ import * as core from "@murphai/core";
 import { importDeviceProviderSnapshot } from "@murphai/importers";
 import { buildMetricProjection, readVault, readVaultRawTolerant } from "@murphai/query";
 import { createBrowserVaultReplica } from "@murphai/query/browser";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import * as liveData from "./helpers/hosted-local-junction-live-data.js";
-import { proveSyntheticGarminDelivery } from "./helpers/hosted-local-garmin-synthetic-delivery.js";
+import { buildSyntheticGarminActivity, proveSyntheticGarminDelivery } from "./helpers/hosted-local-garmin-synthetic-delivery.js";
+
+vi.mock("node:crypto", async (importOriginal) => ({
+  ...await importOriginal<typeof import("node:crypto")>(), randomInt: () => 4321,
+}));
+
+function replicaStatus(generatedAt: string) {
+  return { inFlight: false, mailboxLag: [], userId: "synthetic-member", workspace: {
+    createdAt: generatedAt, updatedAt: generatedAt, userId: "synthetic-member", version: "1",
+    browserVaultReplicaRef: {
+      byteLength: 256, dataVersion: "synthetic", generatedAt,
+      keyId: "browser-vault-replica:synthetic", objectKey: "synthetic/replica.json",
+      replicaSchema: "murph.browser-vault-replica", runtimeRootKeyId: "udrk:runtime:synthetic",
+      schema: "murph.hosted-browser-vault-replica-ref.v1", sourceBundleHash: "a".repeat(64),
+    },
+  } };
+}
 
 const failure = "MURPH_E2E_GARMIN_SYNTHETIC_DELIVERY_PROOF_FAILED";
 
 describe("synthetic Garmin delivery proof", () => {
+  let emptyReplica: Awaited<ReturnType<typeof createBrowserVaultReplica>>;
+  beforeAll(async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "garmin-synthetic-baseline-"));
+    try {
+      const generatedAt = new Date().toISOString();
+      await core.initializeVault({ createdAt: generatedAt, timezone: "UTC", vaultRoot });
+      emptyReplica = await createBrowserVaultReplica({
+        generatedAt, metricPoints: [], sourceBundleHash: "a".repeat(64), vault: await readVault(vaultRoot),
+      });
+    } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+  });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   function setup() {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ accepted: true, duplicate: false }));
     vi.stubGlobal("fetch", fetchMock);
-    const status = { inFlight: false, mailboxLag: [], userId: "synthetic-member", workspace: null };
+    const status = replicaStatus(emptyReplica.generatedAt);
+    vi.spyOn(liveData, "readCanaryBrowserVaultReplica").mockResolvedValue(emptyReplica);
     const input: Parameters<typeof proveSyntheticGarminDelivery>[0] = {
       client: { resolveUser: vi.fn().mockResolvedValue({ userId: "synthetic-junction-user" }) },
       clientUserId: "synthetic-client-user",
@@ -35,7 +63,7 @@ describe("synthetic Garmin delivery proof", () => {
     return { input, fetchMock };
   }
 
-  it.each(["match", "wrong_value", "wrong_source", "stale"])("checks the delivered fixture through the real importer and canonical query: %s", async (variant) => {
+  it.each(["match", "wrong_value", "wrong_source", "stale", "already_present"])("checks the delivered fixture through the real importer and canonical query: %s", async (variant) => {
     const { input, fetchMock } = setup();
     input.timeoutMs = variant === "match" ? 5000 : 1000;
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "garmin-synthetic-proof-"));
@@ -61,27 +89,40 @@ describe("synthetic Garmin delivery proof", () => {
           sourceBundleHash: "a".repeat(64), vault: await readVault(vaultRoot),
         });
         vi.spyOn(liveData, "readCanaryBrowserVaultReplica").mockResolvedValue(replica);
-        const status = { inFlight: false, mailboxLag: [], userId: input.memberId, workspace: {
-          createdAt: generatedAt, updatedAt: generatedAt, userId: input.memberId, version: "1",
-          browserVaultReplicaRef: {
-            byteLength: 256, dataVersion: "synthetic", generatedAt,
-            keyId: "browser-vault-replica:synthetic", objectKey: "synthetic/replica.json",
-            replicaSchema: "murph.browser-vault-replica", runtimeRootKeyId: "udrk:runtime:synthetic",
-            schema: "murph.hosted-browser-vault-replica-ref.v1", sourceBundleHash: "a".repeat(64),
-          },
-        } };
+        const status = replicaStatus(generatedAt);
         input.scenario.harness.requestJson = async <T>() => JSON.parse(JSON.stringify(status)) as T;
         return Response.json({ accepted: true, duplicate: false });
       });
+      if (variant === "already_present") {
+        await importDeviceProviderSnapshot({ provider: "junction", vaultRoot,
+          snapshot: { importedAt: new Date().toISOString(), summaries: {
+            activity: [buildSyntheticGarminActivity(new Date())],
+          } },
+        }, { corePort: core });
+        const projection = buildMetricProjection(await readVaultRawTolerant(vaultRoot));
+        vi.mocked(liveData.readCanaryBrowserVaultReplica).mockResolvedValue(await createBrowserVaultReplica({
+          generatedAt: new Date().toISOString(), metricPoints: projection.metricPoints,
+          sourceBundleHash: "a".repeat(64), vault: await readVault(vaultRoot),
+        }));
+      }
       if (variant === "match") {
         await expect(proveSyntheticGarminDelivery(input)).resolves.toBe("synthetic_webhook_matched");
       } else {
         await expect(proveSyntheticGarminDelivery(input)).rejects.toThrow(failure);
       }
-      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock).toHaveBeenCalledTimes(variant === "already_present" ? 0 : 1);
     } finally {
       await rm(vaultRoot, { recursive: true, force: true });
     }
+  });
+
+  it("does not mistake a fresh workspace without a replica for saved data", async () => {
+    const { input, fetchMock } = setup();
+    input.scenario.harness.requestJson = async <T>() => JSON.parse(JSON.stringify({
+      inFlight: false, mailboxLag: [], userId: input.memberId, workspace: null,
+    })) as T;
+    await expect(proveSyntheticGarminDelivery(input)).rejects.toThrow(failure);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("cannot pass with a webhook acknowledgement but no published vault data", async () => {
