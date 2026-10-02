@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-10-01
-Updated: 2026-10-01
+Updated: 2026-10-02
 
 ## Goal
 
@@ -39,7 +39,8 @@ health values, dates, raw errors, or secrets. Output identifies synthetic delive
 - [x] Consult a second model; delayed initial delivery is plausible but unproven.
 - [x] Implement signed synthetic delivery and verify importer/query and boundary behavior locally.
 - [x] Verify exact receipt compatibility and workflow selection in Murph Cloud.
-- [ ] Complete parent review, required external review, and exact-head CI.
+- [x] Complete parent review, required external review, and exact-head CI.
+- [ ] Diagnose the hosted synthetic persistence timeout with content-free stage evidence.
 - [ ] Run the protected hosted canary and inspect persistence plus cleanup.
 
 ## Evidence and limits
@@ -50,12 +51,40 @@ were also empty despite successful historical status and available resource
 inventory. Those results do not establish an upstream cause or a production
 vault problem. No production row contents belong here.
 
+The first protected synthetic run completed authorization and persisted connection
+reload, then reached its twenty-minute canonical-data deadline without a match.
+Provider and browser cleanup followed. The failure did not expose whether
+admission, runtime execution, or replica publication stalled. Follow-up evidence
+adds only fixed stage labels, boolean observations, and a status-read count;
+account identities, error text, fixture values, and vault contents remain private.
+Code-path inspection and a second-model consultation identified a missing
+prerequisite: seeding an active control account does not initialize its vault,
+and runtime context rejects device-sync wakes until member.activated bootstrap.
+The data canary now enqueues that real activation event, signals managed Temporal,
+and waits for completion before connecting. A focused runtime regression checks
+the pre-activation rejection. The protected rerun must confirm this resolves the
+observed timeout; no hosted success is inferred from the code-path evidence.
+
 The completed fresh-browser subplan records the login correction. Synthetic
 webhook proof will cover the application's ingress-to-vault behavior; it cannot
 qualify live Garmin delivery or its timing. The local harness uses production
 code with isolated backing services, not production member storage.
 
 ## Verification
+
+Public producer PR #3967 and the private selector/reader are merged with green
+exact-head CI and passing final external review. The private preliminary review
+identified a review-tool duration override; its accepted correction enforces the
+five-minute floor and passed the subsequent final review. Focused proof includes
+26 synthetic-delivery, live-oracle, and signed-webhook tests, 13 configuration
+cases, controller tests, Cloudflare typecheck, and 43 private receipt/review-tool
+tests. Full private verification also passed. Hosted persistence proof remains
+pending in the protected-main canary. The activation follow-up passes 27
+synthetic-delivery/live-oracle/signature tests, 13 configuration cases, and 11
+runtime-context tests, including device-sync rejection before activation. Both
+Cloudflare and assistant-runtime typechecks pass, as do logs guard and docs drift.
+The complexity guard passes with test-only paths excluded; parent review keeps
+the setup inline and the diagnostic state bounded.
 
 Focused synthetic-delivery tests must cover actual importer/query behavior,
 acknowledgement without data, invalid receipt, nonlocal target rejection,
