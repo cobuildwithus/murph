@@ -20,7 +20,7 @@ ReviewGPT will author all test and implementation patches. No production mutatio
 - [x] Request the smallest correction through existing lifecycle owners.
 - [x] Inspect the patch; verify races, successful handoff, abort and cooldown.
 - [x] Run focused proof and applicable typechecks; assess hot-path cost.
-- [ ] Commit/push and open a draft PR with aggregate evidence and release limits.
+- [x] Commit/push and open a draft PR with aggregate evidence and release limits.
 - [ ] Run applicable external review; report exact-head CI limitations honestly.
 
 ## Product and deployment
@@ -79,3 +79,7 @@ old process-local behavior until replaced. A transport that never settles can
 retain a typing claim until process replacement; the existing bounded provider
 transport remains authoritative. Final reply execution does not await cleanup.
 External exact-head review and required CI remain separate pending gates.
+
+Draft PR #3980 owns this correction. Content-only release-note generation and
+archive proof pass (10 tests); Web typecheck passes. Initial CI rejects draft
+proof explicitly; the task requires retaining draft, so required CI is not green.
