@@ -1461,7 +1461,12 @@ or extra consent turn. Direct Linq imports retain the authenticated sender handl
 metadata, so the accepted input renders its phone number for "call me" without
 requiring repetition. Email handles and opaque identifiers are not phone numbers.
 Unknown destinations are resolved before saving; scheduled
-group and email turns remain ineligible.
+group and email turns remain ineligible. Input-event replay tolerates the new
+sender field only when an existing private Linq event omitted it; the original
+stored event and all other immutable checks are preserved. Pending attachment
+retries therefore survive an upgrade. Once enriched events are persisted,
+rollbacks must retain this compatibility reader and the enriched importer until
+those pending events settle; reverting only call guidance remains safe.
 
 Outbound hosted phone calls are a web-owned Retell side effect reached through
 one bounded hosted runtime port. The assistant may expose
