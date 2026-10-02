@@ -1,6 +1,6 @@
 # Verify Garmin connection and synthetic webhook persistence
 
-Status: active
+Status: completed
 Created: 2026-10-01
 Updated: 2026-10-02
 
@@ -40,8 +40,8 @@ health values, dates, raw errors, or secrets. Output identifies synthetic delive
 - [x] Implement signed synthetic delivery and verify importer/query and boundary behavior locally.
 - [x] Verify exact receipt compatibility and workflow selection in Murph Cloud.
 - [x] Complete parent review, required external review, and exact-head CI.
-- [ ] Diagnose the hosted synthetic persistence timeout with content-free stage evidence.
-- [ ] Run the protected hosted canary and inspect persistence plus cleanup.
+- [x] Diagnose the hosted synthetic persistence timeout with content-free stage evidence.
+- [x] Run the protected hosted canary and inspect persistence plus cleanup.
 
 ## Evidence and limits
 
@@ -62,8 +62,8 @@ prerequisite: seeding an active control account does not initialize its vault,
 and runtime context rejects device-sync wakes until member.activated bootstrap.
 The data canary now enqueues that real activation event, signals managed Temporal,
 and waits for completion before connecting. A focused runtime regression checks
-the pre-activation rejection. The protected rerun must confirm this resolves the
-observed timeout; no hosted success is inferred from the code-path evidence.
+the pre-activation rejection. The protected rerun passed activation and synthetic vault persistence, confirming
+the missing activation prerequisite caused the observed failure.
 
 The completed fresh-browser subplan records the login correction. Synthetic
 webhook proof will cover the application's ingress-to-vault behavior; it cannot
@@ -78,8 +78,7 @@ identified a review-tool duration override; its accepted correction enforces the
 five-minute floor and passed the subsequent final review. Focused proof includes
 26 synthetic-delivery, live-oracle, and signed-webhook tests, 13 configuration
 cases, controller tests, Cloudflare typecheck, and 43 private receipt/review-tool
-tests. Full private verification also passed. Hosted persistence proof remains
-pending in the protected-main canary. The activation follow-up passes 27
+tests. Full private verification also passed. Hosted persistence proof now passes in the protected-main canary. The activation follow-up passes 27
 synthetic-delivery/live-oracle/signature tests, 13 configuration cases, and 11
 runtime-context tests, including device-sync rejection before activation. Both
 Cloudflare and assistant-runtime typechecks pass, as do logs guard and docs drift.
@@ -94,3 +93,29 @@ receipt tests distinguish version-3 synthetic proof from legacy live proof.
 Run Cloudflare typecheck, relevant controller tests, logs guard, complexity,
 docs drift, and private verification. The scoped change has no member-facing UX
 or changelog effect.
+
+
+## Hosted outcome
+
+[Public protected run 36974780528](https://github.com/cobuildwithus/murph/actions/runs/36974780528)
+and [private executor 36974805486](https://github.com/cobuildwithus/murph-cloud/actions/runs/36974805486)
+both succeeded on 2026-10-02. Public source was
+`033eab0c7615516bd6e06654e9bf418e51211dd0`; private source was
+`b01f3acbc446d9e8cf294461461ee984c9be2a2a`.
+
+The completed log contains activation-started and activation-completed markers,
+then `MURPH_E2E_GARMIN_SYNTHETIC_WEBHOOK_SAVED=1`. Real Garmin authorization,
+callback, persisted navigation/reload, provider cleanup, and browser/cookie/tunnel
+cleanup completed. The private proof attestation and public receipt enforcement
+passed. No local listener was used. This proves signed synthetic upstream
+delivery through normal ingress and hosted execution into the canonical vault
+and encrypted replica; it does not establish live Garmin delivery latency.
+
+Activation and diagnostic follow-up [PR #3981](https://github.com/cobuildwithus/murph/pull/3981)
+passed exact-head required CI and
+[final ReviewGPT](https://chatgpt.com/c/6abf4e4d-c11c-83ea-885f-f46a24f7728f).
+Hercules selected 6Pro, confirmed the full snapshot on the accepted turn, and
+captured a substantive PASS with REVIEW_COMPLETE after more than ten minutes.
+The review traced real activation ordering and strict canonical matching; no
+findings remain. The task is complete with upstream delivery intentionally mocked.
+Completed: 2026-10-02
