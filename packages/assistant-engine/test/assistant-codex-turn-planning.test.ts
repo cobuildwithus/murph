@@ -358,6 +358,20 @@ describe('assistant Codex turn planning', () => {
         }),
       }),
     }
+    // These private routes include wiki guidance. Assert the intended change
+    // explicitly alongside the complete-plan fingerprints below.
+    for (const plan of [plans.direct, plans.scheduledEmail]) {
+      for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
+        expect(instructions).toContain('vault-cli knowledge show <slug> --format json')
+        expect(instructions).toContain('start from exact supplied page references')
+        expect(instructions).toContain(
+          'let the child do this discovery instead of first loading the index and page bodies in root',
+        )
+        expect(instructions).not.toContain(
+          'For wiki work, use `vault-cli knowledge ...` directly in this turn.',
+        )
+      }
+    }
     const digestPlan = (
       plan: Awaited<ReturnType<typeof resolveAssistantRouteTurnPlan>>,
     ) => {
@@ -420,11 +434,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "29ec3ac30d80b9e497558f1e09575da8bde26411a5871db662c1dbde3bc9bd76",
+        "direct": "73cc679d89e4865ba5b041f41c38a3f0637b606998e45274e469f1dd52a6ba5a",
         "group": "59291f8075dcdacaff23f90a0fb0260d4d1fa3a448aa3ca29c5b14ea757f681d",
         "maintenance": "ac022f98be034bc9bbcfd987fb422a0546cfa1899d4c99b97167d7d22527547e",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "6e8deb63b395af506c9a16a73fcee1fb8f74a6d4ce696d06bc974aee7a176388",
+        "scheduledEmail": "0f39a4d19848e36d4848df82569532832ec3178ca5c542a13555ac7107e7a04d",
       }
     `)
   })
