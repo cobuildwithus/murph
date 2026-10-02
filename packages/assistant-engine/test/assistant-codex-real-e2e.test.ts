@@ -1,6 +1,3 @@
-import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly-usage-optimizer.js'
-import { createAssistantProductFeedbackRecorder } from '../src/assistant/turn-progress.js'
-import { syntheticUsageDiagnostics } from './support/usage-diagnostics.ts'
 import { observesAppointmentConsentMutation } from './support/appointment-consent-observer.js'
 import { seedMurphOnboardingEarlyStallAutomation } from '../src/assistant/onboarding-followup-seed.ts'
 import { startAssistantOnboarding } from '../src/assistant/onboarding-state.ts'
@@ -36,6 +33,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { brotliCompressSync } from 'node:zlib'
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly-usage-optimizer.js'
+import { createAssistantProductFeedbackRecorder } from '../src/assistant/turn-progress.js'
+import { syntheticUsageDiagnostics } from './support/usage-diagnostics.ts'
 
 import {
   MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
