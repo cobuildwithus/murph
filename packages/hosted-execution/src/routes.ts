@@ -109,10 +109,15 @@ export const HOSTED_RUNTIME_CRYPTO_ROOT_PATH =
   "/api/internal/hosted-runtime/crypto-context/root";
 export const HOSTED_RUNTIME_USAGE_RECORD_PATH =
   "/api/internal/hosted-execution/usage/record";
+export const HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH =
+  "/api/internal/hosted-execution/usage/feedback";
 export const HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH =
   "/api/internal/hosted-execution/product-feedback/record";
 export const HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH =
   "/api/internal/hosted-execution/family-plan/tool";
+export const HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH =
+  "/api/internal/hosted-execution/usage/diagnostics";
+
 export const HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH =
   "/api/internal/hosted-execution/plan-usage/tool";
 export const HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH =

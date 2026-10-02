@@ -419,7 +419,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   name: 'submit_product_feedback',
   deferLoading: true,
   description:
-    `Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports an input-schema rejection, accepted, already accepted, unavailable, or callback failure. An input-schema rejection includes value-free validation issues. Accepted, already accepted, unavailable, and callback-failure results are terminal.`,
+    `Submit one structured Murph product-feedback candidate for the current accepted request or the exact authorized weekly usage audit. A weekly usage audit uses kind feature_request, no changelog ids, and the prefix "Usage optimization audit:"; report rounded product cost metadata and coverage without private source text or identifiers, and omit a reproduction recipe when the evidence supports only an aggregate optimization observation. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports an input-schema rejection, accepted, already accepted, unavailable, or callback failure. An input-schema rejection includes value-free validation issues. Accepted, already accepted, unavailable, and callback-failure results are terminal.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -435,7 +435,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         minLength: 1,
         maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
         description:
-          'Concise de-identified, product-only summary of the feedback. Make it actionable without the conversation: name the generic actor, exact Murph surface or workflow, requested or attempted action, expected versus observed result, and any concrete product constraint the source established. Preserve those distinctions instead of replacing them with vague labels. If a detail is not established, omit it or mark it unclear rather than infer or invent it. For any failure, frustration, workaround, degraded or manual workflow, or assistant-observed issue, write the general product problem first, then append a section beginning exactly "Reproduction:". Make that section independently usable without the original conversation: describe the smallest established generic preconditions and synthetic data shape; list the exact Murph CLI commands or tool calls with synthetic arguments when known and applicable; and give a sanitized example request or user action that triggers the issue, plus expected versus observed behavior when not already clear. Replace private inputs with synthetic placeholders or the least-specific product concept that preserves the failure. Never copy or closely paraphrase the member\'s wording. If the evidence is insufficient for a complete reproduction, state the known generic setup and trigger and identify the non-private condition that remains unknown instead of inventing steps. Omit the Reproduction section only for pure feature interest with no failure or friction to reproduce. Abstract every private fact to the least-specific product concept that still explains the issue, such as "a health metric", "a connected source", or "a scheduled item"; do not preserve a private fact merely because it was relevant in the conversation. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Never include names, handles, account or member identifiers, raw user wording, quoted conversation or voice-memo content, diagnoses, symptoms, medications, treatments, lab results, biometrics, exact health/fitness/nutrition values, reproductive details, locations, relationships, contact details, secrets, provider payloads, tags, or topics. For explicit verified-private human support, begin exactly "Support escalation:", then provide Murph\'s concise de-identified explanation in its own words using the same general-problem-plus-reproduction format; never copy or quote the member\'s message.',
+          'Concise de-identified, product-only summary of the feedback. Make it actionable without the conversation: name the generic actor, exact Murph surface or workflow, requested or attempted action, expected versus observed result, and any concrete product constraint the source established. Preserve those distinctions instead of replacing them with vague labels. If a detail is not established, omit it or mark it unclear rather than infer or invent it. For any failure, frustration, workaround, degraded or manual workflow, or assistant-observed issue, write the general product problem first, then append a section beginning exactly "Reproduction:". Make that section independently usable without the original conversation: describe the smallest established generic preconditions and synthetic data shape; list the exact Murph CLI commands or tool calls with synthetic arguments when known and applicable; and give a sanitized example request or user action that triggers the issue, plus expected versus observed behavior when not already clear. Replace private inputs with synthetic placeholders or the least-specific product concept that preserves the failure. Never copy or closely paraphrase the member\'s wording. If the evidence is insufficient for a complete reproduction, state the known generic setup and trigger and identify the non-private condition that remains unknown instead of inventing steps. Omit the Reproduction section only for pure feature interest with no failure or friction to reproduce, or an authorized weekly usage audit whose evidence supports only aggregate optimization observations. Abstract every private fact to the least-specific product concept that still explains the issue, such as "a health metric", "a connected source", or "a scheduled item"; do not preserve a private fact merely because it was relevant in the conversation. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Never include names, handles, account or member identifiers, raw user wording, quoted conversation or voice-memo content, diagnoses, symptoms, medications, treatments, lab results, biometrics, exact health/fitness/nutrition values, reproductive details, locations, relationships, contact details, secrets, provider payloads, tags, or topics. For explicit verified-private human support, begin exactly "Support escalation:", then provide Murph\'s concise de-identified explanation in its own words using the same general-problem-plus-reproduction format; never copy or quote the member\'s message.',
       },
       relatedChangelogItemIds: {
         type: 'array',
@@ -546,6 +546,22 @@ export const MURPH_FAMILY_PLAN_TOOL = {
         required: ['action', 'invite'],
       },
     ],
+  },
+} as const
+
+export const MURPH_USAGE_DIAGNOSTICS_TOOL = {
+  namespace: 'murph',
+  name: 'usage_diagnostics',
+  deferLoading: true,
+  description:
+    'Read private recent usage costs by model/workflow, expensive turns, and tool output sizes for this member. Read-only; defaults to 7 days and 10 turns. Costs are usage allowance, not card charges. Tool bytes are size evidence, not exact tokens or costs. Includes rough model rates.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      days: { type: 'integer', minimum: 1, maximum: 31 },
+      limit: { type: 'integer', minimum: 1, maximum: 20 },
+    },
   },
 } as const
 
@@ -1764,6 +1780,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_PERSONALIZATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_USAGE_DIAGNOSTICS_TOOL,
   MURPH_POLL_TOOL,
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
@@ -1830,6 +1847,7 @@ export interface MurphDynamicToolAvailability {
   familyPlanAvailable?: boolean | null
   labsAvailable?: boolean | null
   planUsageAvailable?: boolean | null
+  usageDiagnosticsAvailable?: boolean | null
   pollsAvailable?: boolean | null
   imessageContactAvailable?: boolean | null
   imageGenerationAvailable?: boolean | null
@@ -1897,6 +1915,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_LABS_TOOL, defaultOff((a) => a.labsAvailable)],
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
+    [MURPH_USAGE_DIAGNOSTICS_TOOL, defaultOff((a) => a.usageDiagnosticsAvailable)],
     [MURPH_POLL_TOOL, defaultOff((a) => a.pollsAvailable)],
     [MURPH_IMESSAGE_CONTACT_TOOL, defaultOff((a) => a.imessageContactAvailable)],
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],

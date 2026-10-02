@@ -1,3 +1,5 @@
+import { MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from '../src/assistant/managed-automations.js'
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID } from '../src/assistant/managed-automation-ids.js'
 import { createHmac } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
@@ -600,3 +602,29 @@ describe("assistant scheduled-log cron helpers", () => {
     }
   });
 });
+
+
+describe('managed usage workflow attribution', () => {
+  it.each([
+    [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, 'assistant_cron_journal_context'],
+    [MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID, 'assistant_cron_personal_patterns'],
+    [MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID, 'assistant_cron_usage_optimizer'],
+  ])('uses a fixed category for a host-bound occurrence (%s)', (automationId, expected) => {
+    const input = { deliverResponse: false, promptProfile: 'conversation' as const,
+      turnTrigger: 'automation-cron' as const, scheduledOccurrenceAt: '2026-10-05T04:00:00.000Z',
+      scheduledInvocationAuthority: { automationId, occurrenceAt: '2026-10-05T04:00:00.000Z' } }
+    expect(resolveAssistantUsageFeatureKey(input)).toBe(expected)
+    expect(resolveAssistantUsageFeatureKey({ ...input, turnTrigger: 'manual-ask' })).toBe('assistant_internal_reply')
+    expect(resolveAssistantUsageFeatureKey({ ...input, scheduledOccurrenceAt: '2026-10-06T04:00:00.000Z' })).toBe('assistant_internal_reply')
+    expect(resolveAssistantUsageFeatureKey({ ...input, deliverResponse: true,
+      scheduledInvocationAuthority: { ...input.scheduledInvocationAuthority, automationId: 'automation_private_unknown' } })).toBe('assistant_cron')
+    const base = { credentialSource: 'platform' as const, memberId: 'synthetic-member',
+      surface: 'telegram', triggerKind: 'automation_cron', stripeMeterSource: 'murph' as const }
+    const attribution = createAssistantUsageAttribution({ ...base, featureKey: expected })
+    expect(attribution).toMatchObject({ credentialSource: 'platform', stripeMeterSource: 'murph',
+      featureKey: expected, triggerKind: 'automation_cron' })
+    expect(JSON.stringify(attribution)).not.toContain(automationId)
+    expect(attribution).not.toHaveProperty('model')
+    expect(attribution).not.toHaveProperty('tokenPricingBasis')
+  })
+})

@@ -1,3 +1,4 @@
+import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
 import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
@@ -502,9 +503,7 @@ function resolvePrivateMemberToolAvailability({
     labsAvailable:
       privateInteractiveProviderTurn &&
       input.hostedToolContext?.labsTool != null,
-    planUsageAvailable:
-      privateInteractiveAudience &&
-      input.hostedToolContext?.planUsageTool != null,
+    ...resolvePrivateUsageToolAvailability(privateInteractiveAudience, input.hostedToolContext),
     imessageContactAvailable:
       privateUserAction &&
       currentAudienceDeliveryFields.channel === 'telegram' &&
@@ -519,6 +518,16 @@ function resolvePrivateMemberToolAvailability({
     vaultFileSendAvailable:
       privateInteractiveAudience &&
       input.hostedToolContext?.vaultFileSendAvailable === true,
+  }
+}
+
+function resolvePrivateUsageToolAvailability(
+  privateAudience: boolean,
+  context: AssistantRouteTurnPlanInput['hostedToolContext'],
+) {
+  return {
+    usageDiagnosticsAvailable: privateAudience && context?.usageDiagnostics != null,
+    planUsageAvailable: privateAudience && context?.planUsageTool != null,
   }
 }
 
@@ -1207,10 +1216,7 @@ export async function resolveAssistantRouteTurnPlan(
   const interactivePhoneCallAudience =
     privateInteractiveAudience ||
     (hostedGroupRuntime && messageTargetingAvailable)
-  const productFeedbackAuthorized =
-    resolveAssistantProductFeedbackAcceptedInputIds(
-      input.acceptedInputItems ?? [],
-    ).length > 0
+  const productFeedbackAuthorized = hasProductFeedbackAuthority(input, conversationScope)
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
   // Maintenance turns run without a delivery target. Each mutable profile
@@ -1836,4 +1842,13 @@ function isConversationMediaTurn(
   acceptedInputIds: readonly string[],
 ): boolean {
   return (privateTurn || groupTurn) && acceptedInputIds.length > 0
+}
+
+function hasProductFeedbackAuthority(
+  input: Parameters<typeof resolveAssistantRouteTurnPlan>[0],
+  conversationScope: string,
+): boolean {
+  return resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? []).length > 0
+    || resolveUsageOptimizerFeedbackScope({ conversationScope, executionContext: input.executionContext,
+      messageInput: input.input }) !== null
 }

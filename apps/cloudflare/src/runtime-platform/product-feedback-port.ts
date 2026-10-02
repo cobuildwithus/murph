@@ -4,6 +4,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   isHostedProductSupportEscalationFeedback,
+  HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX,
   type HostedRuntimeProductFeedbackRecord,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -34,7 +35,9 @@ export function createHostedRuntimeProductFeedbackPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted product feedback recording",
         fetchImpl: input.fetchImpl,
-        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.productFeedbackRecording,
+        route: feedback.summary.startsWith(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX)
+          ? HOSTED_RUNNER_WEB_CONTROL_ROUTES.usageFeedbackRecording
+          : HOSTED_RUNNER_WEB_CONTROL_ROUTES.productFeedbackRecording,
         sensitiveResponseBody: {
           maxBytes: HOSTED_PRODUCT_FEEDBACK_RESPONSE_MAX_BYTES,
         },

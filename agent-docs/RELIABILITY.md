@@ -449,6 +449,16 @@ to apply after cutover.
   input, cache-read, cache-write, and output rates and records the provider
   model and pricing source in the snapshot; unknown non-Venice standard
   provider evidence retains the existing OpenAI-compatible behavior.
+- Member usage diagnostics read one authenticated member and at most 31 days
+  from `hosted_ai_usage`, returning bounded model/source groups and expensive
+  turns. Recorded allowance costs remain authoritative; unpriced rows and absent
+  tool profiles are visible coverage gaps. Tool volume uses the latest sanitized
+  profile per returned turn and is measured in bytes, never invented token cost.
+  The weekly optimizer makes bounded version-checked model-only edits and one
+  member/occurrence-idempotent anonymous report; failed feedback cannot prevent
+  cron completion. Web callback consumers deploy before runtime producers;
+  absent ports or older callback routes return unavailable without retries or
+  an alternate ledger owner.
 - The operator `/ops/usage` collection is bounded independently of lifetime
   member count. The ordinary list reads at most 26 hosted-member primary keys
   to admit a 25-row page. Search instead reads one ID-ordered cap-plus-one

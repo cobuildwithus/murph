@@ -27,7 +27,7 @@ import {
   stripAutomationAvailabilityConflictEvidenceForProvider,
 } from '@murphai/core'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
-import { normalizeAssistantExecutionContext } from './execution-context.js'
+import { normalizeAssistantExecutionContext, type AssistantExecutionContext } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
 import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
 import { resolveAssistantSessionForMessage } from './session-resolution.js'
@@ -71,6 +71,7 @@ import { readAssistantGroupRoomModelState } from './group-room-model.js'
 import type {
   AssistantDeliveryOutcome,
   AssistantMessageInput,
+  ExecutedAssistantProviderTurnResult,
   AssistantSessionResolutionFields,
   ResolvedAssistantSession,
 } from './service-contracts.js'
@@ -720,6 +721,7 @@ export async function sendAssistantNotificationLocal(
             turnCreatedAt,
             turnId,
           })
+          acceptCommittedNotificationProductFeedback(executionContext, providerResult)
           return withPostTurnDeliveryExpectations({
             decision,
             response: null,
@@ -841,6 +843,7 @@ export async function sendAssistantNotificationLocal(
             )
           }
 
+          acceptCommittedNotificationProductFeedback(executionContext, providerResult)
           return withPostTurnDeliveryExpectations({
             decision: {
               ...decision,
@@ -943,6 +946,7 @@ export async function sendAssistantNotificationLocal(
           })
         })
 
+        acceptCommittedNotificationProductFeedback(executionContext, providerResult)
         return withPostTurnDeliveryExpectations({
           decision: {
             ...decision,
@@ -961,6 +965,20 @@ export async function sendAssistantNotificationLocal(
       }
     },
   })
+}
+
+function acceptCommittedNotificationProductFeedback(
+  executionContext: AssistantExecutionContext | null | undefined,
+  providerResult: Pick<ExecutedAssistantProviderTurnResult, 'productFeedbackCandidate'>,
+): void {
+  const candidate = providerResult.productFeedbackCandidate
+  const sink = executionContext?.hosted?.productFeedbackCandidateSink
+  if (!candidate || !sink) return
+  try {
+    sink.acceptProductFeedbackCandidate(candidate)
+  } catch {
+    // Optional feedback cannot affect a committed notification turn.
+  }
 }
 
 async function recoverQueuedAssistantOperatorMessage(

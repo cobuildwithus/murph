@@ -210,6 +210,10 @@
     "./wearable-haptics": {
       "types": "./dist/wearable-haptics.d.ts",
       "default": "./dist/wearable-haptics.js"
+    },
+    "./usage-diagnostics": {
+      "types": "./dist/usage-diagnostics.d.ts",
+      "default": "./dist/usage-diagnostics.js"
     }
   },
   "files": [

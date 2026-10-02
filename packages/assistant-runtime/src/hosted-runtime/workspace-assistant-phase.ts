@@ -44,6 +44,7 @@ import {
   refreshAssistantContextSnapshotBestEffort,
   refreshReminderAvailability,
   resolveAssistantCronDefaultTimeZoneProjection,
+  resolveMurphManagedAutomationOwnerScope,
   upsertAssistantInputEvent,
   type AssistantAutomationOccurrenceProjection,
   type AssistantAutomationOccurrenceProjectionIssue,
@@ -1330,6 +1331,8 @@ async function projectHostedAutomationResponseFields(input: {
   }
   return {
     automationId: input.record.automationId,
+    assistantTargetOverride: input.record.assistantTargetOverride,
+    managed: resolveMurphManagedAutomationOwnerScope(input.record.automationId) !== null,
     contextReferences: [...input.record.contextReferences],
     deliveryChannel: input.record.route.channel,
     effectiveTimeZone,
@@ -1469,6 +1472,9 @@ function buildHostedPhaseOptionalTools(
           personalizationTool:
             input.runtime.platform.assistantPersonalizationToolPort,
         }
+      : {}),
+    ...(input.runtime.platform.usageDiagnosticsPort
+      ? { usageDiagnostics: input.runtime.platform.usageDiagnosticsPort }
       : {}),
     ...(input.runtime.platform.planUsageToolPort
       ? { planUsageTool: input.runtime.platform.planUsageToolPort }

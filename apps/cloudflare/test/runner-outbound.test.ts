@@ -101,6 +101,8 @@ import {
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+  HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH,
+  HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
@@ -238,6 +240,17 @@ type HostedSystemProgressProjection = Required<Pick<
   | "systemMailboxProgressGeneration"
 >>;
 const ALLOWLISTED_WEB_CONTROL_CASES = [
+  {
+    body: { days: 7, limit: 10 },
+    name: "hosted usage diagnostics",
+    path: HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH,
+  },
+  {
+    body: { feedback: { idempotencyKey: "a".repeat(64), kind: "feature_request", relatedChangelogItemIds: [],
+      summary: "Usage optimization audit: Reduce repeated large output." } },
+    name: "hosted anonymous usage feedback",
+    path: HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH,
+  },
   {
     body: {
       action: "authorize",

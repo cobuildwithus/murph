@@ -1,9 +1,12 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
+import { readHostedAppSessionHmacKey } from "../hosted-onboarding/app-session-config";
 
 import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX,
+  isHostedUsageOptimizationAuditFeedback,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   isHostedProductSupportEscalationFeedback,
   sanitizeHostedProductFeedbackSummary,
@@ -45,9 +48,11 @@ export async function recordHostedProductFeedback(input: {
   signal?: AbortSignal;
 }): Promise<HostedRuntimeProductFeedbackRecordResponse> {
   const feedback = normalizeHostedProductFeedback(input.feedback);
-  const feedbackId = buildHostedProductFeedbackId({
-    feedback: input.feedback,
-  });
+  const usageAudit = feedback.summary.startsWith(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX);
+  if (usageAudit && !isHostedUsageOptimizationAuditFeedback(feedback)) rejectHostedProductFeedback();
+  const feedbackId = usageAudit
+    ? await buildHostedAnonymousUsageFeedbackId(input)
+    : buildHostedProductFeedbackId({ feedback: input.feedback });
   // The reserved prefix is itself the support-path discriminator. Fail closed
   // below when the remainder is missing or the reserved kind/linkage contract
   // is invalid instead of persisting it as ordinary feedback.
@@ -59,7 +64,9 @@ export async function recordHostedProductFeedback(input: {
     return await persistHostedProductFeedback({
       feedback,
       feedbackId,
-      memberId: input.memberId?.trim() || null,
+      memberId: feedback.summary.startsWith(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX)
+        ? null
+        : input.memberId?.trim() || null,
     });
   }
   if (!isHostedProductSupportEscalationFeedback(feedback)) {
@@ -258,6 +265,25 @@ export function normalizeHostedProductFeedback(
     relatedChangelogItemIds: [...feedback.relatedChangelogItemIds],
     summary,
   };
+}
+
+async function buildHostedAnonymousUsageFeedbackId(input: {
+  env?: Readonly<Record<string, string | undefined>>;
+  feedback: HostedRuntimeProductFeedbackRecord;
+  memberId?: string | null;
+}): Promise<string> {
+  const memberId = input.memberId?.trim();
+  if (!memberId) throw hostedOnboardingError({ code: "HOSTED_USAGE_FEEDBACK_MEMBER_REQUIRED",
+    httpStatus: 400, message: "Usage feedback requires an authenticated private member." });
+  if (await getPrisma().hostedThreadContainer.findUnique({ select: { memberId: true }, where: { memberId } })) {
+    throw hostedOnboardingError({ code: "HOSTED_USAGE_FEEDBACK_PRIVATE_MEMBER_REQUIRED",
+      httpStatus: 403, message: "Usage feedback requires a private member runtime." });
+  }
+  const digest = createHmac("sha256", readHostedAppSessionHmacKey(input.env))
+    .update("murph.anonymous-usage-feedback.v1\0")
+    .update(memberId).update("\0").update(input.feedback.idempotencyKey)
+    .digest("hex").slice(0, 32);
+  return `product_feedback_${digest}`;
 }
 
 export function buildHostedProductFeedbackId(input: {
