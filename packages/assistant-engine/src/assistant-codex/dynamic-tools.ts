@@ -4669,6 +4669,7 @@ function groupSharedModelResult(
         ? {}
         : { displayName: member.displayName }),
       participantId: member.participantId,
+      ...(member.companionLastContactAt === undefined ? {} : { companionLastContactAt: member.companionLastContactAt }),
       // Keyed by scope so each projection no longer restates its own key, and
       // the scope reads as a heading rather than a field to hunt for.
       projections: Object.fromEntries(member.projections.map((projection) => [
@@ -6731,7 +6732,10 @@ async function readGroupEmailSharedData(input: {
         const existing = members.get(member.memberId)
         if (!existing) {
           members.set(member.memberId, {
-            ...member,
+            currentTurnHandles: member.currentTurnHandles,
+            displayName: member.displayName,
+            memberId: member.memberId,
+            participantId: member.participantId,
             projections: [...projections],
           })
           continue

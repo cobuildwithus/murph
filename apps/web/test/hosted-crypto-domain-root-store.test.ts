@@ -4062,7 +4062,9 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
           input.data.assistantPersonaCausalSeq === null
             ? null
             : BigInt(input.data.assistantPersonaCausalSeq),
-        groupJournalCaptureConsentRequestedAt: null,
+        companionLastContactAt: null,
+    companionLastForegroundAt: null,
+    groupJournalCaptureConsentRequestedAt: null,
         groupJournalCaptureEnabled: null,
         assistantDetail: null,
         assistantDetailCausalSeq:

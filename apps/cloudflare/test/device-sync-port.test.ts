@@ -11,6 +11,20 @@ import {
 } from "../src/runtime-platform/device-sync-port.ts";
 
 describe("hosted device-sync runtime port", () => {
+  it("reads only the bound member contact projection and rejects unexpected response fields", async () => {
+    const contact = { status: "recently_active", lastContactAt: "2026-10-01T12:00:00.000Z", lastForegroundAt: null };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe("/api/internal/companion/presence");
+      expect(await request.json()).toEqual({});
+      return Response.json(contact);
+    });
+    const port = createHostedWebDeviceSyncPort({ boundUserId: "member-synthetic", fetchImpl: fetchMock as typeof fetch, timeoutMs: 5_000, transport: { mode: "proxy" } });
+    await expect(port.companionStatus?.({})).resolves.toEqual(contact);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockResolvedValue(Response.json({ ...contact, deviceIdentifier: "unexpected" }));
+    await expect(port.companionStatus?.({})).rejects.toThrow();
+  });
   it("sends one immediate haptic with host authority and preserves queued receipt semantics", async () => {
     const body = {
       request: { action: "haptic", wearable: "garmin", operation: "buzz" },
@@ -19,7 +33,7 @@ describe("hosted device-sync runtime port", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       expect(new URL(request.url).pathname).toBe("/api/internal/companion/wearables");
-      expect(await request.json()).toEqual(body);
+      expect(await request.json()).toEqual({ ...body, includeAvailability: true });
       return Response.json({ ...body.request, status: "queued" });
     });
     const port = createHostedWebDeviceSyncPort({ boundUserId: "member-synthetic", fetchImpl: fetchMock as typeof fetch, timeoutMs: 5_000, transport: { mode: "proxy" } });

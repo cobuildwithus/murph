@@ -1,3 +1,4 @@
+import { buildHostedVaultShareProjectionScopeKey } from '@murphai/hosted-execution/vault-share'
 import { observesAppointmentConsentMutation } from './support/appointment-consent-observer.js'
 import { seedMurphOnboardingEarlyStallAutomation } from '../src/assistant/onboarding-followup-seed.ts'
 import { startAssistantOnboarding } from '../src/assistant/onboarding-state.ts'
@@ -42568,7 +42569,44 @@ describeRealCodex('real Codex proactive plan follow-through e2e', () => {
 
 
 describeRealCodex('wearable haptic reminder journey', () => {
-  it.each(['whoop-delay', 'garmin-unknown', 'whoop-useful'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
+  it('reports consented group app contact without diagnosing missing steps as closure', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-app-contact-'))
+    const requests: unknown[] = []
+    try {
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: buildHostedGroupStatusDeveloperInstructions('shared_read', false, '2026-08-05'),
+        dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL], env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+        groupConversation: true, model: config.model, modelProvider: config.modelProvider,
+        hostedToolContext: { computerToolsAvailable: false, vaultFileSendAvailable: false,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          groupSharedReader: { request: async (request) => {
+            requests.push(request)
+            return { status: 'ok', requestedProjectionScopeKeys: request.projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
+              members: [{ memberId: 'member-synthetic', participantId: 'participant-synthetic', displayName: 'Cedar', currentTurnHandles: [],
+                companionLastContactAt: '2026-08-05T09:00:00.000Z',
+                projections: request.projectionScopes.map((projectionScope) => ({ projectionScope,
+                  projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope),
+                  dataStatus: 'missing', grantStatus: 'granted', grantedAt: '2026-08-01T00:00:00.000Z', records: [] })) }] }
+          } },
+          sendVaultFile: async () => { throw new Error('No file send expected.') },
+        },
+        prompt: 'Please check our shared steps. If Cedar has no steps available, tell us the last time the app contacted Murph if that is shared. Does missing step data mean Cedar quit the app?',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write('[companion-group-live] ' + JSON.stringify({ reply: result.finalMessage, reads: requests.length }) + '\n')
+      expect(requests).toHaveLength(1)
+      expect(result.finalMessage).toMatch(/5:00|05:00|5 a\.?m\.?|August 5|Aug(?:ust)?\.? 5/iu)
+      expect(result.finalMessage).toMatch(/Cedar/u)
+      expect(result.finalMessage).not.toMatch(/(?:because|since|proves? that|confirmed that) Cedar (?:quit|closed)|permission (?:was|is) denied|synced successfully/iu)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
+
+  it.each(['whoop-delay', 'garmin-unknown', 'whoop-useful', 'app-unreachable', 'device-disconnected', 'health-active', 'health-stale'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wrist-reminder-'))
     const binDirectory = path.join(workingDirectory, 'bin')
@@ -42608,7 +42646,19 @@ describeRealCodex('wearable haptic reminder journey', () => {
         sendVaultFile: async () => { throw new Error('No file send expected.') },
         deviceTool: { async request(request, options) {
           calls.push(request)
+          if (scenario === 'health-active' || scenario === 'health-stale') {
+            if (request.action === 'companion_status') return { action: request.action,
+              status: scenario === 'health-active' ? 'recently_active' : 'unreachable',
+              lastContactAt: new Date(now.getTime() - (scenario === 'health-active' ? 5_000 : 172_800_000)).toISOString(),
+              lastForegroundAt: new Date(now.getTime() - 172_800_000).toISOString() }
+            if (request.action === 'list_accounts') return { action: request.action, provider: null, sourceProvider: null,
+              accounts: [{ accountId: 'synthetic-health', provider: 'junction', displayName: 'Apple Health', status: 'active', lastErrorCode: null, lastSyncCompletedAt: new Date(now.getTime() - 172_800_000).toISOString() }] }
+            throw new Error('Only read-only Health diagnostics expected.')
+          }
           if (request.action !== 'haptic') throw new Error('Only wrist control expected.')
+          if (scenario === 'app-unreachable' || scenario === 'device-disconnected') return {
+            ...request, status: 'unavailable', unavailableReason: scenario === 'app-unreachable' ? 'app_unreachable' : 'device_disconnected',
+          }
           expect(options?.hapticAuthority).toBeDefined()
           // This also proves the host strips session metadata from strict wire authority.
           const { wearableHapticRequestSchema } = await import('@murphai/hosted-execution/wearable-haptics')
@@ -42647,12 +42697,30 @@ describeRealCodex('wearable haptic reminder journey', () => {
         dynamicTools: [MURPH_DEVICE_TOOL, MURPH_AUTOMATION_TOOL], hostedToolContext,
         prompt, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
-      const result = await execute(scenario === 'whoop-delay'
+      const result = await execute(scenario === 'health-active' || scenario === 'health-stale'
+        ? 'My Apple Health steps have not updated. Can you check when the app last contacted Murph and the sync status? Does that prove I closed it? Inspect only app contact and account sync metadata, not step records. Please just diagnose; do not change anything.'
+        : scenario === 'whoop-delay'
         ? `Please buzz my WHOOP once when my ten-minute meditation ends at ${targetAt}. No buzz now. The band is connected in Murph and I will keep the app open until then.`
         : scenario === 'whoop-useful'
           ? 'My WHOOP is connected in Murph. Give it one test buzz and tell me when wrist reminders would be useful for me.'
           : 'Please buzz my Garmin once now. I know its find-device alert may also sound. Do not retry if the result is unclear.', false)
       process.stdout.write('[wearable-haptic-live] ' + JSON.stringify({ scenario, reply: result.finalMessage, calls, saves: saves.length }) + '\n')
+      if (scenario === 'health-active' || scenario === 'health-stale') {
+        expect(calls.filter(call => call.action === 'companion_status')).toHaveLength(1)
+        expect(calls.some(call => call.action === 'list_accounts')).toBe(true)
+        expect(calls.every(call => call.action === 'companion_status' || call.action === 'list_accounts')).toBe(true)
+        expect(saves).toEqual([])
+        expect(result.finalMessage).toMatch(/doesn.t prove|does not prove|can.t tell|cannot tell|not proof|doesn.t (?:mean|confirm)|does not (?:mean|confirm)|not necessarily|can.t prove/iu)
+        expect(result.finalMessage).not.toMatch(/(?:because|since|proves? that|confirmed that) you (?:closed|quit)|permission (?:was|is) denied|steps (?:are|have) (?:now )?(?:synced|updated)/iu)
+        return
+      }
+      if (scenario === 'app-unreachable' || scenario === 'device-disconnected') {
+        expect(calls.filter(call => call.action === 'haptic' && call.operation === 'buzz').length).toBeLessThanOrEqual(1)
+        expect(saves).toEqual([])
+        expect(result.finalMessage).toMatch(scenario === 'app-unreachable' ? /open.*Murph|Murph.*open/iu : /connect|band.*ready/iu)
+        expect(result.finalMessage).not.toMatch(/your Garmin (?:buzzed|vibrated)|you (?:closed|quit)|has vibrated/iu)
+        return
+      }
       if (scenario === 'whoop-useful') {
         expect(calls.filter(call => call.action === 'haptic' && call.operation !== 'status')).toEqual([
           { action: 'haptic', wearable: 'whoop', operation: 'buzz' },

@@ -28,6 +28,18 @@ describe('wrist haptic tool boundary', () => {
     expect(request).toHaveBeenCalledExactlyOnceWith(action, { hapticAuthority: authority, signal: null })
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text!)).toEqual({ ...action, status: 'queued' })
   })
+  it.each(['app_unreachable', 'device_disconnected', 'busy'] as const)('preserves the %s failure reason through the model boundary', async (unavailableReason) => {
+    const request = vi.fn(async () => ({ ...action, status: 'unavailable' as const, unavailableReason }))
+    const result = await executeDeviceDynamicTool({ hapticAuthority: privateAuthority, deviceTool: { request }, request: { kind: 'device', request: action } })
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text!)).toEqual({ ...action, status: 'unavailable', unavailableReason })
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+  it('exposes app contact independently of sync or wearable effects', async () => {
+    const response = { action: 'companion_status' as const, status: 'recently_active' as const, lastContactAt: '2026-10-01T12:00:00.000Z', lastForegroundAt: null }
+    expect(readDeviceDynamicToolRequest({ tool: 'device', arguments: { action: 'companion_status' } })?.kind).toBe('device')
+    const result = await executeDeviceDynamicTool({ deviceTool: { request: async () => response }, request: { kind: 'device', request: { action: 'companion_status' } } })
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text!)).toEqual(response)
+  })
   it('does not confirm a receipt for the wrong band', async () => {
     const request = vi.fn(async () => ({ ...action, wearable: 'garmin' as const, status: 'acknowledged' as const }))
     const result = await executeDeviceDynamicTool({ hapticAuthority: privateAuthority, deviceTool: { request }, request: { kind: 'device', request: action } })

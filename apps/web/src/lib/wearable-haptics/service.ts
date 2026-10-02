@@ -1,9 +1,10 @@
 import "server-only";
+import { COMPANION_FOREGROUND_TTL_MS } from "@murphai/hosted-execution/companion-presence";
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import {
   WEARABLE_COMMAND_TTL_MS, WEARABLE_SESSION_TTL_MS,
-  wearableHapticResponseSchema, wearableOperationSchema,
+  wearableHapticResponseSchema, wearableOperationSchema, wearableUnavailableReasonSchema,
   type WearableCompanionRequest, type WearableCompanionResponse,
   type WearableHapticRequest, type WearableHapticResponse,
 } from "@murphai/hosted-execution/wearable-haptics";
@@ -14,9 +15,9 @@ import {
 } from "@murphai/hosted-execution";
 import { getPrisma } from "../prisma";
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
-import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
 import { readHostedMailboxConversationInputAuthorityByAssistantInputIdTx, readHostedMailboxConversationWakeByAssistantInputId } from "../hosted-mailbox/store";
-import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
+import { requirePersonalMember } from "../companion/member-access";
+import { readCompanionPresenceTx } from "../companion/presence";
 
 const transactionOptions = { maxWait: 5_000, timeout: 5_000 };
 
@@ -31,12 +32,6 @@ export function wearableCommandId(memberId: string, input: WearableHapticRequest
   ])).digest("hex");
 }
 
-async function requirePersonalMember(tx: Prisma.TransactionClient, memberId: string): Promise<void> {
-  await requireHostedRuntimeActiveAccessForUpdateTx(memberId, { prisma: tx });
-  const group = await tx.hostedThreadContainer.findUnique({ where: { memberId }, select: { memberId: true } });
-  if (group) throw new TypeError("Wrist reminders require a private member conversation.");
-  await assertHostedHistoricalLaunchConsentGranted({ memberId, prisma: tx });
-}
 
 async function requireHapticAuthority(tx: Prisma.TransactionClient, memberId: string, input: WearableHapticRequest): Promise<void> {
   if (input.authority.kind === "automation_occurrence") return;
@@ -66,14 +61,25 @@ export async function requestWearableHaptic(input: {
       where: { userId_wearable: { userId: input.memberId, wearable } },
     });
     const ready = session !== null && session.expiresAt > now;
-    const response = (status: WearableHapticResponse["status"]): WearableHapticResponse => ({ action: "haptic", wearable, operation, status });
-    if (operation === "status") return response(ready ? "ready" : "unavailable");
+    const response = (status: WearableHapticResponse["status"], reason?: string | null): WearableHapticResponse => ({
+      action: "haptic", wearable, operation, status,
+      ...(status === "unavailable" && reason && input.request.includeAvailability
+        ? { unavailableReason: wearableUnavailableReasonSchema.parse(reason) } : {}),
+    });
+    const unavailableReason = async () => {
+      const presence = await readCompanionPresenceTx(tx, input.memberId, now);
+      const foregroundAt = presence.lastForegroundAt ? Date.parse(presence.lastForegroundAt) : NaN;
+      return presence.lastContactAt === presence.lastForegroundAt
+        && foregroundAt <= now.getTime() && now.getTime() - foregroundAt < COMPANION_FOREGROUND_TTL_MS
+        ? "device_disconnected" as const : "app_unreachable" as const;
+    };
+    if (operation === "status") return response(ready ? "ready" : "unavailable", ready ? null : await unavailableReason());
     const id = wearableCommandId(input.memberId, input.request);
     const previous = await tx.companionWearableCommand.findUnique({ where: { id } });
     if (previous) {
       const status = previous.expiresAt <= now && previous.status === "queued" ? "expired"
         : previous.expiresAt <= now && previous.status === "claimed" ? "unknown" : previous.status;
-      return wearableHapticResponseSchema.parse({ action: "haptic", wearable, operation, status });
+      return wearableHapticResponseSchema.parse(response(wearableHapticResponseSchema.shape.status.parse(status), previous.unavailableReason));
     }
     // Only one outstanding buzz per session. A stop cancels unsent buzzes;
     // an already claimed buzz may have reached the band and cannot be undone.
@@ -87,12 +93,13 @@ export async function requestWearableHaptic(input: {
     }
     const occupied = pending.some((command) => operation === "buzz" || command.operation === "stop");
     const status = ready && !occupied ? "queued" : "unavailable";
+    const reason = status === "unavailable" ? (ready ? "busy" : await unavailableReason()) : null;
     await tx.companionWearableCommand.create({ data: {
-      id, userId: input.memberId, wearable, operation, status,
+      id, userId: input.memberId, wearable, operation, status, unavailableReason: reason,
       sessionId: ready ? session.sessionId : null,
       expiresAt: new Date(now.getTime() + WEARABLE_COMMAND_TTL_MS),
     } });
-    return response(status);
+    return response(status, reason);
   }, transactionOptions);
 }
 

@@ -922,3 +922,7 @@ Clinical raw validation repair plan: [`2026-09-29-frog-3895-clinical-validation.
 
 Mailbox startup dependency reduction and single-query ingress context proof are tracked in
 [mailbox startup simplification](exec-plans/completed/2026-09-30-mailbox-startup-simplification.md).
+
+Companion app contact and wrist failure feedback are owned by
+[`wearable haptics`](references/wearable-haptics.md); consented group timestamp
+projection is owned by the group challenge data diagnostics spec.
