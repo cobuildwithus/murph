@@ -967,3 +967,7 @@ Weekly usage review, private bounded ledger diagnostics, and anonymous product
 reports are tracked in [weekly usage optimizer](exec-plans/active/2026-10-01-weekly-usage-optimizer.md).
 Current authority and storage contracts remain in `ARCHITECTURE.md`, `SECURITY.md`,
 and `RELIABILITY.md`.
+
+SMS invalid-destination recovery format support is tracked in
+[sign-in destination recovery](exec-plans/active/2026-10-02-otp-destination-error.md);
+`../docs/hosted-auth-migration.md` remains the contract owner.

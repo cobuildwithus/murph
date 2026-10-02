@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-10-02",
+  "order": 100,
+  "item": {
+    "id": "invalid-phone-number-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Correct an invalid sign-in number",
+    "summary": "When SMS sign-in rejects an invalid phone number, Murph asks you to check the number and country code instead of suggesting you retry later.",
+    "details": "This fixes an additional provider response format. Service outages keep their retry guidance, and verification protections are unchanged.",
+    "relevanceTags": [
+      "sign-in"
+    ],
+    "sourcePullRequests": [
+      3941
+    ]
+  }
+}
