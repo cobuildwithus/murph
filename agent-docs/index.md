@@ -1,3 +1,6 @@
+Codex 0.160.0 reconciliation for the current PR is recorded in
+[the PR preparation plan](exec-plans/active/2026-10-01-codex-cli-0160-pr.md).
+
 Codex CLI 0.160.0 upgrade verification is recorded in
 [the completed upgrade plan](exec-plans/completed/2026-10-01-codex-cli-0160.md).
 
