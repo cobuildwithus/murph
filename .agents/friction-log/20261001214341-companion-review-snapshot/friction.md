@@ -1,6 +1,7 @@
 ---
 title: 'Companion review snapshot rejects the private packager metadata layout'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3972'
 ---
 
 ## Expected Behavior

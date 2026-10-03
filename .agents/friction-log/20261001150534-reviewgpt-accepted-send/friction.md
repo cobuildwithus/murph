@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT accepted send can lose its recovery identity before the conversation URL stabilizes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3958'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Morning reconciliation live fixture rejects a supported automation patch field'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3989'
 ---
 
 ## Expected Behavior

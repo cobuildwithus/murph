@@ -1,6 +1,7 @@
 ---
 title: 'Full review snapshot omits the native Codex build patch'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3985'
 ---
 
 ## Expected Behavior
