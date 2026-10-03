@@ -1,6 +1,7 @@
 ---
 title: 'Cold Web builds cannot resolve the declared clinical-records usecase export'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3971'
 ---
 
 ## Expected Behavior

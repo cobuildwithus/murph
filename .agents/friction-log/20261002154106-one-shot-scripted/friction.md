@@ -1,6 +1,7 @@
 ---
 title: 'One-shot scripted subagent waits disguise local fixture exhaustion as provider overload'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3990'
 ---
 
 ## Expected Behavior
