@@ -195,7 +195,7 @@ Current providers:
   complete-day work uses the existing durable resource/day queue, newest first.
   A hashed `junctionTemporalSweepV1` metadata marker records the scheduled scope:
   newest eligible day, timezone, resources, horizon, and stable source roster and
-  capabilities. Matching hourly reconciles skip the broad sweep; a new day or
+  capabilities. Matching scheduled reconciles skip the broad sweep; a new day or
   changed scope schedules it again. The marker and children commit atomically in
   local SQLite. Hosted recovery checkpoints the marker with exact retained jobs
   before publishing it to Web; SQLite itself is excluded from hosted snapshots.
