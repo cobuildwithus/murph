@@ -325,7 +325,9 @@ export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
     windows: {
       backfillDays: DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
       reconcileDays: 7,
-      reconcileIntervalMs: 60 * 60_000,
+      // Webhooks are the primary Junction path; the reconcile is a missed-push
+      // backstop. Matching the other providers' cadence avoids hourly wakes.
+      reconcileIntervalMs: 6 * 60 * 60_000,
     },
     jobKinds: ["backfill", "reconcile", "resource", "push_source_recovery"],
     supportsRemoteDisconnect: true,

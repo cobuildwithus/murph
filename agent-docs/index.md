@@ -23,6 +23,10 @@ The [query owner contract](../packages/query/README.md#ordinary-wearable-reads) 
 [native paired proof](../packages/vault-usecases/bench/global-projection.md) separate
 implemented behavior from pending parent measurements and live-product gates.
 
+Unclaimed input typing cleanup is owned by `agent-docs/RELIABILITY.md`;
+implementation and proof are tracked in
+[`typing claim cleanup`](exec-plans/completed/2026-10-04-typing-claim-cleanup.md).
+
 Foreground checkpoint deadline handling for retained device-import alerts is
 owned by `RELIABILITY.md`; implementation and proof are tracked in
 [`device import checkpoint deadline`](exec-plans/completed/2026-10-04-device-import-checkpoint-deadline.md).
@@ -998,3 +1002,7 @@ SMS invalid-destination recovery format support is tracked in
 `../docs/hosted-auth-migration.md` remains the contract owner.
 
 Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
+
+Runaway invocation detection and local aggregate/incident proof are tracked in
+[the runaway alert plan](exec-plans/completed/2026-10-04-runtime-runaway-alert.md);
+`docs/hosted-runtime-log-database.md` owns the operational contract.

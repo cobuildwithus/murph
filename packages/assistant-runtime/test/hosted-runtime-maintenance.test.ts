@@ -17,6 +17,11 @@ import {
 } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
+import {
+  createHostedAssistantChannelTypingDependencies,
+  startHostedLinqInputTyping,
+} from "../src/hosted-runtime/channel-activity.ts";
+
 const mocks = vi.hoisted(() => ({
   closeHostedRuntimeDeviceSyncService: vi.fn(),
   createConfiguredDeviceSyncProvidersFromConfigs: vi.fn(),
@@ -5176,6 +5181,49 @@ describe("runHostedDeviceSyncPass", () => {
 });
 
 describe("runHostedAssistantAutomationLane", () => {
+  it("releases input typing when automation commits a silent skip", async () => {
+    const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    const context = {
+      directRecipientPhoneNumber: null, fromPhoneNumber: null,
+      replyToMessageId: "synthetic_skipped_input", routeAuthority: null,
+      service: "iMessage", target: "synthetic_skipped_chat", threadIsDirect: true,
+    };
+    const typingInput = {
+      inputId: "synthetic_skipped_input", runtimeAttemptId: "synthetic_skip_attempt",
+      forwardedEnv: { LINQ_API_TOKEN: "synthetic-token" }, userEnv: {}, providerFetch,
+      latencyTraceContext: {
+        assistantInputIds: ["synthetic_skipped_input"], runtimeAttemptId: "synthetic_skip_attempt",
+        source: "linq" as const, latencyTracePort: null,
+      },
+      linqDeliveryContext: context,
+    };
+    const cancel = startHostedLinqInputTyping(typingInput);
+    try {
+      await vi.waitFor(() => expect(providerFetch).toHaveBeenCalledOnce());
+      mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+        input.onTerminalNonReplyCommitted?.({
+          inputIds: ["synthetic_skipped_input"], recordedAt: new Date().toISOString(), source: "linq",
+        });
+        return { nextWakeAt: null, progressed: true };
+      });
+      await runHostedAssistantAutomationLane({
+        wake: { eventId: "synthetic_skip", kind: "runtime.timer", occurredAt: new Date().toISOString(), triggerKind: "runtime_timer", userId: "synthetic_member" },
+        requestId: "synthetic_skip_request", runtime: createHostedAutomationRuntime(),
+        executionContext: { hosted: { memberId: "synthetic_member", userEnvKeys: [] } },
+        runtimeAttemptId: "synthetic_skip_attempt", vaultRoot: "/tmp/synthetic-vault",
+      });
+      await vi.waitFor(() => expect(providerFetch.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "DELETE"]));
+      const next = await createHostedAssistantChannelTypingDependencies({
+        ...typingInput, linqDeliveryContexts: [context],
+      }).startLinqTyping?.({ target: context.target });
+      assert.ok(next);
+      expect(providerFetch.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "DELETE", "POST"]);
+      await next.stop({ providerStop: false });
+    } finally {
+      cancel?.();
+    }
+  });
+
   it.each(["linq", "telegram", "email"] as const)("projects committed terminal non-replies into the existing latency trace", async (source) => {
     const latencyTraceRecord = vi.fn(async () => ({
       matchedCount: 2,
