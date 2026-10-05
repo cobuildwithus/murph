@@ -16,6 +16,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Foreground checkpoint deadline handling for retained device-import alerts is
+owned by `RELIABILITY.md`; implementation and proof are tracked in
+[`device import checkpoint deadline`](exec-plans/completed/2026-10-04-device-import-checkpoint-deadline.md).
+
 Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
 [the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
 
