@@ -426,10 +426,13 @@ describes the active turn at observation time. A delayed thread-scoped warning
 cannot be attributed conclusively to that turn or an earlier WebSocket frame. POST egress
 diagnostics do not observe WebSocket frames, and absence of a warning is not
 proof that no recovery occurred. `codexTransportTimeoutPhase` distinguishes
-`websocket-send`, `websocket-read`, and `http-read` when native warning text
-identifies the operation; missing or unknown phases are omitted by the runtime
-projection. No endpoint, raw thread or turn ID, prompt,
-response, or additional provider error text enters the diagnostic record.
+`websocket-send`, `websocket-ack`, `websocket-read`, and `http-read` when native
+warning text identifies the operation; missing or unknown phases are omitted by
+the runtime projection. `websocket-ack` means the deployed Codex patch received
+no provider frame within 15 seconds after sending a request; later silence
+remains `websocket-read` under the provider stream idle timeout. No endpoint,
+raw thread or turn ID, prompt, response, or additional provider error text
+enters the diagnostic record.
 
 #### Responses WebSocket relay observations
 

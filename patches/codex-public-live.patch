@@ -8242,3 +8242,422 @@ index 1e8483e103a0076ba214d0cf0b9389e2e02c84bd..d6bcf43dad47c708ec53a42f73bdcd11
                      thread_id: thread_id.to_string(),
                      client_managed_handoffs: Some(true),
                      delegation_ack_filler: None,
+diff --git a/codex-rs/codex-api/src/endpoint/responses_websocket.rs b/codex-rs/codex-api/src/endpoint/responses_websocket.rs
+index 7f3ebd7aac30c00b4c42fedc0f7dee5bc79aef68..7162381ac85429dfdf25eff206ded70f3151d584 100644
+--- a/codex-rs/codex-api/src/endpoint/responses_websocket.rs
++++ b/codex-rs/codex-api/src/endpoint/responses_websocket.rs
+@@ -171,6 +171,13 @@ const SESSION_ID_CLIENT_METADATA_KEY: &str = "session_id";
+ const THREAD_ID_CLIENT_METADATA_KEY: &str = "thread_id";
+ const TURN_ID_CLIENT_METADATA_KEY: &str = "turn_id";
+ const WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY: &str = "x-codex-ws-stream-request-start-ms";
++/// Bounds the wait for the first server frame after a request is fully sent.
++///
++/// A healthy server acknowledges a request almost immediately, even when the response later stays
++/// silent while the model reasons or compacts. Silence at this point usually means a reused
++/// connection was dropped without a close frame, so callers retry or fall back instead of waiting
++/// for the full stream idle timeout. Later frames keep the provider's stream idle timeout.
++const RESPONSE_ACKNOWLEDGEMENT_TIMEOUT: Duration = Duration::from_secs(15);
+ 
+ struct ResponsesWebsocketTimingLogContext {
+     model: String,
+@@ -188,6 +195,7 @@ pub struct ResponsesWebsocketConnection {
+     stream: Arc<Mutex<Option<WsStream>>>,
+     // TODO (pakrym): is this the right place for timeout?
+     idle_timeout: Duration,
++    acknowledgement_timeout: Duration,
+     server_reasoning_included: bool,
+     server_model: Option<String>,
+     telemetry: Option<Arc<dyn WebsocketTelemetry>>,
+@@ -198,6 +206,7 @@ impl std::fmt::Debug for ResponsesWebsocketConnection {
+         f.debug_struct("ResponsesWebsocketConnection")
+             .field("stream", &"<ws-stream>")
+             .field("idle_timeout", &self.idle_timeout)
++            .field("acknowledgement_timeout", &self.acknowledgement_timeout)
+             .field("server_reasoning_included", &self.server_reasoning_included)
+             .field("server_model", &self.server_model)
+             .field("telemetry", &self.telemetry.as_ref().map(|_| "<telemetry>"))
+@@ -216,6 +225,7 @@ impl ResponsesWebsocketConnection {
+         Self {
+             stream: Arc::new(Mutex::new(Some(stream))),
+             idle_timeout,
++            acknowledgement_timeout: RESPONSE_ACKNOWLEDGEMENT_TIMEOUT,
+             server_reasoning_included,
+             server_model,
+             telemetry,
+@@ -247,6 +257,7 @@ impl ResponsesWebsocketConnection {
+         let (tx_interrupt, rx_interrupt) = oneshot::channel();
+         let stream = Arc::clone(&self.stream);
+         let idle_timeout = self.idle_timeout;
++        let acknowledgement_timeout = self.acknowledgement_timeout;
+         let server_reasoning_included = self.server_reasoning_included;
+         let server_model = self.server_model.clone();
+         let telemetry = self.telemetry.clone();
+@@ -317,6 +328,7 @@ impl ResponsesWebsocketConnection {
+                             tx_event.clone(),
+                             request_text,
+                             idle_timeout,
++                            acknowledgement_timeout,
+                             telemetry,
+                             turn_state.as_deref(),
+                             &timing_log_context,
+@@ -666,6 +678,7 @@ async fn run_websocket_response_stream(
+     tx_event: mpsc::Sender<std::result::Result<ResponseEvent, ApiError>>,
+     request_text: String,
+     idle_timeout: Duration,
++    acknowledgement_timeout: Duration,
+     telemetry: Option<Arc<dyn WebsocketTelemetry>>,
+     turn_state: Option<&OnceLock<String>>,
+     timing_log_context: &ResponsesWebsocketTimingLogContext,
+@@ -685,11 +698,20 @@ async fn run_websocket_response_stream(
+     // A response owns its interrupt, and create must be sent before interrupt.
+     let mut interrupt = interrupt.fuse();
+     let mut response_id = None;
++    // The acknowledgement bound applies only while it is stricter than the idle timeout.
++    let mut pending_acknowledgement_timeout =
++        Some(acknowledgement_timeout).filter(|timeout| *timeout < idle_timeout);
+     loop {
+         let poll_start = Instant::now();
++        let read_timeout = pending_acknowledgement_timeout.unwrap_or(idle_timeout);
+         let response = tokio::select! {
+-            response = tokio::time::timeout(idle_timeout, ws_stream.next()) => {
+-                response.map_err(|_| ApiError::Stream("idle timeout waiting for websocket".into()))
++            response = tokio::time::timeout(read_timeout, ws_stream.next()) => {
++                response.map_err(|_| match pending_acknowledgement_timeout {
++                    Some(_) => ApiError::Stream(
++                        "timeout waiting for websocket response acknowledgement".into(),
++                    ),
++                    None => ApiError::Stream("idle timeout waiting for websocket".into()),
++                })
+             }
+             Ok(()) = &mut interrupt, if response_id.is_some() => {
+                 send_websocket_request(
+@@ -724,6 +746,7 @@ async fn run_websocket_response_stream(
+                 return Err(err);
+             }
+         };
++        pending_acknowledgement_timeout = None;
+ 
+         match message {
+             Message::Text(text) => {
+@@ -1278,3 +1301,7 @@ mod tests {
+         );
+     }
+ }
++
++#[cfg(test)]
++#[path = "responses_websocket_acknowledgement_tests.rs"]
++mod acknowledgement_tests;
+diff --git a/codex-rs/codex-api/src/endpoint/responses_websocket_acknowledgement_tests.rs b/codex-rs/codex-api/src/endpoint/responses_websocket_acknowledgement_tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..8dd963fbb40d6a9aec6f91ef1c97c39d06fcc792
+--- /dev/null
++++ b/codex-rs/codex-api/src/endpoint/responses_websocket_acknowledgement_tests.rs
+@@ -0,0 +1,224 @@
++use super::*;
++use crate::common::ResponseCreateWsRequest;
++use codex_http_client::OutboundProxyPolicy::ReqwestDefault;
++use pretty_assertions::assert_eq;
++use serde_json::json;
++use tokio::net::TcpListener;
++use tokio_tungstenite::accept_async_with_config;
++
++const SHORT_ACKNOWLEDGEMENT_TIMEOUT: Duration = Duration::from_millis(200);
++const LONG_TIMEOUT: Duration = Duration::from_secs(30);
++
++/// One scripted reply: each event is sent after its delay. An empty reply leaves the
++/// request unanswered while the connection stays open, like a peer that vanished silently.
++type ScriptedReply = Vec<(Duration, Value)>;
++
++struct ScriptedServer {
++    url: Url,
++    task: tokio::task::JoinHandle<()>,
++}
++
++impl Drop for ScriptedServer {
++    fn drop(&mut self) {
++        self.task.abort();
++    }
++}
++
++async fn start_scripted_server(replies: Vec<ScriptedReply>) -> ScriptedServer {
++    let listener = TcpListener::bind("127.0.0.1:0")
++        .await
++        .expect("bind websocket server");
++    let address = listener.local_addr().expect("websocket server address");
++    let url = Url::parse(&format!("ws://{address}/v1/responses")).expect("websocket url");
++    let task = tokio::spawn(async move {
++        let (tcp, _) = listener.accept().await.expect("accept websocket");
++        let mut socket = accept_async_with_config(tcp, Some(websocket_config()))
++            .await
++            .expect("websocket handshake");
++        for reply in replies {
++            let Some(Ok(Message::Text(_))) = socket.next().await else {
++                return;
++            };
++            for (delay, event) in reply {
++                tokio::time::sleep(delay).await;
++                socket
++                    .send(Message::Text(event.to_string().into()))
++                    .await
++                    .expect("send scripted event");
++            }
++        }
++        // Keep the socket open without answering, so the client can only observe silence.
++        std::future::pending::<()>().await;
++    });
++    ScriptedServer { url, task }
++}
++
++async fn connect(
++    server: &ScriptedServer,
++    idle_timeout: Duration,
++    acknowledgement_timeout: Duration,
++) -> ResponsesWebsocketConnection {
++    let (stream, _status, server_reasoning_included, server_model) = connect_websocket(
++        server.url.clone(),
++        HeaderMap::new(),
++        &HttpClientFactory::new(ReqwestDefault),
++        /*turn_state*/ None,
++    )
++    .await
++    .expect("connect websocket");
++    let mut connection = ResponsesWebsocketConnection::new(
++        stream,
++        idle_timeout,
++        server_reasoning_included,
++        server_model,
++        /*telemetry*/ None,
++    );
++    connection.acknowledgement_timeout = acknowledgement_timeout;
++    connection
++}
++
++fn response_create_request() -> ResponsesWsRequest<'static> {
++    ResponsesWsRequest::ResponseCreate(ResponseCreateWsRequest {
++        model: "gpt-test",
++        instructions: "",
++        previous_response_id: None,
++        input: &[],
++        tools: None,
++        tool_choice: "auto",
++        parallel_tool_calls: false,
++        reasoning: None,
++        store: false,
++        stream: true,
++        stream_options: None,
++        include: &[],
++        service_tier: None,
++        prompt_cache_key: None,
++        text: None,
++        generate: None,
++        client_metadata: None,
++        access_programs: None,
++    })
++}
++
++fn response_created(id: &str) -> Value {
++    json!({"type": "response.created", "response": {"id": id}})
++}
++
++fn response_completed(id: &str) -> Value {
++    json!({
++        "type": "response.completed",
++        "response": {
++            "id": id,
++            "usage": {
++                "input_tokens": 0,
++                "input_tokens_details": null,
++                "output_tokens": 0,
++                "output_tokens_details": null,
++                "total_tokens": 0
++            }
++        }
++    })
++}
++
++/// Streams one request and summarizes the lifecycle events until completion or failure.
++async fn stream_outcome(
++    connection: &ResponsesWebsocketConnection,
++    connection_reused: bool,
++) -> (Vec<String>, Duration) {
++    let started = Instant::now();
++    let mut stream = connection
++        .stream_request(
++            response_create_request(),
++            connection_reused,
++            /*turn_state*/ None,
++        )
++        .await
++        .expect("start websocket request");
++    let mut outcome = Vec::new();
++    while let Some(event) = stream.next().await {
++        match event {
++            Ok(ResponseEvent::Created { response_id }) => {
++                outcome.push(format!("created:{}", response_id.unwrap_or_default()));
++            }
++            Ok(ResponseEvent::Completed { response_id, .. }) => {
++                outcome.push(format!("completed:{response_id}"));
++                break;
++            }
++            Ok(_) => {}
++            Err(err) => {
++                outcome.push(format!("error:{err}"));
++                break;
++            }
++        }
++    }
++    (outcome, started.elapsed())
++}
++
++#[tokio::test]
++async fn reused_connection_without_acknowledgement_fails_before_idle_timeout() {
++    let server = start_scripted_server(vec![
++        vec![
++            (Duration::ZERO, response_created("resp-1")),
++            (Duration::ZERO, response_completed("resp-1")),
++        ],
++        Vec::new(),
++    ])
++    .await;
++    let connection = connect(&server, LONG_TIMEOUT, SHORT_ACKNOWLEDGEMENT_TIMEOUT).await;
++
++    let (first, _) = stream_outcome(&connection, /*connection_reused*/ false).await;
++    let (second, elapsed) = stream_outcome(&connection, /*connection_reused*/ true).await;
++
++    assert_eq!(
++        (first, second, connection.is_closed().await),
++        (
++            vec!["created:resp-1".to_string(), "completed:resp-1".to_string()],
++            vec![
++                "error:stream error: timeout waiting for websocket response acknowledgement"
++                    .to_string()
++            ],
++            true,
++        )
++    );
++    assert!(
++        elapsed >= SHORT_ACKNOWLEDGEMENT_TIMEOUT && elapsed < LONG_TIMEOUT / 2,
++        "acknowledgement timeout fired after {elapsed:?}"
++    );
++}
++
++#[tokio::test]
++async fn acknowledged_response_may_stay_silent_beyond_acknowledgement_timeout() {
++    let silence = SHORT_ACKNOWLEDGEMENT_TIMEOUT * 4;
++    let server = start_scripted_server(vec![vec![
++        (Duration::ZERO, response_created("resp-1")),
++        (silence, response_completed("resp-1")),
++    ]])
++    .await;
++    let connection = connect(&server, LONG_TIMEOUT, SHORT_ACKNOWLEDGEMENT_TIMEOUT).await;
++
++    let (outcome, elapsed) = stream_outcome(&connection, /*connection_reused*/ false).await;
++
++    assert_eq!(
++        outcome,
++        vec!["created:resp-1".to_string(), "completed:resp-1".to_string()]
++    );
++    assert!(elapsed >= silence, "response completed after {elapsed:?}");
++}
++
++#[tokio::test]
++async fn idle_timeout_still_bounds_unacknowledged_request_when_shorter() {
++    let idle_timeout = SHORT_ACKNOWLEDGEMENT_TIMEOUT;
++    let server = start_scripted_server(vec![Vec::new()]).await;
++    let connection = connect(&server, idle_timeout, LONG_TIMEOUT).await;
++
++    let (outcome, elapsed) = stream_outcome(&connection, /*connection_reused*/ false).await;
++
++    assert_eq!(
++        outcome,
++        vec!["error:stream error: idle timeout waiting for websocket".to_string()]
++    );
++    assert!(
++        elapsed >= idle_timeout && elapsed < LONG_TIMEOUT / 2,
++        "idle timeout fired after {elapsed:?}"
++    );
++}
+diff --git a/codex-rs/core/tests/suite/client_websockets.rs b/codex-rs/core/tests/suite/client_websockets.rs
+index c6345c160d18898ef27a9fea9b3a1fa26e7fad42..2b32ad51893aea320a079babcee10df8b8f746a1 100755
+--- a/codex-rs/core/tests/suite/client_websockets.rs
++++ b/codex-rs/core/tests/suite/client_websockets.rs
+@@ -2568,6 +2568,79 @@ async fn responses_websocket_v2_surfaces_terminal_error_without_close_handshake(
+     server.shutdown().await;
+ }
+ 
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn responses_websocket_reused_connection_without_acknowledgement_fails_before_idle_timeout() {
++    skip_if_no_network!();
++
++    const STREAM_IDLE_TIMEOUT_MS: u64 = 120_000;
++    // The second request reaches a reused connection that never answers, like a peer that
++    // dropped without a close frame. That silence must not wait for the stream idle timeout.
++    let server = start_websocket_server_with_headers(vec![WebSocketConnectionConfig {
++        requests: vec![
++            vec![ev_response_created("resp-1"), ev_completed("resp-1")],
++            Vec::new(),
++        ],
++        response_headers: Vec::new(),
++        accept_delay: None,
++        close_after_requests: false,
++    }])
++    .await;
++    let mut provider = websocket_provider(&server);
++    provider.stream_idle_timeout_ms = Some(STREAM_IDLE_TIMEOUT_MS);
++    let harness = websocket_harness_with_provider_options(
++        provider,
++        /*runtime_metrics_enabled*/ false,
++        /*concurrent_reasoning_summaries_enabled*/ false,
++        /*enabled_features*/ &[],
++    )
++    .await;
++
++    {
++        let mut first_session = harness.client.new_session();
++        let prompt = prompt_with_input(vec![message_item("hello")]);
++        stream_until_complete(&mut first_session, &harness, &prompt).await;
++    }
++
++    let mut second_session = harness.client.new_session();
++    let prompt = prompt_with_input(vec![message_item("hello"), message_item("again")]);
++    let responses_metadata = turn_metadata(&harness, /*turn_id*/ None);
++    let mut second_stream = second_session
++        .stream(
++            &prompt,
++            &harness.model_info,
++            &harness.session_telemetry,
++            harness.effort.clone(),
++            harness.summary,
++            /*service_tier*/ None,
++            &responses_metadata,
++            &codex_rollout_trace::InferenceTraceContext::disabled(),
++        )
++        .await
++        .expect("websocket stream failed");
++    let error = tokio::time::timeout(Duration::from_millis(STREAM_IDLE_TIMEOUT_MS / 2), async {
++        while let Some(event) = second_stream.next().await {
++            if let Err(err) = event {
++                return err.to_string();
++            }
++        }
++        panic!("websocket stream ended without an error");
++    })
++    .await
++    .expect("unacknowledged request should fail before the stream idle timeout");
++
++    assert_eq!(
++        (error, server.handshakes().len(), server.single_connection().len()),
++        (
++            "stream disconnected before completion: timeout waiting for websocket response acknowledgement"
++                .to_string(),
++            1,
++            2,
++        )
++    );
++
++    server.shutdown().await;
++}
++
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+ async fn responses_websocket_v2_sets_openai_beta_header() {
+     skip_if_no_network!();

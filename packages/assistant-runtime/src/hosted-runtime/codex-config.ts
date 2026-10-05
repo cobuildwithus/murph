@@ -116,6 +116,9 @@ const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 0;
 // can be silent while producing its replacement history. A 30-second window
 // can abort valid slow compactions. Keep retries owned by Codex
 // and retain the existing outer attempt/idle-maintenance wall-clock bounds.
+// The deployed Codex patch separately fails a WebSocket request that receives
+// no provider frame within 15 seconds, so a dropped reused socket falls back
+// to HTTPS without waiting for this window.
 const HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
 const HOSTED_CODEX_NATIVE_MEMORY_CONFIG = {
   featureEnabled: false,
