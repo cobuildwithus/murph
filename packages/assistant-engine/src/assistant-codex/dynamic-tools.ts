@@ -8,6 +8,7 @@ import {
   toolFailureDiagnostic,
   toolFailureMetadata,
   toolTextResult,
+  withProductFeedbackAuditFailureDetails,
   type ToolFailureDiagnostic,
   type ToolFailureReason,
 } from './tool-failure-diagnostics.js'
@@ -4154,7 +4155,10 @@ async function executeSubmitProductFeedbackTool(input: {
         : 'product feedback candidate already accepted',
     )
   } catch (error) {
-    return toolTextResult(false, 'product feedback candidate unavailable', 'handler_exception', error)
+    return withProductFeedbackAuditFailureDetails(
+      toolTextResult(false, 'product feedback candidate unavailable', 'handler_exception', error),
+      error,
+    )
   }
 }
 
