@@ -946,6 +946,79 @@ describeRealCodex('real Codex event-list family isolation', () => {
   }, 360_000)
 })
 
+async function seedFocusedFollowupVault(vaultRoot: string) {
+  await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-04-01T00:00:00Z' })
+  const { createExperiment } = await import('@murphai/core')
+  await createExperiment({ vaultRoot, slug: 'synthetic-followup', title: 'Evening walk',
+    startedOn: '2026-04-01', status: 'paused', hypothesis: 'A consistent routine may help.' })
+}
+
+describe('focused experiment followup production contract', () => {
+  it('reads a paused followup decision through the native CLI without a global projection', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-followup-contract-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    try {
+      await seedFocusedFollowupVault(vaultRoot)
+      await buildFocusedExperimentListInstructions()
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath: path.join(root, 'commands.log'), vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const { stdout } = await execFileAsync(path.join(binDirectory, 'vault-cli'), [
+        'experiment', 'followup', 'due', 'synthetic-followup', '--kind', 'missed-log', '--date', '2026-04-11', '--format', 'json',
+      ])
+      expect(JSON.parse(stdout)).toMatchObject({ decision: { action: 'skip', reason: 'experiment_not_active' } })
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect((await getQueryProjectionStatus(vaultRoot)).exists).toBe(false)
+    } finally { await removeRealCodexTemporaryPaths([root]) }
+  }, 120_000)
+})
+
+describeRealCodex('real Codex focused experiment followup e2e', () => {
+  it('reports a paused experiment followup as not due from one real read without effects', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-followup-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await seedFocusedFollowupVault(vaultRoot)
+      const developerInstructions = await buildFocusedExperimentListInstructions()
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      await writeFile(commandLogPath, '')
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions, env: config.env,
+        fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Check experiment followup due for synthetic-followup, kind missed-log, date April 11, 2026. Is that follow-up due? Briefly explain the saved decision. Do not send anything, change anything, or perform other lookups.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      const reads = commands.filter(command => !/(?:^|\s)--help(?:\s|$)/u.test(command))
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      process.stdout.write(`[focused-followup-e2e] ${JSON.stringify({ commands, reply: result.finalMessage })}\n`)
+      expect(reads).toHaveLength(1)
+      expect(commands.length).toBeLessThanOrEqual(2)
+      expect(commands.every(command => command.startsWith('experiment followup due '))).toBe(true)
+      expect(reads[0]).toContain('synthetic-followup')
+      expect(reads[0]).toMatch(/--kind(?:=|\s)missed-log(?:\s|$)/u)
+      expect(reads[0]).toMatch(/--date(?:=|\s)2026-04-11(?:\s|$)/u)
+      expect(actions).toHaveLength(commands.length)
+      expect(actions.every(action => action.kind === 'command')).toBe(true)
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect((await getQueryProjectionStatus(vaultRoot)).exists).toBe(false)
+      expect(result.finalMessage).toMatch(/paused/iu)
+      expect(result.finalMessage).toMatch(/not due|no .{0,30}(?:follow-up|reminder)|skip/iu)
+      expect(result.finalMessage).not.toMatch(/(?:I|we)(?:['’]ve| have)? (?:sent|paused|updated|changed)/iu)
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+  }, 360_000)
+})
+
 async function seedFocusedExperimentListVault(vaultRoot: string): Promise<void> {
   await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-04-01T00:00:00Z' })
   const { createExperiment } = await import('@murphai/core')
