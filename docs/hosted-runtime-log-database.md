@@ -979,6 +979,26 @@ nonces belong to a separate primary-database nonce cron at minute 5; its
 callback statements retain the 5,000-row statement cap and use a dedicated
 400-batch catch-up ceiling.
 
+### Runaway invocation alert
+
+The existing five-minute `/api/internal/hosted-runtime/latency-alert/cron` also
+runs the runaway invocation monitor. A subject with at least 40
+`runtime.invocation_finished` rows in the trailing 60 minutes opens the shared
+operational email incident. Threshold and window are named constants; recipient
+and timezone configuration is shared with the latency monitor. Reminders use
+the existing six-hour interval and jitter, including quiet hours like the runtime
+progress monitor. A healthy evaluation clears the incident without a recovery
+email. Missing local log configuration skips the monitor; read failures cannot
+clear an existing incident.
+
+Each evaluation uses one aggregate over the existing `(at, id)` time index,
+including the incident owner's fresh pre-send evaluation. It returns the total
+qualifying subject count and at most ten highest-count subjects. Email and
+incident details contain only counts, eight-character digest prefixes, and
+dominant allowlisted `processingMode`/`nextWakeReason` labels (`unknown` for
+missing or unrecognized values). No raw identity lookup, payload export,
+migration, or runtime control action is required.
+
 ### Bounded event inventories
 
 For an already-authorized aggregate diagnostic that times out over a day, keep
