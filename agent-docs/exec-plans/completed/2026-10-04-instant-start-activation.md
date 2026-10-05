@@ -1,6 +1,6 @@
 # Run instant-start activation after answered foreground passes
 
-Status: active
+Status: completed
 Created: 2026-10-04
 Updated: 2026-10-04
 
@@ -83,3 +83,6 @@ Updated: 2026-10-04
 - 26 assistant-phase/entrypoint/runner files, 998 tests, pass.
 - The new due case fails on the unfixed source and passes with the fix.
 - `pnpm complexity:diff`: debt 279 → 279, max unchanged.
+- Full `@murphai/assistant-runtime` Vitest suite: 166 files, 3,658 tests passed (9 skipped).
+- Final ReviewGPT round 1 on `1815c6639b`: PASS, zero findings.
+Completed: 2026-10-04
