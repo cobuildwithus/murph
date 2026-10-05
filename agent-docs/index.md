@@ -5,6 +5,9 @@ Callback preflight snapshots and shared mailbox progress reads are owned by
 is recorded in `exec-plans/completed/2026-10-02-db-pool-pressure.md`.
 [the ReviewGPT loop](operations/pr-reviewgpt-loop.md).
 
+ReviewGPT registry 0.5.152 consumer installation and retained compatibility proof
+are tracked in [the consumer repair plan](exec-plans/completed/2026-10-05-frog-reviewgpt-consumer-3937.md).
+
 Codex 0.160.0 reconciliation for the current PR is recorded in
 [the PR preparation plan](exec-plans/active/2026-10-01-codex-cli-0160-pr.md).
 
@@ -1009,6 +1012,3 @@ Routine Junction daily-total wake batching and its local admission, release and
 PostgreSQL proof are tracked in
 [the routine webhook debounce plan](exec-plans/completed/2026-10-04-junction-routine-webhook-debounce.md);
 `../docs/device-sync-hosted-control-plane.md` owns the deferral contract.
-
-ReviewGPT registry 0.5.152 consumer installation and retained compatibility proof
-are tracked in [the consumer repair plan](exec-plans/completed/2026-10-05-frog-reviewgpt-consumer-3937.md).
