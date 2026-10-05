@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { buildHostedExecutionAssistantNotificationRequestedWake, createHostedExecutionPrivateAssistantAskCompletionDeliveryKey, buildHostedMemberChannelWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
 import {
   createHostedAssistantConversationIdentifierBlind,
@@ -2152,6 +2152,12 @@ describe("hosted Linq egress authority", () => {
   });
 
   it("reports an already-active provider claim without erasing its state", async () => {
+    const warn = vi.spyOn(console, "warn");
+    const error = vi.spyOn(console, "error");
+    onTestFinished(() => {
+      warn.mockRestore();
+      error.mockRestore();
+    });
     const attemptedAt = new Date("2026-06-01T12:00:00.000Z");
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
@@ -2188,13 +2194,18 @@ describe("hosted Linq egress authority", () => {
       }),
     );
 
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({
-      error: expect.objectContaining({
-        code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
-      }),
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      providerDispatchClaimed: false,
+      resolvedRoute: {
+        target: "chat-home",
+        targetKind: "thread",
+      },
     });
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
   it("revalidates a home-route override when that resolved chat becomes a group route", async () => {

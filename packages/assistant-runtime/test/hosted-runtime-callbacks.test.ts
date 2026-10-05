@@ -413,9 +413,15 @@ async function assertLinqEngagementWithExistingProviderClaim(request: {
   fromPhoneNumber?: string | null;
   target?: string | null;
   targetKind?: "explicit" | "participant" | "thread" | null;
-}) {
+}, responseKind: "claim-result" | "legacy-conflict") {
   if (request.authorityCheckOnly === true) {
     return { resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request) };
+  }
+  if (responseKind === "claim-result") {
+    return {
+      providerDispatchClaimed: false,
+      resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request),
+    };
   }
   throw Object.assign(new Error("Hosted Linq provider dispatch is already started."), {
     code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
@@ -13550,7 +13556,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("safely re-enters idempotent Linq text delivery after an existing provider claim", async () => {
+  it.each(["claim-result", "legacy-conflict"] as const)("safely re-enters idempotent Linq text delivery after an existing provider claim (%s)", async (responseKind) => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
@@ -13558,7 +13564,8 @@ describe("hosted runtime callbacks", () => {
       replyToMessageId: "linq_message_1",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
+    const assertRecentInbound = vi.fn((request) =>
+      assertLinqEngagementWithExistingProviderClaim(request, responseKind));
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_123",
@@ -14140,9 +14147,14 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
-  it.each(["reaction", "voice"] as const)(
-    "keeps an already-started non-idempotent Linq %s delivery confirmation-pending",
-    async (kind) => {
+  it.each([
+    ["reaction", "claim-result"],
+    ["voice", "claim-result"],
+    ["reaction", "legacy-conflict"],
+    ["voice", "legacy-conflict"],
+  ] as const)(
+    "keeps an already-started non-idempotent Linq %s delivery confirmation-pending (%s)",
+    async (kind, responseKind) => {
       const effect = createEffect({
         bindingDeliveryKind: "thread",
         bindingDeliveryTarget: "linq_chat_123",
@@ -14151,7 +14163,8 @@ describe("hosted runtime callbacks", () => {
         replyToMessageId: "linq_message_1",
         transportIdempotent: false,
       });
-      const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
+      const assertRecentInbound = vi.fn((request) =>
+        assertLinqEngagementWithExistingProviderClaim(request, responseKind));
       mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
         if (kind === "reaction") {
           await dependencies.setLinqMessageReaction({
