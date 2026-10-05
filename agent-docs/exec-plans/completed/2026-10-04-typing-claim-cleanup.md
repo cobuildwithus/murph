@@ -1,6 +1,6 @@
 # Release unclaimed typing preparations
 
-Status: active
+Status: completed
 
 ## Outcome and invariant
 
@@ -31,4 +31,6 @@ Cancellation is best effort and does not gate model admission. Provider cleanup 
 - Assistant-runtime and Web typechecks passed; changelog rendering: 10 tests passed.
 - Complexity guard passed with unchanged source debt and maxima. Parent review keeps the correction within the existing preparation owner.
 - Product UX: Ready for deterministic indicator lifecycle; model prompts, reply choices and alert policy are unchanged. No live model proof is needed for this effect-only correction.
-- Pending: final PR head, exact-head CI and ReviewGPT. No deployment is authorized or performed.
+- Implementation and parent candidate review complete in PR #4004. Required CI and ReviewGPT remain external completion gates tracked by the PR. No deployment is authorized or performed.
+Updated: 2026-10-04
+Completed: 2026-10-04
