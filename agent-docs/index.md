@@ -16,6 +16,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Empty-import conversation acknowledgment propagation and idle wake convergence
+are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md).
+
 Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
 [the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
 

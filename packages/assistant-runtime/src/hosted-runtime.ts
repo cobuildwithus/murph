@@ -270,6 +270,7 @@ import {
   compactHostedConversationMailboxHandledItemSelection,
   collectHostedPendingAssistantInputMediaRetentionProtections,
   inspectHostedPendingAssistantInputWakeCandidate,
+  type HostedConversationMailboxHandledItemSelection,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
   assertNever,
@@ -7118,6 +7119,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               && !runtimeOwnerHandoffRequested,
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           });
+        const checkpointSignal = checkpointWakeInterruption.signal ?? runtimeAbortController.signal;
         try {
           latestCheckpointSnapshotCleanForWarmReuse = false;
           try {
@@ -7126,7 +7128,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 workspaceSystemWork.quiesce(),
                 pauseDetachedAssistantAskBeforeWorkspaceBoundary(),
               ]),
-              checkpointWakeInterruption.signal ?? runtimeAbortController.signal,
+              checkpointSignal,
             );
             checkpointWakeInterruption.signal?.throwIfAborted();
             const quiescentMailboxWake = await resolveHostedIdleBoundarySystemMailboxWake({ vaultRoot: restored.vaultRoot });
@@ -7137,6 +7139,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   { at: idleWake.nextWakeAt, reason: idleWake.nextWakeReason },
                   quiescentMailboxWake,
                 ]);
+            redactedStatus = { ...redactedStatus, ...checkpointRequestBuilder.readRedactedStatus() };
+            // Remove server-acknowledged terminal inputs before the bounded
+            // wake probe; retained acknowledgments are not maintenance work.
+            const handledConversationMailboxSelection =
+              await compactHostedConversationMailboxHandledItemSelection({
+                consumedThroughSeq: readHostedConversationConsumedSeqFromStatus(redactedStatus),
+                signal: checkpointSignal,
+                vaultRoot: restored.vaultRoot,
+              });
             const defaultProcessingWake =
               await resolveHostedSystemMailboxProcessingModeWake({
                 assistantExecutionBlocked,
@@ -7161,10 +7172,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     ?.systemMailboxProgressGeneration ?? null,
                 progressed: systemMailboxProgressedSinceCheckpoint,
               });
-            redactedStatus = { ...redactedStatus, ...checkpointRequestBuilder.readRedactedStatus() };
             checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
               assertRuntimeNotAborted,
               checkpointRequestBuilder,
+              handledConversationMailboxSelection,
               checkpointSignal: checkpointWakeInterruption.signal,
               expectedUserId: input.request.userId,
               idleCheckpointTrigger: idleCheckpointPhaseLogDetails.idleCheckpointTrigger,
@@ -8626,6 +8637,7 @@ function resolveHostedSystemMailboxCheckpointProgressGeneration(input: {
 async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
+  handledConversationMailboxSelection?: HostedConversationMailboxHandledItemSelection;
   checkpointSignal?: AbortSignal | null;
   expectedUserId: string;
   idleCheckpointTrigger?: HostedRuntimeIdleCheckpointTrigger;
@@ -8650,7 +8662,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   }
 
   input.assertRuntimeNotAborted();
-  const handledConversationMailboxSelection =
+  const handledConversationMailboxSelection = input.handledConversationMailboxSelection ??
     await compactHostedConversationMailboxHandledItemSelection({
       consumedThroughSeq: readHostedConversationConsumedSeqFromStatus(
         input.redactedStatus,
