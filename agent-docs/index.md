@@ -24,6 +24,9 @@ Foreground checkpoint deadline handling for retained device-import alerts is
 owned by `RELIABILITY.md`; implementation and proof are tracked in
 [`device import checkpoint deadline`](exec-plans/completed/2026-10-04-device-import-checkpoint-deadline.md).
 
+Empty-import conversation acknowledgment propagation and idle wake convergence
+are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md).
+
 Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
 [the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
 

@@ -1835,6 +1835,16 @@ once from the complete index.
 Terminal conversation ids stay in the checkpointed snapshot until a later
 mailbox fetch returns a `consumedSeqByLane` floor covering them; the wake probe
 checks terminal evidence so those retained ids do not schedule another reply.
+Every import result, including an empty or replay-only fetch, carries a newer
+authoritative conversation-consumed floor into the existing checkpoint status.
+Older or absent floors cannot regress it, and observing the floor adds no
+separate checkpoint or mailbox request. At the quiescent idle boundary, compact
+acknowledged terminal inputs before deriving the default-processing wake, then
+reuse that exact handled-item selection in the snapshot. This prevents a
+terminal-only index larger than the bounded wake probe from repeatedly arming
+its maintenance timer. Inputs without terminal evidence or committed server
+acknowledgment remain retained. The idle checkpoint still derives system
+progress from the builder's latest accepted workspace generation.
 When more exact ids are pending than the checkpoint request cap, v2 persists a
 batch cursor in the same snapshot and rotates later checkpoints through the
 remaining ids. It never deletes an id merely because it was selected, so a
