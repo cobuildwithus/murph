@@ -36,7 +36,7 @@ The callback continues to lock receipts, materialize the home route, and record 
 ## Completion
 
 1. Complete local checks and parent candidate review.
-2. Commit/push the candidate, create a draft PR, and add its exact changelog provenance.
+2. Candidate committed and pushed; draft PR #4015 owns the correction and changelog provenance.
 3. Mark the stable candidate Ready and start final ReviewGPT concurrently with required CI.
 4. Keep this functional PR for human merge. Close the plan only after the completion gates resolve, or retain the specific blocker.
 
