@@ -1,6 +1,6 @@
 # Retain the original input in instant-reply delivery observation
 
-Status: active
+Status: completed
 Created: 2026-10-05
 Updated: 2026-10-05
 
@@ -66,4 +66,9 @@ existing observation owner, without changing delivery or wake behavior.
   branches there and does not justify a broader functional refactor.
 - Parent review: telemetry-only, no public identifiers/fields, new logging, schema,
   product state, provider call, wake behavior, retry or timeout change. Final
-  ReviewGPT, required exact-head CI and canonical deployment remain pending.
+  ReviewGPT round 1 passes on `7a35f7ac06951e3c829578e2285b2b79ba2db193`
+  with no findings; canonical preflight binds this exact head to PR #4029.
+- Existing alert aggregation regression also passes: shared delivery traces count
+  as one completed reply. Final plan closure changes documentation only; required
+  final-head CI and canonical deployment remain pending.
+Completed: 2026-10-05
