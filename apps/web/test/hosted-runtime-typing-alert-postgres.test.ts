@@ -68,40 +68,80 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     });
   });
 
-  it("resolves synthetic instant replies through the production delivery link and leaves failed sends alertable", async () => {
+  it("links instant replies to original and echo traces and leaves failed sends alertable", async () => {
     await withTables(async (tx) => {
-      for (const id of ["instant-accepted", "instant-failed", "instant-ordinary"]) {
+      for (const id of ["instant-original", "instant-echo", "instant-failed", "instant-ordinary"]) {
         await insertTrace(tx, id, { elapsed: null });
       }
       await insertDelivery(tx, "delivery-instant", "chat-instant", 2500);
       await insertDelivery(tx, "delivery-failed", "chat-failed", null);
       const readAlerts = () => tx.$queryRaw<Array<{ id: string }>>(buildHostedRuntimeTypingAlertQuery({ now }));
-      expect((await readAlerts()).map((row) => row.id)).toContain("runtime-typing/instant-accepted");
+      expect((await readAlerts()).map((row) => row.id)).toEqual(expect.arrayContaining([
+        "runtime-typing/instant-original", "runtime-typing/instant-echo",
+      ]));
       // Synthetic outbound contexts have no source-message routing key or typing
       // observation. Only their exact provider-accepted delivery answers them.
-      for (const [id, deliveryId] of [["instant-accepted", "delivery-instant"], ["instant-failed", "delivery-failed"]] as const) {
+      for (const [answeredMailboxItemIds, deliveryId] of [
+        [["mailbox-instant-original", "mailbox-instant-echo"], "delivery-instant"],
+        [["mailbox-instant-failed"], "delivery-failed"],
+      ] as const) {
         await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
           authenticatedUserId: "synthetic-member",
-          answeredMailboxItemIds: [`mailbox-${id}`],
+          answeredMailboxItemIds,
           linqDeliveryId: deliveryId,
           prisma: tx,
           replyRuntimeAttemptId: null,
-        })).resolves.toEqual({ matchedCount: 1, recorded: true });
+        })).resolves.toEqual({ matchedCount: answeredMailboxItemIds.length, recorded: true });
       }
       expect((await readAlerts()).map((row) => row.id).sort()).toEqual([
         "runtime-typing/instant-failed", "runtime-typing/instant-ordinary",
       ]);
-      await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
-        authenticatedUserId: "synthetic-member",
-        answeredMailboxItemIds: ["mailbox-instant-accepted"],
-        linqDeliveryId: "delivery-competing",
-        prisma: tx,
-        replyRuntimeAttemptId: null,
-      })).resolves.toEqual({ matchedCount: 0, recorded: false });
-      expect(await tx.$queryRaw`SELECT reply_runtime_attempt_id, linq_delivery_id
-        FROM hosted_ingress_latency_trace WHERE id = 'instant-accepted'`).toEqual([
-        { reply_runtime_attempt_id: null, linq_delivery_id: "delivery-instant" },
+      for (const linqDeliveryId of ["delivery-instant", "delivery-competing"]) {
+        await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+          authenticatedUserId: "synthetic-member",
+          answeredMailboxItemIds: ["mailbox-instant-original", "mailbox-instant-echo"],
+          linqDeliveryId,
+          prisma: tx,
+          replyRuntimeAttemptId: null,
+        })).resolves.toEqual({ matchedCount: 0, recorded: false });
+      }
+      expect(await tx.$queryRaw`SELECT mailbox_item_id, runtime_attempt_id, reply_runtime_attempt_id, linq_delivery_id
+        FROM hosted_ingress_latency_trace WHERE id IN ('instant-original', 'instant-echo') ORDER BY id`).toEqual([
+        { mailbox_item_id: "mailbox-instant-echo", runtime_attempt_id: null, reply_runtime_attempt_id: null, linq_delivery_id: "delivery-instant" },
+        { mailbox_item_id: "mailbox-instant-original", runtime_attempt_id: null, reply_runtime_attempt_id: null, linq_delivery_id: "delivery-instant" },
       ]);
+    });
+  });
+
+  it("preserves delivery-link member, suspension, lane, kind, and existing-trace guards", async () => {
+    await withTables(async (tx) => {
+      for (const id of ["foreign", "suspended", "system", "wrong-kind", "trace-member", "trace-source"]) {
+        await insertTrace(tx, id, { elapsed: null });
+      }
+      await insertDelivery(tx, "delivery-instant", "chat-instant", 2500);
+      await tx.$executeRaw`INSERT INTO hosted_member (id, suspended_at)
+        VALUES ('foreign-member', NULL), ('suspended-member', ${received})`;
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'foreign-member' WHERE id = 'mailbox-foreign'`;
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'suspended-member' WHERE id = 'mailbox-suspended'`;
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET lane = 'system' WHERE id = 'mailbox-system'`;
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET kind = 'system.notification' WHERE id = 'mailbox-wrong-kind'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET user_id = 'foreign-member'
+        WHERE id IN ('foreign', 'trace-member')`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET user_id = 'suspended-member' WHERE id = 'suspended'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET source = 'telegram' WHERE id = 'trace-source'`;
+      const before = await tx.$queryRaw`SELECT * FROM hosted_ingress_latency_trace ORDER BY id`;
+      for (const [authenticatedUserId, answeredMailboxItemIds] of [
+        ["synthetic-member", ["mailbox-foreign", "mailbox-suspended"]],
+        ["suspended-member", ["mailbox-suspended"]],
+        ["synthetic-member", ["mailbox-system", "mailbox-wrong-kind"]],
+        ["synthetic-member", ["mailbox-trace-member", "mailbox-trace-source"]],
+      ] as const) {
+        await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+          authenticatedUserId, answeredMailboxItemIds, linqDeliveryId: "delivery-instant",
+          prisma: tx, replyRuntimeAttemptId: null,
+        })).resolves.toEqual({ matchedCount: 0, recorded: false });
+      }
+      expect(await tx.$queryRaw`SELECT * FROM hosted_ingress_latency_trace ORDER BY id`).toEqual(before);
     });
   });
 
