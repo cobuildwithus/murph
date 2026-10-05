@@ -21,8 +21,9 @@ origins are derived by the trusted runtime, as for existing scheduled tools.
 Group/thread containers are rejected. Commands never read health-data accounts.
 
 The native app uses bearer admission on `POST /api/companion/wearables` with
-closed `connect`, `poll`, `receipt`, and `disconnect` requests. Only authenticated
-members operate their own sessions. Native Bluetooth selection, vendor framing,
+closed legacy `connect`, `poll`, `receipt`, and `disconnect` requests, or wake
+`link`, `unlink`, `claim`, and `settle` requests. Only authenticated members
+operate their own sessions and links. Native Bluetooth selection, vendor framing,
 and physical effect execution remain in the companion repository. Deploy the
 Web migration/routes before the Worker tool and companion consumer.
 
@@ -37,10 +38,13 @@ that resumes before expiry keeps its session. The app polls only while open with
 device names, reminder text, or health values. Inactivity or reconnection creates
 a new session, so queued commands cannot leak to a later connection.
 
-Commands expire after 15 seconds. Their keys derive from member, input or
+Each command names exactly one delivery owner in its `session_id`: the live
+legacy session, or the wake link described below. Only that owner may claim or
+settle it, so commands never move between phones or bands. Legacy commands
+expire after 15 seconds and wake commands after 30. Their keys derive from member, input or
 scheduled occurrence, vendor and operation. The ledger records unavailable
 attempts too: repeating an ambiguous request cannot create a delayed buzz.
-One pending buzz and one stop are permitted per session. Stop cancels only an
+One pending buzz and one stop are permitted per owner. Stop cancels only an
 unclaimed buzz. Polling commits a claim before returning at most two commands;
 a lost response drops the effect rather than retrying it. Receipts require the
 same member, vendor, session and claimed command. Acknowledged means the band
@@ -58,6 +62,36 @@ returns its current status without a second buzz. When the member is testing
 or troubleshooting delivery, the assistant may repeat it once after a short wait
 to report a receipt; scheduled reminders make one call.
 Normal conversation turns that do not call this tool add no database requests.
+
+## Wake delivery
+
+Wake-capable apps keep background Bluetooth links and report them with `link`
+and `unlink`, naming a stable installation id and an opaque link id that stays
+the same while iOS restores the same band. Latest `link` wins; `unlink` deletes
+only an exact match. `companion_wearable_link` is observational, not a lease.
+`POST /api/companion/push-route` stores one Apple push address per member
+(installation, token, environment, allowlisted topic, alert permission); `DELETE`
+needs only the authenticated member so sign-out and consent loss always clean up.
+The route is a transport address; enrollment stays on the link.
+
+When no live legacy session exists, admission binds the command to the current
+link. After commit and outside every transaction, the service observes the
+command for one poll interval (an open app claims it), sends one background push,
+observes until seven seconds, then sends one generic alert only if the member
+allowed alerts and the command is still unclaimed. Payloads carry no reminder
+text and expire no later than the command. Apple `Unregistered`/`BadDeviceToken`
+deletes the route only if the rejected token is unchanged. Push outcomes never
+change a command; an unclaimed command expires and reports so. A retry of a
+still-queued command re-sends its wake; claimed effects never replay, and rare
+concurrent retries may duplicate an alert.
+
+Background pushes need no permission but are throttled and not delivered with
+Background App Refresh off, in Low Power Mode, or after force-quit; alerts need
+permission and do not prove app code ran. Delivery is therefore best effort.
+`APNS_TEAM_ID`, `APNS_KEY_ID`, and `APNS_PRIVATE_KEY` configure the sender;
+leaving them unset is the kill switch and keeps every wake action and foreground
+delivery working. Once wake apps ship, the Web rollback floor is the first
+version with wake actions.
 
 ## App contact and unavailable reasons
 
@@ -79,7 +113,9 @@ No conversation-start query or unsolicited message is added.
 A modern host sends includeAvailability=true with wrist requests. Only those
 callers receive unavailableReason: app_unreachable when no recent foreground
 contact exists or the latest contact was background, device_disconnected when
-the latest contact is recent foreground activity but the band session is absent, and busy when another command occupies the session.
+the latest contact is recent foreground activity but the band session is absent
+(or a push-routed app reports no band link), and busy when another command
+occupies the owner.
 Each unavailable command stores its original reason, preserving retry truth.
 Legacy callers receive exactly the original strict response shape. Lease and
 presence freshness are observations with bounded lag, not process-state proof.
@@ -105,12 +141,12 @@ it only in the current session and requires a text route for this composer.
 An explicit test-and-usefulness request authorizes one immediate buzz. The
 assistant reads existing reminders and suggests a relevant use; that suggestion
 does not authorize creating or changing a reminder. Queued delivery remains
-pending, and the app must stay open for runtime command polling.
+pending until the app claims it.
 
 ## Current limits
 
-Delivery requires the companion app to stay open at the deadline. There is no
-push wake-up or background-delivery promise. The native adapters cover WHOOP 4 and 5/MG framing and Garmin GFDI V0/V1/V2
+Legacy apps deliver only while open. Wake apps deliver in the background on a
+best-effort basis and never after the member force-quits the app. The native adapters cover WHOOP 4 and 5/MG framing and Garmin GFDI V0/V1/V2
 FindMyWatch. Older-profile coverage is source- and fixture-based; it does not
 establish compatibility with every device or firmware. Garmin may also sound. Hardware effects are
 not part of this task's tests; the connected WHOOP must not be vibrated.
