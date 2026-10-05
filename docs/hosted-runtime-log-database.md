@@ -1422,6 +1422,110 @@ instrumentation cardinality/bytes and records observed local overhead, **not a
 universal latency bound or production speedup**. Transport cost is covered
 separately by the existing integration tests.
 
+### Private weekly usage audit rejection
+
+The existing caught `submit-product-feedback` classification may add one optional
+`productFeedbackAuditRejection` scalar: `wrong_kind`, `changelog_linked`,
+`missing_prefix`, `summary_too_long`, or `empty_report`. The canonical boolean
+audit validator remains the sole acceptance owner and reports the first failing
+rule in its existing short-circuit order. Its unchanged 1,800-character bound
+runs after the prefix check and before the empty-report check, emitting
+`summary_too_long` on rejection. The dynamic parser still accepts summaries up
+to 5,000 characters; the scheduled audit bound remains 1,800.
+
+Only the already authorized weekly audit recorder rejection attaches the fixed
+non-enumerable own data property to the original `Error`. The feedback adapter's
+caught-failure observer rejects proxies before descriptor reads, accepts only
+own data and exact allowlisted primitive values, and never invokes getters,
+coerces values or follows prototypes, context or causes. It copies no raw error
+code, text, fields, summary, identifiers, dates, arguments, results, provider
+context or stack. Ordinary/support feedback has no new source metadata; other
+tools and native completion rows do not receive this field. Existing generic
+error classification is unchanged; the proxy guarantee applies to this new
+metadata observer. The existing issue reporter and record parser retain exactly
+the finite addition (six classification detail keys, within the 24-key cap),
+without schema, redaction or storage changes.
+
+The Error name/message, `execution` / `handler_exception` / `unknown`
+classification, terminal model RPC, prompts, tool schema, managed instructions,
+idempotency, quiet completion and all effects remain unchanged. Rejection still
+precedes accepted-input callbacks, candidate creation, support delivery and
+persistence. No success log, extra event, retry or metric is introduced.
+
+For a future authorized comparison, use one fixed UTC end instant as `$1` in a
+UTC database session and consecutive half-open 12-hour windows. These details
+live in the **primary**
+`hosted_assistant_runtime_issue.details_json` table, not the runtime log
+database's `redacted_json`. Query only aggregates from at most 200 classification
+rows per window across all releases, grouped by window and release SHA. Only
+full lowercase 40-character hexadecimal release SHAs are returned; missing or
+invalid values share the `NULL` release bucket. Do not retrieve payloads or join
+member data:
+
+```sql
+WITH anchor AS (
+  SELECT $1::timestamptz AS end_at
+), windows AS (
+  SELECT 'prior12' AS period, end_at - interval '24 hours' AS start_at,
+         end_at - interval '12 hours' AS end_at FROM anchor
+  UNION ALL
+  SELECT 'latest12', end_at - interval '12 hours', end_at FROM anchor
+), sampled AS MATERIALIZED (
+  SELECT w.period, i.release_sha, i.rejection
+  FROM windows w
+  CROSS JOIN LATERAL (
+    SELECT CASE WHEN release_sha ~ '^[a-f0-9]{40}$' THEN release_sha END AS release_sha,
+      CASE WHEN details_json->>'productFeedbackAuditRejection' IN
+      ('wrong_kind', 'changelog_linked', 'missing_prefix', 'summary_too_long', 'empty_report')
+      THEN details_json->>'productFeedbackAuditRejection' END AS rejection
+    FROM hosted_assistant_runtime_issue
+    WHERE environment = 'hosted'
+      AND component = 'assistant.codex-dynamic-tool'
+      AND operation = 'submit-product-feedback'
+      AND phase = 'tool_call' AND issue_kind = 'tool_error'
+      AND error_code = 'ASSISTANT_DYNAMIC_TOOL_FAILED'
+      AND occurred_at >= w.start_at AND occurred_at < w.end_at
+      AND details_json->>'diagnosticRole' = 'classification'
+      AND details_json->>'failureStage' = 'execution'
+      AND details_json->>'failureReason' = 'handler_exception'
+      AND details_json->>'errorCategory' = 'unknown'
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT 200
+  ) i
+)
+SELECT w.period, s.release_sha, count(s.period) AS sampled_caught_failure_rows,
+       count(*) FILTER (WHERE s.rejection = 'wrong_kind') AS wrong_kind,
+       count(*) FILTER (WHERE s.rejection = 'changelog_linked') AS changelog_linked,
+       count(*) FILTER (WHERE s.rejection = 'missing_prefix') AS missing_prefix,
+       count(*) FILTER (WHERE s.rejection = 'summary_too_long') AS summary_too_long,
+       count(*) FILTER (WHERE s.rejection = 'empty_report') AS empty_report,
+       count(*) FILTER (WHERE s.period IS NOT NULL AND s.rejection IS NULL)
+         AS absent_or_unattributed,
+       sum(count(s.period)) OVER (PARTITION BY w.period) = 200 AS row_cap_hit
+FROM windows w LEFT JOIN sampled s ON s.period = w.period
+GROUP BY w.period, s.release_sha
+ORDER BY CASE w.period WHEN 'prior12' THEN 0 ELSE 1 END, s.release_sha NULLS LAST;
+```
+
+Each release row repeats its window's cap flag; the 200-row cap is shared across
+releases, not applied separately to each release. Treat a hit row cap as possible
+saturation and counts as lower bounds. Missing fields remain valid on older
+runners and cannot backfill historical causes. `absent_or_unattributed` includes
+older-runner validation rejections and ordinary/support or other unclassified
+feedback exceptions; it does not prove weekly audit membership. This table has
+no `feature_key`, and absent rows must not be assigned to the optimizer. Existing
+native completion rows overlap these
+classification rows and are not additional failures or a separate denominator.
+Best-effort capture, the eight-issue attempt cap and release coverage also limit
+observability: absence, including zero sampled rows, is not zero failures.
+
+Verify compatible reader and producer revisions, including warm runners. The
+earliest new evidence is the first later natural scheduled run after approved
+deployment; this patch grants no deployment authority. Do not induce traffic;
+no live-model journey is required. Any new naturally attributed failure enables a
+targeted correction of that exact rule, with a deterministic reproduction at
+its owner. Unattributed failures do not justify inferring or changing a rule.
+
 ### Private device failure evidence
 
 Caught device-handler failures may add three optional scalars to the existing
