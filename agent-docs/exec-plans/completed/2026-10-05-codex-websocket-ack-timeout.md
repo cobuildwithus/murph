@@ -1,6 +1,6 @@
 # Bound unacknowledged Codex websocket requests
 
-Status: active
+Status: completed
 Created: 2026-10-05
 Updated: 2026-10-05
 
@@ -66,7 +66,23 @@ Updated: 2026-10-05
 
 ## Verification
 
-- Commands to run: focused Codex `just test` filters, `verify:codex-upstream-source`,
-  assistant-engine stall tests with `MURPH_TEST_CODEX_COMMAND`, focused
-  diagnostics tests, and typechecks.
-- Expected outcomes: all pass; recovery at about 15 seconds instead of 90.
+- Codex: `just test -p codex-api -E 'test(/responses_websocket/)'` passed 14,
+  including 3 new acknowledgement tests. The new core reuse test and the existing
+  reuse/fallback suites passed 8, and the core test fails before the 120-second
+  idle timeout. A mutation check that disabled the bound failed both new failure
+  tests. `just clippy -p codex-api` is clean.
+- Patched-binary stall proof: a silent reused socket with a 90-second idle
+  window recovered in 15,009 ms through one HTTPS replay. A response silent for
+  18 seconds after acknowledgement completed on the websocket. The existing
+  stall and idle-safety cases are unchanged on both binaries.
+- Live local-subscription probe (uncommitted build): first provider frames
+  arrived in 187-357 ms. That includes remote v2 compaction (357 ms, compacted
+  in 8.1 seconds) and local compaction (6.0 seconds), with no fallback.
+- Murph: `verify:codex-upstream-source`, Cloudflare contract tests (79), runtime
+  events and config tests (131), assistant-engine transport tests (62),
+  changelog page test (10), both typechecks, complexity diff (no change), and
+  the docs drift check passed.
+- Final ReviewGPT round 1 at `ca048ce3cf`: PASS. The first attempt was INVALID
+  only because the snapshot lacked the native Codex owners; the same-head retry
+  appended that verbatim source as prompt context.
+Completed: 2026-10-05
