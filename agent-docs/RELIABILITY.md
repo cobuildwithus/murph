@@ -2526,10 +2526,15 @@ to apply after cutover.
   evidence. Linq's existing provider cooldown is unchanged. Signup's
   early Web typing hint is also retained, so neither produces a missing-typing
   false positive. Provider-accepted Web instant replies carry their existing
-  delivery identity into the post-response trace writer, including completed
-  webhook replays. The ordinary accepted-delivery link resolves that exact
-  synthetic conversation item without inventing a runtime attempt or placing
-  telemetry on the reply path. Sends without provider acceptance gain no accepted link.
+  delivery identity and original inbound mailbox ID as in-memory telemetry
+  context into the post-response trace writer, including completed webhook
+  replays and failed wakes. Its one existing accepted-delivery link call covers
+  at most two deduplicated candidates: the original input and accepted outbound
+  echo, with a null reply runtime attempt and unchanged member, suspension,
+  lane, and write-once guards. The actual wake/checkpoint and ingress timing
+  writes still observe the echo. Trace writes remain optional and best-effort;
+  no telemetry failure blocks ingress. Sends without provider acceptance gain
+  no accepted link.
   Callback arrival order cannot replace an earlier acceptance.
   No acceptance observation after 30 seconds is eligible as missing evidence;
   the existing five-minute alert cron provides fallback evaluation, while staged
