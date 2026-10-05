@@ -1,4 +1,8 @@
 import { types } from 'node:util'
+import {
+  HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS,
+  type HostedUsageOptimizationAuditRejection,
+} from '@murphai/hosted-execution/runtime-control'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantHostedDeviceToolRequest } from '../assistant/execution-context.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
@@ -16,6 +20,7 @@ export interface ToolFailureDiagnostic {
   deviceErrorCode?: DeviceToolFailureCode
   deviceHttpStatus?: number
   connectedAppsHttpStatus?: number
+  productFeedbackAuditRejection?: HostedUsageOptimizationAuditRejection
 }
 
 // Exactly the source-owned codes recognized by the device adapter, not a
@@ -97,6 +102,27 @@ export function withConnectedAppsToolFailureDetails(
     return {
       ...result,
       failureDiagnostic: { ...result.failureDiagnostic, connectedAppsHttpStatus: status },
+    }
+  } catch {
+    return result
+  }
+}
+
+/** Private source-owned audit evidence only at the feedback adapter's catch. */
+export function withProductFeedbackAuditFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return result
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'productFeedbackAuditRejection')
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return result
+    const rejection = HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS.find((known) => known === descriptor.value)
+    if (rejection === undefined) return result
+    return {
+      ...result,
+      failureDiagnostic: { ...result.failureDiagnostic, productFeedbackAuditRejection: rejection },
     }
   } catch {
     return result
@@ -201,6 +227,7 @@ const ERROR_CATEGORIES = new Map<string, ToolErrorCategory>([
   ['CONNECTED_APPS_MEMBER_INACTIVE', 'authority_rejected'],
   ['CONNECTED_APPS_PERSONAL_MEMBER_REQUIRED', 'authority_rejected'],
   ['CONNECTED_APPS_REQUEST_INVALID', 'invalid_input'],
+  ['CONNECTED_APPS_RESPONSE_SCHEMA_INVALID', 'invalid_result'],
   ['CONNECTED_APPS_TOOLKIT_MISMATCH', 'invalid_input'],
   ['CONNECTED_APPS_TOOLKIT_NOT_CONFIGURED', 'unavailable'],
   ['CONNECTED_APPS_WRITE_ARGUMENT_NOT_ALLOWED', 'invalid_input'],

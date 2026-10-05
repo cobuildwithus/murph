@@ -2815,6 +2815,103 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it.each([
+    { due: true, label: "runs a due queued member activation" },
+    { due: false, label: "leaves a future member activation queued" },
+  ])("$label after a clean foreground pass whose input was already answered", async ({ due }) => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-member-activation-"));
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+
+    try {
+      await initializeVault({ createdAt: now, vaultRoot });
+      const systemMailbox = await loadHostedSystemMailboxRealImplementation();
+      const activationItem = createResolvedMemberActivationMailboxItem({
+        occurredAt: now,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [{
+          attemptCount: 0,
+          itemId: activationItem.item.id,
+          lastAttemptAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          mailboxDedupeKey: activationItem.item.dedupeKey,
+          mailboxLaneSeq: activationItem.item.laneSeq,
+          nextAttemptAt: due ? null : "2026-04-27T00:05:00.000Z",
+          occurredAt: activationItem.item.occurredAt,
+          postCheckpointRecord: null,
+          preferenceCausalSeq: null,
+          requestId: null,
+          routeAction: "apply-member-activation",
+          status: "pending",
+          wake: buildHostedExecutionMemberActivatedWake({
+            eventId: "member.activated:synthetic:instant-first-turn",
+            memberChannels: { email: false, linq: true, telegram: false },
+            memberId: "member_synthetic_phase",
+            occurredAt: now,
+          }),
+        }],
+      }));
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
+        systemMailbox.prepareHostedSystemMailboxItemForCheckpoint,
+      );
+      mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementation(
+        systemMailbox.recordHostedSystemMailboxItemAfterCheckpoint,
+      );
+      mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+        systemMailbox.resolveHostedSystemMailboxNextWakeCandidate,
+      );
+      // Web's instant first turn already answered the imported input, so the
+      // foreground pass completes without a reply and without progress.
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: null,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        progressed: false,
+        redactedLogEntries: [],
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 1,
+        now: () => now,
+        operatorHomeRoot,
+        vaultRoot,
+      }));
+
+      if (!due) {
+        expect(result.progressed).not.toBe(true);
+        expect(result.afterCheckpoint).toBeUndefined();
+        expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalledWith(
+          expect.objectContaining({ allowedRouteActions: expect.arrayContaining(["apply-member-activation"]) }),
+        );
+        return;
+      }
+      expect(result).toEqual(expect.objectContaining({
+        afterCheckpointKeepsForegroundImportLoop: true,
+        checkpointReason: "system_mailbox_receipt",
+        progressed: true,
+      }));
+      expect(await readHostedSystemMailboxState(vaultRoot)).toMatchObject({
+        pending: [{ routeAction: "apply-member-activation" }],
+      });
+
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(await readHostedSystemMailboxState(vaultRoot)).toEqual({ pending: [] });
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "activation_bootstrap",
+      }));
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
   it("does not scan terminal Linq cleanup during fresh conversation input", async () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,

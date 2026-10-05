@@ -10,7 +10,7 @@ import {
 } from "../src/cli-timing.ts";
 import {
   finishCliTimingAction, isCliTimingActive, noteCliTimingExit,
-  startCliPhase, timeCliDispatch, timeCliPhase, withCliTiming,
+  startCliPhase, timeCliDispatch, timeCliPhase, timeCliPhaseSync, withCliTiming,
 } from "../src/node/cli-timing.ts";
 
 async function clocked(run: (advance: (us: number) => void) => Promise<void>) {
@@ -1039,12 +1039,13 @@ test.skipIf(!researchFailureCompatibilityBase)("actual pre-research reader colla
 });
 
 
-test("query rebuild admission is exactly seventeen fixed phases without raising invocation caps", async () => {
+test("query rebuild admission is exactly twenty-one fixed phases without raising invocation caps", async () => {
   assert.deepEqual(CLI_TIMING_PHASES, [
     "total", "setup", "dispatch", "post-dispatch", "teardown", "unattributed",
     "query-freshness", "query-manifest", "query-status", "query-rebuild", "query-wait",
     "query-source-read", "query-wearable-dataset", "query-metric-projection",
     "query-wearable-summary", "query-search-documents", "query-publication",
+    "query-entity-read", "query-wearable-compose", "query-metric-read", "query-pattern-report",
   ]);
   assert.equal(CLI_TIMING_MAX_COMMANDS, 32);
   assert.equal(CLI_TIMING_MAX_SPANS, 64);
@@ -1052,7 +1053,7 @@ test("query rebuild admission is exactly seventeen fixed phases without raising 
   for (const phase of CLI_TIMING_PHASES.slice(1)) {
     assert.equal(addCliPhaseSample(report.commands[0]!.phases, phase, 37_000_000), true);
   }
-  assert.equal(report.commands[0]!.phases.length, 17);
+  assert.equal(report.commands[0]!.phases.length, 21);
   assert.deepEqual(normalizeCliTiming(report), report);
   // Unknown labels are rejected, not pattern-admitted or serialized as paths.
   for (const phase of ["query-publication/PRIVATE_SENTINEL", "QUERY-SOURCE-READ", "query-source-read "]) {
@@ -1076,5 +1077,23 @@ test("query rebuild admission is exactly seventeen fixed phases without raising 
     assert.equal(bounded.commands[0]!.phases.filter(phase => CLI_TIMING_PHASES.slice(11).some(name => name === phase.phase))
       .reduce((count, phase) => count + phase.count, 0), 63);
     assert.deepEqual(normalizeCliTiming(bounded), bounded);
+  });
+});
+
+
+test("synchronous query stage timing preserves values, immediate execution and thrown identity", async () => {
+  const value = { synthetic: true };
+  assert.equal(timeCliPhaseSync("query-entity-read", () => value), value);
+  await clocked(async advance => {
+    let report!: CliTiming;
+    const failure = new Error("synthetic decode failure");
+    await assert.rejects(withCliTiming(() => timeCliDispatch("wearables patterns", async () => {
+      assert.equal(timeCliPhaseSync("query-entity-read", () => { advance(12); return value; }), value);
+      timeCliPhaseSync("query-metric-read", () => { advance(34); throw failure; });
+    }), captured => { report = captured; }), error => error === failure);
+    assert.equal(report.commands[0]!.outcome, "error");
+    assert.deepEqual(report.commands[0]!.phases.filter(phase => phase.phase.startsWith("query-")).map(
+      phase => [phase.phase, phase.count, phase.sumUs]), [["query-entity-read", 1, 12], ["query-metric-read", 1, 34]]);
+    assert.deepEqual(normalizeCliTiming(report), report);
   });
 });

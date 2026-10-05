@@ -979,6 +979,26 @@ nonces belong to a separate primary-database nonce cron at minute 5; its
 callback statements retain the 5,000-row statement cap and use a dedicated
 400-batch catch-up ceiling.
 
+### Runaway invocation alert
+
+The existing five-minute `/api/internal/hosted-runtime/latency-alert/cron` also
+runs the runaway invocation monitor. A subject with at least 25
+`runtime.invocation_finished` rows in the trailing 60 minutes opens the shared
+operational email incident. Threshold and window are named constants; recipient
+and timezone configuration is shared with the latency monitor. Reminders use
+the existing six-hour interval and jitter, including quiet hours like the runtime
+progress monitor. A healthy evaluation clears the incident without a recovery
+email. Missing local log configuration skips the monitor; read failures cannot
+clear an existing incident.
+
+Each evaluation uses one aggregate over the existing `(at, id)` time index,
+including the incident owner's fresh pre-send evaluation. It returns the total
+qualifying subject count and at most ten highest-count subjects. Email and
+incident details contain only counts, eight-character digest prefixes, and
+dominant allowlisted `processingMode`/`nextWakeReason` labels (`unknown` for
+missing or unrecognized values). No raw identity lookup, payload export,
+migration, or runtime control action is required.
+
 ### Bounded event inventories
 
 For an already-authorized aggregate diagnostic that times out over a day, keep
@@ -1192,6 +1212,36 @@ This is best-effort diagnostic attribution, not an authorization or integrity
 ledger. Existing runtime/version dimensions, usage sampling and retention remain
 unchanged; there is no new subject/correlation label.
 
+### Personal Patterns post-freshness timing
+
+`wearables patterns` now records four bounded phases after query freshness:
+`query-entity-read` covers stored entity hydration and read-model construction;
+`query-wearable-compose` covers stored wearable decoding, reconciliation and public
+composition; `query-metric-read` covers stored metric selection and decoding;
+`query-pattern-report` covers optional vocabulary reading and report calculation.
+They use the existing monotonic timing pipeline, fixed names, span/drop accounting
+and 8 KiB transport cap. They add no content, arguments, identifiers, cardinality
+labels, network operations or persisted state. Synchronous stages remain synchronous.
+Thrown values and results retain their original identity and behavior.
+
+Deploy the Web usage normalizer and runtime/CLI timing receivers with these names
+before the producer. Older validators reject an unknown phase and drop the optional
+`cliTiming` object; legacy native-tool usage accounting remains independent.
+Older producers remain valid for new readers. A rejected or missing report is
+unknown, not zero cost. Validate exact source revisions and read-only telemetry
+admission before claiming deployment. This branch does not authorize deploying
+optimization changes together with instrumentation.
+
+After confirmed deployment, observe 24–72 hours of normal traffic using the bounded
+72-hour query below, adding these four literal phase names. Compare counts and
+phase sums for successful/error commands separately, and inspect single-call
+cohorts for attribution. Multi-call histograms do not pair phase maxima or reveal
+call ordering; never assign their maxima to the same slow call. Follow #3997 for
+the unresolved tail and the source transition in #3391. Retain these boundaries
+when that transition lands, adapting names to their actual operations rather than
+claiming SQLite hydration still occurs. No deployment or speedup is established
+merely by these local tests.
+
 ### Timing semantics and completeness
 
 All durations use `process.hrtime.bigint()`, floored to integer **microseconds**.
@@ -1246,7 +1296,7 @@ and children rejected before entering the CLI have no invented command timing.
 Legacy batch output, counts, lengths, durations and failure handling are unchanged.
 
 Bounds are source-owned: 32 distinct command/outcome entries per report/active
-window; 17 fixed phase names (the original 11 plus six rebuild names); 64 started
+window; 21 fixed phase names (the original 11, six rebuild names and four Patterns names); 64 started
 scoped spans per invocation (plus fixed lifecycle samples); at most 8,192 bytes
 per complete UDP envelope (including the ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
 the supported macOS 9 KiB UDP datagram limit; no host setting or permission is
@@ -1304,7 +1354,7 @@ microseconds, eight histogram buckets, command/outcome identity, failure fields,
 32-command / 64-scoped-span caps, UDP 8,192-byte and HTTP 16,384-byte ceilings,
 whole-command trimming and disabled-scope no-op behavior are unchanged. No entity
 counts, IDs, paths, arguments, content, result values or error text are added.
-The enum length itself owns the exact 17-entry per-command shape bound; no
+The enum length itself owns the current 21-entry per-command shape bound (including the four Patterns phases); no
 transport limit is widened to accommodate the extra phases.
 
 | New phase | Existing operation measured |
@@ -1402,6 +1452,110 @@ instrumentation cardinality/bytes and records observed local overhead, **not a
 universal latency bound or production speedup**. Transport cost is covered
 separately by the existing integration tests.
 
+### Private weekly usage audit rejection
+
+The existing caught `submit-product-feedback` classification may add one optional
+`productFeedbackAuditRejection` scalar: `wrong_kind`, `changelog_linked`,
+`missing_prefix`, `summary_too_long`, or `empty_report`. The canonical boolean
+audit validator remains the sole acceptance owner and reports the first failing
+rule in its existing short-circuit order. Its unchanged 1,800-character bound
+runs after the prefix check and before the empty-report check, emitting
+`summary_too_long` on rejection. The dynamic parser still accepts summaries up
+to 5,000 characters; the scheduled audit bound remains 1,800.
+
+Only the already authorized weekly audit recorder rejection attaches the fixed
+non-enumerable own data property to the original `Error`. The feedback adapter's
+caught-failure observer rejects proxies before descriptor reads, accepts only
+own data and exact allowlisted primitive values, and never invokes getters,
+coerces values or follows prototypes, context or causes. It copies no raw error
+code, text, fields, summary, identifiers, dates, arguments, results, provider
+context or stack. Ordinary/support feedback has no new source metadata; other
+tools and native completion rows do not receive this field. Existing generic
+error classification is unchanged; the proxy guarantee applies to this new
+metadata observer. The existing issue reporter and record parser retain exactly
+the finite addition (six classification detail keys, within the 24-key cap),
+without schema, redaction or storage changes.
+
+The Error name/message, `execution` / `handler_exception` / `unknown`
+classification, terminal model RPC, prompts, tool schema, managed instructions,
+idempotency, quiet completion and all effects remain unchanged. Rejection still
+precedes accepted-input callbacks, candidate creation, support delivery and
+persistence. No success log, extra event, retry or metric is introduced.
+
+For a future authorized comparison, use one fixed UTC end instant as `$1` in a
+UTC database session and consecutive half-open 12-hour windows. These details
+live in the **primary**
+`hosted_assistant_runtime_issue.details_json` table, not the runtime log
+database's `redacted_json`. Query only aggregates from at most 200 classification
+rows per window across all releases, grouped by window and release SHA. Only
+full lowercase 40-character hexadecimal release SHAs are returned; missing or
+invalid values share the `NULL` release bucket. Do not retrieve payloads or join
+member data:
+
+```sql
+WITH anchor AS (
+  SELECT $1::timestamptz AS end_at
+), windows AS (
+  SELECT 'prior12' AS period, end_at - interval '24 hours' AS start_at,
+         end_at - interval '12 hours' AS end_at FROM anchor
+  UNION ALL
+  SELECT 'latest12', end_at - interval '12 hours', end_at FROM anchor
+), sampled AS MATERIALIZED (
+  SELECT w.period, i.release_sha, i.rejection
+  FROM windows w
+  CROSS JOIN LATERAL (
+    SELECT CASE WHEN release_sha ~ '^[a-f0-9]{40}$' THEN release_sha END AS release_sha,
+      CASE WHEN details_json->>'productFeedbackAuditRejection' IN
+      ('wrong_kind', 'changelog_linked', 'missing_prefix', 'summary_too_long', 'empty_report')
+      THEN details_json->>'productFeedbackAuditRejection' END AS rejection
+    FROM hosted_assistant_runtime_issue
+    WHERE environment = 'hosted'
+      AND component = 'assistant.codex-dynamic-tool'
+      AND operation = 'submit-product-feedback'
+      AND phase = 'tool_call' AND issue_kind = 'tool_error'
+      AND error_code = 'ASSISTANT_DYNAMIC_TOOL_FAILED'
+      AND occurred_at >= w.start_at AND occurred_at < w.end_at
+      AND details_json->>'diagnosticRole' = 'classification'
+      AND details_json->>'failureStage' = 'execution'
+      AND details_json->>'failureReason' = 'handler_exception'
+      AND details_json->>'errorCategory' = 'unknown'
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT 200
+  ) i
+)
+SELECT w.period, s.release_sha, count(s.period) AS sampled_caught_failure_rows,
+       count(*) FILTER (WHERE s.rejection = 'wrong_kind') AS wrong_kind,
+       count(*) FILTER (WHERE s.rejection = 'changelog_linked') AS changelog_linked,
+       count(*) FILTER (WHERE s.rejection = 'missing_prefix') AS missing_prefix,
+       count(*) FILTER (WHERE s.rejection = 'summary_too_long') AS summary_too_long,
+       count(*) FILTER (WHERE s.rejection = 'empty_report') AS empty_report,
+       count(*) FILTER (WHERE s.period IS NOT NULL AND s.rejection IS NULL)
+         AS absent_or_unattributed,
+       sum(count(s.period)) OVER (PARTITION BY w.period) = 200 AS row_cap_hit
+FROM windows w LEFT JOIN sampled s ON s.period = w.period
+GROUP BY w.period, s.release_sha
+ORDER BY CASE w.period WHEN 'prior12' THEN 0 ELSE 1 END, s.release_sha NULLS LAST;
+```
+
+Each release row repeats its window's cap flag; the 200-row cap is shared across
+releases, not applied separately to each release. Treat a hit row cap as possible
+saturation and counts as lower bounds. Missing fields remain valid on older
+runners and cannot backfill historical causes. `absent_or_unattributed` includes
+older-runner validation rejections and ordinary/support or other unclassified
+feedback exceptions; it does not prove weekly audit membership. This table has
+no `feature_key`, and absent rows must not be assigned to the optimizer. Existing
+native completion rows overlap these
+classification rows and are not additional failures or a separate denominator.
+Best-effort capture, the eight-issue attempt cap and release coverage also limit
+observability: absence, including zero sampled rows, is not zero failures.
+
+Verify compatible reader and producer revisions, including warm runners. The
+earliest new evidence is the first later natural scheduled run after approved
+deployment; this patch grants no deployment authority. Do not induce traffic;
+no live-model journey is required. Any new naturally attributed failure enables a
+targeted correction of that exact rule, with a deterministic reproduction at
+its owner. Unattributed failures do not justify inferring or changing a rule.
+
 ### Private device failure evidence
 
 Caught device-handler failures may add three optional scalars to the existing
@@ -1474,6 +1628,24 @@ Use batch knowledge counters to identify missing-page rejections. Keep completio
 rows as the existing call denominator, not extra failures, and do not add profile
 counts to overlapping native CLI counts. Unresolved connection loss remains
 unresolved. This rollout grants no automatic rollback or production mutation.
+
+The connected-app port's own response-envelope schema rejection keeps its existing
+`TypeError` name/message and adds one fixed, non-enumerable own data code,
+`CONNECTED_APPS_RESPONSE_SCHEMA_INVALID`. Only that exact code maps to the
+existing private `errorCategory: invalid_result`; `failureStage: execution` and
+`failureReason: handler_exception` remain unchanged. Unclassified transport errors
+remain `unknown`. No response content, schema issues, identifiers, raw code or new
+field is persisted. Non-enumerability preserves the existing enumerable-only RPC
+error projection and ambiguous-write no-retry recovery.
+
+For a future authorized comparison, use fixed consecutive 12-hour windows and
+aggregate only connected-app `diagnosticRole: classification` rows by request kind,
+stage, reason, category and optional HTTP status (at most 200 rows per window;
+report saturation as a lower bound). Distinguish `invalid_result` from
+status-absent `unknown`, retaining completion rows as a separate, overlapping call
+denominator. Verify producer/reader release coverage first; old `unknown` records
+cannot be backfilled. This is evidence for future schema-rejection attribution,
+not proof that any previously observed connected-app failure was schema-related.
 
 ### Finite CLI failure counts (optional, same timing identity)
 
@@ -1911,7 +2083,7 @@ rows AS MATERIALIZED (
   GROUP BY r.period
 ), wanted(command) AS (
   VALUES ('goal list'), ('family list'), ('memory show'), ('wearables latest'), ('wearables day'),
-         ('wearables activity list'), ('wearables sources list'), ('other')
+         ('wearables activity list'), ('wearables sources list'), ('wearables patterns'), ('other')
 ), commands AS (
   SELECT v.period, c FROM valid v
   CROSS JOIN LATERAL jsonb_array_elements(v.t -> 'commands') c
@@ -1924,7 +2096,8 @@ rows AS MATERIALIZED (
     'teardown', 'unattributed', 'query-freshness', 'query-manifest',
     'query-status', 'query-rebuild', 'query-wait', 'query-source-read',
     'query-wearable-dataset', 'query-metric-projection', 'query-wearable-summary',
-    'query-search-documents', 'query-publication')
+    'query-search-documents', 'query-publication', 'query-entity-read',
+    'query-wearable-compose', 'query-metric-read', 'query-pattern-report')
 ), totals AS (
   SELECT period, command, outcome, p ->> 'phase' AS phase,
          sum((p ->> 'count')::numeric) AS phase_samples,

@@ -1,5 +1,5 @@
 import { withCanonicalWriteLock } from "@murphai/core";
-import { startCliPhase, timeCliPhase } from "@murphai/runtime-state/node/cli-timing";
+import { startCliPhase, timeCliPhase, timeCliPhaseSync } from "@murphai/runtime-state/node/cli-timing";
 import {
   isValidIanaTimeZone,
 } from "@murphai/contracts";
@@ -365,24 +365,29 @@ export async function buildPersonalPatternReportRuntime(
   options: { asOf?: Date | string; windowDays?: number } = {},
 ): Promise<PersonalPatternReport> {
   const location = await ensureFreshQueryProjection(vaultRoot);
-  const snapshot = readStoredVaultSource(location);
-  const vault = createVaultReadModel({
-    entities: snapshot.entities,
-    metadata: snapshot.metadata,
-    vaultRoot,
+  const vault = timeCliPhaseSync("query-entity-read", () => {
+    const snapshot = readStoredVaultSource(location);
+    return createVaultReadModel({
+      entities: snapshot.entities,
+      metadata: snapshot.metadata,
+      vaultRoot,
+    });
   });
-  const wearableBundle = readStoredPublicWearableSummaryBundle(location, {});
-  const metricPoints = listStoredMetricPoints(
+  const wearableBundle = timeCliPhaseSync("query-wearable-compose", () =>
+    readStoredPublicWearableSummaryBundle(location, {}));
+  const metricPoints = timeCliPhaseSync("query-metric-read", () => listStoredMetricPoints(
     location,
     normalizeMetricPointFilters({ limit: null }),
-  );
-  const vocabulary = await readBrowserVaultPersonalPatternVocabulary(vaultRoot);
-  return buildPersonalPatternReportFromWearableBundleAndMetricPoints(
-    vault,
-    wearableBundle,
-    metricPoints,
-    { ...options, vocabulary },
-  );
+  ));
+  return timeCliPhase("query-pattern-report", async () => {
+    const vocabulary = await readBrowserVaultPersonalPatternVocabulary(vaultRoot);
+    return buildPersonalPatternReportFromWearableBundleAndMetricPoints(
+      vault,
+      wearableBundle,
+      metricPoints,
+      { ...options, vocabulary },
+    );
+  });
 }
 
 export async function summarizeWearableActivityRuntime(

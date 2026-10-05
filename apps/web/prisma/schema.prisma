@@ -203,6 +203,7 @@ model DeviceSyncDirtyConnection {
   sourceProviderCountsJson   Json?            @map("source_provider_counts_json")
   resourceCategoryCountsJson Json?            @map("resource_category_counts_json")
   dirtyResourcesJson         Json?            @map("dirty_resources_json")
+  wakeDeferredUntil          DateTime?        @map("wake_deferred_until")
   createdAt                  DateTime         @default(now()) @map("created_at")
   updatedAt                  DateTime         @updatedAt @map("updated_at")
   connection                 DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
@@ -211,6 +212,7 @@ model DeviceSyncDirtyConnection {
   @@index([userId, dirtyRevision, processedRevision])
   @@index([userId, firstDirtyAt, connectionId])
   @@index([latestDirtyAt])
+  @@index([wakeDeferredUntil])
   @@map("device_sync_dirty_connection")
 }
 

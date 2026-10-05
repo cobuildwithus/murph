@@ -1267,7 +1267,11 @@ boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
   separately named workflow leg makes these invariants visible without
   replacing the two aggregate required checks.
 - `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
-  same exact 30-second boundary for completed and still-unresolved Linq traces,
+  same exact 60-second boundary for completed and still-unresolved Linq traces,
+  keeps explicit group-thread replies out of the first-response alert while
+  unknown directness stays alertable, drops inputs resolved by an earlier
+  non-reply from a later delivery's origin, classifies multi-request replies by
+  their earliest provider start,
   excludes chronologically valid AI usage-denied traces before grouping while
   keeping mixed unblocked rows and impossible denial chronology alertable, and
   applies the bounded-read truncation signal only to that alertable population,
@@ -1448,6 +1452,18 @@ boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
   bounded monitor query. It also proves that recent resumed activity survives
   seven-day trace cleanup through quiet-hour deferral and alerts after quiet
   hours, while a fully stale trace is deleted.
+  This composed proof requires the checked-in Prisma migrations: the monitor
+  persists alert state in `public.hosted_linq_alert`, even though the trace,
+  delivery, and mailbox fixtures use transaction-local temporary tables. The
+  query-only sibling above does not exercise that persistence owner. For a
+  targeted local run, point `LOCAL_POSTGRES_URL` at an isolated loopback
+  `murph_test_<slug>` database, then run these commands in order with the same
+  database URL:
+  ```sh
+  DATABASE_URL="$LOCAL_POSTGRES_URL" pnpm --dir apps/web prisma:generate
+  DATABASE_URL="$LOCAL_POSTGRES_URL" pnpm --dir apps/web prisma:migrate:deploy
+  DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-mailbox-usage-denial-postgres.test.ts
+  ```
 - `apps/cloudflare/test/database-health-{metrics,monitor,store,worker}.test.ts`
   and `apps/cloudflare/test/workers/database-health-e2e.test.ts` cover the
   independent PlanetScale/Linq database-health plane. The tests prove strict
