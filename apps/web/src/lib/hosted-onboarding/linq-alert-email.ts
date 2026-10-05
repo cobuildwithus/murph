@@ -228,6 +228,8 @@ function buildHostedTypingAlertEmailText(alertId: string, details: Record<string
     `Alert ID: ${alertId}`,
     `Channel: ${details.source}`,
     `Workspace: ${details.workspaceState}`,
+    ...(typeof details.providerEventCreatedAt === "string"
+      ? [`Provider event created: ${details.providerEventCreatedAt}`] : []),
     `Webhook received: ${details.webhookReceivedAt}`,
     details.typingAcceptedAt === null
       ? "Typing acceptance: not observed when checked"

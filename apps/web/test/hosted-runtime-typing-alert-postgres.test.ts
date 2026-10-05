@@ -245,6 +245,48 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     });
   });
 
+  it("measures Linq silence from the exact message's provider event, never after receipt", async () => {
+    await withTables(async (tx) => {
+      for (const id of ["early-event", "late-event", "edited", "no-event", "reply-before-receipt"]) {
+        await insertTrace(tx, id, { elapsed: 2500 });
+      }
+      // Time before the route runs counts; a provider clock ahead of ours does not.
+      await insertProviderEvent(tx, "early-event", -1500);
+      await insertProviderEvent(tx, "late-event", 2000);
+      // The edit's own event, not the original send, starts its wait.
+      await insertProviderEvent(tx, "edited", -600_000);
+      await insertProviderEvent(tx, "edited", -400);
+      // A reply delivered after the provider event but before receipt restarts silence.
+      await insertProviderEvent(tx, "reply-before-receipt", -3000);
+      await insertDelivery(tx, "between-reply", "chat-reply-before-receipt", -1000);
+      // Another member's mailbox cannot supply an earlier start.
+      await insertTrace(tx, "other-member", { elapsed: 2500 });
+      await insertProviderEvent(tx, "other-member", -1500);
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'other-member'
+        WHERE id = 'mailbox-other-member'`;
+      await insertTrace(tx, "telegram-fast", { source: "telegram", elapsed: 2500 });
+
+      const rows = await tx.$queryRaw<Array<{ id: string; elapsedMs: bigint }>>(
+        buildHostedRuntimeTypingAlertQuery({ now }),
+      );
+      expect(rows.map(({ id, elapsedMs }) => [id, elapsedMs]).sort()).toEqual([
+        ["runtime-typing/early-event", 4000n],
+        ["runtime-typing/reply-before-receipt", 3500n],
+      ]);
+
+      const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>
+        new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }));
+      await runHostedRuntimeTypingAlertMonitor({
+        env, fetchImpl, now, prisma: tx, userId: "synthetic-member", assistantInputIds: ["input-early-event"],
+      });
+      const body = String(fetchImpl.mock.calls[0]?.[1]?.body);
+      expect(body).toContain("Provider event created: 2026-09-10T03:58:58.500Z");
+      expect(body).toContain("Webhook received: 2026-09-10T03:59:00.000Z");
+      expect(body).toContain("Silence measured from: 2026-09-10T03:58:58.500Z");
+      expect(body).toContain("Wait without typing or a reply: 4000 ms");
+    });
+  });
+
   it.each(["linq", "telegram"] as const)("excludes usage-denied %s inputs while alerting on other slow inputs for the same member", async (source) => {
     await withTables(async (tx) => {
       const usageDeniedAt = new Date(received.getTime() + 1500);
@@ -405,6 +447,14 @@ async function bindConversation(tx: Prisma.TransactionClient, traceId: string, c
     (message_lookup_key, linq_chat_lookup_key, provider_created_at)
     SELECT ${`message-${traceId}`}, ${chat}, webhook_received_at
     FROM hosted_ingress_latency_trace WHERE id = ${traceId}`;
+}
+
+async function insertProviderEvent(tx: Prisma.TransactionClient, traceId: string, offsetMs: number) {
+  await tx.$executeRaw`UPDATE hosted_mailbox_item
+    SET source_message_lookup_key = ${`message-${traceId}`} WHERE id = ${`mailbox-${traceId}`}`;
+  await tx.$executeRaw`INSERT INTO hosted_linq_provider_event
+    (message_lookup_key, linq_chat_lookup_key, provider_created_at)
+    VALUES (${`message-${traceId}`}, ${`chat-${traceId}`}, ${new Date(received.getTime() + offsetMs)})`;
 }
 
 async function insertDelivery(tx: Prisma.TransactionClient, id: string, chat: string, offsetMs: number | null) {
