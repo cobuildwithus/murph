@@ -251,8 +251,10 @@ export raw JSON or subject identifiers just to investigate a latency span.
 ### Provider request diagnostics
 
 `runner.provider_egress_diagnostic` is the bounded provider-request trace for
-hosted OpenAI Responses traffic and Venice Responses calls explicitly tagged by
-Codex as `request_kind: memory`. Version 4 records request and input byte counts,
+hosted OpenAI `POST /v1/responses` traffic. The Worker builds it from the request
+bytes already admitted for the image gate after the provider request starts, and
+persists it as background work, so neither diagnostic parsing nor the runtime-log
+write holds the provider response. Version 4 records request and input byte counts,
 allowlisted shape/model kinds, cache-key presence, and keyed prefix fingerprints.
 For parsed Responses input, it also extends the existing aligned
 `inputNestedMetricKinds`, `inputNestedMetricCounts`, and
@@ -268,16 +270,11 @@ are omitted. They do not claim semantic equivalence, and no call id, serialized
 output, or comparison key is persisted.
 Request bodies above 6 MiB retain the request byte count and `too_large` status
 but skip JSON and function-output classification.
-Venice memory rows additionally record the canonical Murph model, the allowlisted
-upstream Venice model id, response-header latency, HTTP outcome, validated
-`CF-RAY`, bounded provider retry count, and whether the provider's reported model
-matches the requested route. `providerResponseTtfbMs` measures time through
-response headers, not full streamed-generation latency.
 
 Codex `session_id`, `thread_id`, `turn_id`, and `window_id` values are never
 stored. When `HOSTED_LOG_FINGERPRINT_SECRET` is configured, the Worker records
-only context-separated HMAC-SHA256 fingerprints so repeated `request_kind`
-`memory` calls can be grouped within the retention window. Without the secret,
+only context-separated HMAC-SHA256 fingerprints so repeated request prefixes
+can be grouped within the retention window. Without the secret,
 the diagnostic records fingerprint availability only. Provider request and
 response bodies, prompts, messages, tool arguments/results, arbitrary response
 headers, account balances, credentials, paths, vault content, and direct member
@@ -431,96 +428,6 @@ identifies the operation; missing or unknown phases are omitted by the runtime
 projection. No endpoint, raw thread or turn ID, prompt,
 response, or additional provider error text enters the diagnostic record.
 
-#### Responses WebSocket relay observations
-
-The Worker also writes `runner.provider_egress_diagnostic` records with
-`transportKind: websocket` through the existing runtime-log route. The
-`websocketMilestone` values describe actual relay boundaries:
-`client_received`, `upstream_sent`, first `upstream_received`, first
-`downstream_sent`, `response_received`, `response_forwarded`, and one observed
-`closed` or `failed` event. First-frame observations reset after each forwarded
-client frame. A later acknowledgement, first semantic output, or terminal event
-emits one receive/forward pair; further token frames update constant-size state
-without emitting per-token records. When the first frame is itself a milestone,
-it shares the existing first-frame record.
-
-Each connection gets a random `websocketConnectionCorrelation`. Counts include
-`clientFrameCount`, `upstreamSends`, `upstreamFrameCount`, and
-`downstreamFrameCount`. `activeClientMessageOrdinal` identifies the most recently
-forwarded client frame; `observedClientMessageOrdinal` on receipt can describe
-a newer frame still awaiting admission. `requestElapsedMs` starts at receipt of
-the latest forwarded frame, `upstreamSendElapsedMs` measures its admission/relay
-delay, and `firstUpstreamElapsedMs` and `firstDownstreamElapsedMs` measure the
-next receive and forward boundaries. `upstreamIdleMs` and `downstreamIdleMs`
-measure connection-wide time since the last data frame on each boundary.
-
-Every existing milestone includes numeric `acceptedPendingBytes` and
-`acceptedPendingMessageCount` from the relay's shared client/provider reservation
-counters, connection-local `acceptedPendingHighWaterBytes` and
-`acceptedPendingHighWaterMessageCount`, and the existing limits as
-`pendingLimitBytes` and `pendingLimitMessageCount`. High-water values advance only on successful
-reservation and survive draining and request reuse. Receive milestones run before
-reservation, so they exclude the arriving frame; send milestones run before
-release, so they include the frame being forwarded. Rejected frames never enter
-these values. A close or failure can still observe outstanding reservations.
-These measure accepted queued/in-flight work, including authorization or usage
-persistence waits, not JavaScript heap, socket buffers, or total isolate memory.
-The two high-water values are independent peaks, not necessarily simultaneous.
-
-The six scalars are additive under `diagnosticVersion: 1`; the unchanged runtime
-log parser accepts their `Bytes`/`Count` metadata names, as do older readers using
-that same policy. Readers with stricter schemas need separate compatibility
-verification. Older records without the fields remain valid; absence is unknown,
-not zero. No extra events or writes are emitted. A lost tail or platform memory
-termination may leave no final/high-water observation; low values in the last
-surviving record cannot rule out a later backlog peak or other memory pressure.
-
-`firstUpstreamMessageKind` contains only a fixed event-type allowlist or
-`other`, `invalid_json`, `too_large`, or `binary`. Only the first frame is
-parsed for this field, with a 65,536-character limit. No raw frames, arbitrary
-event types, provider IDs, or close reasons enter the records. Close observations
-contain only side, numeric code, and a fixed failure phase. A provider close can
-be observed before queued downstream forwarding finishes; existing relay drain
-ordering remains authoritative.
-
-Interpret these as connection observations, not model-health or exact-request
-proof. A forwarded request followed by no upstream frames supports upstream
-silence; a received frame without its corresponding forward supports relay
-delay. Unsolicited metadata and overlapping frames can weaken attribution.
-A valid, associated `response.created` establishes an acknowledgement, not
-continued inference progress. The runtime-log attempt/fence belongs to the socket upgrade
-and may precede later turns on a reused socket; it must not be treated as the
-current turn ID. Existing write-fence validation is preserved.
-
-`responseMilestone` is `acknowledged`, `progress`, or `terminal` for an observed
-response lifecycle boundary. `responseAcknowledged` requires `response.created`
-with a bounded response ID; metadata alone cannot set it. Lifecycle inspection
-parses text frames up to 65,536 characters and request frames up to 6 MiB.
-Malformed, binary, and oversized frames still pass through the relay and set
-`responseInspectionIncomplete`; missing evidence is never a health verdict.
-
-`responseRequestKind` distinguishes generation and `generate: false` prewarm.
-`responseClientMessageOrdinal` binds captured receive and forward observations
-to a forwarded request, even when forwarding is queued. Only a single outstanding
-recognized request permits `responseAssociationKind: single-request`. Overlap,
-unknown requests, or conflicting response IDs make subsequent attribution
-ambiguous for that socket. Response IDs are used only in memory and never logged.
-
-`responseAcknowledgementElapsedMs`, `responseFirstProgressElapsedMs`, and
-`responseTerminalElapsedMs` start at upstream send. `responseProgressIdleMs`
-measures time since the last recognized output event; `responseMaxFrameGapMs`
-tracks the largest observed data-frame gap, including send to first frame.
-`responseTerminalKind` uses a fixed terminal-event allowlist.
-`responseForwardElapsedMs` measures a captured milestone's receive-to-send delay.
-These fields distinguish acknowledgement, output, and forwarding; silence can
-still mean healthy reasoning, provider queuing, or a stalled stream.
-
-The request's `client_metadata.turn_id` supplies `codexTurnCorrelation` using the
-existing 48-bit SHA-256 correlation convention. It joins native
-`codexTimingTurnCorrelation` within the same runtime context. It is a diagnostic
-join hint, not an authority key; several provider requests can share a turn.
-The socket correlation and request ordinal retain the finer relay scope.
-
 Native `provider-output-received` and `assistant-output-received` timing records
 observe accepted, current-turn assistant/reasoning output or tool activity at
 Murph's app-server consumer. At most two extra records are emitted per turn.
@@ -529,7 +436,7 @@ Murph's app-server consumer. At most two extra records are emitted per turn.
 `codexTimingFirstAssistantReceiptElapsedMs`,
 `codexTimingLastProviderReceiptElapsedMs`, and `codexTimingProviderReceiptCount`
 also appear on turn completion. These timings start at the local `turn/start`
-write, unlike relay timings. Reused-turn scope checks run before receipt tracking.
+write. Reused-turn scope checks run before receipt tracking.
 Tool activity includes native tool execution events; the count is native events,
 not provider frames. Pinned Codex discards the response ID from its internal
 created event, so these records cannot prove delivery of a particular raw
@@ -539,14 +446,6 @@ The additions are optional diagnostics: older readers drop new receipt stages
 and ignore new fields, and newer readers accept older records. Deploy the runtime
 projection before producers for complete visibility; mixed versions and rollback
 can lose diagnostics without changing responses or transport behavior.
-
-Persistence is best effort: at most four log writes are in flight per connection,
-with no diagnostic queue or awaited write on the forwarding path. Structured
-Worker logs retain the observation even when the durable write is skipped.
-`runtimeLogScheduled` and cumulative `droppedRecords` expose local admission
-and failed writes on subsequent observations, without guaranteeing persistence.
-Failures and closes after a send with no upstream frame receive warning
-retention; ordinary milestones remain debug. Missing rows are missing evidence.
 
 #### Stall reproduction and recovery design
 
