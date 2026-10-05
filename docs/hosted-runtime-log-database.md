@@ -979,6 +979,26 @@ nonces belong to a separate primary-database nonce cron at minute 5; its
 callback statements retain the 5,000-row statement cap and use a dedicated
 400-batch catch-up ceiling.
 
+### Runaway invocation alert
+
+The existing five-minute `/api/internal/hosted-runtime/latency-alert/cron` also
+runs the runaway invocation monitor. A subject with at least 40
+`runtime.invocation_finished` rows in the trailing 60 minutes opens the shared
+operational email incident. Threshold and window are named constants; recipient
+and timezone configuration is shared with the latency monitor. Reminders use
+the existing six-hour interval and jitter, including quiet hours like the runtime
+progress monitor. A healthy evaluation clears the incident without a recovery
+email. Missing local log configuration skips the monitor; read failures cannot
+clear an existing incident.
+
+Each evaluation uses one aggregate over the existing `(at, id)` time index,
+including the incident owner's fresh pre-send evaluation. It returns the total
+qualifying subject count and at most ten highest-count subjects. Email and
+incident details contain only counts, eight-character digest prefixes, and
+dominant allowlisted `processingMode`/`nextWakeReason` labels (`unknown` for
+missing or unrecognized values). No raw identity lookup, payload export,
+migration, or runtime control action is required.
+
 ### Bounded event inventories
 
 For an already-authorized aggregate diagnostic that times out over a day, keep
@@ -1474,6 +1494,24 @@ Use batch knowledge counters to identify missing-page rejections. Keep completio
 rows as the existing call denominator, not extra failures, and do not add profile
 counts to overlapping native CLI counts. Unresolved connection loss remains
 unresolved. This rollout grants no automatic rollback or production mutation.
+
+The connected-app port's own response-envelope schema rejection keeps its existing
+`TypeError` name/message and adds one fixed, non-enumerable own data code,
+`CONNECTED_APPS_RESPONSE_SCHEMA_INVALID`. Only that exact code maps to the
+existing private `errorCategory: invalid_result`; `failureStage: execution` and
+`failureReason: handler_exception` remain unchanged. Unclassified transport errors
+remain `unknown`. No response content, schema issues, identifiers, raw code or new
+field is persisted. Non-enumerability preserves the existing enumerable-only RPC
+error projection and ambiguous-write no-retry recovery.
+
+For a future authorized comparison, use fixed consecutive 12-hour windows and
+aggregate only connected-app `diagnosticRole: classification` rows by request kind,
+stage, reason, category and optional HTTP status (at most 200 rows per window;
+report saturation as a lower bound). Distinguish `invalid_result` from
+status-absent `unknown`, retaining completion rows as a separate, overlapping call
+denominator. Verify producer/reader release coverage first; old `unknown` records
+cannot be backfilled. This is evidence for future schema-rejection attribution,
+not proof that any previously observed connected-app failure was schema-related.
 
 ### Finite CLI failure counts (optional, same timing identity)
 

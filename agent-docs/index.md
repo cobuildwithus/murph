@@ -16,6 +16,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Foreground checkpoint deadline handling for retained device-import alerts is
+owned by `RELIABILITY.md`; implementation and proof are tracked in
+[`device import checkpoint deadline`](exec-plans/completed/2026-10-04-device-import-checkpoint-deadline.md).
+
 Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
 [the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
 
@@ -81,6 +85,10 @@ The runtime mailbox contract remains in
 [CLI read validation telemetry](exec-plans/completed/2026-09-25-cli-read-validation-telemetry.md)
 records the locally verified implementation; [PR #3707](https://github.com/cobuildwithus/murph/pull/3707)
 owns delivery status. The contract remains in `docs/hosted-runtime-log-database.md`.
+
+Expected Linq dispatch-claim responses and preserved runtime replay safety are
+recorded in [dispatch claim results](exec-plans/completed/2026-10-02-linq-dispatch-result.md);
+the callback contract is owned by `apps/web/README.md`.
 
 Runtime ownership response timing is tracked in
 [the response plan](exec-plans/completed/2026-09-23-runtime-owner-response.md);
@@ -205,6 +213,10 @@ release record is
 Completed silent-input typing-alert classification is specified in
 `agent-docs/RELIABILITY.md`; the scoped implementation and verification record is
 [`2026-09-17-typing-terminal-classification.md`](exec-plans/completed/2026-09-17-typing-terminal-classification.md).
+
+Reply-latency alert scope for group threads, inputs resolved by an earlier
+non-reply, and multi-request provider-start classification is owned by
+`agent-docs/references/hosted-runtime-protocol.md`.
 
 Upcoming-context sparse plan edits, canonical timing precision, bounded ledger
 controls independent of source history, and disconnect invalidation are owned by
@@ -611,6 +623,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, exact tracked archive inputs, no base-update limit, response timing and evidence requirements, same-session waiting or paced polling by default, exact-metadata and transient-URL recovery, guarded companion snapshots, and invalid-first-attempt baseline recovery. | Final PR ReviewGPT loop | Medium | 2026-09-25 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion, daily recovery, checkpoint-owned continuation preflight, bounded deferral of future history, pending-start history scans, bounded completion-marker retention, and operation-local source admission reuse. | Device-sync ingestion contract | High | 2026-09-20 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
+| `agent-docs/exec-plans/completed/2026-10-02-connected-apps-response-schema-telemetry.md` | Private response-schema rejection attribution; implementation evidence recorded, closing-commit CI still required. | Completed telemetry execution plan | Medium | 2026-10-02 |
 | `agent-docs/exec-plans/completed/2026-09-13-cli-validation-diagnostics.md` | Bounded optional schema diagnostics, three existing knowledge source classifications and consumer-first rollout contract. | CLI diagnostics execution plan | High | 2026-09-13 |
 | `agent-docs/exec-plans/completed/2026-09-13-browser-vault-source-read-telemetry.md` | Fixed source-operation timing through existing Browser Vault timeout telemetry, with behavior-preserving proof and rollout gates. | Completed diagnostic implementation | High | 2026-09-13 |
 | `agent-docs/exec-plans/completed/2026-09-23-opening-history.md` | Current-account opening allowance, retained delivery evidence and PostgreSQL regression proof. | Completed implementation evidence | Medium | 2026-09-23 |
@@ -646,6 +659,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-codex-0158-live-port.md` | Codex 0.158.0 public Live patch port, removal review, and native compatibility verification; deployment gates remain. | Historical implementation evidence | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
+| `agent-docs/exec-plans/completed/2026-10-02-checkpoint-progress-generation.md` | Canonical checkpoint-generation ownership correction and composed regression proof. | Checkpoint generation execution plan | Medium | 2026-10-02 |
 | `agent-docs/exec-plans/completed/2026-10-02-otp-parameter-diagnostic.md` | Bounded Verify parameter-hint telemetry and unchanged authentication proof. | OTP diagnostic execution plan | Medium | 2026-10-02 |
 | `agent-docs/exec-plans/completed/2026-09-25-linq-link-delay-notice.md` | Local implementation and delivery proof for one best-effort notice after a partial link send. | Historical delivery evidence | Low | 2026-09-25 |
 | `agent-docs/exec-plans/completed/2026-09-17-research-scout-failure-telemetry.md` | Three exact research error codes, parent-native verification and old-reader compatibility; rollout tracked separately. | Historical implementation evidence | Medium | 2026-09-17 |
@@ -963,6 +977,10 @@ live setup-to-due proof are recorded in
 [`scheduled phone calls`](exec-plans/completed/2026-10-01-scheduled-phone-calls.md);
 `ARCHITECTURE.md` and the phone-calls skill own the current contract.
 
+Idle snapshot progress generation ownership is specified in the hosted runtime
+protocol reference; regression proof is recorded in
+[`checkpoint progress`](exec-plans/completed/2026-10-02-checkpoint-progress-regression.md).
+
 Weekly usage review, private bounded ledger diagnostics, and anonymous product
 reports are tracked in [weekly usage optimizer](exec-plans/active/2026-10-01-weekly-usage-optimizer.md).
 Current authority and storage contracts remain in `ARCHITECTURE.md`, `SECURITY.md`,
@@ -973,6 +991,10 @@ SMS invalid-destination recovery format support is tracked in
 `../docs/hosted-auth-migration.md` remains the contract owner.
 
 Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
+
+Runaway invocation detection and local aggregate/incident proof are tracked in
+[the runaway alert plan](exec-plans/completed/2026-10-04-runtime-runaway-alert.md);
+`docs/hosted-runtime-log-database.md` owns the operational contract.
 
 Routine Junction daily-total wake batching and its local admission, release and
 PostgreSQL proof are tracked in

@@ -1500,6 +1500,17 @@ projection kinds, content, versions, counts, credentials or error prose; the
 existing request log supplies correlation. Logging failure preserves the same
 generic retryable response. No new reads, writes, retries or network work occur.
 
+### Linq provider dispatch claims
+
+The signed `POST /api/internal/hosted-runtime/linq-egress/engagement` callback
+returns HTTP 200 with `providerDispatchClaimed: false` when the dispatch fence
+already exists. This is an expected claim result, not a route failure or proof
+of delivery. Current authority and egress checks still run before returning it.
+The runtime permits replay only for provider-idempotent sends; non-idempotent
+voice and reaction effects remain confirmation-pending without provider re-entry.
+Runtime support for the legacy `HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED`
+409 remains for Web rollback compatibility.
+
 ### Workspace read timing
 
 `GET /api/internal/hosted-workspace` records content-free
