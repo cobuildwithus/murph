@@ -64,9 +64,13 @@ and results. It counts total, replacer, metric-envelope and empty-metric calls,
 including finite expected-string construction on cold import. It is **not** a
 performance run (`performanceTimings: false`); proof/fingerprint serialization
 outside each timed read is excluded from its per-step counts. Accept only a real
-call reduction and reproducible whole `global-cold`/edited-global improvement
-beyond base/base noise, not an isolated codec microbenchmark or a deferred-work
-headline. Keep all regressions/variation visible. No gain is established here.
+call reduction with complete `global-cold`/edited-global work and base/base
+variation accounted for. Report targeted summary-substage gains separately from
+whole-workflow wall time; neither an isolated codec microbenchmark nor deferred
+work establishes a whole-rebuild gain. The measured codec result below removes
+repeated serialization and improves the summary substage, while whole edited-
+global workflow wall improvement is inconclusive. Keep all regressions and
+variation visible.
 
 For an uninstrumented native CPU profile, seed an owned temporary synthetic
 vault using `node .../global-projection.ts seed "$VAULT"`, then run
@@ -121,18 +125,24 @@ production manifest/system prompt, real CLI and normal dynamic-tool surface,
 allowing one focused data read and at most one targeted help command. It checks
 facts/provenance, no unrelated commands/provider/delivery, no canonical writes,
 unchanged write-operation metadata, empty outbox and no global certification.
-The parent must inspect the actual reply and record model/auth/result separately;
-Opus is not the Murph runtime model. A skipped or unavailable live run is not PASS.
+The parent inspected the actual reply and recorded the successful local
+subscription `gpt-6.1-sol` result below. The exact Opus 5.5 investigative advice
+did not change the Murph runtime model. A skipped or unavailable live run is not
+PASS.
 
 ## Incremental additions: first packet versus this packet
 
 Do not measure the original base against the additions and attribute all gains to
-these changes. Let `FIRST` be the original 16 postimages (including the envelope
-optimization) and `NEXT` this incremental candidate. Copy this revised harness
-and the unchanged sleep fixture into both benchmark checkouts. Only these proof
-files may differ from their respective production revisions. Build dependencies
-normally. The original `full`/`focused` runs above still select the original ten
-scenarios; their fixture and meaning are unchanged.
+these changes. Let `FIRST` be the original base with only the original authored
+query-projection and codec postimages applied, holding finite expected-empty
+envelope reuse constant. Let `NEXT` be the incremental candidate, which includes
+the narrow fresh-global correction as well as blood/browser changes; incremental
+results cannot be attributed to blood/browser alone. Copy the same harness and
+unchanged sleep fixture into both benchmark checkouts. Only these proof files may
+differ from their respective production revisions. Build dependencies normally
+in both checkouts using the public-package build command above. The original
+`full`/`focused` runs still select the original ten scenarios; their fixture and
+meaning are unchanged.
 
 ```sh
 node packages/vault-usecases/bench/global-projection.ts pairs "$FIRST" "$FIRST" additions-control > "$RESULTS/additions-control.jsonl"
@@ -162,7 +172,8 @@ when no entities were removed, or two when Personal Patterns needs raw input.
 Probe output separates replica-build stringify counts from preparation. Native
 CPU profiles remain optional diagnostics, not paired timing evidence.
 
-The metric aggregate deletion is **deferred**, not claimed as implemented.
+The one-pass metric aggregate deletion was **rejected for this candidate**;
+metric production source remains unchanged.
 `metric-aggregate-equivalence.test.ts` uses the exported producers to construct a
 seven-point cross-producer counterexample: one metric row dated `b`, and glucose
 sample summaries dated composed/decomposed `é` and `a`. Those evidence interfaces
@@ -170,7 +181,7 @@ accept arbitrary strings; neither public constructor validates these dates. The
 unchanged comparator returns locale equality before its id tie-break. Sorting
 producer groups before the aggregate can therefore differ from sorting once.
 The source-derived identity/comparator diagnostic found the mismatch, and the
-parent reports the actual-public-path regression passed. It asserts current
+parent's actual-public-path regression passed. It asserts current
 old-composition equality and inequality with the one-pass proposal. Canonical
 mixed/duplicate fixtures and forced id-collision ties also have differential
 coverage. No comparator change, fallback, early suppression or cache is added.
@@ -189,8 +200,9 @@ and native CLI JSON/TOON. It selects a dated ApoB panel ahead of a newer nonmatc
 and an older matching panel, verifies the bounded matched analyte, unchanged
 canonical/write metadata, empty outbox, and no query database. No blood command,
 assistant prompt, generic entity reader, journal input or source visibility
-policy changes. The original unique live activity journey remains the focused
-real-model gate; this patch does not claim it ran.
+policy changes. The original unique live activity journey passed as the focused
+real-model gate; its exact model/auth and parent-inspected outcome are recorded
+below.
 
 ## Fresh-global repair and timing expectations
 
@@ -213,20 +225,101 @@ the paired report. Neither wearable-only freshness nor a certificate published
 inside an outer writer is a new nonblocking-read contract. No worker alteration,
 background task, new telemetry or benchmark normalization is introduced.
 
-## Handoff status
+## Measured evidence and remaining gates
 
-Before this repair, the parent reports dependency build and benchmark/query/
-usecase/assistant typechecks PASS, seven validator controls PASS, all 17 native
-scenario smokes PASS, three native activity/blood CLI contracts PASS, and 14
-usecase tests PASS. These are not paired timing acceptance. The query/browser
-run had 35 passing tests and three fixture failures: unrelated-family blood
-input and cancellation checkpoints 3/4. This patch uses the known malformed
-canonical goal fixture and aborts on the exact real timer scheduling point;
-production cancellation yields are unchanged. Native reruns remain pending.
+The parent independently supplied the following final evidence for
+[PR #4018](https://github.com/cobuildwithus/murph/pull/4018) at
+`eeac8b2651bfb5707c944958b18cb96725db8aef`. This documentation update records
+those results; it does not represent a new author-run native acceptance pass.
 
-The author environment remains Node 22.16.0 without pnpm, installed workspace
-dependencies, built outputs or Codex. The unchanged seven validator controls and
-workspace-boundary/package-cycle guards pass here; they do not validate native
-query/browser execution. New runtime suites, semantic typechecks, paired gain,
-real-Codex and exact-head CI remain parent-owned pending gates. The active plan
-separates these reports; no measured speedup or new native PASS is claimed.
+All four candidate runs completed: primary timing/probe runs over ten scenarios
+and incremental timing/probe runs over nine scenarios, with two warmup and seven
+alternating measured pairs each. The overlapping full-global controls make 17
+unique scenarios. Both sides of the candidate comparisons were measured on
+October 5, 2026 on a busy shared host; base/base controls were captured October 2.
+These are same-method paired synthetic comparisons, not production speedup
+estimates. Whole JSON, SHA256 and phase checks passed before complete JSON was
+stripped from the private local reports. All seven samples, min/median/max and
+signed paired variation are retained; no extra samples were collected to seek a
+desired answer. Medians below summarize those runs without selecting samples.
+
+Primary comparisons use baseline `938664ca9337bf72b4b83aa08f54dfdc0803f928`;
+incremental comparisons use `FIRST` as defined above and include the fresh-global
+correction in `NEXT`. Replica builder intervals include the final hash; source
+preparation and metric projection remain in the complete workflow totals.
+
+| Comparison | Workflow or measured interval | Before median ms | After median ms |
+| --- | --- | ---: | ---: |
+| Primary | Cold latest | 1325.64 | 987.77 |
+| Primary | Cold activity | 1435.03 | 1086.76 |
+| Primary | Cold recovery | 1227.41 | 906.48 |
+| Primary | Repeated wearable reads | 1194.35 | 1042.33 |
+| Primary | Wearable-to-global mixed workflow | 1907.79 | 1947.51 |
+| Primary | Cold full global | 1293.90 | 1210.88 |
+| Primary | Edited full-global workflow | 1821.13 | 1865.55 |
+| Incremental | Cold blood list | 848.19 | 410.16 |
+| Incremental | Repeated blood lists | 838.12 | 440.70 |
+| Incremental | Blood-to-global mixed workflow | 1300.04 | 1307.16 |
+| Incremental | Filtered Browser Vault builder | 180.85 | 139.57 |
+| Incremental | Raw Browser Vault builder | 302.32 | 284.10 |
+| Incremental | Raw Browser Vault whole workflow | 969.99 | 957.17 |
+
+Mixed workflows include later global work and do not show a general speedup.
+Whole edited-global workflow wall improvement is **inconclusive**, with signed
+paired deltas from -504.86 to +471.59 ms. Fresh-global ordinary reads remain
+comparable. Focused wearable-only repeats pay their existing lock plus the new
+global manifest/status preflight, about 4-6 ms extra in this fixture. Required
+global rebuilds remain synchronous under the existing CLI boundary; source-only
+reads still validate strictly and capture under the existing lock.
+
+The finite expected-empty codec removes 13,715 cold or 13,770 warm JSON
+serializations. Cold full-global calls fall from 64,072 to 50,357; the edited
+rebuild falls from 64,021 to 50,251. Necessary metric identity operations remain
+8,100. Cold/edited wearable-summary stage medians improve, but this does not
+establish a robust whole edited-rebuild wall gain. Browser actual derivations
+fall from 3 to 1 for equivalent default-visible input, or 3 to 2 when Personal
+Patterns needs raw input. Complete replica JSON/dataVersion and input
+immutability match; its raw whole-workflow timing is nearly unchanged.
+
+Complete output bytes match before and after: latest 4,241; activity 2,025;
+recovery 1,962; blood list 789; filtered/raw replicas 1,562,950/2,085,893. No result
+truncation or omitted facts accounts for the measured differences. The parked-
+writer reproduction measured 21.46 ms for the old fresh-global reader, 407.87 ms
+for the initial candidate and 15.80 ms after correction, with identical 67,645
+bytes. Deterministic barriers cover all eight readers. These single timings prove
+the blocking regression and its repair, not a production speedup or a guarantee
+that every fresh read is nonblocking; the prior global check/read window remains.
+
+Final parent verification:
+
+- Query: 133 PASS, one existing skip; usecases: 14 PASS; native activity/blood
+  CLI: 3 PASS; benchmark validator: seven PASS.
+- Query/usecase/assistant/benchmark semantic typechecks and dependency/native CLI
+  builds PASS. Workspace cycles, boundaries, dependency policy, documentation
+  drift and raw-log guards PASS. Changelog generation and ten page tests PASS.
+- The focused real-Codex command above passed with local subscription auth and
+  `gpt-6.1-sol`. The parent inspected the actual reply: Oura, 8,800 steps; one
+  native activity data read, no unrelated lookup, write, provider call or
+  delivery. Parent Product UX verdict: Ready.
+- The validator-only refactor passed all seven controls, semantic benchmark
+  typecheck and `pnpm complexity:diff`. Complexity fell from 33 to 8, with helpers
+  at 8/15/5; pre-existing `summarizeWearableMetricFromBundle` remains 39, unchanged.
+  Timed `runTrial` and paired-driver bytes are identical to the measured version.
+  Harness SHA256 before refactoring:
+  `252684cd324086144c44d211f8badcd0b81832fb7ea54c1ed910710c5facae85`;
+  current harness SHA256:
+  `24384326f9bd53b9acbc3b066efab7a09f32ef1a2decbce2055af12e812d97ba`.
+
+Negative investigations remain explicit: the public Unicode-date counterexample
+rejects the one-pass metric deletion, with no metric source change. The existing
+fractional-mtime snapshot test reports 1 PASS/38 SKIPPED; that issue was already
+fixed and this optimization makes no restore change. Exact device redeliveries
+already skip writes. The repeated-rebuild screen found no grouped rebuild count
+greater than call count; it does not establish that all redundant rebuilds are
+absent. Production evidence for September 29 through October 2 UTC used only
+typed aggregate metadata, with no private payloads inspected or published, and
+does not estimate candidate speedup.
+
+Final external ReviewGPT and required exact-head CI remain pending. The execution
+plan stays active for those gates. This evidence update performs no commit,
+push, merge or deployment.
