@@ -165,7 +165,12 @@ describe('applyAssistantSessionCodexResumeStateAction', () => {
 
     const preserved = await applyAssistantSessionCodexResumeStateAction({
       ...actionInput,
-      action: 'preserve-existing',
+      action: resolveAssistantProviderResumeStateAction({
+        providerThreadUnchanged: true, codexThreadId: null, threadScope: 'session-thread',
+      }),
+      assistantContractFingerprint: 'b'.repeat(64),
+      codexThreadId: null,
+      codexRolloutRelativePath: null,
       session: persisted,
     })
     expect(preserved).toBe(persisted)

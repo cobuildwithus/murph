@@ -1,3 +1,4 @@
+import { executeGetSenderContactDynamicTool, readSenderContactDynamicToolRequest, type SenderContactDynamicToolRequest } from './dynamic-tools/sender-contact.js'
 import { type ConversationPollAction } from '@murphai/hosted-execution/conversation-polls'
 import { readConversationPollDynamicToolRequest, executeConversationPollTool } from './dynamic-tools/conversation-polls.js'
 import { nutritionCardAttachmentGuidance } from '../assistant/nutrition-card-introduction.js'
@@ -85,6 +86,11 @@ import type {
   HostedPhoneCallBrief,
   HostedPhoneCallResultNotificationChannel,
 } from '@murphai/hosted-execution/phone-calls'
+import {
+  hostedUsageDiagnosticsRequestSchema,
+  parseHostedUsageDiagnosticsResponse,
+  type HostedUsageDiagnosticsRequest,
+} from '@murphai/hosted-execution/usage-diagnostics'
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
@@ -354,6 +360,7 @@ import {
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_USAGE_DIAGNOSTICS_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
@@ -1486,6 +1493,7 @@ export type MurphDynamicToolRequest =
       kind: 'computer-finish-run'
       args: HostedComputerFinishRunRequest & { runId: string }
     }
+  | SenderContactDynamicToolRequest
   | PhoneCallDynamicToolRequest
   | PhysicalNoteDynamicToolRequest
   | ClinicalRecordsConnectLinkDynamicToolRequest
@@ -1572,6 +1580,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-usage-diagnostics-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-plan-usage-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1605,6 +1617,10 @@ export type MurphDynamicToolRequest =
       messageRef?: string
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
       toolCallId?: string
+    }
+  | {
+      kind: 'usage-diagnostics'
+      request: HostedUsageDiagnosticsRequest
     }
   | {
       kind: 'plan-usage'
@@ -1745,6 +1761,7 @@ export function readMurphDynamicToolRequest(
     readMemberMemoryDynamicToolRequest,
     readConnectedAppsDynamicToolRequest,
     readAssistantStyleDynamicToolRequest,
+    readSenderContactDynamicToolRequest,
     readPhoneCallDynamicToolRequest,
     readPhysicalNoteDynamicToolRequest,
     readClinicalRecordsConnectLinkDynamicToolRequest,
@@ -1960,19 +1977,9 @@ export function readMurphDynamicToolRequest(
         request: parsed.request,
       }
     }
-    case MURPH_PLAN_USAGE_TOOL.name: {
-      const parsed = parsePlanUsageArguments(request.arguments)
-      if (!parsed.ok) {
-        return {
-          kind: 'invalid-plan-usage-arguments',
-          validationDigest: parsed.validationDigest,
-        }
-      }
-      return {
-        kind: 'plan-usage',
-        request: parsed.request,
-      }
-    }
+    case MURPH_USAGE_DIAGNOSTICS_TOOL.name:
+    case MURPH_PLAN_USAGE_TOOL.name:
+      return parsePrivateUsageToolRequest(request.tool, request.arguments)
     case MURPH_IMESSAGE_CONTACT_TOOL.name: {
       const parsed = parseIMessageContactArguments(request.arguments)
       if (!parsed.ok) {
@@ -3587,6 +3594,7 @@ async function executeComputerRequestDynamicTool(
 async function dispatchMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
+  const hostedContext = input.hostedToolContext ?? null
   const hostedImageCompletionEffectScope =
     input.hostedToolContext?.currentHostedImageCompletionEffectScope?.() ?? null
   if (
@@ -3604,7 +3612,7 @@ async function dispatchMurphDynamicToolRequest(
   }
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
-    !canExecuteComputerDynamicTools(input.hostedToolContext ?? null)
+    !canExecuteComputerDynamicTools(hostedContext)
   ) {
     return toolTextResult(
       false,
@@ -3718,7 +3726,7 @@ async function dispatchMurphDynamicToolRequest(
         vaultRoot: input.vaultRoot?.trim() || null,
       })
     case 'assistant-style': {
-      const hostedToolContext = input.hostedToolContext ?? null
+      const hostedToolContext = hostedContext
       return await executeAssistantStyleDynamicTool({
         authority: resolveHostedAssistantPersonalizationToolAuthority(
           hostedToolContext,
@@ -3738,6 +3746,11 @@ async function dispatchMurphDynamicToolRequest(
       return await executeResolvePhysicalNoteDynamicTool(input, input.request)
     case 'send-physical-note':
       return await executeSendPhysicalNoteDynamicTool(input, input.request)
+    case 'get-sender-contact':
+      return await executeGetSenderContactDynamicTool({
+        userActionScope: input.hostedToolContext?.currentUserActionScope?.() ?? null,
+        vaultRoot: input.vaultRoot ?? null,
+      })
     case 'create-phone-call':
       return await executeCreatePhoneCallDynamicTool(input, input.request)
     case 'get-phone-call-status':
@@ -3749,33 +3762,34 @@ async function dispatchMurphDynamicToolRequest(
     case 'submit-product-feedback':
       return await executeSubmitProductFeedbackTool({
         feedback: input.request.feedback,
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         productFeedbackRecorder: input.productFeedbackRecorder ?? null,
       })
     case 'family-plan':
       return await executeFamilyPlanTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         request: input.request.request,
       })
+    case 'usage-diagnostics':
     case 'plan-usage':
     case 'poll':
     case 'imessage-contact':
       return await executeCurrentConversationTool(input, input.request)
     case 'subscription':
       return await executeSubscriptionTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         request: input.request.request,
       })
     case 'personalization':
       return await executePersonalizationTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         messageRef: input.request.messageRef,
         request: input.request.request,
         toolCallId: input.request.toolCallId ?? null,
       })
     case 'assistant-configuration':
       return await executeAssistantConfigurationTool({
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         request: input.request.request,
       })
     case 'group':
@@ -3786,7 +3800,7 @@ async function dispatchMurphDynamicToolRequest(
         deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
-        hostedToolContext: input.hostedToolContext ?? null,
+        hostedToolContext: hostedContext,
         groupSharedReadTurnState: input.groupSharedReadTurnState ?? null,
         materializeWorkspaceArtifacts:
           input.materializeWorkspaceArtifacts ?? null,
@@ -3891,7 +3905,7 @@ async function dispatchMurphDynamicToolRequest(
     case 'connected-apps-manage':
     case 'connected-apps-search':
     case 'connected-apps-execute': {
-      const connectedApps = input.hostedToolContext?.connectedApps ?? null
+      const connectedApps = hostedContext?.connectedApps
       if (!connectedApps) {
         return toolTextResult(
           false,
@@ -4172,6 +4186,26 @@ async function executeFamilyPlanTool(input: {
   }
 }
 
+async function executeUsageDiagnosticsTool(
+  context: AssistantHostedToolContext | null,
+  request: HostedUsageDiagnosticsRequest,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (!context?.usageDiagnostics) {
+    return toolTextResult(false, 'usage diagnostics are unavailable for this turn', 'unavailable')
+  }
+  const scope = context.currentInvocationScope?.()?.conversationScope
+    ?? context.currentUserActionScope?.()?.conversationScope
+  if (scope !== 'direct') {
+    return toolTextResult(false, 'usage diagnostics require a private conversation or private scheduled automation', 'authority_rejected')
+  }
+  try {
+    const result = parseHostedUsageDiagnosticsResponse(await context.usageDiagnostics.read(request))
+    return toolTextResult(true, safeToolPayloadText(result))
+  } catch (error) {
+    return toolTextResult(false, 'usage diagnostics could not be read', 'handler_exception', error)
+  }
+}
+
 async function executePlanUsageTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedPlanUsageToolRequest
@@ -4249,10 +4283,11 @@ function projectHostedGroupPlanLabel(label: string): string {
 
 async function executeCurrentConversationTool(
   input: ExecuteMurphDynamicToolRequestInput,
-  request: Extract<MurphDynamicToolRequest, { kind: 'poll' | 'plan-usage' | 'imessage-contact' }>,
+  request: Extract<MurphDynamicToolRequest, { kind: 'poll' | 'plan-usage' | 'usage-diagnostics' | 'imessage-contact' }>,
 ): Promise<MurphDynamicToolExecutionResult> {
   const hostedToolContext = input.hostedToolContext ?? null
   switch (request.kind) {
+    case 'usage-diagnostics': return executeUsageDiagnosticsTool(hostedToolContext, request.request)
     case 'poll': return executeConversationPollTool({ request: request.request, context: hostedToolContext })
     case 'plan-usage': return executePlanUsageTool({ request: request.request, hostedToolContext })
     case 'imessage-contact': return executeIMessageContactTool({ hostedToolContext })
@@ -4669,6 +4704,7 @@ function groupSharedModelResult(
         ? {}
         : { displayName: member.displayName }),
       participantId: member.participantId,
+      ...(member.companionLastContactAt === undefined ? {} : { companionLastContactAt: member.companionLastContactAt }),
       // Keyed by scope so each projection no longer restates its own key, and
       // the scope reads as a heading rather than a field to hunt for.
       projections: Object.fromEntries(member.projections.map((projection) => [
@@ -5109,6 +5145,7 @@ async function executeGroupSharedRead(input: {
 
   try {
     const result = await groupSharedReader.request({
+      includeCompanionPresence: true,
       projectionScopes: input.request.projectionScopes,
       ...(input.request.participantId ? { participantId: input.request.participantId } : {}),
       ...(input.request.history ? { history: input.request.history } : {}),
@@ -6731,7 +6768,10 @@ async function readGroupEmailSharedData(input: {
         const existing = members.get(member.memberId)
         if (!existing) {
           members.set(member.memberId, {
-            ...member,
+            currentTurnHandles: member.currentTurnHandles,
+            displayName: member.displayName,
+            memberId: member.memberId,
+            participantId: member.participantId,
             projections: [...projections],
           })
           continue
@@ -7481,6 +7521,27 @@ function parseFamilyPlanArguments(
       },
     },
   }
+}
+
+function parsePrivateUsageToolRequest(
+  toolName: string,
+  value: unknown,
+): MurphDynamicToolRequest {
+  if (toolName === MURPH_USAGE_DIAGNOSTICS_TOOL.name) {
+    const parsed = parseDynamicToolArguments({
+      schema: hostedUsageDiagnosticsRequestSchema,
+      value,
+      schemaRootKeys: ['days', 'limit'],
+      toolName: 'murph.usage_diagnostics',
+    })
+    return parsed.ok
+      ? { kind: 'usage-diagnostics', request: parsed.args }
+      : { kind: 'invalid-usage-diagnostics-arguments', validationDigest: parsed.validationDigest }
+  }
+  const parsed = parsePlanUsageArguments(value)
+  return parsed.ok
+    ? { kind: 'plan-usage', request: parsed.request }
+    : { kind: 'invalid-plan-usage-arguments', validationDigest: parsed.validationDigest }
 }
 
 function parsePlanUsageArguments(

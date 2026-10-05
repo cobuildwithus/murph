@@ -5,11 +5,11 @@
  * source-tree review rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "8e68a98ef03cdde76d2e6800791ebdf1b3b95b24",
+  upstreamCommit: "a956835d020762cb2b570053af06f643a11c0ecc",
   upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "7ea79ec139a8dd7cfffdde84026a6786fb73a271",
-  upstreamTag: "rust-v0.159.1",
-  version: "0.159.1",
+  upstreamSourceTree: "a17e1a769e8fca44e37c73c1293f5350c8adadf5",
+  upstreamTag: "rust-v0.160.0",
+  version: "0.160.0",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -204,6 +204,18 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     },
   ],
   nonProviderBinaryCandidates: [
+    {
+      candidate: "/v1/rowscols",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "The 0.160.0 Linux release joins the /v1/ base-path literal to adjacent rows and cols labels. The reviewed provider source contains no /v1/rowscols endpoint.",
+    },
+    {
+      candidate: "/v1/liveazurefd.api.path",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The 0.160.0 Linux release joins /v1/live to adjacent host and field labels. realtime_websocket/methods.rs constructs only the reviewed /v1/live endpoint.",
+    },
     {
       candidate: "/v1/analytics/codex/turn-costsestimated_usage_usd_microsthreadsspeedskipping",
       disposition: "binary_false_positive",

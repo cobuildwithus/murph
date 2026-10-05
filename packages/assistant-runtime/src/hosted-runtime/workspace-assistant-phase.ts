@@ -15,6 +15,7 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  isHostedUsageOptimizationAuditFeedback,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeProductFeedbackRecord,
   type HostedWorkspaceCheckpointReason,
@@ -44,6 +45,7 @@ import {
   refreshAssistantContextSnapshotBestEffort,
   refreshReminderAvailability,
   resolveAssistantCronDefaultTimeZoneProjection,
+  resolveMurphManagedAutomationOwnerScope,
   upsertAssistantInputEvent,
   type AssistantAutomationOccurrenceProjection,
   type AssistantAutomationOccurrenceProjectionIssue,
@@ -178,6 +180,10 @@ import {
   type HostedSystemMailboxPendingItem,
   type HostedSystemMailboxRouteAction,
 } from "./system-mailbox.ts";
+import {
+  findNextHostedSystemMailboxQueueItem,
+  readHostedSystemMailboxState,
+} from "./system-mailbox-state.ts";
 import type {
   HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
@@ -1330,6 +1336,8 @@ async function projectHostedAutomationResponseFields(input: {
   }
   return {
     automationId: input.record.automationId,
+    assistantTargetOverride: input.record.assistantTargetOverride,
+    managed: resolveMurphManagedAutomationOwnerScope(input.record.automationId) !== null,
     contextReferences: [...input.record.contextReferences],
     deliveryChannel: input.record.route.channel,
     effectiveTimeZone,
@@ -1470,6 +1478,9 @@ function buildHostedPhaseOptionalTools(
             input.runtime.platform.assistantPersonalizationToolPort,
         }
       : {}),
+    ...(input.runtime.platform.usageDiagnosticsPort
+      ? { usageDiagnostics: input.runtime.platform.usageDiagnosticsPort }
+      : {}),
     ...(input.runtime.platform.planUsageToolPort
       ? { planUsageTool: input.runtime.platform.planUsageToolPort }
       : {}),
@@ -1587,6 +1598,7 @@ export async function runHostedWorkspaceAssistantPhase(
     runtimeAttemptId: input.request.attemptId,
     source: "linq" as const,
   };
+  const committedUsageAuditKeys = new Set<string>();
   const productFeedbackCandidates = new Map<
     string,
     HostedRuntimeProductFeedbackRecord
@@ -1676,7 +1688,13 @@ export async function runHostedWorkspaceAssistantPhase(
               productFeedbackCandidateSink: {
                 acceptProductFeedbackCandidate(
                   feedback: HostedRuntimeProductFeedbackRecord,
+                  authorization?: { committedUsageOptimizerScope: { memberId: string; occurrenceAt: string } },
                 ) {
+                  committedUsageAuditKeys.delete(feedback.idempotencyKey);
+                  if (authorization?.committedUsageOptimizerScope.memberId === input.request.userId
+                    && isHostedUsageOptimizationAuditFeedback(feedback)) {
+                    committedUsageAuditKeys.add(feedback.idempotencyKey);
+                  }
                   productFeedbackCandidates.set(
                     feedback.idempotencyKey,
                     feedback,
@@ -1990,6 +2008,7 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
     }) => {
       productFeedbackCandidates.clear();
+      committedUsageAuditKeys.clear();
       const automationLaneStartedAt = Date.now();
       const automationBootstrapStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
@@ -2095,6 +2114,7 @@ export async function runHostedWorkspaceAssistantPhase(
           : {
               assistantAutomationProductFeedbackCandidates:
                 [...productFeedbackCandidates.values()],
+              assistantAutomationCommittedUsageAuditKeys: [...committedUsageAuditKeys],
             }),
         ...(assistantAutomationRedactedLogEntries.length === 0
           ? {}
@@ -2311,6 +2331,10 @@ export async function runHostedWorkspaceAssistantPhase(
       const result = withPostForegroundMemberMaintenanceAfterCheckpoint({
         executionContext,
         input,
+        memberMaintenanceDue: await hasDueHostedPostForegroundMemberMaintenance({
+          input,
+          result: foregroundResult,
+        }),
         result: foregroundResult,
         wake,
       });
@@ -2510,11 +2534,12 @@ export async function runHostedWorkspaceAssistantPhase(
         providerCleanup: providerCleanupScheduledWakeAt,
       },
     });
-    const hasPostCommitProviderCleanup = providerCleanupDue
+    const hasCommittedUsageAudit = hasHostedCommittedUsageAudit(assistantMetrics);
+    const hasPostCheckpointWork = hasCommittedUsageAudit || providerCleanupDue
       || deliveryEffects.length > 0
       || providerCleanupStateQueued;
 
-    const phaseProgressed = progressed || providerCleanupDue;
+    const phaseProgressed = progressed || providerCleanupDue || hasCommittedUsageAudit;
     const redactedStatus = buildHostedWorkspaceAssistantPhaseRedactedStatus({
       deliveryEffectCount: deliveryEffects.length,
       nextWakeAt,
@@ -2538,7 +2563,7 @@ export async function runHostedWorkspaceAssistantPhase(
     }
 
     const result = mergeContinuingSystemMailboxResult({
-      ...(hasPostCommitProviderCleanup
+      ...(hasPostCheckpointWork
         ? {
             afterCheckpointKeepsForegroundImportLoop: true,
             afterCheckpoint: async () => {
@@ -2559,6 +2584,11 @@ export async function runHostedWorkspaceAssistantPhase(
                 && !providerCleanupDue
                 && !providerCleanupStateQueued
               ) {
+                await recordHostedProductFeedbackAfterCommittedTurn({
+                  assistantMetrics,
+                  outcomes: [],
+                  port: input.runtime.platform.productFeedbackPort,
+                });
                 return {
                   checkpointReason: "assistant_runtime_commit",
                   nextWakeAt: baseNextWakeAt,
@@ -4365,25 +4395,55 @@ function shouldRunShadowedDeviceSyncAfterNoProgressAssistantWake(input: {
   );
 }
 
+async function hasDueHostedPostForegroundMemberMaintenance(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  result: HostedWorkspaceRunnerAssistantPhaseResult;
+}): Promise<boolean> {
+  // Progressed passes already attach member maintenance; failed replies keep it.
+  if (input.result.progressed === true || input.result.foregroundReplyFailed !== 0) {
+    return false;
+  }
+  const item = findNextHostedSystemMailboxQueueItem({
+    allowedRouteActions: HOSTED_POST_FOREGROUND_MEMBER_MAINTENANCE_ROUTE_ACTIONS,
+    now: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
+    pendingOnly: true,
+    state: await readHostedSystemMailboxState(input.input.restored.vaultRoot),
+  });
+  return item !== null
+    && (HOSTED_POST_FOREGROUND_MEMBER_MAINTENANCE_WAKE_KINDS as readonly string[])
+      .includes(item.wake.kind);
+}
+
 function withPostForegroundMemberMaintenanceAfterCheckpoint(input: {
   executionContext: AssistantExecutionContext;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  memberMaintenanceDue: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): HostedWorkspaceRunnerAssistantPhaseResult {
-  if (
-    input.result.progressed !== true
-    || input.result.foregroundReplyFailed !== 0
-  ) {
+  if (input.result.foregroundReplyFailed !== 0) {
     return input.result;
   }
+  // A clean foreground pass can make no progress when another owner already
+  // answered its input (Web's instant first turn). Due member maintenance
+  // still follows that pass instead of waiting for the idle checkpoint.
+  if (input.result.progressed !== true && !input.memberMaintenanceDue) {
+    return input.result;
+  }
+  const result = input.result.progressed === true
+    ? input.result
+    : {
+        ...input.result,
+        checkpointReason: "system_mailbox_receipt" as const,
+        progressed: true as const,
+      };
 
   return {
-    ...input.result,
+    ...result,
     afterCheckpointKeepsForegroundImportLoop: true,
     afterCheckpoint: composeHostedAssistantPhaseAfterCheckpoint({
       callbacks: [
-        input.result.afterCheckpoint,
+        result.afterCheckpoint,
         async () => {
           const maintenance = await runSystemMailboxMaintenancePhase({
             exclusiveRouteActions:
@@ -6475,11 +6535,8 @@ async function drainHostedPostCheckpointDelivery(input: {
         wake: input.wake,
       })
     : [];
-  await recordHostedProductFeedbackAfterMemberDelivery({
-    candidates:
-      input.assistantMetrics?.assistantAutomationProductFeedbackCandidates ?? [],
-    currentTurnDeliveryIntentIds:
-      input.assistantMetrics?.assistantAutomationCurrentTurnDeliveryIntentIds ?? [],
+  await recordHostedProductFeedbackAfterCommittedTurn({
+    assistantMetrics: input.assistantMetrics,
     outcomes,
     port: input.input.runtime.platform.productFeedbackPort ?? null,
   });
@@ -6633,27 +6690,28 @@ async function drainHostedPostCheckpointDelivery(input: {
   };
 }
 
-async function recordHostedProductFeedbackAfterMemberDelivery(input: {
-  candidates: readonly HostedRuntimeProductFeedbackRecord[];
-  currentTurnDeliveryIntentIds: readonly string[];
+function hasHostedCommittedUsageAudit(metrics: HostedAssistantMetrics): boolean {
+  return (metrics.assistantAutomationCommittedUsageAuditKeys?.length ?? 0) > 0;
+}
+
+async function recordHostedProductFeedbackAfterCommittedTurn(input: {
+  assistantMetrics?: HostedAssistantMetrics | null;
   outcomes: readonly HostedAssistantDeliveryOutcome[];
   port: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["productFeedbackPort"];
 }): Promise<void> {
-  if (
-    !input.port
-    || input.candidates.length === 0
-    || !input.outcomes.some((outcome) =>
-      outcome.deliveryStatus === "sent"
-      && input.currentTurnDeliveryIntentIds.includes(outcome.effectId)
-    )
-  ) {
-    return;
-  }
-
+  const candidates = input.assistantMetrics?.assistantAutomationProductFeedbackCandidates ?? [];
+  const committedUsageAuditKeys = input.assistantMetrics?.assistantAutomationCommittedUsageAuditKeys ?? [];
+  const currentTurnDeliveryIntentIds = input.assistantMetrics?.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
+  if (!input.port || candidates.length === 0) return;
+  const memberDeliverySent = input.outcomes.some((outcome) =>
+    outcome.deliveryStatus === "sent"
+    && currentTurnDeliveryIntentIds.includes(outcome.effectId)
+  );
   await Promise.allSettled(
-    input.candidates.map((candidate) =>
-      input.port?.recordProductFeedback(candidate)
-    ),
+    candidates.filter((candidate) => memberDeliverySent
+      || (committedUsageAuditKeys.includes(candidate.idempotencyKey)
+        && isHostedUsageOptimizationAuditFeedback(candidate)))
+      .map(async (candidate) => input.port!.recordProductFeedback(candidate)),
   );
 }
 
@@ -8661,12 +8719,17 @@ function resolveHostedWorkspaceDeviceTool(input: {
 
   return {
     async request(request, context) {
-      context?.signal?.throwIfAborted();
+      const signal = context?.signal ?? null;
+      signal?.throwIfAborted();
       if (request.action === "haptic") {
         return requestHostedWearableHaptic(deviceSyncPort, request, context);
       }
+      if (request.action === "companion_status") {
+        if (!deviceSyncPort.companionStatus) throw new VaultCliError("companion_status_unavailable", "App presence is unavailable right now.");
+        return { action: "companion_status", ...await deviceSyncPort.companionStatus({ signal }) };
+      }
       if (request.action === "list_accounts") {
-        return readHostedDeviceAccounts(deviceSyncPort, request, context?.signal ?? null);
+        return readHostedDeviceAccounts(deviceSyncPort, request, signal);
       }
 
       if (request.action === "reconcile") {
@@ -8678,7 +8741,7 @@ function resolveHostedWorkspaceDeviceTool(input: {
         }
         const result = await deviceSyncPort.reconcileAccount({
           connectionId: request.accountId,
-          signal: context?.signal ?? null,
+          signal,
         });
         return {
           accountId: result.connectionId,
@@ -8700,7 +8763,7 @@ function resolveHostedWorkspaceDeviceTool(input: {
         }
         const common = {
           assistantInputId: context.acceptedInputAuthority.assistantInputId,
-          signal: context.signal ?? null,
+          signal,
           sourceProviderSlug: request.sourceProvider,
         };
         const result = request.mode === "after_days"

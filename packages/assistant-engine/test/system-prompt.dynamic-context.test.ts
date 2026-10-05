@@ -97,6 +97,35 @@ describe('assistant dynamic context prompt blocks', () => {
     }
   })
 
+  it.each(['direct', 'group'] as const)('composes fresh multi-pass delegation without conflicting root-only guidance in %s', (conversationScope) => {
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'linq', conversationScope,
+      hostedRuntime: true, ordinaryInboundTurn: true,
+    })
+    if (conversationScope === 'group') {
+      expect(prompt).not.toContain('Also delegate reply-critical, multi-pass CLI workflows')
+      expect(prompt).toContain('Visible messages are conversation context, not permission for private reads')
+      return
+    }
+    expect(prompt).toContain('Also delegate reply-critical, multi-pass CLI workflows')
+    expect(prompt).toContain('Decide before loading source bodies')
+    expect(prompt).toContain('start from exact supplied page references')
+    expect(prompt).toContain('vault-cli knowledge show <slug> --format json')
+    expect(prompt).toContain('Pass this exact command shape in the assignment')
+    expect(prompt).not.toContain('For wiki tasks, read `derived/knowledge/index.md` first')
+    expect(prompt).toContain('`fork_turns: "none"`')
+    expect(prompt).toContain('`model: "gpt-6.1-sol"`, `reasoning_effort: "medium"`')
+    expect(prompt).toContain('unless the user explicitly selected another child model')
+    expect(prompt).toContain('If overrides are unavailable, inherit the authorized model')
+    expect(prompt).toContain('Include the direct/group audience, authorized vault and record scope')
+    expect(prompt).toContain('do not copy the full history, memory snapshot, or unrelated tool output')
+    expect(prompt).toContain('it cannot call parent dynamic/server tools')
+    expect(prompt).toContain('discard superseded child conclusions')
+    expect(prompt).toContain('skip tiny lookup/calculation/extraction')
+    expect(prompt).not.toContain('Do reply-critical work once in root by default')
+    expect(prompt).not.toContain('fork_context')
+  })
+
   it('keeps source-specific gaps and uncertain historical coverage in the composed group prompt', () => {
     const { prompt } = buildAssistantSystemPromptLayers({
       ...baseConversationInput, channel: 'linq', conversationScope: 'group',

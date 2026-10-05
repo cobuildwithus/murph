@@ -1,4 +1,5 @@
 import "server-only";
+import { readSharedCompanionContact } from "./shared-companion-presence";
 
 import {
   evaluatePushPrimarySourceStaleness,
@@ -753,6 +754,7 @@ export async function readHostedGroupParticipantDisplayNameCandidatesByRuntimeMe
  * database authority window.
  */
 export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGroupSharedReadOptions & {
+  includeCompanionPresence?: true;
   linqSenderHandles?: readonly string[];
   prisma?: PrismaClient;
   telegramSenderHandles?: readonly string[];
@@ -1011,6 +1013,10 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
     const snapshotData = await readHostedGroupSharedSnapshots({ capture, prisma, now, options, runtimeMemberId: input.runtimeMemberId });
     if (!snapshotData) return sharedReadCapacityUnavailable();
     const { recordsByMemberAndScope, readableGrantIds, dateCoverage } = snapshotData;
+    const companionContacts = input.includeCompanionPresence ? await readSharedCompanionContact({
+      prisma, runtimeMemberId: input.runtimeMemberId,
+      grants: capture.grants.filter((grant) => readableGrantIds.has(grant.id)),
+    }).catch(() => new Map<string, string | null>()) : new Map<string, string | null>();
 
     const grantsByMember = new Map<
       string,
@@ -1050,6 +1056,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
         displayName,
         memberId,
         participantId,
+        ...(companionContacts.has(memberId) ? { companionLastContactAt: companionContacts.get(memberId) ?? null } : {}),
         projections: projectionScopes.map((projectionScope, index) => {
           const projectionScopeKey = requestedProjectionScopeKeys[index];
           if (!projectionScopeKey) {

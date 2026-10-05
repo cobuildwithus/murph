@@ -22,6 +22,7 @@ import {
   releaseHostedRuntimeAfterRetirement,
   releaseHostedRuntimeAfterCompletion,
   requireHostedRuntimeOwnerTx,
+  requireHostedRuntimeCallback,
   retireHostedRuntime,
   revokeHostedRuntimeAiUsageTx,
   type HostedRuntimeIdentity,
@@ -217,6 +218,82 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     await expect(executeHostedRuntimeOwnerCommand({ prisma: second, userId, command: {
       operation: "authorize_effect", ...runtime, runnerContainerName: null, managedAi: false,
     } })).rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+  });
+
+  it("checks callback preflight in one statement without waiting on publication locks", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const locked = deferred();
+    const release = deferred();
+    const holding = first.$transaction(async tx => {
+      await requireHostedRuntimeOwnerTx(tx, runtime);
+      locked.resolve();
+      await release.promise;
+    });
+    await locked.promise;
+    const raw = vi.spyOn(second, "$queryRaw");
+    const transaction = vi.spyOn(second, "$transaction");
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        requireHostedRuntimeCallback(second, userId, runtime),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("Callback preflight waited on publication locks.")), 1_000);
+        }),
+      ]);
+      expect(raw).toHaveBeenCalledTimes(1);
+      expect(transaction).not.toHaveBeenCalled();
+    } finally {
+      clearTimeout(timeout);
+      release.resolve();
+      await holding;
+      raw.mockRestore();
+      transaction.mockRestore();
+    }
+    await retireHostedRuntime({ prisma: first, identity: runtime });
+    await expect(requireHostedRuntimeCallback(second, userId, runtime))
+      .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+  });
+
+  it("keeps callback identity, deletion, phase and cutover boundaries fail-closed", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    for (const wrong of [null, { ...runtime, userId: "other" },
+      { ...runtime, attemptId: "rt_wrong" }, { ...runtime, generation: "999" }]) {
+      await expect(requireHostedRuntimeCallback(second, userId, wrong))
+        .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+    }
+    await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime,
+      runnerContainerName: "synthetic-callback-boundaries", workspaceVersion: "0",
+      providerEgressTokenHash: null, customInferenceEnvelope: null, platformAiUsageAllowed: true });
+    for (const phase of ["starting", "active", "retiring", "idle"]) {
+      await observer.hostedRuntimeOwner.update({ where: { userId },
+        data: { phase, attemptId: phase === "idle" ? null : runtime.attemptId } });
+      if (phase === "starting" || phase === "active") {
+        await expect(requireHostedRuntimeCallback(second, userId, runtime)).resolves.toBeUndefined();
+      } else {
+        await expect(requireHostedRuntimeCallback(second, userId, runtime))
+          .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+      }
+    }
+    await observer.hostedRuntimeOwner.update({ where: { userId },
+      data: { phase: "active", attemptId: runtime.attemptId } });
+    try {
+      for (const phase of ["legacy", "rolling", "draining", "postgres"]) {
+        await observer.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase } });
+        if (phase === "draining") {
+          await expect(requireHostedRuntimeCallback(second, userId, runtime))
+            .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+        } else {
+          await expect(requireHostedRuntimeCallback(second, userId, runtime)).resolves.toBeUndefined();
+        }
+      }
+      await observer.hostedMember.delete({ where: { id: userId } });
+      await expect(requireHostedRuntimeCallback(second, userId, runtime))
+        .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+    } finally {
+      await observer.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres" } });
+    }
   });
 
   it.each(["cold", "retained", "existing"] as const)("admits a %s runtime without redundant policy or routing reads", async state => {

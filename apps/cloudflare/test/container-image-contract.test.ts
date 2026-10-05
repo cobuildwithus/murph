@@ -454,8 +454,8 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_UPSTREAM_REVISION=8e68a98ef03cdde76d2e6800791ebdf1b3b95b24");
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.159.1");
+    expect(baseDockerfile).toContain("ARG CODEX_UPSTREAM_REVISION=a956835d020762cb2b570053af06f643a11c0ecc");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.160.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -499,7 +499,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("COPY patches/codex-public-live.patch");
     expect(baseDockerfile).toContain("git apply --check /tmp/codex-public-live.patch");
     expect(baseDockerfile).toContain("export CODEX_BWRAP_SHA256=");
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.159.1");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.160.0");
     expect(baseDockerfile).toContain("COPY --from=codex-package /opt/codex/ /opt/codex/");
     expect(baseDockerfile).toContain("ARG CODEX_CARGO_JOBS=2");
     expect(baseDockerfile).toContain('cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex --jobs "${CODEX_CARGO_JOBS}"');

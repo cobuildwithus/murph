@@ -389,6 +389,21 @@ export type HostedVaultShareProjectionKind =
 /** Maximum snapshot replacements one durable first-materialization pass may attempt. */
 export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX = 25;
 
+// New share kinds do not expose app contact until deliberately classified here.
+const companionContactKinds = new Set<HostedVaultShareProjectionKind>([
+  "device-sync-status.v0", "sleep-times.v0", "workout-days.v0", "workouts.v0",
+  "heart-rate-zones-days.v0", "activity-days.v0", "sleep-duration-days.v0",
+  "deep-sleep-days.v0", "deep-sleep-sources-days.v1", "rem-sleep-days.v0", "rem-sleep-sources-days.v1",
+  "steps-days.v0", "max-heart-rate-days.v0", "distance-days.v0", "active-calories-days.v0",
+  "elevation-gain-days.v0", "floors-climbed-days.v0", "day-strain-days.v0", "workout-strain-days.v0",
+  "activity-score-days.v0", "vo2-max-days.v0", "resting-heart-rate-days.v0", "hrv-days.v0",
+  "activity-minutes-days.v1", "activity-distance-days.v1", "activity-session-count-days.v1",
+]);
+
+export function sharesCompanionContact(kind: HostedVaultShareProjectionKind): boolean {
+  return companionContactKinds.has(kind);
+}
+
 export interface HostedVaultShareFixedProjectionScope {
   projectionKind: HostedVaultShareFixedProjectionKind;
 }

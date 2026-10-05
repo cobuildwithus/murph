@@ -1037,6 +1037,16 @@ export interface HostedRuntimeProductFeedbackRecord {
 }
 
 export const HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX = "Support escalation:";
+export const HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX = "Usage optimization audit:";
+export function isHostedUsageOptimizationAuditFeedback(
+  feedback: Pick<HostedRuntimeProductFeedbackRecord, "kind" | "relatedChangelogItemIds" | "summary">,
+): boolean {
+  return feedback.kind === "feature_request" && feedback.relatedChangelogItemIds.length === 0
+    && feedback.summary.startsWith(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX)
+    && feedback.summary.length <= 1800
+    && feedback.summary.slice(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX.length).trim().length > 0;
+}
+
 export const HOSTED_PATTERN_ENGINE_AUDIT_PREFIX = "Pattern engine audit:";
 
 export function isHostedProductSupportEscalationSummary(
@@ -1462,6 +1472,7 @@ export interface HostedRuntimeGroupSharedFreshness {
 }
 
 export interface HostedRuntimeGroupSharedReadRequest extends HostedGroupSharedReadOptions {
+  includeCompanionPresence?: true;
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
   /** Only missing, currently consented wearable dates can request existing sync work. */
   freshness?: readonly HostedRuntimeGroupSharedFreshnessRequirement[];
@@ -1492,6 +1503,7 @@ export interface HostedRuntimeGroupSharedProjection {
 }
 
 export interface HostedRuntimeGroupSharedMember {
+  companionLastContactAt?: string | null;
   currentTurnHandles: readonly string[];
   displayName: string | null;
   memberId: string;

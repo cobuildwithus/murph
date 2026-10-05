@@ -120,6 +120,10 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
     ["../../packages/hosted-execution/src/plan-usage.ts"],
   );
   assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/usage-diagnostics"],
+    ["../../packages/hosted-execution/src/usage-diagnostics.ts"],
+  );
+  assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/subscription"],
     ["../../packages/hosted-execution/src/subscription.ts"],
   );

@@ -1,3 +1,4 @@
+import type { CompanionPresence } from "@murphai/hosted-execution/companion-presence";
 import type { WearableHapticRequest, WearableHapticResponse } from "@murphai/hosted-execution/wearable-haptics";
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type {
@@ -111,6 +112,10 @@ import type {
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
+import type {
+  HostedUsageDiagnosticsRequest,
+  HostedUsageDiagnosticsResponse,
+} from "@murphai/hosted-execution/usage-diagnostics";
 import type {
   HostedPlanUsageStatus,
   HostedPlanUsageToolRequest,
@@ -565,6 +570,7 @@ export type HostedRuntimeEffectsPort = HostedRuntimeEffectsPortBase;
 export type HostedRuntimeDeviceSyncMessagingReturnTarget = "imessage" | "telegram";
 
 export interface HostedRuntimeDeviceSyncPort {
+  companionStatus?(input: { signal?: AbortSignal | null }): Promise<CompanionPresence>;
   haptic?(input: WearableHapticRequest & { signal?: AbortSignal | null }): Promise<WearableHapticResponse>;
   applyUpdates(input: {
     occurredAt?: string | null;
@@ -650,6 +656,10 @@ export interface HostedRuntimeFamilyPlanToolPort {
   request(
     request: HostedRuntimeFamilyPlanToolRequest,
   ): Promise<HostedRuntimeFamilyPlanToolResponse>;
+}
+
+export interface HostedRuntimeUsageDiagnosticsPort {
+  read(request: HostedUsageDiagnosticsRequest): Promise<HostedUsageDiagnosticsResponse>;
 }
 
 export interface HostedRuntimePlanUsageToolPort {
@@ -909,6 +919,7 @@ export interface HostedRuntimePlatform {
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
+  usageDiagnosticsPort?: HostedRuntimeUsageDiagnosticsPort | null;
   physicalNotes?: HostedRuntimePhysicalNotePort | null;
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;
   subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;

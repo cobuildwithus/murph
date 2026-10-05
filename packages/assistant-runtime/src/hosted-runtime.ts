@@ -7155,7 +7155,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             const systemMailboxProgressGeneration =
               resolveHostedSystemMailboxCheckpointProgressGeneration({
                 currentGeneration:
-                  committedWorkspace?.systemMailboxProgressGeneration ?? null,
+                  // Canonical publications drained above can advance the builder
+                  // without rebasing the foreground workspace projection.
+                  checkpointRequestBuilder.latestWorkspace()
+                    ?.systemMailboxProgressGeneration ?? null,
                 progressed: systemMailboxProgressedSinceCheckpoint,
               });
             redactedStatus = { ...redactedStatus, ...checkpointRequestBuilder.readRedactedStatus() };
@@ -8910,6 +8913,9 @@ function createAbortGuardedDeviceSyncPort(
   guard: <T>(run: () => Promise<T>) => Promise<T>,
 ): NonNullable<HostedRuntimePlatform["deviceSyncPort"]> {
   return {
+    ...(port.companionStatus ? {
+      companionStatus: (statusInput) => guard(() => port.companionStatus!(statusInput)),
+    } : {}),
     ...(port.haptic ? {
       haptic: (hapticInput) => guard(() => port.haptic!(hapticInput)),
     } : {}),

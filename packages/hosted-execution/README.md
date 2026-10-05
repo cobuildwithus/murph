@@ -122,3 +122,9 @@ Configuration request/response parsers live with the model and provider values
 in `@murphai/hosted-execution/assistant-model`. Consumers that only need those
 parsers should use that entrypoint to avoid initializing unrelated runtime and
 device-sync parsers. The existing `parsers` exports forward to the same functions.
+
+The `usage-diagnostics` entrypoint owns the strict, read-only member usage
+request/response contract. Query options are bounded and contain no identity;
+only the signed host supplies member authority. Responses distinguish recorded
+allowance costs from current informational model rates and tool output bytes
+from tokens. Unknown response fields are rejected at the runtime boundary.

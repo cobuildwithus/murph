@@ -246,6 +246,7 @@ export function expectAdvertisedMurphDynamicTools(
     physicalNoteRecoveryAvailable?: boolean;
     physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
+    senderContactAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
     responseCardAvailable?: boolean;
     telegramRichContentResponseCardAvailable?: boolean;

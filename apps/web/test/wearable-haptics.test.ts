@@ -14,7 +14,7 @@ const request: WearableHapticRequest = { request: { action: "haptic", wearable: 
 function store() {
   const sessions = { findUnique: vi.fn(), upsert: vi.fn(), update: vi.fn(), delete: vi.fn() };
   const commands = { findUnique: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), create: vi.fn(), updateMany: vi.fn() };
-  const tx = { hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue(null) }, companionWearableSession: sessions, companionWearableCommand: commands };
+  const tx = { hostedMember: { findUniqueOrThrow: vi.fn().mockResolvedValue({ companionLastContactAt: null, companionLastForegroundAt: null }) }, hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue(null) }, companionWearableSession: sessions, companionWearableCommand: commands };
   m.prisma.mockReturnValue({ $transaction: async (run: (client: typeof tx) => Promise<unknown>) => run(tx) });
   sessions.findUnique.mockResolvedValue({ userId: memberId, wearable: "whoop", sessionId, expiresAt: new Date(Date.now() + 20_000) });
   return { tx, sessions, commands };
@@ -25,6 +25,40 @@ describe("wearable command admission and claims", () => {
     vi.resetAllMocks();
     m.input.mockResolvedValue({ occurredAt: new Date().toISOString(), causalSeq: "1" });
     m.wake.mockResolvedValue({ kind: "conversation.message", message: { channel: "linq", linqMessage: { threadIsDirect: true } } });
+  });
+  it("distinguishes app reachability, band readiness and busy without changing legacy wire responses", async () => {
+    const { sessions, commands, tx } = store();
+    const modern = { ...request, includeAvailability: true as const };
+    sessions.findUnique.mockResolvedValue(null);
+    expect(await send(modern)).toMatchObject({ status: "unavailable", unavailableReason: "app_unreachable" });
+    expect(await send()).not.toHaveProperty("unavailableReason");
+    const foregroundAt = new Date();
+    tx.hostedMember.findUniqueOrThrow.mockResolvedValue({ companionLastContactAt: foregroundAt, companionLastForegroundAt: foregroundAt });
+    expect(await send(modern)).toMatchObject({ status: "unavailable", unavailableReason: "device_disconnected" });
+    const saved = commands.create.mock.calls.at(-1)![0].data;
+    commands.findUnique.mockResolvedValue(saved);
+    tx.hostedMember.findUniqueOrThrow.mockResolvedValue({ companionLastContactAt: null, companionLastForegroundAt: null });
+    expect(await send(modern)).toMatchObject({ unavailableReason: "device_disconnected" });
+    commands.findUnique.mockResolvedValue(null);
+    sessions.findUnique.mockResolvedValue({ sessionId, expiresAt: new Date(Date.now() + 20_000) });
+    commands.findMany.mockResolvedValue([{ id: "pending", operation: "buzz", status: "claimed" }]);
+    expect(await send(modern)).toMatchObject({ status: "unavailable", unavailableReason: "busy" });
+  });
+  it("does not mistake recent background contact for a disconnected foreground band", async () => {
+    const { sessions, tx } = store();
+    sessions.findUnique.mockResolvedValue(null);
+    tx.hostedMember.findUniqueOrThrow.mockResolvedValue({ companionLastContactAt: new Date(), companionLastForegroundAt: new Date(Date.now() - 1_000) });
+    expect(await send({ ...request, includeAvailability: true })).toMatchObject({ unavailableReason: "app_unreachable" });
+  });
+  it("retires a foreground lease on newer background contact but accepts a newer lease", async () => {
+    const { sessions, tx } = store();
+    const now = Date.now();
+    const modernStatus: WearableHapticRequest = { ...request, includeAvailability: true, request: { ...request.request, operation: "status" } };
+    tx.hostedMember.findUniqueOrThrow.mockResolvedValue({ companionLastContactAt: new Date(now - 1_000), companionLastForegroundAt: new Date(now - 3_000) });
+    sessions.findUnique.mockResolvedValue({ sessionId, expiresAt: new Date(now + 18_000) });
+    expect(await send(modernStatus)).toMatchObject({ status: "unavailable", unavailableReason: "app_unreachable" });
+    sessions.findUnique.mockResolvedValue({ sessionId, expiresAt: new Date(now + 20_000) });
+    expect(await send(modernStatus)).toMatchObject({ status: "ready" });
   });
   it.each(["whoop", "garmin"] as const)("queues one immediate command for %s and deduplicates a lost response", async (wearable) => {
     const { commands } = store();

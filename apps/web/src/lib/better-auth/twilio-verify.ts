@@ -9,6 +9,7 @@ export interface HostedAuthSmsVerification {
 
 const phonePattern = /^\+[1-9]\d{6,14}$/u;
 const verificationPattern = /^VE[0-9a-f]{32}$/iu;
+const verifyParameterLabels = ["To", "Channel", "RiskCheck", "Code", "VerificationSid"] as const;
 type VerifyFailure = "invalid_request" | "configuration" | "transaction" | "transport"
   | "aborted" | "timeout" | "provider_http" | "invalid_response" | "binding_mismatch";
 
@@ -16,6 +17,7 @@ type VerifyResponseFailure = {
   code?: number;
   parameter?: string;
   parameterKind?: "recognized" | "unrecognized" | "missing";
+  parameterHint?: (typeof verifyParameterLabels)[number];
   responseKind: "parsed" | "missing" | "oversized" | "invalid_json" | "invalid_shape" | "read_failed";
 };
 
@@ -112,10 +114,18 @@ function parseVerifyFailure(body: string): VerifyResponseFailure {
     && result.code >= 10000 && result.code <= 99999 ? result.code : undefined;
   const message = "message" in result && typeof result.message === "string" ? result.message : "";
   const parameter = code === 60200
-    ? /^Invalid parameter: (To|Channel|RiskCheck|Code|VerificationSid)$/u.exec(message)?.[1]
+    ? /^Invalid parameter(?:: (To|Channel|RiskCheck|Code|VerificationSid)| `(To)`: \+[1-9]\d{6,14})$/u
+      .exec(message)?.slice(1).find(Boolean)
+    : undefined;
+  // Other anchored labels remain observation only, never public error authority.
+  const hint = code === 60200 && !parameter
+    ? /^Invalid parameter(?:: ([A-Za-z]+)|(?::)? `([A-Za-z]+)`)(?=$|[ \t:])/u.exec(message)
+    : null;
+  const parameterHint = hint
+    ? verifyParameterLabels.find((label) => label === (hint[1] ?? hint[2]))
     : undefined;
   return {
-    code, parameter, responseKind: "parsed",
+    code, parameter, parameterHint, responseKind: "parsed",
     ...(code === 60200 ? { parameterKind: parameter ? "recognized" as const : message ? "unrecognized" as const : "missing" as const } : {}),
   };
 }
@@ -139,7 +149,7 @@ function verificationError(operation: "send" | "check", reason: VerifyFailure, s
     });
   }
   return hostedOnboardingError({
-    cause: new Error(`Twilio Verify ${operation}: ${reason}${status === undefined ? "" : `; HTTP ${status}`}${failure?.code === undefined ? "" : `; code ${failure.code}`}${failure?.parameter === undefined ? "" : `; parameter ${failure.parameter}`}${failure ? `; response ${failure.responseKind}` : ""}${failure?.parameterKind ? `; parameterKind ${failure.parameterKind}` : ""}.`),
+    cause: new Error(`Twilio Verify ${operation}: ${reason}${status === undefined ? "" : `; HTTP ${status}`}${failure?.code === undefined ? "" : `; code ${failure.code}`}${failure?.parameter === undefined ? "" : `; parameter ${failure.parameter}`}${failure ? `; response ${failure.responseKind}` : ""}${failure?.parameterKind ? `; parameterKind ${failure.parameterKind}` : ""}${status === 400 && failure?.parameterHint ? `; parameterHint ${failure.parameterHint}` : ""}.`),
     code: operation === "send" ? "AUTH_DELIVERY_UNAVAILABLE" : "AUTH_VERIFICATION_UNAVAILABLE",
     httpStatus: 503,
     message: operation === "send" ? "We could not send a sign-in code. Try again shortly."

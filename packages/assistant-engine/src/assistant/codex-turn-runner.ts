@@ -1,3 +1,4 @@
+import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import {
   assistantReasoningEffortValues,
   type AssistantReasoningEffort,
@@ -122,6 +123,7 @@ import {
   resolveAssistantConversationScope,
 } from './conversation-policy.js'
 import { recordAdditionalAssistantUsageEvents } from './service-usage.js'
+import { classifyAssistantReaction } from './reaction-routing.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
@@ -338,6 +340,91 @@ export async function executeCodexTurnWithRecovery(input: {
   }
 }
 
+async function executeRoutedCodexAttempt(
+  input: AssistantCodexAttemptInput,
+  reasoningEffort: string,
+  usageAttribution: AssistantUsageAttribution | null,
+): Promise<import('./providers/types.js').AssistantProviderTurnAttemptResult> {
+  return await maybeRouteAssistantReaction(input, usageAttribution)
+    ?? await executeCodexAssistantTurnAttemptFromInput(
+      buildCodexAttemptProviderInput(input, reasoningEffort, usageAttribution),
+    )
+}
+
+async function maybeRouteAssistantReaction(
+  input: AssistantCodexAttemptInput,
+  usageAttribution: AssistantUsageAttribution | null,
+): Promise<import('./providers/types.js').AssistantProviderTurnAttemptResult | null> {
+  const { executionPlan, attemptPlan } = input
+  const reaction = executionPlan.input.reactionRouting
+  // A reaction is always an isolated accepted input. A continuation or mixed
+  // input turn must never let one quiet reaction suppress other work.
+  if (!reaction || (input.providerRequestOrdinal ?? 0) !== 0
+    || executionPlan.acceptedInputItems?.length !== 1
+    || !executionPlan.allowFinishWithoutReply) return null
+  const usages: AssistantProviderUsageDraft[] = []
+  let decision: 'quiet' | 'escalate'
+  try {
+    decision = await classifyAssistantReaction({
+      ...reaction,
+      abortSignal: executionPlan.input.abortSignal,
+      codexCommand: attemptPlan.route.codexCommand ?? executionPlan.input.codexCommand ?? undefined,
+      codexHome: attemptPlan.route.providerOptions.codexHome,
+      env: attemptPlan.routePlan.cliEnv,
+      modelProvider: attemptPlan.route.providerOptions.modelProvider,
+      beforeProviderEntry: async () => {
+        notifyProviderRequestStartedBestEffort({
+          event: { providerRequestOrdinal: input.providerRequestOrdinal, startedAt: new Date().toISOString() },
+          hook: input.onProviderRequestStarted ?? null,
+        })
+      },
+      onProviderUsage: ({ usage }) => { usages.push(usage) },
+      onFallback: (reason) => {
+        try {
+          executionPlan.input.onTraceEvent?.({ codexThreadId: null, updates: [], rawEvent: {
+            type: 'assistant.reaction.routing_fallback', reason,
+          } })
+        } catch { /* Diagnostic failures must not suppress the full turn. */ }
+      },
+    })
+  } finally {
+    // The leaf has a separate identity: neither the parent request nor its
+    // dynamic-tool usage ordinals can collide. Failed/aborted leaves count too.
+    await recordAdditionalAssistantUsageEvents({
+      additionalUsages: usages,
+      effectiveEnv: attemptPlan.routePlan.cliEnv,
+      executionContext: executionPlan.executionContext,
+      providerRequestAcceptedInputIds: (executionPlan.acceptedInputItems ?? []).map((item) => item.id),
+      providerResult: {
+        attemptCount: attemptPlan.attemptCount,
+        provider: attemptPlan.route.provider,
+        providerOptions: attemptPlan.route.providerOptions,
+        route: attemptPlan.route,
+        session: attemptPlan.session,
+        usageAttribution: usageAttribution ? { ...usageAttribution, featureKey: 'reaction-routing' } : null,
+      },
+      turnId: `${executionPlan.turnId}:reaction-routing`,
+    })
+  }
+  if (decision !== 'quiet') return null
+  executionPlan.input.abortSignal?.throwIfAborted()
+  await executionPlan.onFinishWithoutReplyAccepted?.({
+    deliveryContextOrdinal: 0, messageReactionPending: false, precedingReplyDeliveryContextOrdinal: null,
+  })
+  await executionPlan.onFinishWithoutReplyRecorded?.({ deliveryContextOrdinal: 0 })
+  return {
+    ok: true,
+    metadata: { activityLabels: [], executedToolCount: 0, providerActionCount: 1, rawToolEvents: [], runtimeIssueInputs: [] },
+    result: {
+      provider: 'codex-cli', providerThreadUnchanged: true,
+      codexThreadId: attemptPlan.routePlan.resume?.codexThreadId ?? null,
+      rawEvents: [], acceptedNoReplyDeliveryContextOrdinals: [0], finalAction: { kind: 'none' },
+      response: '', transcriptResponse: null, responseDeliveryContextOrdinal: 0,
+      stderr: '', stdout: '', usage: null,
+    },
+  }
+}
+
 function createAssistantProviderUsageAttribution(input: {
   attemptPlan: AssistantCodexAttemptPlan
   env: NodeJS.ProcessEnv
@@ -364,6 +451,8 @@ function createAssistantProviderUsageAttribution(input: {
     credentialSource,
     environment: resolveAssistantUsageEnvironment(input.env),
     featureKey: resolveAssistantUsageFeatureKey({
+      scheduledInvocationAuthority: input.executionPlan.input.scheduledInvocationAuthority,
+      scheduledOccurrenceAt: input.executionPlan.input.scheduledOccurrenceAt,
       deliverResponse: input.executionPlan.input.deliverResponse,
       promptProfile: input.executionPlan.profile.promptProfile,
       turnTrigger: input.executionPlan.input.turnTrigger ?? 'manual-ask',
@@ -516,9 +605,7 @@ async function executeAssistantCodexAttempt(
       executionPlan,
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
     })
-    const attemptResult = await executeCodexAssistantTurnAttemptFromInput(
-      buildCodexAttemptProviderInput(input, reasoningEffort, usageAttribution),
-    )
+    const attemptResult = await executeRoutedCodexAttempt(input, reasoningEffort, usageAttribution)
     attemptMetadata = normalizeAssistantProviderAttemptMetadata(attemptResult.metadata)
     recordAssistantRuntimeIssueInputsBestEffort({
       issues: attemptMetadata.runtimeIssueInputs,
@@ -884,6 +971,11 @@ function buildCodexAttemptProviderInput(
       },
       onTraceEvent: executionPlan.input.onTraceEvent,
       productFeedbackRecorder: createAssistantProductFeedbackRecorder({
+        usageOptimizerScope: resolveUsageOptimizerFeedbackScope({
+          conversationScope: resolveAssistantConversationScope(executionPlan.sharedPlan.conversationPolicy.audience),
+          executionContext: executionPlan.executionContext,
+          messageInput: executionPlan.input,
+        }),
         acceptedInputItems: executionPlan.acceptedInputItems ?? [],
         ...(executionPlan.hostedToolContext
             ?.currentProductFeedbackAcceptedInputIds

@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxLatestPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMailboxPayload: vi.fn(),
+  readHostedMailboxProgress: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readSelectedHostedInferenceConnectionOverride: vi.fn(),
@@ -57,6 +58,10 @@ vi.mock("next/server", async (importOriginal) => ({
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/projection", () => ({
+  readHostedMailboxProgress: mocks.readHostedMailboxProgress,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -178,6 +183,10 @@ describe("hosted orchestration reconciliation facts", () => {
       async (input: { message: string }) => input.message,
     );
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
+    mocks.readHostedMailboxProgress.mockImplementation(async () => ({
+      maxSeqByLane: await mocks.readHostedMailboxMaxSeqByLane(),
+      consumedSeqByLane: await mocks.readHostedMailboxConsumedSeqByLane(),
+    }));
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([
       {
@@ -410,9 +419,12 @@ describe("hosted orchestration reconciliation facts", () => {
       },
     ]);
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
+    });
+    expect(mocks.readHostedMailboxProgress).toHaveBeenCalledExactlyOnceWith({
+      now: new Date(FIXED_NOW), prisma: expect.any(Object), userId: MEMBER_ID,
     });
     expect(JSON.stringify(body)).not.toContain("redactedStatus");
     expect(JSON.stringify(body)).not.toContain(UNSAFE_SENTINEL);
@@ -828,7 +840,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(response.status).toBe(200);
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
@@ -967,7 +979,7 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
@@ -1002,7 +1014,7 @@ describe("hosted orchestration reconciliation facts", () => {
       nextWakeReason: "assistant_due",
     });
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
@@ -1115,7 +1127,7 @@ describe("hosted orchestration reconciliation facts", () => {
         status === "allowed" ? null : "health_data_consent_withdrawn",
       );
       expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-        mode: "mutating",
+        mode: "read_first",
         now: new Date(FIXED_NOW),
         userId: MEMBER_ID,
       });
@@ -1649,7 +1661,7 @@ describe("hosted orchestration reconciliation facts", () => {
       systemMailboxProgressGeneration: "7",
     });
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
@@ -1719,7 +1731,7 @@ describe("hosted orchestration reconciliation facts", () => {
       expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
       expect(mocks.hasHostedMailboxAutomationEngagementSince).not.toHaveBeenCalled();
       expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-        mode: "mutating", now: new Date(FIXED_NOW), userId: MEMBER_ID,
+        mode: "read_first", now: new Date(FIXED_NOW), userId: MEMBER_ID,
       });
     },
   );
@@ -1806,7 +1818,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).not.toHaveBeenCalled();
     expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "mutating",
+      mode: "read_first",
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });

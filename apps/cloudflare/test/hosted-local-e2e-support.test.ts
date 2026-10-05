@@ -868,9 +868,11 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && !hostedGroupFamilyToolNames.includes(name)
       && name !== "murph.group_room_model"
       && name !== "murph.imessage_contact"
+      && name !== "murph.usage_diagnostics"
       && name !== "murph.react_to_message"
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
+      && name !== "murph.get_sender_contact"
       && name !== "murph.pending_vault_files"
       && name !== "murph.resolve_physical_note"
       && name !== "murph.send_physical_note"
@@ -896,12 +898,14 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       messageTargetingAvailable: true,
       pendingVaultFilesAvailable: true,
       phoneCallsAvailable: true,
+      senderContactAvailable: true,
       physicalNoteRecoveryAvailable: true,
       physicalNotesAvailable: true,
       progressUpdatesAvailable: true,
       responseCardAvailable: true,
       telegramRichContentResponseCardAvailable: true,
       vaultFileSendAvailable: true,
+      usageDiagnosticsAvailable: true,
     } as const;
     expect(allToolNames).toContain("murph.analyze_video");
     expect(allToolNames).toContain("murph.react_to_message");
@@ -909,12 +913,14 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.computer_open");
     expect(allToolNames).toContain("murph.connected_apps_manage");
     expect(allToolNames).toContain("murph.create_phone_call");
+    expect(allToolNames).toContain("murph.get_sender_contact");
     expect(allToolNames).toContain("murph.create_calendar_link");
     expect(hostedGroupFamilyToolNames).toHaveLength(6);
     expect(allToolNames)
       .toEqual(expect.arrayContaining(hostedGroupFamilyToolNames));
     expect(allToolNames).toContain("murph.group_room_model");
     expect(allToolNames).toContain("murph.imessage_contact");
+    expect(allToolNames).toContain("murph.usage_diagnostics");
     expect(allToolNames).toContain("murph.resolve_physical_note");
     expect(allToolNames).toContain("murph.send_physical_note");
     expect(allToolNames).toContain("murph.send_progress_update");
@@ -926,6 +932,9 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames),
     ]);
+    expect(() => expectAdvertisedMurphDynamicTools([
+      buildResponsesRequest([...baseToolNames, "murph.usage_diagnostics"]),
+    ])).toThrow();
     // Responses Lite models (e.g. gpt-5.6-terra) relocate the structured
     // namespace into an additional_tools input item; it must still be read.
     expectAdvertisedMurphDynamicTools([
@@ -1223,8 +1232,10 @@ function buildResponsesRequest(
         && name !== "murph.generate_song"
         && name !== "murph.analyze_video"
         && name !== "murph.submit_product_feedback"
+        && name !== "murph.usage_diagnostics"
         && name !== "murph.family_plan"
         && name !== "murph.create_phone_call"
+        && name !== "murph.get_sender_contact"
         && name !== "murph.send_physical_note"
         && name !== "murph.resolve_physical_note"
         && !hostedGroupFamilyToolNames.includes(name)

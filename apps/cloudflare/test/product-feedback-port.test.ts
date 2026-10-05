@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
+  HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
   HostedRuntimeProductFeedbackRecord,
@@ -62,6 +63,17 @@ describe("hosted product feedback port", () => {
     await expect(request.clone().json()).resolves.toEqual({
       feedback: FEEDBACK,
     });
+  });
+
+  it("uses the audit-only route and never falls back when older Web returns 404", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("not found", { status: 404 }));
+    const port = createHostedRuntimeProductFeedbackPort({ boundUserId: "synthetic-member", fetchImpl,
+      timeoutMs: 45000, transport: { mode: "proxy" } });
+    await expect(port.recordProductFeedback({ ...FEEDBACK,
+      summary: "Usage optimization audit: Reduce repeated large outputs." })).rejects.toThrow();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const call = fetchImpl.mock.calls[0]!;
+    expect(new Request(call[0], call[1]).url).toBe(`http://web-control.worker${HOSTED_RUNTIME_USAGE_FEEDBACK_RECORD_PATH}`);
   });
 
   it("keeps ordinary feedback short and grants support email enough off-reply time", () => {
