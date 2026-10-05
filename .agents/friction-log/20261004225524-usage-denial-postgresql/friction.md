@@ -1,6 +1,7 @@
 ---
 title: 'Usage-denial PostgreSQL proof needs a migrated schema unlike its latency-query sibling'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4013'
 ---
 
 ## Expected Behavior
