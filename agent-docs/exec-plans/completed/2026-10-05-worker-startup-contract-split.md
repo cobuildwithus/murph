@@ -1,6 +1,6 @@
 # Cut eager contract schemas from Worker startup
 
-Status: active
+Status: completed
 Created: 2026-10-05
 Updated: 2026-10-05
 
@@ -59,7 +59,8 @@ Updated: 2026-10-05
 4. [abandoned] Move the sleep-session enums out of `contracts/src/zod.ts`.
 5. [abandoned] Load the browser vault replica parser on first use.
 6. [complete] Verify with bundle inputs, alternating startup profiles, focused
-   tests, typechecks, and complexity diff; PR CI pending.
+   tests, typechecks, and complexity diff; final ReviewGPT round 1 on
+   `a4d80ada6c` returned PASS with no findings. Exact-head CI runs on PR #4026.
 
 ## Decisions
 
@@ -89,3 +90,4 @@ Updated: 2026-10-05
   `wrangler check startup` pairs against `origin/main`: all ten faster, median
   non-idle startup CPU 140.5 ms to 126 ms (median paired -14.5 ms, -10%).
   `pnpm complexity:diff` passes and reports the 12 functions as exact moves.
+Completed: 2026-10-05
