@@ -973,3 +973,8 @@ SMS invalid-destination recovery format support is tracked in
 `../docs/hosted-auth-migration.md` remains the contract owner.
 
 Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
+
+Routine Junction daily-total wake batching and its local admission, release and
+PostgreSQL proof are tracked in
+[the routine webhook debounce plan](exec-plans/completed/2026-10-04-junction-routine-webhook-debounce.md);
+`../docs/device-sync-hosted-control-plane.md` owns the deferral contract.
