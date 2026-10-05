@@ -975,5 +975,5 @@ SMS invalid-destination recovery format support is tracked in
 Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
 
 The channel welcome delivery identity correction is tracked in
-[`2026-10-04-welcome-delivery-key-contract.md`](exec-plans/active/2026-10-04-welcome-delivery-key-contract.md).
+[`2026-10-04-welcome-delivery-key-contract.md`](exec-plans/completed/2026-10-04-welcome-delivery-key-contract.md).
 The shared-validator correction has focused callback and owner proof plus final review approval; PR #4015 tracks final-head CI and human merge.
