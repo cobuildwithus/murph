@@ -1212,6 +1212,36 @@ This is best-effort diagnostic attribution, not an authorization or integrity
 ledger. Existing runtime/version dimensions, usage sampling and retention remain
 unchanged; there is no new subject/correlation label.
 
+### Personal Patterns post-freshness timing
+
+`wearables patterns` now records four bounded phases after query freshness:
+`query-entity-read` covers stored entity hydration and read-model construction;
+`query-wearable-compose` covers stored wearable decoding, reconciliation and public
+composition; `query-metric-read` covers stored metric selection and decoding;
+`query-pattern-report` covers optional vocabulary reading and report calculation.
+They use the existing monotonic timing pipeline, fixed names, span/drop accounting
+and 8 KiB transport cap. They add no content, arguments, identifiers, cardinality
+labels, network operations or persisted state. Synchronous stages remain synchronous.
+Thrown values and results retain their original identity and behavior.
+
+Deploy the Web usage normalizer and runtime/CLI timing receivers with these names
+before the producer. Older validators reject an unknown phase and drop the optional
+`cliTiming` object; legacy native-tool usage accounting remains independent.
+Older producers remain valid for new readers. A rejected or missing report is
+unknown, not zero cost. Validate exact source revisions and read-only telemetry
+admission before claiming deployment. This branch does not authorize deploying
+optimization changes together with instrumentation.
+
+After confirmed deployment, observe 24–72 hours of normal traffic using the bounded
+72-hour query below, adding these four literal phase names. Compare counts and
+phase sums for successful/error commands separately, and inspect single-call
+cohorts for attribution. Multi-call histograms do not pair phase maxima or reveal
+call ordering; never assign their maxima to the same slow call. Follow #3997 for
+the unresolved tail and the source transition in #3391. Retain these boundaries
+when that transition lands, adapting names to their actual operations rather than
+claiming SQLite hydration still occurs. No deployment or speedup is established
+merely by these local tests.
+
 ### Timing semantics and completeness
 
 All durations use `process.hrtime.bigint()`, floored to integer **microseconds**.
@@ -1266,7 +1296,7 @@ and children rejected before entering the CLI have no invented command timing.
 Legacy batch output, counts, lengths, durations and failure handling are unchanged.
 
 Bounds are source-owned: 32 distinct command/outcome entries per report/active
-window; 17 fixed phase names (the original 11 plus six rebuild names); 64 started
+window; 21 fixed phase names (the original 11, six rebuild names and four Patterns names); 64 started
 scoped spans per invocation (plus fixed lifecycle samples); at most 8,192 bytes
 per complete UDP envelope (including the ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
 the supported macOS 9 KiB UDP datagram limit; no host setting or permission is
@@ -1324,7 +1354,7 @@ microseconds, eight histogram buckets, command/outcome identity, failure fields,
 32-command / 64-scoped-span caps, UDP 8,192-byte and HTTP 16,384-byte ceilings,
 whole-command trimming and disabled-scope no-op behavior are unchanged. No entity
 counts, IDs, paths, arguments, content, result values or error text are added.
-The enum length itself owns the exact 17-entry per-command shape bound; no
+The enum length itself owns the current 21-entry per-command shape bound (including the four Patterns phases); no
 transport limit is widened to accommodate the extra phases.
 
 | New phase | Existing operation measured |
@@ -2053,7 +2083,7 @@ rows AS MATERIALIZED (
   GROUP BY r.period
 ), wanted(command) AS (
   VALUES ('goal list'), ('family list'), ('memory show'), ('wearables latest'), ('wearables day'),
-         ('wearables activity list'), ('wearables sources list'), ('other')
+         ('wearables activity list'), ('wearables sources list'), ('wearables patterns'), ('other')
 ), commands AS (
   SELECT v.period, c FROM valid v
   CROSS JOIN LATERAL jsonb_array_elements(v.t -> 'commands') c
@@ -2066,7 +2096,8 @@ rows AS MATERIALIZED (
     'teardown', 'unattributed', 'query-freshness', 'query-manifest',
     'query-status', 'query-rebuild', 'query-wait', 'query-source-read',
     'query-wearable-dataset', 'query-metric-projection', 'query-wearable-summary',
-    'query-search-documents', 'query-publication')
+    'query-search-documents', 'query-publication', 'query-entity-read',
+    'query-wearable-compose', 'query-metric-read', 'query-pattern-report')
 ), totals AS (
   SELECT period, command, outcome, p ->> 'phase' AS phase,
          sum((p ->> 'count')::numeric) AS phase_samples,
