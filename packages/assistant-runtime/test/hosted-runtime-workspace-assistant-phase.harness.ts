@@ -366,6 +366,9 @@ type RuntimeUsageRecordPort = NonNullable<
 type RuntimeAssistantConfigurationToolPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantConfigurationToolPort"]
 >;
+type RuntimeUsageDiagnosticsPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["usageDiagnosticsPort"]
+>;
 type RuntimeLabsToolPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["labsToolPort"]
 >;
@@ -1301,6 +1304,7 @@ function createPhaseInput(input: {
   >;
   runtimeAssistantConfigurationToolPort?: RuntimeAssistantConfigurationToolPort;
   runtimeLabsToolPort?: RuntimeLabsToolPort;
+  runtimeUsageDiagnosticsPort?: RuntimeUsageDiagnosticsPort;
   runtimeSubscriptionToolPort?: RuntimeSubscriptionToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
@@ -1458,6 +1462,9 @@ function createPhaseInput(input: {
               assistantConfigurationToolPort:
                 input.runtimeAssistantConfigurationToolPort,
             }
+          : {}),
+        ...(input.runtimeUsageDiagnosticsPort
+          ? { usageDiagnosticsPort: input.runtimeUsageDiagnosticsPort }
           : {}),
         ...(input.runtimeLabsToolPort
           ? { labsToolPort: input.runtimeLabsToolPort }
@@ -2142,6 +2149,7 @@ export type {
   RuntimeDeviceSyncConnectLinkRequest,
   RuntimeDeviceSyncPort,
   RuntimeLabsToolPort,
+  RuntimeUsageDiagnosticsPort,
   RuntimeSubscriptionToolPort,
   RuntimeUsageRecordPort,
 };

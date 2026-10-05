@@ -3087,6 +3087,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
         lookup: "daily-evening-reminder",
       })).resolves.toEqual({
         action: "inspect",
+        assistantTargetOverride: null,
         automationId: beforeInspect.automationId,
         deliveryChannel: "linq",
         executionInspection: expect.objectContaining({
@@ -3100,6 +3101,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
         title: beforeInspect.title,
         effectiveTimeZone: "America/Chicago",
         lookupId: "daily-evening-reminder",
+        managed: false,
         occurrenceProjection: {
           nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
           status: 'resolved' as const,

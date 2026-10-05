@@ -228,6 +228,7 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationOutboxOnlyNextWakeAt?: string | null;
   assistantAutomationPassElapsedMs?: number | null;
   assistantAutomationPostScanTailElapsedMs?: number | null;
+  assistantAutomationCommittedUsageAuditKeys?: readonly string[] | null;
   assistantAutomationProductFeedbackCandidates?:
     readonly HostedRuntimeProductFeedbackRecord[] | null;
   assistantAutomationProgressed?: boolean | null;

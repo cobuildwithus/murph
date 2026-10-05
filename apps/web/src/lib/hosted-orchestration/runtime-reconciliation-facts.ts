@@ -34,13 +34,13 @@ import {
 } from "../hosted-mailbox/ai-usage-gate";
 import {
   decodeHostedMailboxStoredPayload,
-  readHostedMailboxConsumedSeqByLane,
   readHostedMailboxFirstLiveSystemItemAfterSeq,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload,
   tryMarkHostedMailboxConversationAiUsageDenied,
 } from "../hosted-mailbox/store";
+import { readHostedMailboxProgress } from "../hosted-mailbox/projection";
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
@@ -197,17 +197,9 @@ export async function readHostedRuntimeReconciliationFacts(
   }
 
   reportStage?.("canonical_mailbox");
-  const [
-    maxSeqByLane,
-    consumedSeqByLane,
-  ] = await Promise.all([
-    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
-    readHostedMailboxConsumedSeqByLane({
-      lanes: ["conversation"],
-      prisma,
-      userId: input.userId,
-    }),
-  ]);
+  const { maxSeqByLane, consumedSeqByLane } = await readHostedMailboxProgress({
+    now, prisma, userId: input.userId,
+  });
   reportStage?.("canonical_projection");
   const redactedStatus = readHostedMailboxRedactedStatusRecord(
     workspace?.redactedStatusJson,
@@ -264,7 +256,9 @@ export async function readHostedRuntimeReconciliationFacts(
 
   if (usageGateRequired) {
     const gate = await resolveHostedRuntimeAiUsageGate({
-      mode: input.usageGateMode ?? "mutating",
+      // Reconciliation predicts runnable work; spend accounting owns period
+      // creation. Confirm denials under the existing lock before acting on them.
+      mode: input.usageGateMode === "read_only" ? "read_only" : "read_first",
       now,
       userId: input.userId,
     });

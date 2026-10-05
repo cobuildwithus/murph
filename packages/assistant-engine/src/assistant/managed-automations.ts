@@ -57,6 +57,7 @@ import {
   seedMurphOnboardingFollowupFromStartedOnboarding,
   seedMurphOnboardingEarlyStallAutomation,
 } from './onboarding-followup-seed.js'
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from './weekly-usage-optimizer.js'
 import { MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from './managed-automation-ids.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 
@@ -412,6 +413,7 @@ const MURPH_PROACTIVE_HEALTH_OUTREACH_POLICY = [
 ].join('\n')
 
 export const MURPH_MANAGED_AUTOMATIONS = [
+  MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION,
   {
     automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
     slug: 'journal-connected-context-morning',

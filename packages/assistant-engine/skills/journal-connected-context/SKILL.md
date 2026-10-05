@@ -127,9 +127,10 @@ return `skip` when no useful question remains. One event or trip gets at most
 one useful follow-up, not one per segment.
 
 Reconcile linked follow-ups under this same eligibility rule, including when
-source plans are unchanged or a previous save was partial. Inspect the full
-automation and relevant canonical context, including paused and archived
-history. Archive an active automatically generated attendance/logistics-only
+source plans are unchanged or a previous save was partial. Reuse complete
+instructions and references from the bounded inventory below; read exact missing
+details and relevant paused/archived history for the linked plan, not every
+automation again. Archive an active automatically generated attendance/logistics-only
 check-in when its instructions and context establish no concrete health purpose
 and no explicit member request. Do not infer provenance from a title alone.
 Preserve explicit requests, useful health support, pause/archive state, and
@@ -241,11 +242,17 @@ Preserve segment-local timezones and the member's saved home timezone.
 Run this every morning, even with no new plans, no travel, or no eligible connected
 accounts. Review the existing private reminder inventory, not only reminders that
 match newly captured events. Start with `vault-cli automation list --status active
---status paused --compact --limit 200 --format json`; compare returned count with
-`totalCount`, narrowing by supported filters if necessary. The default ten-item
-list is not the inventory. Inspect each candidate’s instructions and relevant
-canonical references; compact titles alone cannot establish correctness. Never
-claim a complete review of a truncated inventory. Include paused
+--status paused --include-instructions --limit 20 --format json`. Read each page
+once, following `nextCursor` with the same filters until it is null; compare the
+collected count with `totalCount`. Pages include instructions, canonical references,
+model, schedule, lifecycle, and delivery audience together. Do not individually
+show or inspect unchanged records whose complete instructions are already on the
+page. When `instructionsComplete=false`, read that exact record before assessing
+it; omitted instructions are not evidence that it is correct. A failed page or
+changing inventory is an incomplete review, never proof that missing reminders
+were deleted. Do not restart a full inventory simply to verify a few repairs.
+The default ten-item list and compact titles alone are not a complete review.
+Include paused
 reminders when correcting their content, but preserve their pause. Never reactivate
 an archived or paused reminder merely because its context now looks relevant.
 
@@ -265,8 +272,15 @@ instruction, add generic future-proofing, or add a new suppression condition to 
 recurring habit because one occurrence is complete. Stop once the mismatch is
 resolved; the same evidence on another pass is not a new reason to edit.
 
-Repair every supported mismatch through the existing automation inspect and
-version-checked patch path, not just location. This includes stale activity,
+After comparing complete instructions with permitted current evidence, inspect
+only records with a concrete supported repair (or missing detail needed to decide),
+then use the existing version-checked patch path. Reuse the patch's canonical
+readback to verify the repair; do not inspect again when it already contains the
+needed fields. Batch independent canonical context reads when possible and reuse
+them for reminders about the same subject. Read all-status linked follow-up
+history only where needed to preserve pause/archive state or deduplicate; do not
+expand every unchanged reminder into a separate history investigation.
+Repair every supported mismatch, not just location. This includes stale activity,
 preparation, equipment, venue, wording, dates, timezone assumptions, and references.
 Update event-relative timing when the underlying event moves, preserving the
 member's requested offset. Calculate the due instant with timezone-aware code

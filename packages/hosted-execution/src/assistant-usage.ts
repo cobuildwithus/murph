@@ -156,7 +156,7 @@ function isAssistantTurnProfileIdentifierComponent(value: string): boolean {
     && ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_PATTERN.test(value);
 }
 
-function isAssistantTurnProfileToolIdentityLabel(
+export function isAssistantTurnProfileToolIdentityLabel(
   kind: "dynamic_tool" | "mcp_tool",
   label: string,
 ): boolean {
@@ -1359,6 +1359,10 @@ function normalizeOptionalRawUsageJsonRecord(
 // The profile is droppable telemetry: an invalid profile becomes null instead
 // of rejecting the whole usage record, so token accounting never fails open
 // because of a telemetry-only validation mismatch.
+export function normalizeAssistantTurnProfileJson(value: unknown): Record<string, unknown> | null {
+  return normalizeOptionalTurnProfileJson(value, "turnProfileJson");
+}
+
 function normalizeOptionalTurnProfileJson(
   value: unknown,
   label: string,

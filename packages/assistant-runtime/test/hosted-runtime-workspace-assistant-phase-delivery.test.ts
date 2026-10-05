@@ -295,6 +295,166 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(recordProductFeedback).not.toHaveBeenCalled();
   });
 
+  describe("committed weekly usage feedback checkpoint", () => {
+    const feedback = {
+      idempotencyKey: "synthetic-weekly-usage-occurrence",
+      kind: "feature_request" as const,
+      relatedChangelogItemIds: [],
+      summary: "Usage optimization audit: Bounded reads can reduce repeated tool output.",
+    };
+    const authorization = {
+      committedUsageOptimizerScope: {
+        memberId: "member_synthetic_phase",
+        occurrenceAt: "2026-04-27T04:00:00.000Z",
+      },
+    };
+    const completedLane = {
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    };
+
+    function acceptCommittedAuditDuringLane() {
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+        async (laneInput) => {
+          const sink = laneInput.executionContext.hosted?.productFeedbackCandidateSink;
+          expect(sink).toBeDefined();
+          // The engine's real cron integration suite proves this trusted metadata
+          // is emitted only after the exact private weekly occurrence commits.
+          sink?.acceptProductFeedbackCandidate(feedback, authorization);
+          sink?.acceptProductFeedbackCandidate(feedback, authorization);
+          return completedLane;
+        },
+      );
+    }
+
+    function expectNoMemberDeliveryOrCleanup() {
+      expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+      expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+      expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    }
+
+    it("records one silent committed audit only after the hosted checkpoint", async () => {
+      acceptCommittedAuditDuringLane();
+      const recordProductFeedback = vi.fn(async () => ({
+        feedbackId: "feedback_synthetic_weekly",
+        recorded: true,
+      }));
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+      }));
+
+      expect(result.afterCheckpoint).toEqual(expect.any(Function));
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expectNoMemberDeliveryOrCleanup();
+      await result.afterCheckpoint?.();
+      expect(recordProductFeedback).toHaveBeenCalledExactlyOnceWith(feedback);
+      expectNoMemberDeliveryOrCleanup();
+    });
+
+    it("does not record the audit if cancelled before the checkpoint callback", async () => {
+      acceptCommittedAuditDuringLane();
+      const controller = new AbortController();
+      const recordProductFeedback = vi.fn();
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+        signal: controller.signal,
+      }));
+      expect(result.afterCheckpoint).toEqual(expect.any(Function));
+      controller.abort(new Error("Synthetic checkpoint cancellation"));
+
+      await expect(result.afterCheckpoint?.()).rejects.toThrow("cancel");
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expectNoMemberDeliveryOrCleanup();
+    });
+
+    it("does not record a candidate if its automation lane fails", async () => {
+      const recordProductFeedback = vi.fn();
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        laneInput.executionContext.hosted?.productFeedbackCandidateSink
+          ?.acceptProductFeedbackCandidate(feedback, authorization);
+        throw new Error("Synthetic automation lane failure");
+      });
+
+      await expect(runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+      }))).rejects.toThrow("Synthetic automation lane failure");
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expectNoMemberDeliveryOrCleanup();
+    });
+
+    it.each(["rejects", "throws"] as const)("keeps a completed silent turn successful when the optional feedback callback %s", async (failureKind) => {
+      acceptCommittedAuditDuringLane();
+      const recordProductFeedback = vi.fn(() => {
+        const failure = new Error("Synthetic optional feedback outage");
+        if (failureKind === "throws") throw failure;
+        return Promise.reject(failure);
+      });
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+      }));
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expect(result.afterCheckpoint).toEqual(expect.any(Function));
+
+      await expect(result.afterCheckpoint?.()).resolves.toBeDefined();
+      expect(recordProductFeedback).toHaveBeenCalledExactlyOnceWith(feedback);
+      expectNoMemberDeliveryOrCleanup();
+    });
+
+    it.each(["ordinary feedback", "an untrusted audit"] as const)("does not retain committed scope when the candidate is overwritten by %s", async (replacementKind) => {
+      const recordProductFeedback = vi.fn();
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        const sink = laneInput.executionContext.hosted?.productFeedbackCandidateSink;
+        sink?.acceptProductFeedbackCandidate(feedback, authorization);
+        sink?.acceptProductFeedbackCandidate({
+          ...feedback,
+          summary: replacementKind === "ordinary feedback"
+            ? "Please improve reminder filtering."
+            : feedback.summary,
+        });
+        return completedLane;
+      });
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+      }));
+      await result.afterCheckpoint?.();
+
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expectNoMemberDeliveryOrCleanup();
+    });
+
+    it.each([
+      { name: "an audit prefix without committed scope", candidate: feedback, authorization: undefined },
+      { name: "another member's committed scope", candidate: feedback, authorization: {
+        committedUsageOptimizerScope: { ...authorization.committedUsageOptimizerScope, memberId: "member_synthetic_other" },
+      } },
+      { name: "ordinary feedback with committed scope", candidate: { ...feedback, summary: "Please improve reminder filtering." }, authorization },
+      { name: "support feedback with an audit prefix", candidate: { ...feedback, kind: "frustration" as const }, authorization },
+      { name: "an audit with changelog references", candidate: { ...feedback, relatedChangelogItemIds: ["synthetic-changelog-item"] }, authorization },
+    ])("does not bypass member delivery for $name", async (testCase) => {
+      const recordProductFeedback = vi.fn();
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        laneInput.executionContext.hosted?.productFeedbackCandidateSink
+          ?.acceptProductFeedbackCandidate(testCase.candidate, testCase.authorization);
+        return completedLane;
+      });
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        workspace: createDueAssistantWorkspace(),
+        runtimeProductFeedbackPort: { recordProductFeedback },
+      }));
+      await result.afterCheckpoint?.();
+
+      expect(recordProductFeedback).not.toHaveBeenCalled();
+      expectNoMemberDeliveryOrCleanup();
+    });
+  });
+
   it("records support escalations through the port inside the turn instead of the post-delivery flush", async () => {
     const supportFeedback = {
       idempotencyKey: "support-escalation-in-turn",

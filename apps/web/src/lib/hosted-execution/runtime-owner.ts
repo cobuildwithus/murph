@@ -180,6 +180,21 @@ export async function requireHostedRuntimeCallbackTx(
   return requireOwnerAfterCutoverLockTx(tx, identity);
 }
 
+/** Preflight only: a lock released before the handler cannot fence its work.
+ * Canonical publications still use requireHostedRuntimeCallbackTx. */
+export async function requireHostedRuntimeCallback(
+  prisma: PrismaClient,
+  userId: string,
+  identity: HostedRuntimeIdentity | null,
+): Promise<void> {
+  if (identity && identity.userId !== userId) throw staleRuntimeError();
+  const { cutover, owner } = await readRuntimeEffectOwner(prisma, userId);
+  if (cutover === "legacy") return;
+  if (cutover !== "postgres" || !identity || !owner
+    || owner.attemptId !== identity.attemptId
+    || owner.generation.toString() !== identity.generation) throw staleRuntimeError();
+}
+
 async function requireOwnerAfterCutoverLockTx(
   tx: OwnerTransaction,
   identity: HostedRuntimeIdentity,

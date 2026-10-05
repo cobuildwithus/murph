@@ -18,6 +18,24 @@ afterEach(async () => {
 });
 
 describe("automation exact-tag pagination", () => {
+  it("pages the full instruction inventory by immutable id without a support series", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-query-inventory-page-"));
+    createdVaultRoots.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, "bank/automations"), { recursive: true });
+    await Promise.all(Array.from({ length: 25 }, (_, index) => writeAutomation(vaultRoot, index, "inventory")));
+    const first = await listAutomationPage(vaultRoot, { orderById: true, limit: 20 });
+    expect(first.items.map(record => record.automationId)).toEqual(
+      Array.from({ length: 20 }, (_, index) => `automation_page_${String(index).padStart(3, "0")}`),
+    );
+    expect(first.nextCursor).toBe("automation_page_019");
+    const second = await listAutomationPage(vaultRoot, { orderById: true, limit: 20, cursor: first.nextCursor! });
+    expect(second.items.map(record => record.automationId)).toEqual([
+      "automation_page_020", "automation_page_021", "automation_page_022", "automation_page_023", "automation_page_024",
+    ]);
+    expect(second.totalCount).toBe(25);
+    expect(second.nextCursor).toBeNull();
+  });
+
   it("pages every exact support-series match beyond 200 by immutable id", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-query-automation-page-"));
     createdVaultRoots.push(vaultRoot);

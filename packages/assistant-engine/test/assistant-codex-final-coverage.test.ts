@@ -78,6 +78,9 @@ const providerTurnRunnerMocks = vi.hoisted(() => ({
   recordCodexAttemptFailed: vi.fn(),
 }))
 
+const reactionRoutingMocks = vi.hoisted(() => ({ classify: vi.fn() }))
+vi.mock('../src/assistant/reaction-routing.js', () => ({ classifyAssistantReaction: reactionRoutingMocks.classify }))
+
 const storeMocks = vi.hoisted(() => ({
   appendAssistantTranscriptEntries: vi.fn(() => Promise.resolve([])),
 }))
@@ -3045,5 +3048,64 @@ describe('Codex model catalog', () => {
     // records failures exclusively: a successful attempt must make no receipt
     // timeline write between provider success and the reply return.
     expect(providerTurnRunnerMocks.recordCodexAttemptFailed).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('attested reaction routing through the admitted provider turn', () => {
+  it.each(['quiet', 'quiet-cold', 'escalate', 'failed-leaf', 'aborted-leaf', 'mixed'] as const)('preserves billing, admission, and terminal ownership for %s', async (decision) => {
+    const route = createRoute()
+    const session = createAssistantSession({ providerOptions: route.providerOptions })
+    const input = { prompt: 'Reacted with a heart reaction.', vault: '/vaults/test', reactionRouting: { reaction: 'Reacted with a heart reaction.', targetMessage: 'The entry is saved.' } }
+    const recordUsage = vi.fn(async () => {})
+    const accepted = vi.fn(async () => {})
+    const recorded = vi.fn(async () => {})
+    const order: string[] = []
+    const released = vi.fn(async () => { order.push('released') })
+    reactionRoutingMocks.classify.mockImplementation(async (leaf: Parameters<typeof import('../src/assistant/reaction-routing.js').classifyAssistantReaction>[0]) => {
+      order.push('classifier')
+      await leaf.beforeProviderEntry?.()
+      leaf.onProviderUsage?.({ stage: 'answer', usage: { occurredAt: '2026-09-30T12:00:00Z', provider: 'codex-cli', providerRequestOrdinal: 0, providerRequestOutcome: decision === 'failed-leaf' ? 'failed' : decision === 'aborted-leaf' ? 'aborted' : 'succeeded', usage: {
+        apiKeyEnv: null, baseUrl: null, cacheWriteTokens: null, cachedInputTokens: 0, inputTokens: 180,
+        outputTokens: 8, providerMetadataJson: null, providerName: null, providerRequestId: 'synthetic-classifier-request', rawUsageJson: null,
+        reasoningTokens: 0, requestedModel: 'gpt-6-luna', servedModel: 'gpt-6-luna', totalTokens: 188,
+      } } })
+      if (decision === 'aborted-leaf') throw new Error('Synthetic outer cancellation')
+      return decision.startsWith('quiet') ? 'quiet' : 'escalate'
+    })
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportedUserMessageContentTypes: ['text'], supportsReasoningEffort: true })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(createProviderAttemptResult())
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      acceptedInputItems: [{ id: 'synthetic-reaction-input', source: 'manual' }, ...(decision === 'mixed' ? [{ id: 'synthetic-other-input', source: 'manual' as const }] : [])],
+      activeTurnSteering: null, allowFinishWithoutReply: true,
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], usageRecorder: { recordUsage } } },
+      input, onFinishWithoutReplyAccepted: accepted, onFinishWithoutReplyRecorded: recorded,
+      profile: { promptProfile: 'conversation', toolProfile: 'provider-turn', threadScope: 'session-thread' },
+      promptTimeContext: { currentLocalDate: '2026-09-30', currentTimeZone: 'UTC' }, route, sharedPlan: createSharedPlan(), turnId: 'synthetic-parent-turn',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({ attemptCount: 1, route, session, routePlan: {
+      assistantContractFingerprint: 'a'.repeat(64), assistantCliContract: null, cliEnv: {},
+      codexContinuation: { kind: 'explicit-structured-history' }, developerInstructions: null,
+      diagnosticsPolicy: { environment: 'local', privateIssueCaptureEnabled: false, surface: null },
+      dynamicTools: [], onboardingGuidanceInjected: false, planningDiagnostics: createRoutePlanningDiagnostics(),
+      promptCacheMetadata: null, resume: decision === 'quiet-cold' ? null : { codexThreadId: 'unchanged-root-thread' }, sessionContext: undefined,
+      systemPrompt: null, turnContextPrompt: null, workingDirectory: '/work',
+    } } satisfies AssistantCodexAttemptPlan)
+    const outcome = await executeCodexTurnWithRecovery({ input, plan: createSharedPlan(), resolvedSession: session, route,
+      turnCreatedAt: '2026-09-30T12:00:00Z', turnId: 'synthetic-parent-turn',
+      onProviderRequestPlanned: async () => { order.push('admitted'); return released },
+    })
+    expect(outcome.kind).toBe(decision === 'aborted-leaf' ? 'failed_terminal' : 'succeeded')
+    expect(order).toEqual(decision === 'mixed' ? ['admitted', 'released'] : ['admitted', 'classifier', 'released'])
+    expect(recordUsage).toHaveBeenCalledTimes(decision === 'mixed' ? 0 : 1)
+    if (decision !== 'mixed') expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({ turnId: 'synthetic-parent-turn:reaction-routing', requestedModel: 'gpt-6-luna', inputTokens: 180, outputTokens: 8, featureKey: 'reaction-routing', providerRequestOutcome: decision === 'failed-leaf' ? 'failed' : decision === 'aborted-leaf' ? 'aborted' : 'succeeded' }), ['synthetic-reaction-input'])
+    expect(providerMocks.executeCodexAssistantTurnAttemptFromInput).toHaveBeenCalledTimes(decision.startsWith('quiet') || decision === 'aborted-leaf' ? 0 : 1)
+    expect(accepted).toHaveBeenCalledTimes(decision.startsWith('quiet') ? 1 : 0)
+    expect(recorded).toHaveBeenCalledTimes(decision.startsWith('quiet') ? 1 : 0)
+    if (decision.startsWith('quiet') && outcome.kind === 'succeeded') {
+      expect(outcome.providerTurn).toMatchObject({ providerThreadUnchanged: true, response: '', finalAction: { kind: 'none' }, codexThreadId: decision === 'quiet-cold' ? null : 'unchanged-root-thread', usage: null, acceptedNoReplyDeliveryContextOrdinals: [0] })
+      const { resolveAssistantProviderResumeStateAction } = await import('../src/assistant/turn-finalizer.js')
+      expect(resolveAssistantProviderResumeStateAction({ ...outcome.providerTurn, threadScope: 'session-thread' })).toBe('preserve-existing')
+    }
   })
 })

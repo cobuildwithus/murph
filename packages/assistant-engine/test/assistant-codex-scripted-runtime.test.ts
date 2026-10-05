@@ -1,3 +1,4 @@
+import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
 import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -3478,6 +3479,103 @@ text(result.output);
       expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
     },
   )
+
+  it('keeps fresh Sol child requests free of parent history and member snapshot while accounting native tool work', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({ multiAgentV2: true })
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    const historySentinel = 'PARENT_HISTORY_ONLY_amber_canoe'
+    const snapshotSentinel = 'PARENT_SNAPSHOT_ONLY_cobalt_kite'
+    const childResult = 'The blue parcel weighs 7 kilograms.'
+    const childUsages: unknown[] = []
+    let releaseChildCompletion!: () => void
+    const childCompletionGate = new Promise<void>((resolve) => {
+      releaseChildCompletion = resolve
+    })
+    let parentWaitCount = 0
+    await writeFile(path.join(scenario.turnInput.workingDirectory, 'parcel.txt'), childResult)
+    scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
+    scenario.stub.queue(
+      {
+        requestIncludes: [historySentinel],
+        functionCall: { namespace: 'collaboration', name: 'spawn_agent', arguments: {
+          task_name: 'fresh_parcel', fork_turns: 'none', model: 'gpt-6.1-sol', reasoning_effort: 'medium',
+          message: 'Direct private task, read-only within this synthetic workspace. Read parcel.txt with the native shell, report its exact contents, then stop. Do not read other files, write, send messages, or use external tools.',
+        } },
+      },
+      {
+        requestIncludes: ['Message Type: NEW_TASK', 'fresh_parcel'],
+        requestExcludes: [historySentinel, snapshotSentinel],
+        customToolCall: { name: 'exec', input: 'text(await tools.exec_command({cmd: "cat parcel.txt", max_output_tokens: 100}));' },
+      },
+      {
+        beforeRespond: () => childCompletionGate,
+        requestIncludes: ['Message Type: NEW_TASK', childResult],
+        requestExcludes: [historySentinel, snapshotSentinel],
+        text: childResult,
+      },
+      // Native waits can time out or wake before the child finishes. Keep a
+      // bounded scripted wait loop, and force one timeout to prove this path.
+      // A one-shot response instead makes the local provider return HTTP 500.
+      ...Array.from({ length: 6 }, (): ScriptedResponse => ({
+        beforeRespond: async () => {
+          parentWaitCount += 1
+          if (parentWaitCount === 2) releaseChildCompletion()
+        },
+        requestIncludes: [historySentinel], requestExcludes: [childResult],
+        functionCall: { namespace: 'collaboration', name: 'wait_agent', arguments: { timeout_ms: 10000 } },
+      })),
+      { requestIncludes: [historySentinel, childResult], text: childResult },
+    )
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      // Match the hosted runtime and other native shell fixtures. OS sandbox
+      // enforcement has its own Linux-capable runner; this proves delegation.
+      sandbox: 'danger-full-access',
+      configOverrides: await readHostedDelegationHintOverrides(),
+      baseInstructions: 'Follow the task and tools. Preserve scope and privacy.',
+      developerInstructions: buildScriptedHostedSystemPrompt('direct') + '\n' + snapshotSentinel,
+      env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
+      dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+      onAdditionalUsage: async (usage) => { childUsages.push(usage) },
+      prompt: `Check the parcel. Irrelevant earlier conversation: ${historySentinel}`,
+    })
+    expect(result.finalMessage).toBe(childResult)
+    const requests = scenario.stub.requestSummariesSinceBaseline()
+    expect(parentWaitCount).toBeGreaterThanOrEqual(2)
+    expect(requests.some((request) => request.functionCallOutputs?.some((output) =>
+      output.includes('"timed_out":true'),
+    ))).toBe(true)
+    const children = requests.filter((request) => request.model === 'gpt-6.1-sol')
+    expect(children).toHaveLength(2)
+    for (const request of children) {
+      const input = request.completeProviderInput?.json
+      expect(input).toContain('bounded one-shot task worker')
+      expect(input).not.toContain(historySentinel)
+      expect(input).not.toContain(snapshotSentinel)
+    }
+    const firstChildJson = children[0]?.completeProviderInput?.json ?? '{}'
+    const advertisedTools = readProviderNativeTools(firstChildJson)
+    process.stdout.write(`[fresh-child-native-contract] ${JSON.stringify({
+      childToolNames: advertisedTools.map(({ namespace, name }) => [namespace, name].filter(Boolean).join('.')),
+      parentDynamicToolAdvertised: firstChildJson.includes('finish_without_reply'),
+      childInputBytes: Buffer.byteLength(children[0]?.completeProviderInput?.json ?? ''),
+      parentInputBytes: Buffer.byteLength(requests[0]?.completeProviderInput?.json ?? ''),
+    })}\n`)
+    expect(advertisedTools.some(({ name }) => name === 'exec_command')).toBe(true)
+    expect(firstChildJson).not.toContain('finish_without_reply')
+    expect(requests[0]?.completeProviderInput?.json).toContain('finish_without_reply')
+    expect(children[1]?.completeProviderInput?.json).toContain(childResult)
+    expect(childUsages).toHaveLength(1)
+    expect(childUsages[0]).toMatchObject({ providerRequestOutcome: 'succeeded', usage: {
+      requestedModel: 'gpt-6.1-sol', servedModel: 'gpt-6.1-sol',
+      usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
+    } })
+  })
 
   it.each(['gpt-5.5', 'gpt-6-astra'])('rejects an unavailable child model %s before a provider request', {
     timeout: TURN_TIMEOUT_MS,

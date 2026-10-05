@@ -2290,6 +2290,7 @@ export async function sendAssistantMessageLocal(
             ? 'clear'
             : resolveAssistantProviderResumeStateAction({
                 codexThreadId: providerResult.codexThreadId ?? null,
+                providerThreadUnchanged: providerResult.providerThreadUnchanged,
                 threadScope,
               })
         if (

@@ -3694,6 +3694,7 @@ describe("readHostedMailboxConsumedSeqByLane", () => {
       { consumedSeq: "14", lane: "system" },
     ]);
     expect(findFirst).toHaveBeenNthCalledWith(1, {
+      select: { laneSeq: true },
       orderBy: {
         laneSeq: "asc",
       },
@@ -3703,6 +3704,7 @@ describe("readHostedMailboxConsumedSeqByLane", () => {
       }),
     });
     expect(findFirst).toHaveBeenNthCalledWith(2, {
+      select: { laneSeq: true },
       orderBy: {
         laneSeq: "asc",
       },
