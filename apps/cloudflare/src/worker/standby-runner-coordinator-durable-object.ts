@@ -32,15 +32,20 @@ import type {
   DurableObjectSqlValue,
   DurableObjectStateLike,
 } from "../user-runner/types.js";
+import type { WorkerAnalyticsEngineDatasetLike } from "../worker-contracts.js";
 
 const STANDBY_READY_REPROBE_MS = 60_000;
 const STANDBY_CONTROL_RPC_TIMEOUT_MS = 1_000;
 const STANDBY_CLEANUP_BATCH_SIZE = 4;
 const STANDBY_PARALLELISM = 2;
 
+export const HOSTED_STANDBY_INVENTORY_ANALYTICS_SCHEMA =
+  "murph.hosted-standby-inventory.v1";
+
 type Region = HostedStandbyCoordinatorState["region"];
 
 interface StandbyCoordinatorEnvironment extends Readonly<Record<string, unknown>> {
+  HOSTED_STANDBY_ANALYTICS?: WorkerAnalyticsEngineDatasetLike;
   RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
   NEXT_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
   STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
@@ -63,6 +68,7 @@ interface StandbyClaimRow extends Record<string, DurableObjectSqlValue> {
 }
 
 type CleanupTarget = { slotName: string; claimId?: string };
+type PreparationKind = "refill" | "reproof" | "resume";
 
 export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
   private readonly fillWork = new Set<Promise<void>>();
@@ -96,12 +102,18 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
       throw new TypeError("Hosted standby claim deadline is invalid.");
     }
     const startedAtMs = Date.now();
+    let replayed = false;
+    let before = { provisioning: 0, ready: 0 };
     const result = this.transactionSync((): HostedStandbyClaimResult => {
       this.store.initialize(input);
+      before = this.store.countInventory();
       // A replay is the original handoff, not another allocation. Preserve it
       // even when its deadline, mode or release has subsequently changed.
       const replay = this.store.readClaim(input.claimId);
-      if (replay) return { outcome: "claimed", slotName: replay.slot_name };
+      if (replay) {
+        replayed = true;
+        return { outcome: "claimed", slotName: replay.slot_name };
+      }
       if (readHostedStandbyMode(this.environment) !== "allocate") {
         return { outcome: "disabled" };
       }
@@ -114,16 +126,27 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
       const slotName = this.store.claimReadySlot(input.claimId, Date.now());
       return slotName ? { outcome: "claimed", slotName } : { outcome: "no_ready_slot" };
     });
+    const elapsedMs = Math.max(0, Date.now() - startedAtMs);
     emitHostedExecutionStructuredLog({
       component: "cloudflare.standby",
       eventId: input.claimId,
       details: {
-        standbyClaimHandlerElapsedMs: Math.max(0, Date.now() - startedAtMs),
+        standbyClaimHandlerElapsedMs: elapsedMs,
+        standbyClaimProvisioningBefore: before.provisioning,
+        standbyClaimReadyBefore: before.ready,
         standbyClaimRemainingBudgetMs: Math.max(0, input.deadlineAtEpochMs - startedAtMs),
+        standbyClaimReplayed: replayed,
         standbyClaimRpcOutcome: result.outcome,
       },
       message: "Hosted standby coordinator answered a claim.",
       phase: "runtime.starting",
+    });
+    this.recordInventoryEvent({
+      detail: replayed ? "replayed" : result.outcome,
+      durationMs: elapsedMs,
+      event: "claim",
+      inventory: () => before,
+      outcome: "",
     });
     this.startFill();
     this.startCleanup();
@@ -218,17 +241,19 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
         const pending = this.store.readInventory().find((row) =>
           row.phase === "provisioning" && row.check_at_ms <= Date.now()
           && !this.preparing.has(row.slot_name));
-        if (pending) return { slotName: pending.slot_name, fresh: false };
+        if (pending) {
+          return { kind: "resume" as const, slotName: pending.slot_name, fresh: false };
+        }
         if (state.readySlotNames.length + state.provisioningSlotNames.length < target) {
           const slotName = createHostedRunnerSlotName(state.releaseId);
           this.store.insertProvisioning(slotName);
-          return { slotName, fresh: true };
+          return { kind: "refill" as const, slotName, fresh: true };
         }
         if (!reprobed && state.provisioningSlotNames.length === 0) {
           const slotName = this.store.beginReproof(Date.now(), target);
           if (slotName) {
             reprobed = true;
-            return { slotName, fresh: false };
+            return { kind: "reproof" as const, slotName, fresh: false };
           }
         }
         return null;
@@ -246,7 +271,7 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
           if (reservation.fresh) this.store.forgetSlot(reservation.slotName);
           continue;
         }
-        if (!await this.prepareSlot(reservation.slotName)) break;
+        if (!await this.prepareSlot(reservation.slotName, reservation.kind)) break;
       } finally {
         this.preparing.delete(reservation.slotName);
         this.store.makeDrainDue(reservation.slotName, Date.now());
@@ -256,9 +281,10 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     await this.scheduleRecovery();
   }
 
-  private async prepareSlot(slotName: string): Promise<boolean> {
+  private async prepareSlot(slotName: string, kind: PreparationKind): Promise<boolean> {
     const releaseId = readHostedRunnerSlotReleaseId(slotName);
     if (!releaseId) throw new Error("Hosted runner slot identity is invalid.");
+    const startedAtMs = Date.now();
     try {
       const proof = await withRpcDeadline(
         () => this.slot(slotName).prepareStandbySlot({
@@ -281,9 +307,11 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
         this.rebalance();
         this.store.finishProvisioning(slotName, Date.now(), this.desiredTarget());
       });
+      this.recordPreparation(kind, "ready", startedAtMs);
       return true;
     } catch (error) {
       this.transactionSync(() => this.store.rememberDrain(slotName, Date.now()));
+      this.recordPreparation(kind, "failed", startedAtMs);
       emitHostedExecutionStructuredLog({
         component: "cloudflare.standby",
         details: {
@@ -295,6 +323,49 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
         phase: "failed",
       });
       return false;
+    }
+  }
+
+  private recordPreparation(
+    kind: PreparationKind,
+    outcome: "failed" | "ready",
+    startedAtMs: number,
+  ): void {
+    this.recordInventoryEvent({
+      detail: kind,
+      durationMs: Math.max(0, Date.now() - startedAtMs),
+      event: "prepare",
+      inventory: () => this.store.countInventory(),
+      outcome,
+    });
+  }
+
+  // One identifier-free point per claim answer or finished preparation. Claim
+  // inventory is read before selection; preparation inventory after its result.
+  private recordInventoryEvent(input: {
+    detail: string;
+    durationMs: number;
+    event: "claim" | "prepare";
+    inventory: () => { provisioning: number; ready: number };
+    outcome: string;
+  }): void {
+    const analytics = this.environment.HOSTED_STANDBY_ANALYTICS;
+    if (!analytics) return;
+    try {
+      const inventory = input.inventory();
+      analytics.writeDataPoint({
+        indexes: [input.event],
+        blobs: [HOSTED_STANDBY_INVENTORY_ANALYTICS_SCHEMA, input.event, input.detail, input.outcome],
+        doubles: [
+          1,
+          inventory.ready,
+          inventory.provisioning,
+          this.desiredTarget(),
+          input.durationMs,
+        ],
+      });
+    } catch {
+      // Best-effort telemetry must never alter claims or inventory.
     }
   }
 
@@ -432,6 +503,14 @@ class StandbyRunnerCoordinatorStore {
       releaseId: row?.release_id ?? null,
       region,
     };
+  }
+
+  countInventory(): { provisioning: number; ready: number } {
+    const row = this.sql.exec<{ provisioning: number; ready: number }>(`SELECT
+      COALESCE(SUM(phase = 'ready'), 0) AS ready,
+      COALESCE(SUM(phase = 'provisioning'), 0) AS provisioning
+      FROM standby_coordinator_slot`).toArray()[0];
+    return { provisioning: Number(row?.provisioning ?? 0), ready: Number(row?.ready ?? 0) };
   }
 
   readInventory(): StandbySlotRow[] {
