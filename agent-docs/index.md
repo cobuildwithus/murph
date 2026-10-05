@@ -210,6 +210,10 @@ Completed silent-input typing-alert classification is specified in
 `agent-docs/RELIABILITY.md`; the scoped implementation and verification record is
 [`2026-09-17-typing-terminal-classification.md`](exec-plans/completed/2026-09-17-typing-terminal-classification.md).
 
+Reply-latency alert scope for group threads, inputs resolved by an earlier
+non-reply, and multi-request provider-start classification is owned by
+`agent-docs/references/hosted-runtime-protocol.md`.
+
 Upcoming-context sparse plan edits, canonical timing precision, bounded ledger
 controls independent of source history, and disconnect invalidation are owned by
 `agent-docs/product-specs/journal.md` and `ARCHITECTURE.md`.
