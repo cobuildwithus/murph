@@ -267,6 +267,10 @@ Direct Linq preparation-reason telemetry and retry-preservation proof are record
 The preparation member-lock correction and composed PostgreSQL proof are recorded in
 [`2026-09-25-linq-preparation-lock.md`](exec-plans/completed/2026-09-25-linq-preparation-lock.md).
 
+The channel welcome delivery identity correction is tracked in
+[`2026-10-04-welcome-delivery-key-contract.md`](exec-plans/completed/2026-10-04-welcome-delivery-key-contract.md).
+The shared-validator correction has focused callback and owner proof plus final review approval; PR #4015 tracks final-head CI and human merge.
+
 Runtime admission policy and single-request provider backend selection are owned
 by `agent-docs/references/hosted-postgres-runtime.md` and `agent-docs/SECURITY.md`.
 
@@ -973,7 +977,3 @@ SMS invalid-destination recovery format support is tracked in
 `../docs/hosted-auth-migration.md` remains the contract owner.
 
 Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
-
-The channel welcome delivery identity correction is tracked in
-[`2026-10-04-welcome-delivery-key-contract.md`](exec-plans/completed/2026-10-04-welcome-delivery-key-contract.md).
-The shared-validator correction has focused callback and owner proof plus final review approval; PR #4015 tracks final-head CI and human merge.
