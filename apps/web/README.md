@@ -1511,6 +1511,19 @@ voice and reaction effects remain confirmation-pending without provider re-entry
 Runtime support for the legacy `HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED`
 409 remains for Web rollback compatibility.
 
+Member-route `HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH` warnings include the
+private `linqRouteAuthorityMismatchReason` from the existing rejection site:
+`durable_thread_container_mismatch`, `durable_target_missing`,
+`requested_target_missing`, `member_routing_missing`, `target_not_owned`,
+`route_projection_mismatch`, `pending_recipient_invalid`,
+`member_identity_missing`, or `member_recipient_invalid`. Composite guards keep
+one reason; the durable-target check is defensive because the current reader
+rejects empty targets before returning a durable route. The closed reader omits
+malformed metadata without getters or coercion. No values or identifiers enter
+the diagnostic; error names, public 403 JSON, checks, reads, and provider admission
+are unchanged. The separate route assertion and later resolved-route guard do
+not emit this reason.
+
 ### Workspace read timing
 
 `GET /api/internal/hosted-workspace` records content-free

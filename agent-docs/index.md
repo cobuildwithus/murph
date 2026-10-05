@@ -721,6 +721,9 @@ Mailbox callback phase diagnostics and lazy Google SDK loading are owned by
 `apps/web/README.md` under "Mailbox fetch timing". Implementation evidence is
 tracked in `exec-plans/completed/2026-09-21-mailbox-fetch-startup.md`.
 
+Private Linq member-route rejection classification is tracked in
+[the route diagnostic plan](exec-plans/completed/2026-10-05-linq-route-mismatch-diagnostic.md).
+
 ## Conventions
 
 Local feedback diagnostics are documented in

@@ -75,6 +75,7 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
+  assertHostedLinqRouteAuthorityMatchesTarget,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   resolveHostedMemberAssistantNotificationRoute,
@@ -88,6 +89,7 @@ import {
   buildHostedSourceDeliveryStallNoticeKey,
 } from "@/src/lib/device-sync/source-delivery-stall-episode";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
 
 describe("hosted Linq egress authority", () => {
@@ -296,6 +298,105 @@ describe("hosted Linq egress authority", () => {
       code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
       httpStatus: 403,
     });
+  });
+
+  it.each([
+    ["durable_thread_container_mismatch", { threadRouteContainerMemberId: "member-other" }, "chat-home"],
+    ["requested_target_missing", { threadRouteContainerMemberId: "member-1" }, null],
+    ["member_routing_missing", {}, "chat-home"],
+    ["target_not_owned", {}, "chat-other"],
+    ["route_projection_mismatch", {}, "chat-home"],
+    ["pending_recipient_invalid", {
+      pendingChatId: "chat-pending", pendingParticipantContact: "+15550100999",
+      pendingParticipantContactLookupKey: createRequiredPhoneLookupKey("+15550100001"),
+    }, "chat-pending"],
+    ["member_identity_missing", {}, "chat-home"],
+    ["member_recipient_invalid", {
+      homeParticipantContactLookupKey: createRequiredPhoneLookupKey("+15550100999"),
+    }, "chat-home"],
+  ] as const)("privately classifies %s through actual route authority before provider entry", async (reason, options, target) => {
+    const prisma = createPrismaStub({ homeChatId: "chat-home", homeLinePhone: "+15550100099", ...options });
+    if (reason === "member_routing_missing") prisma.hostedMemberRouting.findUnique.mockResolvedValue(null);
+    if (reason === "member_identity_missing") prisma.hostedMemberIdentity.findUnique.mockResolvedValue(null);
+    if (reason === "route_projection_mismatch") {
+      const routing = await prisma.hostedMemberRouting.findUnique();
+      prisma.hostedMemberRouting.findUnique.mockResolvedValue({ ...routing, linqChatIdEncrypted: null }).mockClear();
+    }
+    mocks.getPrisma.mockReturnValue(prisma);
+    captureRouteAuthorityLogs();
+
+    const response = await postHostedLinqEgressEngagement(routeAuthorityRequest({ target }));
+    const code = "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH";
+    const message = "Linq egress target does not match the runtime user's Linq route.";
+    expect(response.status).toBe(403);
+    await expect(response.text()).resolves.toBe(JSON.stringify({ error: { code, message, retryable: false } }));
+    expect(console.warn).toHaveBeenCalledOnce();
+    expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorType: "HostedOnboardingError", errorMessage: message, errorCode: code,
+      internalMessage: "Hosted onboarding route failed unexpectedly.", requestMethod: "POST",
+      errorResponseCode: code, errorResponseStatus: 403, errorResponseRetryable: false,
+      linqRouteAuthorityMismatchReason: reason,
+    });
+    expect(console.error).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
+    expect(prisma.hostedLinqChatHealth.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqLine.findFirst).not.toHaveBeenCalled();
+    expect(mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqLine.update).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqLine.upsert).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    if (reason === "requested_target_missing") {
+      // Empty identity lookup returns null before querying a durable route;
+      // the later durable_target_missing defense is unreachable here.
+      expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+      expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    ["current", { homeChatId: "chat-home" }, "chat-home", true],
+    ["pending", { pendingChatId: "chat-pending" }, "chat-pending", true],
+    ["owned thread", { threadRouteContainerMemberId: "member-1" }, "chat-group", false],
+  ] as const)("preserves accepted %s routing without diagnostic output", async (_label, options, target, threadIsDirect) => {
+    const prisma = createPrismaStub(options);
+    mocks.getPrisma.mockReturnValue(prisma);
+    captureRouteAuthorityLogs();
+    const response = await postHostedLinqEgressEngagement(routeAuthorityRequest({ target }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true, providerDispatchClaimed: true,
+      resolvedRoute: { target, targetKind: "thread", threadIsDirect },
+    });
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("keeps the separate thread-authority assertion unclassified with its original message", async () => {
+    captureRouteAuthorityLogs();
+    const route = withJsonError<[Request]>(async () => {
+      assertHostedLinqRouteAuthorityMatchesTarget({
+        chatId: "chat-other", memberId: "member-1",
+        routeAuthority: { channel: "linq", containerMemberId: "member-1", threadId: "chat-owned" },
+      });
+      return new Response();
+    });
+    const response = await route(routeAuthorityRequest({ target: "chat-other" }));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: {
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      message: "Linq egress route authority does not match the requested thread.", retryable: false,
+    } });
+    expect(console.warn).toHaveBeenCalledOnce();
+    expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.not.objectContaining({
+      linqRouteAuthorityMismatchReason: expect.anything(),
+    }));
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("uses a container's durable route for replies and current-home-fallback preflights", async () => {
@@ -1880,6 +1981,7 @@ describe("hosted Linq egress authority", () => {
   });
 
   it("fails closed before provider dispatch when the resolved route changed after preflight", async () => {
+    captureRouteAuthorityLogs();
     const homeLinePhone = "+15550100099";
     const memberPhone = "+15550100001";
     const memberPhoneLookupKey = createRequiredPhoneLookupKey(memberPhone);
@@ -1935,6 +2037,11 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqLine.findFirst).not.toHaveBeenCalled();
     expect(mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx)
       .not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledOnce();
+    expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.not.objectContaining({
+      linqRouteAuthorityMismatchReason: expect.anything(),
+    }));
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("returns recovery posture for an at-risk existing chat without claiming dispatch", async () => {
@@ -2278,6 +2385,19 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
   });
 });
+
+function captureRouteAuthorityLogs(): void {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => { warn.mockRestore(); error.mockRestore(); });
+}
+
+function routeAuthorityRequest(body: Record<string, unknown>): Request {
+  return new Request("https://internal.example.test/engagement", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ authorityCheckOnly: false, idempotencyKey: "assistant-outbox:route-authority", targetKind: "thread", ...body }),
+  });
+}
 
 function createPrismaStub(input: {
   activeMemberAccess?: boolean;
