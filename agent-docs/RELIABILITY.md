@@ -2457,12 +2457,17 @@ to apply after cutover.
   requested checkpoint; only the finished event's `webCheckpointAccepted`
   establishes Web acceptance. Malformed timestamp values and raw wake reasons
   are never copied into these fields.
-- Per-message typing alerts independently measure the Web route's receipt instant
-  through the earliest accepted typing indicator: strictly over 3 seconds for a
-  warm workspace and over 8 seconds for a cold workspace. Mailbox acceptance
-  remains its existing timestamp; it never substitutes for webhook receipt.
+- Per-message typing alerts independently measure the member's wait through the
+  earliest accepted typing indicator: strictly over 3 seconds for a warm
+  workspace and over 8 seconds for a cold workspace. Linq waits start at the
+  latest recorded provider event for the exact member-bound message (its own
+  creation, or a later edit), never after the Web route's receipt instant, so
+  time before the route runs, such as a fresh Web instance boot, counts.
+  Without that event, and for Telegram, the wait starts at route receipt.
+  Mailbox acceptance remains its existing timestamp; it never substitutes for
+  either start.
   For unanswered Linq inputs, the latest accepted message in the same chat
-  resets the silence start between receipt and the first typing acceptance
+  resets the silence start between that start and the first typing acceptance
   (or the missing-observation check). A reply does not exempt subsequent silence.
   An accepted reply linked to this exact input ends its wait; no later typing
   is required for an already-answered input. Existing blinded provider message/chat
@@ -2472,8 +2477,9 @@ to apply after cutover.
   five-minute expiry, then silence resumes from that endpoint. Missing correlation,
   failed sends, and sends after the measured typing endpoint cannot reset the clock.
   Missing typing retains a 30-second telemetry grace from the silence start;
-  observed typing uses the strict warm/cold threshold. Frozen emails retain both
-  receipt and silence-start timestamps; older records retain their original text.
+  observed typing uses the strict warm/cold threshold. Frozen emails retain the
+  receipt and silence-start timestamps, plus the provider event's creation when
+  it preceded receipt; older records retain their original text.
   Telegram retains exact-input typing observations and the existing thresholds.
   Accepted-typing persistence waits for competing short trace-row writes in the
   detached callback; other retry-backed milestones keep skipping locked rows.

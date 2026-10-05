@@ -217,6 +217,8 @@ release record is
 Completed silent-input typing-alert classification is specified in
 `agent-docs/RELIABILITY.md`; the scoped implementation and verification record is
 [`2026-09-17-typing-terminal-classification.md`](exec-plans/completed/2026-09-17-typing-terminal-classification.md).
+The same RELIABILITY section owns the Linq provider-event wait start, and
+`../apps/web/README.md` owns the pre-handler boot diagnostics.
 
 Reply-latency alert scope for group threads, inputs resolved by an earlier
 non-reply, and multi-request provider-start classification is owned by

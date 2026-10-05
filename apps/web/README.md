@@ -2009,6 +2009,13 @@ number multiplied by the live Fluid instance count. Leaving
 without silently changing capacity. Use the pressure, acquisition, and callback
 measurements to re-baseline representative ingress, runtime-log, device-sync,
 signup, and Stripe workloads before choosing an explicit per-instance value.
+The same line carries `processUptimeMs` at that first database use, which
+separates a freshly booted Fluid instance from a long-lived one. The Linq
+webhook's `hosted-onboarding.route.linq-webhook` timing adds `processUptimeMs`,
+`routeModuleAgeMs`, and `routeModuleRequestOrdinal` at route start. Compare them
+with Vercel's function start to attribute time spent before the handler, which
+`webhook_received_at` cannot see, to process boot, lazy route loading, or the
+platform.
 
 The generated Prisma client uses the supported `small` query compiler to reduce
 fresh-instance loading and first-query initialization. This is a build choice,

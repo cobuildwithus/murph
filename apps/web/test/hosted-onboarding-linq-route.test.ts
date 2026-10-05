@@ -110,6 +110,9 @@ describe("hosted onboarding Linq webhook route", () => {
     expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
       "hosted-onboarding.route.linq-webhook",
       expect.objectContaining({
+        processUptimeMs: expect.any(Number),
+        routeModuleAgeMs: expect.any(Number),
+        routeModuleRequestOrdinal: expect.any(Number),
         signaturePresent: true,
         signalAbortedAtStart: false,
         timestampPresent: true,
@@ -143,6 +146,26 @@ describe("hosted onboarding Linq webhook route", () => {
         signalAbortedBeforeReturn: false,
       }),
     );
+  });
+
+  it("records process and route-module age so pre-handler boot time is attributable", async () => {
+    vi.spyOn(process, "uptime").mockReturnValue(3.4567);
+    const post = () => hostedOnboardingLinqRoute.POST(new Request(
+      "https://join.example.test/api/hosted-onboarding/linq/webhook",
+      { method: "POST", body: "{}" },
+    ));
+
+    await post();
+    await post();
+
+    const routeStarts = mocks.startHostedOnboardingTiming.mock.calls
+      .filter(([step]) => step === "hosted-onboarding.route.linq-webhook")
+      .map(([, details]) => details as Record<string, unknown>);
+    expect(routeStarts).toHaveLength(2);
+    expect(routeStarts[0]).toMatchObject({ processUptimeMs: 3457 });
+    expect(routeStarts[0]?.routeModuleAgeMs).toBeGreaterThanOrEqual(0);
+    expect(routeStarts[1]?.routeModuleRequestOrdinal)
+      .toBe(Number(routeStarts[0]?.routeModuleRequestOrdinal) + 1);
   });
 
   it("composes visible secondary replies through the public Linq route", async () => {
