@@ -1,6 +1,6 @@
 # Reject malformed referral paths before generated page loading
 
-Status: active
+Status: completed
 Created: 2026-10-05
 Updated: 2026-10-05
 
@@ -70,4 +70,11 @@ their existing behavior.
   pass. Proxy complexity 7 to 8; no source hotspot above 20.
 - Parent candidate review: Product UX Ready; no new I/O, state, URL rewriting,
   logging, dependencies, or API invocation on supported paths.
-- Final ReviewGPT and exact-head required CI remain pending.
+- Final ReviewGPT round 1 passes on `2a96e8810ad77f7c7082042b15a31fcbdc730185`
+  with no findings. Required exact-head CI remains pending; functional merge and
+  deployment remain with the user.
+- One broad CI run failed the package-verifier interlock test. Its isolated
+  rerun passes; an independently reproduced status/liveness race is being fixed
+  in a separate tooling task. The CI trace does not prove that exact interleaving.
+  Final plan closure changes no runtime code; final-head CI remains required.
+Completed: 2026-10-05
