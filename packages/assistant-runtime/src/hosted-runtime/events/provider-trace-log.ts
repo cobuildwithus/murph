@@ -146,13 +146,11 @@ const HOSTED_ASSISTANT_CODEX_PROCESS_LIFECYCLE_STAGE_VALUES = new Set([
 const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "initialized",
   "preinitialized",
-  "shutdown",
   "spawn-ready",
   "thread-resumed",
   "thread-started",
   "turn-completed",
   "turn-started",
-  "warm-abort-poisoned",
   "warm-idle",
   "warm-reused",
   "provider-output-received",

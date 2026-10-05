@@ -82,7 +82,6 @@ import {
   projectHostedRuntimeTrustStoreEnv,
 } from "./hosted-runtime/environment.ts";
 import {
-  HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
   hostedCodexProviderTransportDiagnostics,
   prepareHostedCodexRuntimeEnvironment,
   projectHostedRuntimeProcessEnvironment,
@@ -2462,7 +2461,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           details: {
             codexEffectiveModelProviderId:
               preparedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
-            ...HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
             ...hostedCodexProviderTransportDiagnostics(
               preparedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? "",
             ),

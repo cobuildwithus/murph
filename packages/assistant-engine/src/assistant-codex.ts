@@ -3390,9 +3390,7 @@ function buildCodexTransportDiagnosticsTraceEvent(input: {
     ['idle timeout waiting for sse', 'http-read'],
   ] as const).find(([phrase]) => normalizedText.includes(phrase)) ?? ['', null]
   const idleTimeout = timeoutPhase !== null
-  const streamDisconnected =
-    normalizedText.includes('stream disconnected') ||
-    normalizedText.includes('response stream disconnected')
+  const streamDisconnected = normalizedText.includes('stream disconnected')
 
   if (!fallbackActivated && !idleTimeout && !streamDisconnected && !retryProgress) {
     return null
