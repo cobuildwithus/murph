@@ -1,6 +1,7 @@
 ---
 title: 'System mailbox focused tests fail vault-share publication on the baseline'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4000'
 ---
 
 ## Expected Behavior
