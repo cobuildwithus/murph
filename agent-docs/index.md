@@ -16,6 +16,8 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Malformed referral-path routing plan: [`2026-10-05-referral-path-routing.md`](exec-plans/active/2026-10-05-referral-path-routing.md).
+
 Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
 [the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
 
@@ -986,5 +988,3 @@ SMS invalid-destination recovery format support is tracked in
 `../docs/hosted-auth-migration.md` remains the contract owner.
 
 Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
-
-Malformed referral-path routing plan: [`2026-10-05-referral-path-routing.md`](exec-plans/active/2026-10-05-referral-path-routing.md).
