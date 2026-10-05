@@ -1,6 +1,7 @@
 ---
 title: 'Public Web artifact timeout discards completed builds'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3977'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Synthetic Garmin persistence failures omit safe stage evidence'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3982'
 ---
 
 ## Expected Behavior
