@@ -61,6 +61,12 @@ export async function timeCliPhase<T>(phase: CliTimingPhase, run: () => Promise<
   try { return await run(); } finally { end(); }
 }
 
+/** Time synchronous query work without inserting an asynchronous boundary. */
+export function timeCliPhaseSync<T>(phase: CliTimingPhase, run: () => T): T {
+  const end = startCliPhase(phase);
+  try { return run(); } finally { end(); }
+}
+
 /** Called only with Incur's resolved registered path, never argv/display text. */
 export async function timeCliDispatch(command: string, next: () => Promise<void>): Promise<void> {
   const invocation = invocations.getStore();
