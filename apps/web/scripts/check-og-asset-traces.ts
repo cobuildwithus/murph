@@ -22,7 +22,6 @@ import { MURPH_CONTACT_AVATAR_OPTIONS } from "../src/lib/murph-contact-avatars";
 // Trace entries are recorded relative to each trace file and stay inside
 // apps/web, so the suffixes carry no apps/web prefix.
 const requiredOgAssetSuffixes = [
-  "public/icons/murph-mark.svg",
   "public/logo.svg",
   "app/fonts/Fraunces-400.ttf",
   "app/fonts/Fraunces-600.ttf",

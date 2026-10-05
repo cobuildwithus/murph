@@ -86,14 +86,12 @@ export function getCompactTableCardImageSize(
 
 /**
  * Mirrors the shipping SwiftUI compact-table snapshot at a wider raster size.
- * Messages owns the outer corner mask; the bitmap owns Murph's canonical mark.
+ * Messages owns the outer corner mask and draws Murph's app badge beside the title.
  */
 export function CompactTableCardImage({
   card,
-  logoSrc = "/icons/murph-mark.svg",
 }: {
   card: CompactTablePresentationCardV1;
-  logoSrc?: string;
 }) {
   const layout = getCompactTableCardImageLayout(card);
   return (
@@ -113,7 +111,6 @@ export function CompactTableCardImage({
     >
       <IMessageCardHeader
         height={layout.headerHeight}
-        logoSrc={logoSrc}
         subtitle={"workout" in card ? null : layout.subtitle}
         title={layout.title}
       />
