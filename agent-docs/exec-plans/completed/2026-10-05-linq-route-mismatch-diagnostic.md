@@ -1,6 +1,6 @@
 # Classify Linq route-authority rejections privately
 
-Status: active
+Status: completed
 Created: 2026-10-05
 Updated: 2026-10-05
 
@@ -78,4 +78,11 @@ exactly.
   diagnostics do not justify refactoring its existing authority semantics.
 - Parent candidate review: telemetry-only; no identifiers, public fields, new
   event, I/O, state, provider calls, retries, or validation changes.
-- Final ReviewGPT, exact-head required CI, and deployment remain pending.
+- Final ReviewGPT round 1 passes on
+  `d63a582a149b316de605b11a16541441e81ff15d` with no findings. The reviewer
+  confirms the exact error owner, closed classifications, unchanged authority
+  decisions and public response, and privacy/accessor regression coverage.
+- Final plan closure is explanatory only. Required CI must pass on its final
+  head before the authorized telemetry-only merge. Canonical deployment and
+  natural-traffic observation remain separate gates; no recovery is claimed.
+Completed: 2026-10-05
