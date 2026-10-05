@@ -20,7 +20,7 @@ export const HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
 // Wake reasons are extensible strings. Only known operational labels may leave
 // the diagnostic database in an email; missing/new values remain unknown.
 const EMAIL_WAKE_REASONS = [
-  "assistant", "assistant_delivery", "device-sync.reconcile", "mailbox",
+  "assistant", "assistant_delivery", "device-sync.reconcile", "inbox_media_retention", "mailbox",
 ];
 
 type RunawaySubject = {

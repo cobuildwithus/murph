@@ -67,6 +67,13 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     expect(JSON.stringify(health)).not.toContain(subject);
   });
 
+  it("labels the known inbox media retention wake reason", async () => {
+    await seed(40, { metadata: { processingMode: "default", nextWakeReason: "inbox_media_retention" } });
+    const health = await readHostedRuntimeRunawayHealth({ now, database });
+    expect(health.subjects).toEqual([{ subjectPrefix: "abcdef01", invocationCount: 40,
+      processingMode: "default", nextWakeReason: "inbox_media_retention" }]);
+  });
+
   it("does not return private or malformed diagnostic values", async () => {
     await seed(40, { key: "synthetic-member-id", metadata: {
       processingMode: "private@example.test", nextWakeReason: "+15555550123",
