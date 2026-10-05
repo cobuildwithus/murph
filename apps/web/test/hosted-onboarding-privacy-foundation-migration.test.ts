@@ -1231,6 +1231,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260922220000_poll_result_notifications",
       "20261001140000_companion_wearable_haptics",
       "20261002010000_companion_presence",
+      "20261005000000_device_sync_deferred_wake",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

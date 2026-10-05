@@ -278,7 +278,8 @@ the owning marker is durable, then represented as a bounded `device-sync.wake`
 mailbox handoff keyed by connection and reconcile timestamp. Dirty webhook
 freshness is separate: web persists dirty state and appends one deterministic
 `device-sync.wake` handoff on clean-to-dirty transitions, but dirty rows are not
-selected by a global scheduled sweep. The existing shared mailbox-handoff sweep
+selected by a global scheduled sweep beyond releasing bounded routine Junction
+wake deadlines (see `docs/device-sync-hosted-control-plane.md`). The existing shared mailbox-handoff sweep
 may re-signal one exact unconsumed `device-sync.wake` pointer per user; it reads
 mailbox and lane-watermark truth, not dirty rows. Historical `runtime.mailbox-lag-observed`
 and `runtime.device-sync-recovery-requested` rows remain valid runtime-control
