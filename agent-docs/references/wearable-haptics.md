@@ -2,8 +2,11 @@
 
 `murph.device` action `haptic` accepts `wearable` (`whoop` or `garmin`) and
 `operation` (`status`, `buzz`, or `stop`). Existing canonical automations own
-delays: a ten-minute meditation creates an ordinary one-shot automation, whose
-due invocation calls the immediate command. No new scheduler or watch alarms.
+delays of a minute or longer: a ten-minute meditation creates an ordinary
+one-shot automation, whose due invocation calls the immediate command. A
+requested wait under one minute, below the scheduler's resolution, is an
+in-turn shell sleep before the immediate command. No new scheduler or watch
+alarms.
 
 ## Ownership and authority
 
@@ -47,6 +50,10 @@ All collection reads are bounded to two indexed rows. Member locking serializes
 admission and claims across phone polls and runtime requests. Transactions have
 five-second lock/operation limits, and contain no external I/O. Each tool request
 adds one signed callback; it does not wait or repeatedly poll for a receipt.
+Repeating the same request in the same turn resolves to the stored command and
+returns its current status without a second buzz. When the member is testing
+or troubleshooting delivery, the assistant may repeat it once after a short wait
+to report a receipt; scheduled reminders make one call.
 Normal conversation turns that do not call this tool add no database requests.
 
 ## App contact and unavailable reasons
