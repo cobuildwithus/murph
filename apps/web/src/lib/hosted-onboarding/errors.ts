@@ -5,6 +5,7 @@ export interface HostedOnboardingErrorInput {
   cause?: unknown;
   details?: Record<string, unknown>;
   retryable?: boolean;
+  linqRouteAuthorityMismatchReason?: HostedLinqRouteAuthorityMismatchReason;
 }
 
 export class HostedOnboardingError extends Error {
@@ -12,6 +13,7 @@ export class HostedOnboardingError extends Error {
   readonly httpStatus: number;
   readonly details?: Record<string, unknown>;
   readonly retryable: boolean;
+  readonly linqRouteAuthorityMismatchReason?: HostedLinqRouteAuthorityMismatchReason;
 
   constructor(input: HostedOnboardingErrorInput) {
     super(input.message, { cause: input.cause });
@@ -20,6 +22,7 @@ export class HostedOnboardingError extends Error {
     this.httpStatus = input.httpStatus;
     this.details = input.details;
     this.retryable = input.retryable ?? false;
+    this.linqRouteAuthorityMismatchReason = input.linqRouteAuthorityMismatchReason;
   }
 }
 
@@ -55,6 +58,34 @@ export function getHostedAuthMigrationConflictReasonForLog(
   // Read only this diagnostic's data property; never invoke getters or coerce values.
   const reason: unknown = Object.getOwnPropertyDescriptor(error, "reconciliationReason")?.value;
   return HOSTED_AUTH_MIGRATION_CONFLICT_REASONS.find((allowed) => allowed === reason);
+}
+
+const HOSTED_LINQ_ROUTE_AUTHORITY_MISMATCH_REASONS = [
+  "durable_thread_container_mismatch",
+  "durable_target_missing",
+  "requested_target_missing",
+  "member_routing_missing",
+  "target_not_owned",
+  "route_projection_mismatch",
+  "pending_recipient_invalid",
+  "member_identity_missing",
+  "member_recipient_invalid",
+] as const;
+
+export type HostedLinqRouteAuthorityMismatchReason =
+  (typeof HOSTED_LINQ_ROUTE_AUTHORITY_MISMATCH_REASONS)[number];
+
+export function getHostedLinqRouteAuthorityMismatchReasonForLog(
+  error: unknown,
+): HostedLinqRouteAuthorityMismatchReason | undefined {
+  if (!(error instanceof HostedOnboardingError)) return undefined;
+  // Match this owner and read only data properties; never invoke getters or coerce values.
+  if (
+    Object.getOwnPropertyDescriptor(error, "code")?.value !== "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH"
+    || Object.getOwnPropertyDescriptor(error, "message")?.value !== "Linq egress target does not match the runtime user's Linq route."
+  ) return undefined;
+  const reason: unknown = Object.getOwnPropertyDescriptor(error, "linqRouteAuthorityMismatchReason")?.value;
+  return HOSTED_LINQ_ROUTE_AUTHORITY_MISMATCH_REASONS.find((allowed) => allowed === reason);
 }
 
 export const HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE =

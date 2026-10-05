@@ -18,6 +18,7 @@ import {
 } from "./linq-daily-state";
 import {
   hostedOnboardingError,
+  type HostedLinqRouteAuthorityMismatchReason,
 } from "./errors";
 import {
   evaluateHostedLinqEgressPolicy,
@@ -244,12 +245,12 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     // authority: a personal proactive send still cannot reach a group thread,
     // and the owning container is not held to a home route it cannot have.
     if (targetThreadRoute.containerMemberId !== input.memberId) {
-      throwHostedLinqRouteAuthorityMismatch();
+      throwHostedLinqRouteAuthorityMismatch("durable_thread_container_mismatch");
     }
 
     const target = normalizeNullable(input.target);
     if (!target) {
-      throwHostedLinqRouteAuthorityMismatch();
+      throwHostedLinqRouteAuthorityMismatch("durable_target_missing");
     }
     const fromPhoneNumber = await readHostedLinqLinePhoneNumberByLookupKey({
       phoneNumberLookupKey: targetThreadRoute.accountLookupKey,
@@ -533,7 +534,7 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
 }): Promise<HostedLinqRuntimeEgressAssertionResult> {
   const chatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.chatId);
   if (chatLookupKeys.length === 0 && !canResolveHostedLinqHomeRouteOverride(input)) {
-    throwHostedLinqRouteAuthorityMismatch();
+    throwHostedLinqRouteAuthorityMismatch("requested_target_missing");
   }
 
   const routing = await input.prisma.hostedMemberRouting.findUnique({
@@ -558,7 +559,7 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   });
 
   if (!routing) {
-    throwHostedLinqRouteAuthorityMismatch();
+    throwHostedLinqRouteAuthorityMismatch("member_routing_missing");
   }
 
   const exactRouteKind =
@@ -572,7 +573,7 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   const routeKind = exactRouteKind
     ?? (canResolveHostedLinqHomeRouteOverride(input) ? "current" : null);
   if (!routeKind) {
-    throwHostedLinqRouteAuthorityMismatch();
+    throwHostedLinqRouteAuthorityMismatch("target_not_owned");
   }
 
   if (exactRouteKind) {
@@ -818,7 +819,7 @@ async function resolveHostedMemberDirectLinqRoute(input: {
       )
     )
   ) {
-    throwHostedLinqRouteAuthorityMismatch();
+    throwHostedLinqRouteAuthorityMismatch("route_projection_mismatch");
   }
 
   const contactKind = normalizeHostedLinqParticipantContactKind(
@@ -882,7 +883,7 @@ async function resolveHostedMemberDirectLinqParticipant(input: {
       || !createHostedPhoneLookupKeyReadCandidates(phoneNumber)
         .includes(input.contactLookupKey)
     ) {
-      throwHostedLinqRouteAuthorityMismatch();
+      throwHostedLinqRouteAuthorityMismatch("pending_recipient_invalid");
     }
     return {
       lookupKey: input.contactLookupKey,
@@ -899,7 +900,7 @@ async function resolveHostedMemberDirectLinqParticipant(input: {
     where: { memberId: input.memberId },
   });
   if (!identity) {
-    throwHostedLinqRouteAuthorityMismatch();
+    throwHostedLinqRouteAuthorityMismatch("member_identity_missing");
   }
   const phoneNumber = normalizePhoneNumber(
     await readHostedMemberIdentityPhoneNumber(identity, input.prisma),
@@ -915,7 +916,7 @@ async function resolveHostedMemberDirectLinqParticipant(input: {
     || !phoneLookupKeys.includes(identityLookupKey)
     || !phoneLookupKeys.includes(expectedLookupKey)
   ) {
-    throwHostedLinqRouteAuthorityMismatch();
+    throwHostedLinqRouteAuthorityMismatch("member_recipient_invalid");
   }
   return {
     lookupKey: expectedLookupKey,
@@ -967,12 +968,13 @@ function canResolveHostedLinqHomeRouteOverride(input: {
   );
 }
 
-function throwHostedLinqRouteAuthorityMismatch(): never {
+function throwHostedLinqRouteAuthorityMismatch(reason: HostedLinqRouteAuthorityMismatchReason): never {
   throw hostedOnboardingError({
     code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
     httpStatus: 403,
     message: "Linq egress target does not match the runtime user's Linq route.",
     retryable: false,
+    linqRouteAuthorityMismatchReason: reason,
   });
 }
 
