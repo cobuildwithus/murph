@@ -1,3 +1,4 @@
+import type { UsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import { createHash } from 'node:crypto'
 import type {
   AssistantSession,
@@ -8,6 +9,7 @@ import type {
 } from './codex-turn/planning.js'
 import {
   isHostedProductSupportEscalationFeedback,
+  isHostedUsageOptimizationAuditFeedback,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -103,13 +105,14 @@ export { shouldCreateAssistantProgressDelivery } from './progress-constants.js'
 export function createAssistantProductFeedbackRecorder(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   getAcceptedInputIds?: (() => readonly string[]) | null
+  usageOptimizerScope?: UsageOptimizerFeedbackScope | null
   productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
 }): AssistantTurnProductFeedbackRecorder | null {
   const productFeedbackCandidateSink = input.productFeedbackCandidateSink ?? null
   const initialAcceptedInputIds = resolveAssistantProductFeedbackAcceptedInputIds(
     input.acceptedInputItems ?? [],
   )
-  if (!productFeedbackCandidateSink || initialAcceptedInputIds.length === 0) {
+  if (!productFeedbackCandidateSink || initialAcceptedInputIds.length === 0 && !input.usageOptimizerScope) {
     return null
   }
 
@@ -122,6 +125,7 @@ export function createAssistantProductFeedbackRecorder(input: {
   return {
     async recordProductFeedback(feedback) {
       const normalized = normalizeAssistantProductFeedback(feedback)
+      if (input.usageOptimizerScope && !isHostedUsageOptimizationAuditFeedback(normalized)) throw new Error('Scheduled usage feedback requires one bounded anonymous usage audit.')
       const supportEscalation = isHostedProductSupportEscalationFeedback(normalized)
       if (supportEscalation) {
         if (supportEscalationOutcome === 'delivered') {
@@ -144,10 +148,12 @@ export function createAssistantProductFeedbackRecorder(input: {
         ?? initialAcceptedInputIds
       const candidate = {
         ...normalized,
-        idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
-          acceptedInputIds,
-          feedback: normalized,
-        }),
+        idempotencyKey: input.usageOptimizerScope
+          ? createHash('sha256').update(JSON.stringify({
+              kind: 'weekly-usage-optimizer',
+              ...input.usageOptimizerScope,
+            })).digest('hex')
+          : buildAssistantProductFeedbackIdempotencyKey({ acceptedInputIds, feedback: normalized }),
       }
       const deliverSupportEscalation =
         productFeedbackCandidateSink.deliverProductSupportEscalation

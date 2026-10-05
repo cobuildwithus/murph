@@ -7155,6 +7155,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             const systemMailboxProgressGeneration =
               resolveHostedSystemMailboxCheckpointProgressGeneration({
                 currentGeneration:
+                  // Canonical publications drained above can advance the builder
+                  // without rebasing the foreground workspace projection.
                   checkpointRequestBuilder.latestWorkspace()
                     ?.systemMailboxProgressGeneration ?? null,
                 progressed: systemMailboxProgressedSinceCheckpoint,

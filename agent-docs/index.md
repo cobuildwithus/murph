@@ -1,4 +1,8 @@
 Native Codex patch inclusion in full review snapshots is owned by
+
+Callback preflight snapshots and shared mailbox progress reads are owned by
+`references/hosted-postgres-runtime.md` and `../apps/web/README.md`; focused proof
+is recorded in `exec-plans/completed/2026-10-02-db-pool-pressure.md`.
 [the ReviewGPT loop](operations/pr-reviewgpt-loop.md).
 
 Codex 0.160.0 reconciliation for the current PR is recorded in
@@ -11,6 +15,9 @@ Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
 # Murph Agent Docs Index
+
+Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
+[the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
 
 Private sender contact presentation and retrieval are owned by `ARCHITECTURE.md`;
 implementation proof: [on-demand sender contact](exec-plans/completed/2026-10-01-on-demand-sender-contact.md).
@@ -74,6 +81,10 @@ The runtime mailbox contract remains in
 [CLI read validation telemetry](exec-plans/completed/2026-09-25-cli-read-validation-telemetry.md)
 records the locally verified implementation; [PR #3707](https://github.com/cobuildwithus/murph/pull/3707)
 owns delivery status. The contract remains in `docs/hosted-runtime-log-database.md`.
+
+Expected Linq dispatch-claim responses and preserved runtime replay safety are
+recorded in [dispatch claim results](exec-plans/completed/2026-10-02-linq-dispatch-result.md);
+the callback contract is owned by `apps/web/README.md`.
 
 Runtime ownership response timing is tracked in
 [the response plan](exec-plans/completed/2026-09-23-runtime-owner-response.md);
@@ -604,6 +615,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, exact tracked archive inputs, no base-update limit, response timing and evidence requirements, same-session waiting or paced polling by default, exact-metadata and transient-URL recovery, guarded companion snapshots, and invalid-first-attempt baseline recovery. | Final PR ReviewGPT loop | Medium | 2026-09-25 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion, daily recovery, checkpoint-owned continuation preflight, bounded deferral of future history, pending-start history scans, bounded completion-marker retention, and operation-local source admission reuse. | Device-sync ingestion contract | High | 2026-09-20 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
+| `agent-docs/exec-plans/completed/2026-10-02-connected-apps-response-schema-telemetry.md` | Private response-schema rejection attribution; implementation evidence recorded, closing-commit CI still required. | Completed telemetry execution plan | Medium | 2026-10-02 |
 | `agent-docs/exec-plans/completed/2026-09-13-cli-validation-diagnostics.md` | Bounded optional schema diagnostics, three existing knowledge source classifications and consumer-first rollout contract. | CLI diagnostics execution plan | High | 2026-09-13 |
 | `agent-docs/exec-plans/completed/2026-09-13-browser-vault-source-read-telemetry.md` | Fixed source-operation timing through existing Browser Vault timeout telemetry, with behavior-preserving proof and rollout gates. | Completed diagnostic implementation | High | 2026-09-13 |
 | `agent-docs/exec-plans/completed/2026-09-23-opening-history.md` | Current-account opening allowance, retained delivery evidence and PostgreSQL regression proof. | Completed implementation evidence | Medium | 2026-09-23 |
@@ -956,3 +968,18 @@ Private scheduled phone-call guidance, authenticated Linq sender context, and
 live setup-to-due proof are recorded in
 [`scheduled phone calls`](exec-plans/completed/2026-10-01-scheduled-phone-calls.md);
 `ARCHITECTURE.md` and the phone-calls skill own the current contract.
+
+Idle snapshot progress generation ownership is specified in the hosted runtime
+protocol reference; regression proof is recorded in
+[`checkpoint progress`](exec-plans/completed/2026-10-02-checkpoint-progress-regression.md).
+
+Weekly usage review, private bounded ledger diagnostics, and anonymous product
+reports are tracked in [weekly usage optimizer](exec-plans/active/2026-10-01-weekly-usage-optimizer.md).
+Current authority and storage contracts remain in `ARCHITECTURE.md`, `SECURITY.md`,
+and `RELIABILITY.md`.
+
+SMS invalid-destination recovery format support is tracked in
+[sign-in destination recovery](exec-plans/completed/2026-10-02-otp-destination-error.md);
+`../docs/hosted-auth-migration.md` remains the contract owner.
+
+Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).

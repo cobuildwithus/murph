@@ -1,5 +1,6 @@
 import {
   HOSTED_MAILBOX_KINDS,
+  HOSTED_MAILBOX_LANES,
   isHostedMailboxKind,
   isHostedMailboxLane,
   type HostedMailboxFetchCursorMode,
@@ -122,6 +123,93 @@ interface HostedRuntimeMailboxProjectionRow {
   requestedLane: string;
 }
 
+function hostedMailboxLaneProjectionSql(input: {
+  lanes: readonly { ordinal: number; lane: HostedMailboxLane; importedSeq: bigint }[];
+  userId: string;
+  fetchedAt: Date;
+}): Prisma.Sql {
+  const { lanes, userId, fetchedAt } = input;
+  const retainedAt = new Date(fetchedAt.getTime() - HOSTED_MAILBOX_RETENTION_MS);
+  const requestedLaneValues = lanes.map((entry) => Prisma.sql`(
+    ${entry.ordinal}::integer,
+    ${entry.lane}::text,
+    ${entry.importedSeq}::bigint
+  )`);
+  return Prisma.sql`
+    WITH requested_lane (ordinal, lane, imported_seq) AS (
+      VALUES ${Prisma.join(requestedLaneValues)}
+    ),
+    lane_projection AS (
+      SELECT
+        requested_lane.ordinal,
+        requested_lane.lane,
+        requested_lane.imported_seq,
+        GREATEST(
+          COALESCE(lane_counter.consumed_seq, 0::bigint),
+          COALESCE(oldest_live.lane_seq - 1::bigint, 0::bigint)
+        ) AS consumed_seq,
+        COALESCE(newest_live.lane_seq, 0::bigint) AS max_seq,
+        newest_live.updated_at AS max_updated_at
+      FROM requested_lane
+      LEFT JOIN hosted_mailbox_lane_counter AS lane_counter
+        ON lane_counter.user_id = ${userId}
+        AND lane_counter.lane = requested_lane.lane
+      LEFT JOIN LATERAL (
+        SELECT mailbox_item.lane_seq
+        FROM hosted_mailbox_item AS mailbox_item
+        WHERE mailbox_item.user_id = ${userId}
+          AND mailbox_item.lane = requested_lane.lane
+          AND mailbox_item.created_at > ${retainedAt}
+          AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
+        ORDER BY mailbox_item.lane_seq ASC
+        LIMIT 1
+      ) AS oldest_live ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT mailbox_item.lane_seq, mailbox_item.updated_at
+        FROM hosted_mailbox_item AS mailbox_item
+        WHERE mailbox_item.user_id = ${userId}
+          AND mailbox_item.lane = requested_lane.lane
+          AND mailbox_item.created_at > ${retainedAt}
+          AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
+        ORDER BY mailbox_item.lane_seq DESC
+        LIMIT 1
+      ) AS newest_live ON TRUE
+    )
+  `;
+}
+
+/** One statement snapshot of both lanes, without reading mailbox payloads. */
+export async function readHostedMailboxProgress(input: {
+  now?: Date;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<Pick<FetchHostedRuntimeMailboxProjectionResult, "consumedSeqByLane" | "maxSeqByLane">> {
+  const prisma = input.prisma ?? getPrisma();
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  const lanes = HOSTED_MAILBOX_LANES.map((lane, ordinal) => ({
+    importedSeq: 0n, lane, ordinal,
+  }));
+  const rows = await prisma.$queryRaw<Pick<HostedRuntimeMailboxProjectionRow,
+    "requestedLane" | "consumedSeq" | "maxSeq" | "maxUpdatedAt"
+  >[]>(Prisma.sql`
+    ${hostedMailboxLaneProjectionSql({ lanes, userId, fetchedAt: input.now ?? new Date() })}
+    SELECT lane AS "requestedLane", consumed_seq AS "consumedSeq",
+      max_seq AS "maxSeq", max_updated_at AS "maxUpdatedAt"
+    FROM lane_projection ORDER BY ordinal
+  `);
+  return {
+    consumedSeqByLane: rows.map(row => ({
+      lane: requireHostedMailboxLane(row.requestedLane),
+      consumedSeq: row.consumedSeq.toString(),
+    })),
+    maxSeqByLane: rows.map(row => ({
+      lane: requireHostedMailboxLane(row.requestedLane),
+      maxSeq: row.maxSeq.toString(),
+      maxUpdatedAt: row.maxUpdatedAt?.toISOString() ?? null,
+    })),
+  };
+}
+
 export async function fetchHostedRuntimeMailboxProjection(input: {
   cursorMode?: HostedMailboxFetchCursorMode | null;
   lanes: readonly HostedMailboxRuntimeFetchLaneCursor[];
@@ -164,51 +252,8 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
     };
   }
 
-  const requestedLaneValues = lanes.map((entry) => Prisma.sql`(
-    ${entry.ordinal}::integer,
-    ${entry.lane}::text,
-    ${entry.importedSeq}::bigint
-  )`);
   const rows = await prisma.$queryRaw<HostedRuntimeMailboxProjectionRow[]>(Prisma.sql`
-    WITH requested_lane (ordinal, lane, imported_seq) AS (
-      VALUES ${Prisma.join(requestedLaneValues)}
-    ),
-    lane_projection AS (
-      SELECT
-        requested_lane.ordinal,
-        requested_lane.lane,
-        requested_lane.imported_seq,
-        GREATEST(
-          COALESCE(lane_counter.consumed_seq, 0::bigint),
-          COALESCE(oldest_live.lane_seq - 1::bigint, 0::bigint)
-        ) AS consumed_seq,
-        COALESCE(newest_live.lane_seq, 0::bigint) AS max_seq,
-        newest_live.updated_at AS max_updated_at
-      FROM requested_lane
-      LEFT JOIN hosted_mailbox_lane_counter AS lane_counter
-        ON lane_counter.user_id = ${userId}
-        AND lane_counter.lane = requested_lane.lane
-      LEFT JOIN LATERAL (
-        SELECT mailbox_item.lane_seq
-        FROM hosted_mailbox_item AS mailbox_item
-        WHERE mailbox_item.user_id = ${userId}
-          AND mailbox_item.lane = requested_lane.lane
-          AND mailbox_item.created_at > ${retainedAt}
-          AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
-        ORDER BY mailbox_item.lane_seq ASC
-        LIMIT 1
-      ) AS oldest_live ON TRUE
-      LEFT JOIN LATERAL (
-        SELECT mailbox_item.lane_seq, mailbox_item.updated_at
-        FROM hosted_mailbox_item AS mailbox_item
-        WHERE mailbox_item.user_id = ${userId}
-          AND mailbox_item.lane = requested_lane.lane
-          AND mailbox_item.created_at > ${retainedAt}
-          AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
-        ORDER BY mailbox_item.lane_seq DESC
-        LIMIT 1
-      ) AS newest_live ON TRUE
-    )
+    ${hostedMailboxLaneProjectionSql({ lanes, userId, fetchedAt })}
     SELECT
       lane_projection.lane AS "requestedLane",
       lane_projection.consumed_seq AS "consumedSeq",

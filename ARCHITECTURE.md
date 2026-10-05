@@ -304,6 +304,12 @@ intact. Event-relative reminders follow verified event changes; exact completed
 or canceled one-offs and verified duplicates can be archived. Correct reminders
 and recurring habits are preserved, including on retries. Source opt-outs still
 apply, and uncertain context does not authorize a mutation.
+The review reads the paginated automation instruction inventory once, following
+every cursor. Each page holds at most 20 records and 48 KiB of data JSON in
+immutable-id order. Oversized instructions are explicitly incomplete and require
+an exact read before judgment. Complete unchanged records need no individual
+inspection; mutation candidates retain an exact read and version check. Ordinary
+compact listings keep their existing projection and ordering.
 Scheduled outdoor reminders independently resolve current member location and
 canonical travel, including recent segments after arrival leaves the upcoming
 projection. Plans remain conditional evidence. Lodging destinations require
@@ -972,6 +978,20 @@ instead of a durable deletion-timestamp trail in anonymous analytics.
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification from a single target-bound `threadIsDirect` fact; actor equality and participant delivery kind do not establish a private audience. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
 Assistant-authored cron schedules require a literal wildcard in either day-of-month or day-of-week. The shared automation tool argument schema rejects combined restrictions before creation or schedule replacement and returns repair guidance through the existing validation feedback. Finite recurrences keep their repeating days in the schedule and their exclusive expiration in `activeUntil`. Canonical cron retains standard OR semantics for existing records and operator workflows; inspection and patches without a replacement schedule remain compatible.
+
+A private hosted weekly usage review is an ordinary fresh managed automation,
+pinned to GPT-6.1 Sol medium. It reads bounded current-member diagnostics from
+the canonical hosted AI usage ledger, preserving recorded allowance costs and
+explicit missing/truncated coverage. Existing sanitized turn profiles attribute
+tool output bytes; bytes are not token counts or per-tool dollar charges. The
+vault stores no duplicate ledger. It can change only suitable active ordinary
+automation model overrides through inspected-version patches; explicit member
+preferences, managed pins, instructions, routes, and timing remain intact. One
+bounded de-identified usage audit enters the existing product feedback owner,
+with member-and-occurrence idempotency, a server-keyed HMAC identity, and no
+member linkage in the persisted row. The dedicated signed usage-feedback route
+fails closed on older Web consumers; it never falls back to ordinary feedback. The review stays silent. Its managed identity grants no support escalation
+or email capability; ordinary scheduled turns still cannot submit feedback.
 
 Hosted automation writes use a narrow root-turn tool backed by an invocation-scoped automation port. The already-bound member or synthetic-group runtime vault remains the sole owner of canonical automation records; the tool adds no service, credential, transport, or second record owner. Ordinary model-authored saves omit a recipe key and receive a generated `automationId`: titles may repeat, and existing records are patched only by exact id. A current loaded skill may supply only its exact stable, non-title-derived recipe key so a singleton product recipe can be rediscovered; inspection returns its authoritative id and every patch uses that id. The markdown owner stores that key in the existing slug field and otherwise derives an opaque id-based slug and path solely for schema and rollout compatibility; legacy aliases remain readable, while fixed managed automations retain their registered identities. Ordinary hosted model processes use the native `murph-member-workspace` permission profile: they retain normal workspace and temporary-file writes plus automation reads, while `bank/automations` is read-only at the filesystem boundary. The root-turn automation port remains outside that profile, and local operator CLI mutation behavior remains unchanged. Relative one-shot day words resolve from the persisted accepted input's ingress receipt time, with the stored event time only as a legacy fallback; if one delivery context spans different calendar dates in the requested IANA timezone, the host requires an explicit date instead of choosing a context-wide day. DST gap and fold recovery stays root-turn-local as an insertion-ordered collection keyed by an opaque recovery correlation and trusted date: each failure returns its key, each unresolved reminder receives a target-specific question in delivered and transcript text, and only a successful explicit-date owner mutation echoing that exact key and date removes the entry as completed. The correlation is stripped before the canonical owner call and grants no mutation authority; every executable or locally invalid correlated retry must match an existing exact key and date before owner execution or recovery-state mutation. An invalid matching retry retains the original target-specific entry, while an unknown, consumed, dismissed, or mismatched correlation is rejected without minting or resurrecting one; omission or a failed owner call leaves existing obligations untouched. The opaque key, rather than mutable title text, correlates an explicit retry or withdrawal with its exact pending DST question. When the participant instead withdraws the reminder or supersedes its trusted date, one active-root, offered-tool dismissal carrying that exact key and date removes only the matching ephemeral entry without calling the automation owner; any replacement date then proceeds as an ordinary independent save or versioned patch. No-reply or response-card delivery remains suppressed until the collection is empty. An authenticated hosted conversation may edit, pause, archive, or reactivate any automation in that vault even when the record stores an older route. New records and explicit retargets persist only the trusted current route instead of model-supplied locators or directness; ordinary edits preserve the stored route. Scheduled automation occurrences enter the same conversation turn planner, prompt stack, thread policy, skill surface, and dynamic-tool assembly as attended turns. The stored automation instructions are the user request; occurrence and delivery facts are trusted turn context, and send-or-skip JSON is only the delivery envelope. Canonical automations may also own a bounded list of exact generic record references; scheduled execution persists them on the existing outbox delivery and exposes them with `automationId`, occurrence timestamps, and `supportSeriesId` to the next ordinary cross-session direct-chat turn as routing and interpretation context only, never mutation authority. Tool availability still follows the ordinary invocation's actual ports, audience, accepted-input evidence, and effect-owner checks rather than the trigger origin. A detached `assistant.notification.requested` system event without a valid occurrence is not a scheduled or user turn: it uses an isolated output-only formatter with no conversation history, private context, resume mutation, or tool and network surface, while the platform retains delivery ownership. That formatter runs as a fresh ephemeral thread on the resident App Server; its thread-local deny configuration leaves the ordinary provider-process launch identity unchanged. Unauthenticated group-email replies remain read-only because their audience does not authorize durable room controls, not because they use a separate assistant profile. Explicit arbitrary-route authoring remains a local operator capability. For every hosted Linq send, foreground or scheduled, persisted route data, binding delivery, session actor, invocation-local delivery context, and explicit target are only bounded hints. Immediately before capability or provider work, the existing Web egress owner resolves one ephemeral typed route containing the canonical target, target kind, direct/group fact, privacy-blinded conversation locator, and only the raw recipient and sender coordinates required by that provider call. Runtime delivery consumes no other recipient or thread source and reasserts the identical route before capability access and the idempotent provider-dispatch claim; a mismatch fails before provider mutation. Raw coordinates remain transient across that signed control-plane exchange and the immediate provider call; they are never copied into prompts, logs, outbox/checkpoint/Temporal state, or artifacts. Exact-message authority, durable groups, known-group no-fallback, personal current-home fallback, and authorized stale direct-thread recovery retain their existing owners. An authorized private scheduled occurrence can therefore perform native-card capability lookup without a foreground actor or inbound delivery context, while unresolved authority remains retryable without a marker or manual-repair protocol.
 
@@ -1901,8 +1921,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   GPT-5.6 Luna; GPT-5.6 Sol and GPT-6 Astra retain their premium gates.
   Saved Terra preferences now resolve to GPT-6.1 Sol; other explicit choices stay
   saved, while a null preference follows the default. New managed recipes and
-  automation guidance use GPT-6 Luna for fixed cues and GPT-6.1 Sol for contextual
-  work, including the Personal Patterns job. Web opening replies
+  automation guidance use GPT-6 Luna for fixed cues and bounded low-risk workflows
+  with a few targeted reads; ambiguous, research-heavy, sensitive, or demanding
+  sourcing work retains GPT-6.1 Sol or the explicitly selected stronger model.
+  Morning Journal and Personal Patterns use their managed Luna pins. Web opening replies
   also use GPT-6 Luna. At scheduled execution,
   automation pins use a reviewed OpenAI replacement map: GPT-5.6 Luna becomes
   GPT-6 Luna, and GPT-6 Sol, GPT-5.6 Sol, or Terra becomes GPT-6.1 Sol. Provider-neutral
@@ -3029,9 +3051,24 @@ Detached MultiAgent V2 work is a bounded path, not a process-memory queue.
 Before the root reply, Murph retains a durable accepted input, canonical fact,
 or raw source and gives each child its exact source words, ids, or refs. A
 loaded skill may assign one independent canonical record family per child; all
-writes remain idempotently attributable to that source. Reply-critical work stays
-in the root by default. Explicitly requested bounded lookups may use a child; the root uses native `wait_agent` when needed and
-synthesizes the result before its final reply. Failure yields an honest blocker,
+writes remain idempotently attributable to that source. In ordinary private
+turns, bounded multi-pass canonical CLI work may run in a fresh native child even
+when its result is needed for the reply; tiny tasks stay in the root unless the
+member requests delegation. The root uses native `wait_agent` and synthesizes the
+result before its final reply. Children replace root work rather than duplicate
+it. The default target for these substantial tasks is GPT-6.1 Sol medium when
+native model overrides are authorized; an explicit member child-model choice
+wins, and runtimes without overrides inherit their authorized model.
+`fork_turns: "none"` excludes conversation history. The native
+`subagent_developer_instructions` override separately replaces the full parent
+Murph prompt and member snapshot with bounded leaf policy. Assignments carry only
+relevant inputs, exact constraints, audience, read/write scope, canonical CLI
+instructions, provenance, and stopping conditions. Native sandbox/provider
+permissions and base instructions remain inherited. Dynamic/server tools,
+browser, phone, external effects, sensitive judgments, and member delivery stay
+parent-owned; unsupported child steps report a blocker rather than bypassing
+that authority. Fresh children still pay their own prompt costs, so savings
+require replacing substantial repeated context or large tool output. Failure yields an honest blocker,
 not a promise of an automatic follow-up. Independent onboarding saves remain
 nonblocking. A child terminal event is only an advisory lifecycle receipt, so canonical readback
 confirms a write before Murph reports it as finished.
@@ -4622,7 +4659,7 @@ by their owning stores. Phone-conflict suppression reads only the blind-index
 owner id, so preserving another member's binding never decrypts that member's
 private identity or requires a second prepared root inside the transaction.
 
-One case is actionable immediately: an affirmative added reaction from the
+An added reaction from the
 active participant is adapted into the existing `message.received` planner
 input, using the reaction event as inbound identity and the reacted-to message
 only as a reply reference. The synthetic text describes the actual reaction
@@ -4634,7 +4671,20 @@ generation. The turn context binds the reaction to that exact message and
 treats a tapback as acknowledgment or appreciation by default, and as agreement
 only when the target asked a single closed yes/no question or proposed one
 specific action whose affirmative answer is unambiguous; a reaction alone never
-establishes user facts, consent, or authorization.
+establishes user facts, consent, or authorization. After normal turn admission,
+explicit question-mark, negative, and unidentified reaction labels continue
+directly to normal assistant interpretation without a classifier request.
+Other reactions use a fresh, confined Luna request at low reasoning and
+priority service tier that classifies only that exact reaction and target.
+Detached asks explicitly disable agents and goals; classifier and disclosure
+review turns also select no native environment, removing shell, patch, and image
+access. The pinned CLI still advertises generic execution wrappers, input, and
+clock helpers; no Murph effect tools are supplied. Clear acknowledgments finish quietly without
+changing the root conversation thread. Answers, confusion, disagreement,
+uncertainty, malformed output, oversized evidence, and classifier failures
+continue through the normal assistant. Laughter at failed work or bad news is
+ambiguous rather than automatically quiet. The classifier has an eight-second
+timeout and separately metered usage; it cannot authorize an effect.
 Synthetic reactions stay in one-input automation groups, so an adjacent
 ordinary reply cannot lend them trust or be suppressed with them. This keeps
 the path independent of Linq's short provider-message retention while rendering
@@ -4642,8 +4692,9 @@ the exact same- or cross-session target from existing outbox truth.
 Unmatched targets are terminally silent, and synthetic reaction identities are
 excluded from message read receipts and provider-message cleanup. The reaction
 path adds no mailbox kind, state, or lifecycle. Existing group join-offer
-acceptance remains the earlier exact owner. Removals and nonaffirmative
-reactions remain on the silent group context path above (or ignored outside
+acceptance remains the earlier exact owner. Deploy runtime routing before Web
+expands admission to nonaffirmative added reactions. Removals remain on the
+silent group context path above (or ignored outside
 groups), with one exception: a removal of the exact canonical join offer by a
 nonmember whose phone region has no derivable safe send window is consumed by
 the join-offer owner before that path runs, so a participant the outreach

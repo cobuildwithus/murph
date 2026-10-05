@@ -62,7 +62,7 @@ vault-cli memory forget <memoryId> --vault <path> [--compact]
 vault-cli automation scaffold --vault <path>
 vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> [--channel <channel>] [...]
 vault-cli automation show <lookup> --vault <path>
-vault-cli automation list --vault <path> [--status <status> ...] [--text <query>] [--limit <n>]
+vault-cli automation list --vault <path> [--status <status> ...] [--text <query>] [--limit <n>] [--include-instructions] [--cursor <automation-id>]
 vault-cli automation import-json --vault <path> --input @payload.json|-
 vault-cli device provider list --vault <path> [--baseUrl <url>]
 vault-cli device connect <target> --vault <path> [--baseUrl <url>] [--returnTo <url>] [--open]
@@ -223,6 +223,14 @@ vault-cli supplement stop <regimenId> --vault <path> [--stopped-on <date>] [--re
 vault-cli supplement compound list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
 vault-cli supplement compound show <compound> --vault <path> [--status <status>] [--request-id <id>]
 ```
+
+`automation list --include-instructions` returns at most 20 records and 48 KiB
+of data JSON per page in immutable-id order. Follow every `nextCursor`, retaining
+the same filters. An oversized instruction body is `null` with
+`instructionsComplete: false`; read that exact automation before judging it.
+This mode is incompatible with `--compact`. Ordinary listings retain their
+existing projection and ordering. Mutation candidates still require exact
+readback and their current revision.
 
 When `experiment session log` receives `--reminder-intent-id`, the strict sent outbox intent is the immutable occurrence proof. The canonical writer validates private provider delivery, the exact `experiment:<experimentId>` support owner, `scheduledOccurrenceAt`, and `plannedOccurrenceAt`; derives one event identity from the experiment and planned occurrence; returns the existing event when the same planned session is confirmed through an identical retry or another accepted reminder; rejects a replay that changes the already logged effect so the caller can edit that event explicitly; and includes canonical experiment progress in the result. `--date`, `--occurred-at`, and `--source` are invalid in this mode because the writer derives the occurrence and records an explicit manual report. A legacy reminder without `plannedOccurrenceAt` remains conversational context and must use ordinary plan-based session resolution rather than this strict writer. Later automation edits, archival, or deletion do not invalidate the historical occurrence; the current automation revision and consent remain pre-send authority for future delivery.
 

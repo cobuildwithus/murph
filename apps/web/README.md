@@ -1257,6 +1257,14 @@ Hosted AI usage metering:
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
 - Web applies the composed access-and-usage gate in runtime reconciliation and
   mailbox fetch/payload routes before exhausted work reaches the runner.
+  Reconciliation uses the existing read-first allowance gate: successful checks
+  neither lock members nor create usage periods, while denials are confirmed
+  through the mutating owner before notices or blocked decisions. Spend
+  accounting remains responsible for creating missing periods.
+  Reconciliation reads both mailbox lanes' high-water and effective consumed
+  sequences in one payload-free statement using the mailbox fetch projection's
+  existing retention and expiry predicates. Its four indexed, one-row lane
+  probes use one checkout; the system frontier retains its separate live read.
   Temporal owns only the resulting blocked orchestration facts; Cloudflare
   receives no billing or credit projection. Runtime usage is recorded after it
   exists.
@@ -1490,6 +1498,17 @@ Successful requests emit no new diagnostic. The record contains no identifiers,
 projection kinds, content, versions, counts, credentials or error prose; the
 existing request log supplies correlation. Logging failure preserves the same
 generic retryable response. No new reads, writes, retries or network work occur.
+
+### Linq provider dispatch claims
+
+The signed `POST /api/internal/hosted-runtime/linq-egress/engagement` callback
+returns HTTP 200 with `providerDispatchClaimed: false` when the dispatch fence
+already exists. This is an expected claim result, not a route failure or proof
+of delivery. Current authority and egress checks still run before returning it.
+The runtime permits replay only for provider-idempotent sends; non-idempotent
+voice and reaction effects remain confirmation-pending without provider re-entry.
+Runtime support for the legacy `HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED`
+409 remains for Web rollback compatibility.
 
 ### Workspace read timing
 
@@ -2573,6 +2592,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/device-sync/reconcile`
 - `POST /api/internal/hosted-execution/usage/record`
 - `POST /api/internal/hosted-execution/plan-usage/tool`
+- `POST /api/internal/hosted-execution/usage/diagnostics`
 - `POST /api/internal/hosted-execution/subscription/tool`
 - `POST /api/internal/hosted-mailbox/fetch`
 - `POST /api/internal/hosted-mailbox/payload/fetch`
@@ -2793,3 +2813,48 @@ To refresh, review the upstream font and license changes, use FontTools
 `TTFont.flavor = "woff2"` and Brotli. This is asset preparation only, never a
 build step or application dependency. Verify the local loader emits all four
 files without Google responses, then check the rendered families and weights.
+
+### Private usage diagnostics
+
+The signed `usage/diagnostics` callback reads only the callback-bound private
+member's existing `hosted_ai_usage` ledger. Its strict request accepts `days`
+(default 7, maximum 31) and `limit` (default 10, maximum 20); it never accepts
+member identity, SQL, or arbitrary filters. Group runtimes and inactive access
+are denied; exhausted private members may still inspect usage. Operator tasks
+are excluded. One index-bounded SQL window aggregates recorded allowance costs,
+token counts, models, trigger/feature sources, and the most expensive turns.
+A source joins available `triggerKind` and `featureKey` with a colon, keeping
+reaction classification distinguishable from ordinary conversation work. Model/source
+groups are capped at 20 with explicit truncation flags. Costs are allowance
+consumption, not additional card charges; unaccounted rows are identified and
+historical charges are never recalculated using current prices. Only rows whose
+canonical `allowance_counted` flag remains true contribute cost; forgiven or
+otherwise uncounted rows retain their workload counts/tokens but not allowance
+cost. `coverage.allowanceExcludedRecords` reports their count in the window.
+
+The response projects only existing normalized v2 tool-profile labels, counts,
+and output bytes from the latest retained profile of each selected turn. Missing
+or legacy profiles report unavailable; truncated profiles report partial.
+Bytes are not tokens or independently attributable tool cost. The current Sol
+and Luna rate table derives from the canonical allowance-pricing constants,
+including Standard, Flex, and Priority multipliers. No prompts, tool bodies,
+raw usage, member identifiers, or copied vault ledger are returned.
+
+Roll out this Web callback and its shared response reader before enabling the
+Cloudflare runtime port and assistant tool. The capability is absent in local
+runtimes without that port. Keep the compatible Web callback through runner
+convergence and any rollback window.
+
+New managed automation usage records use fixed workflow feature keys (including
+Morning Journal, Personal Patterns, research, and the weekly usage review).
+They derive only from the runtime-bound built-in occurrence identity and do not
+change model selection or pricing. Older generic `assistant_cron` or internal
+reply rows remain generic; diagnostics cannot reconstruct their workflow names.
+
+Weekly usage audits use `/api/internal/hosted-execution/usage/feedback`, the
+existing feedback parser and persistence owner, and the existing app-session
+HMAC key with a separate domain. The persisted id binds the callback member and
+stable occurrence key without storing member linkage or an enumerable unkeyed
+hash. Missing key configuration fails closed. Deploy Web first, then the Worker
+allowlist and runtime producer; older Web returns 404 and the producer must not
+fall back to ordinary member-linked feedback. Ordinary feedback remains unchanged.

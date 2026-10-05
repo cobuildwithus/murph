@@ -221,6 +221,7 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
   let requestSummaryBaseline = 0
   let providerRequestDiagnosticsEnabled = false
   let completeProviderInputEnabled = false
+  let unmatchedRequestReported = false
 
   const server: Server = createServer(async (request, response) => {
     if (request.method !== 'POST' || request.url !== '/v1/responses') {
@@ -248,6 +249,30 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       ? queuedResponses.splice(scriptedResponseIndex, 1)[0]
       : undefined
     if (!scripted) {
+      if (providerRequestDiagnosticsEnabled && !unmatchedRequestReported) {
+        unmatchedRequestReported = true
+        const summary = requestSummaries[requestSummaries.length - 1]!
+        const outputs = [...(summary.customToolCallOutputs ?? []), ...(summary.functionCallOutputs ?? [])].join('\n')
+        // Only structural metadata and fixed classifiers: never print request,
+        // tool output, paths, or matcher text from model-visible fixtures.
+        process.stdout.write(`[scripted-provider-unmatched] ${JSON.stringify({
+          requestIndex: responsesRequestCount - requestBaseline,
+          nativeChildTask: requestBody.includes('Message Type: NEW_TASK'),
+          outputCount: (summary.customToolCallOutputs?.length ?? 0) + (summary.functionCallOutputs?.length ?? 0),
+          outputSignals: {
+            sandbox: /sandbox|bwrap|bubblewrap|landlock/i.test(outputs),
+            denied: /denied|not permitted/i.test(outputs),
+            missingFile: /no such file/i.test(outputs),
+            running: /Script running|Process running|session_id/i.test(outputs),
+            timedOut: /"timed_out":true/.test(outputs),
+          },
+          remainingRoutes: queuedResponses.map((candidate, index) => ({
+            index,
+            missingIncludes: (candidate.requestIncludes ?? []).flatMap((value, index) => requestBody.includes(value) ? [] : [index]),
+            presentExcludes: (candidate.requestExcludes ?? []).flatMap((value, index) => requestBody.includes(value) ? [index] : []),
+          })),
+        })}\n`)
+      }
       response.statusCode = 500
       response.end(JSON.stringify({
         error: 'scripted responses stub received a request without a queued response',
@@ -404,6 +429,7 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       completedResponseLabels.splice(0)
       providerRequestDiagnosticsEnabled = false
       completeProviderInputEnabled = false
+      unmatchedRequestReported = false
       requestBaseline = responsesRequestCount
       requestSummaryBaseline = requestSummaries.length
     },

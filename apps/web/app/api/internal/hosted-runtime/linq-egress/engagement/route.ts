@@ -233,14 +233,6 @@ export const POST = withJsonError(async (request: Request) => {
         sourceRef: intentId ?? idempotencyKey,
         targetKind: finalAuthority.resolvedRoute.targetKind,
       });
-      if (!claim.claimed) {
-        throw hostedOnboardingError({
-          code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
-          httpStatus: 409,
-          message: "Hosted Linq provider dispatch is already started.",
-          retryable: false,
-        });
-      }
       providerDispatchClaimed = claim.claimed;
     }
     return {

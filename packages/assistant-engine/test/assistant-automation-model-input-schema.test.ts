@@ -235,7 +235,7 @@ describe('automation model input schema', () => {
     },
   )
 
-  it('advertises GPT-6.1 Sol as the reminder default and Luna only for a fixed cue', () => {
+  it('advertises Luna for bounded low-risk reads while preserving stronger reasoning and member preferences', () => {
     const schemaDescriptions = collectKeys(
       MURPH_AUTOMATION_TOOL.inputSchema,
       'description',
@@ -255,28 +255,31 @@ describe('automation model input schema', () => {
       const normalizedGuidance = guidance.toLowerCase()
 
       expect(normalizedGuidance).toContain(
-        'use luna only when the complete future turn is a fixed, fully self-contained cue',
+        'use luna for fixed cues and bounded low-risk workflows',
       )
       expect(normalizedGuidance).toContain(
-        'use sol for all reminders that do not meet that luna exception; when unsure, use sol.',
+        'sensitive health decisions',
       )
       expect(normalizedGuidance).toContain('for a non-reminder automation')
-      expect(normalizedGuidance).not.toContain(
-        'use luna for self-contained cues and reminders',
-      )
+      expect(normalizedGuidance).toContain('preserve explicit member model preferences')
+      expect(normalizedGuidance).not.toContain('must need no reads')
     }
     expect(MURPH_AUTOMATION_TOOL.description).toContain('Luna and Sol mean GPT-6 Luna and GPT-6.1 Sol')
     expect(schemaDescriptions.join(' ')).not.toMatch(/Terra|high for Luna/iu)
     expect(MURPH_AUTOMATION_TOOL.description).not.toContain('GPT-5.6')
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'when its instructions or context requirements materially change or the member explicitly asks to change its model or reasoning',
+      'only when intentionally changing the task purpose or reasoning burden',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'omit assistantTargetOverride for timing-only or status-only edits to preserve the stored override',
+      'Omit assistantTargetOverride for factual corrections, timing-only or status-only edits to preserve the stored override',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'On a non-reminder patch, assistantTargetOverride replaces the whole stored override: use null to return that automation to conversation inheritance',
     )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('correcting stale instructions or reconciling a plan does not itself authorize a model change')
+    expect(MURPH_AUTOMATION_TOOL.description).not.toContain('when its instructions or context requirements materially change')
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('If a changed field such as instructions is absent from the result, use one exact inspection')
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('The authorized weekly usage review may also make model-only optimization patches')
   })
 
   it('advertises the complete canonical runtime schema with self-contained action branches', () => {

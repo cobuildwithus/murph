@@ -1633,13 +1633,18 @@
                           "minLength": 1
                         },
                         "cursor": {
-                          "description": "Continue an exact support-series listing after this automation id.",
+                          "description": "Continue a support-series or --include-instructions listing after this immutable automation id, preserving the filters.",
                           "type": "string",
                           "minLength": 1
                         },
                         "compact": {
                           "default": false,
                           "description": "Return identifiers, current updatedAt, and basic lifecycle and schedule state; use automation show for complete details.",
+                          "type": "boolean"
+                        },
+                        "includeInstructions": {
+                          "default": false,
+                          "description": "Review instructions and metadata together in immutable-id order. At most 20 records and 48 KiB per page; follow nextCursor. Oversized instructions are null with instructionsComplete=false: read that record exactly before judging it. Incompatible with --compact.",
                           "type": "boolean"
                         },
                         "limit": {

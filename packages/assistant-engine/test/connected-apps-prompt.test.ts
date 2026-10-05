@@ -51,10 +51,13 @@ describe('connected-apps skill and system-prompt coverage', () => {
     const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
     for (const text of [
       'Run this every morning, even with no new plans, no travel, or no eligible connected accounts',
-      'vault-cli automation list --status active --status paused --compact --limit 200 --format json',
-      'The default ten-item list is not the inventory',
-      'Never claim a complete review of a truncated inventory',
-      'existing automation inspect and version-checked patch path, not just location',
+      'vault-cli automation list --status active --status paused --include-instructions --limit 20 --format json',
+      'following `nextCursor` with the same filters until it is null',
+      'Do not individually show or inspect unchanged records whose complete instructions are already on the page',
+      'When `instructionsComplete=false`, read that exact record before assessing it',
+      'A failed page or changing inventory is an incomplete review',
+      'then use the existing version-checked patch path',
+      "Reuse the patch's canonical readback to verify the repair",
       'Update event-relative timing when the underlying event moves',
       "preserving the member's requested offset",
       'Calculate the due instant with timezone-aware code',
@@ -78,6 +81,7 @@ describe('connected-apps skill and system-prompt coverage', () => {
       'including reminder repair and automatic context projection',
     ]) expect(skill).toContain(text)
     expect(skill).not.toContain('Change only stale contextual instructions')
+    expect(skill).not.toContain('Inspect each candidate’s instructions')
   })
 
   it('keeps weather lookup subordinate to current location and uncertainty', async () => {

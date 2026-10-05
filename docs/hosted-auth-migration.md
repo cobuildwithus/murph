@@ -120,8 +120,10 @@ configuration, rejected provider authority and malformed responses fail closed.
 Server-side failure causes retain only the operation, fixed failure stage,
 HTTP status, a five-digit numeric Twilio code and finite response/parameter
 diagnostics read from at most 4 KiB. For code `60200`, `parameter` and
-`parameterKind` retain the exact `Invalid parameter: LABEL` classifier for
-`To`, `Channel`, `RiskCheck`, `Code` and `VerificationSid`. Only an exact `To`
+`parameterKind` recognize the exact `Invalid parameter: LABEL` format for
+`To`, `Channel`, `RiskCheck`, `Code` and `VerificationSid`. They also recognize
+an exact backtick-delimited `To` label followed by a colon, space and an
+E.164-shaped destination; the destination is discarded. Only a recognized `To`
 rejection on send with HTTP 400 maps to the existing invalid-request response.
 For HTTP 400/code `60200` with `parameterKind unrecognized`, an optional
 `parameterHint` retains only one of those five labels. It recognizes a leading

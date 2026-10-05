@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
+import { resolveHostedRuntimeAiUsageGate } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const databaseUrl = process.env.DATABASE_URL ?? "";
@@ -76,6 +77,20 @@ describe.skipIf(!enabled)("Postgres Family allowance read", () => {
       allowed: true, billingPlanCode: "launch_edge_monthly", limitUsdMicros: 15_200_000n,
       periodStart: new Date("2026-09-01T00:00:00Z"), periodEnd: new Date("2026-10-01T00:00:00Z"),
     });
+  });
+
+  it("keeps successful runtime reconciliation free of transactions, locks and period writes", async () => {
+    const { memberId } = await seed();
+    const transaction = vi.spyOn(prisma, "$transaction");
+    queries.length = 0;
+    try {
+      expect(await resolveHostedRuntimeAiUsageGate({ mode: "read_first", prisma, userId: memberId, now }))
+        .toEqual({ status: "allowed" });
+      expect(transaction).not.toHaveBeenCalled();
+      expect(queries).toHaveLength(3);
+      expect(queries.every(query => !/\b(INSERT|UPDATE|DELETE|BEGIN|COMMIT)\b|FOR (UPDATE|SHARE)/iu.test(query))).toBe(true);
+    } finally { transaction.mockRestore(); }
+    expect(await prisma.hostedAiUsagePeriod.count({ where: { memberId } })).toBe(0);
   });
 
   it.each(["membership_removed", "group_unpaid", "group_suspended"])(

@@ -114,9 +114,10 @@ function parseVerifyFailure(body: string): VerifyResponseFailure {
     && result.code >= 10000 && result.code <= 99999 ? result.code : undefined;
   const message = "message" in result && typeof result.message === "string" ? result.message : "";
   const parameter = code === 60200
-    ? /^Invalid parameter: (To|Channel|RiskCheck|Code|VerificationSid)$/u.exec(message)?.[1]
+    ? /^Invalid parameter(?:: (To|Channel|RiskCheck|Code|VerificationSid)| `(To)`: \+[1-9]\d{6,14})$/u
+      .exec(message)?.slice(1).find(Boolean)
     : undefined;
-  // Observation only: keep the exact parameter classifier above unchanged.
+  // Other anchored labels remain observation only, never public error authority.
   const hint = code === 60200 && !parameter
     ? /^Invalid parameter(?:: ([A-Za-z]+)|(?::)? `([A-Za-z]+)`)(?=$|[ \t:])/u.exec(message)
     : null;
