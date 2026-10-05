@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-10-05",
+  "order": 100,
+  "item": {
+    "id": "faster-experiment-followup-checks",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less waiting on experiment follow-up checks",
+    "summary": "Murph can check whether an experiment follow-up is due without first refreshing unrelated health summaries.",
+    "details": "The check still uses your current experiment status and saved activity to decide whether to follow up.",
+    "relevanceTags": [
+      "experiments"
+    ],
+    "sourcePullRequests": []
+  }
+}

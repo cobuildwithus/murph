@@ -2339,11 +2339,15 @@ export async function showExperimentFollowupDue(input: {
   kind: 'missed-log' | 'weekly-digest'
   date?: string
 }) {
+  const runtime = await loadExperimentJournalVaultQueryRuntime()
+  const source = await runtime.readExperimentQuerySource(input.vault).catch((error: unknown) => {
+    throw toVaultMetadataCliError(error)
+  })
   const { query, readModel, entity, slug } = await resolveExperimentQueryTarget({
     invalidSlugMessage: 'Experiment follow-up requires a canonical slug.',
     lookup: input.lookup,
     vault: input.vault,
-  })
+  }, source.readModel)
 
   const decision = query.decideExperimentFollowupDue(readModel, slug, {
     kind: input.kind,
