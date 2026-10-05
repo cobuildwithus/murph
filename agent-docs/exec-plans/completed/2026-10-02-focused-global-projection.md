@@ -1,6 +1,6 @@
 # Focused projection reads and reusable wearable derivation
 
-Status: active — parent native, product and measured evidence recorded; final ReviewGPT and exact-head CI pending
+Status: completed
 Created: 2026-10-02
 Updated: 2026-10-05
 Base: `938664ca9337bf72b4b83aa08f54dfdc0803f928`
@@ -79,10 +79,12 @@ demonstrated synthetically, not its production frequency.
    do not claim universal whole-rebuild gains or omit deferred global work.
 9. [x] Parent: run and inspect the unique live journey using local subscription
    `gpt-6.1-sol`; record actual reply, tool, fact and effect evidence. UX Ready.
-10. [ ] Final ReviewGPT review of the complete candidate after this evidence update.
-11. [ ] Required exact-head CI after this documentation patch is incorporated.
-    Keep this plan active until these remaining external gates pass. Neither gate,
-    merge nor deployment is claimed complete.
+10. [x] Final round 1 full sensitive ReviewGPT PASS on
+    `3f6b207683808089108e0d0df2b6ca0fe6b54d9e` with Hercules `gpt-6-pro`:
+    no findings, zero accepted/rejected ([review](https://chatgpt.com/c/6ac3bb7c-cc88-83e9-8d42-e2a0d3360f01)).
+11. [x] Required CI PASS on pre-closeout head
+    `3a83209c70e996a685a1d6c4bb31743dc0997761`, verified before applying this closeout.
+    Required exact-head CI for the final closeout commit remains a PR handoff gate.
 
 ## Incremental additions and rejected work
 
@@ -193,5 +195,10 @@ misleading mixed-workflow timing. The negative tests and full-byte/phase proof
 target these boundaries. Finite module initialization is charged on cold import;
 necessary global rebuilds remain synchronous, and the fallback's extra preflight
 is explicitly measured. No stale-while-refresh policy or optimistic wearable-only
-capture is introduced. Final ReviewGPT and exact-head CI remain pending; this
-active plan does not authorize merge or deployment.
+capture is introduced. Final ReviewGPT and pre-closeout CI are recorded above.
+The reviewed head remains immutable. The normal current-main merge conflicted
+only in the index and retained both sides' literal prose; all five optimized
+production files remain byte-identical to the reviewed head. Required exact-head
+CI for the final closeout commit remains a PR handoff gate. Archival does not
+claim overall PR completion or authorize merge or deployment.
+Completed: 2026-10-05
