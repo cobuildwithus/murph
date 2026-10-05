@@ -10,9 +10,9 @@ import { buildTimeline, type TimelineEntry } from "../timeline.ts";
 import { createVaultReadModel, type VaultReadModel } from "../read-model.ts";
 import { resolveAdherenceObservationActivityKind } from "../experiment-adherence.ts";
 import {
-  buildWearableAssistantSummary,
+  buildWearableAssistantSummaryFromBundle,
   buildWearableSummaryBundle,
-  summarizeWearableSourceHealth,
+  summarizeWearableSourceHealthFromBundle,
   type WearableAssistantSummary,
   type WearableSourceHealthSummary,
 } from "../wearables.ts";
@@ -107,9 +107,14 @@ export async function createBrowserVaultReplica(
     requestedMetrics,
     selectionPoints: selectionMetricPoints,
   });
-  const sourceHealthRows = summarizeWearableSourceHealth(defaultProjectedVault, { limit: SOURCE_HEALTH_LIMIT })
+  const defaultWearableBundle = buildWearableSummaryBundle(defaultProjectedVault);
+  const sourceHealthRows = summarizeWearableSourceHealthFromBundle(defaultWearableBundle, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
-  const wearableSummaryBundle = buildWearableSummaryBundle(input.vault);
+  // Filtering only removes entities. Reuse is exact when none were removed;
+  // otherwise Personal Patterns retains its separate, raw input semantics.
+  const wearableSummaryBundle = defaultProjectedVault.entities.length === input.vault.entities.length
+    ? defaultWearableBundle
+    : buildWearableSummaryBundle(input.vault);
   const personalPatterns = buildPersonalPatternReportFromWearableBundleAndMetricPoints(
     input.vault,
     wearableSummaryBundle,
@@ -121,7 +126,7 @@ export async function createBrowserVaultReplica(
   );
   await yieldToBrowserVaultReplicaCancellation(input.signal);
   const replicaWithoutVersion: BrowserVaultReplica = {
-    assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(defaultProjectedVault)),
+    assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummaryFromBundle(defaultWearableBundle)),
     entities,
     experimentOutcomes: (input.experimentOutcomes ?? []).map((outcome) =>
       experimentOutcomeSchema.parse(outcome)

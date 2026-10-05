@@ -3,6 +3,13 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Focused wearable/blood reads, Browser Vault bundle reuse and finite empty-envelope
+verification (with metric sort deletion deferred for parity) are tracked
+in [the active global-projection plan](exec-plans/active/2026-10-02-focused-global-projection.md).
+The [query owner contract](../packages/query/README.md#ordinary-wearable-reads) and
+[native paired proof](../packages/vault-usecases/bench/global-projection.md) separate
+implemented behavior from pending parent measurements and live-product gates.
+
 Experiment-list family-local read implementation and local proof are recorded in
 [the completed latency plan](exec-plans/completed/2026-10-02-experiment-list-latency.md).
 [PR #3969](https://github.com/cobuildwithus/murph/pull/3969) owns final review,

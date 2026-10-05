@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-02",
+  "order": 100,
+  "item": {
+    "id": "focused-wearable-reads",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less extra work for saved health lookups",
+    "summary": "Murph keeps wearable and blood-test lookups focused on the records they need.",
+    "details": "Latest readings, activity, recovery and blood-test lists avoid unrelated search rebuilds. Preparing your Vault also reuses wearable calculations. Saved updates and deletions are still checked before Murph answers.",
+    "relevanceTags": ["wearables"],
+    "sourcePullRequests": []
+  }
+}

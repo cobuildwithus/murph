@@ -248,3 +248,21 @@ for implementation and local proof.
 [PR #3969](https://github.com/cobuildwithus/murph/pull/3969) owns final ReviewGPT,
 required finding disposition, exact-head CI (including any closeout head) and
 final mergeability. Local proof does not establish completion of those gates.
+
+### Focused ordinary wearable reads
+
+The query service's day/latest/metric/drift/activity/body/recovery operations now
+reuse the old unlocked path for fully fresh global rows, otherwise sharing
+query's existing focused wearable owner. Sleep retains its always-focused read.
+Input normalization and full service envelopes are unchanged; no usecase owns a second
+projection or freshness policy. The [query owner contract](../query/README.md#ordinary-wearable-reads)
+explains strict invalidation and synchronous freshness. The
+[synthetic paired benchmark and product gates](bench/global-projection.md) reuse
+the existing sleep fixture and native built public entrypoints, include deferred
+global work, and keep exact-byte proof separate from timing measurements.
+
+Blood-test listing likewise keeps its public envelope and matched-result behavior
+while query reuses the existing focused event acquisition owner. The same paired
+proof now includes blood workflows and full raw/default Browser Vault replicas;
+all necessary later global work remains counted. The proposed metric-aggregation
+sort deletion is deferred for the documented public-input ordering counterexample.

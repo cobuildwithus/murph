@@ -1843,13 +1843,21 @@ export function buildWearableAssistantSummary(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableAssistantSummary {
+  return buildWearableAssistantSummaryFromBundle(buildWearableSummaryBundle(vault, filters), filters);
+}
+
+/** The caller supplies a bundle already selected with these filters. */
+export function buildWearableAssistantSummaryFromBundle(
+  bundle: WearableSummaryBundle,
+  filters: WearableFilters = {},
+): WearableAssistantSummary {
   const {
     activityDays,
     bodyStateDays,
     recoveryDays,
     sleepNights,
     sourceHealth,
-  } = buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters));
+  } = bundle;
   const latestDate = collectLatestDate([
     activityDays[0]?.date,
     sleepNights[0]?.date,
