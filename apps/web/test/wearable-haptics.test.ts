@@ -122,6 +122,20 @@ describe("wearable command admission and claims", () => {
     expect(sessions.upsert).not.toHaveBeenCalled();
     expect(sessions.delete).not.toHaveBeenCalled();
   });
+  it("does not queue a buzz on a lease whose phone stopped polling", async () => {
+    const { sessions, commands } = store();
+    // Renewed ten seconds ago: the lease is unexpired, but no phone is claiming.
+    sessions.findUnique.mockResolvedValue({ sessionId, expiresAt: new Date(Date.now() + 10_000) });
+    expect(await send({ ...request, includeAvailability: true })).toMatchObject({ status: "unavailable", unavailableReason: "app_unreachable" });
+    expect(commands.create.mock.calls[0]![0].data).toMatchObject({ status: "unavailable", sessionId: null });
+  });
+  it("lets a reconnecting phone replace a stalled lease", async () => {
+    const { sessions } = store();
+    sessions.findUnique.mockResolvedValue({ userId: memberId, wearable: "whoop", sessionId, expiresAt: new Date(Date.now() + 10_000) });
+    const replacement = "00000000-0000-4000-8000-000000000002";
+    expect(await exchangeWearableCommands(memberId, { action: "connect", wearable: "whoop", sessionId: replacement })).toEqual({ active: true, commands: [] });
+    expect(sessions.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: expect.objectContaining({ sessionId: replacement }) }));
+  });
   it("binds receipts to claimed command, authenticated member and session", async () => {
     const { commands } = store();
     await exchangeWearableCommands(memberId, { action: "receipt", wearable: "whoop", sessionId, commandId: "a".repeat(64), status: "acknowledged" });

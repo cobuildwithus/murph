@@ -46,8 +46,18 @@ async function requireHapticAuthority(tx: Prisma.TransactionClient, memberId: st
   if (!authority || !direct) throw new TypeError("Wrist reminders require current private member input.");
 }
 
+// The phone renews its lease on every two-second poll while Murph is open. An
+// unexpired lease alone does not prove a poller remains, so admission and
+// displacement protection need a renewal within four poll intervals.
+const WEARABLE_SESSION_LIVE_MS = 8_000;
+
+function isWearableSessionLive(session: { expiresAt: Date }, now: Date): boolean {
+  const renewedAt = session.expiresAt.getTime() - WEARABLE_SESSION_TTL_MS;
+  return session.expiresAt > now && now.getTime() - renewedAt < WEARABLE_SESSION_LIVE_MS;
+}
+
 function isWearableSessionReady(session: { expiresAt: Date } | null, presence: CompanionPresence, now: Date): session is { expiresAt: Date } {
-  if (!session || session.expiresAt <= now) return false;
+  if (!session || !isWearableSessionLive(session, now)) return false;
   // A background report retires an older foreground lease. A newer lease still
   // works for legacy apps and after returning to the foreground.
   const backgroundAt = presence.lastContactAt !== presence.lastForegroundAt
@@ -77,6 +87,8 @@ export async function requestWearableHaptic(input: {
         ? { unavailableReason: wearableUnavailableReasonSchema.parse(reason) } : {}),
     });
     const unavailableReason = () => {
+      // An unexpired lease that is not ready lost its poller: Murph left the screen.
+      if (session && session.expiresAt > now) return "app_unreachable" as const;
       const foregroundAt = presence.lastForegroundAt ? Date.parse(presence.lastForegroundAt) : NaN;
       return presence.lastContactAt === presence.lastForegroundAt
         && foregroundAt <= now.getTime() && now.getTime() - foregroundAt < COMPANION_FOREGROUND_TTL_MS
@@ -122,7 +134,7 @@ export async function exchangeWearableCommands(memberId: string, request: Wearab
     if (request.action === "connect") {
       // A second phone cannot displace an active connection. Retired pollers
       // cannot register again without a fresh, explicit native connection.
-      if (current && current.expiresAt > now && current.sessionId !== request.sessionId) return { active: false, commands: [] };
+      if (current && isWearableSessionLive(current, now) && current.sessionId !== request.sessionId) return { active: false, commands: [] };
       const data = { sessionId: request.sessionId, expiresAt: new Date(now.getTime() + WEARABLE_SESSION_TTL_MS) };
       await tx.companionWearableSession.upsert({ where, create: { ...key, ...data }, update: data });
       return { active: true, commands: [] };

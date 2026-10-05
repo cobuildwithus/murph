@@ -29,8 +29,11 @@ Web migration/routes before the Worker tool and companion consumer.
 ## Delivery and results
 
 One session per member/vendor has a random UUID and a 20-second heartbeat lease.
-An active phone cannot be displaced by another phone. The native app polls every
-two seconds only while open with a ready band, and never uploads Bluetooth IDs,
+The native app polls every two seconds, so a session is live only when renewed
+within eight seconds. Only a live session admits commands or blocks another
+phone's connect; a stalled lease, usually left when Murph leaves the screen,
+reports `app_unreachable` and a reconnecting phone replaces it. A stalled poller
+that resumes before expiry keeps its session. The app polls only while open with a ready band, and never uploads Bluetooth IDs,
 device names, reminder text, or health values. Inactivity or reconnection creates
 a new session, so queued commands cannot leak to a later connection.
 
