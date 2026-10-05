@@ -16,8 +16,6 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
-Malformed referral-path routing plan: [`2026-10-05-referral-path-routing.md`](exec-plans/active/2026-10-05-referral-path-routing.md).
-
 Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
 [the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
 
@@ -299,6 +297,8 @@ Private memory selection and automatic compaction are owned by
 admission, and real-Codex fresh-conversation proof live in the assistant-engine
 memory and managed-automation tests. Implementation and review evidence is
 recorded in `exec-plans/completed/2026-09-20-memory-current-context.md`.
+
+Malformed referral-path routing plan: [`2026-10-05-referral-path-routing.md`](exec-plans/active/2026-10-05-referral-path-routing.md).
 
 ## Purpose
 
