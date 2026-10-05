@@ -16,6 +16,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Foreground checkpoint deadline handling for retained device-import alerts is
+owned by `RELIABILITY.md`; implementation and proof are tracked in
+[`device import checkpoint deadline`](exec-plans/completed/2026-10-04-device-import-checkpoint-deadline.md).
+
 Empty-import conversation acknowledgment propagation and idle wake convergence
 are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md).
 
@@ -658,6 +662,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-codex-0158-live-port.md` | Codex 0.158.0 public Live patch port, removal review, and native compatibility verification; deployment gates remain. | Historical implementation evidence | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
+| `agent-docs/exec-plans/completed/2026-10-02-checkpoint-progress-generation.md` | Canonical checkpoint-generation ownership correction and composed regression proof. | Checkpoint generation execution plan | Medium | 2026-10-02 |
 | `agent-docs/exec-plans/completed/2026-10-02-otp-parameter-diagnostic.md` | Bounded Verify parameter-hint telemetry and unchanged authentication proof. | OTP diagnostic execution plan | Medium | 2026-10-02 |
 | `agent-docs/exec-plans/completed/2026-09-25-linq-link-delay-notice.md` | Local implementation and delivery proof for one best-effort notice after a partial link send. | Historical delivery evidence | Low | 2026-09-25 |
 | `agent-docs/exec-plans/completed/2026-09-17-research-scout-failure-telemetry.md` | Three exact research error codes, parent-native verification and old-reader compatibility; rollout tracked separately. | Historical implementation evidence | Medium | 2026-09-17 |
@@ -989,3 +994,7 @@ SMS invalid-destination recovery format support is tracked in
 `../docs/hosted-auth-migration.md` remains the contract owner.
 
 Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
+
+Runaway invocation detection and local aggregate/incident proof are tracked in
+[the runaway alert plan](exec-plans/completed/2026-10-04-runtime-runaway-alert.md);
+`docs/hosted-runtime-log-database.md` owns the operational contract.

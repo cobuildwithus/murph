@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-02",
+  "order": 100,
+  "item": {
+    "id": "more-reliable-overlapping-saves",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable background saves",
+    "summary": "Murph can finish saving recent conversation changes when background updates complete at the same time.",
+    "details": "Overlapping saves preserve the latest completed background progress. This improves saving reliability without changing how replies are sent.",
+    "relevanceTags": [
+      "reliability",
+      "conversations"
+    ],
+    "sourcePullRequests": [
+      3987
+    ]
+  }
+}
