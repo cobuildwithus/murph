@@ -5,6 +5,9 @@ Callback preflight snapshots and shared mailbox progress reads are owned by
 is recorded in `exec-plans/completed/2026-10-02-db-pool-pressure.md`.
 [the ReviewGPT loop](operations/pr-reviewgpt-loop.md).
 
+ReviewGPT registry 0.5.152 consumer installation and retained compatibility proof
+are tracked in [the consumer repair plan](exec-plans/completed/2026-10-05-frog-reviewgpt-consumer-3937.md).
+
 Codex 0.160.0 reconciliation for the current PR is recorded in
 [the PR preparation plan](exec-plans/active/2026-10-01-codex-cli-0160-pr.md).
 
@@ -16,9 +19,16 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Unclaimed input typing cleanup is owned by `agent-docs/RELIABILITY.md`;
+implementation and proof are tracked in
+[`typing claim cleanup`](exec-plans/completed/2026-10-04-typing-claim-cleanup.md).
+
 Foreground checkpoint deadline handling for retained device-import alerts is
 owned by `RELIABILITY.md`; implementation and proof are tracked in
 [`device import checkpoint deadline`](exec-plans/completed/2026-10-04-device-import-checkpoint-deadline.md).
+
+Empty-import conversation acknowledgment propagation and idle wake convergence
+are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md).
 
 Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
 [the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
@@ -213,6 +223,8 @@ release record is
 Completed silent-input typing-alert classification is specified in
 `agent-docs/RELIABILITY.md`; the scoped implementation and verification record is
 [`2026-09-17-typing-terminal-classification.md`](exec-plans/completed/2026-09-17-typing-terminal-classification.md).
+The same RELIABILITY section owns the Linq provider-event wait start, and
+`../apps/web/README.md` owns the pre-handler boot diagnostics.
 
 Reply-latency alert scope for group threads, inputs resolved by an earlier
 non-reply, and multi-request provider-start classification is owned by
@@ -587,7 +599,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/feature-user-story-audit/testing-errors.md` | Test errors captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
-| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, locked usage-period acquisition, full canonical Codex tool-contract/CLI-upgrade guards and payload captures, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, shared runtime fixture preparation, compiler cache policy, and current coverage owners, including composed vault-share deadline, device dirty-payload classification/reconnect PostgreSQL proof, encrypted v2 hosted-local snapshot fixtures and canonical assertion readers with marked Docker bridge admission and canonical base64url IV validation, and independent Environment checkpoint ownership that preserves the earlier default-owned prefix, actual Habitat replica content, and metadata-only checkpoint timing with exact future-continuation owner release, accepted-runtime admission observation for reminder/device fairness, real Junction replay through a retained consumer wake and strict hosted completion with progress/auth checks, restored Environment completion after foreground replacement with real retry and second-message preemption proof, structural provider-stub failure diagnostics, shared Linq fixture CDN origins that preserve canonical metadata authentication, standby deadline fixtures, contention-aware PostgreSQL milestone proof, and monotonic foreground mailbox frontiers with same-user successor continuation evidence. Includes bounded live selector diagnostics, read-only exact-name discovery, selectable latency-query correctness and stress proof, and bounded signed Linq webhook redelivery proof, plus deployed-binary Codex WebSocket acknowledgement and stall proof. | Testing and CI truth | High | 2026-10-05 |
+| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, locked usage-period acquisition, full canonical Codex tool-contract/CLI-upgrade guards and payload captures, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, shared runtime fixture preparation, compiler cache policy, and current coverage owners, including composed vault-share deadline, device dirty-payload classification/reconnect PostgreSQL proof, encrypted v2 hosted-local snapshot fixtures and canonical assertion readers with marked Docker bridge admission and canonical base64url IV validation, and independent Environment checkpoint ownership that preserves the earlier default-owned prefix, actual Habitat replica content, and metadata-only checkpoint timing with exact future-continuation owner release, accepted-runtime admission observation for reminder/device fairness, real Junction replay through a retained consumer wake and strict hosted completion with progress/auth checks, restored Environment completion after foreground replacement with real retry and second-message preemption proof, structural provider-stub failure diagnostics, shared Linq fixture CDN origins that preserve canonical metadata authentication, standby deadline fixtures, contention-aware PostgreSQL milestone proof, and monotonic foreground mailbox frontiers with same-user successor continuation evidence. Includes bounded live selector diagnostics, read-only exact-name discovery, selectable latency-query correctness and stress proof, migrated-database setup for the composed usage-denial proof, and bounded signed Linq webhook redelivery proof, plus deployed-binary Codex WebSocket acknowledgement and stall proof. | Testing and CI truth | High | 2026-10-05 |
 | `packages/core/bench/README.md` | Secret-free Docker import and hydration reproduction, required one-vCPU latency CI budgets, and sizing evidence limits. | Container CPU benchmark | Medium | 2026-09-04 |
 | `packages/core/bench/container-sizing.md` | Synthetic Docker CPU/RAM sizing matrix, foreground profiling, and limits of production downsizing evidence. | Container sizing investigation | Medium | 2026-09-09 |
 | `packages/query/bench/README.md` | Reproduce synthetic query resource measurements through public canonical and query APIs in constrained Docker containers. | Query resource benchmarks | Medium | 2026-09-09 |
@@ -598,6 +610,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/references/hosted-postgres-runtime.md` | Postgres admission with foreground priority over unlaunched background preparation, canonical mutations, native provider authority and pending usage receipts, native wake and completion, uploads, bounded cleanup cadence, heartbeat-free snapshot publication with one managed session/receipt read, seven-day encrypted checkpoint recovery history, replacement vault integrity, user deletion, local controls, completed cutover, and retained migration history. | Hosted runtime ownership | High | 2026-09-30 |
 | `agent-docs/exec-plans/completed/2026-09-30-native-provider-authority.md` | Callback and credential deletion, native invocation authority, usage-outage regression proof, rollout boundaries, and final ReviewGPT pass. | Historical implementation evidence | Low | 2026-09-30 |
 | `agent-docs/references/hosted-runtime-protocol.md` | Closed checkpoint-generation rejection diagnostics; Graceful container drain and Codex exit cleanup; system checkpoint cancellation and numeric mailbox Web/Worker timing; Hosted operator provider authentication, mailbox/workspace checkpoints, v2-only live restore, derived artifact availability, inert legacy cache manifests, retained legacy object cleanup and canonical receipt recovery, hot admission and bounded history reads, stale delivery-wake recovery, exact ownership, idle restore publication, and accepted-work monitoring, including independent workspace attempts, shared canonical publication, single-pass device-hint coverage, bounded late system-mailbox import after completion recording with covered-schedule retirement and locked stale-schedule rejection, validated continuation scheduling, provider cadence separated from runtime retry deadlines, independent maintenance, bounded retention failure/blocker retries and stage diagnostics, future retry wakes after cold restore, vault-share deadline revalidation, fenced prior-snapshot reuse, background Browser Vault freshness, retired member shell hints with historical latency reads, deadline-bound operator diagnostic execution and status, exact future-continuation owner release, metadata-only checkpoint timing, committed Browser Vault publication before subsequent ordinary due work with timeout continuation delivery, completion ownership across foreground handoff and reuse, observation-only active-fence liveness without cleanup deferral, and bounded consent-aware group wearable freshness requests with source-specific gaps, independent recent-date recovery, conservative historical absence, and shared-history recovery, honest check times and optional schedule recovery. | Hosted execution architecture and bounded device-sync drain budgets | High | 2026-09-12 |
+| `agent-docs/exec-plans/completed/2026-10-05-instant-reply-trace-link.md` | Original inbound delivery linkage for Web instant-reply observations. | Execution plan | Medium | 2026-10-05 |
 | `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration, compatible controller-first bootstrap, checkpointed device-continuation rechecks, digest-bound production-core release admission, and explicit Web admission status delivery. | Hosted Temporal orchestration target | High | 2026-09-11 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-09-10 |
@@ -708,6 +721,9 @@ Five-minute ingress cache retention and member isolation proof are tracked in
 Mailbox callback phase diagnostics and lazy Google SDK loading are owned by
 `apps/web/README.md` under "Mailbox fetch timing". Implementation evidence is
 tracked in `exec-plans/completed/2026-09-21-mailbox-fetch-startup.md`.
+
+Private Linq member-route rejection classification is tracked in
+[the route diagnostic plan](exec-plans/completed/2026-10-05-linq-route-mismatch-diagnostic.md).
 
 ## Conventions
 
@@ -991,3 +1007,12 @@ SMS invalid-destination recovery format support is tracked in
 `../docs/hosted-auth-migration.md` remains the contract owner.
 
 Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
+
+Runaway invocation detection and local aggregate/incident proof are tracked in
+[the runaway alert plan](exec-plans/completed/2026-10-04-runtime-runaway-alert.md);
+`docs/hosted-runtime-log-database.md` owns the operational contract.
+
+Routine Junction daily-total wake batching and its local admission, release and
+PostgreSQL proof are tracked in
+[the routine webhook debounce plan](exec-plans/completed/2026-10-04-junction-routine-webhook-debounce.md);
+`../docs/device-sync-hosted-control-plane.md` owns the deferral contract.
