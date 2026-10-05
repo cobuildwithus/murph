@@ -986,3 +986,5 @@ SMS invalid-destination recovery format support is tracked in
 `../docs/hosted-auth-migration.md` remains the contract owner.
 
 Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
+
+Malformed referral-path routing plan: [`2026-10-05-referral-path-routing.md`](exec-plans/active/2026-10-05-referral-path-routing.md).

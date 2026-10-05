@@ -427,6 +427,17 @@ card without fallback text remains contentless there rather than receiving the
 active-member placeholder. This rule is app-card-specific; legacy media-only
 first contacts retain their existing behavior.
 
+The Web proxy rejects referral paths whose `/refer` prefix is immediately
+followed by a single-encoded slash or backslash before generated page loading.
+Its narrow matcher and fixed 404 preserve valid referral paths, encoded query
+values, normal missing-route handling, homepage negotiation, and workflow token
+validation. The isolated production routing proof uses no production credentials
+or full Web build:
+
+```sh
+pnpm exec node --import tsx apps/web/scripts/verify-referral-proxy-routing.ts
+```
+
 The public homepage also owns the browser fallback for shared response-card
 URLs. After hydration, a non-empty `#murph-card=` fragment opens the iPhone App
 Store handoff; the client compares only the prefix and presence of a value and

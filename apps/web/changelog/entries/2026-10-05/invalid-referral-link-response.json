@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-10-05",
+  "order": 100,
+  "item": {
+    "id": "invalid-referral-link-response",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "Clearer responses for invalid referral links",
+    "summary": "Some malformed referral links now show a not-found response instead of a server error.",
+    "details": "Valid referral links, including their query parameters, keep working as before.",
+    "relevanceTags": [
+      "referrals"
+    ],
+    "sourcePullRequests": []
+  }
+}
