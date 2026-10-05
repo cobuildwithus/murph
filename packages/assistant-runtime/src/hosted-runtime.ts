@@ -117,6 +117,7 @@ import { createHostedClinicalEnrichmentController, resolveHostedBackgroundReadCh
 import { runOneHostedClinicalEnrichment } from "./hosted-runtime/clinical-enrichment.ts";
 import { makeHostedClinicalEnrichmentWakeDue, setHostedClinicalEnrichmentWakeNextAttempt } from "./hosted-runtime/clinical-enrichment-wake.ts";
 import {
+  cancelHostedLinqInputTyping,
   createHostedAssistantChannelTypingDependencies,
 } from "./hosted-runtime/channel-activity.ts";
 import {
@@ -7748,6 +7749,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           await imageGenerationController?.close();
           await closeDetachedAssistantAskBeforeWorkspaceRelease();
         } finally {
+          await cancelHostedLinqInputTyping({ runtimeAttemptId: input.request.attemptId });
           hostAbortSignal?.removeEventListener("abort", abortFromHost);
         }
       }

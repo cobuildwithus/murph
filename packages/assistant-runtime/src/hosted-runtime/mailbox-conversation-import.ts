@@ -615,6 +615,8 @@ function startHostedConversationInputTyping(input: {
     return null;
   }
   return startHostedLinqInputTyping({
+    inputId: input.foregroundAssistantInputId,
+    runtimeAttemptId: input.runtimeAttemptId,
     forwardedEnv: input.runtime.forwardedEnv,
     latencyTraceContext: input.runtimeAttemptId ? {
       assistantInputIds: [input.foregroundAssistantInputId],

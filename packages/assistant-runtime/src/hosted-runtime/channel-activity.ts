@@ -37,6 +37,9 @@ type HostedLinqTypingTargetState = {
   cooldownUntilMs: number;
   cleanup?: () => void;
   preparation?: {
+    inputId: string;
+    runtimeAttemptId: string | null;
+    cancel(): Promise<void>;
     providerFetch: typeof fetch;
     take(signal?: AbortSignal): Promise<HostedLinqTypingHandle | undefined>;
   };
@@ -144,9 +147,9 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       }
       const existing = hostedLinqTypingTargets.get(target);
       if (existing?.preparation
-        && existing.preparation.providerFetch === input.providerFetch
-        && existing.activeUntilMs > Date.now()) {
-        return existing.preparation.take(input.signal);
+        && existing.preparation.providerFetch === input.providerFetch) {
+        const handle = await existing.preparation.take(input.signal);
+        if (handle) return handle;
       }
       const typingTarget = claimHostedLinqTypingTarget(target);
       return typingTarget ? startHostedLinqTypingForTarget(input, typingTarget) : undefined;
@@ -170,6 +173,8 @@ export function createHostedAssistantChannelTypingDependencies(input: {
 export function startHostedLinqInputTyping(input: Omit<
   HostedChannelTypingInput, "linqDeliveryContexts"
 > & {
+  inputId: string;
+  runtimeAttemptId?: string | null;
   linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
 }): (() => void) | null {
   const context = input.linqDeliveryContext;
@@ -196,6 +201,7 @@ export function startHostedLinqInputTyping(input: Omit<
   let ownerSignal: AbortSignal | undefined;
   let handedOff = false;
   let stopped = false;
+  let teardown: Promise<void> | undefined;
   const detach = () => ownerSignal?.removeEventListener("abort", stop);
   typingTarget.state.cleanup = detach;
   const ready = startHostedLinqTypingForTarget({
@@ -203,12 +209,16 @@ export function startHostedLinqInputTyping(input: Omit<
     signal: controller.signal,
   }, typingTarget).catch(() => undefined);
 
-  function stop(): void {
-    if (stopped) return;
+  function cancel(): Promise<void> {
     stopped = true;
     detach();
+    // Let an in-flight start settle before stopping it. Aborting an accepted
+    // request can lose its handle and leave the provider indicator running.
+    return teardown ??= ready.then((handle) => handle?.stop()).catch(() => {});
+  }
+  function stop(): void {
     controller.abort(ownerSignal?.reason);
-    void ready.then((handle) => handle?.stop()).catch(() => {});
+    void cancel();
   }
   function bindSignal(signal?: AbortSignal): void {
     detach();
@@ -219,8 +229,16 @@ export function startHostedLinqInputTyping(input: Omit<
   }
 
   typingTarget.state.preparation = {
+    inputId: input.inputId,
+    runtimeAttemptId: input.runtimeAttemptId ?? null,
+    cancel,
     providerFetch: input.providerFetch,
-    take(signal) {
+    async take(signal) {
+      if (stopped) {
+        await teardown;
+        return undefined;
+      }
+      if (typingTarget.state.activeUntilMs <= Date.now()) return undefined;
       handedOff = true;
       delete typingTarget.state.preparation;
       bindSignal(signal);
@@ -241,6 +259,23 @@ export function startHostedLinqInputTyping(input: Omit<
     });
   }).catch(() => {});
   return () => { if (!handedOff) stop(); };
+}
+
+// Only preparations remain here after import; taking a handle removes it.
+export async function cancelHostedLinqInputTyping(input: {
+  runtimeAttemptId?: string | null;
+  inputIds?: readonly string[];
+}): Promise<void> {
+  if (!input.runtimeAttemptId) return;
+  const stops: Promise<void>[] = [];
+  for (const state of hostedLinqTypingTargets.values()) {
+    const preparation = state.preparation;
+    if (preparation?.runtimeAttemptId === input.runtimeAttemptId
+      && (!input.inputIds || input.inputIds.includes(preparation.inputId))) {
+      stops.push(preparation.cancel());
+    }
+  }
+  await Promise.all(stops);
 }
 
 async function startHostedLinqTypingForTarget(
@@ -353,6 +388,7 @@ function releaseHostedLinqTypingTarget(input: HostedLinqTypingClaim, options: {
     return;
   }
   input.state.cleanup?.();
+  delete input.state.preparation;
   if (!options.completedMaxSession) {
     hostedLinqTypingTargets.delete(input.target);
     return;

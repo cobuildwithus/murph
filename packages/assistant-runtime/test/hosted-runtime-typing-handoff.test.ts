@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { initializeVault } from "@murphai/core";
-import { test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 import {
   TEST_NOW, TEST_USER_ID, createMailboxItem, createMailboxPort, createPlatform,
   createSnapshotFixtureRef, createWorkspacePort, createWorkspaceRuntimeJobInput,
@@ -36,9 +36,10 @@ vi.mock("../src/hosted-runtime/mailbox-conversation-import.ts", async (importOri
     ...actual,
     createHostedConversationMailboxImportItem: (
       input: Parameters<typeof actual.createHostedConversationMailboxImportItem>[0],
-    ) => async () => {
+    ) => async (_item: unknown, context?: { runtimeAttemptId?: string | null }) => {
       mocks.importedFetch = input.runtime.platform.providerFetch;
       mocks.cancel = startHostedLinqInputTyping({
+        inputId: "synthetic_input", runtimeAttemptId: context?.runtimeAttemptId,
         forwardedEnv: input.runtime.forwardedEnv, userEnv: input.runtime.userEnv,
         providerFetch: input.runtime.platform.providerFetch, linqDeliveryContext: route,
       });
@@ -48,10 +49,11 @@ vi.mock("../src/hosted-runtime/mailbox-conversation-import.ts", async (importOri
 });
 
 test.each([
-  { abortAfterHandoff: false, providerAvailable: true },
-  { abortAfterHandoff: true, providerAvailable: true },
-  { abortAfterHandoff: false, providerAvailable: false },
-])("runtime bridge preserves typing handoff and provider authority ($providerAvailable, abort: $abortAfterHandoff)", async ({ abortAfterHandoff, providerAvailable }) => {
+  { abortAfterHandoff: false, providerAvailable: true, skipTurn: false },
+  { abortAfterHandoff: false, providerAvailable: true, skipTurn: true },
+  { abortAfterHandoff: true, providerAvailable: true, skipTurn: false },
+  { abortAfterHandoff: false, providerAvailable: false, skipTurn: false },
+])("runtime bridge preserves typing handoff and provider authority ($providerAvailable, abort: $abortAfterHandoff, skipped: $skipTurn)", async ({ abortAfterHandoff, providerAvailable, skipTurn }) => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-typing-handoff-"));
   const events: string[] = [];
   const originalFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
@@ -90,6 +92,7 @@ test.each([
           assert.equal(mocks.start.mock.calls.length, 0);
           return { progressed: false };
         }
+        if (skipTurn) return { progressed: false };
         assert.ok(guardedFetch);
         assert.notEqual(guardedFetch, originalFetch);
         const typing = createHostedAssistantChannelTypingDependencies({
@@ -115,6 +118,7 @@ test.each([
     if (abortAfterHandoff) await assert.rejects(running, /Synthetic invocation ended/);
     else await running;
     assert.equal(checked, true);
+    if (skipTurn) expect(mocks.stop).toHaveBeenCalledOnce();
     assert.equal(originalFetch.mock.calls.length, 0, "aborted provider authority stays closed");
   } finally {
     mocks.cancel?.();
