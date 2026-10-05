@@ -705,7 +705,7 @@ Mailbox callback phase diagnostics and lazy Google SDK loading are owned by
 tracked in `exec-plans/completed/2026-09-21-mailbox-fetch-startup.md`.
 
 Private Linq member-route rejection classification is tracked in
-[the route diagnostic plan](exec-plans/active/2026-10-05-linq-route-mismatch-diagnostic.md).
+[the route diagnostic plan](exec-plans/completed/2026-10-05-linq-route-mismatch-diagnostic.md).
 
 ## Conventions
 
