@@ -491,7 +491,7 @@ The production-promotion continuity correction for the native iOS health canary
 is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/completed/2026-09-18-ios-canary-deployment-continuity.md).
 
 Package verifier worker-exit result preservation is tracked in
-[the verifier race plan](exec-plans/active/2026-10-05-verifier-exit-status-race.md).
+[the verifier race plan](exec-plans/completed/2026-10-05-verifier-exit-status-race.md).
 
 ## Canonical Docs
 

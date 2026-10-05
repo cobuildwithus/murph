@@ -1,6 +1,6 @@
 # Preserve worker results at verifier exit
 
-Status: active
+Status: completed
 Created: 2026-10-05
 Updated: 2026-10-05
 
@@ -59,4 +59,10 @@ observes worker exit, while retaining failure for nonzero or absent results.
 - Parent review confirms no new wait, retry, concurrency change or failure
   suppression; the existing result path handles status published during exit.
 - Shell syntax, repo-tools typecheck, whitespace, complexity and docs checks
-  pass; final ReviewGPT and exact-head CI remain pending.
+  pass. Final ReviewGPT round 1 passes on
+  `671636fc4a9771725862778621beb34ebf2035e5` with no findings; it independently
+  executes the four new and two existing shell harnesses. The review identifies
+  the exact commit; canonical preflight bound that commit to PR #4027.
+- Final plan closure is explanatory only; required CI must pass on the final
+  head. This internal functional fix remains for human merge.
+Completed: 2026-10-05
