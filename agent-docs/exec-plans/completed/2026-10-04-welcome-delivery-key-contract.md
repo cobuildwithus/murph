@@ -1,6 +1,6 @@
 # Preserve channel welcome delivery identity across acceptance
 
-Status: implementation verified; completion gates pending
+Status: completed
 Created: 2026-10-04
 Updated: 2026-10-05
 
@@ -31,13 +31,13 @@ The callback continues to lock receipts, materialize the home route, and record 
 - Corrected callback, admission, home-routing, and changelog suites: 220 passed, including all 57 callback cases.
 - Focused ESLint and whitespace checks passed.
 - Complexity guard passed: callback 31 to 30; total changed-file complexity 108 to 102. The remaining callback hotspot expresses its existing validation/transaction sequence; extracting wrappers would obscure the ordering without reducing policy.
-- Web typecheck, documentation drift, and documentation gardening passed. Exact-head CI and final review remain pending.
+- Web typecheck, documentation drift/gardening, exact-base/head documentation proof, and all five rendered PR evidence validators passed.
+- Final ReviewGPT round 1 on `5d3c944bfaa32369960b2b48e3920d35d19902dc`: PASS, zero qualifying or accepted findings. Accepted-turn identity and exact response hash verified; managed requested-model capture exceeded its minimum response time.
+- Required CLI platform and hosted Stripe boundary checks passed on the reviewed head. Release aggregation was still running at plan closeout; final-head required CI remains a PR handoff gate.
 
-## Completion
+## Completion and handoff
 
-1. Complete local checks and parent candidate review.
-2. Candidate committed and pushed; draft PR #4015 owns the correction and changelog provenance.
-3. Mark the stable candidate Ready and start final ReviewGPT concurrently with required CI.
-4. Keep this functional PR for human merge. Close the plan only after the completion gates resolve, or retain the specific blocker.
+PR #4015 contains the implementation and release-note provenance. Parent final review confirms that only the shared-validator substitution and duplicate-parser deletion change production behavior; the receipt transaction, route ownership, and followup sequence are unchanged. No unresolved review findings remain.
 
-No production change or recovery is claimed by the local regression result.
+This plan-closeout commit changes explanatory documentation only, so the resolved substantive review remains valid under the review-loop exemption. Required checks must pass on the final pushed head before merge readiness is reported. Keep the functional change for human merge, then use read-only deployed-revision and exact receipt/home-route evidence to verify production recovery. No production write or recovery occurred during this task.
+Completed: 2026-10-05
