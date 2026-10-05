@@ -189,8 +189,10 @@ describe.skipIf(!runPostgresProof)(
         await prisma.hostedMember.create({ data: member(userId, HostedBillingStatus.active) });
         await seedProgressLane({ createdAt: acceptedAt, kind, lane: "system", tx: prisma, userId });
         await seedProgressLane({ createdAt: foregroundAt, lane: "conversation", tx: prisma, userId });
+        // Production shape: the progress counter starts at zero and advances
+        // independently of the lease generation (first owner lease is 1+).
         await prisma.hostedWorkspace.create({ data: {
-          userId, checkpointedAt, systemMailboxProgressGeneration: 2n,
+          userId, checkpointedAt, systemMailboxProgressGeneration: 0n,
           redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" },
         } });
         await prisma.hostedRuntimeOwner.create({ data: {
@@ -225,15 +227,18 @@ describe.skipIf(!runPostgresProof)(
             generation: 2n, completedAt: null,
           } });
         }
+        for (const systemMailboxProgressGeneration of [null, 2n, 9n]) {
+          await prisma.hostedWorkspace.update({ where: { userId }, data: { systemMailboxProgressGeneration } });
+          await assertStalled(0);
+        }
         for (const override of [
-          { systemMailboxProgressGeneration: 1n },
           { redactedStatusJson: { hostedMailboxSystemImportedSeq: "0" } },
           { checkpointedAt: completedAt },
         ]) {
           await prisma.hostedWorkspace.update({ where: { userId }, data: override });
           await assertStalled(1);
           await prisma.hostedWorkspace.update({ where: { userId }, data: {
-            systemMailboxProgressGeneration: 2n, checkpointedAt,
+            systemMailboxProgressGeneration: 0n, checkpointedAt,
             redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" },
           } });
         }
