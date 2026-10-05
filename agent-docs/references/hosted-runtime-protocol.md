@@ -4679,8 +4679,13 @@ there is no historical lifecycle backfill.
 
 Web runs one Vercel-authenticated reply-latency monitor every five minutes over
 the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
-conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A
-recent accepted delivery at or above that boundary is anomalous. A trace at or
+conversation `consumed_at` facts. The fixed product boundary is 60 seconds. A
+recent accepted delivery at or above that boundary is anomalous unless its
+thread is explicitly a group (`thread_is_direct = false`): Murph may answer a
+busy group late or not at all, so group replies count as completed but never
+page. Unknown directness stays alertable. An input whose own turn committed
+valid `terminal_non_reply_committed` evidence at or before the delivery was
+already resolved and does not set that delivery's latency origin. A trace at or
 above the boundary with no accepted delivery and no durable consumed evidence
 is provisionally resolved only when it has valid
 `terminal_non_reply_committed` evidence and the runtime's latest
@@ -4698,8 +4703,10 @@ Every other latency leaf remains assign-once. For slow completed replies, the
 monitor compares
 accepted-to-provider-start with provider-start-to-first-visible-response and
 reports the larger measured boundary as pre-provider path or provider/assistant
-execution. Missing, ambiguous, or impossible provider chronology remains
-unknown. For unresolved replies, it separates missing valid terminal evidence
+execution. Inputs that arrive during a running turn get later provider
+requests, so the earliest provider start in the delivery bounds the
+pre-provider path. Missing or impossible provider chronology remains unknown.
+For unresolved replies, it separates missing valid terminal evidence
 from valid terminal non-reply evidence that still lacks durable checkpoint
 acknowledgement. Persisted incident details and alert email contain only these
 aggregate counts and durations.

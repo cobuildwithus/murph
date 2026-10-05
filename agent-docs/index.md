@@ -20,6 +20,10 @@ Unclaimed input typing cleanup is owned by `agent-docs/RELIABILITY.md`;
 implementation and proof are tracked in
 [`typing claim cleanup`](exec-plans/completed/2026-10-04-typing-claim-cleanup.md).
 
+Foreground checkpoint deadline handling for retained device-import alerts is
+owned by `RELIABILITY.md`; implementation and proof are tracked in
+[`device import checkpoint deadline`](exec-plans/completed/2026-10-04-device-import-checkpoint-deadline.md).
+
 Silent weekly usage-report checkpoint handoff and clean-build proof are tracked in
 [the remediation plan](exec-plans/completed/2026-10-02-weekly-usage-review-remediation.md).
 
@@ -85,6 +89,10 @@ The runtime mailbox contract remains in
 [CLI read validation telemetry](exec-plans/completed/2026-09-25-cli-read-validation-telemetry.md)
 records the locally verified implementation; [PR #3707](https://github.com/cobuildwithus/murph/pull/3707)
 owns delivery status. The contract remains in `docs/hosted-runtime-log-database.md`.
+
+Expected Linq dispatch-claim responses and preserved runtime replay safety are
+recorded in [dispatch claim results](exec-plans/completed/2026-10-02-linq-dispatch-result.md);
+the callback contract is owned by `apps/web/README.md`.
 
 Runtime ownership response timing is tracked in
 [the response plan](exec-plans/completed/2026-09-23-runtime-owner-response.md);
@@ -209,6 +217,10 @@ release record is
 Completed silent-input typing-alert classification is specified in
 `agent-docs/RELIABILITY.md`; the scoped implementation and verification record is
 [`2026-09-17-typing-terminal-classification.md`](exec-plans/completed/2026-09-17-typing-terminal-classification.md).
+
+Reply-latency alert scope for group threads, inputs resolved by an earlier
+non-reply, and multi-request provider-start classification is owned by
+`agent-docs/references/hosted-runtime-protocol.md`.
 
 Upcoming-context sparse plan edits, canonical timing precision, bounded ledger
 controls independent of source history, and disconnect invalidation are owned by
@@ -615,6 +627,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, exact tracked archive inputs, no base-update limit, response timing and evidence requirements, same-session waiting or paced polling by default, exact-metadata and transient-URL recovery, guarded companion snapshots, and invalid-first-attempt baseline recovery. | Final PR ReviewGPT loop | Medium | 2026-09-25 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion, daily recovery, checkpoint-owned continuation preflight, bounded deferral of future history, pending-start history scans, bounded completion-marker retention, and operation-local source admission reuse. | Device-sync ingestion contract | High | 2026-09-20 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
+| `agent-docs/exec-plans/completed/2026-10-02-connected-apps-response-schema-telemetry.md` | Private response-schema rejection attribution; implementation evidence recorded, closing-commit CI still required. | Completed telemetry execution plan | Medium | 2026-10-02 |
 | `agent-docs/exec-plans/completed/2026-09-13-cli-validation-diagnostics.md` | Bounded optional schema diagnostics, three existing knowledge source classifications and consumer-first rollout contract. | CLI diagnostics execution plan | High | 2026-09-13 |
 | `agent-docs/exec-plans/completed/2026-09-13-browser-vault-source-read-telemetry.md` | Fixed source-operation timing through existing Browser Vault timeout telemetry, with behavior-preserving proof and rollout gates. | Completed diagnostic implementation | High | 2026-09-13 |
 | `agent-docs/exec-plans/completed/2026-09-23-opening-history.md` | Current-account opening allowance, retained delivery evidence and PostgreSQL regression proof. | Completed implementation evidence | Medium | 2026-09-23 |

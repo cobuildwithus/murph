@@ -2711,7 +2711,19 @@ to apply after cutover.
   expires 15 minutes after the oldest outstanding pass for that connection,
   across attempts; repeated deferrals and restarts cannot extend it. Only the
   matching accepted checkpoint removes an outstanding pass. Runnable or unknown
-  queue evidence and overdue wakes retain conservative stall detection. Deferred
+  queue evidence and overdue wakes retain conservative stall detection unless
+  the connection is awaiting its active foreground attempt's recorded checkpoint
+  publication deadline. The bounded workspace read selects only the latest
+  ingress trace in the observation window, matches the active default-mode
+  owner's attempt and lease generation, and requires a completed foreground turn
+  with a valid unexpired deadline. It does not fall back to an older trace when
+  the latest evidence is missing or invalid. This grace applies only to unsaved
+  progress or a latest pass proving no runnable work, with all outstanding passes
+  owned by that same attempt. It ends at checkpoint acceptance or deadline expiry;
+  an older unsaved attempt, another connection's runnable no-progress work, and
+  a saved overdue queue remain eligible for alerts. The runtime may extend its
+  deadline after another foreground turn without resetting import progress.
+  No additional persisted state or runtime protocol is introduced. Deferred
   publication never counts as saved progress. Cycling and backlog detection use
   runnable observations within the same 15-minute continuity window independently of the
   wake, so eligibility cannot

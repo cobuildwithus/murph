@@ -29,7 +29,13 @@ export function createHostedWebConnectedAppsPort(input: {
       });
       const parsed = hostedConnectedAppsResponseSchema.safeParse(response);
       if (!parsed.success) {
-        throw new TypeError("Hosted connected apps returned an invalid response.");
+        const error = new TypeError("Hosted connected apps returned an invalid response.");
+        // Private diagnostics read own data; RPC recovery spreads enumerable fields.
+        Object.defineProperty(error, "code", {
+          value: "CONNECTED_APPS_RESPONSE_SCHEMA_INVALID",
+          enumerable: false,
+        });
+        throw error;
       }
       return parsed.data;
     },
