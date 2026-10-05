@@ -2506,7 +2506,13 @@ to apply after cutover.
   evidence. The existing per-chat claim retains one preparation handle; the
   validated turn takes it only through the same provider-fetch authority,
   rebinding cancellation without another start or a reset session budget.
-  Import failure cancels only an unclaimed preparation. Provider acceptance,
+  Import failure cancels only an unclaimed preparation. Terminal non-reply
+  completion also cancels the exact input's preparation in the same runtime;
+  invocation cleanup drains its remaining unclaimed preparations. A canceled
+  preparation settles any pending provider start and stop before a successor
+  turn starts typing. These best-effort effects never gate model admission,
+  never stop a handed-off turn, and retain the existing full-session cooldown.
+  Cleanup identity is independent of optional latency telemetry. Provider acceptance,
   never staging or a claimed target alone, supplies the retained timestamp.
   Its readiness promise covers admission before or after typing starts without
   a foreground telemetry wait. Telegram keeps turn-owned start. Failed
