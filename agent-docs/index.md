@@ -981,3 +981,6 @@ SMS invalid-destination recovery format support is tracked in
 `../docs/hosted-auth-migration.md` remains the contract owner.
 
 Reaction ambiguity and bounded gate latency proof: [reaction gate](exec-plans/completed/2026-10-02-reaction-gate-ambiguity.md).
+
+ReviewGPT registry 0.5.152 consumer installation and retained compatibility proof
+are tracked in [the consumer repair plan](exec-plans/active/2026-10-05-frog-reviewgpt-consumer-3937.md).
