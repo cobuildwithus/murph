@@ -982,7 +982,7 @@ callback statements retain the 5,000-row statement cap and use a dedicated
 ### Runaway invocation alert
 
 The existing five-minute `/api/internal/hosted-runtime/latency-alert/cron` also
-runs the runaway invocation monitor. A subject with at least 40
+runs the runaway invocation monitor. A subject with at least 25
 `runtime.invocation_finished` rows in the trailing 60 minutes opens the shared
 operational email incident. Threshold and window are named constants; recipient
 and timezone configuration is shared with the latency monitor. Reminders use

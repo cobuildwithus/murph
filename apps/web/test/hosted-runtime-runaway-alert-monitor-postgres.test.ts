@@ -1,6 +1,9 @@
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { readHostedRuntimeRunawayHealth } from "@/src/lib/hosted-runtime-log/runaway-alert-monitor";
+import {
+  HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD as THRESHOLD,
+  readHostedRuntimeRunawayHealth,
+} from "@/src/lib/hosted-runtime-log/runaway-alert-monitor";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const databaseUrl = process.env.DATABASE_URL ?? "";
@@ -35,21 +38,21 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     ]);
   }
 
-  it.each([39, 40, 41])("evaluates the actual SQL threshold at %s events", async count => {
+  it.each([THRESHOLD - 1, THRESHOLD, THRESHOLD + 1])("evaluates the actual SQL threshold at %s events", async count => {
     await seed(count);
     expect(await readHostedRuntimeRunawayHealth({ now, database })).toMatchObject({
-      anomalous: count >= 40, runawaySubjectCount: count >= 40 ? 1 : 0,
+      anomalous: count >= THRESHOLD, runawaySubjectCount: count >= THRESHOLD ? 1 : 0,
     });
   });
 
   it("excludes old, future and unrelated events, includes the exact window boundary", async () => {
-    await seed(39);
+    await seed(THRESHOLD - 1);
     await seed(50, { at: new Date(+now - 60 * 60_000 - 1) });
     await seed(50, { at: new Date(+now + 1) });
     await seed(50, { event: "runner.processing_finished" });
     expect((await readHostedRuntimeRunawayHealth({ now, database })).anomalous).toBe(false);
     await seed(1, { at: new Date(+now - 60 * 60_000) });
-    expect((await readHostedRuntimeRunawayHealth({ now, database })).subjects[0]?.invocationCount).toBe(40);
+    expect((await readHostedRuntimeRunawayHealth({ now, database })).subjects[0]?.invocationCount).toBe(THRESHOLD);
   });
 
   it("caps top subjects while preserving the total and dominant redacted labels", async () => {

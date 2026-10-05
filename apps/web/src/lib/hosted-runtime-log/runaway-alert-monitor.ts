@@ -12,7 +12,7 @@ import { getPrisma } from "../prisma";
 import { getHostedRuntimeLogPool, isHostedRuntimeLogDatabaseConfigured } from "./database";
 import type { HostedRuntimeLogSqlDatabase } from "./store";
 
-export const HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD = 40;
+export const HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD = 25;
 export const HOSTED_RUNTIME_RUNAWAY_WINDOW_MS = 60 * 60_000;
 export const HOSTED_RUNTIME_RUNAWAY_SUBJECT_LIMIT = 10;
 export const HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;

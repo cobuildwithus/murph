@@ -1016,3 +1016,7 @@ Routine Junction daily-total wake batching and its local admission, release and
 PostgreSQL proof are tracked in
 [the routine webhook debounce plan](exec-plans/completed/2026-10-04-junction-routine-webhook-debounce.md);
 `../docs/device-sync-hosted-control-plane.md` owns the deferral contract.
+
+The runaway invocation alert threshold change (40 to 25 per trailing hour) is
+tracked in [the threshold plan](exec-plans/completed/2026-10-05-runaway-alert-threshold-25.md);
+`../docs/hosted-runtime-log-database.md` owns the operational contract.
