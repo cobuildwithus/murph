@@ -1,6 +1,6 @@
 # Wake-driven wearable delivery with background Bluetooth
 
-Status: active
+Status: completed
 Created: 2026-10-05
 Updated: 2026-10-05
 
@@ -154,3 +154,16 @@ when the route belongs to the link's installation, on fixed reserved deadlines:
   apple-push with a fake transport; web typecheck.
 - iOS: CI xcodebuild tests for delivery, wake coordinator deadlines, restoration;
   physical-device matrix above on a TestFlight build.
+
+## Outcome
+
+- Web (PR #4033): live legacy leases, short in-turn waits, wake actions, push
+  route, Apple push sender, silent-first wake with visible fallback, and account
+  deletion coverage. Dormant until APNs credentials are configured.
+- iOS (`murph-ios` `feat/wearable-wake`): background Bluetooth, push
+  registration, wake relay, and one serialized delivery pass.
+- Follow-ups outside this plan: APNs key and Push capability provisioning,
+  physical-device proof on a TestFlight build, `murph.device` delivery wording
+  after that proof, measuring terminated-app wakes before adding Bluetooth state
+  restoration, and deleting the poll actions once 1.1.21 apps age out.
+Completed: 2026-10-05
