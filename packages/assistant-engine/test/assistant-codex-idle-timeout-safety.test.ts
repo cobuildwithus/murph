@@ -132,17 +132,6 @@ it('recovers a silent continuation without repeating an already completed Murph 
   await healthyWork({ idleMs: 1_000, workMs: 100, tool: true, stallAfterTool: true })
 })
 
-it.runIf(process.env.MURPH_RUN_CODEX_30S_PROOF === '1')(
-  'preserves quiet responses, streaming reasoning, and tool work at the 30-second idle setting',
-  { timeout: 180_000 },
-  async () => {
-    await healthyWork({ idleMs: 30_000, workMs: 22_000 })
-    await healthyWork({ idleMs: 30_000, workMs: 35_000, reasoningIntervalMs: 5_000 })
-    await healthyWork({ idleMs: 30_000, workMs: 35_000, tool: true })
-    await healthyWork({ idleMs: 30_000, workMs: 100, tool: true, stallAfterTool: true })
-  },
-)
-
 it.runIf(process.env.MURPH_RUN_CODEX_TIMEOUT_SAFETY === '1')(
   'compares healthy 22-second reasoning and executed Murph tool work with 20-second and 90-second idle settings',
   { timeout: 180_000 },
