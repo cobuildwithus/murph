@@ -3970,7 +3970,11 @@ workspace checkpoint that retains the prior snapshot ref. Web retains its
 workspace-version CAS and equal-or-plus-one generation invariant; rejected
 transitions add only a fixed regression, skipped-increment, or invalid-initial
 error code to the existing publication-failure event, never generation values
-or checkpoint contents. Capacity, log shape, and payload lengths are validated before
+or checkpoint contents. After draining system work, idle snapshots derive their
+progress generation from the checkpoint builder's latest accepted workspace,
+which also owns the expected workspace version. A foreground projection can
+precede canonical publications and must not supply an older generation.
+Capacity, log shape, and payload lengths are validated before
 upload. The complete immutable payload, receipt, and log artifact set then
 uploads in small fixed concurrent waves; every started wave settles before a
 failure returns, and the checkpoint publishes the log ref only after the whole
