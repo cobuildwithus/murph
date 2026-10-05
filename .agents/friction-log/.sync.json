@@ -1795,6 +1795,10 @@
     {
       "issue": "cobuildwithus/murph#3990",
       "path": ".agents/friction-log/20261002154106-one-shot-scripted/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4000",
+      "path": ".agents/friction-log/20261002151655-system-mailbox-focused/friction.md"
     }
   ],
   "version": 1
