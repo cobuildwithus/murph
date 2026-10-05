@@ -2457,12 +2457,17 @@ to apply after cutover.
   requested checkpoint; only the finished event's `webCheckpointAccepted`
   establishes Web acceptance. Malformed timestamp values and raw wake reasons
   are never copied into these fields.
-- Per-message typing alerts independently measure the Web route's receipt instant
-  through the earliest accepted typing indicator: strictly over 3 seconds for a
-  warm workspace and over 8 seconds for a cold workspace. Mailbox acceptance
-  remains its existing timestamp; it never substitutes for webhook receipt.
+- Per-message typing alerts independently measure the member's wait through the
+  earliest accepted typing indicator: strictly over 3 seconds for a warm
+  workspace and over 8 seconds for a cold workspace. Linq waits start at the
+  latest recorded provider event for the exact member-bound message (its own
+  creation, or a later edit), never after the Web route's receipt instant, so
+  time before the route runs, such as a fresh Web instance boot, counts.
+  Without that event, and for Telegram, the wait starts at route receipt.
+  Mailbox acceptance remains its existing timestamp; it never substitutes for
+  either start.
   For unanswered Linq inputs, the latest accepted message in the same chat
-  resets the silence start between receipt and the first typing acceptance
+  resets the silence start between that start and the first typing acceptance
   (or the missing-observation check). A reply does not exempt subsequent silence.
   An accepted reply linked to this exact input ends its wait; no later typing
   is required for an already-answered input. Existing blinded provider message/chat
@@ -2472,8 +2477,9 @@ to apply after cutover.
   five-minute expiry, then silence resumes from that endpoint. Missing correlation,
   failed sends, and sends after the measured typing endpoint cannot reset the clock.
   Missing typing retains a 30-second telemetry grace from the silence start;
-  observed typing uses the strict warm/cold threshold. Frozen emails retain both
-  receipt and silence-start timestamps; older records retain their original text.
+  observed typing uses the strict warm/cold threshold. Frozen emails retain the
+  receipt and silence-start timestamps, plus the provider event's creation when
+  it preceded receipt; older records retain their original text.
   Telegram retains exact-input typing observations and the existing thresholds.
   Accepted-typing persistence waits for competing short trace-row writes in the
   detached callback; other retry-backed milestones keep skipping locked rows.
@@ -2506,7 +2512,13 @@ to apply after cutover.
   evidence. The existing per-chat claim retains one preparation handle; the
   validated turn takes it only through the same provider-fetch authority,
   rebinding cancellation without another start or a reset session budget.
-  Import failure cancels only an unclaimed preparation. Provider acceptance,
+  Import failure cancels only an unclaimed preparation. Terminal non-reply
+  completion also cancels the exact input's preparation in the same runtime;
+  invocation cleanup drains its remaining unclaimed preparations. A canceled
+  preparation settles any pending provider start and stop before a successor
+  turn starts typing. These best-effort effects never gate model admission,
+  never stop a handed-off turn, and retain the existing full-session cooldown.
+  Cleanup identity is independent of optional latency telemetry. Provider acceptance,
   never staging or a claimed target alone, supplies the retained timestamp.
   Its readiness promise covers admission before or after typing starts without
   a foreground telemetry wait. Telegram keeps turn-owned start. Failed
@@ -2587,9 +2599,9 @@ to apply after cutover.
   facts never acknowledge mailbox consumption; the checkpoint retains ownership.
   A system head ages from its accepted mailbox creation time.
   Imported `member.activated` and `device-sync.wake` work may defer their alerts
-  while the same active default-mode runtime owns both its workspace progress
-  generation and the
-  latest foreground trace's attempt/generation. That trace must prove a terminal
+  while the active default-mode runtime owner matches the latest foreground
+  trace's attempt and lease generation. The workspace system-mailbox progress
+  generation is an independent counter and never binds this evidence. That trace must prove a terminal
   reply or no-reply after the system head and last workspace checkpoint, with an
   unexpired runtime-owned checkpoint deadline. Read only the newest trace through
   the existing member/acceptance index; never fall back to older evidence when
@@ -2705,7 +2717,19 @@ to apply after cutover.
   expires 15 minutes after the oldest outstanding pass for that connection,
   across attempts; repeated deferrals and restarts cannot extend it. Only the
   matching accepted checkpoint removes an outstanding pass. Runnable or unknown
-  queue evidence and overdue wakes retain conservative stall detection. Deferred
+  queue evidence and overdue wakes retain conservative stall detection unless
+  the connection is awaiting its active foreground attempt's recorded checkpoint
+  publication deadline. The bounded workspace read selects only the latest
+  ingress trace in the observation window, matches the active default-mode
+  owner's attempt and lease generation, and requires a completed foreground turn
+  with a valid unexpired deadline. It does not fall back to an older trace when
+  the latest evidence is missing or invalid. This grace applies only to unsaved
+  progress or a latest pass proving no runnable work, with all outstanding passes
+  owned by that same attempt. It ends at checkpoint acceptance or deadline expiry;
+  an older unsaved attempt, another connection's runnable no-progress work, and
+  a saved overdue queue remain eligible for alerts. The runtime may extend its
+  deadline after another foreground turn without resetting import progress.
+  No additional persisted state or runtime protocol is introduced. Deferred
   publication never counts as saved progress. Cycling and backlog detection use
   runnable observations within the same 15-minute continuity window independently of the
   wake, so eligibility cannot

@@ -201,6 +201,7 @@ const ERROR_CATEGORIES = new Map<string, ToolErrorCategory>([
   ['CONNECTED_APPS_MEMBER_INACTIVE', 'authority_rejected'],
   ['CONNECTED_APPS_PERSONAL_MEMBER_REQUIRED', 'authority_rejected'],
   ['CONNECTED_APPS_REQUEST_INVALID', 'invalid_input'],
+  ['CONNECTED_APPS_RESPONSE_SCHEMA_INVALID', 'invalid_result'],
   ['CONNECTED_APPS_TOOLKIT_MISMATCH', 'invalid_input'],
   ['CONNECTED_APPS_TOOLKIT_NOT_CONFIGURED', 'unavailable'],
   ['CONNECTED_APPS_WRITE_ARGUMENT_NOT_ALLOWED', 'invalid_input'],

@@ -535,7 +535,6 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           AND owner.processing_mode = 'default'
           AND owner.completed_at IS NULL
           AND owner.attempt_id = foreground.runtime_attempt_id
-          AND owner.generation = workspace_evidence.workspace_system_mailbox_progress_generation
           AND owner.generation::text = foreground.phase_breakdown_json -> 'assistant' ->> 'runtimeLeaseGeneration'
       ) AS foreground_checkpoint ON TRUE
       LEFT JOIN LATERAL (

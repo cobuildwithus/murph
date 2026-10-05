@@ -1267,7 +1267,11 @@ boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
   separately named workflow leg makes these invariants visible without
   replacing the two aggregate required checks.
 - `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
-  same exact 30-second boundary for completed and still-unresolved Linq traces,
+  same exact 60-second boundary for completed and still-unresolved Linq traces,
+  keeps explicit group-thread replies out of the first-response alert while
+  unknown directness stays alertable, drops inputs resolved by an earlier
+  non-reply from a later delivery's origin, classifies multi-request replies by
+  their earliest provider start,
   excludes chronologically valid AI usage-denied traces before grouping while
   keeping mixed unblocked rows and impossible denial chronology alertable, and
   applies the bounded-read truncation signal only to that alertable population,

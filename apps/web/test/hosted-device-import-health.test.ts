@@ -17,6 +17,68 @@ function health(observations: DeviceImportObservation[], due = true) {
 }
 
 describe("device import progress and efficiency alerts", () => {
+  function withPublication(observations: DeviceImportObservation[], patch: {
+    subjectKey?: string; attemptId?: string; expectedBy?: Date;
+  } = {}) {
+    return summarizeDeviceImportHealth({ now, observations,
+      dueSubjects: new Set(["synthetic-subject"]),
+      checkpointPublications: new Map([[patch.subjectKey ?? "synthetic-subject", {
+        attemptId: patch.attemptId ?? "attempt-a",
+        expectedBy: patch.expectedBy ?? new Date(+now + 4 * minute),
+      }]]),
+    });
+  }
+
+  it.each([{ runnable: false }, { progressed: true }])(
+    "honors a matching foreground publication deadline for unsaved work (%j)", (patch) => {
+      const rows = [row(28, { progressed: true }), checkpoint(27), row(20, patch)];
+      expect(health(rows).stalled.anomalous).toBe(true);
+      expect(withPublication(rows).stalled.anomalous).toBe(false);
+      expect(withPublication(rows, { expectedBy: now }).stalled.anomalous).toBe(false);
+      const expired = withPublication(rows, { expectedBy: new Date(+now - 1) });
+      expect(expired.stalled).toEqual(health(rows).stalled);
+      // A later foreground completion may publish a new deadline without
+      // changing the retained import observations or their progress clock.
+      expect(withPublication(rows, { expectedBy: new Date(+now + minute) }).stalled.anomalous).toBe(false);
+    },
+  );
+
+  it("does not grant grace from another subject, attempt, or invalid deadline", () => {
+    const rows = [row(25, { runnable: false })];
+    for (const patch of [
+      { subjectKey: "other-subject" }, { attemptId: "other-attempt" },
+      { expectedBy: new Date(NaN) },
+    ]) expect(withPublication(rows, patch).stalled.anomalous).toBe(true);
+  });
+
+  it("does not let a foreground deadline hide older unsaved attempts or runnable no-progress work", () => {
+    expect(withPublication([row(26, { attemptId: "old-attempt" }),
+      row(18, { runnable: false })]).stalled.anomalous).toBe(true);
+    for (const runnable of [true, null]) {
+      expect(withPublication([row(25, { runnable })]).stalled.anomalous).toBe(true);
+    }
+    expect(withPublication([row(25, { runnable: false, attemptId: null })])
+      .stalled.anomalous).toBe(true);
+  });
+
+  it("keeps grace connection-scoped and stops granting it after checkpoint acceptance", () => {
+    const deferred = [row(25, { runnable: false })];
+    expect(withPublication(deferred).stalled.anomalous).toBe(false);
+    expect(withPublication([...deferred, row(24, { connectionKey: "b".repeat(64) })])
+      .stalled.anomalous).toBe(true);
+    expect(withPublication([...deferred, checkpoint(1)]).stalled.anomalous).toBe(true);
+    expect(withPublication([...deferred, row(1, { pending: false }), checkpoint(0)])
+      .stalled.anomalous).toBe(false);
+  });
+
+  it("does not count foreground publication grace as saved progress or silence cycling", () => {
+    const rows = [19, 14, 9, 4].map(age => row(age, { restarted: true, progressed: true }));
+    const result = withPublication(rows);
+    expect(result.stalled.anomalous).toBe(false);
+    expect(result.cycling).toEqual(health(rows).cycling);
+    expect(result.cycling.savedProgressPassCount).toBe(0);
+  });
+
   it("detects 15 minutes without saved progress, including a silent due queue", () => {
     expect(health([row(15)]).stalled.anomalous).toBe(true);
     expect(health([row(14.99)]).stalled.anomalous).toBe(false);

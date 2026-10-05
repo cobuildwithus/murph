@@ -17,12 +17,21 @@ import {
 const HOSTED_LINQ_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 const handleHostedOnboardingLinqWebhookWithVisibleSecondaryOutcomes =
   withHostedVisibleSecondaryLinqOutcomes(handleHostedOnboardingLinqWebhook);
+// Time spent before this handler runs is invisible to `webhookReceivedAt`.
+// Process and module age at route start show whether that time went to a
+// fresh process boot, a lazy route load, or somewhere before our process.
+const routeModuleLoadedAtMs = Date.now();
+let routeModuleRequestOrdinal = 0;
 
 export const POST = withJsonError(async (request: Request) => {
   const routeStartedAtMs = Date.now();
+  routeModuleRequestOrdinal += 1;
   const signature = request.headers.get("x-webhook-signature");
   const timestamp = request.headers.get("x-webhook-timestamp");
   const routeTiming = startHostedOnboardingTiming("hosted-onboarding.route.linq-webhook", {
+    processUptimeMs: Math.round(process.uptime() * 1_000),
+    routeModuleAgeMs: routeStartedAtMs - routeModuleLoadedAtMs,
+    routeModuleRequestOrdinal,
     signalAbortedAtStart: request.signal.aborted,
     signaturePresent: Boolean(signature),
     timestampPresent: Boolean(timestamp),

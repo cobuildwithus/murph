@@ -27,7 +27,11 @@ import {
   type HostedStandbyRunnerContainerStubLike,
   type HostedStandbySlotBinding,
 } from "../src/standby-runner-contract.js";
-import { StandbyRunnerCoordinatorDurableObject } from "../src/worker/standby-runner-coordinator-durable-object.js";
+import {
+  HOSTED_STANDBY_INVENTORY_ANALYTICS_SCHEMA,
+  StandbyRunnerCoordinatorDurableObject,
+} from "../src/worker/standby-runner-coordinator-durable-object.js";
+import type { WorkerAnalyticsEngineDatasetLike } from "../src/worker-contracts.js";
 import { handleStandbyRunnerScheduled } from "../src/worker/index.js";
 import { handleTestEnsureStandbyReadyRoute } from "../src/worker/route-handlers/test-standby.js";
 import {
@@ -819,6 +823,81 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     assert(!facts.includes("member"));
   });
 
+  it("records each claim with the ready inventory it saw and each refill without identifiers", async () => {
+    const h = createCoordinatorHarness();
+    h.ensure();
+    await h.flush();
+    assert.deepEqual(standbyPoints(h, "prepare").map(({ detail, outcome }) => [detail, outcome]), [
+      ["refill", "ready"],
+      ["refill", "ready"],
+    ]);
+    h.analytics.writeDataPoint.mockClear();
+    const claimId = createHostedStandbyClaimId();
+    const first = h.claim(claimId);
+    assert.equal(first.outcome, "claimed");
+    assert.equal(h.claim().outcome, "claimed");
+    assert.equal(h.claim().outcome, "no_ready_slot");
+    assert.deepEqual(h.claim(claimId), first);
+    assert.deepEqual(standbyPoints(h, "claim"), [
+      { detail: "claimed", outcome: "", ready: 2, provisioning: 0, target: 2 },
+      { detail: "claimed", outcome: "", ready: 1, provisioning: 0, target: 2 },
+      { detail: "no_ready_slot", outcome: "", ready: 0, provisioning: 0, target: 2 },
+      { detail: "replayed", outcome: "", ready: 0, provisioning: 0, target: 2 },
+    ]);
+    await h.flush();
+    assert.deepEqual(
+      standbyPoints(h, "prepare").map(({ detail, outcome, ready }) => [detail, outcome, ready]).sort(),
+      [["refill", "ready", 1], ["refill", "ready", 2]],
+    );
+    const serialized = JSON.stringify(h.analytics.writeDataPoint.mock.calls);
+    assert(!serialized.includes(claimId));
+    for (const slotName of h.slots.keys()) assert(!serialized.includes(slotName));
+  });
+
+  it("keeps claims and refills independent of analytics failures", async () => {
+    const h = createCoordinatorHarness();
+    h.analytics.writeDataPoint.mockImplementation(() => {
+      throw new Error("synthetic analytics failure");
+    });
+    h.ensure();
+    await h.flush();
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 2);
+    assert.equal(h.claim().outcome, "claimed");
+    await h.flush();
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 2);
+    assert.equal(prepareCount(h), 3);
+  });
+
+  it("records reproof and failed preparation outcomes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    let preparing = 0;
+    const h = createCoordinatorHarness({ async prepare() {
+      preparing += 1;
+      if (preparing === 4) throw new Error("synthetic reproof failure");
+    } });
+    h.ensure();
+    await h.flush();
+    vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+    await h.coordinator.alarm();
+    await h.flush();
+    vi.setSystemTime(CLAIMED_AT_MS + 120_000);
+    await h.coordinator.alarm();
+    await h.flush();
+    h.ensure();
+    await h.flush();
+    const prepares = standbyPoints(h, "prepare");
+    assert.deepEqual(prepares.slice(0, 4).map(({ detail, outcome }) => [detail, outcome]), [
+      ["refill", "ready"],
+      ["refill", "ready"],
+      ["reproof", "ready"],
+      ["reproof", "failed"],
+    ]);
+    assert.deepEqual(prepares.at(-1), {
+      detail: "refill", outcome: "ready", ready: 2, provisioning: 0, target: 2,
+    });
+  });
+
   it("recovers a synchronous claim from SQLite under its already-persisted inventory alarm", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(CLAIMED_AT_MS);
@@ -1537,11 +1616,13 @@ function createCoordinatorHarness(input: {
     }
     return slot;
   });
+  const analytics = { writeDataPoint: vi.fn<WorkerAnalyticsEngineDatasetLike["writeDataPoint"]>() };
   const environment: Record<string, unknown> & {
     RUNNER_CONTAINER: { getByName: typeof runnerGet };
     STANDBY_RUNNER_CONTAINER: { getByName: typeof legacyGet };
   } = {
     CF_VERSION_METADATA: { id: RELEASE_ID },
+    HOSTED_STANDBY_ANALYTICS: analytics,
     HOSTED_EXECUTION_STANDBY_MODE: input.mode ?? "allocate",
     HOSTED_EXECUTION_STANDBY_TARGET: input.target,
     RUNNER_CONTAINER: { getByName: runnerGet },
@@ -1549,7 +1630,7 @@ function createCoordinatorHarness(input: {
   };
   const coordinator = new StandbyRunnerCoordinatorDurableObject(state, environment);
   return {
-    coordinator, db, environment, legacyGet, legacySlots, pending, runnerGet, setAlarm, slots, state,
+    analytics, coordinator, db, environment, legacyGet, legacySlots, pending, runnerGet, setAlarm, slots, state,
     claim(claimId = createHostedStandbyClaimId()) {
       return coordinator.claimReadyStandby({
         claimId, deadlineAtEpochMs: Date.now() + 250, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
@@ -1582,6 +1663,25 @@ function createCoordinatorSlot(
       return base.retireStandbySlot(input);
     }),
   };
+}
+
+function standbyPoints(h: ReturnType<typeof createCoordinatorHarness>, event: "claim" | "prepare") {
+  return h.analytics.writeDataPoint.mock.calls.map(([point]) => point)
+    .filter((point) => point.indexes?.[0] === event)
+    .map((point) => {
+      assert.deepEqual(point.indexes, [event]);
+      assert.equal(point.blobs?.[0], HOSTED_STANDBY_INVENTORY_ANALYTICS_SCHEMA);
+      assert.equal(point.blobs?.[1], event);
+      assert.equal(point.doubles?.[0], 1);
+      assert((point.doubles?.[4] ?? -1) >= 0);
+      return {
+        detail: point.blobs?.[2],
+        outcome: point.blobs?.[3],
+        ready: point.doubles?.[1],
+        provisioning: point.doubles?.[2],
+        target: point.doubles?.[3],
+      };
+    });
 }
 
 function prepareCount(h: ReturnType<typeof createCoordinatorHarness>): number {

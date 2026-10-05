@@ -17,6 +17,7 @@ interface TypingAlertRow {
   id: string;
   source: string;
   webhookReceivedAt: Date;
+  providerEventCreatedAtEpochMs: bigint | null;
   silenceStartedAtEpochMs: bigint;
   typingAcceptedAtEpochMs: bigint | null;
   workspaceState: "warm" | "cold" | "unconfirmed";
@@ -60,6 +61,8 @@ export async function runHostedRuntimeTypingAlertMonitor(input: TypingAlertInput
         schemaVersion: 1,
         source: row.source,
         webhookReceivedAt: row.webhookReceivedAt.toISOString(),
+        providerEventCreatedAt: row.providerEventCreatedAtEpochMs === null
+          ? null : new Date(Number(row.providerEventCreatedAtEpochMs)).toISOString(),
         silenceStartedAt: new Date(Number(row.silenceStartedAtEpochMs)).toISOString(),
         typingAcceptedAt: row.typingAcceptedAtEpochMs === null
           ? null : new Date(Number(row.typingAcceptedAtEpochMs)).toISOString(),
@@ -111,6 +114,11 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         trace.webhook_received_at,
         trace.provider_start_at,
         EXTRACT(EPOCH FROM trace.webhook_received_at AT TIME ZONE 'UTC') * 1000 AS received_ms,
+        origin.at AS origin_at,
+        EXTRACT(EPOCH FROM origin.at AT TIME ZONE 'UTC') * 1000 AS origin_ms,
+        CASE WHEN origin.at < trace.webhook_received_at
+          THEN EXTRACT(EPOCH FROM origin.at AT TIME ZONE 'UTC') * 1000
+        END AS provider_event_created_ms,
         EXTRACT(EPOCH FROM GREATEST(trace.accepted_at, trace.webhook_received_at,
           trace.assistant_input_staged_at) AT TIME ZONE 'UTC') * 1000 AS terminal_not_before_ms,
         CASE
@@ -139,6 +147,24 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
       END AS value) AS typing
       CROSS JOIN LATERAL (SELECT trace.phase_breakdown_json
         #> '{assistant,terminalNonReplyCommittedAtEpochMs}' AS value) AS terminal
+      -- The member waits from the provider's event, so time before our route
+      -- runs (such as a fresh Web instance) counts. The latest event for this
+      -- exact message is its own creation or a later edit/reaction, so an edit
+      -- never inherits the original send time, and a provider clock ahead of
+      -- ours never moves the start past receipt.
+      LEFT JOIN LATERAL (
+        SELECT event.provider_created_at
+        FROM hosted_mailbox_item AS mailbox
+        JOIN hosted_linq_provider_event AS event
+          ON event.message_lookup_key = mailbox.source_message_lookup_key
+        WHERE trace.source = 'linq'
+          AND mailbox.id = trace.mailbox_item_id
+          AND mailbox.user_id = trace.user_id
+        ORDER BY event.provider_created_at DESC
+        LIMIT 1
+      ) AS provider_event ON TRUE
+      CROSS JOIN LATERAL (SELECT LEAST(trace.webhook_received_at,
+        provider_event.provider_created_at) AS at) AS origin
       WHERE trace.source IN ('linq', 'telegram')
         AND trace.webhook_received_at IS NOT NULL
         AND trace.accepted_at >= ${new Date(input.now.getTime() - 7 * 24 * 60 * 60_000)}
@@ -160,7 +186,7 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
           THEN ${HOSTED_WARM_TYPING_ALERT_THRESHOLD_MS}::integer
           ELSE ${HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS}::integer
         END AS threshold_ms,
-        COALESCE(typing_ms, ${input.now.getTime()}::bigint) - received_ms AS elapsed_ms
+        COALESCE(typing_ms, ${input.now.getTime()}::bigint) - origin_ms AS elapsed_ms
       FROM observations
       WHERE (typing_ms <= ${input.now.getTime()}::bigint
         OR (typing_ms IS NULL
@@ -173,7 +199,7 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
           OR terminal_non_reply_ms < terminal_not_before_ms
           OR terminal_non_reply_ms > ${input.now.getTime()}::bigint)
     ), measured AS MATERIALIZED (
-      SELECT observation.*, GREATEST(received_ms,
+      SELECT observation.*, GREATEST(origin_ms,
         EXTRACT(EPOCH FROM ${buildLinqConversationActivitySql(input.now)} AT TIME ZONE 'UTC') * 1000
       ) AS silence_started_ms
       FROM classified AS observation
@@ -188,6 +214,7 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         )
     )
     SELECT id, source, webhook_received_at AS "webhookReceivedAt",
+      provider_event_created_ms::bigint AS "providerEventCreatedAtEpochMs",
       silence_started_ms::bigint AS "silenceStartedAtEpochMs",
       typing_ms AS "typingAcceptedAtEpochMs", workspace_state AS "workspaceState",
       (COALESCE(typing_ms, ${input.now.getTime()}::bigint) - silence_started_ms)::bigint AS "elapsedMs",
@@ -208,9 +235,9 @@ function buildLinqConversationActivitySql(now: Date): Prisma.Sql {
       (
         SELECT MAX(delivery.accepted_at) FROM hosted_linq_delivery AS delivery
         WHERE delivery.linq_chat_lookup_key = conversation.linq_chat_lookup_key
-          AND delivery.attempted_at >= observation.webhook_received_at - INTERVAL '5 minutes'
+          AND delivery.attempted_at >= observation.origin_at - INTERVAL '5 minutes'
           AND delivery.attempted_at <= ${now}
-          AND delivery.accepted_at >= observation.webhook_received_at
+          AND delivery.accepted_at >= observation.origin_at
           AND delivery.accepted_at <= LEAST(${now}::timestamp,
             TIMESTAMP 'epoch' + observation.typing_ms * INTERVAL '1 millisecond')
       ),

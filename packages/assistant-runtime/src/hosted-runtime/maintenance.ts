@@ -1,3 +1,4 @@
+import { cancelHostedLinqInputTyping } from "./channel-activity.ts";
 import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
@@ -566,6 +567,12 @@ export async function runHostedAssistantAutomation(
         });
       },
       onTerminalNonReplyCommitted: (event) => {
+        if (event.source === "linq") {
+          void cancelHostedLinqInputTyping({
+            inputIds: event.inputIds,
+            runtimeAttemptId: options?.runtimeAttemptId,
+          });
+        }
         recordHostedAssistantTerminalNonReplyBestEffort({
           commitTimeoutMs: options?.commitTimeoutMs ?? null,
           event,
