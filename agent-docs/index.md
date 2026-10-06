@@ -1080,3 +1080,6 @@ The inactive retention e2e now expects the kept system pointer; see
 
 Lost native result recovery and verification limits are recorded in
 [`lost operation recovery`](exec-plans/completed/2026-10-06-lost-operation-recovery.md).
+
+Deterministic reminder/device-sync overlap proof and barrier regression coverage:
+[non-starvation barriers](exec-plans/completed/2026-10-06-nonstarvation-barriers.md).
