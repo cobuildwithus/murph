@@ -1346,14 +1346,8 @@ function reportOpenAiAuthorizationFailureSafely(input: {
       .catch(() => {
         logFailure();
       });
-    if (typeof input.ctx?.waitUntil === "function") {
-      try {
-        input.ctx.waitUntil(reportPromise);
-        return;
-      } catch {
-        logFailure();
-      }
-    }
+    if (scheduleHostedRunnerBackgroundWork(input.ctx, reportPromise)) return;
+    logFailure();
     return reportPromise;
   } catch {
     logFailure();
@@ -1974,13 +1968,9 @@ async function maybeHandleGeminiRequest(input: {
       ?? response.headers.get("x-request-id"),
     responseBody,
   });
-  if (typeof input.ctx?.waitUntil === "function") {
-    input.ctx.waitUntil(usageRecording);
-  } else {
-    // Production container interception has no waitUntil. The recorder owns
-    // its catch/log path, so usage accounting cannot withhold the answer.
-    void usageRecording;
-  }
+  // The recorder owns its catch/log path, so usage accounting never withholds
+  // the answer; background registration keeps it from being canceled.
+  scheduleHostedRunnerBackgroundWork(input.ctx, usageRecording);
   const responseHeaders = new Headers(response.headers);
   responseHeaders.delete("content-encoding");
   responseHeaders.delete("content-length");
@@ -1989,6 +1979,26 @@ async function maybeHandleGeminiRequest(input: {
     status: response.status,
     statusText: response.statusText,
   });
+}
+
+/**
+ * Keeps failure-isolated work alive after the provider response returns.
+ * Production container interception supplies no `ctx.waitUntil`, so the
+ * module-level `waitUntil` attaches the work to the current invocation instead
+ * of letting it be canceled with it. Returns false when neither registration is
+ * available; callers that must not lose the work then await it.
+ */
+function scheduleHostedRunnerBackgroundWork(
+  ctx: HostedRunnerOutboundContext | undefined,
+  work: Promise<unknown>,
+): boolean {
+  try {
+    if (typeof ctx?.waitUntil === "function") ctx.waitUntil(work);
+    else waitUntil(work);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function recordHostedGeminiVideoAnalysisUsage(input: {
@@ -2141,14 +2151,10 @@ async function maybeHandleXaiRequest(input: {
     providerRequestId: responseMetadata.providerRequestId,
     usage: responseMetadata.usage,
   });
-  if (typeof input.ctx?.waitUntil === "function") {
-    input.ctx.waitUntil(usageRecording);
-  } else {
-    // Production container interception has no waitUntil. The recorder owns
-    // its catch/log path, so deliberately let the already-started best-effort
-    // post continue without extending the member-visible provider budget.
-    void usageRecording;
-  }
+  // The recorder owns its catch/log path, so the already-started post never
+  // extends the member-visible provider budget; background registration keeps
+  // it from being canceled with the response.
+  scheduleHostedRunnerBackgroundWork(input.ctx, usageRecording);
   // The buffered body may differ from the wire encoding (fetch decompresses),
   // so drop the stale entity headers before re-wrapping.
   const responseHeaders = new Headers(response.headers);

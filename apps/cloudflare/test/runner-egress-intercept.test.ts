@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
 import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ContainerProxy } from "./stubs/cloudflare-containers.ts";
+import { settleWaitUntilForTest } from "./stubs/cloudflare-workers.ts";
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
@@ -437,7 +438,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Production-shaped requests leave diagnostics in module-level background
+  // work; settle them before the next test replaces the global fetch stub.
+  await settleWaitUntilForTest();
   vi.useRealTimers();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
@@ -2472,6 +2476,8 @@ describe("hostedRunnerIntercept", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    let background: Promise<void> | undefined;
+    let backgroundSettled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       const response = await Promise.race([
@@ -2504,6 +2510,13 @@ describe("hostedRunnerIntercept", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual(upstreamPayload);
       await accountingStarted;
+      // The production-shaped recording is registered background work, so it
+      // stays attached to the invocation instead of floating until canceled.
+      background = settleWaitUntilForTest().then(() => {
+        backgroundSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(backgroundSettled).toBe(false);
     } finally {
       if (timeoutId !== undefined) {
         clearTimeout(timeoutId);
@@ -2514,6 +2527,8 @@ describe("hostedRunnerIntercept", () => {
         usageId: "usage_1",
       }));
     }
+    await background;
+    expect(backgroundSettled).toBe(true);
   });
 
   it("rejects an oversized Gemini response without widening the delivery buffer", async () => {
@@ -2811,6 +2826,8 @@ describe("hostedRunnerIntercept", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    let background: Promise<void> | undefined;
+    let backgroundSettled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       const response = await Promise.race([
@@ -2839,6 +2856,13 @@ describe("hostedRunnerIntercept", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual(upstreamPayload);
       await accountingStarted;
+      // The production-shaped recording is registered background work, so it
+      // stays attached to the invocation instead of floating until canceled.
+      background = settleWaitUntilForTest().then(() => {
+        backgroundSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(backgroundSettled).toBe(false);
     } finally {
       if (timeoutId !== undefined) {
         clearTimeout(timeoutId);
@@ -2849,6 +2873,8 @@ describe("hostedRunnerIntercept", () => {
         usageId: "usage_1",
       }));
     }
+    await background;
+    expect(backgroundSettled).toBe(true);
   });
 
   it("does not delay or fail xAI delivery when off-path accounting rejects", async () => {
@@ -3858,6 +3884,44 @@ describe("hostedRunnerIntercept", () => {
     await Promise.all(deferred.promises);
     expect(reportCompleted).toBe(true);
     expect(await response.text()).toBe("private-upstream-response-body");
+  });
+
+  it("keeps the OpenAI authorization alert report as background work when the context lacks waitUntil", async () => {
+    let completeReport = (_value: { accepted: true }): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    const reportFailure = vi.fn(
+      (_report: OpenAiAuthorizationAlertReport) =>
+        new Promise<{ accepted: true }>((resolve) => {
+          completeReport = resolve;
+        }),
+    );
+    const alert = createOpenAiAuthorizationAlertTestNamespace(reportFailure);
+    const upstreamResponse = new Response("forbidden", { status: 403 });
+
+    const response = await handleHostedRunnerOpenAiOutbound(
+      createAuthorizedOpenAiModelsRequest(),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        OPENAI_AUTHORIZATION_ALERT_MONITOR: alert.namespace,
+        validateRuntimeWriteFence: async () => true,
+      }),
+      // Production container interception supplies no ctx.waitUntil.
+      { className: "RunnerContainer", containerId: "synthetic-container" },
+      async () => upstreamResponse,
+    );
+
+    expect(response).toBe(upstreamResponse);
+    expect(reportFailure).toHaveBeenCalledOnce();
+    let backgroundSettled = false;
+    const background = settleWaitUntilForTest().then(() => {
+      backgroundSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(backgroundSettled).toBe(false);
+    completeReport({ accepted: true });
+    await background;
+    expect(backgroundSettled).toBe(true);
   });
 
   it("routes standby provider and internal hosts through concrete class interception", async () => {
