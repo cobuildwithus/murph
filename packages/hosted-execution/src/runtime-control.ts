@@ -4102,6 +4102,8 @@ export function isHostedRetiredMailboxKind(
 
 export {
   parseHostedGroupSharedFreshnessRequirements,
+  readHostedGroupSharedFreshnessRejection,
+  type HostedGroupSharedFreshnessRejection,
   selectRefreshableHostedGroupWearableDates,
   hostedGroupMemberHasMissingWearableDates,
   hostedGroupSharedNeedsWearableRecovery,

@@ -1475,6 +1475,64 @@ rows as the existing call denominator, not extra failures, and do not add profil
 counts to overlapping native CLI counts. Unresolved connection loss remains
 unresolved. This rollout grants no automatic rollback or production mutation.
 
+### Shared-read semantic validation reason
+
+A structurally valid group `read_shared` call (any `murph.group*` tool) that
+fails the semantic refinement still yields its one model-visible `custom` issue at
+`freshness`, with unchanged message, path and repair bytes, and its existing
+`TOOL_INPUT_SCHEMA_REJECTION` intake row. The private validation digest, and so
+that row's `details`, may add one optional `semanticRejection`:
+
+- `shared_read_options`: participant/history rejected by
+  `parseHostedGroupSharedReadOptions` (including history with freshness), or
+  `group_email` combined with history, a participant or freshness.
+- `shared_freshness_scope_not_requested`, `shared_freshness_scope_not_wearable`,
+  `shared_freshness_invalid_date` or `shared_freshness_duplicate_pair`: the
+  first failing freshness entry, in canonical evaluation order.
+- `shared_freshness_count`, `shared_freshness_entry_shape` or
+  `shared_freshness_entry_fields`: canonical shape checks that structural
+  validation normally rejects first.
+- `shared_semantic_unclassified`: the canonical reader threw unexpectedly.
+
+`readHostedGroupSharedFreshnessRejection` in
+`packages/hosted-execution/src/group-shared-freshness.ts` is the source. The
+throwing parser derives from the same function, so acceptance, order and messages
+are unchanged. The digest admits only exact members of
+`SAFE_TOOL_CALL_SEMANTIC_REJECTIONS`. It never reads a label from input. Raw
+values, structurally invalid calls, other actions and other tools get no reason.
+The field is excluded from `validationFingerprint`, so fingerprints remain
+comparable across releases. One fingerprint may therefore carry several reasons.
+The reason identifies the first rejected decision, not every defect. It does not
+explain why the model chose those values. It is a classification on the existing
+intake row, not another failed-call count. Older records lack the field; treat
+that as missing evidence. Within a fixed bounded window:
+
+```sql
+SELECT operation,
+       CASE WHEN NOT (details_json ? 'semanticRejection') THEN 'missing_evidence'
+            WHEN details_json->>'semanticRejection' IN (
+                   'shared_read_options', 'shared_freshness_count',
+                   'shared_freshness_entry_shape', 'shared_freshness_entry_fields',
+                   'shared_freshness_scope_not_requested',
+                   'shared_freshness_scope_not_wearable', 'shared_freshness_invalid_date',
+                   'shared_freshness_duplicate_pair', 'shared_semantic_unclassified')
+            THEN details_json->>'semanticRejection' ELSE 'unrecognized_evidence'
+       END AS semantic_rejection,
+       count(*) AS rejected_calls
+FROM hosted_assistant_runtime_issue
+WHERE occurred_at >= $1 AND occurred_at < $2
+  AND component = 'assistant.tool-validation'
+  AND error_code = 'TOOL_INPUT_SCHEMA_REJECTION'
+  AND operation LIKE 'murph.group%'
+  AND details_json->'pathIssues' @> '[{"path":"freshness","code":"custom"}]'
+GROUP BY 1, 2;
+```
+
+Each row records one already-rejected call, using an existing reporter. The
+sanitizer and record parser are unchanged, and this detail stays below the 24-key
+cap. No schema bump, event, prompt, tool schema or behavior change is needed.
+Existing readers ignore or retain the optional string, so no reader-first release is needed.
+
 ### Finite CLI failure counts (optional, same timing identity)
 
 Each non-successful invocation from a new producer contributes at most one
