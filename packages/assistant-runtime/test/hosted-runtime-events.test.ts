@@ -815,6 +815,7 @@ describe("executeHostedMailboxEvent", () => {
   it.each([
     { phase: "websocket-read", expectedPhase: "websocket-read" },
     { phase: "websocket-send", expectedPhase: "websocket-send" },
+    { phase: "websocket-ack", expectedPhase: "websocket-ack" },
     { phase: "http-read", expectedPhase: "http-read" },
     { phase: "PRIVATE_UNKNOWN_PHASE", expectedPhase: null },
     { phase: undefined, expectedPhase: null },

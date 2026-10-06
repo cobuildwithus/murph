@@ -3386,6 +3386,7 @@ function buildCodexTransportDiagnosticsTraceEvent(input: {
     normalizedText.includes('falling back from websockets to https transport')
   const [, timeoutPhase] = ([
     ['idle timeout sending websocket request', 'websocket-send'],
+    ['timeout waiting for websocket response acknowledgement', 'websocket-ack'],
     ['idle timeout waiting for websocket', 'websocket-read'],
     ['idle timeout waiting for sse', 'http-read'],
   ] as const).find(([phrase]) => normalizedText.includes(phrase)) ?? ['', null]

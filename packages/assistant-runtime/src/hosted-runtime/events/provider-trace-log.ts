@@ -170,7 +170,7 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_COLD_START_REASON_VALUES = new Set([
   "previous-turn-failure",
 ]);
 const HOSTED_ASSISTANT_CODEX_TRANSPORT_TIMEOUT_PHASE_VALUES = new Set([
-  "websocket-send", "websocket-read", "http-read",
+  "websocket-send", "websocket-ack", "websocket-read", "http-read",
 ]);
 const HOSTED_ASSISTANT_CODEX_TRANSPORT_EVENT_KIND_VALUES = new Set([
   "stream-disconnected",

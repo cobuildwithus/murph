@@ -2359,7 +2359,8 @@ image during local Wrangler container builds.
 The base Dockerfile builds the CLI from the checksum-pinned Codex 0.160.0 source
 with `patches/codex-public-live.patch`. It keeps the same release's bundled
 Code Mode host and sandbox resources. The patch adds public API-key Live
-compatibility, owned-session shutdown, and opt-in app-server input ownership.
+compatibility, owned-session shutdown, opt-in app-server input ownership, and a
+15-second bound on a Responses websocket request that receives no provider frame.
 Existing callers retain native routing by default. No separate package registry
 or release workflow is required.
 Both the Dockerfile and patch enter the source fingerprint, so a patch-only
@@ -2373,8 +2374,11 @@ To update the patch, retain the pinned release as its base, run the affected
 upstream tests, and run `pnpm --dir apps/cloudflare verify:codex-upstream-source`
 to verify applicability. Codex 0.160.0 supplies the policy-aware websocket transport;
 the patch retains that transport and only adds the public Live wire adapter,
-client-managed input ownership, and owned-session finalization. It does not
-restore a separate model catalog or websocket stack. Update the source revision and archive checksum
+client-managed input ownership, owned-session finalization, and the request
+acknowledgement bound. That bound fails a silently dropped reused socket so
+native fallback replays the request over HTTPS; acknowledged responses keep the
+provider stream idle timeout. It does not restore a separate model catalog or
+websocket stack. Update the source revision and archive checksum
 together when upgrading Codex, keep the npm helper version aligned, and rerun
 the exact-image compatibility and sandbox lane. Remove the patch and build
 stage once a verified upstream release provides this behavior. Cold native

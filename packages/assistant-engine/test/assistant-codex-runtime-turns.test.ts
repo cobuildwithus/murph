@@ -2256,6 +2256,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
   it.each([
     { timeoutMessage: 'idle timeout waiting for websocket', timeoutPhase: 'websocket-read', transport: 'websocket' },
     { timeoutMessage: 'idle timeout sending websocket request', timeoutPhase: 'websocket-send', transport: 'websocket' },
+    { timeoutMessage: 'timeout waiting for websocket response acknowledgement', timeoutPhase: 'websocket-ack', transport: 'websocket' },
     { timeoutMessage: 'idle timeout waiting for SSE', timeoutPhase: 'http-read', transport: 'http' },
   ])('emits metadata-only Codex transport diagnostics for $timeoutPhase and fallback', async ({ timeoutMessage, timeoutPhase, transport }) => {
     const workingDirectory = await createTempDir('assistant-codex-transport-diagnostics-')

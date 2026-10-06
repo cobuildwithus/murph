@@ -426,10 +426,13 @@ describes the active turn at observation time. A delayed thread-scoped warning
 cannot be attributed conclusively to that turn or an earlier WebSocket frame. POST egress
 diagnostics do not observe WebSocket frames, and absence of a warning is not
 proof that no recovery occurred. `codexTransportTimeoutPhase` distinguishes
-`websocket-send`, `websocket-read`, and `http-read` when native warning text
-identifies the operation; missing or unknown phases are omitted by the runtime
-projection. No endpoint, raw thread or turn ID, prompt,
-response, or additional provider error text enters the diagnostic record.
+`websocket-send`, `websocket-ack`, `websocket-read`, and `http-read` when native
+warning text identifies the operation; missing or unknown phases are omitted by
+the runtime projection. `websocket-ack` means the deployed Codex patch received
+no provider frame within 15 seconds after sending a request; later silence
+remains `websocket-read` under the provider stream idle timeout. No endpoint,
+raw thread or turn ID, prompt, response, or additional provider error text
+enters the diagnostic record.
 
 #### Responses WebSocket relay observations
 
@@ -588,17 +591,16 @@ lowering the limit; it does not measure real provider silence frequency or prove
 90 seconds is universally safe. An idle deadline bounds stream-read silence,
 not total latency across HTTP setup, retries, tools, or continuing response events.
 
-A test-only alternative closes the socket after five seconds without its first
-upstream data frame; the same native fallback began at 5,010 ms while native idle
-remained 90 seconds. A separate healthy case emitted `response.created`
-promptly, waited one second for text, and completed without fallback despite a
-500 ms prototype deadline. This alternative preserves acknowledged quiet
-reasoning, but any first frame cancels it: it cannot recover a post-acknowledgement
-stall or establish model progress. It is not a complete replacement for the idle
-deadline. A post-acknowledgement stall fixture confirms native idle recovery
-still fires after the first-frame guard has been cancelled. Ping/pong similarly
-proves a responsive transport peer, not inference;
-Murph's Worker relay also separates the client and upstream transport legs.
+The deployed Codex patch bounds that first-frame wait natively. A WebSocket
+request that receives no provider frame within 15 seconds fails with the
+`websocket-ack` phase, and native fallback replays it over HTTPS while the idle
+window stays 90 seconds. Any provider frame clears the bound, so acknowledged
+quiet reasoning and compaction keep the idle window; ping and pong are consumed
+by the transport and do not count as acknowledgement. The bound cannot recover a
+post-acknowledgement stall, which still surfaces as `websocket-read` after the
+idle window. The permission-sandbox lane runs `assistant-codex-websocket-stall.test.ts`
+against the deployed binary to prove both cases; the ordinary lane uses the
+unpatched npm helper and skips them.
 
 The current hosted policy uses a 90-second native stream-idle timeout for
 OpenAI, including its HTTPS fallback and operator requests. Streaming native
@@ -624,15 +626,12 @@ cause of the original delayed reply. Genuine provider silence over 30 seconds
 can interrupt useful work; continuing events reset the idle wait, while local
 tool work occurs outside it. This is not a total reply deadline.
 
-The opt-in `MURPH_RUN_CODEX_30S_PROOF=1` cases in the two fixture files above
-exercise the full 30-second setting: silence before/after acknowledgement or partial text,
-22-second quiet completion, reasoning events and local tools spanning 35
-seconds, continuation recovery after a completed tool, and a resumed next turn.
 Routine CI runs short native equivalents and checks the rendered hosted config.
 Rollout needs fresh-process config adoption; mixed old/new containers retain
 their respective native windows without a wire or persisted-state change.
-Observe selected timeout, acknowledgement/forwarding gaps, native timeout phase,
-fallback frequency, and terminal failures through the existing diagnostics.
+Observe the selected timeout, native timeout phase (`websocket-ack` or
+`websocket-read`), fallback frequency, and terminal failures through the
+existing diagnostics.
 
 ### Web-control preflight rejection attribution
 

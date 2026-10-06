@@ -862,15 +862,17 @@ pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-cove
   apps/cloudflare/test/container-image-contract.test.ts
 ```
 
-The credential-free `assistant-codex-websocket-stall.test.ts` suite runs the
-pinned binary through a local WebSocket fault proxy. It proves warm-socket silent
+The credential-free `assistant-codex-websocket-stall.test.ts` suite runs a
+native binary through a local WebSocket fault proxy. It proves warm-socket silent
 stall detection, one native HTTPS fallback, sticky transport reuse, explicit-close
-recovery, and a test-only first-frame deadline that preserves acknowledged slow
-output. Short cases run in the ordinary assistant-engine lane. The opt-in full
-90-second reproduction and five-second comparisons run with:
+recovery, and post-acknowledgement idle recovery. Short cases run in the ordinary
+assistant-engine lane with the unpatched npm helper. With
+`MURPH_TEST_CODEX_COMMAND` pointing at the deployed patched binary, as the
+permission-sandbox lane does, it also proves the 15-second acknowledgement bound
+and that an acknowledged response may stay quiet beyond it:
 
 ```sh
-MURPH_RUN_CODEX_STALL_REPRO=1 MURPH_VITEST_MAX_WORKERS=1 \
+MURPH_TEST_CODEX_COMMAND=<patched-codex> \
   pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts \
   --no-coverage test/assistant-codex-websocket-stall.test.ts
 ```
