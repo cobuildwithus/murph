@@ -1021,4 +1021,4 @@ The runaway invocation alert threshold change (40 to 25 per trailing hour) is
 tracked in [the threshold plan](exec-plans/completed/2026-10-05-runaway-alert-threshold-25.md);
 `../docs/hosted-runtime-log-database.md` owns the operational contract.
 
-Replica physical purge deadline proof: [replica purge batch](exec-plans/active/2026-10-05-replica-purge-batch.md).
+Replica physical purge deadline proof: [replica purge batch](exec-plans/completed/2026-10-05-replica-purge-batch.md).
