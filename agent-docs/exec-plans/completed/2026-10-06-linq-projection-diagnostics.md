@@ -1,6 +1,6 @@
 # Distinguish Linq route projection rejection causes
 
-Status: active
+Status: completed
 Created: 2026-10-06
 Updated: 2026-10-06
 
@@ -59,4 +59,13 @@ Updated: 2026-10-06
 - No product or provider-input change; changelog and real-model journeys are
   not applicable. Public error JSON and headers, current/pending success paths,
   lookup order, read/write counts, and omission of malformed metadata are covered.
-- Final pushed-head ReviewGPT and required CI remain the completion gates.
+- Final ReviewGPT passed on pushed candidate
+  `f55fd8a0bbdaf4dd6e99dfb7c35a5e2f46ef975f`, with no accepted findings.
+  Parent final review confirms unchanged behavior, private closed values,
+  unchanged complexity, and the absence of new runtime work.
+- Implementation and focused proof are complete. Plan closure and its index
+  pointer are the only later edits; required exact-head CI remains a merge gate.
+- Telemetry-only merge is authorized after CI passes. Canonical Web deployment
+  and natural emission verification remain separate operational follow-ups;
+  absence of traffic will not establish a fixed route or recovered delivery.
+Completed: 2026-10-06
