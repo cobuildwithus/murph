@@ -823,6 +823,21 @@ the aggregate queries in
 to detect affected runtimes and their later mailbox outcomes without returning
 subject keys or raw JSON.
 
+The `HOSTED_STANDBY_ANALYTICS` Analytics Engine binding records one
+identifier-free data point per standby coordinator claim answer and per finished
+slot preparation in `murph_hosted_standby_inventory`. `index1` and `blob2` are
+the event (`claim` or `prepare`), `blob1` is the schema
+`murph.hosted-standby-inventory.v1`, `double1` is the event count, `double2` and
+`double3` are the ready and provisioning inventory, `double4` is the configured
+target, and `double5` is the duration in milliseconds. A claim's `blob3` is its
+outcome (`claimed`, `no_ready_slot`, `replayed`, `disabled`, `stale_release` or
+`deadline_expired`) and its inventory is read before selection, so a claimed
+point with one ready slot shows overlapping demand or a reproof, and
+`no_ready_slot` shows a foreground cold fallback. A preparation's `blob3` is
+`refill`, `resume` or `reproof`, `blob4` is `ready` or `failed`, and its
+inventory is read after the result. Query daily claims and preparation latency
+with [`scripts/standby-inventory.sql`](scripts/standby-inventory.sql).
+
 The `HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding records one
 identifier-free data point only after the runtime owner has decided to return
 `retry_later`. `index1` is the sole index and `blob2` repeats the bounded retry

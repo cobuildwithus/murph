@@ -1038,13 +1038,26 @@ export interface HostedRuntimeProductFeedbackRecord {
 
 export const HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX = "Support escalation:";
 export const HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX = "Usage optimization audit:";
+export const HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS = [
+  "wrong_kind", "changelog_linked", "missing_prefix", "summary_too_long", "empty_report",
+] as const;
+export type HostedUsageOptimizationAuditRejection =
+  (typeof HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS)[number];
+
 export function isHostedUsageOptimizationAuditFeedback(
   feedback: Pick<HostedRuntimeProductFeedbackRecord, "kind" | "relatedChangelogItemIds" | "summary">,
+  onRejection?: (reason: HostedUsageOptimizationAuditRejection) => void,
 ): boolean {
-  return feedback.kind === "feature_request" && feedback.relatedChangelogItemIds.length === 0
-    && feedback.summary.startsWith(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX)
-    && feedback.summary.length <= 1800
-    && feedback.summary.slice(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX.length).trim().length > 0;
+  // Observe the existing short-circuit rules once, without a second validator.
+  const reject = (reason: HostedUsageOptimizationAuditRejection): false => {
+    onRejection?.(reason);
+    return false;
+  };
+  return (feedback.kind === "feature_request" || reject("wrong_kind"))
+    && (feedback.relatedChangelogItemIds.length === 0 || reject("changelog_linked"))
+    && (feedback.summary.startsWith(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX) || reject("missing_prefix"))
+    && (feedback.summary.length <= 1800 || reject("summary_too_long"))
+    && (feedback.summary.slice(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX.length).trim().length > 0 || reject("empty_report"));
 }
 
 export const HOSTED_PATTERN_ENGINE_AUDIT_PREFIX = "Pattern engine audit:";

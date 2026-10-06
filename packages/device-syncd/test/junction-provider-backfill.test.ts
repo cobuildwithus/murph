@@ -1198,7 +1198,7 @@ test("Junction empty historical backfill records progress and stores the retry w
       "2026-04-03T00:00:00.000Z",
     ),
   );
-  assert.equal(due?.nextReconcileAt, "2026-04-04T01:15:00.000Z");
+  assert.equal(due?.nextReconcileAt, "2026-04-04T06:15:00.000Z");
 });
 
 test("Junction due historical backfill retry does not make ordinary reconcile own the retry wake", async () => {
@@ -1385,7 +1385,7 @@ test("Junction retrying historical backfill without attempts uses the first retr
       "2026-04-03T00:00:00.000Z",
     ),
   );
-  assert.equal(due?.nextReconcileAt, "2026-04-04T01:16:00.000Z");
+  assert.equal(due?.nextReconcileAt, "2026-04-04T06:16:00.000Z");
 });
 
 test("Junction yieldable reconcile checkpoints one bounded normalization-safe summary unit per continuation", async () => {
@@ -1802,7 +1802,7 @@ test("Junction non-connect backfill window uses bounded job retry without histor
   );
 
   assert.equal(result.metadataPatch, undefined);
-  assert.equal(result.nextReconcileAt, "2026-04-04T01:00:00.000Z");
+  assert.equal(result.nextReconcileAt, "2026-04-04T06:00:00.000Z");
   const retryJob = requireValue(
     result.scheduledJobs?.[0],
     "Empty non-connect Junction backfill should schedule a delayed exact-window retry.",

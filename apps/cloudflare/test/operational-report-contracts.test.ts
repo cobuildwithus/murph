@@ -9,6 +9,9 @@ import { describe, expect, it } from "vitest";
 import {
   HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
 } from "../src/user-runner/runtime-processing-responses.ts";
+import {
+  HOSTED_STANDBY_INVENTORY_ANALYTICS_SCHEMA,
+} from "../src/worker/standby-runner-coordinator-durable-object.ts";
 
 const execFileAsync = promisify(execFile);
 const coldStartReportPath = fileURLToPath(
@@ -17,6 +20,10 @@ const coldStartReportPath = fileURLToPath(
 const coldStartReportSql = readFileSync(coldStartReportPath, "utf8");
 const retryReasonsSql = readFileSync(
   new URL("../scripts/runtime-retry-reasons.sql", import.meta.url),
+  "utf8",
+);
+const standbyInventorySql = readFileSync(
+  new URL("../scripts/standby-inventory.sql", import.meta.url),
   "utf8",
 );
 const cloudflareReadme = readFileSync(
@@ -53,6 +60,26 @@ describe("hosted runtime operational report contracts", () => {
       "timestamp < toDateTime('YYYY-MM-DD HH:MM:SS', 'Etc/UTC')",
     );
     expect(retryReasonsSql).not.toMatch(/blob3\s*(?:!=|<>)/u);
+  });
+
+  it("keeps the standby inventory query aligned with the emitted Analytics Engine point", () => {
+    expect(standbyInventorySql).toContain("FROM murph_hosted_standby_inventory");
+    expect(standbyInventorySql).toContain(
+      `blob1 = '${HOSTED_STANDBY_INVENTORY_ANALYTICS_SCHEMA}'`,
+    );
+    for (const column of [
+      "blob2 AS event",
+      "blob3 AS detail",
+      "blob4 AS outcome",
+      "double2 AS ready",
+      "SUM(_sample_interval * double1) AS events",
+      "quantileExactWeighted(0.95)(double5, _sample_interval)",
+    ]) {
+      expect(standbyInventorySql).toContain(column);
+    }
+    expect(standbyInventorySql).toContain("INTERVAL '7' DAY");
+    expect(cloudflareReadme).toContain("`HOSTED_STANDBY_ANALYTICS`");
+    expect(cloudflareReadme).toContain("scripts/standby-inventory.sql");
   });
 
   it("documents the bounded optional container-busy stage contract", () => {

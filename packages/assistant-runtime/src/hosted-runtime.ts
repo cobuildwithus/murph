@@ -117,6 +117,7 @@ import { createHostedClinicalEnrichmentController, resolveHostedBackgroundReadCh
 import { runOneHostedClinicalEnrichment } from "./hosted-runtime/clinical-enrichment.ts";
 import { makeHostedClinicalEnrichmentWakeDue, setHostedClinicalEnrichmentWakeNextAttempt } from "./hosted-runtime/clinical-enrichment-wake.ts";
 import {
+  cancelHostedLinqInputTyping,
   createHostedAssistantChannelTypingDependencies,
 } from "./hosted-runtime/channel-activity.ts";
 import {
@@ -270,6 +271,7 @@ import {
   compactHostedConversationMailboxHandledItemSelection,
   collectHostedPendingAssistantInputMediaRetentionProtections,
   inspectHostedPendingAssistantInputWakeCandidate,
+  type HostedConversationMailboxHandledItemSelection,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
   assertNever,
@@ -7118,6 +7120,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               && !runtimeOwnerHandoffRequested,
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           });
+        const checkpointSignal = checkpointWakeInterruption.signal ?? runtimeAbortController.signal;
         try {
           latestCheckpointSnapshotCleanForWarmReuse = false;
           try {
@@ -7126,7 +7129,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 workspaceSystemWork.quiesce(),
                 pauseDetachedAssistantAskBeforeWorkspaceBoundary(),
               ]),
-              checkpointWakeInterruption.signal ?? runtimeAbortController.signal,
+              checkpointSignal,
             );
             checkpointWakeInterruption.signal?.throwIfAborted();
             const quiescentMailboxWake = await resolveHostedIdleBoundarySystemMailboxWake({ vaultRoot: restored.vaultRoot });
@@ -7137,6 +7140,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   { at: idleWake.nextWakeAt, reason: idleWake.nextWakeReason },
                   quiescentMailboxWake,
                 ]);
+            redactedStatus = { ...redactedStatus, ...checkpointRequestBuilder.readRedactedStatus() };
+            // Remove server-acknowledged terminal inputs before the bounded
+            // wake probe; retained acknowledgments are not maintenance work.
+            const handledConversationMailboxSelection =
+              await compactHostedConversationMailboxHandledItemSelection({
+                consumedThroughSeq: readHostedConversationConsumedSeqFromStatus(redactedStatus),
+                signal: checkpointSignal,
+                vaultRoot: restored.vaultRoot,
+              });
             const defaultProcessingWake =
               await resolveHostedSystemMailboxProcessingModeWake({
                 assistantExecutionBlocked,
@@ -7155,13 +7167,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             const systemMailboxProgressGeneration =
               resolveHostedSystemMailboxCheckpointProgressGeneration({
                 currentGeneration:
-                  committedWorkspace?.systemMailboxProgressGeneration ?? null,
+                  // Canonical publications drained above can advance the builder
+                  // without rebasing the foreground workspace projection.
+                  checkpointRequestBuilder.latestWorkspace()
+                    ?.systemMailboxProgressGeneration ?? null,
                 progressed: systemMailboxProgressedSinceCheckpoint,
               });
-            redactedStatus = { ...redactedStatus, ...checkpointRequestBuilder.readRedactedStatus() };
             checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
               assertRuntimeNotAborted,
               checkpointRequestBuilder,
+              handledConversationMailboxSelection,
               checkpointSignal: checkpointWakeInterruption.signal,
               expectedUserId: input.request.userId,
               idleCheckpointTrigger: idleCheckpointPhaseLogDetails.idleCheckpointTrigger,
@@ -7745,6 +7760,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           await imageGenerationController?.close();
           await closeDetachedAssistantAskBeforeWorkspaceRelease();
         } finally {
+          await cancelHostedLinqInputTyping({ runtimeAttemptId: input.request.attemptId });
           hostAbortSignal?.removeEventListener("abort", abortFromHost);
         }
       }
@@ -8623,6 +8639,7 @@ function resolveHostedSystemMailboxCheckpointProgressGeneration(input: {
 async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
+  handledConversationMailboxSelection?: HostedConversationMailboxHandledItemSelection;
   checkpointSignal?: AbortSignal | null;
   expectedUserId: string;
   idleCheckpointTrigger?: HostedRuntimeIdleCheckpointTrigger;
@@ -8647,7 +8664,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   }
 
   input.assertRuntimeNotAborted();
-  const handledConversationMailboxSelection =
+  const handledConversationMailboxSelection = input.handledConversationMailboxSelection ??
     await compactHostedConversationMailboxHandledItemSelection({
       consumedThroughSeq: readHostedConversationConsumedSeqFromStatus(
         input.redactedStatus,

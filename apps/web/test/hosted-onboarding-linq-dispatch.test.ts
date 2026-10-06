@@ -6029,6 +6029,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               eventId: "evt_null_preflight_duplicate",
               linqChatId: "chat_123",
               mailboxItemId: acceptedMailboxItem.id,
+              originalInboundMailboxItemId: "mailbox_existing_null_preflight",
               source: "linq",
               userId: "member_123",
               wakeMailboxCheckpoint: { lane: "conversation", laneSeq: "7" },

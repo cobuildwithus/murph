@@ -5,7 +5,7 @@ import { test } from 'vitest'
 
 import { ASSISTANT_USAGE_SCHEMA, parseAssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import { emptyCliTiming, normalizeCliTiming, type CliTiming } from '@murphai/runtime-state/cli-timing'
-import { timeCliDispatch, withCliTiming } from '@murphai/runtime-state/node/cli-timing'
+import { timeCliDispatch, timeCliPhaseSync, withCliTiming } from '@murphai/runtime-state/node/cli-timing'
 import { VAULT_CLI_BATCH_RESULT_SCHEMA } from '@murphai/operator-config/vault-cli-contracts'
 import { buildAssistantCodexTurnProfileJson } from '../src/assistant/providers/helpers.ts'
 
@@ -290,4 +290,37 @@ test.skipIf(!researchCompatibilityBase)('actual pre-research hosted reader loses
     assert.deepEqual(parseAssistantUsageRecord(absent), absent)
     assert.ok(!JSON.stringify(expected).includes('PRIVATE_SENTINEL'))
   }
+})
+
+const patternTimingCompatibilityBase = process.env.MURPH_PATTERN_TIMING_COMPAT_BASE
+test.skipIf(!patternTimingCompatibilityBase)('Patterns stages survive new consumers while old consumers preserve legacy usage', async () => {
+  assert.match(patternTimingCompatibilityBase ?? '', /^[a-f0-9]{40}$/u)
+  const source = (file: string) => execFileSync('git', ['show', `${patternTimingCompatibilityBase}:${file}`],
+    { encoding: 'utf8', maxBuffer: 1_000_000 })
+  const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(text)).toString('base64')}`
+  const oldTimingUrl = moduleUrl(source('packages/runtime-state/src/cli-timing.ts'))
+  const oldTiming: { normalizeCliTiming: typeof normalizeCliTiming } = await import(oldTimingUrl)
+  const oldUsageSource = source('packages/hosted-execution/src/assistant-usage.ts')
+  assert.ok(oldUsageSource.includes('"@murphai/runtime-state/cli-timing"'))
+  const old: { parseAssistantUsageRecord: typeof parseAssistantUsageRecord } = await import(moduleUrl(
+    oldUsageSource.replace('"@murphai/runtime-state/cli-timing"', JSON.stringify(oldTimingUrl))))
+  let report!: CliTiming
+  await withCliTiming(() => timeCliDispatch('wearables patterns', async () => {
+    for (const phase of ['query-entity-read', 'query-wearable-compose', 'query-metric-read', 'query-pattern-report'] as const) {
+      timeCliPhaseSync(phase, () => undefined)
+    }
+  }), value => { report = value })
+  const legacy = buildAssistantCodexTurnProfileJson({ rawEvents: [...baseEvents, native('vault-cli wearables patterns')], turnId })!
+  const profile = { ...legacy, cliTiming: report }
+  const input = usage(profile)
+  assert.deepEqual(input.turnProfileJson, profile)
+  assert.equal(oldTiming.normalizeCliTiming(report), null)
+  assert.deepEqual(old.parseAssistantUsageRecord(input), { ...input, turnProfileJson: legacy })
+  const oldReport = structuredClone(report)
+  oldReport.commands[0]!.phases = oldReport.commands[0]!.phases.filter(phase => !phase.phase.startsWith('query-'))
+  assert.deepEqual(oldTiming.normalizeCliTiming(oldReport), oldReport)
+  assert.deepEqual(normalizeCliTiming(oldReport), oldReport)
+  const oldInput = usage({ ...legacy, cliTiming: oldReport })
+  assert.deepEqual(old.parseAssistantUsageRecord(oldInput), oldInput)
+  assert.deepEqual(parseAssistantUsageRecord(oldInput), oldInput)
 })
