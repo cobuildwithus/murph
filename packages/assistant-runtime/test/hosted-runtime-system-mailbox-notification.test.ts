@@ -95,6 +95,104 @@ import {
 
 const FIXED_NOW = "2026-04-27T00:00:00.000Z";
 
+it.each([
+  "pending", "recording", "unmarked", "sending", "unimported-owner", "duplicate-owner",
+  "missing-record", "no-retained-jobs", "no-retention", "record-epoch", "record-connection",
+  "connection", "provider", "epoch", "member", "manual", "webhook", "new-jobs",
+  "equal-cadence", "newer-cadence", "future-occurrence", "missing-cadence", "barrier",
+] as const)(
+  "transfers only proven redundant device schedules during import (%s)",
+  async (scenario) => {
+    const status = scenario === "pending" ? "pending" : "recording";
+    const workspace = await createHostedRuntimeWorkspace("device-schedule-import-");
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const wake = buildHostedExecutionDeviceSyncWake({
+      connectionId: "synthetic_connection", eventId: "device-sync.wake:owner",
+      expectedConnectedAt: FIXED_NOW, occurredAt: FIXED_NOW,
+      provider: "junction", reason: "reconcile_due", userId: "member_123",
+      hint: { nextReconcileAt: retryAt, jobs: [{
+        kind: "resource", dedupeKey: "synthetic_retained_job", availableAt: retryAt,
+      }] },
+    });
+    const recording = createDeviceSyncCompletionRecordingItem({
+      itemId: "synthetic_owner", retainedWake: wake, retryAt,
+    });
+    const owner: HostedSystemMailboxPendingItem = {
+      ...recording, deviceSyncContinuationOwner: true, preferenceCausalSeq: null, status,
+      wake: status === "recording" ? { ...wake, hint: { ...wake.hint, nextReconcileAt: FIXED_NOW } } : wake,
+      ...(status === "pending" ? { postCheckpointRecord: null, nextAttemptAt: retryAt } : {}),
+    };
+    const hint = { ...wake, eventId: "device-sync.wake:schedule",
+      hint: { nextReconcileAt: FIXED_NOW } };
+    if (scenario === "unmarked") delete owner.deviceSyncContinuationOwner;
+    if (scenario === "sending") owner.status = "sending";
+    if (scenario === "missing-record") owner.postCheckpointRecord = null;
+    if (owner.postCheckpointRecord?.kind === "device-sync.dirty-processed-batch") {
+      if (scenario === "no-retention") {
+        delete owner.postCheckpointRecord.retainMailboxItemUntil;
+        owner.postCheckpointRecord.nextWakeAt = retryAt;
+      }
+      if (scenario === "no-retained-jobs") owner.postCheckpointRecord.retainedWake = {
+        ...wake, hint: { nextReconcileAt: retryAt, jobs: [] },
+      };
+      if (scenario === "record-epoch") owner.postCheckpointRecord.retainedWake = {
+        ...wake, expectedConnectedAt: retryAt,
+      };
+      if (scenario === "record-connection") owner.postCheckpointRecord.retainedWake = {
+        ...wake, connectionId: "synthetic_other_connection",
+      };
+    }
+    if (scenario === "connection") hint.connectionId = "synthetic_other_connection";
+    if (scenario === "provider") hint.provider = "garmin";
+    if (scenario === "epoch") hint.expectedConnectedAt = retryAt;
+    if (scenario === "member") hint.userId = "synthetic_other_member";
+    if (scenario === "manual") Object.assign(hint.hint, { reason: "manual_reconcile" });
+    if (scenario === "webhook") hint.reason = "webhook_hint";
+    if (scenario === "new-jobs") Object.assign(hint.hint, { jobs: [{ kind: "reconcile" }] });
+    if (scenario === "equal-cadence") hint.hint.nextReconcileAt = retryAt;
+    if (scenario === "newer-cadence") hint.hint.nextReconcileAt = "2026-04-29T00:00:00.000Z";
+    if (scenario === "future-occurrence") hint.occurredAt = "2099-01-01T00:00:00.000Z";
+    if (scenario === "missing-cadence") Object.assign(hint, { hint: {} });
+    const pending = [owner];
+    if (scenario === "duplicate-owner") pending.push({ ...owner, itemId: "synthetic_other_owner" });
+    if (scenario === "barrier") {
+      const { deviceSyncContinuationOwner: _continuationOwner, ...base } = owner;
+      pending.push({
+        ...base, itemId: "synthetic_manual_barrier",
+        mailboxLaneSeq: "2", mailboxDedupeKey: "device-sync.wake:manual-barrier",
+        status: "pending", attemptCount: 0, lastAttemptAt: null, postCheckpointRecord: null,
+        wake: { ...wake, eventId: "device-sync.wake:manual-barrier", hint: { reason: "manual_reconcile" } },
+      });
+    }
+    const importedSeq = scenario === "unimported-owner" ? "0" : scenario === "barrier" ? "2" : "1";
+    const hintSeq = scenario === "barrier" ? "3" : "2";
+    const covered = scenario === "pending" || scenario === "recording";
+    try {
+      await writeHostedMailboxImportState({ vaultRoot: workspace.vaultRoot, state: {
+        ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: importedSeq },
+      } });
+      await updateHostedSystemMailboxState(workspace.vaultRoot, () => ({ pending }));
+      // Restore the exact recording owner before importing the successor. No
+      // provider pass, acknowledgement or assistant turn may be needed.
+      await restoreHostedSystemMailboxCheckpointRollbackState({
+        vaultRoot: workspace.vaultRoot, state: { pending },
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({ id: "synthetic_schedule", dedupeKey: hint.eventId, laneSeq: hintSeq }),
+        vaultRoot: workspace.vaultRoot, wake: hint,
+      });
+      const state = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(state.pending.filter((item) => item.itemId !== "synthetic_schedule")).toEqual(pending);
+      expect(state.pending.some((item) => item.itemId === "synthetic_schedule")).toBe(!covered);
+      if (covered) expect(resolveHostedSystemMailboxProgress({ importedSeq: hintSeq, now: FIXED_NOW, state }))
+        .toMatchObject({ handledThroughSeq: hintSeq, firstPendingSeq: null, deviceSyncContinuationSeqs: ["1"] });
+      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+    } finally {
+      await workspace.cleanup();
+    }
+  },
+);
+
 it.each([false, true])("preserves accepted device continuations and reports rejected persistence (invalid: %s)", async (invalid) => {
   const workspace = await createHostedRuntimeWorkspace("device-continuation-persistence-");
   const entries: HostedRuntimeLogEntry[] = [];

@@ -30,6 +30,12 @@ Current responsibilities:
   carries same-epoch provider cadence and dirty terminal evidence, and retries
   that reconciliation, while restored records repeat the full path and
   authorityless legacy or terminal records drain without a cadence write
+- transfer a plain scheduled device hint during import only when a validated
+  retained connection owner already covers its cadence; a recording owner's
+  retained jobs and matching completion record may prove that coverage, while
+  the record and retry remain unchanged until normal checkpoint publication.
+  Manual refreshes, dirty webhooks, new jobs, and mismatched connection epochs
+  retain ordinary admission. Import rollback restores the prior frontier.
 - drain each hosted device-sync pass through one bounded worker call so
   canonical imports can safely reuse a pass-local event identity index, while
   cumulative progress remains observable and the service-owned foreground

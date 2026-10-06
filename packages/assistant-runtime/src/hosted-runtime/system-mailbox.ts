@@ -51,6 +51,7 @@ import {
   findHostedRunnableSystemMailboxItem,
   findNextHostedSystemMailboxQueueItem,
   isHostedGroupContextHandoffSystemMailboxItem,
+  isHostedPlainDeviceSyncWakeHint,
   isHostedRetainedDeviceScheduledAdmission,
   mergeHostedSystemMailboxRollbackItems,
   projectHostedDeviceHintCoverage,
@@ -302,14 +303,56 @@ export async function enqueueHostedSystemMailboxItem(input: {
     status: "pending",
     wake: input.wake,
   };
-  await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
-    pending: upsertHostedSystemMailboxPendingItem(state.pending, nextItem),
-  }));
+  await updateHostedSystemMailboxState(input.vaultRoot, async (state) => {
+    const queued = { pending: upsertHostedSystemMailboxPendingItem(state.pending, nextItem) };
+    if (nextItem.wake.kind !== "device-sync.wake"
+      || nextItem.wake.reason !== "reconcile_due"
+      || !isHostedPlainDeviceSyncWakeHint(nextItem)) return queued;
+
+    const continuationItemIds = await readHostedSystemMailboxContinuationItemIds({
+      state: queued, vaultRoot: input.vaultRoot,
+    });
+    if (continuationItemIds.size === 0) return queued;
+    // A recording continuation already owns its retained jobs and cadence.
+    // Transfer only redundant schedules; preserve the exact completion record
+    // until its ordinary post-checkpoint publication succeeds.
+    return retireHostedCoveredDeviceHints({
+      continuationItemIds,
+      coverage: projectHostedDeviceHintCoverage({
+        now: new Date().toISOString(),
+        pending: queued.pending.map(projectHostedDeviceScheduleImportOwner),
+      }),
+      eligibleItemIds: new Set([nextItem.itemId]),
+      state: queued,
+    }).state;
+  });
 
   return {
     reasonCode: "system_mailbox.queued",
     status: "imported",
   };
+}
+
+function projectHostedDeviceScheduleImportOwner(
+  item: HostedSystemMailboxPendingItem,
+): HostedSystemMailboxPendingItem {
+  const record = item.postCheckpointRecord;
+  if (item.deviceSyncContinuationOwner !== true
+    || item.status !== "recording"
+    || item.wake.kind !== "device-sync.wake"
+    || record?.kind !== "device-sync.dirty-processed-batch"
+    || !record.retainMailboxItemUntil) return item;
+  const wake = record.retainedWake;
+  if (wake?.kind !== "device-sync.wake"
+    || wake.eventId !== item.wake.eventId
+    || wake.userId !== item.wake.userId
+    || wake.connectionId !== item.wake.connectionId
+    || wake.provider !== item.wake.provider
+    || wake.expectedConnectedAt !== item.wake.expectedConnectedAt
+    || !wake.hint?.jobs?.length) return item;
+  // This is a coverage-only view, never a mutation or execution admission.
+  return { ...item, status: "pending", postCheckpointRecord: null,
+    nextAttemptAt: record.retainMailboxItemUntil, wake };
 }
 
 async function resolveAssistantAskCompletionCutoff(
