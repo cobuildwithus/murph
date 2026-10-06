@@ -1891,7 +1891,7 @@ describe("prisma module", () => {
 
     expect(info).toHaveBeenCalledExactlyOnceWith(
       "Hosted web database pool configured.",
-      { maxConnections: 9, source: "configured" },
+      { maxConnections: 9, processUptimeMs: expect.any(Number), source: "configured" },
     );
   });
 
@@ -1913,7 +1913,7 @@ describe("prisma module", () => {
     expect(second).toBe(first);
     expect(info).toHaveBeenCalledExactlyOnceWith(
       "Hosted web database pool configured.",
-      { maxConnections: 15, source: "default" },
+      { maxConnections: 15, processUptimeMs: expect.any(Number), source: "default" },
     );
   });
 });

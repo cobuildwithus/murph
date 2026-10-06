@@ -14,8 +14,6 @@ export const IMESSAGE_CARD_VERTICAL_PADDING = 38;
 const BADGE = {
   height: 101,
   left: 30,
-  markHeight: 53,
-  markWidth: 75,
   top: 30,
   width: 135,
 } as const;
@@ -43,68 +41,34 @@ type IMessageCardHeaderText = {
 };
 
 /**
- * Static stand-in for the Messages-owned transcript badge.
+ * Empty footprint for the Messages-owned transcript badge.
  *
- * The native Studio reserves a 36×27 point badge at (8, 8). Linq does not
- * provide an app badge when the extension is absent, so the fallback bitmap
- * fills that exact footprint with Murph's checked-in SVG mark.
+ * The native Studio reserves a 36×27 point badge at (8, 8). Linq app cards
+ * carry Murph's App Store id, so Messages draws Murph's app art there on the
+ * static fallback too; painting a mark into the bitmap would show it twice.
  */
-export function IMessageCardBadge({
-  logoSrc,
-  placement = "absolute",
-}: {
-  logoSrc: string;
-  placement?: "absolute" | "inline";
-}) {
-  const isAbsolute = placement === "absolute";
-  const placementStyle = isAbsolute
-    ? { position: "absolute" as const, top: BADGE.top, left: BADGE.left }
-    : { position: "relative" as const };
+function IMessageCardBadgeSpace() {
   return (
     <div
       aria-hidden="true"
-      data-murph-card-badge="svg"
-      data-murph-card-badge-placement={placement}
+      data-imessage-card-badge-space="true"
       style={{
-        ...placementStyle,
         display: "flex",
         width: BADGE.width,
         height: BADGE.height,
         flexShrink: 0,
-        alignItems: "center",
-        justifyContent: "center",
-        border: "2px solid rgba(20,18,23,0.08)",
-        borderRadius: 999,
-        backgroundColor: "#FCFAF5",
-        boxShadow: "0 2px 4px rgba(20,18,23,0.08)",
       }}
-    >
-      {/* eslint-disable-next-line @next/next/no-img-element -- ImageResponse renders the embedded SVG data URI directly. */}
-      <img
-        alt=""
-        data-murph-card-logo="true"
-        height={BADGE.markHeight}
-        src={logoSrc}
-        width={BADGE.markWidth}
-        style={{
-          width: BADGE.markWidth,
-          height: BADGE.markHeight,
-          objectFit: "contain",
-        }}
-      />
-    </div>
+    />
   );
 }
 
-/** Shared logo, heading, and optional subtitle hierarchy for card fallbacks. */
+/** Shared heading and optional subtitle hierarchy beside the badge space. */
 export function IMessageCardHeader({
   height,
-  logoSrc,
   subtitle,
   title,
 }: {
   height: number;
-  logoSrc: string;
   subtitle: IMessageCardHeaderText | null;
   title: IMessageCardHeaderText;
 }) {
@@ -130,7 +94,7 @@ export function IMessageCardHeader({
           gap: IMESSAGE_CARD_HEADER_BADGE_GAP,
         }}
       >
-        <IMessageCardBadge logoSrc={logoSrc} placement="inline" />
+        <IMessageCardBadgeSpace />
         <h1
           data-card-text-lines={title.lineCount}
           style={{

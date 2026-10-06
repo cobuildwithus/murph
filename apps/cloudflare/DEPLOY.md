@@ -1515,10 +1515,11 @@ Before the first deploy:
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
 The rendered and checked-in Wrangler configs both declare the code-owned
-`HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding and
-`murph_hosted_runtime_retries` dataset. Analytics Engine creates the dataset on
-its first write, so this binding adds no GitHub environment variable, secret,
-or separate private-workflow mapping.
+`HOSTED_RUNTIME_RETRY_ANALYTICS` and `HOSTED_STANDBY_ANALYTICS` Analytics Engine
+bindings with their `murph_hosted_runtime_retries` and
+`murph_hosted_standby_inventory` datasets. Analytics Engine creates each dataset
+on its first write, so these bindings add no GitHub environment variable,
+secret, or separate private-workflow mapping.
 
 The checked-in lifecycle file contains four narrow backstops. Raw hosted-email blobs and their encrypted recovery refs under `hosted-email/messages/` become deletion-eligible after 24 hours. Application-encrypted Linq avatar-ingress objects under `hosted-private-media/images/` also become deletion-eligible after 24 hours. Retries reuse the deterministic object and cap capability expiry at that object's original lifecycle boundary; at or after the boundary, the mutation-locked `UserRunner` replaces the same deterministic key before returning another bounded capability. Application-encrypted Environment voice recordings under `hosted-environment-voice/audio/` become deletion-eligible after 24 hours; successful processing deletes them immediately after the updated vault checkpoint. Account deletion synchronously deletes each member prefix. Encrypted automatic meal-photo staging under `hosted-meal-photos/images/` becomes deletion-eligible after 31 days, one day beyond canonical mailbox recovery retention; successful imports still delete those objects immediately after checkpoint. R2 deletes eligible objects asynchronously. The rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
 
@@ -2358,7 +2359,8 @@ image during local Wrangler container builds.
 The base Dockerfile builds the CLI from the checksum-pinned Codex 0.160.0 source
 with `patches/codex-public-live.patch`. It keeps the same release's bundled
 Code Mode host and sandbox resources. The patch adds public API-key Live
-compatibility, owned-session shutdown, and opt-in app-server input ownership.
+compatibility, owned-session shutdown, opt-in app-server input ownership, and a
+15-second bound on a Responses websocket request that receives no provider frame.
 Existing callers retain native routing by default. No separate package registry
 or release workflow is required.
 Both the Dockerfile and patch enter the source fingerprint, so a patch-only
@@ -2372,8 +2374,11 @@ To update the patch, retain the pinned release as its base, run the affected
 upstream tests, and run `pnpm --dir apps/cloudflare verify:codex-upstream-source`
 to verify applicability. Codex 0.160.0 supplies the policy-aware websocket transport;
 the patch retains that transport and only adds the public Live wire adapter,
-client-managed input ownership, and owned-session finalization. It does not
-restore a separate model catalog or websocket stack. Update the source revision and archive checksum
+client-managed input ownership, owned-session finalization, and the request
+acknowledgement bound. That bound fails a silently dropped reused socket so
+native fallback replays the request over HTTPS; acknowledged responses keep the
+provider stream idle timeout. It does not restore a separate model catalog or
+websocket stack. Update the source revision and archive checksum
 together when upgrading Codex, keep the npm helper version aligned, and rerun
 the exact-image compatibility and sandbox lane. Remove the patch and build
 stage once a verified upstream release provides this behavior. Cold native

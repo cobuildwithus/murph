@@ -180,6 +180,10 @@ import {
   type HostedSystemMailboxPendingItem,
   type HostedSystemMailboxRouteAction,
 } from "./system-mailbox.ts";
+import {
+  findNextHostedSystemMailboxQueueItem,
+  readHostedSystemMailboxState,
+} from "./system-mailbox-state.ts";
 import type {
   HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
@@ -1072,6 +1076,7 @@ function createHostedAssistantAutomationTool(input: {
       if (request.action === "inspect") {
         return await buildHostedAutomationToolResponse({
           action: "inspect",
+          view: request.view,
           record: existing,
           routeBinding: "preserved",
           vaultRoot: input.vaultRoot,
@@ -1233,6 +1238,7 @@ function assertActiveHostedAutomationRoute(input: {
 type HostedAutomationToolResponseInput =
   | {
       action: "inspect";
+      view?: "full" | "model_review";
       record: AutomationRecord;
       routeBinding: "preserved";
       vaultRoot: string;
@@ -1349,6 +1355,27 @@ async function buildHostedAutomationToolResponse(
   input: HostedAutomationToolResponseInput,
 ): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
   const record = input.action === "inspect" ? input.record : input.result.record;
+  if (input.action === "inspect" && input.view === "model_review") {
+    const managed = resolveMurphManagedAutomationOwnerScope(record.automationId) !== null;
+    return {
+      action: "inspect",
+      view: "model_review",
+      automationId: record.automationId,
+      assistantTargetOverride: record.assistantTargetOverride,
+      managed,
+      contextReferences: [...record.contextReferences],
+      ...(managed
+        ? { instructionsOmitted: "managed_model_preserved" as const }
+        : { instructions: record.instructions }),
+      title: record.title,
+      deliveryChannel: record.route.channel,
+      lookupId: record.slug,
+      routeBinding: "preserved",
+      schedule: record.schedule,
+      status: record.status,
+      updatedAt: record.updatedAt,
+    };
+  }
   const responseFields = await projectHostedAutomationResponseFields({
     record,
     vaultRoot: input.vaultRoot,
@@ -2327,6 +2354,10 @@ export async function runHostedWorkspaceAssistantPhase(
       const result = withPostForegroundMemberMaintenanceAfterCheckpoint({
         executionContext,
         input,
+        memberMaintenanceDue: await hasDueHostedPostForegroundMemberMaintenance({
+          input,
+          result: foregroundResult,
+        }),
         result: foregroundResult,
         wake,
       });
@@ -4387,25 +4418,55 @@ function shouldRunShadowedDeviceSyncAfterNoProgressAssistantWake(input: {
   );
 }
 
+async function hasDueHostedPostForegroundMemberMaintenance(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  result: HostedWorkspaceRunnerAssistantPhaseResult;
+}): Promise<boolean> {
+  // Progressed passes already attach member maintenance; failed replies keep it.
+  if (input.result.progressed === true || input.result.foregroundReplyFailed !== 0) {
+    return false;
+  }
+  const item = findNextHostedSystemMailboxQueueItem({
+    allowedRouteActions: HOSTED_POST_FOREGROUND_MEMBER_MAINTENANCE_ROUTE_ACTIONS,
+    now: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
+    pendingOnly: true,
+    state: await readHostedSystemMailboxState(input.input.restored.vaultRoot),
+  });
+  return item !== null
+    && (HOSTED_POST_FOREGROUND_MEMBER_MAINTENANCE_WAKE_KINDS as readonly string[])
+      .includes(item.wake.kind);
+}
+
 function withPostForegroundMemberMaintenanceAfterCheckpoint(input: {
   executionContext: AssistantExecutionContext;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  memberMaintenanceDue: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): HostedWorkspaceRunnerAssistantPhaseResult {
-  if (
-    input.result.progressed !== true
-    || input.result.foregroundReplyFailed !== 0
-  ) {
+  if (input.result.foregroundReplyFailed !== 0) {
     return input.result;
   }
+  // A clean foreground pass can make no progress when another owner already
+  // answered its input (Web's instant first turn). Due member maintenance
+  // still follows that pass instead of waiting for the idle checkpoint.
+  if (input.result.progressed !== true && !input.memberMaintenanceDue) {
+    return input.result;
+  }
+  const result = input.result.progressed === true
+    ? input.result
+    : {
+        ...input.result,
+        checkpointReason: "system_mailbox_receipt" as const,
+        progressed: true as const,
+      };
 
   return {
-    ...input.result,
+    ...result,
     afterCheckpointKeepsForegroundImportLoop: true,
     afterCheckpoint: composeHostedAssistantPhaseAfterCheckpoint({
       callbacks: [
-        input.result.afterCheckpoint,
+        result.afterCheckpoint,
         async () => {
           const maintenance = await runSystemMailboxMaintenancePhase({
             exclusiveRouteActions:

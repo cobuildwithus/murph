@@ -116,20 +116,14 @@ const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 0;
 // can be silent while producing its replacement history. A 30-second window
 // can abort valid slow compactions. Keep retries owned by Codex
 // and retain the existing outer attempt/idle-maintenance wall-clock bounds.
+// The deployed Codex patch separately fails a WebSocket request that receives
+// no provider frame within 15 seconds, so a dropped reused socket falls back
+// to HTTPS without waiting for this window.
 const HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
 const HOSTED_CODEX_NATIVE_MEMORY_CONFIG = {
   featureEnabled: false,
   generateMemories: false,
   useMemories: false,
-} as const;
-export const HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS = {
-  codexOperatorMemoryFeatureEnabled:
-    HOSTED_CODEX_NATIVE_MEMORY_CONFIG.featureEnabled,
-  codexOperatorMemoryGenerateMemories:
-    HOSTED_CODEX_NATIVE_MEMORY_CONFIG.generateMemories,
-  codexOperatorMemoryMode: "disabled",
-  codexOperatorMemoryUseMemories:
-    HOSTED_CODEX_NATIVE_MEMORY_CONFIG.useMemories,
 } as const;
 export function hostedCodexProviderTransportDiagnostics(providerId: string) {
   return {
@@ -137,7 +131,6 @@ export function hostedCodexProviderTransportDiagnostics(providerId: string) {
       ? 1 : HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
     codexProviderStreamIdleTimeoutMs: HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
     codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
-    codexProviderTransportMode: "codex-native-provider-transport",
   } as const;
 }
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
@@ -157,7 +150,6 @@ const HOSTED_CODEX_SUPPORTED_PROVIDER_IDS = new Set<string>(
 );
 const HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL =
   [...HOSTED_CODEX_SUPPORTED_PROVIDER_IDS].join(" or ");
-const HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID = "hosted-openai";
 const HOSTED_CODEX_BOUND_USER_ID_ENV = "MURPH_HOSTED_CODEX_BOUND_USER_ID";
 const HOSTED_CODEX_RUNTIME_ATTEMPT_ID_ENV = "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID";
 const HOSTED_CODEX_RUNTIME_LEASE_GENERATION_ENV =
@@ -218,7 +210,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
-  const openAiProvider = providerConfig.id === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID;
+  const openAiProvider = providerConfig.id === HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID;
   const seededChatGptAuthJson = openAiProvider
     ? readHostedCodexChatGptAuthJson(input.runtimeEnv)
     : null;
@@ -468,7 +460,7 @@ function resolveHostedCodexModelProviderConfig(input: {
   const providerConfig = resolvedProviderConfig.id === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
     ? {
         ...resolvedProviderConfig,
-        id: HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID,
+        id: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
       }
     : resolvedProviderConfig;
 
@@ -516,7 +508,7 @@ function resolveHostedCodexModelProviderConfig(input: {
     baseUrl: url.toString(),
     id: providerConfig.id === VENICE_CODEX_MODEL_PROVIDER_ID
       ? HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
-      : providerConfig.id === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID
+      : providerConfig.id === HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
         ? HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
         : providerConfig.id,
     supportsWebSockets: false,

@@ -44,9 +44,9 @@ async function expectSendUnavailable(providerResponse: Response, causeMessage: s
 }
 
 describe("Twilio Verify SMS transport", () => {
-  it("returns an actionable client error only for an explicitly rejected destination", async () => {
+  it.each(["Invalid parameter: To", `Invalid parameter \`To\`: ${phoneNumber}`])("returns an actionable client error for an explicitly rejected destination: %s", async (message) => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    request.mockResolvedValue(Response.json({ code: 60200, message: "Invalid parameter: To" }, { status: 400 }));
+    request.mockResolvedValue(Response.json({ code: 60200, message }, { status: 400 }));
     const error = await hostedAuthSmsVerification().send({ phoneNumber }).catch((failure: unknown) => failure);
     const response = jsonError(error);
     expect(response.status).toBe(400);
@@ -111,6 +111,11 @@ describe("Twilio Verify SMS transport", () => {
         message: "We could not verify your sign-in code. Try again shortly.",
         cause: { message: "Twilio Verify check: provider_http; HTTP 400; code 60200; response parsed; parameterKind unrecognized; parameterHint To." },
       });
+    request.mockResolvedValue(Response.json({ code: 60200, message: `Invalid parameter \`To\`: ${phoneNumber}` }, { status: 400 }));
+    await expect(hostedAuthSmsVerification().check({ phoneNumber, verificationSid: sid, code: "123456" }))
+      .rejects.toMatchObject({ code: "AUTH_VERIFICATION_UNAVAILABLE", httpStatus: 503 });
+    await expectSendUnavailable(Response.json({ code: 60200, message: `Invalid parameter \`To\`: ${phoneNumber}` }, { status: 500 }),
+      "Twilio Verify send: provider_http; HTTP 500; code 60200; parameter To; response parsed; parameterKind recognized.");
     request.mockResolvedValue(Response.json({ code: 60200, message: "Invalid parameter: To" }, { status: 500 }));
     await expect(hostedAuthSmsVerification().send({ phoneNumber }))
       .rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE", httpStatus: 503 });

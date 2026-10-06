@@ -48,8 +48,9 @@ then signal the pointer-only hosted Temporal workflow for the affected member.
 Device-sync webhook freshness is a dirty-state path instead: web records
 trace/audit facts, widens per-connection dirty resources, completes the trace in
 that transaction, and appends one deterministic `device-sync.wake` mailbox
-handoff only when the connection moves clean-to-dirty. Already-dirty level hints
-coalesce without another mailbox row. The dirty row remains the source of truth;
+handoff only when the connection moves clean-to-dirty. Routine Junction daily
+totals defer that handoff up to fifteen minutes and the scheduled recovery sweep
+releases it. Already-dirty level hints coalesce without another mailbox row. The dirty row remains the source of truth;
 the mailbox row is only the durable handoff into the normal Temporal wake path.
 Post-commit Temporal signal failures are logged as best-effort mailbox handoff
 failures; repeated dirty hints while a connection is already dirty do not retry
@@ -426,6 +427,17 @@ text before any signup or group routing, independent of admission mode. An app
 card without fallback text remains contentless there rather than receiving the
 active-member placeholder. This rule is app-card-specific; legacy media-only
 first contacts retain their existing behavior.
+
+The Web proxy rejects referral paths whose `/refer` prefix is immediately
+followed by a single-encoded slash or backslash before generated page loading.
+Its narrow matcher and fixed 404 preserve valid referral paths, encoded query
+values, normal missing-route handling, homepage negotiation, and workflow token
+validation. The isolated production routing proof uses no production credentials
+or full Web build:
+
+```sh
+pnpm exec node --import tsx apps/web/scripts/verify-referral-proxy-routing.ts
+```
 
 The public homepage also owns the browser fallback for shared response-card
 URLs. After hydration, a non-empty `#murph-card=` fragment opens the iPhone App
@@ -1499,6 +1511,30 @@ projection kinds, content, versions, counts, credentials or error prose; the
 existing request log supplies correlation. Logging failure preserves the same
 generic retryable response. No new reads, writes, retries or network work occur.
 
+### Linq provider dispatch claims
+
+The signed `POST /api/internal/hosted-runtime/linq-egress/engagement` callback
+returns HTTP 200 with `providerDispatchClaimed: false` when the dispatch fence
+already exists. This is an expected claim result, not a route failure or proof
+of delivery. Current authority and egress checks still run before returning it.
+The runtime permits replay only for provider-idempotent sends; non-idempotent
+voice and reaction effects remain confirmation-pending without provider re-entry.
+Runtime support for the legacy `HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED`
+409 remains for Web rollback compatibility.
+
+Member-route `HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH` warnings include the
+private `linqRouteAuthorityMismatchReason` from the existing rejection site:
+`durable_thread_container_mismatch`, `durable_target_missing`,
+`requested_target_missing`, `member_routing_missing`, `target_not_owned`,
+`route_projection_mismatch`, `pending_recipient_invalid`,
+`member_identity_missing`, or `member_recipient_invalid`. Composite guards keep
+one reason; the durable-target check is defensive because the current reader
+rejects empty targets before returning a durable route. The closed reader omits
+malformed metadata without getters or coercion. No values or identifiers enter
+the diagnostic; error names, public 403 JSON, checks, reads, and provider admission
+are unchanged. The separate route assertion and later resolved-route guard do
+not emit this reason.
+
 ### Workspace read timing
 
 `GET /api/internal/hosted-workspace` records content-free
@@ -1998,6 +2034,13 @@ number multiplied by the live Fluid instance count. Leaving
 without silently changing capacity. Use the pressure, acquisition, and callback
 measurements to re-baseline representative ingress, runtime-log, device-sync,
 signup, and Stripe workloads before choosing an explicit per-instance value.
+The same line carries `processUptimeMs` at that first database use, which
+separates a freshly booted Fluid instance from a long-lived one. The Linq
+webhook's `hosted-onboarding.route.linq-webhook` timing adds `processUptimeMs`,
+`routeModuleAgeMs`, and `routeModuleRequestOrdinal` at route start. Compare them
+with Vercel's function start to attribute time spent before the handler, which
+`webhook_received_at` cannot see, to process boot, lazy route loading, or the
+platform.
 
 The generated Prisma client uses the supported `small` query compiler to reduce
 fresh-instance loading and first-query initialization. This is a build choice,

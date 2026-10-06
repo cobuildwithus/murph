@@ -34,7 +34,10 @@ The live ownership split is:
   appends one deterministic `device-sync.wake` mailbox handoff if the connection
   transitioned from clean to dirty, and completes trace acceptance in the same
   transaction. The post-commit Temporal signal carries only the mailbox pointer.
-  There is no periodic dirty-row recovery sweep. The existing scheduled
+  Routine Junction daily totals defer that handoff up to fifteen minutes; the
+  scheduled recovery command releases due deadlines (see
+  `docs/device-sync-hosted-control-plane.md`). Otherwise there is no periodic
+  dirty-row recovery sweep. The existing scheduled
   mailbox-handoff sweep may re-signal one exact unconsumed `device-sync.wake`
   pointer per user after a failed first signal; it does not scan dirty state.
   The runtime pulls pending dirty rows through the required signed dirty-pending
@@ -406,7 +409,7 @@ authorization succeeds.
 The pinned Codex release has a test-only, version-bound route-disposition
 inventory whose authoritative review input is the upstream
 `codex-rs/codex-api/src` tree. Required Linux CI resolves the version-derived
-OpenAI tag and verifies its exact commit and source-tree object, so stale
+OpenAI tag and verifies its exact commit, which pins that source tree, so stale
 provenance cannot pass after a pin change. Offline tests scan the installed
 native artifact for conservative `/v1/**` plus separated provider-relative
 candidates, require every discovered candidate to be explicitly classified,
@@ -1076,6 +1079,9 @@ withdraw that wait, leaving the actual child tracked until it exits. Only effect
 covered by a successful snapshot may acknowledge exact device revisions. Already
 committed Web updates remain authoritative, and interrupted attempts recover
 through the durable mailbox and existing continuation contract.
+After quiescence, full snapshots derive `systemMailboxProgressGeneration` from
+the checkpoint request builder's latest accepted workspace and advance it only
+for system progress not yet checkpointed.
 
 After a device item records a durable follow-up deadline, that
 `device-sync.reconcile` deadline remains in the canonical model-free
@@ -1832,6 +1838,16 @@ once from the complete index.
 Terminal conversation ids stay in the checkpointed snapshot until a later
 mailbox fetch returns a `consumedSeqByLane` floor covering them; the wake probe
 checks terminal evidence so those retained ids do not schedule another reply.
+Every import result, including an empty or replay-only fetch, carries a newer
+authoritative conversation-consumed floor into the existing checkpoint status.
+Older or absent floors cannot regress it, and observing the floor adds no
+separate checkpoint or mailbox request. At the quiescent idle boundary, compact
+acknowledged terminal inputs before deriving the default-processing wake, then
+reuse that exact handled-item selection in the snapshot. This prevents a
+terminal-only index larger than the bounded wake probe from repeatedly arming
+its maintenance timer. Inputs without terminal evidence or committed server
+acknowledgment remain retained. The idle checkpoint still derives system
+progress from the builder's latest accepted workspace generation.
 When more exact ids are pending than the checkpoint request cap, v2 persists a
 batch cursor in the same snapshot and rotates later checkpoints through the
 remaining ids. It never deletes an id merely because it was selected, so a
@@ -3970,7 +3986,11 @@ workspace checkpoint that retains the prior snapshot ref. Web retains its
 workspace-version CAS and equal-or-plus-one generation invariant; rejected
 transitions add only a fixed regression, skipped-increment, or invalid-initial
 error code to the existing publication-failure event, never generation values
-or checkpoint contents. Capacity, log shape, and payload lengths are validated before
+or checkpoint contents. After draining system work, idle snapshots derive their
+progress generation from the checkpoint builder's latest accepted workspace,
+which also owns the expected workspace version. A foreground projection can
+precede canonical publications and must not supply an older generation.
+Capacity, log shape, and payload lengths are validated before
 upload. The complete immutable payload, receipt, and log artifact set then
 uploads in small fixed concurrent waves; every started wave settles before a
 failure returns, and the checkpoint publishes the log ref only after the whole
@@ -4675,8 +4695,13 @@ there is no historical lifecycle backfill.
 
 Web runs one Vercel-authenticated reply-latency monitor every five minutes over
 the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
-conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A
-recent accepted delivery at or above that boundary is anomalous. A trace at or
+conversation `consumed_at` facts. The fixed product boundary is 60 seconds. A
+recent accepted delivery at or above that boundary is anomalous unless its
+thread is explicitly a group (`thread_is_direct = false`): Murph may answer a
+busy group late or not at all, so group replies count as completed but never
+page. Unknown directness stays alertable. An input whose own turn committed
+valid `terminal_non_reply_committed` evidence at or before the delivery was
+already resolved and does not set that delivery's latency origin. A trace at or
 above the boundary with no accepted delivery and no durable consumed evidence
 is provisionally resolved only when it has valid
 `terminal_non_reply_committed` evidence and the runtime's latest
@@ -4694,8 +4719,10 @@ Every other latency leaf remains assign-once. For slow completed replies, the
 monitor compares
 accepted-to-provider-start with provider-start-to-first-visible-response and
 reports the larger measured boundary as pre-provider path or provider/assistant
-execution. Missing, ambiguous, or impossible provider chronology remains
-unknown. For unresolved replies, it separates missing valid terminal evidence
+execution. Inputs that arrive during a running turn get later provider
+requests, so the earliest provider start in the delivery bounds the
+pre-provider path. Missing or impossible provider chronology remains unknown.
+For unresolved replies, it separates missing valid terminal evidence
 from valid terminal non-reply evidence that still lacks durable checkpoint
 acknowledgement. Persisted incident details and alert email contain only these
 aggregate counts and durations.

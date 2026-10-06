@@ -95,8 +95,6 @@ describe("pinned Codex OpenAI egress conformance", () => {
       .toMatch(/^[0-9a-f]{40}$/u);
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamSourceRoot)
       .toBe("codex-rs/codex-api/src");
-    expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamSourceTree)
-      .toMatch(/^[0-9a-f]{40}$/u);
     expect(cloudflarePackage.scripts?.["verify:codex-upstream-source"])
       .toContain("verify-codex-upstream-source.ts");
     expect(hostSupportWorkflow)

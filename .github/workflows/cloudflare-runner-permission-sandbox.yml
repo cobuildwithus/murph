@@ -17,6 +17,12 @@ on:
       - "packages/assistant-engine/src/assistant-ask.ts"
       - "packages/assistant-engine/src/assistant-codex.ts"
       - "packages/assistant-engine/src/assistant-codex/**"
+      - "packages/assistant-engine/test/assistant-codex-native-voice.test.ts"
+      - "packages/assistant-engine/test/assistant-codex-websocket-stall.test.ts"
+      - "packages/assistant-engine/test/support/codex-scripted-provider.ts"
+      - "packages/assistant-engine/test/support/codex-websocket-proxy.ts"
+      - "apps/cloudflare/test/codex-openai-egress-conformance.test.ts"
+      - "apps/cloudflare/test/runner-egress-openai-live.test.ts"
       - "packages/hosted-execution/package.json"
       - "packages/hosted-execution/src/assistant-permissions.ts"
       - "packages/assistant-runtime/src/hosted-runtime/codex-config.ts"
@@ -40,6 +46,12 @@ on:
       - "packages/assistant-engine/src/assistant-ask.ts"
       - "packages/assistant-engine/src/assistant-codex.ts"
       - "packages/assistant-engine/src/assistant-codex/**"
+      - "packages/assistant-engine/test/assistant-codex-native-voice.test.ts"
+      - "packages/assistant-engine/test/assistant-codex-websocket-stall.test.ts"
+      - "packages/assistant-engine/test/support/codex-scripted-provider.ts"
+      - "packages/assistant-engine/test/support/codex-websocket-proxy.ts"
+      - "apps/cloudflare/test/codex-openai-egress-conformance.test.ts"
+      - "apps/cloudflare/test/runner-egress-openai-live.test.ts"
       - "packages/hosted-execution/package.json"
       - "packages/hosted-execution/src/assistant-permissions.ts"
       - "packages/assistant-runtime/src/hosted-runtime/codex-config.ts"
@@ -102,7 +114,7 @@ jobs:
 
       - name: Prove deployed Codex native Live and provider compatibility
         run: |
-          pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-native-voice.test.ts --no-coverage
+          pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-native-voice.test.ts test/assistant-codex-websocket-stall.test.ts --no-coverage
           pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/codex-openai-egress-conformance.test.ts apps/cloudflare/test/runner-egress-openai-live.test.ts --no-coverage
 
       - name: Allow capability-bearing nested user namespaces

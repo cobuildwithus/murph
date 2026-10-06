@@ -1,8 +1,19 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildHostedMemberChannelWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
 
 import {
   createHostedLinqChatLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
+
+const SELF_WELCOME_IDEMPOTENCY_KEYS = buildWelcomeIdempotencyKeys("member_123");
+const FOREIGN_WELCOME_IDEMPOTENCY_KEYS = buildWelcomeIdempotencyKeys("member_other");
+const MISSING_WELCOME_EVIDENCE: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+  ["missing original participant", { directRecipientPhoneNumber: null }],
+  ["missing sender line", { fromPhoneNumber: null }],
+  ["missing provider chat", { providerThreadId: null }],
+  ["missing provider message", { providerMessageId: null }],
+  ["non-direct provider chat", { threadIsDirect: false }],
+];
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
@@ -96,13 +107,13 @@ describe("hosted runtime Linq delivery route", () => {
     });
   });
 
-  it("atomically materializes an accepted canonical participant welcome before recording it", async () => {
+  it.each(SELF_WELCOME_IDEMPOTENCY_KEYS)("atomically materializes an accepted participant welcome before recording it: %s", async (idempotencyKey) => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
       attemptedAt: "2026-04-26T00:00:03.000Z",
       directRecipientPhoneNumber: "+15550100001",
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "signup-welcome:member_123",
+      idempotencyKey,
       intentId: "intent_signup_welcome",
       lineLookupKey: "hbidx:phone:v1:untrusted-echo",
       providerMessageId: "linq_message_welcome",
@@ -120,7 +131,7 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.materializeHostedSignupWelcomeHomeRouteTx).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550100001",
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "signup-welcome:member_123",
+      idempotencyKey,
       linqChatId: "linq_chat_welcome",
       memberId: "member_123",
       prisma,
@@ -128,7 +139,7 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: new Date("2026-04-26T00:00:04.000Z"),
-        idempotencyKey: "signup-welcome:member_123",
+        idempotencyKey,
         linqChatId: "linq_chat_welcome",
         messageId: "linq_message_welcome",
         phoneNumber: "+15550100099",
@@ -146,18 +157,19 @@ describe("hosted runtime Linq delivery route", () => {
     );
   });
 
-  it.each([
-    ["missing original participant", { directRecipientPhoneNumber: null }],
-    ["missing provider chat", { providerThreadId: null }],
-    ["missing provider message", { providerMessageId: null }],
-    ["non-direct provider chat", { threadIsDirect: false }],
-  ])("rejects a canonical welcome with %s evidence", async (_label, override) => {
+  it.each(
+    SELF_WELCOME_IDEMPOTENCY_KEYS.flatMap((idempotencyKey) =>
+      MISSING_WELCOME_EVIDENCE.map(([label, override]) =>
+        [label, idempotencyKey, override] as const
+      ),
+    ),
+  )("rejects a participant welcome with %s evidence: %s", async (_label, idempotencyKey, override) => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
       attemptedAt: "2026-04-26T00:00:03.000Z",
       directRecipientPhoneNumber: "+15550100001",
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "signup-welcome:member_123",
+      idempotencyKey,
       providerMessageId: "linq_message_welcome",
       providerThreadId: "linq_chat_welcome",
       targetKind: "participant",
@@ -166,16 +178,17 @@ describe("hosted runtime Linq delivery route", () => {
     }));
 
     expect(response.status).toBe(403);
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(mocks.materializeHostedSignupWelcomeHomeRouteTx).not.toHaveBeenCalled();
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
   });
 
-  it("records an accepted canonical welcome sent to an existing thread without rematerializing it", async () => {
+  it.each(SELF_WELCOME_IDEMPOTENCY_KEYS)("records an accepted welcome sent to an existing thread without rematerializing it: %s", async (idempotencyKey) => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
       attemptedAt: "2026-04-26T00:00:03.000Z",
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "signup-welcome:member_123",
+      idempotencyKey,
       providerMessageId: "linq_message_welcome",
       providerThreadId: "linq_chat_existing",
       targetKind: "thread",
@@ -188,7 +201,7 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: new Date("2026-04-26T00:00:04.000Z"),
-        idempotencyKey: "signup-welcome:member_123",
+        idempotencyKey,
         linqChatId: "linq_chat_existing",
         messageId: "linq_message_welcome",
         prisma,
@@ -199,13 +212,43 @@ describe("hosted runtime Linq delivery route", () => {
     );
   });
 
-  it("rejects a canonical welcome claimed for another authenticated member", async () => {
+  it.each(
+    (["participant", "thread"] as const).flatMap((targetKind) =>
+      FOREIGN_WELCOME_IDEMPOTENCY_KEYS.map((idempotencyKey) =>
+        [targetKind, idempotencyKey] as const
+      ),
+    ),
+  )("rejects a %s welcome claimed for another authenticated member: %s", async (targetKind, idempotencyKey) => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
       attemptedAt: "2026-04-26T00:00:03.000Z",
       directRecipientPhoneNumber: "+15550100001",
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "signup-welcome:member_other",
+      idempotencyKey,
+      providerMessageId: "linq_message_welcome",
+      providerThreadId: "linq_chat_welcome",
+      targetKind,
+      threadIsDirect: true,
+    }));
+
+    expect(response.status).toBe(403);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "signup-welcome:",
+    "signup-welcome:member_123:retry",
+    "signup-welcome:member_123:email",
+    "signup-welcome:member_123:linq:not-a-digest",
+    `signup-welcome:member_123:linq:${"A".repeat(64)}`,
+  ])("rejects malformed participant keys inside the signup-welcome namespace: %s", async (idempotencyKey) => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      directRecipientPhoneNumber: "+15550100001",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey,
       providerMessageId: "linq_message_welcome",
       providerThreadId: "linq_chat_welcome",
       targetKind: "participant",
@@ -217,22 +260,29 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
   });
 
-  it("rejects malformed participant keys inside the signup-welcome namespace", async () => {
+  it("keeps recording legacy malformed signup-welcome keys on thread outcomes", async () => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
       attemptedAt: "2026-04-26T00:00:03.000Z",
-      directRecipientPhoneNumber: "+15550100001",
       fromPhoneNumber: "+15550100099",
       idempotencyKey: "signup-welcome:member_123:retry",
       providerMessageId: "linq_message_welcome",
-      providerThreadId: "linq_chat_welcome",
-      targetKind: "participant",
+      providerThreadId: "linq_chat_existing",
+      targetKind: "thread",
       threadIsDirect: true,
     }));
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(200);
     expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
+    expect(mocks.materializeHostedSignupWelcomeHomeRouteTx).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "signup-welcome:member_123:retry",
+        linqChatId: "linq_chat_existing",
+        targetKind: "thread",
+        userId: "member_123",
+      }),
+    );
   });
 
   it("records an accepted runtime delivery outcome without raw recipient fallback for participant sends", async () => {
@@ -728,6 +778,23 @@ function buildDeliveryRequest(
       method: "POST",
     },
   );
+}
+
+function buildWelcomeIdempotencyKeys(memberId: string): string[] {
+  return [
+    `signup-welcome:${memberId}`,
+    `signup-welcome:${memberId}:linq`,
+    buildHostedMemberChannelWelcomeDeliveryIdentity({
+      memberId,
+      channel: "linq",
+      destinationLookupKey: "synthetic-phone-destination",
+    }),
+    buildHostedMemberChannelWelcomeDeliveryIdentity({
+      memberId,
+      channel: "email",
+      destinationLookupKey: "synthetic-email-destination",
+    }),
+  ];
 }
 
 async function runScheduledAfterTask(index = 0): Promise<void> {

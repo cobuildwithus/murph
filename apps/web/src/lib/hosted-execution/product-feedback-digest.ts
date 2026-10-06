@@ -8,6 +8,7 @@ import {
   HOSTED_PATTERN_ENGINE_AUDIT_PREFIX,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+  HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX,
   type HostedProductFeedbackKind,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -52,6 +53,7 @@ export async function runHostedProductFeedbackDigest(input: {
   env?: Readonly<Record<string, string | undefined>>;
   now?: Date;
   readFeedback?: typeof readHostedProductFeedbackDigestBatch;
+  readUsageReports?: typeof readHostedProductFeedbackDigestBatch;
   sendEmail?: typeof sendHostedResendPlainTextEmail;
   signal?: AbortSignal;
 } = {}): Promise<HostedProductFeedbackDigestResult> {
@@ -101,6 +103,32 @@ export async function runHostedProductFeedbackDigest(input: {
     to: emailConfig.recipients,
   });
 
+  const usageReports = await (
+    input.readUsageReports ?? readHostedProductFeedbackDigestBatch
+  )({
+    endAt: window.endAt,
+    startAt: window.startAt,
+    usageReportsOnly: true,
+  });
+  const usageReportCount = countHostedProductFeedbackDigestBatch(usageReports);
+  if (usageReportCount > 0) {
+    const omittedCount = usageReportCount - usageReports.rows.length;
+    await (input.sendEmail ?? sendHostedResendPlainTextEmail)({
+      config: emailConfig.resend,
+      idempotencyKey: `hosted-usage-report-digest/${window.dayKey}`,
+      ...(input.signal ? { signal: input.signal } : {}),
+      subject: `Biweekly usage reports — ${window.dayKey}`,
+      text: [
+        `Usage optimization reports (${usageReportCount})`,
+        ...usageReports.rows.map((row) => `- ${row.summary}`),
+        ...(omittedCount > 0
+          ? [`Not shown past the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item email limit: ${omittedCount}`]
+          : []),
+      ].join("\n\n"),
+      to: emailConfig.recipients,
+    });
+  }
+
   return {
     dayKey: window.dayKey,
     feedbackCount: countHostedProductFeedbackDigestBatch(batch),
@@ -133,6 +161,7 @@ export function resolveHostedProductFeedbackDigestWindow(now: Date): {
 export async function readHostedProductFeedbackDigestBatch(input: {
   endAt: Date;
   startAt: Date;
+  usageReportsOnly?: boolean;
 }): Promise<HostedProductFeedbackDigestBatch> {
   const digestRowFilter = {
     createdAt: {
@@ -154,9 +183,15 @@ export async function readHostedProductFeedbackDigestBatch(input: {
           startsWith: HOSTED_PATTERN_ENGINE_AUDIT_PREFIX,
         },
       },
+      ...(!input.usageReportsOnly
+        ? [{ summary: { startsWith: HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX } }]
+        : []),
     ],
     summary: {
       not: null,
+      ...(input.usageReportsOnly
+        ? { startsWith: HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX }
+        : {}),
     },
   };
   const groupedCounts = await getPrisma().hostedProductFeedback.groupBy({

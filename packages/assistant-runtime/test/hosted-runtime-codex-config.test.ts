@@ -62,7 +62,6 @@ import {
 
 import {
   buildHostedCodexConfigToml,
-  HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
   hostedCodexProviderTransportDiagnostics,
   prepareHostedCodexRuntimeEnvironment,
   resolveHostedCodexModelCatalogPath,
@@ -417,21 +416,11 @@ test("shared CLI timing fixture requires completed children and exact per-stream
   }
 });
 
-test("hosted Codex memory diagnostics expose only safe config metadata", () => {
-  assert.deepEqual(HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS, {
-    codexOperatorMemoryFeatureEnabled: false,
-    codexOperatorMemoryGenerateMemories: false,
-    codexOperatorMemoryMode: "disabled",
-    codexOperatorMemoryUseMemories: false,
-  });
-});
-
 test("hosted Codex provider transport diagnostics expose only safe config metadata", () => {
   assert.deepEqual(hostedCodexProviderTransportDiagnostics("hosted-openai"), {
     codexProviderRequestMaxRetries: 4,
     codexProviderStreamIdleTimeoutMs: 90_000,
     codexProviderStreamMaxRetries: 0,
-    codexProviderTransportMode: "codex-native-provider-transport",
   });
 });
 

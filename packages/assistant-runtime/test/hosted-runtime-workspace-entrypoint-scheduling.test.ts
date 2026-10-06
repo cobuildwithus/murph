@@ -126,8 +126,132 @@ import {
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
+import {
+  compactHostedConversationMailboxHandledItemSelection,
+  hasHostedPendingAssistantInputWakeCandidate,
+  inspectHostedPendingAssistantInputWakeCandidate,
+  readHostedPendingAssistantInputIds,
+} from "../src/hosted-runtime/pending-input-index.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
+  test("converges a restored terminal-only index after an empty import advances consumption", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-consumed-convergence-"));
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const farWakeAt = new Date(Date.parse(TEST_NOW) + 86_400_000).toISOString();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+      await upsertAutomation({
+        automationId: "automation_01J00000000000000000000001", continuityPolicy: "fresh",
+        instructions: "Send the synthetic scheduled reminder.", now: new Date(TEST_NOW),
+        route: {
+          channel: "linq", deliveryTarget: "synthetic_consumed_chat", identityId: null,
+          participantId: null, threadId: "synthetic_consumed_chat", threadIsDirect: true,
+        },
+        schedule: { kind: "at", at: farWakeAt }, status: "active",
+        title: "Synthetic consumption reminder", vaultRoot,
+      });
+      let unacknowledgedInputId = "";
+      for (let seq = 1; seq <= 65; seq += 1) {
+        const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+          item: createMailboxItem({ id: `mailbox_consumed_${seq}`, laneSeq: String(seq) }),
+          vaultRoot,
+        });
+        await writeSyntheticAssistantAutoReplyTerminalEvidence({ inputId, vaultRoot });
+        await recordHostedMailboxAssistantInputItem({
+          inputId, mailboxItemId: `mailbox_consumed_${seq}`, vault: vaultRoot,
+        });
+        if (seq === 65) unacknowledgedInputId = inputId;
+      }
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.conversation = "65";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      assert.deepEqual(await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }), {
+        hasCandidate: false, indexComplete: false,
+      });
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
+      artifactBytesByHash.set(initialSnapshot.hash, initialSnapshot.bytes);
+      let workspace = createWorkspaceState({
+        snapshotRef: initialSnapshot.snapshotRef,
+        nextWakeAt: farWakeAt, nextWakeReason: "assistant",
+        nextDefaultProcessingWakeAt: TEST_NOW, nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "7",
+        redactedStatus: {
+          hostedMailboxConversationImportedSeq: "65",
+          hostedMailboxConversationConsumedSeq: "0",
+          hostedMailboxSystemImportedSeq: "0",
+        },
+      });
+      // Restore the published checkpoint again: acknowledgment must survive a
+      // new invocation, while terminal but unacknowledged input remains retained.
+      for (let invocation = 0; invocation < 2; invocation += 1) {
+        const checkpointCountBeforeInvocation = checkpointRequests.length;
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({ request: {
+            runnerIdleTtlMs: 1, workspaceVersion: workspace.version,
+          } }),
+          {
+            vaultRoot,
+            platform: createPlatform({
+              artifactBytesByHash,
+              mailboxPort: createMailboxPort({
+                events, items: [],
+                consumedSeqByLane: [{ lane: "conversation", consumedSeq: "64" }],
+              }),
+              workspacePort: createWorkspacePort({ events, checkpointRequests, workspace }),
+            }),
+            async importItem() { throw new Error("An empty mailbox must not import items."); },
+            // Isolate the steady-state empty pass from assistant post-checkpoint
+            // work, which can independently request a near-term continuation.
+            async runAssistantPhase() {
+              return {
+                progressed: false, runtimeProjectionCheckpointRequested: true,
+                nextWakeAt: farWakeAt, nextWakeReason: "assistant",
+              };
+            },
+            async createCheckpointSnapshot() {
+              const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+              artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+              return { snapshotRef: snapshot.snapshotRef };
+            },
+          },
+        );
+        assert.ok(checkpointRequests.length > checkpointCountBeforeInvocation);
+        const checkpoint = checkpointRequests.at(-1);
+        assert.ok(checkpoint);
+        assert.equal(checkpoint.nextDefaultProcessingWakeAt, farWakeAt,
+          "An acknowledged terminal index must not re-arm the 30-second maintenance wake.");
+        assert.equal(checkpoint.redactedStatus?.hostedMailboxConversationConsumedSeq, "64",
+          "The assistant phase must preserve the freshly observed consumption floor.");
+        assert.equal(checkpoint.systemMailboxProgressGeneration, "7");
+        assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [unacknowledgedInputId]);
+        assert.deepEqual(checkpoint.handledConversationMailboxItemIds, ["mailbox_consumed_65"]);
+        workspace = createWorkspaceState({
+          ...workspace,
+          snapshotRef: checkpoint.snapshotRef,
+          redactedStatus: checkpoint.redactedStatus,
+          nextDefaultProcessingWakeAt: checkpoint.nextDefaultProcessingWakeAt,
+          version: String(BigInt(checkpoint.expectedWorkspaceVersion) + 1n),
+        });
+      }
+      const freshInputId = await stagePendingLinqAssistantInputForMailboxItem({
+        item: createMailboxItem({ id: "mailbox_consumed_fresh", laneSeq: "66" }),
+        vaultRoot,
+      });
+      await compactHostedConversationMailboxHandledItemSelection({ consumedThroughSeq: "64", vaultRoot });
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [unacknowledgedInputId, freshInputId]);
+      assert.equal(await hasHostedPendingAssistantInputWakeCandidate({ vaultRoot }), true,
+        "Fresh unconsumed foreground input must remain runnable after acknowledgment compaction.");
+      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
   test("clears a stale delivery projection while the same workspace drains device work", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-stale-delivery-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();

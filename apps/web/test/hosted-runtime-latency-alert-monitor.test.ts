@@ -388,6 +388,140 @@ describe("hosted runtime latency health", () => {
     expect(health.invalidChronologyCount).toBe(1);
     expect(health.recentCompletedReplyCount).toBe(0);
   });
+
+  it("classifies a reply spanning provider requests by its earliest start", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:30.000Z",
+          linqDeliveryId: "delivery_multi_request_1",
+          providerRequestOrdinal: 0,
+          providerStartAt: "2026-07-26T15:58:05.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:10.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:30.000Z",
+          linqDeliveryId: "delivery_multi_request_1",
+          providerRequestOrdinal: 1,
+          providerStartAt: "2026-07-26T15:58:50.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:59:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:30.000Z",
+          linqDeliveryId: "delivery_multi_request_1",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:30.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:40.000Z",
+          linqDeliveryId: "delivery_multi_request_2",
+          providerStartAt: "2026-07-26T15:58:20.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:40.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:40.000Z",
+          linqDeliveryId: "delivery_multi_request_2",
+          providerStartAt: "2026-07-26T15:58:45.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      invalidChronologyCount: 1,
+      maxFirstVisibleResponseLatencyMs: 90_000,
+      recentCompletedReplyCount: 2,
+      recentSlowInitialResponseCount: 2,
+      recentSlowPreProviderDominantCount: 0,
+      recentSlowProviderExecutionDominantCount: 1,
+      recentSlowUnknownBoundaryCount: 1,
+    });
+  });
+
+  it("does not charge inputs resolved by an earlier non-reply to a later reply", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:57:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:30.000Z",
+          linqDeliveryId: "delivery_after_non_reply_1",
+          terminalNonReplyCommittedAt: "2026-07-26T15:57:20.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:59:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:30.000Z",
+          linqDeliveryId: "delivery_after_non_reply_1",
+          providerStartAt: "2026-07-26T15:59:02.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:40.000Z",
+          linqDeliveryId: "delivery_only_non_reply_1",
+          terminalNonReplyCommittedAt: "2026-07-26T15:58:10.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:57:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+          linqDeliveryId: "delivery_invalid_non_reply_1",
+          terminalNonReplyCommittedAt: "2026-07-26T15:56:30.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:57:30.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:20.000Z",
+          linqDeliveryId: "delivery_later_non_reply_1",
+          terminalNonReplyCommittedAt: "2026-07-26T15:59:50.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: true,
+      maxFirstVisibleResponseLatencyMs: 120_000,
+      recentCompletedReplyCount: 3,
+      recentSlowInitialResponseCount: 2,
+    });
+  });
+
+  it("keeps slow group-thread replies out of the first-response alert", () => {
+    const groupRow = latencyRow({
+      acceptedAt: "2026-07-26T15:57:00.000Z",
+      deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+      deliveryThreadIsDirect: false,
+      linqDeliveryId: "delivery_group_1",
+    });
+
+    expect(summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [groupRow],
+    })).toMatchObject({
+      anomalous: false,
+      recentCompletedReplyCount: 1,
+      recentSlowInitialResponseCount: 0,
+    });
+    expect(summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        groupRow,
+        latencyRow({
+          acceptedAt: "2026-07-26T15:57:30.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+          deliveryThreadIsDirect: true,
+          linqDeliveryId: "delivery_direct_1",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+          linqDeliveryId: "delivery_unknown_thread_1",
+        }),
+      ],
+    })).toMatchObject({
+      anomalous: true,
+      maxFirstVisibleResponseLatencyMs: 90_000,
+      recentCompletedReplyCount: 3,
+      recentSlowInitialResponseCount: 2,
+    });
+  });
 });
 
 describe("hosted runtime latency alert monitor", () => {
@@ -421,6 +555,36 @@ describe("hosted runtime latency alert monitor", () => {
       prisma: fixture.prisma,
       source: canaryAlertEnv,
     });
+  });
+
+  it("keeps a slow group-thread reply out of the operational incident", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:57:00.000Z",
+        deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+        deliveryThreadIsDirect: false,
+        linqDeliveryId: "delivery_group_monitor_1",
+        providerStartAt: "2026-07-26T15:57:05.000Z",
+      }),
+    ]);
+    const sendAlert = vi.fn();
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+
+    expect(result).toMatchObject({
+      health: {
+        anomalous: false,
+        recentCompletedReplyCount: 1,
+        recentSlowInitialResponseCount: 0,
+      },
+      outcome: "healthy",
+    });
+    expect(sendAlert).not.toHaveBeenCalled();
   });
 
   it("keeps ordinary member latency alertable beside the canary", async () => {
@@ -1723,6 +1887,7 @@ function latencyRow(input: {
   checkpointPublicationExpectedBy?: string | null;
   consumedAt?: string | null;
   deliveryAcceptedAt?: string | null;
+  deliveryThreadIsDirect?: boolean | null;
   linqDeliveryId?: string | null;
   progressUpdateAcceptedAt?: string | null;
   providerRequestOrdinal?: number | null;
@@ -1746,6 +1911,7 @@ function latencyRow(input: {
     deliveryAcceptedAt: input.deliveryAcceptedAt
       ? instant(input.deliveryAcceptedAt)
       : null,
+    deliveryThreadIsDirect: input.deliveryThreadIsDirect ?? null,
     linqDeliveryId: input.linqDeliveryId ?? null,
     progressUpdateAcceptedAt: input.progressUpdateAcceptedAt
       ? instant(input.progressUpdateAcceptedAt)
@@ -1797,6 +1963,7 @@ function createMonitorPrismaFixture(
         acceptedAt: row.acceptedAt,
         consumedAt: row.consumedAt,
         deliveryAcceptedAt: row.deliveryAcceptedAt,
+        deliveryThreadIsDirect: row.deliveryThreadIsDirect,
         linqDeliveryId: row.linqDeliveryId,
         phaseBreakdownJson:
           row.terminalNonReplyCommittedAt

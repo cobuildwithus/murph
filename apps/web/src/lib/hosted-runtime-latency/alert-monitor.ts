@@ -51,6 +51,7 @@ export interface HostedRuntimeLatencyHealthRow {
   checkpointPublicationExpectedBy: Date | null;
   consumedAt: Date | null;
   deliveryAcceptedAt: Date | null;
+  deliveryThreadIsDirect: boolean | null;
   linqDeliveryId: string | null;
   progressUpdateAcceptedAt: Date | null;
   providerRequestOrdinal: number | null;
@@ -82,6 +83,7 @@ interface HostedRuntimeLatencyQueryRow {
   acceptedAt: Date;
   consumedAt: Date | null;
   deliveryAcceptedAt: Date | null;
+  deliveryThreadIsDirect: boolean | null;
   linqDeliveryId: string | null;
   phaseBreakdownJson: unknown;
   providerRequestOrdinal: number | null;
@@ -210,6 +212,7 @@ export async function readHostedRuntimeLatencyHealth(input: {
         readHostedRuntimeCheckpointPublicationExpectedBy(row.phaseBreakdownJson),
       consumedAt: row.consumedAt,
       deliveryAcceptedAt: row.deliveryAcceptedAt,
+      deliveryThreadIsDirect: row.deliveryThreadIsDirect,
       linqDeliveryId: row.linqDeliveryId,
       progressUpdateAcceptedAt:
         readHostedRuntimeProgressUpdateAcceptedAt(row.phaseBreakdownJson),
@@ -294,6 +297,7 @@ export function buildHostedRuntimeLatencyHealthQuery(input: {
         ) AS usage_denial_chronology_invalid,
         mailbox_item.consumed_at,
         delivery.accepted_at AS delivery_accepted_at,
+        delivery.thread_is_direct AS delivery_thread_is_direct,
         trace.linq_delivery_id,
         trace.phase_breakdown_json,
         trace.provider_request_ordinal,
@@ -335,6 +339,7 @@ export function buildHostedRuntimeLatencyHealthQuery(input: {
       latency_origin_at AS "acceptedAt",
       consumed_at AS "consumedAt",
       delivery_accepted_at AS "deliveryAcceptedAt",
+      delivery_thread_is_direct AS "deliveryThreadIsDirect",
       linq_delivery_id AS "linqDeliveryId",
       phase_breakdown_json AS "phaseBreakdownJson",
       provider_request_ordinal AS "providerRequestOrdinal",
@@ -363,9 +368,12 @@ export function summarizeHostedRuntimeLatencyRows(input: {
   let oldestUnresolvedAgeMs: number | null = null;
   let recentCompletedReplyCount = 0;
   let recentSlowInitialResponseCount = 0;
-  let recentSlowPreProviderDominantCount = 0;
-  let recentSlowProviderExecutionDominantCount = 0;
-  let recentSlowUnknownBoundaryCount = 0;
+  const slowBoundaryCounts: Record<SlowReplyBoundary, number> = {
+    invalid_chronology: 0,
+    pre_provider: 0,
+    provider_execution: 0,
+    unknown: 0,
+  };
   let unresolvedCheckpointAcknowledgementCount = 0;
   let unresolvedMissingTerminalEvidenceCount = 0;
   let unresolvedReplyCount = 0;
@@ -387,10 +395,9 @@ export function summarizeHostedRuntimeLatencyRows(input: {
     groupedRows.set(groupKey, rows);
   });
 
-  for (const rows of groupedRows.values()) {
-    const acceptedAtMs = Math.min(...rows.map((row) => row.acceptedAt.getTime()));
+  for (const groupRows of groupedRows.values()) {
     const deliveryAcceptedAtValues = [
-      ...new Set(rows
+      ...new Set(groupRows
         .map((row) => row.deliveryAcceptedAt?.getTime() ?? null)
         .filter((value): value is number => value !== null)),
     ];
@@ -399,6 +406,18 @@ export function summarizeHostedRuntimeLatencyRows(input: {
       continue;
     }
     const deliveryAcceptedAtMs = deliveryAcceptedAtValues[0] ?? null;
+    // The runtime links every input its reply covered, including inputs an
+    // earlier turn already resolved with a durable non-reply. Those inputs do
+    // not wait on this delivery, so they do not set its latency origin.
+    const rows = deliveryAcceptedAtMs === null
+      ? groupRows
+      : groupRows.filter((row) =>
+          !hasTerminalNonReplyBy(row, deliveryAcceptedAtMs)
+        );
+    if (rows.length === 0) {
+      continue;
+    }
+    const acceptedAtMs = Math.min(...rows.map((row) => row.acceptedAt.getTime()));
     const validProgressAcceptedAtValues = [
       ...new Set(rows
         .map((row) => row.progressUpdateAcceptedAt?.getTime() ?? null)
@@ -435,36 +454,22 @@ export function summarizeHostedRuntimeLatencyRows(input: {
       );
       const latencyMs = firstVisibleResponseAtMs - acceptedAtMs;
       recentCompletedReplyCount += 1;
+      // Murph may answer a busy group thread late or not at all, so only
+      // direct threads and unknown routes owe a timely first response.
+      if (rows.some((row) => row.deliveryThreadIsDirect === false)) {
+        continue;
+      }
       if (latencyMs >= HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS) {
         recentSlowInitialResponseCount += 1;
         maxFirstVisibleResponseLatencyMs = Math.max(
           maxFirstVisibleResponseLatencyMs ?? 0,
           latencyMs,
         );
-        const providerStartAtValues = [
-          ...new Set(rows
-            .map((row) => row.providerStartAt?.getTime() ?? null)
-            .filter((value): value is number => value !== null)),
-        ];
-        const providerStartAtMs = providerStartAtValues[0] ?? null;
-        if (providerStartAtValues.length === 0) {
-          recentSlowUnknownBoundaryCount += 1;
-        } else if (
-          providerStartAtValues.length !== 1
-          || providerStartAtMs === null
-          || providerStartAtMs < acceptedAtMs
-          || providerStartAtMs > firstVisibleResponseAtMs
-        ) {
-          invalidChronologyCount += 1;
-          recentSlowUnknownBoundaryCount += 1;
-        } else if (
-          firstVisibleResponseAtMs - providerStartAtMs
-          >= providerStartAtMs - acceptedAtMs
-        ) {
-          recentSlowProviderExecutionDominantCount += 1;
-        } else {
-          recentSlowPreProviderDominantCount += 1;
-        }
+        slowBoundaryCounts[classifySlowReplyBoundary({
+          acceptedAtMs,
+          firstVisibleResponseAtMs,
+          rows,
+        })] += 1;
       }
       continue;
     }
@@ -544,14 +549,17 @@ export function summarizeHostedRuntimeLatencyRows(input: {
       recentSlowInitialResponseCount > 0
       || unresolvedReplyCount > 0
       || scanTruncated,
-    invalidChronologyCount,
+    invalidChronologyCount:
+      invalidChronologyCount + slowBoundaryCounts.invalid_chronology,
     maxFirstVisibleResponseLatencyMs,
     oldestUnresolvedAgeMs,
     recentCompletedReplyCount,
     recentSlowInitialResponseCount,
-    recentSlowPreProviderDominantCount,
-    recentSlowProviderExecutionDominantCount,
-    recentSlowUnknownBoundaryCount,
+    recentSlowPreProviderDominantCount: slowBoundaryCounts.pre_provider,
+    recentSlowProviderExecutionDominantCount:
+      slowBoundaryCounts.provider_execution,
+    recentSlowUnknownBoundaryCount:
+      slowBoundaryCounts.unknown + slowBoundaryCounts.invalid_chronology,
     scanTruncated,
     thresholdMs: HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS,
     unresolvedCheckpointAcknowledgementCount,
@@ -559,6 +567,48 @@ export function summarizeHostedRuntimeLatencyRows(input: {
     unresolvedReplyCount,
     windowMinutes: HOSTED_RUNTIME_LATENCY_COMPLETED_WINDOW_MS / 60_000,
   };
+}
+
+type SlowReplyBoundary =
+  | "invalid_chronology"
+  | "pre_provider"
+  | "provider_execution"
+  | "unknown";
+
+function classifySlowReplyBoundary(input: {
+  acceptedAtMs: number;
+  firstVisibleResponseAtMs: number;
+  rows: readonly HostedRuntimeLatencyHealthRow[];
+}): SlowReplyBoundary {
+  // Inputs that arrive during a running turn get later provider requests; the
+  // earliest start bounds the pre-provider path.
+  const providerStartAtValues = input.rows
+    .map((row) => row.providerStartAt?.getTime() ?? null)
+    .filter((value): value is number => value !== null);
+  if (providerStartAtValues.length === 0) {
+    return "unknown";
+  }
+  const providerStartAtMs = Math.min(...providerStartAtValues);
+  if (
+    providerStartAtMs < input.acceptedAtMs
+    || providerStartAtMs > input.firstVisibleResponseAtMs
+  ) {
+    return "invalid_chronology";
+  }
+  return input.firstVisibleResponseAtMs - providerStartAtMs
+    >= providerStartAtMs - input.acceptedAtMs
+    ? "provider_execution"
+    : "pre_provider";
+}
+
+function hasTerminalNonReplyBy(
+  row: HostedRuntimeLatencyHealthRow,
+  deadlineMs: number,
+): boolean {
+  const committedAtMs = row.terminalNonReplyCommittedAt?.getTime() ?? null;
+  return committedAtMs !== null
+    && committedAtMs >= row.acceptedAt.getTime()
+    && committedAtMs <= deadlineMs;
 }
 
 export function readHostedRuntimeTerminalNonReplyCommittedAt(value: unknown): Date | null {

@@ -11,6 +11,7 @@ import {
   isHostedProductSupportEscalationFeedback,
   isHostedUsageOptimizationAuditFeedback,
   type HostedRuntimeProductFeedbackRecord,
+  type HostedUsageOptimizationAuditRejection,
 } from '@murphai/hosted-execution/runtime-control'
 import {
   deliverAssistantProgressUpdate,
@@ -125,7 +126,18 @@ export function createAssistantProductFeedbackRecorder(input: {
   return {
     async recordProductFeedback(feedback) {
       const normalized = normalizeAssistantProductFeedback(feedback)
-      if (input.usageOptimizerScope && !isHostedUsageOptimizationAuditFeedback(normalized)) throw new Error('Scheduled usage feedback requires one bounded anonymous usage audit.')
+      if (input.usageOptimizerScope) {
+        let rejection: HostedUsageOptimizationAuditRejection | undefined
+        if (!isHostedUsageOptimizationAuditFeedback(normalized, (reason) => { rejection = reason })) {
+          const error = new Error('Scheduled usage feedback requires one bounded anonymous usage audit.')
+          if (rejection !== undefined) {
+            Object.defineProperty(error, 'productFeedbackAuditRejection', {
+              value: rejection, enumerable: false,
+            })
+          }
+          throw error
+        }
+      }
       const supportEscalation = isHostedProductSupportEscalationFeedback(normalized)
       if (supportEscalation) {
         if (supportEscalationOutcome === 'delivered') {

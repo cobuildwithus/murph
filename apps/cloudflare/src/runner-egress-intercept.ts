@@ -127,7 +127,6 @@ import {
 } from "./runner-egress-venice.ts";
 import {
   buildHostedOpenAiCacheDiagnostic,
-  type HostedOpenAiCacheDiagnosticEndpointKind,
   type HostedRunnerDiagnosticJson,
 } from "./runner-egress-responses-diagnostics.ts";
 import {
@@ -214,10 +213,6 @@ const OPENAI_EGRESS_POLICY = [
   },
   {
     method: "POST",
-    pathname: "/v1/responses/compact",
-  },
-  {
-    method: "POST",
     pathname: "/v1/alpha/search",
   },
   {
@@ -291,10 +286,6 @@ interface HostedRunnerOutboundContext {
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
-interface HostedRunnerDiagnosticBodySource {
-  arrayBuffer(): Promise<ArrayBuffer>;
-}
-
 type HostedProviderEgressValidationMode = "deploy_smoke_live_model_turn" | "native_container";
 type HostedProviderEgressRejectReason = "bound_container_inactive" | "usage_settlement_pending";
 
@@ -304,10 +295,8 @@ interface HostedProviderEgressAuthorization {
   customInferenceEnvelope?: string | null;
   durationMs: number;
   mode: HostedProviderEgressValidationMode;
-  providerEgressTokenPresent: boolean;
   platformAiUsageAllowed?: boolean;
   rejectReason?: HostedProviderEgressRejectReason;
-  runtimeAuthorityHeadersPresent: boolean;
   userId: string | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }
@@ -1346,14 +1335,8 @@ function reportOpenAiAuthorizationFailureSafely(input: {
       .catch(() => {
         logFailure();
       });
-    if (typeof input.ctx?.waitUntil === "function") {
-      try {
-        input.ctx.waitUntil(reportPromise);
-        return;
-      } catch {
-        logFailure();
-      }
-    }
+    if (scheduleHostedRunnerBackgroundWork(input.ctx, reportPromise)) return;
+    logFailure();
     return reportPromise;
   } catch {
     logFailure();
@@ -1465,24 +1448,7 @@ async function maybeHandleOpenAiRequest(input: {
     headers,
     boundedBody !== undefined ? { body: boundedBody } : {},
   );
-  const endpointKind = readOpenAiCacheDiagnosticEndpointKind(
-    input.request.method,
-    pathnameSuffix,
-  );
-  let diagnosticPromise: Promise<void> | null = null;
-  if (endpointKind) {
-    diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
-      endpointKind,
-      env: input.env,
-      request: input.request,
-      upstreamRequestBody: upstreamRequest.clone(),
-    });
-    if (typeof input.ctx?.waitUntil === "function") {
-      input.ctx.waitUntil(diagnosticPromise);
-    }
-  }
-
-  const response = await fetchAuthorizedProviderUpstream({
+  const responsePromise = fetchAuthorizedProviderUpstream({
     authorization,
     providerKind: "openai",
     request: input.request,
@@ -1491,6 +1457,24 @@ async function maybeHandleOpenAiRequest(input: {
     upstreamFetchImpl: input.upstreamFetchImpl,
     url: input.url,
   });
+  if (pathnameSuffix === "/v1/responses" && boundedBody !== undefined) {
+    // The provider request is already in flight. The diagnostic reuses the
+    // admitted bytes and is a Worker log only; background parsing cannot hold
+    // the provider response, and no runtime-log callback is sent.
+    const diagnostic = emitHostedRunnerOpenAiCacheDiagnostic({
+      env: input.env,
+      request: input.request,
+      requestBytes: new Uint8Array(boundedBody),
+    });
+    try {
+      if (typeof input.ctx?.waitUntil === "function") input.ctx.waitUntil(diagnostic);
+      else waitUntil(diagnostic);
+    } catch {
+      // Best-effort persistence must not change provider forwarding.
+    }
+  }
+
+  const response = await responsePromise;
   if (response.status === 401 || response.status === 403) {
     const reportPromise = reportOpenAiAuthorizationFailureSafely({
       ctx: input.ctx,
@@ -1500,9 +1484,6 @@ async function maybeHandleOpenAiRequest(input: {
     if (reportPromise) {
       await reportPromise;
     }
-  }
-  if (diagnosticPromise && typeof input.ctx?.waitUntil !== "function") {
-    await diagnosticPromise;
   }
 
   // Return upgrades unaccepted: Cloudflare owns the byte forwarding and
@@ -1566,7 +1547,6 @@ async function handleHostedLiveAttachment(input: {
   // closure after revocation. It cannot create another Live session.
   const response = await fetchAuthorizedProviderUpstream({
     authorization: { authorized: true, mode: "native_container", durationMs: Date.now() - startedAt,
-      providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
       userId: resource.owner.userId, writeFence: { ...resource.owner, workspaceVersion: null } },
     providerKind: "openai", request: input.request, startedAt, url: input.url,
     upstreamRequest: await createHostedRunnerUpstreamRequest(input.request, url, headers, { redirect: "manual" }),
@@ -1971,13 +1951,9 @@ async function maybeHandleGeminiRequest(input: {
       ?? response.headers.get("x-request-id"),
     responseBody,
   });
-  if (typeof input.ctx?.waitUntil === "function") {
-    input.ctx.waitUntil(usageRecording);
-  } else {
-    // Production container interception has no waitUntil. The recorder owns
-    // its catch/log path, so usage accounting cannot withhold the answer.
-    void usageRecording;
-  }
+  // The recorder owns its catch/log path, so usage accounting never withholds
+  // the answer; background registration keeps it from being canceled.
+  scheduleHostedRunnerBackgroundWork(input.ctx, usageRecording);
   const responseHeaders = new Headers(response.headers);
   responseHeaders.delete("content-encoding");
   responseHeaders.delete("content-length");
@@ -1986,6 +1962,26 @@ async function maybeHandleGeminiRequest(input: {
     status: response.status,
     statusText: response.statusText,
   });
+}
+
+/**
+ * Keeps failure-isolated work alive after the provider response returns.
+ * Production container interception supplies no `ctx.waitUntil`, so the
+ * module-level `waitUntil` attaches the work to the current invocation instead
+ * of letting it be canceled with it. Returns false when neither registration is
+ * available; callers that must not lose the work then await it.
+ */
+function scheduleHostedRunnerBackgroundWork(
+  ctx: HostedRunnerOutboundContext | undefined,
+  work: Promise<unknown>,
+): boolean {
+  try {
+    if (typeof ctx?.waitUntil === "function") ctx.waitUntil(work);
+    else waitUntil(work);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function recordHostedGeminiVideoAnalysisUsage(input: {
@@ -2138,14 +2134,10 @@ async function maybeHandleXaiRequest(input: {
     providerRequestId: responseMetadata.providerRequestId,
     usage: responseMetadata.usage,
   });
-  if (typeof input.ctx?.waitUntil === "function") {
-    input.ctx.waitUntil(usageRecording);
-  } else {
-    // Production container interception has no waitUntil. The recorder owns
-    // its catch/log path, so deliberately let the already-started best-effort
-    // post continue without extending the member-visible provider budget.
-    void usageRecording;
-  }
+  // The recorder owns its catch/log path, so the already-started post never
+  // extends the member-visible provider budget; background registration keeps
+  // it from being canceled with the response.
+  scheduleHostedRunnerBackgroundWork(input.ctx, usageRecording);
   // The buffered body may differ from the wire encoding (fetch decompresses),
   // so drop the stale entity headers before re-wrapping.
   const responseHeaders = new Headers(response.headers);
@@ -2195,22 +2187,6 @@ function recordHostedXaiSearchUsage(input: {
   });
 }
 
-function readOpenAiCacheDiagnosticEndpointKind(
-  method: string,
-  pathnameSuffix: string,
-): HostedOpenAiCacheDiagnosticEndpointKind | null {
-  if (method !== "POST") {
-    return null;
-  }
-  if (pathnameSuffix === "/v1/responses") {
-    return "responses";
-  }
-  if (pathnameSuffix === "/v1/responses/compact") {
-    return "responses_compact";
-  }
-  return null;
-}
-
 async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   pathnameSuffix: string;
   request: Request;
@@ -2232,20 +2208,17 @@ async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
 }
 
 async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
-  endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
-  upstreamRequestBody: HostedRunnerDiagnosticBodySource;
+  requestBytes: Uint8Array;
 }): Promise<void> {
   let diagnostic: HostedRunnerDiagnosticJson;
   try {
-    const requestBytes = new Uint8Array(await input.upstreamRequestBody.arrayBuffer());
     diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: input.endpointKind,
+      endpointKind: "responses",
       fingerprintSecret: readOpenAiCacheDiagnosticFingerprintSecret(input.env),
       method: input.request.method,
-      providerKind: "openai",
-      requestBytes,
+      requestBytes: input.requestBytes,
       turnMetadataHeader: input.request.headers.get(
         OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER,
       ),
@@ -2255,7 +2228,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       component: "runner",
       details: {
         diagnosticCaptured: false,
-        endpointKind: input.endpointKind,
+        endpointKind: "responses",
         providerKind: "openai",
       },
       error,
@@ -2268,10 +2241,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
 
   emitHostedExecutionStructuredLog({
     component: "runner",
-    details: {
-      runtimeLogScheduled: false,
-      ...diagnostic,
-    },
+    details: diagnostic,
     message: "Hosted runner provider request diagnostic captured.",
     phase: "wake.running",
   });
@@ -2762,7 +2732,6 @@ async function authorizeHostedProviderEgress(input: {
   if (!owner && input.providerKind === "openai") {
     const smoke = await authorizeHostedProviderEgressDeploySmokeLiveModelTurn({
       ctx: input.ctx, env: input.env, startedAt, userId: input.userId,
-      providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
       deploySmokeLiveModelTurnModel: await readDeploySmokeLiveModelTurnOpenAiModel({
         pathnameSuffix: input.openAiPathnameSuffix ?? "", request: input.request }),
     });
@@ -2774,7 +2743,6 @@ async function authorizeHostedProviderEgress(input: {
     caller: input.ctx,
     authorized: Boolean(owner) && !owner?.retiring && !settlementPending,
     durationMs: Date.now() - startedAt, mode: "native_container",
-    providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
     userId: owner?.userId ?? null,
     ...(owner ? { platformAiUsageAllowed: owner.platformAiUsageAllowed, customInferenceEnvelope: owner.customInferenceEnvelope } : {}),
     ...(settlementPending ? { rejectReason: "usage_settlement_pending" as const }
@@ -2788,19 +2756,13 @@ async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
   ctx?: HostedRunnerOutboundContext;
   deploySmokeLiveModelTurnModel: string | null;
   env: RunnerOutboundEnvironmentSource;
-  providerEgressTokenPresent: boolean;
-  runtimeAuthorityHeadersPresent: boolean;
   startedAt: number;
   userId: string | null;
 }): Promise<HostedProviderEgressAuthorization | null> {
   if (!input.deploySmokeLiveModelTurnModel) {
     return null;
   }
-  if (
-    input.userId !== null
-    || input.providerEgressTokenPresent
-    || input.runtimeAuthorityHeadersPresent
-  ) {
+  if (input.userId !== null) {
     return null;
   }
   const containerId = input.ctx?.containerId?.trim();
@@ -2833,8 +2795,6 @@ async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
       authorized: true,
       durationMs: Date.now() - input.startedAt,
       mode: "deploy_smoke_live_model_turn",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
       userId: null,
       writeFence: null,
     };
@@ -3007,8 +2967,6 @@ function emitHostedProviderEgressDiagnostic(input: {
       ...(providerBearerCredentialKind
         ? { providerBearerCredentialKind }
         : {}),
-      providerEgressTokenPresent: input.authorization.providerEgressTokenPresent,
-      runtimeAuthorityHeadersPresent: input.authorization.runtimeAuthorityHeadersPresent,
       userIdPresent: input.authorization.userId !== null,
       writeFenceMetadataPresent: input.authorization.writeFence !== null,
       writeFenceValidationDurationMs: input.authorization.durationMs,

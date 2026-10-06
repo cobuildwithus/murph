@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 
 /** Local fault injection at the provider wire; the real binary owns recovery. */
-export async function startCodexWebSocketProxy(httpBaseUrl: string, responseStartTimeoutMs?: number) {
+export async function startCodexWebSocketProxy(httpBaseUrl: string) {
   let mode: 'healthy' | 'silent' | 'acknowledged-silent' | 'partial-silent' | 'close' = 'healthy'
   let httpRequests = 0
   let websocketRequests = 0
@@ -62,22 +62,7 @@ export async function startCodexWebSocketProxy(httpBaseUrl: string, responseStar
         if (typeof turnId === 'string') {
           requestTurnCorrelations.push(Number.parseInt(createHash('sha256').update(turnId).digest('hex').slice(0, 12), 16))
         }
-        // Recovery design prototype, confined to this local test proxy. The first
-        // upstream data frame cancels the timer; this does not prove model progress.
-        let responseDeadline: ReturnType<typeof setTimeout> | undefined
-        if (responseStartTimeoutMs !== undefined) {
-          responseDeadline = setTimeout(() => {
-            timers.delete(responseDeadline!)
-            socket.close(1011, 'synthetic response start deadline')
-          }, responseStartTimeoutMs)
-          timers.add(responseDeadline)
-        }
         const sendProviderFrame = (frame: string) => {
-          if (responseDeadline) {
-            clearTimeout(responseDeadline)
-            timers.delete(responseDeadline)
-            responseDeadline = undefined
-          }
           if (socket.readyState === WebSocket.OPEN) socket.send(frame)
         }
         if (mode !== 'healthy') {

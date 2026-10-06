@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
 import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ContainerProxy } from "./stubs/cloudflare-containers.ts";
+import { settleWaitUntilForTest } from "./stubs/cloudflare-workers.ts";
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
@@ -447,7 +448,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Production-shaped requests leave diagnostics in module-level background
+  // work; settle them before the next test replaces the global fetch stub.
+  await settleWaitUntilForTest();
   vi.useRealTimers();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
@@ -1475,8 +1479,6 @@ describe("hostedRunnerIntercept", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           providerKind: "openai",
-          providerEgressTokenPresent: false,
-          runtimeAuthorityHeadersPresent: false,
           writeFenceMetadataPresent: true,
           writeFenceValidationMode: "native_container",
         }),
@@ -2482,6 +2484,8 @@ describe("hostedRunnerIntercept", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    let background: Promise<void> | undefined;
+    let backgroundSettled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       const response = await Promise.race([
@@ -2514,6 +2518,13 @@ describe("hostedRunnerIntercept", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual(upstreamPayload);
       await accountingStarted;
+      // The production-shaped recording is registered background work, so it
+      // stays attached to the invocation instead of floating until canceled.
+      background = settleWaitUntilForTest().then(() => {
+        backgroundSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(backgroundSettled).toBe(false);
     } finally {
       if (timeoutId !== undefined) {
         clearTimeout(timeoutId);
@@ -2524,6 +2535,8 @@ describe("hostedRunnerIntercept", () => {
         usageId: "usage_1",
       }));
     }
+    await background;
+    expect(backgroundSettled).toBe(true);
   });
 
   it("rejects an oversized Gemini response without widening the delivery buffer", async () => {
@@ -2821,6 +2834,8 @@ describe("hostedRunnerIntercept", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    let background: Promise<void> | undefined;
+    let backgroundSettled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       const response = await Promise.race([
@@ -2849,6 +2864,13 @@ describe("hostedRunnerIntercept", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual(upstreamPayload);
       await accountingStarted;
+      // The production-shaped recording is registered background work, so it
+      // stays attached to the invocation instead of floating until canceled.
+      background = settleWaitUntilForTest().then(() => {
+        backgroundSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(backgroundSettled).toBe(false);
     } finally {
       if (timeoutId !== undefined) {
         clearTimeout(timeoutId);
@@ -2859,6 +2881,8 @@ describe("hostedRunnerIntercept", () => {
         usageId: "usage_1",
       }));
     }
+    await background;
+    expect(backgroundSettled).toBe(true);
   });
 
   it("does not delay or fail xAI delivery when off-path accounting rejects", async () => {
@@ -3239,8 +3263,6 @@ describe("hostedRunnerIntercept", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           providerKind: "openai",
-          providerEgressTokenPresent: false,
-          runtimeAuthorityHeadersPresent: false,
           writeFenceMetadataPresent: true,
           writeFenceValidationMode: "native_container",
         }),
@@ -3293,8 +3315,6 @@ describe("hostedRunnerIntercept", () => {
           providerKind: "openai",
           providerBearerCredentialKind: "provider_egress",
           providerEgressAuthMode: "native_container",
-          providerEgressTokenPresent: false,
-          runtimeAuthorityHeadersPresent: false,
           writeFenceMetadataPresent: true,
           writeFenceValidationMode: "native_container",
         }),
@@ -3870,6 +3890,44 @@ describe("hostedRunnerIntercept", () => {
     expect(await response.text()).toBe("private-upstream-response-body");
   });
 
+  it("keeps the OpenAI authorization alert report as background work when the context lacks waitUntil", async () => {
+    let completeReport = (_value: { accepted: true }): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    const reportFailure = vi.fn(
+      (_report: OpenAiAuthorizationAlertReport) =>
+        new Promise<{ accepted: true }>((resolve) => {
+          completeReport = resolve;
+        }),
+    );
+    const alert = createOpenAiAuthorizationAlertTestNamespace(reportFailure);
+    const upstreamResponse = new Response("forbidden", { status: 403 });
+
+    const response = await handleHostedRunnerOpenAiOutbound(
+      createAuthorizedOpenAiModelsRequest(),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        OPENAI_AUTHORIZATION_ALERT_MONITOR: alert.namespace,
+        validateRuntimeWriteFence: async () => true,
+      }),
+      // Production container interception supplies no ctx.waitUntil.
+      { className: "RunnerContainer", containerId: "synthetic-container" },
+      async () => upstreamResponse,
+    );
+
+    expect(response).toBe(upstreamResponse);
+    expect(reportFailure).toHaveBeenCalledOnce();
+    let backgroundSettled = false;
+    const background = settleWaitUntilForTest().then(() => {
+      backgroundSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(backgroundSettled).toBe(false);
+    completeReport({ accepted: true });
+    await background;
+    expect(backgroundSettled).toBe(true);
+  });
+
   it("routes standby provider and internal hosts through concrete class interception", async () => {
     const fetchMock = vi.fn<typeof fetch>(
       async () => new Response("provider-ok", { status: 200 }),
@@ -4291,42 +4349,6 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
   });
 
-  it("injects OpenAI authorization for Codex auto-compaction requests", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
-
-      userId: string;
-    }) => createProviderEgressCredentialValidationResult(input));
-    const credential = await createTestProviderEgressCredential();
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses/compact", {
-        headers: {
-          authorization: `Bearer ${credential}`,
-        },
-        method: "POST",
-      }),
-      createInterceptEnv({
-        OPENAI_API_KEY: "openai-worker-secret",
-        providerContext: validateRuntimeProviderEgressCredential,
-      }),
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(200);
-
-    const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
-    expect(forwarded).toBeInstanceOf(Request);
-    const forwardedRequest = forwarded as Request;
-    expect(forwardedRequest.url).toBe("https://api.openai.com/v1/responses/compact");
-    expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
-    expect(forwardedRequest.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
-    expect(forwardedRequest.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
-    expect(forwardedRequest.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
-    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
-  });
-
   it("emits OpenAI cache diagnostics as redacted structured metadata without a Web runtime-log POST", async () => {
     const waitUntilPromises: Promise<unknown>[] = [];
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
@@ -4444,7 +4466,6 @@ describe("hostedRunnerIntercept", () => {
       previousResponsePresent: true,
       providerKind: "openai",
       requestFingerprintPresent: true,
-      runtimeLogScheduled: false,
       streamPresent: true,
       toolCount: 1,
     }));
@@ -4533,7 +4554,7 @@ describe("hostedRunnerIntercept", () => {
     });
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses/compact", {
+      new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify(requestBody),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
@@ -4568,8 +4589,7 @@ describe("hostedRunnerIntercept", () => {
       codexCompactionTriggerKind: "auto",
       codexRequestKind: "compaction",
       codexTurnMetadataStatus: "valid",
-      endpointKind: "responses_compact",
-      runtimeLogScheduled: false,
+      endpointKind: "responses",
     }));
     parseDiagnosticRuntimeLog(diagnostic);
 
@@ -4646,7 +4666,6 @@ describe("hostedRunnerIntercept", () => {
     expect(diagnostic).toEqual(expect.objectContaining({
       endpointKind: "responses",
       providerKind: "openai",
-      runtimeLogScheduled: false,
     }));
   });
 
@@ -4689,6 +4708,7 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
+    await settleWaitUntilForTest();
     expect(findFetchCall(fetchMock, "api.openai.com")).toBeDefined();
     expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
     const diagnostic = readCapturedOpenAiDiagnostic();
@@ -4698,7 +4718,6 @@ describe("hostedRunnerIntercept", () => {
       fingerprintKind: "hmac-sha256",
       inputFingerprintPresent: false,
       requestFingerprintPresent: false,
-      runtimeLogScheduled: false,
     }));
   });
 
@@ -4745,26 +4764,31 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("rejects OpenAI paths outside the explicit hosted runner policy", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
+    for (const url of [
+      "https://api.openai.com/v1/chat/completions",
+      "https://api.openai.com/v1/responses/compact",
+    ]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+      vi.stubGlobal("fetch", fetchMock);
 
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/chat/completions", {
-        body: JSON.stringify({ messages: [] }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          ...WRITE_FENCE_HEADERS,
-        },
-        method: "POST",
-      }),
-      createInterceptEnv({
-        OPENAI_API_KEY: "openai-worker-secret",
-      }),
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
-    );
+      const response = await hostedRunnerIntercept(
+        new Request(url, {
+          body: JSON.stringify({ messages: [] }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            ...WRITE_FENCE_HEADERS,
+          },
+          method: "POST",
+        }),
+        createInterceptEnv({
+          OPENAI_API_KEY: "openai-worker-secret",
+        }),
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
+      );
 
-    expect(response.status).toBe(403);
-    expect(fetchMock).not.toHaveBeenCalled();
+      expect(response.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
   });
 
   it("rejects wrong OpenAI methods on otherwise allowed paths", async () => {
