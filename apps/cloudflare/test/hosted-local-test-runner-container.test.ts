@@ -2,6 +2,7 @@ import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRunti
 import { readFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { holdPositiveDeviceSyncPassCheckpoint } from "./helpers/hosted-local-device-pass-checkpoint.js";
 import {
   HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
@@ -966,6 +967,87 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(false);
     } finally {
       releaseShutdownCheckpointPublicationBarrier(userId);
+    }
+  });
+
+  it("lets housekeeping publish between an empty device pass and the next pre-drain fence", async () => {
+    const userId = "member_device_pass_checkpoint";
+    const fromAt = new Date("2026-01-01T12:00:00.000Z");
+    const env = createOutboundEnv();
+    const ctx = { className: "RunnerContainer" };
+    const committed = vi.fn(async () => Response.json({ checkpointed: true }));
+    const canonical = wrapForegroundPriorityOrderingObservationForTest(committed, "web-control");
+    const publication = wrapShutdownCheckpointPublicationBarrierForTest(committed);
+    let passCount = 0;
+    const readPass = vi.fn(async () => ({
+      at: new Date(fromAt.getTime() + ++passCount).toISOString(),
+      attemptId: "synthetic-attempt",
+      component: "device-sync",
+      eventCode: "device-sync.pass_finished",
+      level: "info",
+      phase: "invoke",
+      redactedJson: { outcome: "yielded", processedJobs: passCount === 1 ? 0 : 1 },
+    }));
+    armForegroundPriorityOrderingObservation(userId, "canonical_post_commit");
+    const observation = holdPositiveDeviceSyncPassCheckpoint({
+      fromAt,
+      userId,
+      harness: {
+        armForegroundPriorityOrderingObservationForTest: async (id, target) => {
+          armForegroundPriorityOrderingObservation(id, target);
+          return { ok: true };
+        },
+        armShutdownCheckpointPublicationBarrierForTest: async (id) => {
+          armShutdownCheckpointPublicationBarrier(id);
+          return { ok: true };
+        },
+        releaseForegroundPriorityOrderingBarrierForTest: async (id) => ({
+          ok: true, released: releaseForegroundPriorityOrderingBarrier(id),
+        }),
+        clearForegroundPriorityOrderingObservationForTest: async (id) => ({
+          ok: true, cleared: clearForegroundPriorityOrderingObservation(id),
+        }),
+        releaseShutdownCheckpointPublicationBarrierForTest: async (id) => ({
+          ok: true, released: releaseShutdownCheckpointPublicationBarrier(id),
+        }),
+      },
+      waitForPreDrain: async () => {
+        await vi.waitFor(() => expect(readForegroundPriorityOrderingObservation(userId))
+          .toMatchObject({ barrierState: "entered", barrierTarget: "canonical_post_commit" }));
+      },
+      waitForPublication: async () => {
+        await vi.waitFor(() => expect(readShutdownCheckpointPublicationBarrierState(userId))
+          .toBe("entered"));
+      },
+      waitForPass: readPass,
+    });
+    // Consume a rejection immediately; assertions below still await the result.
+    void observation.catch(() => undefined);
+    let positivePublication: Promise<Response> | undefined;
+    try {
+      await canonical(createCanonicalCheckpointRequest(userId), env, ctx);
+      await publication(createSnapshotCompleteRequest(userId, "a".repeat(64), "idle_shutdown"), env, ctx);
+      expect(readPass).toHaveBeenCalledTimes(1);
+      expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("unarmed");
+
+      // A retained owner can checkpoint without running another device pass.
+      // Holding this request while waiting for a new pass log deadlocks it.
+      await publication(createSnapshotCompleteRequest(userId, "a".repeat(64), "idle_shutdown"), env, ctx);
+      expect(readPass).toHaveBeenCalledTimes(1);
+      expect(readForegroundPriorityOrderingObservation(userId).barrierState).toBe("armed");
+
+      await canonical(createCanonicalCheckpointRequest(userId), env, ctx);
+      positivePublication = publication(
+        createSnapshotCompleteRequest(userId, "a".repeat(64), "idle_shutdown"), env, ctx,
+      );
+      await expect(observation).resolves.toMatchObject({ redactedJson: { processedJobs: 1 } });
+      expect(readPass).toHaveBeenNthCalledWith(2, new Date(fromAt.getTime() + 2));
+      expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("entered");
+    } finally {
+      releaseShutdownCheckpointPublicationBarrier(userId);
+      clearForegroundPriorityOrderingObservation(userId);
+      await positivePublication;
+      await observation.catch(() => undefined);
     }
   });
 
