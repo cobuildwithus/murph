@@ -318,6 +318,8 @@ admission, and real-Codex fresh-conversation proof live in the assistant-engine
 memory and managed-automation tests. Implementation and review evidence is
 recorded in `exec-plans/completed/2026-09-20-memory-current-context.md`.
 
+Malformed referral-path routing plan: [`2026-10-05-referral-path-routing.md`](exec-plans/completed/2026-10-05-referral-path-routing.md).
+
 ## Purpose
 
 Deferred device hints honor their persisted retry time in wake projection and
