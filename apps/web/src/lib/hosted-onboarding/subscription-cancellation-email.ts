@@ -31,6 +31,7 @@ export type HostedSubscriptionCancellationEmailResult =
     };
 
 export async function sendHostedSubscriptionCancellationEmailForMember(input: {
+  accountGroupId?: string;
   env?: HostedSubscriptionCancellationEmailEnv;
   fetchImpl?: typeof fetch;
   memberId: string;
@@ -50,7 +51,21 @@ export async function sendHostedSubscriptionCancellationEmailForMember(input: {
     };
   }
 
-  if (member.billingStatus !== HostedBillingStatus.canceled || member.suspendedAt) {
+  const canceledFamily = input.accountGroupId && !member.suspendedAt
+    ? await prisma.hostedAccountGroup.findFirst({
+        select: { id: true },
+        where: {
+          id: input.accountGroupId,
+          ownerMemberId: member.id,
+          billingStatus: HostedBillingStatus.canceled,
+          suspendedAt: null,
+        },
+      })
+    : null;
+  const subscriptionCanceled = input.accountGroupId
+    ? Boolean(canceledFamily)
+    : member.billingStatus === HostedBillingStatus.canceled;
+  if (!subscriptionCanceled || member.suspendedAt) {
     return {
       reason: "member_not_canceled",
       status: "skipped",

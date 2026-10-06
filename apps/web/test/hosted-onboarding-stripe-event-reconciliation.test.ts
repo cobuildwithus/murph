@@ -3810,7 +3810,7 @@ describe("hosted Stripe event reconciliation", () => {
     );
   });
 
-  it("sends the cancellation feedback email after a cancellation billing write", async () => {
+  it.each([false, true])("sends the cancellation feedback email after a cancellation billing write (family: %s)", async (family) => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeSubscriptionEvent("customer.subscription.deleted");
     const canonicalSubscription = makeCanonicalSubscription({
@@ -3826,6 +3826,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeSubscriptionUpdated.mockResolvedValueOnce({
       newlyActivatedMemberIds: [],
       subscriptionCancellationEmail: {
+        ...(family ? { accountGroupId: "hbag_family" } : {}),
         memberId: "member_123",
         stripeSubscriptionId: "sub_123",
       },
@@ -3848,6 +3849,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(mocks.sendHostedSubscriptionCancellationEmailForMember)
       .toHaveBeenCalledWith({
+        ...(family ? { accountGroupId: "hbag_family" } : {}),
         memberId: "member_123",
         prisma: prisma.client,
         stripeSubscriptionId: "sub_123",
@@ -3865,7 +3867,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
   });
 
-  it("retries cancellation feedback email provider failures before completing the receipt", async () => {
+  it.each([false, true])("retries cancellation feedback email provider failures before completing the receipt (family: %s)", async (family) => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeSubscriptionEvent("customer.subscription.deleted");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -3882,6 +3884,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
       newlyActivatedMemberIds: [],
       subscriptionCancellationEmail: {
+        ...(family ? { accountGroupId: "hbag_family" } : {}),
         memberId: "member_123",
         stripeSubscriptionId: "sub_123",
       },
@@ -3938,7 +3941,7 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
-  it("does not resend cancellation feedback when provider success was marked before receipt completion failed", async () => {
+  it.each([false, true])("does not resend cancellation feedback when provider success was marked before receipt completion failed (family: %s)", async (family) => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeSubscriptionEvent("customer.subscription.deleted");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -3955,6 +3958,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
       newlyActivatedMemberIds: [],
       subscriptionCancellationEmail: {
+        ...(family ? { accountGroupId: "hbag_family" } : {}),
         memberId: "member_123",
         stripeSubscriptionId: "sub_123",
       },
