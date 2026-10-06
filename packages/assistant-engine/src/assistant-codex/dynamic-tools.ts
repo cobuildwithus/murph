@@ -46,7 +46,7 @@ import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
-  parseHostedGroupSharedFreshnessRequirements,
+  readHostedGroupSharedFreshnessRejection,
   parseHostedGroupSharedReadOptions,
   type HostedGroupSharedReadOptions,
   getHostedGroupWearableReportingGaps,
@@ -193,6 +193,7 @@ import {
 import {
   buildSafeToolCallValidationDigest,
   collectSafeJsonSchemaValidationPaths,
+  type SafeToolCallSemanticRejection,
   type SafeToolCallValidationDigest,
 } from '../assistant/tool-validation-digest.js'
 import type {
@@ -559,6 +560,62 @@ const groupDisclosureGrantIdSchema = z
     { message: 'grantId exceeds the Unicode code-point limit' },
   )
 
+const groupReadSharedArgumentsSchema = z
+  .object({
+    action: z.literal('read_shared'),
+    participantId: z.string().min(1).max(200).optional(),
+    history: z.object({ fromDate: z.string(), throughDate: z.string() }).strict().optional(),
+    audience: z.literal('group_email').optional(),
+    freshness: z.array(z.object({
+      projectionScopeKey: z.string().min(1).max(191),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+    }).strict()).min(1).max(21).optional(),
+    projectionScopes: z
+      .array(groupVaultShareProjectionScopeSchema)
+      .min(1)
+      .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
+      .refine(
+        (projectionScopes) =>
+          new Set(
+            projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
+          ).size === projectionScopes.length,
+        { message: 'projectionScopes must contain unique exact scopes' },
+      ),
+  })
+  .strict()
+
+// The read_shared refinement's only decision. The model still receives the one
+// broad issue; private validation telemetry records this finite first reason.
+function readGroupSharedReadSemanticRejection(
+  request: z.infer<typeof groupReadSharedArgumentsSchema>,
+): SafeToolCallSemanticRejection | null {
+  try {
+    parseHostedGroupSharedReadOptions(request, request.projectionScopes)
+  } catch {
+    return 'shared_read_options'
+  }
+  if (request.audience && (request.history || request.participantId)) return 'shared_read_options'
+  if (request.freshness === undefined) return null
+  if (request.audience !== undefined) return 'shared_read_options'
+  try {
+    const rejection = readHostedGroupSharedFreshnessRejection(
+      request.freshness,
+      request.projectionScopes,
+    )
+    return rejection === null ? null : `shared_freshness_${rejection}` as const
+  } catch {
+    return 'shared_semantic_unclassified'
+  }
+}
+
+// Rejection-only: structurally invalid or non-read_shared input has no reason.
+function readGroupArgumentsSemanticRejection(
+  value: unknown,
+): SafeToolCallSemanticRejection | null {
+  const request = groupReadSharedArgumentsSchema.safeParse(value)
+  return request.success ? readGroupSharedReadSemanticRejection(request.data) : null
+}
+
 const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
@@ -755,45 +812,11 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       policyCode: z.enum(HOSTED_USAGE_REFERRAL_POLICY_CODES),
     })
     .strict(),
-  z
-    .object({
-      action: z.literal('read_shared'),
-      participantId: z.string().min(1).max(200).optional(),
-      history: z.object({ fromDate: z.string(), throughDate: z.string() }).strict().optional(),
-      audience: z.literal('group_email').optional(),
-      freshness: z.array(z.object({
-        projectionScopeKey: z.string().min(1).max(191),
-        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
-      }).strict()).min(1).max(21).optional(),
-      projectionScopes: z
-        .array(groupVaultShareProjectionScopeSchema)
-        .min(1)
-        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
-        .refine(
-          (projectionScopes) =>
-            new Set(
-              projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
-            ).size === projectionScopes.length,
-          { message: 'projectionScopes must contain unique exact scopes' },
-        ),
-    })
-    .strict()
-    .refine((request) => {
-      try {
-        parseHostedGroupSharedReadOptions(request, request.projectionScopes)
-        if (request.audience && (request.history || request.participantId)) return false
-      } catch {
-        return false
-      }
-      if (request.freshness === undefined) return true
-      if (request.audience !== undefined) return false
-      try {
-        parseHostedGroupSharedFreshnessRequirements(request.freshness, request.projectionScopes)
-        return true
-      } catch {
-        return false
-      }
-    }, { message: 'history requires one participant, one existing health metric scope and at most 90 inclusive dates, without freshness or group_email; freshness requires exact requested wearable dates', path: ['freshness'] })
+  groupReadSharedArgumentsSchema
+    .refine(
+      (request) => readGroupSharedReadSemanticRejection(request) === null,
+      { message: 'history requires one participant, one existing health metric scope and at most 90 inclusive dates, without freshness or group_email; freshness requires exact requested wearable dates', path: ['freshness'] },
+    )
     .refine(
       (request) =>
         request.audience === 'group_email'
@@ -7714,6 +7737,7 @@ function parseGroupArguments(
     schema: parser,
     value,
     schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
+    readSemanticRejection: readGroupArgumentsSemanticRejection,
     toolName: qualifiedToolName,
   });
   if (!parsed.ok) {

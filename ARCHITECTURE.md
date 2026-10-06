@@ -885,6 +885,11 @@ configuration does not become a member connection request. Personal account
 metadata and approval remain unchanged. Mixed service searches discard upstream
 cached connection plans that contradict this host-owned boundary while preserving
 tool schemas and search errors. This projection adds no network call or state.
+The connected-app skill reuses complete schemas within the same turn and scope,
+while retaining live account/approval checks. Reads use available provider
+window, page and field controls; pagination and attribution evidence remain
+visible. Different capabilities or explicit schema-invalid results trigger
+fresh discovery. No cross-turn schema or account cache is added.
 
 
 Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. A group newsletter is an ordinary automation whose instructions reopen the private editorial skill and record its chosen delivery and exact scopes. Its slug and instructions grant no capability, and cron never recognizes newsletter metadata. Current-chat editions use the ordinary consent-aware shared read and bound-route conversation outbox. Any scheduled non-direct group cron occurrence may instead use the generic one-shot group-email effect: `murph.group_data` prepares address-free authorized facts through `read_shared audience="group_email"`, then `murph.group_email` accepts a recipient-free `send_email`. Preparation derives the group from the signed runtime member and keeps its private authorization proof outside model-visible output. Send persists the proof plus HTML on the existing assistant outbox parent and ends the turn so the group outbox cannot duplicate the edition. The outbox reports an accepted parent to cron immediately, Web marks it sent only after current-authority revalidation and durable recipient fanout, and the existing cron reconciler settles the occurrence without another model turn. Recipient intents use only the generic outbox retry lifecycle. Bounded readers recognize prior newsletter idempotency keys and proof fields solely to drain already-accepted effects; new writes use generic group-email names. Because group-email `From` identity is spoofable, replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
@@ -986,7 +991,19 @@ explicit missing/truncated coverage. Existing sanitized turn profiles attribute
 tool output bytes; bytes are not token counts or per-tool dollar charges. The
 vault stores no duplicate ledger. It can change only suitable active ordinary
 automation model overrides through inspected-version patches; explicit member
-preferences, managed pins, instructions, routes, and timing remain intact. One
+preferences, managed pins, instructions, routes, and timing remain intact. Model reviews use
+`automation.inspect` with `view=model_review`: ordinary records retain complete
+instructions, references, host-resolved ownership, model override and version;
+managed records explicitly omit instructions because their model is preserved.
+This read-only projection skips scheduler timing and execution-history reads.
+The engine's `inspect_models` action batches up to ten exact ids through that
+same port, deduplicates ids, and returns at most 24 KB of whole records. Oversized
+or remaining records appear in `requiresIndividualInspection` for an exact
+single read; missing records are explicit, and unexpected read failures use the
+ordinary tool-failure boundary. There is no parallel host protocol or new store.
+Omitted/default `view=full` preserves ordinary inspection diagnostics. Each bounded batch or individual audit
+readback is rendered separately to avoid combined-output truncation; missing
+ownership or incomplete ordinary instructions forbids a model change. One
 bounded de-identified usage audit enters the existing product feedback owner,
 with member-and-occurrence idempotency, a server-keyed HMAC identity, and no
 member linkage in the persisted row. The dedicated signed usage-feedback route

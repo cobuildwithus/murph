@@ -19,6 +19,14 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Focused wearable/blood reads, Browser Vault bundle reuse and finite empty-envelope
+verification (with metric sort deletion deferred for parity) are tracked
+in [the completed global-projection plan](exec-plans/completed/2026-10-02-focused-global-projection.md).
+The [query owner contract](../packages/query/README.md#ordinary-wearable-reads) and
+[native paired proof](../packages/vault-usecases/bench/global-projection.md) record
+implemented behavior, measured evidence and limitations; final-closeout-head CI
+remains a PR handoff gate.
+
 Unclaimed input typing cleanup is owned by `agent-docs/RELIABILITY.md`;
 implementation and proof are tracked in
 [`typing claim cleanup`](exec-plans/completed/2026-10-04-typing-claim-cleanup.md).
@@ -291,6 +299,10 @@ Direct Linq preparation-reason telemetry and retry-preservation proof are record
 The preparation member-lock correction and composed PostgreSQL proof are recorded in
 [`2026-09-25-linq-preparation-lock.md`](exec-plans/completed/2026-09-25-linq-preparation-lock.md).
 
+The channel welcome delivery identity correction is tracked in
+[`2026-10-04-welcome-delivery-key-contract.md`](exec-plans/completed/2026-10-04-welcome-delivery-key-contract.md).
+The shared-validator correction has focused callback and owner proof plus final review approval; PR #4015 tracks final-head CI and human merge.
+
 Runtime admission policy and single-request provider backend selection are owned
 by `agent-docs/references/hosted-postgres-runtime.md` and `agent-docs/SECURITY.md`.
 
@@ -313,6 +325,8 @@ Private memory selection and automatic compaction are owned by
 admission, and real-Codex fresh-conversation proof live in the assistant-engine
 memory and managed-automation tests. Implementation and review evidence is
 recorded in `exec-plans/completed/2026-09-20-memory-current-context.md`.
+
+Malformed referral-path routing plan: [`2026-10-05-referral-path-routing.md`](exec-plans/completed/2026-10-05-referral-path-routing.md).
 
 ## Purpose
 
@@ -492,6 +506,9 @@ The iOS production-revision canary correction is tracked in
 
 The production-promotion continuity correction for the native iOS health canary
 is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/completed/2026-09-18-ios-canary-deployment-continuity.md).
+
+Package verifier worker-exit result preservation is tracked in
+[the verifier race plan](exec-plans/completed/2026-10-05-verifier-exit-status-race.md).
 
 ## Canonical Docs
 
@@ -1020,3 +1037,7 @@ PostgreSQL proof are tracked in
 The runaway invocation alert threshold change (40 to 25 per trailing hour) is
 tracked in [the threshold plan](exec-plans/completed/2026-10-05-runaway-alert-threshold-25.md);
 `../docs/hosted-runtime-log-database.md` owns the operational contract.
+
+Compact automation model-review readbacks and measured context reductions are
+tracked in [the compact review plan](exec-plans/completed/2026-10-05-compact-automation-review.md);
+`../ARCHITECTURE.md` owns the runtime contract.
