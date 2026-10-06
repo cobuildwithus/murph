@@ -309,6 +309,10 @@ after replacement. The existing orphan row owns this recovery history;
 no additional scheduler or plaintext backup is created. Key-only session and
 adapter cleanup records preserve that reference and cannot shorten its deadline.
 Unaccepted uploads and ordinary replica orphans retain the 65-minute grace.
+After namespace validation, physical replica cleanup deletes the root and its
+finite sibling set in one R2 batch operation so serial binding round trips do
+not exhaust the Web control deadline. Provider rejection remains a failed purge;
+Web records purge acknowledgement only after the deletion request succeeds.
 The existing bounded cleanup sweep retires expired, non-current snapshots under
 the same owner/publication locks. Account deletion still drains writes and
 deletes the entire member snapshot namespace without waiting seven days.
