@@ -715,6 +715,7 @@ export class RunnerContainer extends Container {
     region: HostedRunnerRegion;
     slotName: string;
     timeoutMs: number;
+    recheck?: true;
   }): Promise<{
     prepared: true;
     runnerImage: { bundleFingerprint: string; sourceFingerprint: string };
@@ -732,6 +733,20 @@ export class RunnerContainer extends Container {
     const timeoutMs = requireRunnerSlotTimeout(input.timeoutMs);
     const deadlineAtEpochMs = Date.now() + timeoutMs;
     const signal = AbortSignal.timeout(timeoutMs);
+    if (input.recheck) {
+      // Observation must neither join the binding lock nor use SDK auto-start.
+      // A racing claim owns the slot; the coordinator discards its late result.
+      const binding = this.requireRunnerSlotStore().read();
+      if (binding.state !== "unbound" || this.isPlatformContainerDefinitelyStopped()
+        || this.warmShellInvalidatedByUnsettledDestroy) {
+        throw new Error("Hosted standby slot is not eligible for recheck.");
+      }
+      this.renewPlatformActivityTimeout("standby-recheck");
+      const health = await this.readStandbyHealth(deadlineAtEpochMs);
+      const runnerImage = this.assertPristineStandbyHealth(health, input);
+      return { prepared: true, runnerImage, releaseId: binding.releaseId,
+        region: binding.region, slotName: binding.slotName };
+    }
     return await this.withLifecycleLock(async () => {
       throwIfRunnerContainerOperationAborted(signal);
       const store = this.requireRunnerSlotStore();
@@ -940,7 +955,8 @@ export class RunnerContainer extends Container {
   private async readStandbyHealth(
     deadlineAtEpochMs: number,
   ): Promise<Record<string, unknown>> {
-    const response = await this.containerFetch(RUNNER_HEALTH_URL, {
+    // Observe only: SDK containerFetch may start a stopped process.
+    const response = await this.ctx.container!.getTcpPort(RUNNER_PORT).fetch(RUNNER_HEALTH_URL, {
       method: "GET",
       signal: AbortSignal.timeout(requireRunnerSlotRemainingTime(deadlineAtEpochMs)),
     });

@@ -618,7 +618,8 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/consented-group-disclosure.md` | Hosted group disclosure. | Hosted group disclosure | High | 2026-08-26 |
 | `agent-docs/product-specs/hosted-group-join-confirmation.md` | Hosted group membership behavior. | Hosted group membership behavior | High | 2026-07-23 |
 | `agent-docs/product-specs/clinical-records-intake.md` | Bounded clinical import, stable undated-fact replay, optional daily checks, document enrichment, saved results and privacy controls. | Clinical Records intake behavior | High | 2026-09-15 |
-| `agent-docs/references/wearable-haptics.md` | Wrist command authority, message handoff, delivery state and foreground limits. | Companion wrist reminders | High | 2026-10-01 |
+| `agent-docs/references/wearable-haptics.md` | Wrist command authority, message handoff, live legacy leases, delivery owners, best-effort push wake with visible fallback, and limits. | Companion wrist reminders | High | 2026-10-05 |
+| `agent-docs/exec-plans/completed/2026-10-05-wearable-wake-delivery.md` | Completed plan for wake-driven wearable delivery across Web and the iOS companion; historical evidence only. | Historical implementation evidence | Low | 2026-10-05 |
 | `agent-docs/references/epic-automatic-distribution.md` | Epic automatic-distribution API matrix, hospital-approved imports, optional persistent credentials and privacy questionnaire guidance. | Epic import registration and rollout | High | 2026-09-15 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/phone-calls/retell-analysis-fields.md` | Retell post-call analysis field contract and transcript-retention boundary. | Hosted phone-call provider setup | Medium | 2026-06-25 |
@@ -1056,6 +1057,10 @@ Compact automation model-review readbacks and measured context reductions are
 tracked in [the compact review plan](exec-plans/completed/2026-10-05-compact-automation-review.md);
 `../ARCHITECTURE.md` owns the runtime contract.
 
+Covered device schedule transfer during import is owned by
+`packages/assistant-runtime/README.md`; focused proof and baseline verification
+are recorded in [device wake progress](exec-plans/completed/2026-10-06-device-wake-progress.md).
+
 Admission-denied claim spacing (`blockedReason`), inactive-member scheduling,
 and the processing-attempt runaway alert are tracked in
 [the inactive claim plan](exec-plans/completed/2026-10-06-inactive-claim-backoff-alert.md);
@@ -1063,3 +1068,10 @@ and the processing-attempt runaway alert are tracked in
 and `../docs/hosted-runtime-log-database.md` own the contracts.
 
 Native companion messaging-link protocol is owned by `../docs/hosted-auth-migration.md`; implementation and proof are tracked in `exec-plans/active/2026-10-06-native-messaging-link.md`.
+
+Claimable standby health observations and race/recovery proof are recorded in
+[`standby rechecks`](exec-plans/completed/2026-10-06-standby-recheck.md).
+The current inventory and telemetry contract remains in `apps/cloudflare/README.md`.
+
+The inactive retention e2e now expects the kept system pointer; see
+[the pointer e2e plan](exec-plans/completed/2026-10-06-inactive-retention-pointer-e2e.md).

@@ -250,7 +250,7 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
           return { kind: "refill" as const, slotName, fresh: true };
         }
         if (!reprobed && state.provisioningSlotNames.length === 0) {
-          const slotName = this.store.beginReproof(Date.now(), target);
+          const slotName = this.store.beginReproof(Date.now(), target, this.preparing);
           if (slotName) {
             reprobed = true;
             return { kind: "reproof" as const, slotName, fresh: false };
@@ -266,7 +266,7 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
         // obtaining the external stub. A reset never substitutes a new name.
         await this.scheduleRecovery();
         this.transactionSync(() => this.rebalance());
-        if (!this.store.isProvisioning(reservation.slotName)) {
+        if (!this.store.isInventoryPhase(reservation.slotName, reservation.kind === "reproof" ? "ready" : "provisioning")) {
           // This invocation alone knows a fresh intent never left the owner.
           if (reservation.fresh) this.store.forgetSlot(reservation.slotName);
           continue;
@@ -290,9 +290,11 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
         () => this.slot(slotName).prepareStandbySlot({
           releaseId, region: HOSTED_RUNNER_REGION, slotName,
           timeoutMs: HOSTED_STANDBY_READY_TIMEOUT_MS,
+          ...(kind === "reproof" ? { recheck: true as const } : {}),
         }),
         HOSTED_STANDBY_READY_TIMEOUT_MS,
         () => {
+          if (kind === "reproof") return; // Read-only late checks own no cleanup.
           // Timeout is not cancellation. A late completion must still have an
           // exact cleanup target, even if an earlier retirement already settled.
           this.transactionSync(() => this.store.rememberDrain(slotName, Date.now()));
@@ -303,13 +305,15 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
         || proof.region !== HOSTED_RUNNER_REGION || proof.prepared !== true) {
         throw new Error("Hosted standby preparation proof is invalid.");
       }
+      if (kind === "reproof" && !this.store.isInventoryPhase(slotName, "ready")) return true;
       this.transactionSync(() => {
         this.rebalance();
-        this.store.finishProvisioning(slotName, Date.now(), this.desiredTarget());
+        this.store.finishPreparation(slotName, Date.now(), this.desiredTarget());
       });
       this.recordPreparation(kind, "ready", startedAtMs);
       return true;
     } catch (error) {
+      if (kind === "reproof" && !this.store.isInventoryPhase(slotName, "ready")) return true;
       this.transactionSync(() => this.store.rememberDrain(slotName, Date.now()));
       this.recordPreparation(kind, "failed", startedAtMs);
       emitHostedExecutionStructuredLog({
@@ -529,33 +533,34 @@ class StandbyRunnerCoordinatorStore {
       VALUES (?, 'provisioning', 0)`, slotName);
   }
 
-  isProvisioning(slotName: string): boolean {
+  isInventoryPhase(slotName: string, phase: "ready" | "provisioning"): boolean {
     return this.sql.exec<{ phase: string }>(
       "SELECT phase FROM standby_coordinator_slot WHERE slot_name = ?", slotName,
-    ).toArray()[0]?.phase === "provisioning";
+    ).toArray()[0]?.phase === phase;
   }
 
-  beginReproof(now: number, target: number): string | null {
+  beginReproof(now: number, target: number, preparing: ReadonlySet<string>): string | null {
     const row = this.sql.exec<StandbySlotRow>(`SELECT slot_name, phase, check_at_ms
       FROM standby_coordinator_slot WHERE phase = 'ready' AND check_at_ms <= ?
-      ORDER BY check_at_ms, slot_name LIMIT 1`, now).toArray()[0];
+      ORDER BY check_at_ms, slot_name`, now).toArray().find((slot) => !preparing.has(slot.slot_name));
     if (!row) return null;
-    this.sql.exec("UPDATE standby_coordinator_slot SET phase = 'provisioning' WHERE slot_name = ?", row.slot_name);
+    this.sql.exec("UPDATE standby_coordinator_slot SET check_at_ms = ? WHERE slot_name = ?",
+      now + STANDBY_READY_REPROBE_MS, row.slot_name);
     // Stagger even after downtime made several proofs overdue. Only one ready
-    // slot is withdrawn; finishing it does not make its peers immediately due.
+    // slot is checked at a time; every healthy slot remains claimable.
     this.sql.exec(`UPDATE standby_coordinator_slot SET check_at_ms = MAX(check_at_ms, ?)
       WHERE phase = 'ready'`, now + Math.ceil(STANDBY_READY_REPROBE_MS / target));
     return row.slot_name;
   }
 
-  finishProvisioning(slotName: string, now: number, target: number): void {
+  finishPreparation(slotName: string, now: number, target: number): void {
     if (!target) return;
     const last = this.sql.exec<{ due: number | null }>(`SELECT MAX(check_at_ms) AS due
-      FROM standby_coordinator_slot WHERE phase = 'ready'`).toArray()[0]?.due;
+      FROM standby_coordinator_slot WHERE phase = 'ready' AND slot_name <> ?`, slotName).toArray()[0]?.due;
     const due = Math.max(now + STANDBY_READY_REPROBE_MS,
       (last ?? now) + Math.ceil(STANDBY_READY_REPROBE_MS / target));
     this.sql.exec(`UPDATE standby_coordinator_slot SET phase = 'ready', check_at_ms = ?
-      WHERE slot_name = ? AND phase = 'provisioning'`, due, slotName);
+      WHERE slot_name = ? AND phase IN ('ready', 'provisioning')`, due, slotName);
   }
 
   readClaim(claimId: string): StandbyClaimRow | null {

@@ -586,6 +586,34 @@ model CompanionWearableSession {
   @@map("companion_wearable_session")
 }
 
+// Where to wake the member's companion app. A transport address only: wearable
+// enrollment lives on CompanionWearableLink.
+model CompanionPushRoute {
+  userId         String       @id @map("user_id")
+  installationId String       @map("installation_id")
+  token          String
+  environment    String
+  topic          String
+  alertsAllowed  Boolean      @map("alerts_allowed")
+  updatedAt      DateTime     @map("updated_at")
+  member         HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("companion_push_route")
+}
+
+// The band link a wake-capable app last reported ready. Observational, not a lease.
+model CompanionWearableLink {
+  userId         String       @map("user_id")
+  wearable       String
+  installationId String       @map("installation_id")
+  linkId         String       @map("link_id")
+  updatedAt      DateTime     @map("updated_at")
+  member         HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, wearable])
+  @@map("companion_wearable_link")
+}
+
 model CompanionWearableCommand {
   unavailableReason String? @map("unavailable_reason")
   id        String   @id
@@ -605,6 +633,8 @@ model CompanionWearableCommand {
 model HostedMember {
   companionLastContactAt         DateTime?                       @map("companion_last_contact_at")
   companionLastForegroundAt      DateTime?                       @map("companion_last_foreground_at")
+  companionPushRoute             CompanionPushRoute?
+  wearableLinks                  CompanionWearableLink[]
   wearableSessions               CompanionWearableSession[]
   wearableCommands               CompanionWearableCommand[]
   authRecords                    HostedAuthRecord[]

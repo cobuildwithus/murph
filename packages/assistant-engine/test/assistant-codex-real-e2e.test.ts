@@ -43308,12 +43308,13 @@ describeRealCodex('wearable haptic reminder journey', () => {
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 360_000)
 
-  it.each(['whoop-delay', 'garmin-unknown', 'whoop-useful', 'app-unreachable', 'device-disconnected', 'health-active', 'health-stale', 'offer-whoop', 'offer-garmin', 'offer-none', 'offer-declined'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
+  it.each(['whoop-delay', 'short-wait', 'garmin-unknown', 'whoop-useful', 'app-unreachable', 'device-disconnected', 'health-active', 'health-stale', 'offer-whoop', 'offer-garmin', 'offer-none', 'offer-declined'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wrist-reminder-'))
     const binDirectory = path.join(workingDirectory, 'bin')
     const commandLogPath = path.join(workingDirectory, 'commands.log')
     const calls: AssistantHostedDeviceToolRequest[] = []
+    const buzzes = new Map<string, number>()
     const saves: AssistantHostedAutomationToolRequest[] = []
     const now = new Date()
     now.setUTCSeconds(0, 0) // Match the existing scheduler’s minute-resolution contract.
@@ -43365,6 +43366,12 @@ describeRealCodex('wearable haptic reminder journey', () => {
           // This also proves the host strips session metadata from strict wire authority.
           const { wearableHapticRequestSchema } = await import('@murphai/hosted-execution/wearable-haptics')
           expect(wearableHapticRequestSchema.safeParse({ request, authority: options?.hapticAuthority }).success).toBe(true)
+          if (scenario === 'short-wait' && request.operation === 'buzz') {
+            // Mirrors the Web command key: a repeat in the same turn reads the first command.
+            const seen = buzzes.get(request.wearable) ?? 0
+            buzzes.set(request.wearable, seen + 1)
+            return { ...request, status: seen === 0 ? 'queued' : 'acknowledged' }
+          }
           return { ...request, status: request.operation === 'status' ? 'ready' : scenario === 'garmin-unknown' ? 'unknown' : 'queued' }
         } },
         automationTool: { async request(request) {
@@ -43413,6 +43420,8 @@ describeRealCodex('wearable haptic reminder journey', () => {
               ? `Remind me at ${targetAt} to take a seven-minute breathing break.` : null
       const result = await execute(offerPrompt ?? (scenario === 'health-active' || scenario === 'health-stale'
         ? 'My Apple Health steps have not updated. Can you check when the app last contacted Murph and the sync status? Does that prove I closed it? Inspect only app contact and account sync metadata, not step records. Please just diagnose; do not change anything.'
+        : scenario === 'short-wait'
+        ? 'I am testing whether your buzzes reach my bands. Both are connected in Murph and the app is open. Wait 5 seconds, then buzz my WHOOP and my Garmin once each.'
         : scenario === 'whoop-delay'
         ? `Please buzz my WHOOP once when my ten-minute meditation ends at ${targetAt}. No buzz now. The band is connected in Murph and I will keep the app open until then.`
         : scenario === 'whoop-useful'
@@ -43481,6 +43490,22 @@ describeRealCodex('wearable haptic reminder journey', () => {
         expect(result.finalMessage).toMatch(/five|5/iu)
         expect(result.finalMessage).toMatch(/queued|sent|requested/iu)
         expect(result.finalMessage).not.toMatch(/your WHOOP (?:buzzed|vibrated)|has vibrated|I(?:'ve| have) (?:set|created|scheduled)/iu)
+        return
+      }
+      if (scenario === 'short-wait') {
+        expect([...buzzes.keys()].sort()).toEqual(['garmin', 'whoop'])
+        expect([...buzzes.values()].every(count => count <= 2)).toBe(true)
+        expect(calls.every(call => call.action === 'haptic' && call.operation !== 'stop')).toBe(true)
+        expect(saves).toEqual([])
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const wait = actions.find(action => action.kind === 'command' && /\bsleep\s+5(?:\.0+)?s?\b|sleep\(\s*5(?:\.0+)?\s*\)/u.test(action.command))
+        const firstBuzz = actions.find(action => action.kind === 'dynamic' && action.tool === MURPH_DEVICE_TOOL.name && action.argumentsValue.operation === 'buzz')
+        expect(wait?.eventIndex).toBeLessThan(firstBuzz?.eventIndex ?? -1)
+        expect(result.finalMessage).toMatch(/WHOOP/u)
+        expect(result.finalMessage).toMatch(/Garmin/u)
+        expect(result.finalMessage).not.toMatch(/can.t|cannot|unable|scheduler|restriction|instead\?/iu)
+        expect(result.finalMessage).toMatch(/acknowledg|accepted/iu)
+        expect(result.finalMessage).not.toMatch(/(?:has|have) vibrated|(?:buzzed|vibrated) (?:on )?your wrist|you(?:'ll| will| should) feel/iu)
         return
       }
       if (scenario === 'garmin-unknown') {

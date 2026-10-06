@@ -89,6 +89,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "codexAuthConnection HostedCodexAuthConnection?",
     'companionLastContactAt DateTime? @map("companion_last_contact_at")',
     'companionLastForegroundAt DateTime? @map("companion_last_foreground_at")',
+    "companionPushRoute CompanionPushRoute?",
     "conversationPolls HostedConversationPoll[]",
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
@@ -128,6 +129,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'usageReferralsAsIntroduced HostedUsageReferral[] @relation("HostedUsageReferralIntroducedMember")',
     'usageReferralsAsReferrer HostedUsageReferral[] @relation("HostedUsageReferralReferrer")',
     "wearableCommands CompanionWearableCommand[]",
+    "wearableLinks CompanionWearableLink[]",
     "wearableSessions CompanionWearableSession[]",
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
@@ -1232,6 +1234,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261001140000_companion_wearable_haptics",
       "20261002010000_companion_presence",
       "20261005000000_device_sync_deferred_wake",
+      "20261005120000_companion_wake_delivery",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
