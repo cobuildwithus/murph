@@ -1,6 +1,6 @@
 # Family subscription cancellation follow-ups
 
-Status: active
+Status: completed
 Created: 2026-10-06
 Updated: 2026-10-06
 
@@ -43,12 +43,18 @@ A deploy starts coverage for newly processed cancellations; it does not resend o
 
 Web typecheck passed. Five focused billing/email and changelog suites passed (461 tests). Focused ESLint passed with five existing
 unused-symbol warnings in the reconciliation suite. Complexity guard passed with
-no increased hotspot debt. External review and exact-head CI remain pending. Clipboard copy verified separately.
+no increased hotspot debt. Final ReviewGPT passed on 77004a1424ec11ee9ba47e40ade07a3be4921f56 with no qualifying findings.
+Exact-head CI remains a separate PR gate. Clipboard copy verified separately.
 
 Parent review: existing email copy and recipient preference remain intact. The
 Family owner result is emitted only after authoritative terminal billing work;
 stale events and abandoned incomplete subscriptions cannot generate feedback.
 The additional send-time query is one bounded primary-key group lookup outside
 the billing transaction. No per-seat fanout, provider call under lock, or new state.
-Product UX: Ready for candidate review; provider-shaped delivery/retry proof only,
+Product UX: Ready; provider-shaped delivery/retry proof only,
 with live production delivery not exercised.
+
+Final parent review: no accepted findings or additional implementation work.
+The subsequent plan archival is explanatory documentation only; runtime and test
+changes remain identical to the reviewed candidate.
+Completed: 2026-10-06
