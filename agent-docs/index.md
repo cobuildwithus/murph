@@ -1071,5 +1071,9 @@ Claimable standby health observations and race/recovery proof are recorded in
 [`standby rechecks`](exec-plans/completed/2026-10-06-standby-recheck.md).
 The current inventory and telemetry contract remains in `apps/cloudflare/README.md`.
 
+Bounded runtime resource cleanup failure classification and privacy proof are
+tracked in [the cleanup diagnostics plan](exec-plans/completed/2026-10-06-runtime-cleanup-diagnostics.md);
+`../apps/web/README.md` owns the diagnostic contract.
+
 The inactive retention e2e now expects the kept system pointer; see
 [the pointer e2e plan](exec-plans/completed/2026-10-06-inactive-retention-pointer-e2e.md).

@@ -1444,14 +1444,23 @@ Callback auth contract:
   the control-plane, external-provider, and runtime-maintenance crons; a
   caught-up hour still stops after the first short batch. Account deletion
   still independently deletes the member's nonce rows
-- the other hourly retention routes are staggered and independently bounded:
+- the other retention routes are staggered and independently bounded:
   `/api/internal/hosted-execution/retention/control-plane/cron` at minute 20
   for ordinary primary-database cleanup,
-  `/api/internal/hosted-execution/retention/external/cron` at minute 35 for
-  account and computer provider cleanup, and
+  `/api/internal/hosted-execution/retention/external/cron` every five minutes
+  starting at minute 2 for account, computer and runtime resource cleanup, and
   `/api/internal/hosted-execution/retention/runtime/cron` at minute 50 for
   runtime signals followed by best-effort isolated diagnostic-log cleanup. Each has a 300-second
   duration; none invokes the nonce owner
+- Runtime resource cleanup warns once per caught failure with the static message
+  `Hosted runtime resource cleanup failed.` and only `resourceKind` (`snapshot`,
+  `replica`, `legacy_snapshot`, `media`, `unknown`), `stage` (`parse`, `purge`,
+  `acknowledge`), `errorCategory` (`timeout`, `abort`, `http`, `validation`,
+  `database`, `other`), and optional integer `httpStatus` (100–599). Existing
+  request context supplies correlation; no identities or raw error/provider data
+  are logged. Success, disabled, and deadline-skipped work stay quiet. Diagnostic
+  inspection/logging failures cannot change claims, counts, fences, retry timing,
+  or failure propagation.
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
