@@ -10,6 +10,7 @@ import {
 
 import {
   buildAssistantProviderMurphToolCall,
+  buildAssistantProviderShellCommandCall,
   buildAssistantProviderVaultCliCall,
   buildHostedLocalDeviceSyncProviderEnvClearances,
   buildHostLoopbackStubBaseUrl,
@@ -427,6 +428,39 @@ describe("startAssistantProviderStubServer", () => {
       });
       expect(responseState.queuedResponses).toHaveLength(1);
     } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it("holds a tool-call response until the scenario releases its state barrier", async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const requests: Array<{ url: string; body: string }> = [];
+    const server = await startAssistantProviderStubServer({
+      onRequest: request => { requests.push(request); },
+      responseState: { queuedResponses: [{
+        ...buildAssistantProviderShellCommandCall("echo barrier-released"),
+        beforeResponse: async () => { entered(); await gate; },
+      }] },
+    });
+    try {
+      let returned = false;
+      const response = fetch(`${buildHostLoopbackStubBaseUrl(server, "tool barrier")}/v1/responses`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ input: [], model: "gpt-5.6-terra", stream: true }),
+      }).then(value => { returned = true; return value; });
+      await started;
+      expect(requests).toHaveLength(1);
+      expect(returned).toBe(false);
+      release();
+      const body = await (await response).text();
+      expect(body).toContain('"type":"function_call"');
+      expect(body).toContain("barrier-released");
+      expect(body).toContain("response.completed");
+    } finally {
+      release();
       await stopHttpStubServer(server);
     }
   });

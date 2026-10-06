@@ -165,7 +165,13 @@ reactivation. Failed reads and incomplete cutover preserve the existing schedule
 lifecycle recheck; they do not grant a new conversation lease. Cleanup rechecks
 native interaction fencing after the bounded control read, which runs outside
 the lifecycle lock so arriving work does not wait on control-plane latency. Explicit retirement
-and its exact native stop proof remain the recovery owner.
+and its exact native stop proof remain the recovery owner. When the outer result
+is lost after a completion callback, the existing container lifecycle recheck
+also replays settled completion for a matching retiring owner, exact completed
+native receipt, and inactive native fence. This releases drained owners without
+requiring new mailbox work. Active or unknown native execution, stale receipts,
+and failed completion preserve the scheduled recheck. Destruction requires a
+fresh canonical observation on a later lifecycle pass.
 
 The runtime completion callback and outer invocation result share the same
 native receipt and Web `complete` command. Each stage uses one HTTP request for
@@ -176,7 +182,8 @@ settled outer result releases ownership before the HTTP response. Only an
 updated `complete` response schedules the advisory hint through Next `after`,
 so neither its dependency loading nor its network wait delays acknowledgement.
 The hint has a two-second best-effort budget; failure leaves
-durable completion for the normal recheck. Lost responses replay the same exact
+durable completion for native lifecycle or processing reconciliation. Lost
+responses replay the same exact
 identity and cannot retire or release a successor. Pending upload drains remain
 owned by the existing release transaction.
 Recovery from a lost completion acknowledgment uses that same settled `complete`
