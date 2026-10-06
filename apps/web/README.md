@@ -1241,7 +1241,7 @@ Hosted AI usage metering:
   Murph usage days derived from the persisted grant and policy basis. It is
   never translated into a message count or calendar/trial duration. Exact
   qualification counters remain server-only.
-  The standalone minute recovery cron is the normal settlement owner for
+  The standalone five-minute recovery cron is the normal settlement owner for
   attributed stable-link activations. Conversational referrals also use
   immediate post-commit reconciliation, and that same cron converges on one
   final referral grant and one atomic source-mailbox celebration fence.
@@ -1526,9 +1526,20 @@ Member-route `HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH` warnings include the
 private `linqRouteAuthorityMismatchReason` from the existing rejection site:
 `durable_thread_container_mismatch`, `durable_target_missing`,
 `requested_target_missing`, `member_routing_missing`, `target_not_owned`,
-`route_projection_mismatch`, `pending_recipient_invalid`,
-`member_identity_missing`, or `member_recipient_invalid`. Composite guards keep
-one reason; the durable-target check is defensive because the current reader
+`pending_recipient_invalid`, `member_identity_missing`, or
+`member_recipient_invalid`. The projection guard reports its first failed check,
+in the existing short-circuit order:
+
+- `route_projection_chat_missing`: normalized private chat is absent.
+- `route_projection_chat_lookup_key_missing`: normalized chat lookup key is absent.
+- `route_projection_chat_lookup_key_mismatch`: chat does not match its lookup key.
+- `route_projection_sender_phone_missing_or_invalid`: a line lookup key exists but the sender normalizes to null.
+- `route_projection_sender_lookup_key_mismatch`: sender does not match the existing line lookup key.
+
+The sender checks remain conditional on a non-null line lookup key. The reader
+also accepts legacy `route_projection_mismatch` values. These reasons identify
+failed predicates, not functional root causes. The durable-target check is
+defensive because the current reader
 rejects empty targets before returning a durable route. The closed reader omits
 malformed metadata without getters or coercion. No values or identifiers enter
 the diagnostic; error names, public 403 JSON, checks, reads, and provider admission

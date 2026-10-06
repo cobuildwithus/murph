@@ -916,7 +916,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       .toBe(firstOperation === "checkpoint" ? 1n : 0n);
   });
 
-  it.each(["default", "inbox_media_retention"] as const)("preserves %s admission policy with one eligibility query", async processingMode => {
+  it.each(["default", "system_mailbox", "inbox_media_retention"] as const)("preserves %s admission policy with one eligibility query", async processingMode => {
     for (const policy of ["missing", "active", "paused", "suspended", "granted", "revoked"] as const) {
       const userId = await member(policy === "paused" ? "paused" : "active");
       if (policy === "missing") await observer.hostedMember.delete({ where: { id: userId } });
@@ -932,7 +932,11 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       }));
       expect(result, policy).toMatchObject({ cutover: "postgres", status: allowed ? "claimed" : "blocked" });
       expect(operations, policy).toHaveLength(allowed ? 5 : 3);
-      if (!allowed) expect(await observer.hostedRuntimeOwner.findUnique({ where: { userId } })).toBeNull();
+      if (!allowed) {
+        // The Worker spaces only admission denials; the reason never names the policy.
+        expect(result, policy).toEqual({ cutover: "postgres", status: "blocked", owner: null, blockedReason: "admission" });
+        expect(await observer.hostedRuntimeOwner.findUnique({ where: { userId } })).toBeNull();
+      }
     }
   });
 
@@ -978,7 +982,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       const operations: PrismaOperationTiming[] = [];
       expect(await runWithPrismaOperationTimings(operations, () => executeHostedRuntimeOwnerCommand({
         prisma: first, userId, command: { operation: "claim", processingMode: "default" },
-      }))).toEqual({ cutover: phase === "rolling" ? "legacy" : phase, status: "blocked", owner: null });
+      }))).toEqual({ cutover: phase === "rolling" ? "legacy" : phase, status: "blocked", owner: null, blockedReason: "cutover" });
       expect(operations).toHaveLength(phase === "rolling" ? 4 : 1);
       expect((await observer.hostedRuntimeOwner.findUnique({ where: { userId } }))?.generation ?? 0n).toBe(0n);
     } finally {

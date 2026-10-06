@@ -99,8 +99,14 @@ have released the completed owner. An unusable retained target likewise permits
 fresh admission after its existing exact retirement path. One ensure request
 visits at most three admitted generations (completed owner, expired target,
 fresh successor), within its existing command deadline. A repeated generation,
-uncertain liveness or stop, denied admission, or further contention returns the
-existing retry response. Successful warm wakes and fresh starts add no reads;
+uncertain liveness or stop, or further contention returns the existing
+three-second retry response. A claim denied by member admission (inactive,
+suspended, or consent withdrawn) carries `blockedReason: "admission"`, and the
+Worker retries five minutes out with reason `admission_blocked`. Member
+activation and new inbound work signal Temporal directly, so the slower recheck
+does not delay them. The reason is optional and parsed leniently: old Web omits
+it (three-second retry) and old Workers ignore it, so either side may deploy
+first. Successful warm wakes and fresh starts add no reads;
 completion recovery removes the separate release callback. Each fresh-start
 attempt retains its own bounded, overlapping workspace and native readiness
 preparation; abandoned target reads are not execution authority.

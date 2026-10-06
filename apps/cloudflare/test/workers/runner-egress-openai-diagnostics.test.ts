@@ -6,38 +6,30 @@ import { createHostedExecutionTestEnv } from "../hosted-execution-fixtures.ts";
 import {
   hostedRunnerIntercept,
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-  HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
 } from "../../src/runner-egress-intercept.ts";
 import type { RunnerOutboundEnvironmentSource } from "../../src/runner-outbound.ts";
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
-test("returns the OpenAI Responses body while its diagnostic runtime-log write is still pending", async () => {
-  let releaseRuntimeLog: (() => void) | undefined;
-  const runtimeLogReleased = new Promise<void>((resolve) => {
-    releaseRuntimeLog = resolve;
-  });
-  let markRuntimeLogWritten: ((body: string) => void) | undefined;
-  const runtimeLogWritten = new Promise<string>((resolve) => {
-    markRuntimeLogWritten = resolve;
-  });
+test("returns the OpenAI Responses body and emits its diagnostic as a Worker log only", async () => {
+  const upstreamPaths: string[] = [];
   vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (target, init) => {
     const request = new Request(target, init);
     const url = new URL(request.url);
+    upstreamPaths.push(url.pathname);
     if (url.pathname === HOSTED_RUNTIME_OWNER_PATH) {
       return Response.json({ cutover: "postgres", status: "authorized", owner: createPostgresTestOwner() });
     }
     if (url.hostname === "api.openai.com") return new Response("synthetic provider stream");
-    if (url.pathname === HOSTED_RUNTIME_LOG_PATH) {
-      const body = await request.text();
-      await runtimeLogReleased;
-      markRuntimeLogWritten?.(body);
-      return Response.json({ loggedCount: 1 });
-    }
     throw new Error(`Unexpected synthetic upstream ${url.pathname}`);
   }));
+  // The workers test config silences structured stdio logs; this test reads them.
+  vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
+  const info = vi.spyOn(console, "info").mockImplementation(() => {});
   const environment: RunnerOutboundEnvironmentSource = {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
@@ -59,15 +51,21 @@ test("returns the OpenAI Responses body while its diagnostic runtime-log write i
 
   expect(response.status).toBe(200);
   expect(await response.text()).toBe("synthetic provider stream");
-  releaseRuntimeLog?.();
-  const runtimeLogBody = JSON.parse(await runtimeLogWritten) as {
-    entries?: Array<{ eventCode?: string; redactedJson?: Record<string, unknown> }>;
-  };
-  expect(runtimeLogBody.entries?.[0]?.eventCode).toBe(HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE);
+  const diagnostic = await vi.waitFor(() => {
+    const record = info.mock.calls
+      .map(([line]) => (typeof line === "string" ? JSON.parse(line) as {
+        details?: Record<string, unknown>;
+        message?: string;
+      } : null))
+      .find((entry) => entry?.message === "Hosted runner provider request diagnostic captured.");
+    expect(record).toBeDefined();
+    return record;
+  });
   // The admitted bytes remain readable after the upstream request takes its body.
-  expect(runtimeLogBody.entries?.[0]?.redactedJson).toMatchObject({
+  expect(diagnostic?.details).toMatchObject({
     jsonValid: true,
     modelKind: "gpt-5.6-terra",
     requestBytes: new TextEncoder().encode(requestBody).byteLength,
   });
+  expect(upstreamPaths).not.toContain(HOSTED_RUNTIME_LOG_PATH);
 });

@@ -1459,14 +1459,12 @@ async function maybeHandleOpenAiRequest(input: {
   });
   if (pathnameSuffix === "/v1/responses" && boundedBody !== undefined) {
     // The provider request is already in flight. The diagnostic reuses the
-    // admitted bytes and runs as background work, so neither its parsing nor
-    // its runtime-log write can hold the provider response.
+    // admitted bytes and is a Worker log only; background parsing cannot hold
+    // the provider response, and no runtime-log callback is sent.
     const diagnostic = emitHostedRunnerOpenAiCacheDiagnostic({
       env: input.env,
       request: input.request,
       requestBytes: new Uint8Array(boundedBody),
-      userId: authorization.userId,
-      writeFence: authorization.writeFence,
     });
     try {
       if (typeof input.ctx?.waitUntil === "function") input.ctx.waitUntil(diagnostic);
@@ -2213,8 +2211,6 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   requestBytes: Uint8Array;
-  userId: string | null;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }): Promise<void> {
   let diagnostic: HostedRunnerDiagnosticJson;
   try {
@@ -2249,74 +2245,6 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
     message: "Hosted runner provider request diagnostic captured.",
     phase: "wake.running",
   });
-
-  // Only an owner-authorized member request carries a write fence; deploy-smoke
-  // traffic has neither a member nor a runtime log to write.
-  if (!input.userId || !input.writeFence) {
-    return;
-  }
-
-  await writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog({
-    diagnostic,
-    env: input.env,
-    userId: input.userId,
-    writeFence: input.writeFence,
-  }).catch((error) => {
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        endpointKind: "responses",
-        providerKind: "openai",
-      },
-      error,
-      level: "warn",
-      message: "Hosted runner provider request diagnostic runtime-log write failed.",
-      phase: "wake.running",
-    });
-  });
-}
-
-async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
-  diagnostic: HostedRunnerDiagnosticJson;
-  env: RunnerOutboundEnvironmentSource;
-  userId: string;
-  writeFence: HostedProviderEgressWriteFenceMetadata;
-}): Promise<void> {
-  const route = HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite;
-  const { writeFence } = input;
-  const response = await handleRunnerOutboundRequest(
-    new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${route.path}`, {
-      body: JSON.stringify({
-        entries: [{
-          at: new Date().toISOString(),
-          attemptId: writeFence.attemptId,
-          component: "runner",
-          eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
-          leaseGeneration: writeFence.leaseGeneration,
-          level: "debug",
-          phase: "fetch",
-          redactedJson: input.diagnostic,
-          ...(writeFence.workspaceVersion ? { workspaceVersion: writeFence.workspaceVersion } : {}),
-        }],
-      }),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: writeFence.attemptId,
-        [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: writeFence.leaseGeneration,
-        ...(writeFence.workspaceVersion
-          ? { [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: writeFence.workspaceVersion }
-          : {}),
-      },
-      method: route.method,
-    }),
-    input.env,
-    input.userId,
-  );
-
-  if (!response.ok) {
-    throw new Error(`Hosted provider request diagnostic runtime-log write returned HTTP ${response.status}.`);
-  }
-  await drainHostedRunnerMetadataResponse(response);
 }
 
 function readOpenAiCacheDiagnosticFingerprintSecret(
@@ -2325,13 +2253,6 @@ function readOpenAiCacheDiagnosticFingerprintSecret(
   const value = env.HOSTED_LOG_FINGERPRINT_SECRET;
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
-}
-
-async function drainHostedRunnerMetadataResponse(response: Response): Promise<void> {
-  if (response.body === null || response.bodyUsed) {
-    return;
-  }
-  await response.arrayBuffer();
 }
 
 async function maybeHandleExaRequest(input: {

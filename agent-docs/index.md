@@ -112,6 +112,10 @@ Expected Linq dispatch-claim responses and preserved runtime replay safety are
 recorded in [dispatch claim results](exec-plans/completed/2026-10-02-linq-dispatch-result.md);
 the callback contract is owned by `apps/web/README.md`.
 
+Private Linq projection rejection reasons and their behavior-preserving proof
+are tracked in [projection diagnostics](exec-plans/completed/2026-10-06-linq-projection-diagnostics.md);
+`apps/web/README.md` owns the diagnostic vocabulary.
+
 Static iMessage card fallbacks leave the upper-left badge footprint empty for
 the Messages-drawn App Store art; the contract is owned by
 `operations/imessage-deliverability.md`.
@@ -1055,3 +1059,9 @@ tracked in [the compact review plan](exec-plans/completed/2026-10-05-compact-aut
 Covered device schedule transfer during import is owned by
 `packages/assistant-runtime/README.md`; focused proof and baseline verification
 are recorded in [device wake progress](exec-plans/completed/2026-10-06-device-wake-progress.md).
+
+Admission-denied claim spacing (`blockedReason`), inactive-member scheduling,
+and the processing-attempt runaway alert are tracked in
+[the inactive claim plan](exec-plans/completed/2026-10-06-inactive-claim-backoff-alert.md);
+`references/hosted-postgres-runtime.md`, `references/hosted-temporal-orchestration.md`
+and `../docs/hosted-runtime-log-database.md` own the contracts.
