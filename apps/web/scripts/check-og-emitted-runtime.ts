@@ -121,7 +121,6 @@ const probeRoutes: ProbeRoute[] = [
 
 const requiredAssetNames = [
   "logo.svg",
-  "murph-mark.svg",
   "Fraunces-400.ttf",
   "Fraunces-600.ttf",
   "DMSans-400.ttf",
@@ -299,20 +298,11 @@ async function main(): Promise<void> {
  */
 function assertDeployedAssetLayout(relocatedRoot: string): void {
   const deployed = path.join(relocatedRoot, "apps/web/public/logo.svg");
-  const deployedMark = path.join(
-    relocatedRoot,
-    "apps/web/public/icons/murph-mark.svg",
-  );
   const workingDirectoryRelative = path.join(relocatedRoot, "public/logo.svg");
 
   if (!existsSync(deployed)) {
     throw new Error(
       `Expected the traced function to contain apps/web/public/logo.svg at ${deployed}.`,
-    );
-  }
-  if (!existsSync(deployedMark)) {
-    throw new Error(
-      `Expected the traced function to contain apps/web/public/icons/murph-mark.svg at ${deployedMark}.`,
     );
   }
   if (existsSync(workingDirectoryRelative)) {

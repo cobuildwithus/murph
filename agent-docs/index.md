@@ -108,6 +108,10 @@ Expected Linq dispatch-claim responses and preserved runtime replay safety are
 recorded in [dispatch claim results](exec-plans/completed/2026-10-02-linq-dispatch-result.md);
 the callback contract is owned by `apps/web/README.md`.
 
+Static iMessage card fallbacks leave the upper-left badge footprint empty for
+the Messages-drawn App Store art; the contract is owned by
+`operations/imessage-deliverability.md`.
+
 Runtime ownership response timing is tracked in
 [the response plan](exec-plans/completed/2026-09-23-runtime-owner-response.md);
 its durable contract remains in the hosted Postgres runtime reference.

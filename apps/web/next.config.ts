@@ -81,7 +81,6 @@ const BRANDFETCH_IMAGE_SOURCES = ["https://cdn.brandfetch.io"] as const;
 // scripts/check-og-asset-traces.ts fails the build when a trace goes missing.
 const OG_SHARE_ASSET_TRACE_INCLUDES = [
   "app/fonts/*.ttf",
-  "public/icons/murph-mark.svg",
   "public/logo.svg",
 ];
 const MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES = [
