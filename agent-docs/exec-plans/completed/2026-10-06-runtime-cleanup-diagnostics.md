@@ -1,6 +1,6 @@
 # Runtime cleanup failure diagnostics
 
-Status: active
+Status: completed
 Created: 2026-10-06
 Updated: 2026-10-06
 
@@ -57,4 +57,7 @@ Distinguish resource parsing, control purge and acknowledgement failures in the 
 - Original production source: 32 diagnostic assertions fail, 12 checks pass. Candidate: all 44 focused checks pass through the actual cleanup owner and injected control-client transport.
 - Web typecheck, scoped ESLint, docs drift/gardening and whitespace pass. Complexity debt remains zero; maximum function complexity is 19.
 - Parent review verified unchanged claims, acknowledgement predicates, deadlines, external-call order, retry scheduling and response shape. Native timeout/abort, real HTTP errors, hostile accessors and throwing logger cases pass.
-- Final external review and required exact-head CI remain pending. No functional repair, replay or production-data mutation is included.
+- Final ReviewGPT passed with no findings on `7cff5b58d240aedd7209b431b30c4074810bcf20`; parent review accepts the result. The final plan/schedule documentation update changes no runtime or test source. Required exact-head CI remains the merge gate.
+- The owner README now matches the existing external-retention cron configuration: every five minutes starting at minute 2. No scheduling change is made.
+- No functional repair, replay or production-data mutation is included. Telemetry-only merge is authorized after required CI; serving revision and natural emission must be verified separately.
+Completed: 2026-10-06
