@@ -104,6 +104,10 @@ The runtime mailbox contract remains in
 records the locally verified implementation; [PR #3707](https://github.com/cobuildwithus/murph/pull/3707)
 owns delivery status. The contract remains in `docs/hosted-runtime-log-database.md`.
 
+Temporal compatibility binds to the exact commit Repo Hygiene tested; a PR
+head that moved past it is left to the newer commit's run. The proof surface is
+listed in `references/testing-ci-map.md`.
+
 Expected Linq dispatch-claim responses and preserved runtime replay safety are
 recorded in [dispatch claim results](exec-plans/completed/2026-10-02-linq-dispatch-result.md);
 the callback contract is owned by `apps/web/README.md`.

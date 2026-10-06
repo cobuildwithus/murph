@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
+      current: ${{ steps.select.outputs.current }}
       head_sha: ${{ steps.select.outputs.head_sha }}
       selected: ${{ steps.select.outputs.selected }}
       targets_default_branch: ${{ steps.select.outputs.targets_default_branch }}
@@ -43,13 +44,15 @@ jobs:
         id: select
         env:
           EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}
-          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+          # The commit Repo Hygiene tested and named its fixture after. The PR's
+          # live head can already be newer; selection then reports it stale.
+          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/hosted-orchestration-compatibility.mjs select
 
       - name: Mark stable status pending
-        if: ${{ steps.select.outputs.targets_default_branch == 'true' }}
+        if: ${{ steps.select.outputs.targets_default_branch == 'true' && steps.select.outputs.current == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           STATUS_SHA: ${{ steps.select.outputs.head_sha }}
@@ -64,7 +67,7 @@ jobs:
   compatibility:
     name: Prove supported Temporal readers
     needs: select-pr
-    if: ${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.current == 'true' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}
     environment: temporal-compatibility
     runs-on: ubuntu-24.04
     timeout-minutes: 70
@@ -133,7 +136,7 @@ jobs:
     needs:
       - select-pr
       - compatibility
-    if: ${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null && needs.select-pr.outputs.targets_default_branch == 'true' }}
+    if: ${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.current == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -144,7 +147,7 @@ jobs:
           SELECT_RESULT: ${{ needs.select-pr.result }}
           SELECTED: ${{ needs.select-pr.outputs.selected }}
           SOURCE_RESULT: ${{ github.event.workflow_run.conclusion }}
-          STATUS_SHA: ${{ needs.select-pr.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha }}
+          STATUS_SHA: ${{ needs.select-pr.outputs.head_sha || github.event.workflow_run.head_sha }}
           TRUSTED: ${{ needs.select-pr.outputs.trusted }}
         shell: bash
         run: |
