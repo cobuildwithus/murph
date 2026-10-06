@@ -2208,7 +2208,15 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   dedicated environment allowlist, and every same-hour attempt reuses the
   Eastern day key as the Resend idempotency key. Missing configuration fails
   before the database read. This adds no digest table, cursor, scheduler,
-  retry queue, or second feedback owner.
+  retry queue, or second feedback owner. Summaries beginning with the reserved
+  `Usage optimization audit:` prefix are excluded from the product-feedback
+  query and read separately with the same window, kind allowlist, row cap,
+  projection, and recipient list. Nonempty usage windows send a separate
+  `Weekly usage reports — <day>` email with report totals and overflow counts,
+  without feature-request labels or member identifiers. These reports retain
+  the daily delivery schedule; "weekly" describes the reports, not a new cron.
+  Usage delivery has its own `hosted-usage-report-digest/<day>` Resend key,
+  so retries after a partial send reuse each email's original key.
 
   Inbound hosted conversation traffic appends one canonical
   `conversation.message` mailbox item with provider/channel detail inside its

@@ -21,7 +21,7 @@ import {
   HOSTED_PRODUCT_FEEDBACK_DIGEST_TIME_ZONE,
   readHostedProductFeedbackDigestBatch,
   resolveHostedProductFeedbackDigestWindow,
-  runHostedProductFeedbackDigest,
+  runHostedProductFeedbackDigest as runDigest,
 } from "@/src/lib/hosted-execution/product-feedback-digest";
 import {
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
@@ -36,6 +36,15 @@ const feedbackDigestEnv = {
     "product@example.test, founder@example.test",
   RESEND_API_KEY: "re_test",
 };
+
+function runHostedProductFeedbackDigest(
+  input: Parameters<typeof runDigest>[0],
+) {
+  return runDigest({
+    readUsageReports: async () => createFeedbackDigestBatch(),
+    ...input,
+  });
+}
 
 describe("hosted product feedback digest", () => {
   beforeEach(() => {
@@ -231,6 +240,11 @@ describe("hosted product feedback digest", () => {
         {
           summary: {
             startsWith: HOSTED_PATTERN_ENGINE_AUDIT_PREFIX,
+          },
+        },
+        {
+          summary: {
+            startsWith: "Usage optimization audit:",
           },
         },
       ],
@@ -462,6 +476,108 @@ describe("hosted product feedback digest", () => {
       `Feature requests (${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS})`,
     );
     expect(sentText).not.toContain("Not shown past");
+  });
+
+  it("sends bounded usage reports separately and retries with independent delivery keys", async () => {
+    const reportSummary = "Usage optimization audit: Synthetic weekly report.";
+    mocks.groupBy.mockImplementation(async ({ where }) => [{
+      kind: "feature_request",
+      _count: { _all: where.summary.startsWith ? 203 : 1 },
+    }]);
+    mocks.findMany.mockImplementation(async ({ where }) => [{
+      kind: "feature_request",
+      memberId: "member_synthetic",
+      summary: where.summary.startsWith
+        ? reportSummary
+        : "Requested a calendar export.",
+    }]);
+    const captured: CapturedResendRequest[] = [];
+    const deliveredKeys = new Set<string>();
+    let failUsageOnce = true;
+    const server = createServer((request, response) => {
+      captureResendRequest(request).then((result) => {
+        captured.push(result);
+        deliveredKeys.add(result.idempotencyKey);
+        if (result.idempotencyKey.startsWith("hosted-usage-report-digest/") && failUsageOnce) {
+          failUsageOnce = false;
+          response.writeHead(503);
+          response.end();
+          return;
+        }
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ id: "email_synthetic" }));
+      });
+    });
+    const apiBaseUrl = await listenOnLoopback(server);
+    const env = {
+      ...feedbackDigestEnv,
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      MURPH_HOSTED_LOCAL_RESEND_API_BASE_URL: apiBaseUrl,
+    };
+    try {
+      await expect(runDigest({
+        env,
+        now: new Date("2026-07-30T22:00:30.000Z"),
+      })).rejects.toMatchObject({ code: "RESEND_SEND_FAILED" });
+      await expect(runDigest({
+        env,
+        now: new Date("2026-07-30T22:10:30.000Z"),
+      })).resolves.toMatchObject({ feedbackCount: 1, outcome: "sent" });
+    } finally {
+      await closeTestServer(server);
+    }
+    expect(captured).toHaveLength(4);
+    expect(captured[0]).toEqual(captured[2]);
+    expect(captured[1]).toEqual(captured[3]);
+    expect([...deliveredKeys]).toEqual([
+      "hosted-product-feedback-digest/2026-07-30",
+      "hosted-usage-report-digest/2026-07-30",
+    ]);
+    const feedback = JSON.parse(captured[0]!.body);
+    const usage = JSON.parse(captured[1]!.body);
+    expect(feedback.subject).toBe("Murph feedback — 2026-07-30");
+    expect(feedback.text).toContain("Requested a calendar export.");
+    expect(feedback.text).not.toContain(reportSummary);
+    expect(usage).toMatchObject({
+      subject: "Weekly usage reports — 2026-07-30",
+      to: feedback.to,
+    });
+    expect(usage.text).toContain(reportSummary);
+    expect(usage.text).toContain("Usage optimization reports (203)");
+    expect(usage.text).toContain("200-item email limit: 202");
+    expect(usage.text).not.toContain("Feature requests");
+    expect(usage.text).not.toContain("Requested a calendar export.");
+    expect(JSON.stringify(captured)).not.toContain("member_synthetic");
+    const feedbackQuery = mocks.findMany.mock.calls[0]![0];
+    const usageQuery = mocks.findMany.mock.calls[1]![0];
+    expect(feedbackQuery.where.NOT).toContainEqual({
+      summary: { startsWith: "Usage optimization audit:" },
+    });
+    expect(usageQuery).toEqual({
+      ...feedbackQuery,
+      where: {
+        ...feedbackQuery.where,
+        NOT: feedbackQuery.where.NOT.slice(0, -1),
+        summary: { not: null, startsWith: "Usage optimization audit:" },
+      },
+    });
+    expect(mocks.groupBy.mock.calls[1]![0].where).toEqual(usageQuery.where);
+  });
+
+  it("does not send a separate email when the usage report window is empty", async () => {
+    mocks.groupBy.mockResolvedValue([]);
+    mocks.findMany.mockResolvedValue([]);
+    const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
+    await runDigest({
+      env: feedbackDigestEnv,
+      now: new Date("2026-07-30T22:00:30.000Z"),
+      sendEmail,
+    });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      subject: "Murph feedback — 2026-07-30",
+      text: "- No feedback logged.",
+    }));
   });
 
   it("retries the production transport with one day key after an ambiguous failure", async () => {
