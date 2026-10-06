@@ -295,10 +295,8 @@ interface HostedProviderEgressAuthorization {
   customInferenceEnvelope?: string | null;
   durationMs: number;
   mode: HostedProviderEgressValidationMode;
-  providerEgressTokenPresent: boolean;
   platformAiUsageAllowed?: boolean;
   rejectReason?: HostedProviderEgressRejectReason;
-  runtimeAuthorityHeadersPresent: boolean;
   userId: string | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }
@@ -1551,7 +1549,6 @@ async function handleHostedLiveAttachment(input: {
   // closure after revocation. It cannot create another Live session.
   const response = await fetchAuthorizedProviderUpstream({
     authorization: { authorized: true, mode: "native_container", durationMs: Date.now() - startedAt,
-      providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
       userId: resource.owner.userId, writeFence: { ...resource.owner, workspaceVersion: null } },
     providerKind: "openai", request: input.request, startedAt, url: input.url,
     upstreamRequest: await createHostedRunnerUpstreamRequest(input.request, url, headers, { redirect: "manual" }),
@@ -2814,7 +2811,6 @@ async function authorizeHostedProviderEgress(input: {
   if (!owner && input.providerKind === "openai") {
     const smoke = await authorizeHostedProviderEgressDeploySmokeLiveModelTurn({
       ctx: input.ctx, env: input.env, startedAt, userId: input.userId,
-      providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
       deploySmokeLiveModelTurnModel: await readDeploySmokeLiveModelTurnOpenAiModel({
         pathnameSuffix: input.openAiPathnameSuffix ?? "", request: input.request }),
     });
@@ -2826,7 +2822,6 @@ async function authorizeHostedProviderEgress(input: {
     caller: input.ctx,
     authorized: Boolean(owner) && !owner?.retiring && !settlementPending,
     durationMs: Date.now() - startedAt, mode: "native_container",
-    providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
     userId: owner?.userId ?? null,
     ...(owner ? { platformAiUsageAllowed: owner.platformAiUsageAllowed, customInferenceEnvelope: owner.customInferenceEnvelope } : {}),
     ...(settlementPending ? { rejectReason: "usage_settlement_pending" as const }
@@ -2840,19 +2835,13 @@ async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
   ctx?: HostedRunnerOutboundContext;
   deploySmokeLiveModelTurnModel: string | null;
   env: RunnerOutboundEnvironmentSource;
-  providerEgressTokenPresent: boolean;
-  runtimeAuthorityHeadersPresent: boolean;
   startedAt: number;
   userId: string | null;
 }): Promise<HostedProviderEgressAuthorization | null> {
   if (!input.deploySmokeLiveModelTurnModel) {
     return null;
   }
-  if (
-    input.userId !== null
-    || input.providerEgressTokenPresent
-    || input.runtimeAuthorityHeadersPresent
-  ) {
+  if (input.userId !== null) {
     return null;
   }
   const containerId = input.ctx?.containerId?.trim();
@@ -2885,8 +2874,6 @@ async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
       authorized: true,
       durationMs: Date.now() - input.startedAt,
       mode: "deploy_smoke_live_model_turn",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
       userId: null,
       writeFence: null,
     };
@@ -3059,8 +3046,6 @@ function emitHostedProviderEgressDiagnostic(input: {
       ...(providerBearerCredentialKind
         ? { providerBearerCredentialKind }
         : {}),
-      providerEgressTokenPresent: input.authorization.providerEgressTokenPresent,
-      runtimeAuthorityHeadersPresent: input.authorization.runtimeAuthorityHeadersPresent,
       userIdPresent: input.authorization.userId !== null,
       writeFenceMetadataPresent: input.authorization.writeFence !== null,
       writeFenceValidationDurationMs: input.authorization.durationMs,

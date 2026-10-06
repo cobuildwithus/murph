@@ -1,13 +1,12 @@
 /**
- * Reviewed against the pinned upstream source tree below. Base-relative paths
+ * Reviewed against the pinned upstream commit below. Base-relative paths
  * are recorded separately because native linkers may concatenate their string
  * literals differently across targets; changing the Codex pin requires a fresh
- * source-tree review rather than trusting one platform's binary layout.
+ * source review at the new commit rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
   upstreamCommit: "a956835d020762cb2b570053af06f643a11c0ecc",
   upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "a17e1a769e8fca44e37c73c1293f5350c8adadf5",
   upstreamTag: "rust-v0.160.0",
   version: "0.160.0",
   baseRelativeProviderRoutes: [

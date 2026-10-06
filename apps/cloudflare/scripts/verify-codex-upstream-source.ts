@@ -59,25 +59,18 @@ async function main(): Promise<void> {
       ["rev-parse", "FETCH_HEAD^{commit}"],
       upstreamRepository,
     );
-    const actualSourceTree = runGit(
-      ["rev-parse", `FETCH_HEAD:${inventory.upstreamSourceRoot}`],
-      upstreamRepository,
-    );
     if (actualCommit !== inventory.upstreamCommit) {
       throw new Error(
         `Codex tag ${inventory.upstreamTag} resolved to unexpected commit ${actualCommit}.`,
       );
     }
-    if (actualSourceTree !== inventory.upstreamSourceTree) {
-      throw new Error(
-        `Codex source root ${inventory.upstreamSourceRoot} resolved to unexpected tree ${actualSourceTree}.`,
-      );
-    }
 
     // Verify the same patch the deployment build applies to this exact release.
-    runGit(["checkout", "--quiet", "--detach", "FETCH_HEAD"], upstreamRepository);
+    // The commit pins every tree. Checking against the index fetches only the
+    // blobs the patch touches instead of materializing the whole checkout.
+    runGit(["read-tree", "FETCH_HEAD"], upstreamRepository);
     runGit([
-      "apply", "--check", path.join(repoRoot, "patches/codex-public-live.patch"),
+      "apply", "--cached", "--check", path.join(repoRoot, "patches/codex-public-live.patch"),
     ], upstreamRepository);
 
     const sourceFiles = new Set(runGit([
@@ -103,7 +96,7 @@ async function main(): Promise<void> {
     }
 
     process.stdout.write(
-      `Verified Codex ${inventory.version} tag, commit, native patch applicability, ${inventory.upstreamSourceRoot} tree, and ${declaredSources.size} reviewed source paths.\n`,
+      `Verified Codex ${inventory.version} tag, commit, native patch applicability, and ${declaredSources.size} reviewed source paths.\n`,
     );
   } finally {
     await rm(temporaryRoot, { force: true, recursive: true });

@@ -1469,8 +1469,6 @@ describe("hostedRunnerIntercept", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           providerKind: "openai",
-          providerEgressTokenPresent: false,
-          runtimeAuthorityHeadersPresent: false,
           writeFenceMetadataPresent: true,
           writeFenceValidationMode: "native_container",
         }),
@@ -3255,8 +3253,6 @@ describe("hostedRunnerIntercept", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           providerKind: "openai",
-          providerEgressTokenPresent: false,
-          runtimeAuthorityHeadersPresent: false,
           writeFenceMetadataPresent: true,
           writeFenceValidationMode: "native_container",
         }),
@@ -3309,8 +3305,6 @@ describe("hostedRunnerIntercept", () => {
           providerKind: "openai",
           providerBearerCredentialKind: "provider_egress",
           providerEgressAuthMode: "native_container",
-          providerEgressTokenPresent: false,
-          runtimeAuthorityHeadersPresent: false,
           writeFenceMetadataPresent: true,
           writeFenceValidationMode: "native_container",
         }),
