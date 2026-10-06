@@ -2,6 +2,12 @@
 
 Use this directory for additive, dated release notes that summarize operator-visible changes, contract shifts, and verification outcomes.
 
+## Records
+
+- [Companion wrist reminders, 2026-10-06](2026-10-06-companion-wrist-reminders.md)
+- [Device-provider import foundation, 2026-03-16](2026-03-16-device-provider-import-foundation.md)
+- [Vault baseline scaffold, 2026-03-12](2026-03-12-vault-baseline-scaffold.md)
+
 ## Naming
 
 - File format: `YYYY-MM-DD-short-title.md`
