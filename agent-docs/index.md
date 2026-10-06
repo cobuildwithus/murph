@@ -1037,3 +1037,7 @@ PostgreSQL proof are tracked in
 The runaway invocation alert threshold change (40 to 25 per trailing hour) is
 tracked in [the threshold plan](exec-plans/completed/2026-10-05-runaway-alert-threshold-25.md);
 `../docs/hosted-runtime-log-database.md` owns the operational contract.
+
+Compact automation model-review readbacks and measured context reductions are
+tracked in [the compact review plan](exec-plans/completed/2026-10-05-compact-automation-review.md);
+`../ARCHITECTURE.md` owns the runtime contract.

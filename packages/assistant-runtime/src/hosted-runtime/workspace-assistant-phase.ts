@@ -1076,6 +1076,7 @@ function createHostedAssistantAutomationTool(input: {
       if (request.action === "inspect") {
         return await buildHostedAutomationToolResponse({
           action: "inspect",
+          view: request.view,
           record: existing,
           routeBinding: "preserved",
           vaultRoot: input.vaultRoot,
@@ -1237,6 +1238,7 @@ function assertActiveHostedAutomationRoute(input: {
 type HostedAutomationToolResponseInput =
   | {
       action: "inspect";
+      view?: "full" | "model_review";
       record: AutomationRecord;
       routeBinding: "preserved";
       vaultRoot: string;
@@ -1353,6 +1355,27 @@ async function buildHostedAutomationToolResponse(
   input: HostedAutomationToolResponseInput,
 ): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
   const record = input.action === "inspect" ? input.record : input.result.record;
+  if (input.action === "inspect" && input.view === "model_review") {
+    const managed = resolveMurphManagedAutomationOwnerScope(record.automationId) !== null;
+    return {
+      action: "inspect",
+      view: "model_review",
+      automationId: record.automationId,
+      assistantTargetOverride: record.assistantTargetOverride,
+      managed,
+      contextReferences: [...record.contextReferences],
+      ...(managed
+        ? { instructionsOmitted: "managed_model_preserved" as const }
+        : { instructions: record.instructions }),
+      title: record.title,
+      deliveryChannel: record.route.channel,
+      lookupId: record.slug,
+      routeBinding: "preserved",
+      schedule: record.schedule,
+      status: record.status,
+      updatedAt: record.updatedAt,
+    };
+  }
   const responseFields = await projectHostedAutomationResponseFields({
     record,
     vaultRoot: input.vaultRoot,

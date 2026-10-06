@@ -126,6 +126,13 @@ describe('automation model input schema', () => {
   const reference = { entityKind: 'condition', entityId: 'condition_synthetic' }
   const cases: { label: string; args: JsonSchemaObject; accepted: boolean }[] = [
     { label: 'inspect', args: { action: 'inspect', lookup: patch.lookup }, accepted: true },
+    { label: 'full inspection', args: { action: 'inspect', lookup: patch.lookup, view: 'full' }, accepted: true },
+    { label: 'model review inspection', args: { action: 'inspect', lookup: patch.lookup, view: 'model_review' }, accepted: true },
+    { label: 'unknown inspection view', args: { action: 'inspect', lookup: patch.lookup, view: 'summary' }, accepted: false },
+    { label: 'batched model reviews', args: { action: 'inspect_models', lookups: [patch.lookup] }, accepted: true },
+    { label: 'maximum model review batch', args: { action: 'inspect_models', lookups: Array.from({ length: 10 }, (_, i) => `automation_${i}`) }, accepted: true },
+    { label: 'empty model review batch', args: { action: 'inspect_models', lookups: [] }, accepted: false },
+    { label: 'overlong model review batch', args: { action: 'inspect_models', lookups: Array.from({ length: 11 }, (_, i) => `automation_${i}`) }, accepted: false },
     { label: 'save', args: { action: 'save', title: patch.title, instructions: 'Synthetic cue.', schedule: { kind: 'every', everyMs: 3_600_000 } }, accepted: true },
     { label: 'versioned patch', args: patch, accepted: true },
     { label: 'onboarding save', args: { action: 'save_onboarding_first_personal_read' }, accepted: true },
