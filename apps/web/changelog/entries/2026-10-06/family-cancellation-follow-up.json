@@ -8,7 +8,13 @@
     "title": "A follow-up when your Family plan ends",
     "summary": "Family billing owners now receive the same cancellation follow-up email as individual subscribers.",
     "details": "When your subscription ends, the email goes to your verified or checkout email address so you can reply with feedback or ask for help. Other family members do not receive the billing follow-up.",
-    "relevanceTags": ["billing", "family", "support"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "billing",
+      "family",
+      "support"
+    ],
+    "sourcePullRequests": [
+      4062
+    ]
   }
 }
