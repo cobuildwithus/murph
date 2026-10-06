@@ -22,6 +22,9 @@ import { requireHostedBetterAuthConfig } from "./config";
 import { readHostedAuthSourceSnapshot } from "./migration-source";
 import type { AuthRecord } from "./record";
 import { authLookupKey } from "./record-crypto";
+import type { HostedAuthTransport } from "./admission";
+import { classifyHostedNativeCredential } from "./transport";
+import { assertHostedAuthSessionCurrentTx } from "./session";
 
 export const HOSTED_CREDENTIAL_CHANGE_KIND = "account.credential.change";
 const changeSchema = z.object({
@@ -86,7 +89,7 @@ export async function readHostedInitialMessagingSetupAllowed(prisma: Client, ses
     && identity.phoneLookupKey === null && identity.phoneNumberVerifiedAt === null && approval === null;
 }
 
-function assertInitialMessagingSetupFresh(session: HostedAppSession) {
+export function assertInitialMessagingSetupFresh(session: HostedAppSession) {
   const age = Date.now() - (session.primaryAuthenticatedAt?.getTime() ?? Number.NaN);
   if (!Number.isFinite(age) || age < 0 || age > 5 * 60_000) throw hostedOnboardingError({
     code: "AUTH_FRESH_LOGIN_REQUIRED", httpStatus: 403, message: "Sign in again before connecting a messaging account.",
@@ -111,7 +114,7 @@ export async function readCanonicalCredentialIdentity(prisma: PrismaClient, memb
 
 export async function prepareHostedCredentialChange(input: {
   change: HostedCredentialChange; request: Request; session: HostedAppSession; prisma: PrismaClient;
-  authorization?: unknown;
+  authorization?: unknown; transport?: HostedAuthTransport;
 }) {
   const { change, session, prisma } = input;
   const memberId = session.member.id;
@@ -147,7 +150,13 @@ export async function prepareHostedCredentialChange(input: {
       .flatMap((value) => { const contact = value ? createHostedLinqParticipantContact({ kind: method, value }) : null; return contact ? [contact] : []; })
       .sort((a, b) => a.lookupKey.localeCompare(b.lookupKey));
     for (const contact of contacts) await acquireHostedLinqParticipantContactLockTx({ contact, tx, lockTimeoutMs: 5_000 });
-    await assertHostedAppSessionCurrentTx({ memberId, prisma: tx, request: input.request, sessionId: session.sessionId, authProof: session.authProof });
+    if (input.transport === "native") {
+      const credential = classifyHostedNativeCredential({ authorization: input.request.headers.get("authorization"), cookie: input.request.headers.get("cookie"), legacyAllowed: false });
+      if (!session.authProof) throw invalidChange();
+      await assertHostedAuthSessionCurrentTx({ memberId, prisma: tx, sessionId: session.sessionId, credential: credential.token, proof: session.authProof });
+    } else {
+      await assertHostedAppSessionCurrentTx({ memberId, prisma: tx, request: input.request, sessionId: session.sessionId, authProof: session.authProof });
+    }
     await revalidatePreparedHostedDomainRootForWebTx({ prepared: root, tx });
     if (source !== await readHostedAuthSourceSnapshot(tx, memberId)) throw changedIdentity();
     const adapter = hostedAuthTransactionAdapter(prisma, tx, options);

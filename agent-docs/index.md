@@ -1061,3 +1061,5 @@ and the processing-attempt runaway alert are tracked in
 [the inactive claim plan](exec-plans/completed/2026-10-06-inactive-claim-backoff-alert.md);
 `references/hosted-postgres-runtime.md`, `references/hosted-temporal-orchestration.md`
 and `../docs/hosted-runtime-log-database.md` own the contracts.
+
+Native companion messaging-link protocol is owned by `../docs/hosted-auth-migration.md`; implementation and proof are tracked in `exec-plans/active/2026-10-06-native-messaging-link.md`.

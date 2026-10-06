@@ -22,6 +22,12 @@ vi.mock("../src/lib/hosted-crypto/domain-root-store", async (original) => ({
   revalidatePreparedHostedDomainRootForWebTx: async () => ({ rootKeyId: "synthetic-root", root: Promise.resolve({ rootKey: Buffer.alloc(32, 7) }) }),
 }));
 
+import { POST as sendNativePhone } from "../app/api/device-sync/companion/auth/messaging/phone/send/route";
+import { POST as verifyNativePhone } from "../app/api/device-sync/companion/auth/messaging/phone/verify/route";
+import { POST as startNativeTelegram } from "../app/api/device-sync/companion/auth/messaging/telegram/start/route";
+import { POST as completeNativeTelegram } from "../app/api/device-sync/companion/auth/messaging/telegram/complete/route";
+import { captureNativeMessagingTelegramProof } from "../src/lib/better-auth/native-messaging-telegram";
+import { isHostedMemberMessagingSetupRequired } from "../src/lib/hosted-onboarding/messaging-state";
 import { POST as legacyRepairOptions } from "../app/api/settings/approval-passkeys/legacy-options/route";
 import { GET as passkeyStatus } from "../app/api/settings/approval-passkeys/route";
 import * as passkeyStore from "../src/lib/sensitive-actions/passkey-store";
@@ -514,6 +520,88 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       }
     });
   }
+
+  function nativeRequest(token: string, body: unknown, cookies = false) {
+    return new Request("https://www.withmurph.ai/api/device-sync/companion/auth/messaging", {
+      method: "POST", headers: { authorization: `Bearer murph_auth_v1.${token}`, "content-type": "application/json",
+        "x-vercel-forwarded-for": `2001:db8:${Buffer.from(token).toString("hex").slice(0, 24).match(/.{4}/gu)!.join(":")}`, ...(cookies ? { cookie: "ambient=1" } : {}) }, body: JSON.stringify(body),
+    });
+  }
+
+  it("native phone send issues a real owner challenge and enforces its cooldown", () => withInitialPasskeyMember(async (f) => {
+    vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+    const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550194" };
+    await f.prisma.hostedAuthRecord.deleteMany({ where: { id: { in: ["send:cooldown", "send:contact"].map((prefix) => `arl_${authLookupKey("verification", "rate-limit", `${prefix}:phone:${change.value}`)}`) } } });
+    const response = await sendNativePhone(nativeRequest(f.token, { change }));
+    expect(await response.json()).toEqual({ ok: true });
+    expect(response.headers.has("set-cookie")).toBe(false);
+    expect((await sendNativePhone(nativeRequest(f.token, { change }))).status).toBe(429);
+    expect((await verifyNativePhone(nativeRequest(f.token, { change, code: provider.codes.get(change.value!) }))).status).toBe(200);
+    expect((await readHostedMemberIdentity(f))?.phoneNumber).toBe(change.value);
+  }));
+
+  it("native phone verifies through canonical owners, rejects cookies and wrong codes, and clears readiness", () => withInitialPhoneMember(async (f) => {
+    const body = { change: f.change, code: f.code };
+    expect((await verifyNativePhone(nativeRequest(f.token, body, true))).status).toBe(401);
+    expect((await verifyNativePhone(nativeRequest(f.token, { ...body, code: f.code === "000000" ? "111111" : "000000" }))).status).toBe(400);
+    const response = await verifyNativePhone(nativeRequest(f.token, body));
+    expect(await response.json()).toEqual({ ok: true });
+    expect(response.headers.has("set-cookie")).toBe(false);
+    const identity = await readHostedMemberIdentity(f);
+    expect(identity?.phoneNumber).toBe(f.change.value);
+    expect(isHostedMemberMessagingSetupRequired({ identity, routing: null })).toBe(false);
+    expect((await getHostedAppSessionFromRequest(f.request({})))?.member.id).toBe(f.memberId);
+  }));
+
+  it("native phone send preserves cooldown, target conflicts and strict add-only input", () => withInitialPhoneMember(async (f) => {
+    expect((await sendNativePhone(nativeRequest(f.token, { change: f.change }))).status).toBe(429);
+    expect((await sendNativePhone(nativeRequest(f.token, { change: { ...f.change, method: "email", value: "test@example.test" } }))).status).toBe(400);
+    await verifyNativePhone(nativeRequest(f.token, { change: f.change, code: f.code }));
+    await withInitialPasskeyMember(async (other) => {
+      const result = await sendNativePhone(nativeRequest(other.token, { change: f.change }));
+      // Clear only the synthetic contact cooldown so conflict reaches its owner.
+      if (result.status === 429) {
+        await f.prisma.hostedAuthRecord.deleteMany({ where: { id: `arl_${authLookupKey("verification", "rate-limit", `send:cooldown:phone:${f.change.value}`)}` } });
+      }
+      const conflict = await sendNativePhone(nativeRequest(other.token, { change: f.change }));
+      expect(await conflict.json()).toMatchObject({ error: { code: "AUTH_CONTACT_IN_USE" } });
+      expect((await readHostedMemberIdentity(other))?.phoneNumber).toBeNull();
+    });
+  }));
+
+  it.each(["stale", "revoked", "protected"] as const)("native phone preserves %s rejection", (kind) => withInitialPhoneMember(async (f) => {
+    if (kind === "revoked") await logoutBrowser(f.request({}));
+    else if (kind === "protected") await registerPasskey(f.request(await initialEnrollment(f.request)));
+    else await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt: new Date(Date.now() - 360_000) },
+    });
+    expect([401, 403]).toContain((await verifyNativePhone(nativeRequest(f.token, { change: f.change, code: f.code }))).status);
+    expect((await readHostedMemberIdentity(f))?.phoneNumber).toBeNull();
+  }));
+
+  it("native Telegram binds bot proof to the initiating member/session and consumes it once", () => withInitialPasskeyMember(async (f) => {
+    vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+    vi.stubEnv("TELEGRAM_BOT_USERNAME", "synthetic_murph_bot");
+    expect((await startNativeTelegram(nativeRequest(f.token, {}, true))).status).toBe(401);
+    const start = await startNativeTelegram(nativeRequest(f.token, {}));
+    expect(start.status).toBe(200);
+    const link = await start.json();
+    expect(link.url).toContain(`?start=link_${link.token}`);
+    expect((await (await completeNativeTelegram(nativeRequest(f.token, { token: link.token }))).json()).linked).toBe(false);
+    const update = { update_id: 1, message: { message_id: 1, date: Math.floor(Date.now() / 1000),
+      from: { id: 123456789, is_bot: false, first_name: "Synthetic" }, chat: { id: 123456789, type: "private" as const }, text: `/start link_${link.token}` } };
+    expect(await captureNativeMessagingTelegramProof({ ...update, message: { ...update.message, chat: { id: -123, type: "group" } } }, f.prisma)).toBe(true);
+    expect((await (await completeNativeTelegram(nativeRequest(f.token, { token: link.token }))).json()).linked).toBe(false);
+    expect(await captureNativeMessagingTelegramProof(update, f.prisma)).toBe(true);
+    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBeNull();
+    await withInitialPasskeyMember(async (other) => {
+      expect((await completeNativeTelegram(nativeRequest(other.token, { token: link.token }))).status).toBe(400);
+    });
+    const done = await completeNativeTelegram(nativeRequest(f.token, { token: link.token }));
+    expect(await done.json()).toEqual({ ok: true, linked: true });
+    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBe("123456789");
+    expect((await completeNativeTelegram(nativeRequest(f.token, { token: link.token }))).status).toBe(400);
+  }));
 
   it("completes initial phone setup with phone proof alone and rejects replay and replacement", () => withInitialPhoneMember(async (f) => {
     expect((await verifyCredentialCode(f.request({ change: f.change, code: "invalid" }))).status).toBe(400);

@@ -325,6 +325,54 @@ require those devices to sign in again. A later import cannot restore the old
 method. These routes remain gated by issuance activation; the settings clients
 and recovery journeys must be qualified before enabling them.
 
+### Native first messaging setup
+
+Authenticated companions use four additive, cookie-rejecting POST endpoints:
+
+- `/api/device-sync/companion/auth/messaging/phone/send`
+- `/api/device-sync/companion/auth/messaging/phone/verify`
+- `/api/device-sync/companion/auth/messaging/telegram/start`
+- `/api/device-sync/companion/auth/messaging/telegram/complete`
+
+Phone requests carry `{ change: { method: "phone", operation: "set",
+expectedIdentity: null, value: "<E164_PHONE>" } }`; verify also carries `code`.
+The existing credential owner owns canonical conflict checks, SMS budgets,
+Twilio Verify proof, current-session revalidation, first-messaging eligibility,
+five-minute primary freshness, atomic contact/login writes and durable channel
+wake. These endpoints cannot replace/remove methods, accept client approval,
+import members, or bypass existing approval state. Protected members use account
+settings; stale primary proof requires signing in again. Additions preserve
+sessions. Existing browser credential routes are unchanged.
+
+Telegram start accepts `{}` and returns `{ ok: true, token, url }`. A random
+256-bit, five-minute token travels only in the bot deep link and app memory.
+The existing encrypted, expiring auth verification store owns the pending proof,
+bound to the initiating member and session. The webhook owner intercepts the
+reserved `/start link_<token>` command after authenticating the webhook secret;
+only a non-bot sender in their own private chat can record the numeric Telegram
+identity. This command creates no member, credential or conversation message.
+Complete accepts `{ token }` with the original native bearer and returns
+`{ ok: true, linked: false }` until proof arrives. Completion reuses the ordinary
+credential owner and atomically consumes the proof with canonical/login writes
+and the channel wake. Wrong-member/session, expired, consumed, conflicting and
+stale-primary attempts fail closed. Concurrent bot proof cannot replace an
+already-recorded sender. No native bearer is stored in the link or pending proof.
+The next ordinary Telegram message uses existing direct-thread admission.
+
+Current messaging readiness accepts the canonical phone lookup or a linked
+Telegram identity awaiting inbound. Provider acceptance still owns materializing
+a Linq home thread; the app does not infer delivery from an SMS verification.
+Both apps reread initial onboarding after linking and on Telegram return.
+
+Deploy this backend before distributing either native consumer. Older apps keep
+using browser settings. New apps against an older backend show a retryable error
+and retain that fallback. No schema, Worker protocol, canary pin, secret or app
+minimum changes are required. Rollback to the prior backend interrupts new native
+link attempts, while committed contacts and sessions retain existing readers;
+prefer keeping these additive endpoints until dependent apps have drained.
+Real SMS delivery, bot redemption and device lifecycle must be qualified in a
+separately authorized environment before app publication.
+
 ## Browser and native continuity
 
 Browser renewal and primary sign-in/logout serialize cookie-writing requests with one origin-wide Web Lock. An older renewal must settle before another login is dispatched, including across tabs; no valid server session is revoked merely to change accounts. Renewal requests have a ten-second deadline and verification/logout have thirty-second deadlines. Browsers without the lock API retain their existing cookie lifetime and can still sign in; native bearer renewal is unchanged. This uses the browser's [Web Locks contract](https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API), with no persistent coordinator.

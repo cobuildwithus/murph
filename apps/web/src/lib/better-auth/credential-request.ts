@@ -9,7 +9,8 @@ import { createSensitiveActionChallenge } from "../sensitive-actions/server";
 import { getPrisma } from "../prisma";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { assertHostedBetterAuthIssuanceEnabled } from "./config";
-import { hostedAuthRequestIp } from "./admission";
+import { hostedAuthRequestIp, type HostedAuthTransport } from "./admission";
+import { requireNativeMessagingSession, nativeMessagingApprovalRequired } from "./native-messaging-session";
 import { HOSTED_CREDENTIAL_CHANGE_KIND, parseHostedCredentialChange, prepareHostedCredentialChange, readHostedInitialMessagingSetupAllowed, readHostedLoginMethods } from "./credential-change";
 import { commitHostedCredentialOtp, sendHostedCredentialOtp } from "./credential-otp";
 import { hostedAuthDelivery } from "./delivery";
@@ -18,11 +19,12 @@ import { hostedAuthRateLimitStorage } from "./rate-limit";
 const bodySchema = z.object({ change: z.unknown(), authorization: z.unknown().optional(), code: z.string().regex(/^\d{6}$/u).optional() }).strict();
 type Operation = "challenge" | "send" | "verify" | "remove";
 
-async function readCredentialMutation(request: Request, operation: Operation) {
+async function readCredentialMutation(request: Request, operation: Operation, transport: HostedAuthTransport) {
   const parsed = bodySchema.safeParse(await readOptionalJsonObject(request, { limitBytes: 32_768 }));
   if (!parsed.success) throw invalidRequest();
   const body = parsed.data;
   const change = parseHostedCredentialChange(body.change);
+  if (transport === "native") assertNativeMutation(change, operation, body.authorization);
   if ((operation === "send" || operation === "verify") && (change.operation !== "set" || change.method === "telegram")) throw invalidRequest();
   if (operation === "remove" && change.operation !== "remove") throw invalidRequest();
   if (operation === "verify" && !body.code) throw invalidRequest();
@@ -39,13 +41,13 @@ export async function readHostedLoginMethodsRequest(request: Request): Promise<R
   return jsonOk({ ok: true, methods: current.methods, initialMessagingSetupAllowed });
 }
 
-export async function changeHostedLoginMethodRequest(request: Request, operation: Operation): Promise<Response> {
+export async function changeHostedLoginMethodRequest(request: Request, operation: Operation, transport: HostedAuthTransport = "browser"): Promise<Response> {
   assertHostedBetterAuthIssuanceEnabled();
-  assertHostedOnboardingMutationOrigin(request);
+  if (transport === "browser") assertHostedOnboardingMutationOrigin(request);
   return runWithFreshHostedDomainRootUnwrapCache(async () => {
-    const session = await requireHostedAppSessionFromRequest(request);
+    const session = transport === "native" ? await requireNativeMessagingSession(request) : await requireHostedAppSessionFromRequest(request);
     const prisma = getPrisma();
-    const body = await readCredentialMutation(request, operation);
+    const body = await readCredentialMutation(request, operation, transport);
     const change = body.change;
     const limits = hostedAuthRateLimitStorage(prisma);
     const value = change.value ?? change.expectedIdentity;
@@ -58,10 +60,10 @@ export async function changeHostedLoginMethodRequest(request: Request, operation
     ] as const) {
       if (!(await limits.consume(key, { max, window })).allowed) throw hostedOnboardingError({ code: "AUTH_RATE_LIMITED", httpStatus: 429, message: "Too many attempts. Wait a moment and try again.", retryable: true });
     }
-    const prepared = await prepareHostedCredentialChange({ change, session, request, prisma,
+    const prepared = await prepareHostedCredentialChange({ change, session, request, prisma, transport,
       ...((operation === "verify" || operation === "remove") ? { authorization: body.authorization } : {}),
     });
-    if (operation === "verify" && body.authorization === undefined && !prepared.initialMessagingSetup) throw invalidRequest();
+    assertCredentialAuthorization({ transport, operation, authorization: body.authorization, initialMessagingSetup: prepared.initialMessagingSetup });
     if (operation === "challenge") return jsonOk(await createSensitiveActionChallenge({
       bindingHash: prepared.bindingHash, kind: HOSTED_CREDENTIAL_CHANGE_KIND, memberId: session.member.id, prisma,
     }));
@@ -81,3 +83,14 @@ export async function changeHostedLoginMethodRequest(request: Request, operation
 }
 
 function invalidRequest() { return hostedOnboardingError({ code: "AUTH_CREDENTIAL_REQUEST_INVALID", httpStatus: 400, message: "The account change was invalid. Refresh Settings and try again." }); }
+
+function assertNativeMutation(change: ReturnType<typeof parseHostedCredentialChange>, operation: Operation, authorization: unknown) {
+  if ((operation !== "send" && operation !== "verify") || change.method !== "phone"
+    || change.operation !== "set" || change.expectedIdentity !== null || authorization !== undefined) throw invalidRequest();
+}
+
+function assertCredentialAuthorization(input: { transport: HostedAuthTransport; operation: Operation; authorization: unknown; initialMessagingSetup: boolean }) {
+  if (input.initialMessagingSetup) return;
+  if (input.transport === "native") throw nativeMessagingApprovalRequired();
+  if (input.operation === "verify" && input.authorization === undefined) throw invalidRequest();
+}

@@ -1,3 +1,4 @@
+import { captureNativeMessagingTelegramProof } from "../better-auth/native-messaging-telegram";
 import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
 import { handleHostedLinqPollWebhook } from "../hosted-polls/linq-webhook";
 import type {
@@ -2133,6 +2134,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   assertHostedTelegramWebhookSecret(input.secretToken);
 
   const update = parseHostedTelegramWebhookUpdate(input.rawBody);
+  if (await captureNativeMessagingTelegramProof(update, prisma)) return { ok: true, ignored: true, reason: "native-messaging-link" };
 
   // An inline-button tap grants membership or a disclosure directly, so it runs
   // outside the planning transaction: acceptance owns its own transactions and
