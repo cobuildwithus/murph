@@ -127,7 +127,6 @@ import {
 } from "./runner-egress-venice.ts";
 import {
   buildHostedOpenAiCacheDiagnostic,
-  type HostedOpenAiCacheDiagnosticEndpointKind,
   type HostedRunnerDiagnosticJson,
 } from "./runner-egress-responses-diagnostics.ts";
 import {
@@ -214,10 +213,6 @@ const OPENAI_EGRESS_POLICY = [
   },
   {
     method: "POST",
-    pathname: "/v1/responses/compact",
-  },
-  {
-    method: "POST",
     pathname: "/v1/alpha/search",
   },
   {
@@ -289,10 +284,6 @@ interface HostedRunnerOutboundContext {
   containerId?: string;
   className?: string;
   waitUntil?: (promise: Promise<unknown>) => void;
-}
-
-interface HostedRunnerDiagnosticBodySource {
-  arrayBuffer(): Promise<ArrayBuffer>;
 }
 
 type HostedProviderEgressValidationMode = "deploy_smoke_live_model_turn" | "native_container";
@@ -1465,27 +1456,7 @@ async function maybeHandleOpenAiRequest(input: {
     headers,
     boundedBody !== undefined ? { body: boundedBody } : {},
   );
-  const endpointKind = readOpenAiCacheDiagnosticEndpointKind(
-    input.request.method,
-    pathnameSuffix,
-  );
-  let diagnosticPromise: Promise<void> | null = null;
-  if (endpointKind) {
-    diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
-      ctx: input.ctx ?? null,
-      endpointKind,
-      env: input.env,
-      request: input.request,
-      upstreamRequestBody: upstreamRequest.clone(),
-      userId: authorization.userId,
-      writeFence: authorization.writeFence,
-    });
-    if (typeof input.ctx?.waitUntil === "function") {
-      input.ctx.waitUntil(diagnosticPromise);
-    }
-  }
-
-  const response = await fetchAuthorizedProviderUpstream({
+  const responsePromise = fetchAuthorizedProviderUpstream({
     authorization,
     providerKind: "openai",
     request: input.request,
@@ -1494,6 +1465,26 @@ async function maybeHandleOpenAiRequest(input: {
     upstreamFetchImpl: input.upstreamFetchImpl,
     url: input.url,
   });
+  if (pathnameSuffix === "/v1/responses" && boundedBody !== undefined) {
+    // The provider request is already in flight. The diagnostic reuses the
+    // admitted bytes and runs as background work, so neither its parsing nor
+    // its runtime-log write can hold the provider response.
+    const diagnostic = emitHostedRunnerOpenAiCacheDiagnostic({
+      env: input.env,
+      request: input.request,
+      requestBytes: new Uint8Array(boundedBody),
+      userId: authorization.userId,
+      writeFence: authorization.writeFence,
+    });
+    try {
+      if (typeof input.ctx?.waitUntil === "function") input.ctx.waitUntil(diagnostic);
+      else waitUntil(diagnostic);
+    } catch {
+      // Best-effort persistence must not change provider forwarding.
+    }
+  }
+
+  const response = await responsePromise;
   if (response.status === 401 || response.status === 403) {
     const reportPromise = reportOpenAiAuthorizationFailureSafely({
       ctx: input.ctx,
@@ -1503,9 +1494,6 @@ async function maybeHandleOpenAiRequest(input: {
     if (reportPromise) {
       await reportPromise;
     }
-  }
-  if (diagnosticPromise && typeof input.ctx?.waitUntil !== "function") {
-    await diagnosticPromise;
   }
 
   // Return upgrades unaccepted: Cloudflare owns the byte forwarding and
@@ -2198,22 +2186,6 @@ function recordHostedXaiSearchUsage(input: {
   });
 }
 
-function readOpenAiCacheDiagnosticEndpointKind(
-  method: string,
-  pathnameSuffix: string,
-): HostedOpenAiCacheDiagnosticEndpointKind | null {
-  if (method !== "POST") {
-    return null;
-  }
-  if (pathnameSuffix === "/v1/responses") {
-    return "responses";
-  }
-  if (pathnameSuffix === "/v1/responses/compact") {
-    return "responses_compact";
-  }
-  return null;
-}
-
 async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   pathnameSuffix: string;
   request: Request;
@@ -2235,23 +2207,19 @@ async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
 }
 
 async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
-  ctx: HostedRunnerOutboundContext | null;
-  endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
-  upstreamRequestBody: HostedRunnerDiagnosticBodySource;
+  requestBytes: Uint8Array;
   userId: string | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }): Promise<void> {
   let diagnostic: HostedRunnerDiagnosticJson;
   try {
-    const requestBytes = new Uint8Array(await input.upstreamRequestBody.arrayBuffer());
     diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: input.endpointKind,
+      endpointKind: "responses",
       fingerprintSecret: readOpenAiCacheDiagnosticFingerprintSecret(input.env),
       method: input.request.method,
-      providerKind: "openai",
-      requestBytes,
+      requestBytes: input.requestBytes,
       turnMetadataHeader: input.request.headers.get(
         OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER,
       ),
@@ -2261,7 +2229,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       component: "runner",
       details: {
         diagnosticCaptured: false,
-        endpointKind: input.endpointKind,
+        endpointKind: "responses",
         providerKind: "openai",
       },
       error,
@@ -2272,36 +2240,30 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
     return;
   }
 
-  const runtimeLogScheduled =
-    input.userId !== null
-    && typeof input.ctx?.waitUntil === "function";
   emitHostedExecutionStructuredLog({
     component: "runner",
-    details: {
-      runtimeLogScheduled,
-      ...diagnostic,
-    },
+    details: diagnostic,
     message: "Hosted runner provider request diagnostic captured.",
     phase: "wake.running",
   });
 
-  if (!input.userId) {
+  // Only an owner-authorized member request carries a write fence; deploy-smoke
+  // traffic has neither a member nor a runtime log to write.
+  if (!input.userId || !input.writeFence) {
     return;
   }
 
   await writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog({
     diagnostic,
     env: input.env,
-    request: input.request,
     userId: input.userId,
     writeFence: input.writeFence,
   }).catch((error) => {
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
-        endpointKind: input.endpointKind,
+        endpointKind: "responses",
         providerKind: "openai",
-        runtimeLogScheduled,
       },
       error,
       level: "warn",
@@ -2314,40 +2276,32 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
 async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   diagnostic: HostedRunnerDiagnosticJson;
   env: RunnerOutboundEnvironmentSource;
-  request: Request;
   userId: string;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
+  writeFence: HostedProviderEgressWriteFenceMetadata;
 }): Promise<void> {
   const route = HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite;
-  const writeFence = input.writeFence ?? readRuntimeLogWriteFenceMetadata({
-    headers: input.request.headers,
-    userId: input.userId,
-  });
+  const { writeFence } = input;
   const response = await handleRunnerOutboundRequest(
     new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${route.path}`, {
       body: JSON.stringify({
         entries: [{
           at: new Date().toISOString(),
-          ...(writeFence ? { attemptId: writeFence.attemptId } : {}),
+          attemptId: writeFence.attemptId,
           component: "runner",
           eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
-          ...(writeFence ? { leaseGeneration: writeFence.leaseGeneration } : {}),
+          leaseGeneration: writeFence.leaseGeneration,
           level: "debug",
           phase: "fetch",
           redactedJson: input.diagnostic,
-          ...(writeFence?.workspaceVersion ? { workspaceVersion: writeFence.workspaceVersion } : {}),
+          ...(writeFence.workspaceVersion ? { workspaceVersion: writeFence.workspaceVersion } : {}),
         }],
       }),
       headers: {
         "content-type": "application/json; charset=utf-8",
-        ...(writeFence
-          ? {
-              [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: writeFence.attemptId,
-              [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: writeFence.leaseGeneration,
-              ...(writeFence.workspaceVersion
-                ? { [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: writeFence.workspaceVersion }
-                : {}),
-            }
+        [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: writeFence.attemptId,
+        [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: writeFence.leaseGeneration,
+        ...(writeFence.workspaceVersion
+          ? { [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: writeFence.workspaceVersion }
           : {}),
       },
       method: route.method,
@@ -2368,34 +2322,6 @@ function readOpenAiCacheDiagnosticFingerprintSecret(
   const value = env.HOSTED_LOG_FINGERPRINT_SECRET;
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
-}
-
-function readRuntimeLogHeader(headers: Headers, name: string): string | null {
-  const normalized = headers.get(name)?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
-}
-
-function readRuntimeLogWriteFenceMetadata(input: {
-  headers: Headers;
-  userId: string;
-}): HostedProviderEgressWriteFenceMetadata | null {
-  const attemptId = readRuntimeLogHeader(input.headers, HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
-  const leaseGeneration = readRuntimeLogHeader(
-    input.headers,
-    HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
-  );
-  if (!attemptId || !leaseGeneration) {
-    return null;
-  }
-  return {
-    attemptId,
-    leaseGeneration,
-    userId: input.userId,
-    workspaceVersion: readRuntimeLogHeader(
-      input.headers,
-      HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
-    ),
-  };
 }
 
 async function drainHostedRunnerMetadataResponse(response: Response): Promise<void> {

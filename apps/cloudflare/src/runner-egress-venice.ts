@@ -19,21 +19,14 @@ export function isAllowedHostedVeniceRequest(
   method: string,
   pathnameSuffix: string,
 ): boolean {
-  return method.toUpperCase() === "POST"
-    && (
-      pathnameSuffix === "/responses"
-      || pathnameSuffix === "/responses/compact"
-    );
+  return method.toUpperCase() === "POST" && pathnameSuffix === "/responses";
 }
 
 export function buildHostedVeniceResponsesRequestBody(input: {
   body: ArrayBuffer;
   pathnameSuffix: string;
 }): string | null {
-  if (
-    input.pathnameSuffix !== "/responses"
-    && input.pathnameSuffix !== "/responses/compact"
-  ) {
+  if (input.pathnameSuffix !== "/responses") {
     return null;
   }
   let payload: unknown;

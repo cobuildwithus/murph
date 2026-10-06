@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
 import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ContainerProxy } from "./stubs/cloudflare-containers.ts";
+import { settleWaitUntilForTest } from "./stubs/cloudflare-workers.ts";
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
@@ -437,7 +438,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Production-shaped requests leave diagnostics in module-level background
+  // work; settle them before the next test replaces the global fetch stub.
+  await settleWaitUntilForTest();
   vi.useRealTimers();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
@@ -4281,42 +4285,6 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
   });
 
-  it("injects OpenAI authorization for Codex auto-compaction requests", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
-
-      userId: string;
-    }) => createProviderEgressCredentialValidationResult(input));
-    const credential = await createTestProviderEgressCredential();
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses/compact", {
-        headers: {
-          authorization: `Bearer ${credential}`,
-        },
-        method: "POST",
-      }),
-      createInterceptEnv({
-        OPENAI_API_KEY: "openai-worker-secret",
-        providerContext: validateRuntimeProviderEgressCredential,
-      }),
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(200);
-
-    const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
-    expect(forwarded).toBeInstanceOf(Request);
-    const forwardedRequest = forwarded as Request;
-    expect(forwardedRequest.url).toBe("https://api.openai.com/v1/responses/compact");
-    expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
-    expect(forwardedRequest.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
-    expect(forwardedRequest.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
-    expect(forwardedRequest.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
-    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
-  });
-
   it("records OpenAI cache diagnostics as redacted metadata when background work is available", async () => {
     const waitUntilPromises: Promise<unknown>[] = [];
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
@@ -4547,7 +4515,7 @@ describe("hostedRunnerIntercept", () => {
     });
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses/compact", {
+      new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify(requestBody),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
@@ -4588,7 +4556,7 @@ describe("hostedRunnerIntercept", () => {
       codexCompactionTriggerKind: "auto",
       codexRequestKind: "compaction",
       codexTurnMetadataStatus: "valid",
-      endpointKind: "responses_compact",
+      endpointKind: "responses",
     }));
     if (redactedJson) {
       parseDiagnosticRuntimeLog(redactedJson);
@@ -4725,6 +4693,7 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
+    await settleWaitUntilForTest();
     expect(findFetchCall(fetchMock, "api.openai.com")).toBeDefined();
     const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
     expect(runtimeLogCall).toBeDefined();
@@ -4743,12 +4712,64 @@ describe("hostedRunnerIntercept", () => {
         requestFingerprintPresent: false,
       }),
     }));
-    const captureCall = mocks.emitHostedExecutionStructuredLog.mock.calls.find(([entry]) =>
-      entry.message === "Hosted runner provider request diagnostic captured."
-    );
-    expect(captureCall?.[0].details).toEqual(expect.objectContaining({
-      runtimeLogScheduled: false,
-    }));
+  });
+
+  it("returns the OpenAI response without awaiting diagnostic persistence when waitUntil is unavailable", async () => {
+    let markRuntimeLogStarted: (() => void) | undefined;
+    const runtimeLogStarted = new Promise<void>((resolve) => {
+      markRuntimeLogStarted = resolve;
+    });
+    let finishRuntimeLog: ((response: Response) => void) | undefined;
+    const pendingRuntimeLog = new Promise<Response>((resolve) => {
+      finishRuntimeLog = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        markRuntimeLogStarted?.();
+        return await pendingRuntimeLog;
+      }
+      return new Response("ok");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await Promise.race([
+        hostedRunnerIntercept(
+          new Request("https://api.openai.com/v1/responses", {
+            body: JSON.stringify({ input: "hello", model: "gpt-5.6-terra", stream: true }),
+            headers: {
+              ...BOUND_USER_WRITE_FENCE_HEADERS,
+              "content-type": "application/json; charset=utf-8",
+              authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+            },
+            method: "POST",
+          }),
+          createInterceptEnv({
+            OPENAI_API_KEY: "openai-worker-secret",
+            validateRuntimeWriteFence: async () => true,
+          }),
+          { className: "RunnerContainer", containerId: "opaque-container-id" },
+        ),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("OpenAI delivery waited for the diagnostic runtime-log write"));
+          }, 1_000);
+        }),
+      ]);
+      expect(response.status).toBe(200);
+      await expect(response.text()).resolves.toBe("ok");
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    await runtimeLogStarted;
+    finishRuntimeLog?.(Response.json({ loggedCount: 1 }));
+    await settleWaitUntilForTest();
+    const runtimeLogBody = JSON.parse(
+      String(findFetchCall(fetchMock, "web.example.test")?.[1]?.body ?? "{}"),
+    ) as { entries?: Array<{ eventCode?: string }> };
+    expect(runtimeLogBody.entries?.[0]?.eventCode).toBe(HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE);
   });
 
   it("does not double-record ordinary OpenAI turns at egress", async () => {
@@ -4794,26 +4815,31 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("rejects OpenAI paths outside the explicit hosted runner policy", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
+    for (const url of [
+      "https://api.openai.com/v1/chat/completions",
+      "https://api.openai.com/v1/responses/compact",
+    ]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+      vi.stubGlobal("fetch", fetchMock);
 
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/chat/completions", {
-        body: JSON.stringify({ messages: [] }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          ...WRITE_FENCE_HEADERS,
-        },
-        method: "POST",
-      }),
-      createInterceptEnv({
-        OPENAI_API_KEY: "openai-worker-secret",
-      }),
-      { className: "RunnerContainer", containerId: "opaque-container-id" },
-    );
+      const response = await hostedRunnerIntercept(
+        new Request(url, {
+          body: JSON.stringify({ messages: [] }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            ...WRITE_FENCE_HEADERS,
+          },
+          method: "POST",
+        }),
+        createInterceptEnv({
+          OPENAI_API_KEY: "openai-worker-secret",
+        }),
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
+      );
 
-    expect(response.status).toBe(403);
-    expect(fetchMock).not.toHaveBeenCalled();
+      expect(response.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
   });
 
   it("rejects wrong OpenAI methods on otherwise allowed paths", async () => {

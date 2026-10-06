@@ -248,30 +248,6 @@ test("Venice egress preserves caller-owned cache controls without adding a secon
   assert.deepEqual(parsed.input, input.slice(1));
 });
 
-test("Venice egress leaves compact-request caching unchanged", () => {
-  const developerMessage = {
-    content: [{ text: "Stable instructions.", type: "input_text" }],
-    role: "developer",
-    type: "message",
-  };
-  const body = buildHostedVeniceResponsesRequestBody({
-    body: encodeJson({
-      input: [
-        {
-          role: "developer",
-          tools: MURPH_NAMESPACE_TOOLS,
-          type: "additional_tools",
-        },
-        developerMessage,
-      ],
-      model: "gpt-5.6-sol",
-    }),
-    pathnameSuffix: "/responses/compact",
-  });
-  assert.ok(body);
-  assert.deepEqual(JSON.parse(body).input, [developerMessage]);
-});
-
 test("Venice egress fails closed for malformed or conflicting Responses Lite tools", () => {
   const additionalTools = {
     role: "developer",
@@ -348,7 +324,7 @@ test("Venice egress rejects unknown endpoint paths", () => {
 
 test("Venice egress admits only Codex Responses POST endpoints", () => {
   assert.equal(isAllowedHostedVeniceRequest("POST", "/responses"), true);
-  assert.equal(isAllowedHostedVeniceRequest("POST", "/responses/compact"), true);
+  assert.equal(isAllowedHostedVeniceRequest("POST", "/responses/compact"), false);
   assert.equal(isAllowedHostedVeniceRequest("GET", "/responses"), false);
   assert.equal(isAllowedHostedVeniceRequest("POST", "/chat/completions"), false);
 });
