@@ -2031,6 +2031,14 @@ with Vercel's function start to attribute time spent before the handler, which
 `webhook_received_at` cannot see, to process boot, lazy route loading, or the
 platform.
 
+Next on Vercel loads a route's whole static import graph on that route's first
+request in each process, and most inbound Linq messages are such a first
+request. Keep other providers' handlers and optional SDKs off the Linq webhook
+graph: the Stripe webhook handler and the group tool are separate modules, and
+the Workflow client SDK (`workflow/api`) loads only when a workflow is started
+or resumed. `hosted-onboarding-linq-webhook-graph-boundary.test.ts` guards these
+edges.
+
 The generated Prisma client uses the supported `small` query compiler to reduce
 fresh-instance loading and first-query initialization. This is a build choice,
 not a database migration; query contracts, pool ownership, retries and transaction

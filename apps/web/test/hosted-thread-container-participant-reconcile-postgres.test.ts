@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   reconcileHostedThreadContainerParticipants,
-} from "@/src/lib/hosted-groups/group-tool";
+} from "@/src/lib/hosted-groups/thread-container-participants";
 import {
   createHostedLinqParticipantContactLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";

@@ -3,7 +3,7 @@ import {
   readHostedOnboardingRawBodyText,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
-import { handleHostedStripeWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
+import { handleHostedStripeWebhook } from "@/src/lib/hosted-onboarding/webhook-service-stripe";
 
 const HOSTED_STRIPE_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
 
