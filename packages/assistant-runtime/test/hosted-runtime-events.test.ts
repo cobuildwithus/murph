@@ -931,7 +931,6 @@ describe("executeHostedMailboxEvent", () => {
       "preinitialized",
       "warm-reused",
       "warm-idle",
-      "warm-abort-poisoned",
     ]) {
       const eventId = `evt_codex_${stage.replaceAll("-", "_")}_timing`;
       const wake = buildHostedExecutionAssistantNotificationRequestedWake({

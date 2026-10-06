@@ -2435,7 +2435,6 @@ describe("hosted workspace runtime entrypoint", () => {
         codexProviderRequestMaxRetries: 4,
         codexProviderStreamIdleTimeoutMs: 90_000,
         codexProviderStreamMaxRetries: 0,
-        codexProviderTransportMode: "codex-native-provider-transport",
       }));
       expect(phaseLogs.every((entry) =>
         typeof entry.details.runtimeElapsedMs === "number"

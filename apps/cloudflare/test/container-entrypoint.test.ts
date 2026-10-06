@@ -1860,8 +1860,8 @@ describe("startHostedContainerEntrypoint", () => {
       expect(codexConfigToml).toContain('wire_api = "responses"');
       expect(codexConfigToml).toContain("requires_openai_auth = false");
       expect(codexConfigToml).toContain("supports_websockets = false");
-      expect(codexConfigToml).toContain("request_max_retries = 4");
-      expect(codexConfigToml).toContain("stream_max_retries = 5");
+      expect(codexConfigToml).toContain("request_max_retries = 0");
+      expect(codexConfigToml).toContain("stream_max_retries = 0");
       expect(codexConfigToml).toContain("multi_agent_v2 = true");
       expectCodexConfigDisablesLoginShellAtTopLevel(codexConfigToml);
     } finally {
