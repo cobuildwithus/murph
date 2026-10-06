@@ -6,6 +6,12 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, test, vi } from "vitest";
+import * as core from "@murphai/core";
+import { withImmediateTransaction } from "@murphai/runtime-state/node";
+import * as freshness from "../src/projection/freshness.ts";
+import * as shapeStore from "../src/projection/wearable-summary-shapes.ts";
+import * as ordinaryRuntime from "../src/query-projection.ts";
+import * as wearables from "../src/wearables.ts";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import { CANONICAL_WRITE_LOCK_DIRECTORY, withCanonicalWriteLock } from "@murphai/core";
 import {
@@ -120,6 +126,7 @@ function inspectProjection(root: string) {
       globalMeta: database.prepare("SELECT * FROM query_meta WHERE key != 'wearable_source_manifest' ORDER BY key").all(),
       wearableMeta: database.prepare("SELECT value FROM query_meta WHERE key = 'wearable_source_manifest'").get()?.value,
       wearable: database.prepare("SELECT * FROM query_wearable_summaries ORDER BY id").all(),
+      shapes: database.prepare("SELECT * FROM query_wearable_summary_shapes ORDER BY shape_id").all(),
     };
   } finally {
     database.close();
@@ -706,4 +713,401 @@ test.skipIf(process.env.MURPH_QUERY_REBUILD_PHASE_MEASURE !== "1")("synthetic re
     if (priorEndpoint === undefined) delete process.env.MURPH_CLI_TIMING_ENDPOINT;
     else process.env.MURPH_CLI_TIMING_ENDPOINT = priorEndpoint;
   }
+});
+
+// The old ordinary-read path composed these same stored rows after global
+// freshness. Keep that oracle independent of the new focused helper.
+interface OrdinaryWearableReader {
+  name: string;
+  read: (root: string, filters: wearables.WearableMetricSummaryFilters) => Promise<unknown>;
+  select: (bundle: wearables.ProjectedWearableSummaryBundle, filters: wearables.WearableMetricSummaryFilters) => unknown;
+}
+const ordinaryWearableReaders: OrdinaryWearableReader[] = [
+  { name: "day", read: (root, filters) => ordinaryRuntime.summarizeWearableDayRuntime(root, filters.date ?? "2026-05-01", { providers: filters.providers }),
+    select: (bundle, filters) => wearables.summarizeWearableDayFromBundle(bundle, filters.date ?? "2026-05-01") },
+  { name: "latest", read: ordinaryRuntime.summarizeWearableLatestRuntime, select: wearables.summarizeWearableLatestFromBundle },
+  { name: "metric-latest", read: (root, filters) => ordinaryRuntime.summarizeWearableMetricLatestRuntime(root, "steps", filters),
+    select: (bundle, filters) => wearables.summarizeWearableMetricLatestFromBundle(bundle, "steps", filters) },
+  { name: "metric-trend", read: (root, filters) => ordinaryRuntime.summarizeWearableMetricTrendRuntime(root, "hrv", filters),
+    select: (bundle, filters) => wearables.summarizeWearableMetricTrendFromBundle(bundle, "hrv", filters) },
+  { name: "drift", read: ordinaryRuntime.explainWearableDriftRuntime, select: wearables.explainWearableDriftFromBundle },
+  { name: "activity", read: ordinaryRuntime.summarizeWearableActivityRuntime, select: wearables.summarizeWearableActivityFromBundle },
+  { name: "body", read: ordinaryRuntime.summarizeWearableBodyStateRuntime, select: wearables.summarizeWearableBodyStateFromBundle },
+  { name: "recovery", read: ordinaryRuntime.summarizeWearableRecoveryRuntime, select: wearables.summarizeWearableRecoveryFromBundle },
+];
+function ordinaryStoredOracle(reader: OrdinaryWearableReader, root: string, filters: wearables.WearableMetricSummaryFilters) {
+  const compositionFilters = reader.name === "day"
+    ? { date: filters.date ?? "2026-05-01", providers: filters.providers } : filters;
+  const rows = wearableStore.readWearableSummaryRows(currentQueryProjectionLocation(root), { providers: filters.providers });
+  return reader.select(composePublicWearableSummaryBundleFromStoredRows(rows, compositionFilters), filters);
+}
+
+for (const reader of ordinaryWearableReaders) {
+  for (const empty of [false, true]) {
+    test(`${reader.name}: focused cold/repeated/fresh/global/correction/deletion equals independent full rows (empty=${empty})`, async () => {
+      const { root, shard, events } = await fixture(empty);
+      const cases: wearables.WearableMetricSummaryFilters[] = [...filterCases,
+        { providers: ["garmin", "oura"] }, { from: "2026-05-01", to: "2026-05-04", windowDays: 3 }];
+      let report!: CliTiming;
+      const read = (filters: wearables.WearableMetricSummaryFilters) => measuredQuery(
+        `wearables ${reader.name}`, () => reader.read(root, filters), value => { report = value; });
+      const cold = [];
+      for (const [index, filters] of cases.entries()) {
+        cold.push(await read(filters));
+        assertRebuildTiming(report, index === 0 ? sourceRebuildPhases : [], root);
+      }
+      assert.deepEqual(inspectProjection(root).globalTables, []);
+      assert.equal((await getQueryProjectionStatus(root)).fresh, false);
+      await assertWearablesFresh(root);
+      // A real global operation must still do its work, without re-encoding
+      // the focused generation. Then force an independent full-row oracle.
+      await measuredQuery("query list", () => listCanonicalEntitiesRuntime(root), value => { report = value; });
+      assertRebuildTiming(report, rebuildPhases.filter(phase => phase !== "query-wearable-summary"), root);
+      assert.equal((await getQueryProjectionStatus(root)).fresh, true);
+      await forceFullReference(root);
+      const full = inspectProjection(root);
+      for (const [index, filters] of cases.entries()) {
+        const expected = JSON.stringify(ordinaryStoredOracle(reader, root, filters));
+        assert.equal(JSON.stringify(cold[index]), expected);
+        assert.equal(JSON.stringify(await read(filters)), expected);
+        assertRebuildTiming(report, [], root);
+      }
+      assert.deepEqual(inspectProjection(root), full);
+      for (const revision of empty ? [] : [2, 3]) {
+        await withCanonicalWriteLock(root, () => appendFile(shard, events.map(event => JSON.stringify({
+          ...event, value: event.value + 10, recordedAt: "2026-05-05T12:00:00Z",
+          lifecycle: { revision, ...(revision === 3 ? { state: "deleted" } : {}) },
+        })).join("\n") + "\n"));
+        const before = inspectProjection(root);
+        const actual = [];
+        for (const [index, filters] of cases.entries()) {
+          actual.push(await read(filters));
+          assertRebuildTiming(report, index === 0 ? sourceRebuildPhases : [], root);
+        }
+        assert.deepEqual(inspectProjection(root).global, before.global);
+        assert.deepEqual(inspectProjection(root).globalMeta, before.globalMeta);
+        assert.equal((await getQueryProjectionStatus(root)).fresh, false);
+        await measuredQuery("query list", () => listCanonicalEntitiesRuntime(root), value => { report = value; });
+        assertRebuildTiming(report, rebuildPhases.filter(phase => phase !== "query-wearable-summary"), root);
+        await forceFullReference(root);
+        for (const [index, filters] of cases.entries()) {
+          assert.equal(JSON.stringify(actual[index]), JSON.stringify(ordinaryStoredOracle(reader, root, filters)));
+        }
+      }
+    });
+  }
+
+  test(`${reader.name}: focused capture holds the reentrant lock and failed publication rolls back`, async () => {
+    const { root, shard, events } = await fixture();
+    await summarizeWearableSourceHealthRuntime(root);
+    const capture = wearableStore.readWearableSummaryRows;
+    const captured = vi.spyOn(wearableStore, "readWearableSummaryRows").mockImplementation((...args) => {
+      assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), true);
+      return capture(...args);
+    });
+    await withCanonicalWriteLock(root, () => reader.read(root, {}));
+    assert.equal(captured.mock.calls.length, 1);
+    await withCanonicalWriteLock(root, () => appendFile(shard, JSON.stringify({ ...events[0],
+      value: 9900, recordedAt: "2026-05-05T12:00:00Z", lifecycle: { revision: 2 },
+    }) + "\n"));
+    const before = inspectProjection(root);
+    const insert = wearableStore.insertWearableSummaryRows;
+    const failing = vi.spyOn(wearableStore, "insertWearableSummaryRows").mockImplementation((...args) => {
+      insert(...args);
+      throw new Error("synthetic wearable publication failure");
+    });
+    await assert.rejects(reader.read(root, {}), /synthetic wearable publication failure/u);
+    assert.deepEqual(inspectProjection(root), before);
+    assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), false);
+    failing.mockRestore();
+    await reader.read(root, {});
+    await assertWearablesFresh(root);
+    assert.equal((await getQueryProjectionStatus(root)).fresh, false);
+  });
+}
+
+test("all eight ordinary readers reject malformed canonical input even for empty provider scopes", async () => {
+  const { root, shard } = await fixture();
+  await rebuildQueryProjection(root);
+  const dbPath = currentQueryProjectionLocation(root).absolutePath;
+  const before = await readFile(dbPath);
+  await withCanonicalWriteLock(root, () => appendFile(shard, "{malformed synthetic source\n"));
+  const expected = await readVaultSourceStrict(root).then(() => null, (error: unknown) => error);
+  assert.ok(expected instanceof Error);
+  for (const reader of ordinaryWearableReaders) {
+    for (const filters of [{}, { providers: [] }, { providers: ["missing"] }]) {
+      await assert.rejects(reader.read(root, filters), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.constructor, expected.constructor);
+        assert.equal(error.message, expected.message);
+        return true;
+      });
+    }
+  }
+  assert.deepEqual(await readFile(dbPath), before);
+  assert.equal((await getQueryProjectionStatus(root)).fresh, false);
+});
+
+
+function gate() {
+  let release!: () => void;
+  const promise = new Promise<void>(resolve => { release = resolve; });
+  return { promise, release };
+}
+function phaseCount(report: CliTiming, phase: CliTimingPhase) {
+  return report.commands.flatMap(command => command.phases).filter(row => row.phase === phase)
+    .reduce((sum, row) => sum + row.count, 0);
+}
+
+test("all eight fresh-global readers finish before an unrelated parked writer, without acquiring its lock", async () => {
+  const { root } = await fixture();
+  await rebuildQueryProjection(root);
+  const cases = ordinaryWearableReaders.flatMap(reader => [{}, { providers: [] }].map(filters => ({
+    reader, filters, expected: JSON.stringify(ordinaryStoredOracle(reader, root, filters)),
+  })));
+  const held = gate(); const release = gate(); const attempted = gate();
+  const owner = withCanonicalWriteLock(root, async () => { held.release(); await release.promise; });
+  await held.promise;
+  const lock = core.withCanonicalWriteLock;
+  const acquired = vi.spyOn(core, "withCanonicalWriteLock").mockImplementation((...args: Parameters<typeof lock>) => {
+    attempted.release(); return lock(...args);
+  });
+  const focused = vi.spyOn(rebuild, "readFreshWearableSummaryRows");
+  const pending: Promise<unknown>[] = [];
+  try {
+    for (const { reader, filters, expected } of cases) {
+      let report!: CliTiming;
+      const read = measuredQuery(`wearables ${reader.name}`, () => reader.read(root, filters), value => { report = value; });
+      pending.push(read);
+      assert.equal(await Promise.race([read.then(() => "read"), attempted.promise.then(() => "locked")]), "read");
+      assert.equal(JSON.stringify(await read), expected);
+      assertRebuildTiming(report, [], root);
+      for (const phase of ["query-freshness", "query-manifest", "query-status"] as const) assert.equal(phaseCount(report, phase), 1);
+      assert.equal(phaseCount(report, "query-wait"), 0);
+    }
+    assert.equal(acquired.mock.calls.length, 0);
+    assert.equal(focused.mock.calls.length, 0);
+    assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), true);
+  } finally { release.release(); await owner; await Promise.allSettled(pending); }
+});
+
+for (const read of [ordinaryRuntime.summarizeWearableSleepRuntime, summarizeWearableSourceHealthRuntime]) {
+  test(`${read.name} keeps its original focused ownership even with a fresh global cache`, async () => {
+    const { root } = await fixture(); await rebuildQueryProjection(root);
+    const expected = await read(root);
+    const held = gate(); const release = gate(); const attempted = gate();
+    const owner = withCanonicalWriteLock(root, async () => { held.release(); await release.promise; });
+    await held.promise;
+    const lock = core.withCanonicalWriteLock;
+    vi.spyOn(core, "withCanonicalWriteLock").mockImplementation((...args: Parameters<typeof lock>) => {
+      attempted.release(); return lock(...args);
+    });
+    const globalStatus = vi.spyOn(freshness, "readProjectionStatus");
+    const capture = vi.spyOn(wearableStore, "readWearableSummaryRows");
+    const pending = read(root);
+    try {
+      assert.equal(await Promise.race([pending.then(() => "read"), attempted.promise.then(() => "locked")]), "locked");
+      assert.equal(capture.mock.calls.length, 0);
+      assert.equal(globalStatus.mock.calls.length, 0);
+    } finally { release.release(); await owner; await pending.catch(() => undefined); }
+    assert.deepEqual(await pending, expected);
+  });
+}
+
+for (const state of ["missing", "wearable-only", "legacy", "future", "unreadable", "schema-id", "built-at", "global-manifest", "wearable-manifest"] as const) {
+  test(`ordinary global preflight cannot treat ${state} as fresh`, async () => {
+    const { root } = await fixture(); await rebuildQueryProjection(root);
+    const reader = ordinaryWearableReaders[1]!;
+    const expected = JSON.stringify(ordinaryStoredOracle(reader, root, {}));
+    if (state === "missing" || state === "wearable-only") {
+      await removeProjection(root);
+      if (state === "wearable-only") await summarizeWearableSourceHealthRuntime(root);
+    } else if (state === "legacy" || state === "future") {
+      executeSql(root, `PRAGMA user_version = ${QUERY_PROJECTION_SQLITE_VERSION + (state === "legacy" ? -1 : 1)}`);
+    } else if (state === "unreadable") await writeFile(currentQueryProjectionLocation(root).absolutePath, "synthetic invalid database");
+    else if (state === "schema-id") executeSql(root, "UPDATE query_meta SET value = 'unsupported' WHERE key = 'schema_version'");
+    else if (state === "built-at") executeSql(root, "DELETE FROM query_meta WHERE key = 'built_at'");
+    else if (state === "global-manifest") executeSql(root, "UPDATE query_source_manifest SET size_bytes = size_bytes + 1");
+    else executeSql(root, "DELETE FROM query_meta WHERE key = 'wearable_source_manifest'");
+    assert.equal((await getQueryProjectionStatus(root)).fresh, false);
+    const captured = wearableStore.readWearableSummaryRows;
+    vi.spyOn(wearableStore, "readWearableSummaryRows").mockImplementation((...args) => {
+      assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), true); return captured(...args);
+    });
+    let report!: CliTiming;
+    assert.equal(JSON.stringify(await measuredQuery("wearables latest", () => reader.read(root, {}), value => { report = value; })), expected);
+    for (const phase of ["query-freshness", "query-manifest", "query-status"] as const) assert.equal(phaseCount(report, phase), 2);
+    assert.equal(phaseCount(report, "query-wait"), 1);
+    assert.equal(phaseCount(report, "query-metric-projection") + phaseCount(report, "query-search-documents"), 0);
+    await assertWearablesFresh(root);
+    // Repairing only a corrupt wearable certificate can recertify unchanged
+    // completed global work; no other partial/reset case can do so.
+    assert.equal((await getQueryProjectionStatus(root)).fresh, state === "wearable-manifest");
+    await listCanonicalEntitiesRuntime(root);
+    assert.equal((await getQueryProjectionStatus(root)).fresh, true);
+  });
+}
+
+for (const outcome of ["commit", "rollback"] as const) {
+  test(`all eight readers wait for ${outcome}, even after reentrant wearable publication inside the outer writer`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wearable-global-write-")); roots.push(root);
+    await core.initializeVault({ vaultRoot: root, timezone: "UTC", createdAt: "2026-05-01T00:00:00Z" });
+    await rebuildQueryProjection(root);
+    const before = inspectProjection(root);
+    const held = gate(); const release = gate(); const attempted = gate();
+    const failure = new Error("synthetic persistence rollback");
+    const writer = core.withHostedCanonicalWritePort({ async persistCanonicalWrite() {
+      // This is a real canonical mutation before durable persistence completes.
+      // A wearable certificate here is not proof that the outer owner committed.
+      await summarizeWearableSourceHealthRuntime(root);
+      held.release(); await release.promise;
+      // Outside ordinary readers are now queued behind this owner. Its own
+      // ordinary read must remain reentrant, not join any pending reader.
+      await ordinaryRuntime.summarizeWearableLatestRuntime(root);
+      if (outcome === "rollback") throw failure;
+    } }, () => core.importDeviceBatch({ vaultRoot: root, provider: "garmin", importedAt: "2026-05-06T09:00:00Z", events: [{
+      kind: "observation", title: "Synthetic concurrent steps", timeZone: "UTC",
+      occurredAt: "2026-05-06T08:00:00Z", recordedAt: "2026-05-06T09:00:00Z",
+      externalRef: { system: "garmin", resourceType: "daily", resourceId: "synthetic-concurrent" },
+      fields: { metric: "steps", value: 9900, unit: "count" },
+    }] })).then(() => null, (error: unknown) => error);
+    await Promise.race([held.promise, writer.then(() => { throw new Error("Writer did not reach the persistence boundary"); })]);
+    const lock = core.withCanonicalWriteLock; let attempts = 0;
+    vi.spyOn(core, "withCanonicalWriteLock").mockImplementation((...args: Parameters<typeof lock>) => {
+      if (++attempts === ordinaryWearableReaders.length) attempted.release(); return lock(...args);
+    });
+    const captured = vi.spyOn(wearableStore, "readWearableSummaryRows");
+    const globalRebuild = vi.spyOn(rebuild, "rebuildQueryProjectionFromCanonicalSource");
+    const pending = ordinaryWearableReaders.map(reader => reader.read(root, {}));
+    const reads = Promise.all(pending);
+    try {
+      await assertWearablesFresh(root);
+      assert.equal((await getQueryProjectionStatus(root)).fresh, false);
+      assert.equal(await Promise.race([...pending.map(read => read.then(() => "read")), attempted.promise.then(() => "locked")]), "locked");
+      assert.equal(captured.mock.calls.length, 0);
+    } finally { release.release(); await writer; await reads.catch(() => undefined); }
+    assert.equal(await writer, outcome === "rollback" ? failure : null);
+    const actual = await reads;
+    assert.equal(globalRebuild.mock.calls.length, 0);
+    assert.deepEqual(inspectProjection(root).global, before.global);
+    assert.deepEqual(inspectProjection(root).globalMeta, before.globalMeta);
+    await forceFullReference(root);
+    for (const [index, reader] of ordinaryWearableReaders.entries()) {
+      assert.equal(JSON.stringify(actual[index]), JSON.stringify(ordinaryStoredOracle(reader, root, {})));
+    }
+  });
+}
+
+test("a canonical write after the fresh status observation retains the old check/read boundary", async () => {
+  const { root, shard, events } = await fixture(); await rebuildQueryProjection(root);
+  const filters = { providers: ["garmin"] };
+  const expected = JSON.stringify(ordinaryStoredOracle(ordinaryWearableReaders[0]!, root, filters));
+  const status = freshness.readProjectionStatus;
+  const check = vi.spyOn(freshness, "readProjectionStatus").mockImplementationOnce(async (...args) => {
+    const observed = await status(...args); assert.equal(observed?.fresh, true);
+    await withCanonicalWriteLock(root, () => appendFile(shard, JSON.stringify({ ...events[0], value: 9100,
+      lifecycle: { revision: 2 }, recordedAt: "2026-05-06T09:00:00Z" }) + "\n"));
+    return observed;
+  });
+  // The committed write occurs after the real fresh observation, before the
+  // stored-row capture. The baseline did not retry this check/read window.
+  const focused = vi.spyOn(rebuild, "readFreshWearableSummaryRows");
+  const captured = vi.spyOn(wearableStore, "readWearableSummaryRows");
+  const result = await ordinaryWearableReaders[0]!.read(root, filters);
+  assert.equal(JSON.stringify(result), expected);
+  assert.equal(focused.mock.calls.length, 0);
+  assert.equal(check.mock.calls.length, 1); assert.equal(captured.mock.calls.length, 1);
+  check.mockRestore();
+  const current = await ordinaryRuntime.summarizeWearableDayRuntime(root, "2026-05-01", filters);
+  assert.notEqual(JSON.stringify(current), expected);
+  assert.equal(focused.mock.calls.length, 1);
+  assert.equal((await getQueryProjectionStatus(root)).fresh, false);
+});
+
+for (const race of ["version-only", "reset", "missing-table", "corrupt-dictionary"] as const) {
+  test(`fresh-global ${race} after status retains direct stored-read success/error semantics`, async () => {
+    const { root } = await fixture();
+    for (const filters of [{}, { providers: [] }]) {
+      await removeProjection(root); await rebuildQueryProjection(root);
+      const status = freshness.readProjectionStatus;
+      vi.spyOn(freshness, "readProjectionStatus").mockImplementationOnce(async (...args) => {
+        const observed = await status(...args); assert.equal(observed?.fresh, true);
+        if (race === "version-only" || race === "reset") executeSql(root, `PRAGMA user_version = ${QUERY_PROJECTION_SQLITE_VERSION - 1}`);
+        if (race === "reset") await freshness.resetUnsupportedQueryProjection(currentQueryProjectionLocation(root));
+        if (race === "missing-table") executeSql(root, "DROP TABLE query_wearable_summary_shapes");
+        if (race === "corrupt-dictionary") executeSql(root, "UPDATE query_wearable_summary_shapes SET keys_json = '[1]'");
+        return observed;
+      });
+      const focused = vi.spyOn(rebuild, "readFreshWearableSummaryRows");
+      const reader = ordinaryWearableReaders[1]!;
+      const actual = await reader.read(root, filters).then(value => ({ value }), (error: unknown) => ({ error }));
+      // This is precisely the old ordinary reader's post-status operation.
+      const expected = await Promise.resolve().then(() => ordinaryStoredOracle(reader, root, filters))
+        .then(value => ({ value }), (error: unknown) => ({ error }));
+      assert.equal("error" in actual, filters.providers === undefined && race !== "version-only");
+      if ("error" in expected) {
+        assert.ok(expected.error instanceof Error); assert.ok("error" in actual && actual.error instanceof Error);
+        assert.equal(actual.error.constructor, expected.error.constructor); assert.equal(actual.error.message, expected.error.message);
+      } else {
+        assert.ok("value" in actual); assert.deepEqual(actual.value, expected.value);
+      }
+      assert.equal(focused.mock.calls.length, 0, "No catch/retry, schema reset or fallback after a successful status check");
+      vi.restoreAllMocks();
+    }
+  });
+}
+
+test("fresh-global ordinary read captures dictionary and rows in one SQLite generation", async () => {
+  const { root } = await fixture(); await rebuildQueryProjection(root);
+  const location = currentQueryProjectionLocation(root); const filters = { providers: ["garmin"] };
+  const rows = wearableStore.readWearableSummaryRows(location, filters);
+  const before = ordinaryStoredOracle(ordinaryWearableReaders[0]!, root, filters);
+  const next = { ...rows, rows: rows.rows.map(row => ({ ...row, summaryJson: JSON.stringify(Object.fromEntries(
+    Object.entries(JSON.parse(row.summaryJson.replace(/8000/gu, "9100"))).reverse(),
+  )) })) };
+  const writer = schema.openQueryProjectionDatabase(location);
+  const readShapes = shapeStore.readWearableSummaryShapes;
+  const focused = vi.spyOn(rebuild, "readFreshWearableSummaryRows");
+  vi.spyOn(shapeStore, "readWearableSummaryShapes").mockImplementationOnce(database => {
+    const shapes = readShapes(database);
+    withImmediateTransaction(writer, () => {
+      writer.exec("DELETE FROM query_wearable_summaries; DELETE FROM query_wearable_summary_shapes;");
+      wearableStore.insertWearableSummaryRows(writer, next.rows);
+    });
+    return shapes;
+  });
+  try {
+    assert.deepEqual(await ordinaryRuntime.summarizeWearableDayRuntime(root, "2026-05-01", filters), before);
+    const after = wearables.summarizeWearableDayFromBundle(composePublicWearableSummaryBundleFromStoredRows(next, { ...filters, date: "2026-05-01" }), "2026-05-01");
+    assert.notDeepEqual(after, before);
+    assert.deepEqual(await ordinaryRuntime.summarizeWearableDayRuntime(root, "2026-05-01", filters), after);
+    assert.equal(focused.mock.calls.length, 0);
+  } finally { writer.close(); }
+});
+
+test("ordinary timing charges extra global preflight separately from the locked focused recheck", async () => {
+  const { root } = await fixture(); await summarizeWearableSourceHealthRuntime(root);
+  let tick = 0n; vi.spyOn(process.hrtime, "bigint").mockImplementation(() => tick);
+  const manifest = source.listCanonicalSourceManifest;
+  vi.spyOn(source, "listCanonicalSourceManifest").mockImplementation(async (...args) => { tick += 11_000n; return manifest(...args); });
+  const status = freshness.readProjectionStatus;
+  vi.spyOn(freshness, "readProjectionStatus").mockImplementation(async (...args) => { tick += 13_000n; return status(...args); });
+  const wearableStatus = freshness.isWearableProjectionFresh;
+  vi.spyOn(freshness, "isWearableProjectionFresh").mockImplementation(async (...args) => { tick += 17_000n; return wearableStatus(...args); });
+  let report!: CliTiming;
+  const read = () => measuredQuery("wearables latest", () => ordinaryRuntime.summarizeWearableLatestRuntime(root), value => { report = value; });
+  await read(); assertRebuildTiming(report, [], root);
+  const phase = (name: CliTimingPhase) => report.commands[0]!.phases.find(row => row.phase === name)!;
+  assert.equal(phase("query-freshness").count, 2); assert.equal(phase("query-freshness").sumUs, 52);
+  assert.equal(phase("query-manifest").sumUs, 22); assert.equal(phase("query-status").sumUs, 30);
+  await rebuildQueryProjection(root);
+  await read(); assertRebuildTiming(report, [], root);
+  assert.equal(phase("query-freshness").count, 1); assert.equal(phase("query-freshness").sumUs, 24);
+  assert.equal(phaseCount(report, "query-wait"), 0);
+  const failure = new Error("synthetic preflight failure");
+  vi.spyOn(source, "listCanonicalSourceManifest").mockRejectedValueOnce(failure);
+  const focused = vi.spyOn(rebuild, "readFreshWearableSummaryRows");
+  await assert.rejects(read(), error => error === failure);
+  assert.equal(report.commands[0]!.outcome, "error");
+  assert.equal(phaseCount(report, "query-freshness"), 1); assert.equal(focused.mock.calls.length, 0);
 });

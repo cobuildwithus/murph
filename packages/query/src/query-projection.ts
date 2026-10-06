@@ -122,6 +122,24 @@ function readStoredPublicWearableSummaryBundle(
   );
 }
 
+/** Preserve ordinary readers' existing unlocked, fully fresh global path.
+ * Otherwise the focused owner validates, publishes and captures under the lock. */
+async function readFreshPublicWearableSummaryBundle(
+  vaultRoot: string,
+  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+) {
+  const location = currentQueryProjectionLocation(vaultRoot);
+  const status = await timeCliPhase("query-freshness", async () => {
+    const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+    return timeCliPhase("query-status", () => readProjectionStatus(location, manifest));
+  });
+  if (status?.fresh) return readStoredPublicWearableSummaryBundle(location, filters);
+
+  // This preflight and the focused owner's locked recheck are separate spans.
+  const rows = await readFreshWearableSummaryRows(vaultRoot, { providers: filters.providers });
+  return composePublicWearableSummaryBundleFromStoredRows(rows, filters);
+}
+
 export async function getQueryProjectionStatus(
   vaultRoot: string,
 ): Promise<QueryProjectionStatus> {
@@ -272,8 +290,7 @@ export async function summarizeWearableDayRuntime(
   date: string,
   filters: Omit<WearableSummaryFilters, "date" | "from" | "to"> = {},
 ): Promise<ProjectedWearableDaySummary | null> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, {
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, {
     date,
     providers: filters.providers,
   });
@@ -284,8 +301,7 @@ export async function summarizeWearableLatestRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableLatestSummary | null> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableLatestFromBundle(bundle, filters);
 }
 
@@ -294,8 +310,7 @@ export async function summarizeWearableMetricLatestRuntime(
   metric: string,
   filters: WearableMetricSummaryFilters = {},
 ): Promise<ProjectedWearableMetricLatestSummary | null> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableMetricLatestFromBundle(bundle, metric, filters);
 }
 
@@ -304,8 +319,7 @@ export async function summarizeWearableMetricTrendRuntime(
   metric: string,
   filters: WearableMetricSummaryFilters = {},
 ): Promise<ProjectedWearableMetricTrendSummary | null> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableMetricTrendFromBundle(bundle, metric, filters);
 }
 
@@ -313,8 +327,7 @@ export async function explainWearableDriftRuntime(
   vaultRoot: string,
   filters: WearableMetricSummaryFilters = {},
 ): Promise<ProjectedWearableDriftSummary | null> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return explainWearableDriftFromBundle(bundle, filters);
 }
 
@@ -394,8 +407,7 @@ export async function summarizeWearableActivityRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableActivitySummary[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableActivityFromBundle(bundle, filters);
 }
 
@@ -403,8 +415,7 @@ export async function summarizeWearableBodyStateRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableBodyStateSummary[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableBodyStateFromBundle(bundle, filters);
 }
 
@@ -412,8 +423,7 @@ export async function summarizeWearableRecoveryRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableRecoverySummary[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const bundle = await readFreshPublicWearableSummaryBundle(vaultRoot, filters);
   return summarizeWearableRecoveryFromBundle(bundle, filters);
 }
 

@@ -19,6 +19,14 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Focused wearable/blood reads, Browser Vault bundle reuse and finite empty-envelope
+verification (with metric sort deletion deferred for parity) are tracked
+in [the completed global-projection plan](exec-plans/completed/2026-10-02-focused-global-projection.md).
+The [query owner contract](../packages/query/README.md#ordinary-wearable-reads) and
+[native paired proof](../packages/vault-usecases/bench/global-projection.md) record
+implemented behavior, measured evidence and limitations; final-closeout-head CI
+remains a PR handoff gate.
+
 Unclaimed input typing cleanup is owned by `agent-docs/RELIABILITY.md`;
 implementation and proof are tracked in
 [`typing claim cleanup`](exec-plans/completed/2026-10-04-typing-claim-cleanup.md).
