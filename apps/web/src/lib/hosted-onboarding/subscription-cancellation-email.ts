@@ -2,6 +2,9 @@ import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import { normalizeNullableString } from "../primitives";
+import { normalizeHostedEmailAddress } from "./contact-normalization";
+import { requireHostedStripeApi } from "./runtime";
+import { withHostedStripeFailureLog } from "./stripe-error-log";
 import {
   readHostedMemberCoreState,
   readHostedMemberEmailAuthorization,
@@ -72,26 +75,26 @@ export async function sendHostedSubscriptionCancellationEmailForMember(input: {
     };
   }
 
+  const config = readHostedSubscriptionCancellationEmailConfig(input.env ?? process.env);
+
+  if (!config) {
+    return {
+      reason: "not_configured",
+      status: "skipped",
+    };
+  }
+
   const emailAuthorization = await readHostedMemberEmailAuthorization({
     memberId: input.memberId,
     prisma,
   });
   const recipient = emailAuthorization?.verifiedEmail?.address
     ?? emailAuthorization?.stripeCheckoutEmail?.address
-    ?? null;
+    ?? await readHostedStripeCancellationEmailRecipient(input.stripeSubscriptionId);
 
   if (!recipient) {
     return {
       reason: "no_cancellation_email_recipient",
-      status: "skipped",
-    };
-  }
-
-  const config = readHostedSubscriptionCancellationEmailConfig(input.env ?? process.env);
-
-  if (!config) {
-    return {
-      reason: "not_configured",
       status: "skipped",
     };
   }
@@ -112,6 +115,26 @@ export async function sendHostedSubscriptionCancellationEmailForMember(input: {
   return {
     status: "sent",
   };
+}
+
+async function readHostedStripeCancellationEmailRecipient(
+  stripeSubscriptionId: string,
+): Promise<string | null> {
+  const subscription = await withHostedStripeFailureLog(
+    "subscription.retrieve.cancellation-email",
+    () => requireHostedStripeApi().subscriptions.retrieve(stripeSubscriptionId, {
+      expand: ["customer"],
+    }),
+  );
+  const customer = subscription.customer;
+  if (
+    subscription.status !== "canceled"
+    || typeof customer === "string"
+    || customer.deleted
+  ) {
+    return null;
+  }
+  return normalizeHostedEmailAddress(customer.email);
 }
 
 type HostedSubscriptionCancellationEmailConfig = {

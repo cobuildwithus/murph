@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "A follow-up when your Family plan ends",
     "summary": "Family billing owners now receive the same cancellation follow-up email as individual subscribers.",
-    "details": "When your subscription ends, the email goes to your verified or checkout email address so you can reply with feedback or ask for help. Other family members do not receive the billing follow-up.",
+    "details": "When your subscription ends, the email goes to your verified, checkout, or Stripe billing email address so you can reply with feedback or ask for help. Other family members do not receive the billing follow-up.",
     "relevanceTags": [
       "billing",
       "family",
