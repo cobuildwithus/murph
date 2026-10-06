@@ -101,6 +101,41 @@ describe("hosted standby contract", () => {
   });
 });
 
+describe("standby health observation", () => {
+  it("binds through the real lifecycle owner while a native health request is pending", async () => {
+    const h = createStandbyContainerHarness();
+    const identity = { slotName: h.slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+    await h.container.prepareStandbySlot({ ...identity, timeoutMs: 1_000 });
+    const gate = createDeferred<Response>();
+    h.nativeFetch.mockImplementationOnce(() => gate.promise);
+    h.containerFetch.mockClear();
+    h.startAndWaitForPorts.mockClear();
+    const check = h.container.prepareStandbySlot({ ...identity, timeoutMs: 1_000, recheck: true });
+    await until(() => h.nativeFetch.mock.results.some((result) => result.value === gate.promise));
+    await h.container.bindStandbySlot({ ...identity, claimId: createHostedStandbyClaimId(), userId: "member_recheck" });
+    assert.equal((await h.container.readStandbySlotBinding()).state, "bound");
+    gate.resolve(new Response(JSON.stringify(createStandbyHealth())));
+    await check;
+    expect(h.containerFetch).not.toHaveBeenCalled();
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(h.destroy).not.toHaveBeenCalled();
+  });
+
+  it("does not restart a stopped standby during a recheck", async () => {
+    const h = createStandbyContainerHarness();
+    const identity = { slotName: h.slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+    await h.container.prepareStandbySlot({ ...identity, timeoutMs: 1_000 });
+    h.setNativeStatus("stopped");
+    h.startAndWaitForPorts.mockClear();
+    h.containerFetch.mockClear();
+    await expect(h.container.prepareStandbySlot({ ...identity, timeoutMs: 1_000, recheck: true }))
+      .rejects.toThrow("not eligible for recheck");
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(h.containerFetch).not.toHaveBeenCalled();
+    expect(h.destroy).not.toHaveBeenCalled();
+  });
+});
+
 describe("retained small namespace", () => {
   const slotName = `runner-small--v-${RELEASE_ID}--${"a".repeat(32)}`;
   const owner = { claimId: "standby-claim-12345678-1234-4123-8123-123456789abc", userId: "member_retained" };
@@ -1144,31 +1179,108 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     assert.equal(h.db.prepare("SELECT * FROM standby_coordinator_slot").all().length, 0);
   });
 
-  it("reproof withdraws only one slot and keeps its healthy peer claimable", async () => {
+  for (const result of ["ready", "failed", "timeout"] as const) {
+    it(`keeps the sole standby claimable and ignores ${result} reproof after handoff`, async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(CLAIMED_AT_MS);
+      const gate = createDeferred<void>();
+      const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+        if (input.recheck) {
+          await gate.promise;
+          if (result === "failed") throw new Error("synthetic reproof failure");
+        }
+      } });
+      h.ensure();
+      await h.flush();
+      const name = h.coordinator.readStandbyCoordinatorState().readySlotNames[0]!;
+      const slot = h.slots.get(name)!;
+      vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+      const alarm = h.coordinator.alarm();
+      await until(() => slot.prepareStandbySlot.mock.calls.length === 2);
+      assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, [name]);
+      assert.deepEqual(h.coordinator.readStandbyCoordinatorState().provisioningSlotNames, []);
+      // Repeated triggers cannot duplicate an in-flight check, even past its due time.
+      vi.setSystemTime(Date.now() + 60_001);
+      h.ensure();
+      await until(() => h.pending.length > 0);
+      const claimId = createHostedStandbyClaimId();
+      assert.deepEqual(h.claim(claimId), { outcome: "claimed", slotName: name });
+      if (result === "timeout") await vi.advanceTimersByTimeAsync(HOSTED_STANDBY_READY_TIMEOUT_MS);
+      gate.resolve(undefined);
+      await alarm;
+      await h.flush();
+      // A claim is already authoritative before its bind RPC arrives.
+      assert.equal(slot.retireStandbySlot.mock.calls.length, 0);
+      assert.equal(slot.prepareStandbySlot.mock.calls.length, 2);
+      assert.equal((await slot.readStandbySlotBinding()).state, "unbound");
+      assert(!h.coordinator.readStandbyCoordinatorState().readySlotNames.includes(name));
+      assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 1);
+      await slot.bindStandbySlot({ claimId, slotName: name, releaseId: RELEASE_ID,
+        region: HOSTED_RUNNER_REGION, userId: "member_recheck" });
+      assert.equal((await slot.readStandbySlotBinding()).state, "bound");
+      assert.deepEqual(h.claim(claimId), { outcome: "claimed", slotName: name });
+      await h.flush();
+    });
+  }
+
+  it("retires a failed unclaimed recheck and replenishes the sole standby", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(CLAIMED_AT_MS);
-    const gate = createDeferred<void>();
-    let preparing = 0;
-    const h = createCoordinatorHarness({ async prepare() {
-      preparing += 1;
-      if (preparing === 3) await gate.promise;
+    const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+      if (input.recheck) throw new Error("synthetic unhealthy standby");
     } });
     h.ensure();
     await h.flush();
+    const name = h.coordinator.readStandbyCoordinatorState().readySlotNames[0]!;
+    vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+    await h.coordinator.alarm();
+    await h.flush();
+    h.ensure();
+    await h.flush();
+    assert.equal((await h.slots.get(name)!.readStandbySlotBinding()).state, "retired");
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 1);
+    assert(!h.coordinator.readStandbyCoordinatorState().readySlotNames.includes(name));
+  });
+
+  it("keeps rechecking inventory claimable across coordinator reset", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const gate = createDeferred<void>();
+    const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+      if (input.recheck) await gate.promise;
+    } });
+    h.ensure();
+    await h.flush();
+    const name = h.coordinator.readStandbyCoordinatorState().readySlotNames[0]!;
     vi.setSystemTime(CLAIMED_AT_MS + 60_000);
     const alarm = h.coordinator.alarm();
-    await until(() => preparing === 3);
-    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 1);
-    assert.equal(h.coordinator.readStandbyCoordinatorState().provisioningSlotNames.length, 1);
-    const reprobing = h.coordinator.readStandbyCoordinatorState().provisioningSlotNames[0];
-    const claim = h.claim();
-    assert.equal(claim.outcome, "claimed");
-    assert(claim.outcome === "claimed");
-    assert.notEqual(claim.slotName, reprobing);
+    await until(() => prepareCount(h) === 2);
+    const recovered = createCoordinatorHarness({ target: "1", db: copyCoordinatorDatabase(h.db) });
+    assert.deepEqual(recovered.claim(), { outcome: "claimed", slotName: name });
+    await recovered.flush();
+    // Shrink while the old observer is pending: success cannot restore inventory.
+    h.environment.HOSTED_EXECUTION_STANDBY_TARGET = "0";
+    h.ensure();
     gate.resolve(undefined);
     await alarm;
     await h.flush();
-    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 2);
+    assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, []);
+    assert.equal((await h.slots.get(name)!.readStandbySlotBinding()).state, "retired");
+  });
+
+  it("rechecks a sole ready slot every minute without extending its own deadline twice", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const h = createCoordinatorHarness({ target: "1" });
+    h.ensure();
+    await h.flush();
+    for (let minute = 1; minute <= 3; minute += 1) {
+      vi.setSystemTime(CLAIMED_AT_MS + minute * 60_000);
+      await h.coordinator.alarm();
+      await h.flush();
+      assert.equal(prepareCount(h), minute + 1);
+      assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 1);
+    }
   });
 
   it("staggers overdue reproofs even after downtime and repeated ensure calls", async () => {
@@ -1764,12 +1876,13 @@ function createStandbyContainerHarness(input: {
     }
     throw new Error(`Unexpected container URL: ${url}`);
   });
+  const nativeFetch = vi.fn((url: string) => containerFetch(url));
   const container = new (input.containerClass ?? RunnerContainer)({
     ...state,
     id: { name: slotName },
     container: {
       get running() { return nativeStatus !== "stopped"; },
-      getTcpPort: () => ({ fetch: containerFetch }),
+      getTcpPort: () => ({ fetch: nativeFetch }),
     },
   }, environment);
   const platformDestroy = input.destroy;
@@ -1793,6 +1906,7 @@ function createStandbyContainerHarness(input: {
   });
   return {
     async flushWaitUntil() { await Promise.all(pending.splice(0)); },
+    nativeFetch,
     containerFetch,
     container,
     environment,

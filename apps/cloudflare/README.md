@@ -182,6 +182,17 @@ Full Codex and CLI validation stays in deployment smoke. Its health receipt rema
 compatible with preceding Workers that still request a per-slot preflight; their
 legacy readiness query is ignored and runs the full smoke. Global eligibility
 imposes no ENAM health requirement.
+Periodic health rechecks leave ready slots claimable, including a target of one.
+They observe the existing process directly without the binding lifecycle lock or
+SDK auto-start. The coordinator advances the existing check deadline and applies
+a result only while the exact slot remains ready inventory: a racing claim wins,
+and late success, failure or timeout cannot restore or retire its handoff. Failed
+unclaimed checks use existing fenced retirement and refill. Rechecks preserve
+activity renewal; initial preparation still owns startup and full pristine proof.
+Existing persisted provisioning rows continue through ordinary preparation after
+a reset or Worker upgrade. This Worker-only correction uses the existing container
+health response and needs no Web or container-image protocol change.
+
 No member, workspace, or provider credential enters a slot before binding.
 The member-specific resident Codex process starts after encrypted-workspace restore.
 
@@ -832,7 +843,7 @@ the event (`claim` or `prepare`), `blob1` is the schema
 target, and `double5` is the duration in milliseconds. A claim's `blob3` is its
 outcome (`claimed`, `no_ready_slot`, `replayed`, `disabled`, `stale_release` or
 `deadline_expired`) and its inventory is read before selection, so a claimed
-point with one ready slot shows overlapping demand or a reproof, and
+point with target two and one ready slot shows overlapping demand, and
 `no_ready_slot` shows a foreground cold fallback. A preparation's `blob3` is
 `refill`, `resume` or `reproof`, `blob4` is `ready` or `failed`, and its
 inventory is read after the result. Query daily claims and preparation latency

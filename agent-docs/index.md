@@ -1061,3 +1061,7 @@ and the processing-attempt runaway alert are tracked in
 [the inactive claim plan](exec-plans/completed/2026-10-06-inactive-claim-backoff-alert.md);
 `references/hosted-postgres-runtime.md`, `references/hosted-temporal-orchestration.md`
 and `../docs/hosted-runtime-log-database.md` own the contracts.
+
+Claimable standby health observations and race/recovery proof are recorded in
+[`standby rechecks`](exec-plans/completed/2026-10-06-standby-recheck.md).
+The current inventory and telemetry contract remains in `apps/cloudflare/README.md`.
