@@ -806,20 +806,23 @@ async function resolveHostedMemberDirectLinqRoute(input: {
       ? input.privateState.linqRecipientPhone
       : input.privateState.pendingLinqRecipientPhone,
   );
-  if (
-    !target
-    || !targetLookupKey
-    || !createHostedLinqChatLookupKeyReadCandidates(target).includes(targetLookupKey)
-    || (
-      linePhoneNumberLookupKey !== null
-      && (
-        fromPhoneNumber === null
-        || !createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber)
-          .includes(linePhoneNumberLookupKey)
-      )
-    )
-  ) {
-    throwHostedLinqRouteAuthorityMismatch("route_projection_mismatch");
+  if (!target) {
+    throwHostedLinqRouteAuthorityMismatch("route_projection_chat_missing");
+  }
+  if (!targetLookupKey) {
+    throwHostedLinqRouteAuthorityMismatch("route_projection_chat_lookup_key_missing");
+  }
+  if (!createHostedLinqChatLookupKeyReadCandidates(target).includes(targetLookupKey)) {
+    throwHostedLinqRouteAuthorityMismatch("route_projection_chat_lookup_key_mismatch");
+  }
+  if (linePhoneNumberLookupKey !== null) {
+    if (fromPhoneNumber === null) {
+      throwHostedLinqRouteAuthorityMismatch("route_projection_sender_phone_missing_or_invalid");
+    }
+    if (!createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber)
+      .includes(linePhoneNumberLookupKey)) {
+      throwHostedLinqRouteAuthorityMismatch("route_projection_sender_lookup_key_mismatch");
+    }
   }
 
   const contactKind = normalizeHostedLinqParticipantContactKind(
