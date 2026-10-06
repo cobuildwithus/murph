@@ -34462,7 +34462,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
         totalCount: records.length + 1, nextCursor: null,
         items: [...records.map(({ instructions: _instructions, ...record }) => record), {
           automationId: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.automationId,
-          title: 'Weekly usage review', status: 'active', tags: ['murph-managed:weekly-usage-optimizer'],
+          title: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.title, status: 'active', tags: ['murph-managed:weekly-usage-optimizer'],
           assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' },
         }],
       } }
@@ -34499,7 +34499,10 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
             }
             return response
           } },
-          usageDiagnostics: { async read(request) { usageRequests.push(request); return syntheticUsageDiagnostics() } },
+          usageDiagnostics: { async read(request) {
+            usageRequests.push(request)
+            return { ...syntheticUsageDiagnostics(), windowStart: '2026-09-17T12:00:00.000Z' }
+          } },
           sendVaultFile: async () => { throw new Error('Unexpected file send.') },
         },
         model: config.model, modelProvider: config.modelProvider,
@@ -34511,7 +34514,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
       const feedback = feedbackRecorder.readProductFeedback()
       process.stdout.write('[weekly-optimizer-live] ' + JSON.stringify({ model: config.model, changed,
         reply: result.finalMessage, feedback: feedback?.summary }) + '\n')
-      expect(usageRequests).toEqual([{ days: 7, limit: 10 }])
+      expect(usageRequests).toEqual([{ days: 14, limit: 10 }])
       expect(changed.sort()).toEqual(['cue', 'lookup'])
       expect(actions.filter(action => action.kind === 'dynamic' && action.tool === MURPH_AUTOMATION_TOOL.name)).toHaveLength(3)
       expect(fixtures.every(fixture => fixture.requests.filter(request => request.action === 'inspect').length === 1)).toBe(true)
@@ -34520,7 +34523,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
       expect(feedback?.summary).toMatch(/^Usage optimization audit:/u)
       expect(feedback?.summary).toMatch(/bytes|KB|kB/u)
       expect(feedback?.summary).toMatch(/1\.25/u)
-      expect(feedback?.summary).toMatch(/(?:two|2) (?:confirmed |verified |successful |model-only )?(?:model )?(?:Luna(?:\/high)? )?(?:changes|downgrades|patches|reminders|automations)/iu)
+      expect(feedback?.summary).toMatch(/\b(?:two|2)\b[^.!?]*\b(?:changes|changed|downgrades|downgraded|patches)\b/iu)
       expect(feedback?.summary).not.toMatch(/zero model changes|omitted model|obscured|result.*truncation/iu)
       expect(feedback?.summary).not.toMatch(/automation_synthetic|synthetic-member|turn_|session_|Weather walk|Research review/iu)
       expect(JSON.parse(result.finalMessage.trim())).toMatchObject({ kind: 'skip' })

@@ -984,7 +984,7 @@ External conversation directness is three-state authority. Explicit direct evide
 
 Assistant-authored cron schedules require a literal wildcard in either day-of-month or day-of-week. The shared automation tool argument schema rejects combined restrictions before creation or schedule replacement and returns repair guidance through the existing validation feedback. Finite recurrences keep their repeating days in the schedule and their exclusive expiration in `activeUntil`. Canonical cron retains standard OR semantics for existing records and operator workflows; inspection and patches without a replacement schedule remain compatible.
 
-A private hosted weekly usage review is an ordinary fresh managed automation,
+A private hosted biweekly usage review is an ordinary fresh managed automation,
 pinned to GPT-6.1 Sol medium. It reads bounded current-member diagnostics from
 the canonical hosted AI usage ledger, preserving recorded allowance costs and
 explicit missing/truncated coverage. Existing sanitized turn profiles attribute
@@ -2225,7 +2225,17 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   dedicated environment allowlist, and every same-hour attempt reuses the
   Eastern day key as the Resend idempotency key. Missing configuration fails
   before the database read. This adds no digest table, cursor, scheduler,
-  retry queue, or second feedback owner.
+  retry queue, or second feedback owner. Summaries beginning with the reserved
+  `Usage optimization audit:` prefix are excluded from the product-feedback
+  query and read separately with the same window, kind allowlist, row cap,
+  projection, and recipient list. Nonempty usage windows send a separate
+  `Biweekly usage reports — <day>` email with report totals and overflow counts,
+  without feature-request labels or member identifiers. The managed usage
+  optimizer runs every 14 days and requests 14 days of usage diagnostics,
+  preserving its existing automation identity. The daily
+  email sweep delivers newly produced reports and skips empty usage windows.
+  Usage delivery has its own `hosted-usage-report-digest/<day>` Resend key,
+  so retries after a partial send reuse each email's original key.
 
   Inbound hosted conversation traffic appends one canonical
   `conversation.message` mailbox item with provider/channel detail inside its

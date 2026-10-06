@@ -3,6 +3,7 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from '@murphai/hosted-execution/env'
 import { AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG } from '@murphai/contracts'
+import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly-usage-optimizer.js'
 
 type StoredAutomationRecord = {
   activeUntil?: string | null
@@ -417,6 +418,40 @@ beforeEach(() => {
 })
 
 describe('applyMurphManagedAutomations', () => {
+  it.each(['active', 'paused', 'archived'] as const)(
+    'moves only active weekly usage audits to a stable fourteen-day schedule (%s)',
+    async (status) => {
+      const seed = MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION
+      const previousSchedule = { kind: 'cron' as const, expression: '0 4 * * 1' }
+      managedAutomationMocks.records.set(seed.automationId, {
+        ...seed,
+        route: defaultRoute,
+        schedule: previousSchedule,
+        status,
+        tags: ['assistant', 'scheduled', 'murph-managed', ...seed.tags],
+        title: 'Weekly usage review',
+      })
+      const input = {
+        defaultRoute,
+        now: new Date('2026-10-06T12:00:00.000Z'),
+        runtimeEnv: { [HOSTED_RUNTIME_PROCESS_ENV]: '1' },
+        seeds: [seed],
+        vaultRoot,
+      }
+      await expect(applyMurphManagedAutomations(input)).resolves.toMatchObject({
+        created: 0, updated: status === 'active' ? 1 : 0,
+      })
+      expect(managedAutomationMocks.records.get(seed.automationId)).toMatchObject({
+        status,
+        schedule: status === 'active' ? seed.schedule : previousSchedule,
+      })
+      expect(managedAutomationMocks.records.size).toBe(1)
+      await expect(applyMurphManagedAutomations(input)).resolves.toMatchObject({
+        created: 0, updated: 0,
+      })
+    },
+  )
+
   it('stops seed writes at a foreground yield boundary and resumes without duplicating partial state', async () => {
     const seeds: MurphManagedAutomationSeed[] = [
       {
