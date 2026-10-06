@@ -1,3 +1,4 @@
+import { readCloudflareHostedControlHttpError } from "@murphai/cloudflare-hosted-control/client";
 import { reconcileHostedRuntimeUploads } from "./runtime-upload-recovery";
 import { parseHostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import { readHostedExecutionControlClientIfConfigured } from "./control";
@@ -12,6 +13,57 @@ import { executeHostedRuntimeMediaCommand, hasPendingRuntimeMediaPutTx, lockHost
 import type { HostedRuntimeMediaPurge } from "@murphai/hosted-execution/runtime-media";
 
 const RESOURCE_CLEANUP_BATCH_SIZE = 50;
+
+type CleanupResourceKind = "snapshot" | "replica" | "legacy_snapshot" | "media" | "unknown";
+type CleanupFailureStage = "parse" | "purge" | "acknowledge";
+type CleanupErrorCategory = "timeout" | "abort" | "http" | "validation" | "database" | "other";
+
+function classifyCleanupError(error: unknown, stage: CleanupFailureStage): { errorCategory: CleanupErrorCategory; httpStatus?: number } {
+  if (typeof error !== "object" || error === null) return { errorCategory: "other" };
+  const prototype: object | null = Object.getPrototypeOf(error);
+  // The public predicate reads code/status. Give it only inert own data
+  // properties, preserving the prototype for its real HTTP-error check.
+  const http = readCloudflareHostedControlHttpError(Object.create(prototype, {
+    code: { value: undefined },
+    status: { value: Object.getOwnPropertyDescriptor(error, "status")?.value },
+  }));
+  if (http) return Number.isInteger(http.status) && http.status >= 100 && http.status <= 599
+    ? { errorCategory: "http", httpStatus: http.status } : { errorCategory: "http" };
+  const descriptor = Object.getOwnPropertyDescriptor(error, "name") ?? (prototype && Object.getOwnPropertyDescriptor(prototype, "name"));
+  const errorCategory = new Map<unknown, CleanupErrorCategory>([
+    ["TimeoutError", "timeout"], ["AbortError", "abort"],
+    // A fetch TypeError is not evidence of a validation failure.
+    ["TypeError", stage === "parse" ? "validation" : "other"],
+    ["PrismaClientValidationError", "validation"],
+    ["PrismaClientKnownRequestError", "database"], ["PrismaClientUnknownRequestError", "database"],
+    ["PrismaClientInitializationError", "database"], ["PrismaClientRustPanicError", "database"],
+  ]).get(descriptor?.value) ?? "other";
+  if (errorCategory !== "other" || typeof DOMException === "undefined" || !(error instanceof DOMException)) return { errorCategory };
+  // Native fetch aborts have accessor-backed names. This intrinsic is
+  // brand-checked; it never invokes the input's name/code getters.
+  const code: unknown = Object.getOwnPropertyDescriptor(DOMException.prototype, "code")?.get?.call(error);
+  return { errorCategory: new Map<unknown, CleanupErrorCategory>([
+    [DOMException.ABORT_ERR, "abort"], [DOMException.TIMEOUT_ERR, "timeout"],
+  ]).get(code) ?? "other" };
+}
+
+function warnHostedRuntimeResourceCleanupFailure(resource: HostedRuntimeOrphan | "media", stage: CleanupFailureStage, error: unknown): void {
+  const diagnostic: { resourceKind: CleanupResourceKind; stage: CleanupFailureStage; errorCategory: CleanupErrorCategory; httpStatus?: number } = {
+    resourceKind: "unknown", stage, errorCategory: "other",
+  };
+  try {
+    const kind: unknown = resource === "media" ? "media" : Object.getOwnPropertyDescriptor(resource, "kind")?.value;
+    diagnostic.resourceKind = new Map<unknown, CleanupResourceKind>([
+      ["snapshot", "snapshot"], ["replica", "replica"], ["legacy_snapshot", "legacy_snapshot"], ["media", "media"],
+    ]).get(kind) ?? "unknown";
+  } catch { /* Resource inspection is optional, including for proxies. */ }
+  try {
+    Object.assign(diagnostic, classifyCleanupError(error, stage));
+  } catch { /* Hostile reflection/predicate inputs must not affect cleanup. */ }
+  try {
+    console.warn("Hosted runtime resource cleanup failed.", diagnostic);
+  } catch { /* A failed warning must not prevent acknowledgement/requeue. */ }
+}
 
 /** Existing retention owns scheduling. These bounded claims commit terminal
  * retirement before the caller performs any external R2 deletion. */
@@ -100,22 +152,30 @@ export async function runHostedRuntimeResourceCleanup(input: { prisma: PrismaCli
   let failed = 0;
   for (const orphan of claimed.orphans) {
     if (Date.now() >= deadline) break;
+    let stage: CleanupFailureStage = "parse";
     try {
-      await client.purgeRuntimeResource({ userId: orphan.userId, resource: parseHostedRuntimeResourcePurge(orphan) });
+      const request = { userId: orphan.userId, resource: parseHostedRuntimeResourcePurge(orphan) };
+      stage = "purge";
+      await client.purgeRuntimeResource(request);
+      stage = "acknowledge";
       if (await acknowledgeHostedRuntimeOrphanPurge({ ...input, orphan })) deleted += 1;
-    } catch {
+    } catch (error) {
       failed += 1;
+      warnHostedRuntimeResourceCleanupFailure(orphan, stage, error);
       // Avoid one unavailable resource monopolizing a bounded sweep.
       await input.prisma.hostedRuntimeOrphan.updateMany({ where: { userId: orphan.userId, kind: orphan.kind, resourceId: orphan.resourceId, revision: orphan.revision, purgedAt: null }, data: { cleanupAt: new Date(input.now.getTime() + 60_000) } });
     }
   }
   for (const purge of claimed.media) {
     if (Date.now() >= deadline) break;
+    let stage: CleanupFailureStage = "purge";
     try {
       await client.purgeRuntimeResource({ userId: purge.userId, resource: { kind: "media", objectKey: purge.objectKey } });
+      stage = "acknowledge";
       if ((await executeHostedRuntimeMediaCommand({ ...input, userId: purge.userId, command: { operation: "acknowledge_purge", purge } })).applied) deleted += 1;
-    } catch {
+    } catch (error) {
       failed += 1;
+      warnHostedRuntimeResourceCleanupFailure("media", stage, error);
     }
   }
   return { configured: true, deleted, failed };

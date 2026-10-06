@@ -1452,6 +1452,15 @@ Callback auth contract:
   `/api/internal/hosted-execution/retention/runtime/cron` at minute 50 for
   runtime signals followed by best-effort isolated diagnostic-log cleanup. Each has a 300-second
   duration; none invokes the nonce owner
+- Runtime resource cleanup warns once per caught failure with the static message
+  `Hosted runtime resource cleanup failed.` and only `resourceKind` (`snapshot`,
+  `replica`, `legacy_snapshot`, `media`, `unknown`), `stage` (`parse`, `purge`,
+  `acknowledge`), `errorCategory` (`timeout`, `abort`, `http`, `validation`,
+  `database`, `other`), and optional integer `httpStatus` (100–599). Existing
+  request context supplies correlation; no identities or raw error/provider data
+  are logged. Success, disabled, and deadline-skipped work stay quiet. Diagnostic
+  inspection/logging failures cannot change claims, counts, fences, retry timing,
+  or failure propagation.
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.

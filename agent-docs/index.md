@@ -1066,3 +1066,7 @@ and `../docs/hosted-runtime-log-database.md` own the contracts.
 Claimable standby health observations and race/recovery proof are recorded in
 [`standby rechecks`](exec-plans/completed/2026-10-06-standby-recheck.md).
 The current inventory and telemetry contract remains in `apps/cloudflare/README.md`.
+
+Bounded runtime resource cleanup failure classification and privacy proof are
+tracked in [the cleanup diagnostics plan](exec-plans/active/2026-10-06-runtime-cleanup-diagnostics.md);
+`../apps/web/README.md` owns the diagnostic contract.
