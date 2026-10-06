@@ -1077,3 +1077,6 @@ tracked in [the cleanup diagnostics plan](exec-plans/completed/2026-10-06-runtim
 
 The inactive retention e2e now expects the kept system pointer; see
 [the pointer e2e plan](exec-plans/completed/2026-10-06-inactive-retention-pointer-e2e.md).
+
+Deterministic reminder/device-sync overlap proof and barrier regression coverage:
+[non-starvation barriers](exec-plans/completed/2026-10-06-nonstarvation-barriers.md).

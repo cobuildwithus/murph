@@ -21,6 +21,7 @@ import {
   buildHostedAssistantNotificationDecisionResponse,
   type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
+import { holdPositiveDeviceSyncPassCheckpoint } from "./helpers/hosted-local-device-pass-checkpoint.js";
 import {
   countHostedLocalRuntimeAdmissionWindow,
 } from "./helpers/hosted-local-runtime-admission-window.js";
@@ -235,8 +236,6 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       reminderPath,
       (request) => activeLinqStub.readObservedMessageText(request) === reminderText,
     );
-    let devicePassStagingObservationArmed = false;
-    let checkpointBarrierArmed = false;
 
     try {
       await sleepUntil(new Date(
@@ -250,7 +249,6 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
           userId,
           "canonical_post_commit",
         );
-      devicePassStagingObservationArmed = true;
       const wakeResult = await activeScenario.runWake(
         buildJunctionFixtureWake(seed.connectionId, seededAt),
         userId,
@@ -263,22 +261,6 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         throw new Error("Device-sync wake was not accepted for runtime processing.");
       }
       expect(["started", "woken"]).toContain(acceptedWake.action);
-
-      await waitForDevicePassPreDrainCheckpointBarrier(
-        schedule.dueAtIso,
-      );
-      await activeScenario.harness
-        .armShutdownCheckpointPublicationBarrierForTest(userId);
-      checkpointBarrierArmed = true;
-      await expect(
-        activeScenario.harness
-          .releaseForegroundPriorityOrderingBarrierForTest(userId),
-      ).resolves.toEqual({ ok: true, released: true });
-      await expect(
-        activeScenario.harness
-          .clearForegroundPriorityOrderingObservationForTest(userId),
-      ).resolves.toEqual({ cleared: true, ok: true });
-      devicePassStagingObservationArmed = false;
 
       const [admissionObservation, checkpointObservation] = await Promise.allSettled([
         countHostedLocalRuntimeAdmissionWindow({
@@ -293,8 +275,12 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
           windowMs: firstRuntimeAdmissionWindowMs,
         }),
         holdPositiveDeviceSyncPassCheckpoint({
-          dueAtIso: schedule.dueAtIso,
           fromAt: runtimeLogsFrom,
+          harness: activeScenario.harness,
+          userId,
+          waitForPreDrain: () => waitForDevicePassPreDrainCheckpointBarrier(schedule.dueAtIso),
+          waitForPublication: () => waitForShutdownCheckpointPublicationBarrier(schedule.dueAtIso),
+          waitForPass: (fromAt) => waitForDeviceSyncPassFinished({ fromAt }),
         }),
       ]);
       // Both observers must settle before cleanup can release the final barrier;
@@ -326,12 +312,14 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         dirtyResourceCount,
       );
 
+      // The reminder must still be waiting while the positive pass has backlog,
+      // even when slow staging or telemetry has crossed its scheduled due time.
+      expect(countReminderProviderRequestsSince(providerRequestBaseline)).toBe(0);
       await sleepUntil(schedule.dueAtIso);
       await expect(
         activeScenario.harness
           .releaseShutdownCheckpointPublicationBarrierForTest(userId),
       ).resolves.toEqual({ ok: true, released: true });
-      checkpointBarrierArmed = false;
 
       await withTimeout(
         heldReminder.started,
@@ -383,19 +371,15 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         deviceSyncLogs.filter((row) => row.eventCode === "device-sync.job_failed"),
       ).toEqual([]);
     } finally {
-      if (devicePassStagingObservationArmed) {
-        await activeScenario.harness
-          .releaseForegroundPriorityOrderingBarrierForTest(userId)
-          .catch(() => undefined);
-        await activeScenario.harness
-          .clearForegroundPriorityOrderingObservationForTest(userId)
-          .catch(() => undefined);
-      }
-      if (checkpointBarrierArmed) {
-        await activeScenario.harness
-          .releaseShutdownCheckpointPublicationBarrierForTest(userId)
-          .catch(() => undefined);
-      }
+      await activeScenario.harness
+        .releaseForegroundPriorityOrderingBarrierForTest(userId)
+        .catch(() => undefined);
+      await activeScenario.harness
+        .clearForegroundPriorityOrderingObservationForTest(userId)
+        .catch(() => undefined);
+      await activeScenario.harness
+        .releaseShutdownCheckpointPublicationBarrierForTest(userId)
+        .catch(() => undefined);
       releaseHeldReminder?.();
       releaseHeldReminder = null;
     }
@@ -573,10 +557,7 @@ async function waitForDefaultProcessingWake(expectedAt: string): Promise<void> {
 async function waitForShutdownCheckpointPublicationBarrier(
   dueAtIso: string,
 ): Promise<void> {
-  const deadline = Math.min(
-    Date.now() + barrierTimeoutMs,
-    Date.parse(dueAtIso),
-  );
+  const deadline = Date.now() + barrierTimeoutMs;
   let lastState: string | null = null;
   while (Date.now() < deadline) {
     const barrier = await requireScenario().harness
@@ -588,7 +569,7 @@ async function waitForShutdownCheckpointPublicationBarrier(
     await sleep(100);
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "The first capped device-sync pass did not reach its checkpoint barrier before the reminder deadline.",
+    "The first capped device-sync pass did not reach its checkpoint barrier.",
     `last barrier state: ${lastState ?? "unread"}`,
     `reminder due: ${dueAtIso}`,
   ]));
@@ -597,10 +578,7 @@ async function waitForShutdownCheckpointPublicationBarrier(
 async function waitForDevicePassPreDrainCheckpointBarrier(
   dueAtIso: string,
 ): Promise<void> {
-  const deadline = Math.min(
-    Date.now() + barrierTimeoutMs,
-    Date.parse(dueAtIso),
-  );
+  const deadline = Date.now() + barrierTimeoutMs;
   let lastState: string | null = null;
   let lastTarget: string | null = null;
   let lastEventKinds: string[] = [];
@@ -622,7 +600,7 @@ async function waitForDevicePassPreDrainCheckpointBarrier(
     await sleep(100);
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "The device pass did not reach its pre-drain checkpoint barrier before the reminder deadline.",
+    "The device pass did not reach its pre-drain checkpoint barrier.",
     `last barrier state: ${lastState ?? "unread"}`,
     `last barrier target: ${lastTarget ?? "unread"}`,
     `observed ordering events: ${JSON.stringify(lastEventKinds)}`,
@@ -630,38 +608,12 @@ async function waitForDevicePassPreDrainCheckpointBarrier(
   ]));
 }
 
-async function holdPositiveDeviceSyncPassCheckpoint(input: {
-  dueAtIso: string;
-  fromAt: Date;
-}): Promise<HostedRuntimeLogForTestRow> {
-  let fromAt = input.fromAt;
-  while (true) {
-    await waitForShutdownCheckpointPublicationBarrier(input.dueAtIso);
-    const pass = await waitForDeviceSyncPassFinished({ ...input, fromAt });
-    if ((readFiniteNumber(pass.redactedJson, "processedJobs") ?? 0) > 0) {
-      return pass;
-    }
-    expect(pass.redactedJson).toMatchObject({
-      processedJobs: 0,
-    });
-    expect(["completed", "yielded"]).toContain(pass.redactedJson?.outcome);
-    // A completed empty pass or a cooperative yield can precede job progress.
-    // Publish that checkpoint so later work can establish the positive backlog
-    // boundary this test requires; retaining the barrier here would deadlock it.
-    await expect(requireScenario().harness
-      .releaseShutdownCheckpointPublicationBarrierForTest(userId))
-      .resolves.toEqual({ ok: true, released: true });
-    fromAt = new Date(Date.parse(pass.at) + 1);
-    await requireScenario().harness
-      .armShutdownCheckpointPublicationBarrierForTest(userId);
-  }
-}
-
 async function waitForDeviceSyncPassFinished(input: {
-  dueAtIso: string;
   fromAt: Date;
 }): Promise<HostedRuntimeLogForTestRow> {
-  const deadline = Math.min(Date.now() + observationTimeoutMs, Date.parse(input.dueAtIso));
+  // Publication is already held. The due time is an overlap boundary, not a
+  // telemetry deadline: a slow log flush may legitimately cross it.
+  const deadline = Date.now() + observationTimeoutMs;
   let lastLogs: HostedRuntimeLogForTestRow[] = [];
   while (Date.now() < deadline) {
     lastLogs = await listDeviceSyncLogs(input.fromAt);
