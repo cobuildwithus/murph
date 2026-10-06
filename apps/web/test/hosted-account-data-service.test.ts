@@ -431,6 +431,10 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
   "prisma.device_agent_session",
   "prisma.device_browser_assertion_nonce",
   "prisma.hosted_web_internal_request_nonce",
+  "prisma.companion_push_route",
+  "prisma.companion_wearable_link",
+  "prisma.companion_wearable_session",
+  "prisma.companion_wearable_command",
 
   "prisma.hosted_member",
 ] as const;
