@@ -40,12 +40,26 @@ existing country selection and code inputs, and synthetic screenshots.
 
 ## Verification
 
-- Isolated local PostgreSQL, synthetic SMS and crypto ports: 133 tests pass across
+- Isolated local PostgreSQL, synthetic SMS and crypto ports: 142 tests pass across
   canonical credential/Telegram, transport and Telegram route suites.
 - Web typecheck and complexity guard pass; existing unrelated webhook hotspots
   are unchanged. No new database work for ordinary Telegram messages.
-- Android full verification passed with CI public placeholders; iOS build and
-  712 app plus 195 extension tests passed. A Simulator AX startup timeout affected
-  UI-test runner initialization; retrying on a dedicated simulator.
+- Android full verification passed with CI public placeholders; the resumed iOS
+  unit suite passed 911 tests with one skip. Full simulator UI proof is in progress.
 - Remaining: final native fixtures/evidence, source review, PRs, exact-head CI and
   required ReviewGPT. Real SMS, Telegram and physical-device delivery unverified.
+
+## Resumed review remediation
+
+The human approved resuming the accepted review findings and requested the
+simplified native method states. The source-confirmed forwarded-link attack
+required recipient-only proof in addition to the original session binding.
+The revised protocol privately returns that proof from Telegram and checks both
+proofs before the canonical transaction. iOS now refreshes admission only after
+successful completion, preserving pending tokens across foreground retries.
+The docs-index base conflict was resolved by preserving both routing entries.
+
+Verification in progress: forwarded-link, wrong-session/member, replay, expiry,
+provider retry, rate-limit and callback parsing tests; full native checks;
+matching synthetic state captures; fresh exact-head review and hosted gates.
+No production delivery, deployment or app publication is authorized.

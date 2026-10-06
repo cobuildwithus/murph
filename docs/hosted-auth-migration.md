@@ -345,24 +345,41 @@ settings; stale primary proof requires signing in again. Additions preserve
 sessions. Existing browser credential routes are unchanged.
 
 Telegram start accepts `{}` and returns `{ ok: true, token, url }`. A random
-256-bit, five-minute token travels only in the bot deep link and app memory.
-The existing encrypted, expiring auth verification store owns the pending proof,
-bound to the initiating member and session. The webhook owner intercepts the
-reserved `/start link_<token>` command after authenticating the webhook secret;
-only a non-bot sender in their own private chat can record the numeric Telegram
-identity. This command creates no member, credential or conversation message.
-Complete accepts `{ token }` with the original native bearer and returns
-`{ ok: true, linked: false }` until proof arrives. Completion reuses the ordinary
-credential owner and atomically consumes the proof with canonical/login writes
-and the channel wake. Wrong-member/session, expired, consumed, conflicting and
-stale-primary attempts fail closed. Concurrent bot proof cannot replace an
-already-recorded sender. No native bearer is stored in the link or pending proof.
-The next ordinary Telegram message uses existing direct-thread admission.
+256-bit, five-minute token travels in the bot deep link and app memory. The
+existing encrypted auth verification store binds it to the initiating member
+and native session. Authenticated webhook ingress accepts only a non-bot sender
+in their own private chat, locks the first recipient, and privately sends that
+recipient a separate random 256-bit return proof. Repeated ingress for the same
+recipient can resend the proof within a bounded budget; another sender cannot
+replace the recipient or receive their proof. No credential is linked by ingress.
+
+Complete accepts `{ token, proof? }` with the original native bearer. Without
+the recipient proof it returns only `{ ok: true, linked: false }`, even after
+Telegram ingress. Polling never reveals the proof or Telegram identity. The
+creator of a forwarded start link therefore cannot link its recipient by polling.
+The recipient's return link alone also cannot complete another app's pending
+flow. Completion requires the original session, its memory-held token, and the
+private recipient proof; it reuses the credential owner and atomically consumes
+the pending record with canonical/login writes and the channel wake. Expired,
+replayed, wrong-member/session, conflicting and stale-primary requests fail closed.
+
+The bot's HTTPS `/companion/telegram-return#token=...&proof=...` link carries
+proof only in its fragment. This standalone handoff removes the fragment from
+history and offers one fixed `murph-messaging://telegram/complete` app link. It
+has no analytics, application shell or network requests, and uses no-store,
+no-referrer and restrictive CSP headers. Native handlers accept only the exact
+route and a token matching the existing in-memory flow. Cold starts and other
+flows fail closed. No bearer enters either URL. The next ordinary Telegram
+message uses existing direct-thread admission.
 
 Current messaging readiness accepts the canonical phone lookup or a linked
 Telegram identity awaiting inbound. Provider acceptance still owns materializing
 a Linq home thread; the app does not infer delivery from an SMS verification.
-Both apps reread initial onboarding after linking and on Telegram return.
+Both apps reread initial onboarding after successful linking. Telegram returns
+check completion first; pending/error checks retain the same in-memory token
+and screen so the member can retry. The screen has one primary action per
+method, automatic six-digit SMS submission, quiet method switching, and a
+top-bar Sign out. Account settings appears only in applicable inline errors.
 
 Deploy this backend before distributing either native consumer. Older apps keep
 using browser settings. New apps against an older backend show a retryable error
