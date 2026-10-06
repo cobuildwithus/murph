@@ -1083,3 +1083,6 @@ Lost native result recovery and verification limits are recorded in
 
 Deterministic reminder/device-sync overlap proof and barrier regression coverage:
 [non-starvation barriers](exec-plans/completed/2026-10-06-nonstarvation-barriers.md).
+
+Usage-blocked backlog E2E synchronization is recorded in
+[`usage backlog state wait`](exec-plans/completed/2026-10-06-usage-backlog-state-wait.md).
