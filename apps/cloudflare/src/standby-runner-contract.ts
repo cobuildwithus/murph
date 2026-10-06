@@ -81,6 +81,8 @@ export interface HostedRunnerSlotLifecycle {
     region: HostedRunnerRegion;
     slotName: string;
     timeoutMs: number;
+    /** Observe an existing ready process without starting it or blocking binding. */
+    recheck?: true;
   }): Promise<{
     prepared: true;
     /** Additive attestation; older Workers may omit it. Deploy smoke requires it. */
