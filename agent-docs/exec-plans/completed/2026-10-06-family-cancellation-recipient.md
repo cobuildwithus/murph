@@ -1,6 +1,6 @@
 # Cancellation recipient fallback
 
-Status: active
+Status: completed
 Created: 2026-10-06
 Updated: 2026-10-06
 
@@ -39,4 +39,10 @@ because the provider boundary changed. Exact-head CI remains the PR gate.
 Five focused billing/email and changelog suites: 469 tests passed. Web typecheck,
 focused ESLint, complexity guard and diff whitespace checks passed. Parent review
 confirmed no identity writes, provider reads under locks, or new recipient fanout.
-External round 2 and exact-head CI remain pending.
+External ReviewGPT round 2 passed on c5306c4d776c5f22bf614607e719022016b92e35
+with no findings. Refreshed-base merge-tree proof passed. The hosted Stripe billing
+boundary passed on that candidate; required CI on the final documentation-only
+closure commit remains the PR completion gate. No production send or deployment
+was performed. Cancellation email copy was placed on the clipboard with a neutral
+founder-name placeholder.
+Completed: 2026-10-06
