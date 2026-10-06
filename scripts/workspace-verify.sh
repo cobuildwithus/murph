@@ -1192,7 +1192,7 @@ run_all_package_coverage() {
         local status_file="${active_status_files[$active_index]}"
 
         if [[ ! -f "$status_file" ]]; then
-          if package_coverage_pid_finished_without_status "$active_pid"; then
+          if package_coverage_pid_finished_without_status "$active_pid" && [[ ! -f "$status_file" ]]; then
             wait "$active_pid" 2>/dev/null || true
             unregister_background_pid "$active_pid"
             if [[ "$active_pid" == "$cli_coverage_pid" ]]; then

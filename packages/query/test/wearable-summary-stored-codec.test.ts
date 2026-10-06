@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { test } from "vitest";
+import { test, vi } from "vitest";
+import * as publicSummaryJson from "../src/projection/wearable-summary-public-json.ts";
+import { resolveMetric } from "../src/wearables/selection.ts";
+import { BODY_METRIC_KEYS, RECOVERY_METRIC_KEYS, SLEEP_METRIC_KEYS } from "../src/wearables/types.ts";
 
 import {
   buildWearableSummaryBundleFromDataset,
@@ -1328,7 +1331,7 @@ test("null-marker envelopes decode to fresh objects on every parse", () => {
   assert.equal(first.dayStrain.selection.resolution, "none");
   first.dayStrain.selection.resolution = "mutated by a careless caller";
 
-  // The codec memoizes empty envelopes by their JSON; a later parse must not
+  // Only write-side expected strings may be shared; a later decode must not
   // see another caller's mutation.
   assert.equal(JSON.stringify(parseStoredWearableSummary("activity", storedJson)), legacyJson);
 });
@@ -1381,4 +1384,56 @@ test("source-only health keeps HRV in both sleep and recovery projected evidence
   assert.equal(actual.length, 3);
   assert.deepEqual(actual.map(health => health.candidateMetrics), [18, 18, 18]);
   assert.deepEqual(buildWearableSummaryBundleFromDataset(dataset).sourceHealth.map(health => health.candidateMetrics), [16, 16, 16]);
+});
+
+
+test("empty-envelope writes serialize each actual envelope once, with exact stored and decoded bytes", () => {
+  for (const [kind, keys] of [
+    ["body_state", BODY_METRIC_KEYS], ["recovery", RECOVERY_METRIC_KEYS], ["sleep", SLEEP_METRIC_KEYS],
+  ] as const) {
+    const summary = Object.fromEntries([...keys].map(metric => [metric, resolveMetric(metric, [])]));
+    const expectedStored = JSON.stringify(Object.fromEntries([...keys].map(metric => [metric, null])));
+    const expectedPublic = stringifyPublicWearableProjectionSummary(summary);
+    const serialize = vi.spyOn(publicSummaryJson, "stringifyPublicWearableProjectionSummary");
+    let stored = "";
+    try {
+      for (let repeat = 0; repeat < 5; repeat++) {
+        stored = stringifyStoredWearableProjectionSummary(kind, summary);
+        assert.equal(stored, expectedStored);
+      }
+      // One actual-envelope check per metric plus the outer row serialization.
+      // The prior encoder does twice as many metric-envelope serializations.
+      assert.equal(serialize.mock.calls.length, 5 * (keys.size + 1));
+      for (const envelope of Object.values(summary)) {
+        assert.equal(serialize.mock.calls.filter(([value]) => value === envelope).length, 5);
+      }
+    } finally { serialize.mockRestore(); }
+    assert.equal(JSON.stringify(parseStoredWearableSummary(kind, stored)), expectedPublic);
+    const first = parseStoredWearableSummary<Record<string, ReturnType<typeof resolveMetric>>>(kind, stored)!;
+    const second = parseStoredWearableSummary<typeof first>(kind, stored)!;
+    for (const metric of keys) {
+      assert.notEqual(first[metric], second[metric]);
+      first[metric]!.confidence.reasons.push("synthetic mutation");
+      first[metric]!.selection.paths.push("synthetic mutation");
+    }
+    assert.equal(JSON.stringify(second), expectedPublic);
+    assert.equal(JSON.stringify(parseStoredWearableSummary(kind, stored)), expectedPublic);
+  }
+});
+
+test("empty-marker verification preserves unexpected fields and noncanonical field order verbatim", () => {
+  const empty = resolveMetric("hrv", []);
+  const cases = [
+    { ...empty, syntheticExtra: "must survive" },
+    { ...empty, confidence: { ...empty.confidence, reasons: ["synthetic extra reason"] } },
+    { selection: empty.selection, metric: empty.metric, confidence: empty.confidence, candidates: [] },
+    { ...empty, selection: Object.fromEntries(Object.entries(empty.selection).reverse()) },
+  ];
+  for (const envelope of cases) {
+    const summary = { hrv: envelope };
+    const expected = stringifyPublicWearableProjectionSummary(summary);
+    const stored = stringifyStoredWearableProjectionSummary("recovery", summary);
+    assert.equal(stored, expected, "The original codec's fallback stores the full public bytes");
+    assert.equal(JSON.stringify(parseStoredWearableSummary("recovery", stored)), expected);
+  }
 });

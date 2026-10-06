@@ -1197,6 +1197,238 @@ describeRealCodex('real Codex focused experiment list e2e', () => {
   }, 360_000)
 })
 
+async function seedFocusedActivityProjectionVault(vaultRoot: string): Promise<void> {
+  await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-01-01T00:00:00Z' })
+  const { importDeviceBatch } = await import('@murphai/core')
+  for (const [provider, date, value] of [
+    ['oura', '2026-01-03', 8800], ['oura', '2026-01-02', 6200], ['garmin', '2026-01-03', 12300],
+  ] as const) {
+    await importDeviceBatch({ vaultRoot, provider, importedAt: '2026-01-03T10:00:00Z', events: [{
+      kind: 'observation', title: 'Synthetic daily steps', timeZone: 'UTC',
+      occurredAt: `${date}T09:00:00Z`, recordedAt: '2026-01-03T10:00:00Z',
+      externalRef: { system: provider, resourceType: 'daily', resourceId: `synthetic-${provider}-${date}`, facet: 'steps' },
+      fields: { metric: 'steps', value, unit: 'count' },
+    }] })
+  }
+}
+
+async function buildFocusedActivityProjectionInstructions() {
+  const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+    workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+  })
+  expect(manifest.commands.find(command => command.name === 'wearables activity list')?.schema?.options?.properties)
+    .toMatchObject({ date: expect.any(Object), provider: expect.any(Object), limit: expect.any(Object) })
+  expect(manifest.commands.find(command => command.name === 'blood-test list')?.schema?.options?.properties)
+    .toMatchObject({ from: expect.any(Object), to: expect.any(Object), text: expect.any(Object), limit: expect.any(Object) })
+  const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+  if (!assistantCliContract) throw new Error('Expected the generated activity CLI contract.')
+  const instructions = buildAssistantSystemPrompt({
+    assistantCliContract, assistantHostedAutomationAvailable: false,
+    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    conversationScope: 'direct', currentInstant: '2026-01-03T12:00:00.000Z',
+    currentLocalDate: '2026-01-03', currentTimeZone: 'UTC', hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+  })
+  expect(instructions).toContain(assistantCliContract)
+  expect(assistantCliContract).toContain('`activity list`')
+  return instructions
+}
+
+async function materializeFocusedActivityProjectionCli(input: {
+  binDirectory: string; commandLogPath: string; vaultRoot: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  // Native built production CLI, not the older source-loader fixture wrapper.
+  const cli = fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url))
+  await writeFile(path.join(input.binDirectory, 'vault-cli'), [
+    '#!/bin/sh', 'set -eu',
+    `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+    `exec ${quoteNutritionShellLiteral(process.execPath)} ${quoteNutritionShellLiteral(cli)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
+    '',
+  ].join('\n'), { encoding: 'utf8', mode: 0o700 })
+}
+
+function readFocusedActivityProjectionCommand(command: string): string {
+  expect(command).not.toMatch(/[\r\n]/u)
+  const unwrapped = command.match(/^\/bin\/zsh -c '([^']+)'$/u)?.[1] ?? command
+  expect(unwrapped).toMatch(/^[ \t]*vault-cli[ \t]+wearables[ \t]+activity[ \t]+list(?:[ \t]|$)/u)
+  expect(unwrapped).not.toMatch(/[^A-Za-z0-9_= \t-]/u)
+  return unwrapped
+}
+
+function expectFocusedActivityProjectionOutput(output: string): void {
+  if (output.trimStart().startsWith('{')) {
+    const document = readRecord(JSON.parse(output))
+    expect(document?.ok === true ? document.data : document).toMatchObject({ count: 1, items: [{
+      date: '2026-01-03', steps: { value: 8800, unit: 'count', provider: 'oura' },
+    }] })
+  } else {
+    expect(output).toMatch(/^\s*count: 1$/mu)
+    expect(output).toMatch(/^\s*items\[1\]:$/mu)
+    expect(output).toMatch(/^\s*(?:- )?date: 2026-01-03$/mu)
+    const steps = output.match(/^([ \t]+)steps:\r?\n((?:\1[ \t]+[^\r\n]*(?:\r?\n|$))+)/mu)?.[2] ?? ''
+    expect(steps).toMatch(/^\s*provider: oura$/mu)
+    expect(steps).toMatch(/^\s*unit: count$/mu)
+    expect(steps).toMatch(/^\s*value: 8800$/mu)
+  }
+  expect(output).not.toMatch(/12300|6200/u)
+}
+
+async function expectOnlyFocusedActivityProjection(vaultRoot: string): Promise<void> {
+  expect(await getQueryProjectionStatus(vaultRoot)).toMatchObject({
+    exists: true, fresh: false, builtAt: null, entityCount: 0, searchDocumentCount: 0,
+  })
+}
+
+describe('focused activity projection production contract', () => {
+  it('accepts only the single native activity read/help command', () => {
+    for (const direct of ['vault-cli wearables activity list --help',
+      'vault-cli wearables activity list --date=2026-01-03 --provider oura --limit 1']) {
+      expect(readFocusedActivityProjectionCommand(direct)).toBe(direct)
+      expect(readFocusedActivityProjectionCommand(`/bin/zsh -c '${direct}'`)).toBe(direct)
+    }
+    for (const command of ['vault-cli event list', 'vault-cli wearables activity list-extra',
+      'vault-cli wearables activity list; touch synthetic-marker',
+      'vault-cli wearables activity list > synthetic-output',
+      'vault-cli wearables activity list $(touch synthetic-marker)',
+      'vault-cli wearables activity list\ncat synthetic-source']) {
+      expect(() => readFocusedActivityProjectionCommand(command)).toThrow()
+    }
+  })
+
+  it('assembles production instructions and preserves provider/date facts in native JSON and TOON', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-activity-projection-contract-'))
+    const vaultRoot = path.join(root, 'vault'); const binDirectory = path.join(root, 'bin')
+    try {
+      await seedFocusedActivityProjectionVault(vaultRoot)
+      await buildFocusedActivityProjectionInstructions()
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath: path.join(root, 'commands.log'), vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const args = ['wearables', 'activity', 'list', '--date', '2026-01-03', '--provider', 'oura', '--limit', '1']
+      expectFocusedActivityProjectionOutput((await execFileAsync(path.join(binDirectory, 'vault-cli'), [...args, '--format', 'json'])).stdout)
+      const toon = (await execFileAsync(path.join(binDirectory, 'vault-cli'), args)).stdout
+      expect(toon.trim()).not.toMatch(/^\{/u)
+      expectFocusedActivityProjectionOutput(toon)
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      await expectOnlyFocusedActivityProjection(vaultRoot)
+    } finally { await removeRealCodexTemporaryPaths([root]) }
+  }, 120_000)
+})
+
+describe('focused blood-test projection production contract', () => {
+  it('keeps the selected panel and matched analyte in native JSON and TOON without global work or effects', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-blood-projection-contract-'))
+    const vaultRoot = path.join(root, 'vault'); const binDirectory = path.join(root, 'bin')
+    try {
+      await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-03-01T00:00:00Z' })
+      const selected = await appendBloodTest({ vaultRoot, title: 'Synthetic selected panel', testName: 'synthetic-panel',
+        occurredAt: '2026-03-03T08:00:00Z', recordedAt: '2026-03-03T09:00:00Z',
+        results: [{ analyte: 'ApoB', value: 87, unit: 'mg/dL' }] })
+      await appendBloodTest({ vaultRoot, title: 'Synthetic unmatched panel', testName: 'synthetic-other',
+        occurredAt: '2026-03-03T10:00:00Z', recordedAt: '2026-03-03T11:00:00Z',
+        results: [{ analyte: 'Ferritin', value: 999, unit: 'ng/mL' }] })
+      await appendBloodTest({ vaultRoot, title: 'Synthetic older panel', testName: 'synthetic-old',
+        occurredAt: '2026-03-02T08:00:00Z', recordedAt: '2026-03-02T09:00:00Z',
+        results: [{ analyte: 'ApoB', value: 101, unit: 'mg/dL' }] })
+      await buildFocusedActivityProjectionInstructions()
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath: path.join(root, 'commands.log'), vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const args = ['blood-test', 'list', '--text', 'ApoB', '--from', '2026-03-03', '--to', '2026-03-03', '--limit', '1']
+      const json = (await execFileAsync(path.join(binDirectory, 'vault-cli'), [...args, '--format', 'json'])).stdout
+      const document = readRecord(JSON.parse(json))
+      expect(document?.ok === true ? document.data : document).toMatchObject({ count: 1, items: [{
+        id: selected.record.id, kind: 'blood_test',
+        data: { matchedResult: { analyte: 'ApoB', value: 87, unit: 'mg/dL' } },
+      }] })
+      const toon = (await execFileAsync(path.join(binDirectory, 'vault-cli'), args)).stdout
+      expect(toon.trim()).not.toMatch(/^\{/u)
+      expect(toon).toMatch(/^\s*count: 1$/mu)
+      expect(toon).toMatch(/^\s*items\[1\]:$/mu)
+      expect(toon).toContain(selected.record.id)
+      const result = toon.match(/^([ \t]+)matchedResult:\r?\n((?:\1[ \t]+[^\r\n]*(?:\r?\n|$))+)/mu)?.[2] ?? ''
+      expect(result).toMatch(/^\s*analyte: ApoB$/mu)
+      expect(result).toMatch(/^\s*value: 87$/mu)
+      expect(result).toMatch(/^\s*unit: mg\/dL$/mu)
+      expect(toon).not.toMatch(/Ferritin|\b999\b|\b101\b/u)
+      expect(await getQueryProjectionStatus(vaultRoot)).toMatchObject({ exists: false, fresh: false })
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+    } finally { await removeRealCodexTemporaryPaths([root]) }
+  }, 120_000)
+})
+
+describeRealCodex('real Codex focused wearable activity projection e2e', () => {
+  it('answers one Oura step day from one native read without other lookups or effects', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-activity-projection-e2e-'))
+    const vaultRoot = path.join(root, 'vault'); const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await seedFocusedActivityProjectionVault(vaultRoot)
+      const developerInstructions = await buildFocusedActivityProjectionInstructions()
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions,
+        // Retain the production dynamic-tool surface; no fabricated tool results.
+        env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'How many steps did Oura report on January 3, 2026? Read my wearable activity for that date, provider oura, limit one. Give me just the source and step count. No advice, other lookups, messages to anyone, or changes.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      const reads = commands.filter(command => !isRecordedVaultHelpCommand(command))
+      expect(commands.filter(isRecordedVaultHelpCommand).length).toBeLessThanOrEqual(1)
+      expect(commands.every(command => /^wearables activity list(?:\s|$)/u.test(command))).toBe(true)
+      expect(reads).toHaveLength(1)
+      const tokens = reads[0]!.split(/\s+/u).slice(3)
+      const options = new Map<string, string>()
+      while (tokens.length) {
+        const [flag, inline] = tokens.shift()!.split('=')
+        expect(['--date', '--provider', '--limit', '--format']).toContain(flag)
+        expect(options.has(flag!)).toBe(false)
+        const value = inline ?? tokens.shift()
+        expect(value).toBeDefined(); options.set(flag!, value!)
+      }
+      expect(options.get('--date')).toBe('2026-01-03')
+      expect(options.get('--provider')).toBe('oura')
+      expect(options.get('--limit')).toBe('1')
+      if (options.has('--format')) expect(['json', 'toon']).toContain(options.get('--format'))
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions).toHaveLength(commands.length)
+      for (const action of actions) {
+        if (action.kind !== 'command') throw new Error('Only the focused activity read/help is permitted.')
+        expect(action.ok).toBe(true)
+        const command = readFocusedActivityProjectionCommand(action.command)
+        if (!isRecordedVaultHelpCommand(command)) expectFocusedActivityProjectionOutput(action.output)
+      }
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      await expectOnlyFocusedActivityProjection(vaultRoot)
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[focused-activity-projection-e2e] ${JSON.stringify({ reads: reads.length, reply })}\n`)
+      expect(reply).toMatch(/8,?800/u); expect(reply).toMatch(/steps/iu); expect(reply).toMatch(/oura/iu)
+      expect(reply).not.toMatch(/12,?300|6,?200|\b(?:updated|changed|deleted|sent|scheduled)\b|\?/iu)
+      expect(reply.length).toBeLessThanOrEqual(400)
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+  }, 360_000)
+})
+
 describeRealCodex('real model canonical production journeys', () => {
   it('real model canonical meal persists across assistant restart', async () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })
@@ -34197,6 +34429,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
       ['cue', 'Stretch cue', 'Say: Time for a short stretch break.'],
       ['lookup', 'Weather walk', 'Read the saved approximate city and current weather once; suggest the usual short walk only if weather is suitable. Do not ask for location or make medical recommendations.'],
       ['pinned', 'Preferred reminder', 'The member explicitly requested GPT-6.1 Sol for this reminder. Keep that model. Say: Time for your break.'],
+      ['managed', 'Managed maintenance', 'Preserve this host-managed workflow.'],
       ['research', 'Research review', 'Research new clinical evidence, reconcile conflicting sources against relevant medical history, and verify citations before offering a carefully qualified summary.'],
     ] as const
     const records = definitions.map(([slug, title, instructions]) => ({
@@ -34204,7 +34437,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
       contextReferences: [], effectiveTimeZone: 'UTC',
       occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: '2026-10-06T09:00:00.000Z' },
       schedule: { kind: 'dailyLocal' as const, localTime: '09:00', timeZone: 'UTC' },
-      managed: false, status: 'active' as const, updatedAt: '2026-10-01T00:00:00.000Z',
+      managed: slug === 'managed', status: 'active' as const, updatedAt: '2026-10-01T00:00:00.000Z',
       assistantTargetOverride: { model: 'gpt-6.1-sol' as const, reasoningEffort: 'medium' as const },
     }))
     const changed: string[] = []
@@ -34256,7 +34489,15 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
             if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Unexpected automation action.')
             const index = records.findIndex(record => record.automationId === request.lookup)
             if (index < 0) throw new Error('Managed automation must be preserved.')
-            return fixtures[index]!.request(request, options)
+            const response = await fixtures[index]!.request(request, options)
+            if (request.action === 'inspect' && response.action === 'inspect') {
+              expect(request.view).toBe('model_review')
+              const { executionInspection: _history, occurrenceProjection: _timing,
+                effectiveTimeZone: _zone, instructions, ...configuration } = response
+              return { ...configuration, view: 'model_review',
+                ...(response.managed ? { instructionsOmitted: 'managed_model_preserved' } : { instructions }) }
+            }
+            return response
           } },
           usageDiagnostics: { async read(request) { usageRequests.push(request); return syntheticUsageDiagnostics() } },
           sendVaultFile: async () => { throw new Error('Unexpected file send.') },
@@ -34272,13 +34513,14 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
         reply: result.finalMessage, feedback: feedback?.summary }) + '\n')
       expect(usageRequests).toEqual([{ days: 7, limit: 10 }])
       expect(changed.sort()).toEqual(['cue', 'lookup'])
+      expect(actions.filter(action => action.kind === 'dynamic' && action.tool === MURPH_AUTOMATION_TOOL.name)).toHaveLength(3)
       expect(fixtures.every(fixture => fixture.requests.filter(request => request.action === 'inspect').length === 1)).toBe(true)
       expect(actions.filter(action => action.kind === 'dynamic' && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name)).toHaveLength(1)
       expect(feedback).toMatchObject({ kind: 'feature_request', relatedChangelogItemIds: [] })
       expect(feedback?.summary).toMatch(/^Usage optimization audit:/u)
       expect(feedback?.summary).toMatch(/bytes|KB|kB/u)
       expect(feedback?.summary).toMatch(/1\.25/u)
-      expect(feedback?.summary).toMatch(/(?:two|2) (?:confirmed |verified |successful |model-only )?(?:model )?(?:changes|downgrades|patches|reminders|automations)/iu)
+      expect(feedback?.summary).toMatch(/(?:two|2) (?:confirmed |verified |successful |model-only )?(?:model )?(?:Luna(?:\/high)? )?(?:changes|downgrades|patches|reminders|automations)/iu)
       expect(feedback?.summary).not.toMatch(/zero model changes|omitted model|obscured|result.*truncation/iu)
       expect(feedback?.summary).not.toMatch(/automation_synthetic|synthetic-member|turn_|session_|Weather walk|Research review/iu)
       expect(JSON.parse(result.finalMessage.trim())).toMatchObject({ kind: 'skip' })
@@ -42246,7 +42488,7 @@ function tomlKey(value: string): string {
 }
 
 describeRealCodex('real Codex Murph service discovery e2e', () => {
-  it('uses an available Murph service without requesting a member connection', async () => {
+  it('reuses weather service discovery across two reads without requesting a member connection', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-service-discovery-e2e-'))
     const requests: Array<{ operation: string; input: Record<string, unknown> }> = []
@@ -42277,23 +42519,28 @@ describeRealCodex('real Codex Murph service discovery e2e', () => {
               } },
             } }
             if (request.operation !== 'execute') throw new Error('No member connection is needed for this service.')
-            return { result: { main: { temp: 18 }, weather: [{ description: 'clear sky' }], units: 'metric' } }
+            return { result: { main: { temp: request.input.arguments.lat === 40 ? 18 : 12 }, weather: [{ description: request.input.arguments.lat === 40 ? 'clear sky' : 'light rain' }], units: 'metric' } }
           } },
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => { throw new Error('No file send authorized.') }, vaultFileSendAvailable: false,
         },
         model: config.model, modelProvider: config.modelProvider,
-        prompt: 'I am heading out for a walk now near latitude 40, longitude -75. Please use Murph’s built-in weather service to check the current temperature and sky conditions, in Celsius.',
+        prompt: 'I am choosing between two walking spots: A is latitude 40, longitude -75; B is latitude 41, longitude -76. Please check the current temperature and sky conditions at both, in Celsius, using Murph’s built-in weather service, and compare them.',
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
       process.stdout.write(JSON.stringify({ scenario: 'Murph-provided service discovery', reply: result.finalMessage, operations: requests.map((request) => request.operation) }) + '\n')
       expect(requests.filter((request) => request.operation === 'manage')).toEqual([])
       const executions = requests.filter((request) => request.operation === 'execute')
-      expect(executions).toHaveLength(1)
+      expect(executions).toHaveLength(2)
+      expect(requests.filter(request => request.operation === 'search').length).toBeLessThanOrEqual(1)
+      executions.sort((left, right) => Number((left.input.arguments as Record<string, unknown>).lat) - Number((right.input.arguments as Record<string, unknown>).lat))
       expect(executions[0]?.input).toMatchObject({ toolSlug: 'OPENWEATHER_API_GET_CURRENT_WEATHER', arguments: { lat: 40, lon: -75, units: 'metric' } })
-      expect(executions[0]?.input.account).toBeUndefined()
+      expect(executions[1]?.input).toMatchObject({ toolSlug: 'OPENWEATHER_API_GET_CURRENT_WEATHER', arguments: { lat: 41, lon: -76, units: 'metric' } })
+      expect(executions.every(execution => execution.input.account === undefined)).toBe(true)
       expect(result.finalMessage).toMatch(/18/)
       expect(result.finalMessage).toMatch(/clear/iu)
+      expect(result.finalMessage).toMatch(/12/)
+      expect(result.finalMessage).toMatch(/rain/iu)
       expect(result.finalMessage).not.toMatch(/connect.*(?:account|weather)|API key|credentials|sign in/iu)
     } finally { await rm(workingDirectory, { force: true, recursive: true }) }
   }, 720_000)

@@ -178,8 +178,10 @@ test("first provider-filtered read rebuilds carried v25 underscore provider rows
     }
 
     const currentStatus = await getQueryProjectionStatus(vaultRoot);
-    assert.equal(currentStatus.fresh, true);
-    assert.notEqual(currentStatus.builtAt, legacyBuiltAt);
+    // Upgrading a wearable read certifies only the rebuilt wearable rows.
+    assert.equal(currentStatus.fresh, false);
+    assert.equal(currentStatus.builtAt, null);
+    assert.equal((await rebuildQueryProjection(vaultRoot)).fresh, true);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

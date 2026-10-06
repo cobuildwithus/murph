@@ -108,37 +108,121 @@ or biomarker alias, so it cannot silently alias or aggregate with provider HRV.
 
 Root wearable summary APIs should use the runtime projection helpers such as `summarizeWearableLatestRuntime()` and `summarizeWearableActivityRuntime()`. The lower-level read-model helpers in `src/wearables.ts` are package-internal and expect a full raw/debug read model or an intentionally full source model, not the default `readVault()` projection.
 
-### Sleep-list reads
+### Ordinary wearable reads
 
-`summarizeWearableSleepRuntime()` (the integrated `query.listWearableSleep`
-service and `wearables sleep list`) uses the existing
-`readFreshWearableSummaryRows()` owner, not full query freshness. It captures
-provider-filtered rows under the same reentrant canonical lock even when fresh,
-then composes the **normal** public wearable bundle with the original filters
-and invokes the unchanged sleep summarizer. Do not pass `sourceHealthOnly`:
-sleep needs public days. Date, range, ordering and limit interpretation remain
-with the existing composition/service owners; the row read only selects
-providers. Prior/next canonical evidence remains available during projection.
-At the service boundary an omitted or empty provider array is unrestricted;
-a nonempty array normalized to no providers selects nothing.
+Day, latest, metric latest/trend, drift, activity, body and recovery runtime
+readers use the private `readFreshPublicWearableSummaryBundle()` helper. Its
+unlocked preflight uses the same `readProjectionStatus()` predicate as the old
+ordinary global path: current schema/version, complete global tables, non-null
+built-at, exact canonical manifest and matching wearable manifest. Only when
+that full predicate is fresh does it use the old stored bundle read without
+acquiring or waiting for the canonical writer lock.
 
-The exact canonical manifest, strict validation, atomic row/dictionary/manifest
-publication and failure behavior described below apply identically to sleep.
-Every canonical manifest change, including corrections, deletions and unrelated
-records, invalidates wearable freshness. Empty selected scopes do not bypass
-strict validation. No schema, state, cache or provider-precedence policy changes.
-Fresh sleep after a full global build reuses its current wearable rows, but
-now pays the existing focused reader's lock and manifest check.
+Otherwise `readFreshWearableSummaryRows()` remains the synchronous owner of the
+locked recheck, strict source validation, wearable-only publication and capture.
+Wearable-only freshness does not authorize an unlocked read: even an atomic
+wearable publication can occur inside an outer reentrant writer before that
+writer commits. Sleep-list retains its pre-task direct focused-row read and
+normal composition, including on fresh global state; source-health retains its
+focused owner and specialized `sourceHealthOnly` composition. Neither gets the
+ordinary fast path. Ordinary readers keep their original normal composer and
+summarizers, including public days and source health.
 
-Cold/stale sleep does not build global metrics/targets, entities/search or run
-`VACUUM`, and does not certify global freshness. A later full read still does
-its distinct global work and compaction, reusing current wearable summaries.
-This is avoided work for sleep-only use and deferred global work for mixed use,
-not removal of all rebuild latency. Sleep-pattern and other wearable readers
-are unchanged. See the [sleep-list proof and paired benchmark](../vault-usecases/bench/wearable-sleep.md)
-for full-envelope parity, real CLI/assistant proof, phase counts, base/base noise
-and complete mixed-workflow costs. Parent measurements are required before any
-speedup claim.
+Only provider selection is pushed into the stored-row read. Date, range,
+ordering, complete cross-provider composition and limits stay with their existing
+owners, preserving prior/next canonical evidence. At the
+service boundary an omitted or empty provider array is unrestricted; a nonempty
+array normalized to no providers selects nothing.
+
+The exact ordered path/size/mtime manifest, strict current canonical validation,
+atomic row/dictionary/manifest publication and failure behavior below apply to
+all these readers. Corrections, deletions, unrelated ledger edits and timestamp-
+only manifest changes still invalidate freshness. This preserves the timestamp
+contract; it does not assert how frequently timestamp-only changes occur in
+production or introduce a restore workaround. Even an empty selected provider
+scope must validate stale canonical input. No new staleness heuristic or schema.
+
+Cold/stale ordinary reads publish no global metrics/targets, entities/search,
+global completion metadata or `VACUUM`. A later explicit global operation must
+still do its distinct work and compaction, reusing current wearable rows. This
+avoids global work for wearable-only workflows and defers it for mixed workflows;
+complete mixed costs must include that later work. Fresh global rows remain
+reusable without the new lock wait introduced by the first implementation packet.
+
+The fresh-global check and stored read are not one canonical transaction, just
+as before this task. A canonical write after the fresh observation may leave
+that request reading the prior projection; the next request checks again. The
+stored reader's SQLite read transaction captures its dictionary and rows in one
+generation. A reset or malformed store after the check retains the old direct
+read's success/error behavior, including its required-table guard and empty
+provider short-circuit. There is no catch-and-retry, optimistic wearable-only
+branch, schema-race repair protocol or stronger commit guarantee.
+
+Refresh remains synchronous when the checks require it; there is no new stale-
+while-refresh policy. The existing CLI process already keeps this CPU work off
+the hosted conversation event loop. The canonical lock remains the focused
+source/publication boundary, not a claim that every fresh read is nonblocking.
+There is no background owner, daemon, pending-promise coordinator, monitor or
+member-fact cache. A stale focused refresh still reads the
+strict canonical snapshot required by the existing wearable owner, rather than
+pretending unrelated malformed input can be ignored.
+
+Timing charges the global preflight and any focused recheck separately: one
+`query-freshness` span containing manifest/status on the fast path, or two
+non-overlapping freshness spans on fallback, with the latter including lock wait
+and required refresh work. Manifest/status subspans remain inclusive; do not add
+them to their parent spans or omit the extra preflight from workflow costs.
+
+Sleep-pattern remains outside this patch because it also owns current timezone
+metadata capture. `buildPersonalPatternReportRuntime()` is untouched. See the
+[ordinary-read and whole-rebuild proof](../vault-usecases/bench/global-projection.md)
+for the eight-reader oracle, real CLI/assistant gates, exact byte comparisons,
+phase counts and paired workflow measurement. Parent evidence is required before
+claiming a measured improvement. The historical
+[sleep-list proof](../vault-usecases/bench/wearable-sleep.md) remains unchanged.
+
+### Blood-test lists and Browser Vault reuse
+
+`listBloodTests()` acquires unlimited test events through the existing
+`listCanonicalEventEntitiesRuntime()` owner. Fresh global indexed rows remain a
+read accelerator; otherwise that owner captures strict current events under the
+reentrant canonical lock without publishing any projection. Every stale repeat
+re-reads events; no stale facts or new cache is introduced. Blood classification,
+text/status/date filtering and stable ordering still precede the final limit.
+Malformed selected event sources still fail, including for empty result scopes;
+unrelated malformed families no longer force an unrelated global read. A later
+explicit global query still performs its necessary validation/publication work.
+Generic entity queries and other health collections keep their original policy.
+
+Browser Vault builds one default-visible wearable bundle for source health and
+the assistant summary. Its private invocation also reuses that bundle for Personal
+Patterns only when filtering removed no entities. Otherwise Personal Patterns
+retains a separate raw-input bundle. `buildWearableAssistantSummaryFromBundle()`
+expects an already-filtered normal bundle; the existing public vault wrapper
+still performs the same filtering and returns the complete original summary.
+There is no persistent cache. Raw/default visibility, journal input, cancellation
+yields, timestamps and dataVersion hashing are unchanged. This remains correct
+whether the upstream source reader returns raw or already-filtered entities.
+
+The proposed single-pass metric aggregation is not implemented: exported evidence
+constructors accept noncanonical date strings whose locale equality makes the
+unchanged comparator nontransitive. The new cross-producer differential regression
+records the concrete parity boundary instead of changing ordering, validation or
+adding a fallback. See the [incremental benchmark and proof](../vault-usecases/bench/global-projection.md#incremental-additions-first-packet-versus-this-packet).
+
+### Empty stored-envelope verification
+
+The stored codec reuses only module-private expected-empty JSON strings for the
+finite summary metric keys. Each string comes from the same `resolveMetric(key,
+[])` constructor and public serializer used by the previous write-side check.
+Every actual envelope is still serialized and compared **exactly**, including
+field order and unexpected fields; a mismatch still stores the full envelope.
+Nonempty verification is unchanged. Stored/public bytes and the SQLite version
+are unchanged; no member facts, decoder objects or parsed JSON are cached.
+Decoding still constructs fresh objects/arrays for each empty metric and each
+read. Call-count tests distinguish removed expected serialization from the
+required actual-envelope comparison, while existing codec tests retain sparse,
+rich, conflict and fallback coverage.
 
 ### Source-health reads
 
