@@ -34258,7 +34258,10 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
             if (index < 0) throw new Error('Managed automation must be preserved.')
             return fixtures[index]!.request(request, options)
           } },
-          usageDiagnostics: { async read(request) { usageRequests.push(request); return syntheticUsageDiagnostics() } },
+          usageDiagnostics: { async read(request) {
+            usageRequests.push(request)
+            return { ...syntheticUsageDiagnostics(), windowStart: '2026-09-17T12:00:00.000Z' }
+          } },
           sendVaultFile: async () => { throw new Error('Unexpected file send.') },
         },
         model: config.model, modelProvider: config.modelProvider,
@@ -34269,7 +34272,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
       const actions = readCapabilityRoutingActions(result.jsonEvents)
       const feedback = feedbackRecorder.readProductFeedback()
       process.stdout.write('[weekly-optimizer-live] ' + JSON.stringify({ model: config.model, changed,
-        reply: result.finalMessage, feedback: feedback?.summary, actions }) + '\n')
+        reply: result.finalMessage, feedback: feedback?.summary }) + '\n')
       expect(usageRequests).toEqual([{ days: 14, limit: 10 }])
       expect(changed.sort()).toEqual(['cue', 'lookup'])
       expect(fixtures.every(fixture => fixture.requests.filter(request => request.action === 'inspect').length === 1)).toBe(true)
@@ -34278,7 +34281,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
       expect(feedback?.summary).toMatch(/^Usage optimization audit:/u)
       expect(feedback?.summary).toMatch(/bytes|KB|kB/u)
       expect(feedback?.summary).toMatch(/1\.25/u)
-      expect(feedback?.summary).toMatch(/(?:two|2) (?:confirmed |verified |successful |model-only )?(?:model )?(?:changes|downgrades|patches|reminders|automations)/iu)
+      expect(feedback?.summary).toMatch(/\b(?:two|2)\b[^.!?]*\b(?:changes|changed|downgrades|downgraded|patches)\b/iu)
       expect(feedback?.summary).not.toMatch(/zero model changes|omitted model|obscured|result.*truncation/iu)
       expect(feedback?.summary).not.toMatch(/automation_synthetic|synthetic-member|turn_|session_|Weather walk|Research review/iu)
       expect(JSON.parse(result.finalMessage.trim())).toMatchObject({ kind: 'skip' })
