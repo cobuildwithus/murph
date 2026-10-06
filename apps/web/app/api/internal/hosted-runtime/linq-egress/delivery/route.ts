@@ -1,3 +1,4 @@
+import { isHostedMemberSignupWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
 import { queueHostedLinqHomeContactCardAfterDelivery } from "@/src/lib/hosted-onboarding/linq-contact-card-delivery";
 import { after } from "next/server";
 import { lockHostedLinqMessageReceiptsTx } from "@/src/lib/hosted-onboarding/linq-message-receipt-lock";
@@ -132,9 +133,8 @@ export const POST = withJsonError(async (request: Request) => {
     threadIsDirect,
     userId,
   } as const;
-  const acceptedSignupWelcome = acceptedAt
-    ? parseHostedSignupWelcomeIdempotencyKey(idempotencyKey)
-    : null;
+  const acceptedSignupWelcome = acceptedAt !== null
+    && isHostedMemberSignupWelcomeDeliveryIdentity(idempotencyKey);
   const claimsParticipantSignupWelcomeNamespace = Boolean(
     acceptedAt
     && targetKind === "participant"
@@ -143,11 +143,8 @@ export const POST = withJsonError(async (request: Request) => {
     ),
   );
   if (
-    (acceptedSignupWelcome && acceptedSignupWelcome !== userId)
-    || (
-      claimsParticipantSignupWelcomeNamespace
-      && acceptedSignupWelcome !== userId
-    )
+    (acceptedSignupWelcome || claimsParticipantSignupWelcomeNamespace)
+    && !isHostedMemberSignupWelcomeDeliveryIdentity(idempotencyKey, userId)
   ) {
     throwHostedSignupWelcomeDeliveryAuthorityInvalid();
   }
@@ -261,16 +258,6 @@ function scheduleHostedLinqDeliveryFollowupsAfterResponse(input: {
       code: "HOSTED_LINQ_TERMINAL_RETRY_NOT_SCHEDULED",
     });
   }
-}
-
-function parseHostedSignupWelcomeIdempotencyKey(
-  value: string | null,
-): string | null {
-  if (!value?.startsWith(HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX)) {
-    return null;
-  }
-  const memberId = value.slice(HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX.length);
-  return memberId && !memberId.includes(":") ? memberId : null;
 }
 
 function throwHostedSignupWelcomeDeliveryAuthorityInvalid(): never {
