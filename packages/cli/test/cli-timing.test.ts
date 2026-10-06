@@ -291,6 +291,12 @@ test('real Incur error types and command parsing retain finite detail without re
     }] }), expected: { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }, exit: 1 },
     { error: new Errors.ParseError({ message: 'PRIVATE_SENTINEL' }),
       expected: { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }, exit: 1 },
+    { error: new Errors.ParseError({ message: 'PRIVATE_SENTINEL', kind: 'config_missing' }),
+      expected: { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }, exit: 1 },
+    { error: new Errors.ParseError({ message: 'PRIVATE_SENTINEL', kind: 'config_invalid' }),
+      expected: { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }, exit: 1 },
+    { error: new Errors.ParseError({ message: 'PRIVATE_SENTINEL', kind: 'config_unavailable' }),
+      expected: { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }, exit: 1 },
     { error: Object.assign(new Errors.IncurError({ code: 'PRIVATE_SENTINEL', message: 'PRIVATE_SENTINEL',
       cause: Object.assign(new Error('PRIVATE_SENTINEL'), { code: 'invalid_payload', stage: 'validation' }) }),
       { name: 'PRIVATE_SENTINEL', stage: 'PRIVATE_SENTINEL', context: { stage: 'PRIVATE_SENTINEL' }, extra: 'PRIVATE_SENTINEL' }),
@@ -437,7 +443,7 @@ test('real research scout-batch rejects before egress and preserves output/exit 
   assert.equal(succeeded.wire.includes('PRIVATE_'), false)
 })
 
-test('real event list and knowledge upsert validation preserve output, effects and finite loopback evidence', async () => {
+test('real event and knowledge validation preserve output, effects and finite loopback evidence', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'cli-validation-PRIVATE_SENTINEL-'))
   roots.push(home)
   vi.stubEnv('HOME', home)
@@ -449,6 +455,7 @@ test('real event list and knowledge upsert validation preserve output, effects a
   // Observe real registered handlers without substituting their implementation.
   const knowledge = await import('@murphai/assistant-engine/knowledge')
   const upsert = vi.spyOn(knowledge, 'upsertKnowledgePage')
+  const show = vi.spyOn(knowledge, 'getKnowledgePage')
   const services = await import('@murphai/vault-usecases/vault-services')
   const createServices = services.createIntegratedVaultServices
   const eventCalls: Array<() => number> = []
@@ -463,12 +470,16 @@ test('real event list and knowledge upsert validation preserve output, effects a
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2030-01-15T10:00:00.000Z'))
   try {
-    for (const [args, field, code] of [
-      [['event', 'list', '--limit', '201'], 'limit', 'too_big'],
-      [['event', 'list', '--PRIVATE_SENTINEL'], 'arguments', 'custom'],
-      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--PRIVATE_SENTINEL'], 'arguments', 'custom'],
-      [['knowledge', 'upsert', '--body', ''], 'body', 'too_small'],
-      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--related-slug', 'PRIVATE_SENTINEL!'], 'relatedSlug', 'invalid_format'],
+    for (const [args, field, code, missing] of [
+      [['event', 'list', '--limit', '201'], 'limit', 'too_big', false],
+      [['event', 'list', '--PRIVATE_SENTINEL'], 'arguments', 'custom', false],
+      [['knowledge', 'show', '--slug', 'synthetic-page'], 'arguments', 'custom', false],
+      [['knowledge', 'show'], 'slug', 'invalid_type', true],
+      [['knowledge', 'show', 'PRIVATE_SENTINEL!'], 'slug', 'invalid_format', false],
+      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--PRIVATE_SENTINEL'], 'arguments', 'custom', false],
+      [['knowledge', 'upsert'], 'body', 'invalid_type', true],
+      [['knowledge', 'upsert', '--body', ''], 'body', 'too_small', false],
+      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--related-slug', 'PRIVATE_SENTINEL!'], 'relatedSlug', 'invalid_format', false],
     ] as const) {
       const argv = [...args, '--vault', root, '--format', 'json']
       const baseline = await invoke(argv)
@@ -480,23 +491,16 @@ test('real event list and knowledge upsert validation preserve output, effects a
       assert.equal(output.code, 'VALIDATION_ERROR')
       assert.equal(output.stage, 'validation')
       assert.ok(output.fieldErrors.some((issue: { path: string; code: string; missing?: boolean }) =>
-        issue.path === field && issue.code === code && issue.missing === false))
+        issue.path === field && issue.code === code && issue.missing === missing))
       assert.equal(captured.timing.reportCount, 1)
       assert.equal(captured.timing.commands.length, 1)
       const command = captured.timing.commands[0]!
       assert.equal(command.command, args.slice(0, 2).join(' '))
       assert.equal(command.outcome, 'error')
       assert.equal(command.calls, 1)
-      const validation = { field, code, missing: false }
-      // The projected envelope owns arguments; an original ParseError need not
-      // expose publicIssues. Never synthesize detail at the original-error seam.
+      const validation = { field, code, missing }
       assert.deepEqual(cliTimingValidationFailure(command.command, output.code, output, 'fieldErrors'), { validation })
-      const expected = { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }
-      if (field !== 'arguments' || command.failures?.[0]?.validation !== undefined) {
-        assert.deepEqual(command.failures, [{ ...expected, validation }])
-      } else {
-        assert.deepEqual(command.failures, [expected])
-      }
+      assert.deepEqual(command.failures, [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation }])
       assert.equal(command.droppedFailures, undefined)
       assert.equal(captured.timing.droppedCalls, 0)
       assert.equal(captured.timing.droppedSpans, 0)
@@ -504,11 +508,24 @@ test('real event list and knowledge upsert validation preserve output, effects a
       assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
     }
     assert.equal(upsert.mock.calls.length, 0)
+    assert.equal(show.mock.calls.length, 0, 'Parser/schema rejection precedes the registered read handler.')
     assert.equal(eventCalls.reduce((sum, count) => sum + count(), 0), 0)
     assert.equal((await knowledge.listKnowledgePages({ vault: root })).pageCount, 0)
+    const absentArgv = ['knowledge', 'show', 'synthetic-page', '--vault', root, '--format', 'json']
+    const absentBaseline = await invoke(absentArgv)
+    const absent = await collect(() => invoke(absentArgv))
+    assert.deepEqual(absent.result, absentBaseline)
+    assert.deepEqual(absent.result.exits, [1])
+    assert.equal(JSON.parse(absent.result.stdout).code, 'knowledge_page_not_found')
+    assert.equal(absent.timing.commands[0]!.calls, 1)
+    assert.deepEqual(absent.timing.commands[0]!.failures, [{ code: 'knowledge_page_not_found', stage: 'read', count: 1 }])
+    assert.equal(absent.wire.includes('PRIVATE_SENTINEL'), false)
+    assert.equal(show.mock.calls.length, 2)
+    assert.equal(upsert.mock.calls.length, 0)
     for (const args of [
       ['event', 'list', '--limit', '1'],
       ['knowledge', 'upsert', '--body', '# Synthetic page\n\nPRIVATE_SENTINEL\n', '--slug', 'synthetic-page'],
+      ['knowledge', 'show', 'synthetic-page'],
     ]) {
       const argv = [...args, '--vault', root, '--format', 'json']
       const baseline = await invoke(argv)
@@ -522,10 +539,15 @@ test('real event list and knowledge upsert validation preserve output, effects a
       assert.equal(captured.timing.commands[0]!.outcome, 'ok')
       assert.equal(captured.timing.commands[0]!.calls, 1)
       assert.equal(captured.timing.commands[0]!.failures, undefined)
+      if (args[0] === 'knowledge' && args[1] === 'show') {
+        assert.equal(JSON.parse(captured.result.stdout).page.slug, 'synthetic-page')
+        assert.match(JSON.parse(captured.result.stdout).page.markdown, /PRIVATE_SENTINEL/u)
+      }
       assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
       assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
     }
     assert.equal(upsert.mock.calls.length, 2, 'One real upsert per successful invocation, no retries.')
+    assert.equal(show.mock.calls.length, 4, 'One real read per positional invocation, no retries.')
     assert.equal(eventCalls.reduce((sum, count) => sum + count(), 0), 2)
     assert.equal((await knowledge.listKnowledgePages({ vault: root })).pageCount, 1)
     assert.match(await readFile(path.join(root, 'derived/knowledge/pages/synthetic-page.md'), 'utf8'), /PRIVATE_SENTINEL/u)
@@ -589,9 +611,7 @@ test('real meal validation preserves output and mutation boundaries while admitt
         assert.equal(command.outcome, 'error')
         assert.equal(command.calls, 1)
         const failure = { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }
-        // Incur's ParseError has no original publicIssues. Its existing public
-        // projection supplies arguments/custom for completion attribution only.
-        assert.deepEqual(command.failures, [field === 'arguments' ? failure : { ...failure, validation }])
+        assert.deepEqual(command.failures, [{ ...failure, validation }])
         assert.equal(command.droppedFailures, undefined)
         assert.equal(captured.timing.droppedCalls, 0)
         assert.equal(captured.timing.droppedSpans, 0)

@@ -62,7 +62,7 @@ const validationFields = [
   ["automation list", ["limit", "status"]],
   ["event list", ["kind", "from", "to", "tag", "experiment", "limit", "arguments"]],
   ["event payload-schema", ["kind", "for"]],
-  ["knowledge show", ["slug"]],
+  ["knowledge show", ["slug", "arguments"]],
   ["measurement entry list", ["metric", "from", "to", "limit"]],
   ["meal add", ["nutritionCalories", "nutritionSource", "occurredAt", "arguments"]],
   ["meal edit", ["nutritionCalories", "nutritionSource", "occurredAt", "arguments"]],

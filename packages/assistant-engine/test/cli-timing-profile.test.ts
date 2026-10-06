@@ -170,6 +170,50 @@ test('failure diagnostics cross profile extraction and hosted parsing without ch
     { ...produced, cliTiming: withoutFailures })
 })
 
+test('parser validation survives portable, profile and hosted readback without changing native accounting', async () => {
+  for (const [command, field, code, missing] of [
+    ['knowledge show', 'arguments', 'custom', false],
+    ['knowledge upsert', 'arguments', 'custom', false],
+    ['meal edit', 'arguments', 'custom', false],
+    ['knowledge upsert', 'body', 'invalid_type', true],
+  ] as const) {
+    let report!: CliTiming
+    const error = Object.assign(new Error('PRIVATE_SENTINEL'), {
+      code: 'VALIDATION_ERROR', stage: 'validation', fieldErrors: [
+        { path: 'PRIVATE_SENTINEL', code: 'custom', missing: false },
+        { path: field, code, missing, value: 'PRIVATE_SENTINEL', message: 'PRIVATE_SENTINEL' },
+      ], extra: 'PRIVATE_SENTINEL',
+    })
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw error }),
+      (value) => { report = value }), (caught) => caught === error)
+    assert.deepEqual(report.commands[0]!.failures, [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1,
+      validation: { field, code, missing } }])
+    const rawEvents = [...baseEvents, native(`vault-cli ${command}`, 'PRIVATE_SENTINEL', { exitCode: 1 })]
+    const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
+    const profile = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents,
+      { method: 'murph/cliTiming', params: { turnId, timing: { ...report, extra: 'PRIVATE_SENTINEL' } } }], turnId })!
+    const { cliTiming, ...legacy } = profile
+    assert.deepEqual(legacy, baseline)
+    assert.deepEqual(cliTiming, report)
+    assert.deepEqual(normalizeCliTiming(cliTiming), report)
+    const parsed = usage(JSON.parse(JSON.stringify(profile)))
+    assert.deepEqual(parsed.turnProfileJson, profile)
+    assert.equal(parsed.inputTokens, 17)
+    assert.equal(parsed.outputTokens, 11)
+    assert.equal(JSON.stringify(parsed).includes('PRIVATE_SENTINEL'), false)
+    const withoutDetail = structuredClone(report)
+    delete withoutDetail.commands[0]!.failures![0]!.validation
+    // Omitted or malformed optional detail cannot remove valid failure/usage counts.
+    const malformed = { ...report, commands: [{ ...report.commands[0], failures: [{
+      code: 'VALIDATION_ERROR', stage: 'validation', count: 1,
+      validation: { field: 'PRIVATE_SENTINEL', code: 'custom', missing: false },
+    }] }] }
+    for (const timing of [withoutDetail, malformed]) {
+      assert.deepEqual(usage({ ...profile, cliTiming: timing }).turnProfileJson, { ...profile, cliTiming: withoutDetail })
+    }
+  }
+})
+
 // Unlike the older timing rollout above, this base already knows cliTiming.
 // Load BOTH actual base owners so this cannot accidentally use today's normalizer.
 const failureCompatibilityBase = process.env.MURPH_CLI_FAILURE_COMPAT_BASE
@@ -192,6 +236,10 @@ test.skipIf(!failureCompatibilityBase)('actual pre-failure reader preserves comm
       })))
     }
     await withCliTiming(() => timeCliDispatch('experiment session log', async () => {}))
+    await assert.rejects(withCliTiming(() => timeCliDispatch('knowledge show', async () => {
+      throw Object.assign(new Error('PRIVATE_SENTINEL'), { code: 'VALIDATION_ERROR', stage: 'validation',
+        fieldErrors: [{ path: 'arguments', code: 'custom', missing: false }] })
+    })))
   }), (value) => { report = value })
   const oldReport = { ...report, commands: report.commands.map(({ failures, droppedFailures, ...command }) => command) }
   const legacy = buildAssistantCodexTurnProfileJson({ rawEvents: [...baseEvents, native('vault-cli batch')], turnId })!

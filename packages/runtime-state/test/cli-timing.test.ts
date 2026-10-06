@@ -584,7 +584,7 @@ test("validation selection admits only exact schema-owned fields and one standar
     ["automation list", ["limit", "status"]],
     ["event list", ["kind", "from", "to", "tag", "experiment", "limit", "arguments"]],
     ["event payload-schema", ["kind", "for"]],
-    ["knowledge show", ["slug"]],
+    ["knowledge show", ["slug", "arguments"]],
     ["measurement entry list", ["metric", "from", "to", "limit"]],
     ["food search-labels", ["query", "limit"]],
     ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks", "relatedSlug", "librarySlug", "sourcePath", "arguments"]],
@@ -699,6 +699,7 @@ test("original validation capture is first-observation-only and retains neither 
 });
 
 const readValidationCases = [
+  ["knowledge show", "arguments", "custom", false],
   ["knowledge show", "slug", "invalid_type", true],
   ["knowledge show", "slug", "invalid_format", false],
   ["event payload-schema", "kind", "invalid_value", true],
@@ -860,6 +861,8 @@ for (const [reader, base, cases] of [
   ["measurement-validation", process.env.MURPH_CLI_MEASUREMENT_VALIDATION_COMPAT_BASE, measurementValidationCases],
   ["event-invocation-validation", process.env.MURPH_CLI_EVENT_INVOCATION_VALIDATION_COMPAT_BASE, eventInvocationValidationCases],
   ["meal-validation", process.env.MURPH_CLI_MEAL_VALIDATION_COMPAT_BASE, mealValidationCases],
+  ["knowledge-parser-validation", process.env.MURPH_CLI_KNOWLEDGE_PARSER_VALIDATION_COMPAT_BASE,
+    [["knowledge show", "arguments", "custom", false]]],
 ] as const) test.skipIf(!base)(`actual older ${reader} consumer drops detail but preserves the envelope and counts`, async () => {
   assert.match(base ?? "", /^[a-f0-9]{40}$/u);
   const source = execFileSync("git", ["show", `${base}:packages/runtime-state/src/cli-timing.ts`],

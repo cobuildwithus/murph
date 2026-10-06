@@ -1629,7 +1629,8 @@ other values collapse to `unknown`. Capture reads only own data properties for
 validation type names. It does not call getters, enumerate objects, inspect
 messages, arguments or result output, follow prototypes/causes, or retain original
 errors or contexts. The optional schema detail below reads only bounded own
-`publicIssues` data at that same original-error seam. Code-only observations are
+`publicIssues` data at that same original-error seam, or the existing safe Incur
+projection for a typed parser exception as described below. Code-only observations are
 diagnostic hints, not authorization or a claim that a reported stage is independently verified. Existing dynamic-tool
 finite stage/reason/category diagnostics remain separate.
 
@@ -1671,14 +1672,15 @@ For `VALIDATION_ERROR` only, `validation: { field, code, missing? }` is one fini
 selected issue, never another failure observation. `cliTimingValidationFailure`
 in the portable owner selects the first admissible issue within the first **8**
 own array entries. It reads `publicIssues` on the original error, `fieldErrors`
-in the assistant's existing complete **16 KiB** error envelope, or `validation`
+from the CLI bridge's typed Incur projection or the assistant's existing complete
+**16 KiB** error envelope, or `validation`
 on the timing wire. All reads use own data descriptors; getters, prototypes,
 causes, iterators and arbitrary nested paths are not consulted. Only exact full
 static field names are admitted:
 
 - `automation list`: limit, status (only these two options from `packages/cli/src/commands/automation.ts`).
 - `food search-labels`: query, limit.
-- `knowledge show`: slug (required positional argument in `packages/cli/src/commands/knowledge.ts`).
+- `knowledge show`: slug (required positional argument in `packages/cli/src/commands/knowledge.ts`), plus the fixed Incur invocation field arguments.
 - `measurement entry list`: metric, from, to, limit (only these top-level options from `packages/cli/src/commands/measurement.ts`; no metric array indices).
 - `event list`: kind, from, to, tag, experiment, limit (the command and its shared list factory), plus the fixed Incur invocation field arguments.
 - `event payload-schema`: kind, for (required public kind and optional literal `import-jsonl` surface in `packages/cli/src/commands/event.ts`).
@@ -1705,8 +1707,16 @@ otherwise remain unchanged. Synthetic probes establish information loss, **not**
 the behavioral root cause of actual member argument errors.
 
 The existing Incur error bridge observes ordinary handler throws **before** its
-public error projection can discard typed fields. Dispatch and invocation
-catches provide a fallback only: first observation wins, with no per-catch
+public error projection can discard typed fields. For an actual `Errors.ParseError`
+while timing is active, the bridge first reuses pinned Incur's
+`Errors.toErrorEnvelope` as a telemetry-only value: argument-kind errors supply
+`arguments / custom / missing=false`, while config-kind errors keep `config`
+and are not admitted as argument evidence. No error-name/message parsing or
+mutation of the exception is involved. Projection failure falls back to original
+code/stage capture; capture failure cannot replace the original throw. With
+timing disabled, no extra projection runs. The original error still follows the
+same throw/render path, with unchanged public bytes, exits, effects and retries.
+Dispatch and invocation catches provide a fallback only: first observation wins, with no per-catch
 increment and no cross-invocation error-object cache. Recursive batch children
 retain their own scopes; the container is not an additional failure sample.
 Stop-on-error and the existing rejection of nested batch before child entry are
@@ -1800,8 +1810,9 @@ consumers. Older readers omit the new tuples and coalesce equal code/stage pairs
 retaining calls, phases, outcomes, report counts and drops; existing knowledge
 option detail remains readable. New readers accept old producers unchanged and
 cannot reconstruct omitted detail. The fixed invocation field is retained where
-the source supplies it in `fieldErrors` or `publicIssues`; original exceptions
-without it remain code/stage-only. Do not infer it from an error name or message. Set
+the source supplies it in `fieldErrors` or `publicIssues`, including the bridge's
+typed Incur projection above. Other original exceptions without it remain
+code/stage-only. Do not infer it from an error name or message. Set
 `MURPH_CLI_EVENT_INVOCATION_VALIDATION_COMPAT_BASE` to the actual pre-extension
 commit for the history-backed runtime-state test. No schema bump, migration,
 backfill or new event is required. Only after approved telemetry rollout and
@@ -1815,12 +1826,27 @@ The old reader drops the new tuples and coalesces their code/stage counts withou
 losing envelopes, phases, outcomes, calls or drops; new readers accept old reports.
 The real CLI probe checks distinct option failures before mutation/provider
 work, output/exit parity and nearby successful saves. Unknown-option parsing
-supplies arguments/custom in the public envelope; an original ParseError without
-public issues remains code/stage-only in timing. Do not infer the missing tuple.
+supplies arguments/custom in the public envelope; the bridge now reuses that
+existing projection before the first timing observation. Older recorded
+code/stage-only failures remain unresolved; no missing tuple is backfilled.
 The 8 KiB envelope and all existing caps, events and counters remain unchanged.
 Historical meal failures cannot be attributed or backfilled from this extension.
 These probes prove diagnostic loss, not a preventable meal-behavior cause.
 No automatic rollback is authorized or required by a new attribution.
+
+The `knowledge show` arguments admission and parser-capture correction reuse
+that reader-first order: deploy the portable reader in Web/hosted usage,
+engine/profile and completion consumers (including warm processes), then the
+CLI bridge. An older reader omits only the newly admitted show detail, coalesces
+its code/stage variants and preserves calls, phases, outcomes, drops and usage.
+Existing upsert/meal/event invocation fields need no new admission. Set
+`MURPH_CLI_KNOWLEDGE_PARSER_VALIDATION_COMPAT_BASE=1d8c8762af9eb5e283b6892050fc8a8b2f008efa`
+for the existing history-backed portable-reader harness; retain the historical
+profile/hosted-reader compatibility tests as well. Reader rollback loses
+specificity, not accounting. No schema, event, counter, state or backfill is added.
+Use the command-specific query below only after approved convergence, deduplicate
+profiles per turn, and keep absent detail separate. `arguments / custom` proves
+parser rejection, not which option was supplied or any historical behavioral cause.
 
 The `knowledge show`, `event payload-schema` and `measurement entry list` field
 extensions use that same consumer-first Web/reader, then runner/CLI-producer
@@ -1926,7 +1952,7 @@ Attribution is not an automatic behavior or prompt change. Reproduce the exact
 attributed path synthetically and prove the earliest violated behavioral invariant
 before proposing one. This also applies to a single newly attributed meal failure;
 its field/code does not establish why the input was selected.
-For the event-list/upsert probe, `arguments / custom` identifies an Incur
+For show/upsert, event-list and meal probes, `arguments / custom` identifies an Incur
 invocation rejection, not a particular option or its value. A specific option
 such as `limit / too_big` supports inspecting that option's existing contract;
 it does not authorize changing the limit. Absent detail remains unresolved,
@@ -1970,7 +1996,7 @@ WITH rows AS MATERIALIZED (
   CROSS JOIN LATERAL (
     SELECT CASE
              WHEN c ->> 'command' = 'automation list' AND e -> 'validation' ->> 'field' IN ('limit', 'status')
-               OR c ->> 'command' = 'knowledge show' AND e -> 'validation' ->> 'field' = 'slug'
+               OR c ->> 'command' = 'knowledge show' AND e -> 'validation' ->> 'field' IN ('slug', 'arguments')
                OR c ->> 'command' = 'knowledge upsert' AND e -> 'validation' ->> 'field' IN (
                  'body', 'slug', 'title', 'pageType', 'status', 'clearLibraryLinks',
                  'relatedSlug', 'librarySlug', 'sourcePath', 'arguments')

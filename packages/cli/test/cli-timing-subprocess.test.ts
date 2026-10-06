@@ -17,7 +17,7 @@ const root = fileURLToPath(new URL('../../..', import.meta.url))
 const childFile = fileURLToPath(new URL('./fixtures/cli-timing-child.ts', import.meta.url))
 const tsx = import.meta.resolve('tsx')
 const key = '0123456789abcdef0123456789abcdef'
-const sentinels = ['SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', 'SYNTHETIC_PRIVATE_PATH',
+const sentinels = ['PRIVATE_SENTINEL', 'meal_synthetic_missing', 'SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', 'SYNTHETIC_PRIVATE_PATH',
   'SYNTHETIC_MEMORY_VALUE', 'mem_synthetic_missing', 'bank/memory.md', 'synthetic-invalid',
   'SYNTHETIC_INVALID_SLUG!', 'synthetic-page', 'SYNTHETIC_KNOWLEDGE_VALUE',
   'SYNTHETIC_MEASUREMENT_METRIC', 'SYNTHETIC_INVALID_DATE', '2001-02-30']
@@ -117,6 +117,15 @@ const cases: Case[] = [
   { name: 'knowledge append missing heading', argv: ['knowledge', 'append-section', 'synthetic-page', '--body', 'SYNTHETIC_HEALTH_HISTORY'],
     command: 'knowledge append-section', code: 'VALIDATION_ERROR', field: 'heading',
     validation: { field: 'heading', code: 'invalid_type', missing: true } },
+  { name: 'knowledge show rejects named slug before effects', argv: ['knowledge', 'show', '--slug', 'synthetic-page'],
+    command: 'knowledge show', code: 'VALIDATION_ERROR', field: 'arguments',
+    validation: { field: 'arguments', code: 'custom', missing: false } },
+  { name: 'knowledge upsert rejects unknown option before writes', argv: ['knowledge', 'upsert', '--body', 'SYNTHETIC_HEALTH_HISTORY', '--PRIVATE_SENTINEL'],
+    command: 'knowledge upsert', code: 'VALIDATION_ERROR', field: 'arguments',
+    validation: { field: 'arguments', code: 'custom', missing: false } },
+  { name: 'meal edit rejects unknown option before lookup or writes', argv: ['meal', 'edit', 'meal_synthetic_missing', '--PRIVATE_SENTINEL'],
+    command: 'meal edit', code: 'VALIDATION_ERROR', field: 'arguments',
+    validation: { field: 'arguments', code: 'custom', missing: false } },
   { name: 'knowledge show missing slug', argv: ['knowledge', 'show'],
     command: 'knowledge show', code: 'VALIDATION_ERROR', field: 'slug',
     validation: { field: 'slug', code: 'invalid_type', missing: true } },
