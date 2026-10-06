@@ -380,6 +380,16 @@ function parseDiagnosticRuntimeLog(redactedJson: Record<string, unknown>): void 
   });
 }
 
+function readCapturedOpenAiDiagnostic(): Record<string, unknown> {
+  const captureCall = mocks.emitHostedExecutionStructuredLog.mock.calls.find(([entry]) =>
+    entry.message === "Hosted runner provider request diagnostic captured."
+  );
+  expect(captureCall).toBeDefined();
+  const details = captureCall?.[0].details;
+  expect(details && typeof details === "object").toBe(true);
+  return details as Record<string, unknown>;
+}
+
 function readDiagnosticInputMetric(
   diagnostic: Record<string, unknown>,
   kind: string,
@@ -4339,7 +4349,7 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
   });
 
-  it("records OpenAI cache diagnostics as redacted metadata when background work is available", async () => {
+  it("emits OpenAI cache diagnostics as redacted structured metadata without a Web runtime-log POST", async () => {
     const waitUntilPromises: Promise<unknown>[] = [];
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       const url = new URL(readFetchTargetUrl(target));
@@ -4422,35 +4432,10 @@ describe("hostedRunnerIntercept", () => {
       .toBe("Bearer openai-worker-secret");
     await expect((upstreamRequest as Request).clone().json()).resolves.toEqual(requestBody);
 
-    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
-    expect(runtimeLogCall).toBeDefined();
-    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
-      entries?: Array<{
-        attemptId?: string;
-        component?: string;
-        eventCode?: string;
-        leaseGeneration?: string;
-        level?: string;
-        phase?: string;
-        redactedJson?: Record<string, unknown>;
-        workspaceVersion?: string;
-      }>;
-    };
-    const entry = runtimeLogBody.entries?.[0];
-    expect(parseHostedRuntimeLogRequest(runtimeLogBody).entries).toHaveLength(1);
-    if (entry?.redactedJson) {
-      parseDiagnosticRuntimeLog(entry.redactedJson);
-    }
-    expect(entry).toEqual(expect.objectContaining({
-      attemptId: "attempt_1",
-      component: "runner",
-      eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
-      leaseGeneration: "7",
-      level: "debug",
-      phase: "fetch",
-      workspaceVersion: "4",
-    }));
-    expect(entry?.redactedJson).toEqual(expect.objectContaining({
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    const diagnostic = readCapturedOpenAiDiagnostic();
+    parseDiagnosticRuntimeLog(diagnostic);
+    expect(diagnostic).toEqual(expect.objectContaining({
       cacheNamespacePresent: true,
       cacheRetentionKind: "24h",
       endpointKind: "responses",
@@ -4484,48 +4469,48 @@ describe("hostedRunnerIntercept", () => {
       streamPresent: true,
       toolCount: 1,
     }));
-    expect(entry?.redactedJson?.inputLargestItemBytes)
+    expect(diagnostic.inputLargestItemBytes)
       .toBe(testJsonByteLength(requestBody.input[0]));
-    expect(entry?.redactedJson?.inputNestedMetricBytes).toEqual([
+    expect(diagnostic.inputNestedMetricBytes).toEqual([
       testJsonByteLength(requestBody.input[0].content),
       0,
       testByteLength(`${syntheticStablePrefix}${syntheticHiddenText}`)
         + testByteLength("input_text")
         + testByteLength("user"),
     ]);
-    expect(entry?.redactedJson?.inputTailItemBytes).toEqual([
+    expect(diagnostic.inputTailItemBytes).toEqual([
       testJsonByteLength(requestBody.input[0]),
     ]);
-    expect(entry?.redactedJson?.inputTailItemContentBytes).toEqual([
+    expect(diagnostic.inputTailItemContentBytes).toEqual([
       testJsonByteLength(requestBody.input[0].content),
     ]);
-    expect(entry?.redactedJson?.inputTailItemOutputBytes).toEqual([0]);
-    expect(entry?.redactedJson?.inputTailItemStringBytes).toEqual([
+    expect(diagnostic.inputTailItemOutputBytes).toEqual([0]);
+    expect(diagnostic.inputTailItemStringBytes).toEqual([
       testByteLength(`${syntheticStablePrefix}${syntheticHiddenText}`)
         + testByteLength("input_text")
         + testByteLength("user"),
     ]);
-    expect(Object.keys(entry?.redactedJson ?? {}).length).toBeLessThanOrEqual(64);
-    expect(entry?.redactedJson?.cacheNamespaceFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
-    expect(entry?.redactedJson?.previousResponseFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
-    expect(entry?.redactedJson?.requestPrefixFingerprints).toEqual(
+    expect(Object.keys(diagnostic).length).toBeLessThanOrEqual(65);
+    expect(diagnostic.cacheNamespaceFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
+    expect(diagnostic.previousResponseFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
+    expect(diagnostic.requestPrefixFingerprints).toEqual(
       expect.arrayContaining([expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u)]),
     );
-    expect(entry?.redactedJson?.inputPrefixFingerprints).toEqual(
+    expect(diagnostic.inputPrefixFingerprints).toEqual(
       expect.arrayContaining([expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u)]),
     );
-    expect(entry?.redactedJson?.inputTailItemFingerprints).toEqual([
+    expect(diagnostic.inputTailItemFingerprints).toEqual([
       expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u),
     ]);
 
-    const runtimeLogJson = JSON.stringify(runtimeLogBody);
-    expect(runtimeLogJson).not.toContain(syntheticCacheNamespace);
-    expect(runtimeLogJson).not.toContain(syntheticPreviousResponse);
-    expect(runtimeLogJson).not.toContain(syntheticHiddenText);
-    expect(runtimeLogJson).not.toContain("synthetic-stable-cache-prefix-segment");
-    expect(runtimeLogJson).not.toContain("diagnostic-fingerprint-secret");
-    expect(runtimeLogJson).not.toContain("openai-worker-secret");
-    expect(runtimeLogJson).not.toContain(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
+    const diagnosticJson = JSON.stringify(diagnostic);
+    expect(diagnosticJson).not.toContain(syntheticCacheNamespace);
+    expect(diagnosticJson).not.toContain(syntheticPreviousResponse);
+    expect(diagnosticJson).not.toContain(syntheticHiddenText);
+    expect(diagnosticJson).not.toContain("synthetic-stable-cache-prefix-segment");
+    expect(diagnosticJson).not.toContain("diagnostic-fingerprint-secret");
+    expect(diagnosticJson).not.toContain("openai-worker-secret");
+    expect(diagnosticJson).not.toContain(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
     expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
       .not.toContain(syntheticHiddenText);
   });
@@ -4595,15 +4580,9 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     await Promise.all(waitUntilPromises);
 
-    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
-    expect(runtimeLogCall).toBeDefined();
-    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
-      entries?: Array<{
-        redactedJson?: Record<string, unknown>;
-      }>;
-    };
-    const redactedJson = runtimeLogBody.entries?.[0]?.redactedJson;
-    expect(redactedJson).toEqual(expect.objectContaining({
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    const diagnostic = readCapturedOpenAiDiagnostic();
+    expect(diagnostic).toEqual(expect.objectContaining({
       codexCompactionImplementationKind: "responses_compaction_v2",
       codexCompactionPhaseKind: "pre_turn",
       codexCompactionReasonKind: "context_limit",
@@ -4612,19 +4591,17 @@ describe("hostedRunnerIntercept", () => {
       codexTurnMetadataStatus: "valid",
       endpointKind: "responses",
     }));
-    if (redactedJson) {
-      parseDiagnosticRuntimeLog(redactedJson);
-    }
+    parseDiagnosticRuntimeLog(diagnostic);
 
-    const runtimeLogJson = JSON.stringify(runtimeLogBody);
-    expect(runtimeLogJson).not.toContain(sensitiveSessionId);
-    expect(runtimeLogJson).not.toContain(sensitiveThreadId);
-    expect(runtimeLogJson).not.toContain(sensitiveTurnId);
+    const diagnosticJson = JSON.stringify(diagnostic);
+    expect(diagnosticJson).not.toContain(sensitiveSessionId);
+    expect(diagnosticJson).not.toContain(sensitiveThreadId);
+    expect(diagnosticJson).not.toContain(sensitiveTurnId);
     expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
       .not.toContain(sensitiveThreadId);
   });
 
-  it("records OpenAI cache diagnostics under the fence validated by a provider token", async () => {
+  it("emits OpenAI cache diagnostics for provider-token egress without a Web runtime-log POST", async () => {
     const waitUntilPromises: Promise<unknown>[] = [];
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       const url = new URL(readFetchTargetUrl(target));
@@ -4682,33 +4659,17 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     await Promise.all(waitUntilPromises);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
 
-    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
-    expect(runtimeLogCall).toBeDefined();
-    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
-      entries?: Array<{
-        attemptId?: string;
-        eventCode?: string;
-        leaseGeneration?: string;
-        redactedJson?: Record<string, unknown>;
-        workspaceVersion?: string;
-      }>;
-    };
-    expect(parseHostedRuntimeLogRequest(runtimeLogBody).entries).toHaveLength(1);
-    expect(runtimeLogBody.entries?.[0]).toEqual(expect.objectContaining({
-      attemptId: "attempt_provider_egress",
-      eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
-      leaseGeneration: "11",
-      workspaceVersion: "9",
-    }));
-    expect(runtimeLogBody.entries?.[0]?.redactedJson).toEqual(expect.objectContaining({
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    const diagnostic = readCapturedOpenAiDiagnostic();
+    parseDiagnosticRuntimeLog(diagnostic);
+    expect(diagnostic).toEqual(expect.objectContaining({
       endpointKind: "responses",
       providerKind: "openai",
     }));
   });
 
-  it("records OpenAI cache diagnostics when background work is unavailable", async () => {
+  it("emits OpenAI cache diagnostics when background work is unavailable without a Web runtime-log POST", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       const url = new URL(readFetchTargetUrl(target));
       if (url.hostname === "web.example.test") {
@@ -4749,81 +4710,15 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     await settleWaitUntilForTest();
     expect(findFetchCall(fetchMock, "api.openai.com")).toBeDefined();
-    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
-    expect(runtimeLogCall).toBeDefined();
-    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
-      entries?: Array<{
-        eventCode?: string;
-        redactedJson?: Record<string, unknown>;
-      }>;
-    };
-    expect(runtimeLogBody.entries?.[0]).toEqual(expect.objectContaining({
-      eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
-      redactedJson: expect.objectContaining({
-        endpointKind: "responses",
-        fingerprintKind: "hmac-sha256",
-        inputFingerprintPresent: false,
-        requestFingerprintPresent: false,
-      }),
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    const diagnostic = readCapturedOpenAiDiagnostic();
+    parseDiagnosticRuntimeLog(diagnostic);
+    expect(diagnostic).toEqual(expect.objectContaining({
+      endpointKind: "responses",
+      fingerprintKind: "hmac-sha256",
+      inputFingerprintPresent: false,
+      requestFingerprintPresent: false,
     }));
-  });
-
-  it("returns the OpenAI response without awaiting diagnostic persistence when waitUntil is unavailable", async () => {
-    let markRuntimeLogStarted: (() => void) | undefined;
-    const runtimeLogStarted = new Promise<void>((resolve) => {
-      markRuntimeLogStarted = resolve;
-    });
-    let finishRuntimeLog: ((response: Response) => void) | undefined;
-    const pendingRuntimeLog = new Promise<Response>((resolve) => {
-      finishRuntimeLog = resolve;
-    });
-    const fetchMock = vi.fn<typeof fetch>(async (target) => {
-      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
-        markRuntimeLogStarted?.();
-        return await pendingRuntimeLog;
-      }
-      return new Response("ok");
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const response = await Promise.race([
-        hostedRunnerIntercept(
-          new Request("https://api.openai.com/v1/responses", {
-            body: JSON.stringify({ input: "hello", model: "gpt-5.6-terra", stream: true }),
-            headers: {
-              ...BOUND_USER_WRITE_FENCE_HEADERS,
-              "content-type": "application/json; charset=utf-8",
-              authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
-            },
-            method: "POST",
-          }),
-          createInterceptEnv({
-            OPENAI_API_KEY: "openai-worker-secret",
-            validateRuntimeWriteFence: async () => true,
-          }),
-          { className: "RunnerContainer", containerId: "opaque-container-id" },
-        ),
-        new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(new Error("OpenAI delivery waited for the diagnostic runtime-log write"));
-          }, 1_000);
-        }),
-      ]);
-      expect(response.status).toBe(200);
-      await expect(response.text()).resolves.toBe("ok");
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    await runtimeLogStarted;
-    finishRuntimeLog?.(Response.json({ loggedCount: 1 }));
-    await settleWaitUntilForTest();
-    const runtimeLogBody = JSON.parse(
-      String(findFetchCall(fetchMock, "web.example.test")?.[1]?.body ?? "{}"),
-    ) as { entries?: Array<{ eventCode?: string }> };
-    expect(runtimeLogBody.entries?.[0]?.eventCode).toBe(HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE);
   });
 
   it("does not double-record ordinary OpenAI turns at egress", async () => {

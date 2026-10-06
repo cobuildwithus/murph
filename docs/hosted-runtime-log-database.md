@@ -252,11 +252,12 @@ export raw JSON or subject identifiers just to investigate a latency span.
 
 `runner.provider_egress_diagnostic` is the bounded provider-request trace for
 hosted OpenAI `POST /v1/responses` traffic. The Worker builds it from the request
-bytes already admitted for the image gate after the provider request starts, and
-persists it as background work, so neither diagnostic parsing nor the runtime-log
-write holds the provider response. Version 4 records request and input byte counts,
-allowlisted shape/model kinds, cache-key presence, and keyed prefix fingerprints.
-For parsed Responses input, it also extends the existing aligned
+bytes already admitted for the image gate after the provider request starts, as
+background work, and emits it as a Worker structured log with the same bounded,
+redacted fields instead of writing one hosted-runtime-log row per model call.
+Version 4 records request and input byte counts, allowlisted shape/model kinds,
+cache-key presence, and keyed prefix fingerprints. For parsed Responses input, it
+also extends the existing aligned
 `inputNestedMetricKinds`, `inputNestedMetricCounts`, and
 `inputNestedMetricBytes` arrays with fixed function-output metrics. Nonzero
 action metrics use `function_output.action.command.execution`,
