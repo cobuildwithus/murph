@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   handleHostedStripeWebhook: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
+vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
   handleHostedStripeWebhook: mocks.handleHostedStripeWebhook,
 }));
 

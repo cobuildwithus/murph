@@ -218,7 +218,7 @@ import type {
 } from "./webhook-service-types";
 import {
   reconcileHostedThreadContainerParticipants,
-} from "../hosted-groups/group-tool";
+} from "../hosted-groups/thread-container-participants";
 import {
   lookupHostedGroupParticipantMemberIdsByHandles,
 } from "../hosted-groups/participant-member";
@@ -253,13 +253,6 @@ import {
   readHostedPostCommitRemainingMs,
 } from "./bounded-post-commit";
 import { lockHostedMemberRow } from "./shared";
-
-export {
-  handleHostedStripeWebhook,
-} from "./webhook-service-stripe";
-export type {
-  HostedStripeWebhookResponse,
-} from "./webhook-service-types";
 
 type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
 type HostedLinqCurrentInboundReplyProof = {

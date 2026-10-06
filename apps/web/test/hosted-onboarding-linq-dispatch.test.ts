@@ -659,10 +659,6 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
-  handleHostedStripeWebhook: vi.fn(),
-}));
-
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));

@@ -1,5 +1,4 @@
 import { HookNotFoundError } from "workflow/errors";
-import { resumeHook } from "workflow/api";
 
 import { waitForAbortableSettlement } from "../hosted-onboarding/abortable-settlement";
 import type {
@@ -22,9 +21,9 @@ export async function signalHostedPhoneCallReconciliation(input: {
   signal: AbortSignal;
   waitForRegistration?: boolean;
 }): Promise<void> {
-  const hookResumer = input.hookResumer ?? resumeHook<
-    HostedPhoneCallReconciliationHookPayload
-  >;
+  // Load the large Workflow client SDK only when a hook is actually resumed.
+  const hookResumer = input.hookResumer
+    ?? (await import("workflow/api")).resumeHook<HostedPhoneCallReconciliationHookPayload>;
   const token = buildHostedPhoneCallReconciliationHookToken(input.phoneCallId);
   const registrationDeadline = Date.now()
     + HOSTED_PHONE_CALL_RECONCILIATION_HOOK_REGISTRATION_TIMEOUT_MS;
