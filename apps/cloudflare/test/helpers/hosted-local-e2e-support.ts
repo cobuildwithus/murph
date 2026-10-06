@@ -68,6 +68,7 @@ export type HostedLocalAssistantProviderMode = "stub" | "live";
  * first, then the follow-up text.
  */
 type HostedLocalAssistantProviderFunctionCallResponse = {
+    beforeResponse?: () => Promise<void> | void;
     functionCall: {
       arguments: Record<string, unknown>;
       name: string;
@@ -147,7 +148,7 @@ export function scopeHostedLocalAssistantProviderResponse(
  */
 export function buildAssistantProviderShellCommandCall(
   command: string,
-): HostedLocalAssistantProviderScriptedResponse {
+): HostedLocalAssistantProviderFunctionCallResponse {
   return {
     functionCall: {
       arguments: { cmd: command },
@@ -707,11 +708,11 @@ async function prepareAssistantProviderScriptedResponse(
   scriptedResponse: HostedLocalAssistantProviderScriptedResponsePayload,
   requestContext: HostedLocalAssistantProviderRequestContext,
 ): Promise<string | HostedLocalAssistantProviderToolCallResponse> {
-  if (
-    typeof scriptedResponse === "string"
-    || "customToolCall" in scriptedResponse
-    || "functionCall" in scriptedResponse
-  ) {
+  if (typeof scriptedResponse === "object" && "functionCall" in scriptedResponse) {
+    await scriptedResponse.beforeResponse?.();
+    return scriptedResponse;
+  }
+  if (typeof scriptedResponse === "string" || "customToolCall" in scriptedResponse) {
     return scriptedResponse;
   }
   if ("deriveResponse" in scriptedResponse) {

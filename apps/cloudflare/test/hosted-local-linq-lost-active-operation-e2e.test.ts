@@ -94,8 +94,13 @@ describe("hosted local Linq lost active-operation e2e", () => {
 
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(replyPath);
+    let releaseFirstToolCall!: () => void;
+    const firstToolCallGate = new Promise<void>((resolve) => { releaseFirstToolCall = resolve; });
     requireScenario().queueAssistantResponses([
-      buildAssistantProviderShellCommandCall("sleep 3 && echo first-turn-held"),
+      {
+        ...buildAssistantProviderShellCommandCall("echo first-turn-held"),
+        beforeResponse: () => firstToolCallGate,
+      },
       unsteeredFirstReplyText,
     ], {
       matchInputContains: "First message while starting the turn.",
@@ -107,38 +112,45 @@ describe("hosted local Linq lost active-operation e2e", () => {
       matchInputContains: thirdInboundText,
     });
 
-    const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      chatId,
-      {
-        eventId: `evt_lost_active_first_${userId}`,
-        messageId: `msg_lost_active_first_${userId}`,
-        text: "First message while starting the turn.",
-      },
-    ));
-    expect(firstWebhookResponse.status).toBe(202);
+    let firstTurnProviderRequestCount = 0;
+    try {
+      const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        userId,
+        chatId,
+        {
+          eventId: `evt_lost_active_first_${userId}`,
+          messageId: `msg_lost_active_first_${userId}`,
+          text: "First message while starting the turn.",
+        },
+      ));
+      expect(firstWebhookResponse.status).toBe(202);
 
-    await waitForCondition(
-      () => requireScenario().assistantProviderRequests
-        .some((request) => request.url === "/v1/responses"
-          && request.body.includes("First message while starting the turn.")),
-      "Expected the first hosted assistant turn to reach the provider before dropping active operation.",
-    );
-    const firstTurnProviderRequestCount = countResponsesApiRequests();
-    await requireScenario().harness.dropRunnerActiveOperationForTest(userId, {
-      loseCompletedInvocationResult: true,
-    });
+      await waitForCondition(
+        () => requireScenario().assistantProviderRequests
+          .some((request) => request.url === "/v1/responses"
+            && request.body.includes("First message while starting the turn.")),
+        "Expected the first hosted assistant turn to reach the provider before dropping active operation.",
+      );
+      firstTurnProviderRequestCount = countResponsesApiRequests();
+      await requireScenario().harness.dropRunnerActiveOperationForTest(userId, {
+        loseCompletedInvocationResult: true,
+      });
 
-    const secondWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      chatId,
-      {
-        eventId: `evt_lost_active_second_${userId}`,
-        messageId: `msg_lost_active_second_${userId}`,
-        text: secondInboundText,
-      },
-    ));
-    expect(secondWebhookResponse.status).toBe(202);
+      const secondWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        userId,
+        chatId,
+        {
+          eventId: `evt_lost_active_second_${userId}`,
+          messageId: `msg_lost_active_second_${userId}`,
+          text: secondInboundText,
+        },
+      ));
+      expect(secondWebhookResponse.status).toBe(202);
+    } finally {
+      // Only let the in-progress turn execute its tool after the pointer drop
+      // and second mailbox admission, independent of host scheduling speed.
+      releaseFirstToolCall();
+    }
 
     await waitForCondition(
       () => requireScenario().assistantProviderRequests

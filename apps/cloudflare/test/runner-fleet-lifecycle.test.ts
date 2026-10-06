@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it, vi } from "vitest";
 import { RunnerContainer, destroyHostedExecutionContainer } from "../src/runner-container.js";
 import { StandbyRunnerContainer } from "../src/standby-runner-container.js";
+import { RunnerInvocationReceiptStore } from "../src/runner-invocation-receipt.ts";
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.js";
 import {
   HOSTED_RUNNER_REGION, HOSTED_STANDBY_REGION,
@@ -294,6 +295,69 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
     await container.onActivityExpired();
     assert.equal(calls.destroy, 0);
   });
+
+  it.each([false, true])("releases a completed lost outer result without another wake (reactivated=%s)", async (reactivated) => {
+    const initial = runnerHarness({ running: true });
+    await initial.container.bindStandbySlot(claimInput());
+    const current = { ...owner("retiring"), completedAt: new Date().toISOString() };
+    const receipt = new RunnerInvocationReceiptStore(initial.sql);
+    const identity = { attemptId: current.attemptId!, generation: current.generation };
+    receipt.register(identity);
+    receipt.complete(identity, false);
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+      if (command.operation === "complete") {
+        assert.deepEqual(command, { operation: "complete", ...identity,
+          settledRunnerContainerName: GLOBAL_SLOT, immediateRecheckRequested: false });
+        current.phase = "idle";
+        return { cutover: "postgres", status: "updated", owner: null };
+      }
+      return { cutover: "postgres", status: "observed", owner: current };
+    });
+    const { container, calls } = reactivated ? runnerHarness({ running: true, durable: initial }) : initial;
+    await container.onActivityExpired();
+    assert.equal(current.phase, "idle");
+    assert.equal(calls.destroy, 0);
+    assert.equal((await container.listSchedules("onActivityExpired")).length, 1);
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, 1);
+  });
+
+  it.each(["registered", "wrong-attempt", "wrong-generation", "active", "unknown", "failed-completion", "successor"] as const)(
+    "preserves native authority during lost-result recovery: %s", async (condition) => {
+      const h = runnerHarness({ running: true,
+        health: condition === "active" ? { activeJobCount: 1 } : {},
+        fetchHealth: condition === "unknown" ? async () => { throw new Error("synthetic unavailable health"); } : undefined,
+      });
+      await h.container.bindStandbySlot(claimInput());
+      const current = { ...owner("retiring"), completedAt: new Date().toISOString() };
+      const receipt = new RunnerInvocationReceiptStore(h.sql);
+      const identity = { attemptId: condition === "wrong-attempt" ? "other-attempt" : current.attemptId!,
+        generation: condition === "wrong-generation" ? "2" : current.generation };
+      receipt.register(identity);
+      if (condition !== "registered") receipt.complete(identity, true);
+      let completionCalls = 0;
+      vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+        if (command.operation === "complete") {
+          completionCalls++;
+          if (condition === "failed-completion") throw new Error("synthetic unavailable completion");
+          assert.equal(condition, "successor");
+          current.attemptId = "successor-attempt";
+          current.generation = "2";
+          current.phase = "starting";
+          return { cutover: "postgres", status: "stale", owner: null };
+        }
+        return { cutover: "postgres", status: "observed", owner: current };
+      });
+      await h.container.onActivityExpired();
+      assert.equal(completionCalls, ["failed-completion", "successor"].includes(condition) ? 1 : 0);
+      if (condition === "successor") {
+        await h.container.onActivityExpired();
+        assert.equal(completionCalls, 1);
+      }
+      assert.equal(h.calls.destroy, 0);
+      assert.equal((await h.container.listSchedules("onActivityExpired")).length, 1);
+    },
+  );
 
   it("does not block arriving readiness on an idle owner read or apply its stale cleanup", async () => {
     const { container, calls } = runnerHarness({ running: true });
