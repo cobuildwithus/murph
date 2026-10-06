@@ -23,10 +23,18 @@ specific request into a broad account scan.
      (`one_drive`), Dropbox (`dropbox`), Google Tasks (`googletasks`), Todoist
      (`todoist`), Notion (`notion`)
    - approved built-ins: `composio_search`, `instacart`, `openweather_api`
+
+   Reuse an exact slug and complete schema already discovered in this turn for
+   the same toolkit and scope. Search again only for a different capability,
+   missing schema, or an explicit stale/invalid-schema result. Reused discovery
+   is not current account access, approval, or write authority.
 3. Use `murph.connected_apps_execute` with the exact returned slug and schema,
    or with an exact fixed route named below or in the current system prompt.
    Include the exact account selector for connected-account tools and omit an
-   account for accountless services.
+   account for accountless services. When the discovered schema exposes time-window,
+   page-size or field-selection controls, use them to request only task-relevant data.
+   Retain pagination, truncation, errors and source identifiers; fetch further
+   pages or complete source text when required for completeness or attribution.
 
 Before asking the user to repeat a task-relevant fact these surfaces are likely
 to contain, perform the narrow read when the account and task are clear. Ask one

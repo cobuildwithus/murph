@@ -34197,6 +34197,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
       ['cue', 'Stretch cue', 'Say: Time for a short stretch break.'],
       ['lookup', 'Weather walk', 'Read the saved approximate city and current weather once; suggest the usual short walk only if weather is suitable. Do not ask for location or make medical recommendations.'],
       ['pinned', 'Preferred reminder', 'The member explicitly requested GPT-6.1 Sol for this reminder. Keep that model. Say: Time for your break.'],
+      ['managed', 'Managed maintenance', 'Preserve this host-managed workflow.'],
       ['research', 'Research review', 'Research new clinical evidence, reconcile conflicting sources against relevant medical history, and verify citations before offering a carefully qualified summary.'],
     ] as const
     const records = definitions.map(([slug, title, instructions]) => ({
@@ -34204,7 +34205,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
       contextReferences: [], effectiveTimeZone: 'UTC',
       occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: '2026-10-06T09:00:00.000Z' },
       schedule: { kind: 'dailyLocal' as const, localTime: '09:00', timeZone: 'UTC' },
-      managed: false, status: 'active' as const, updatedAt: '2026-10-01T00:00:00.000Z',
+      managed: slug === 'managed', status: 'active' as const, updatedAt: '2026-10-01T00:00:00.000Z',
       assistantTargetOverride: { model: 'gpt-6.1-sol' as const, reasoningEffort: 'medium' as const },
     }))
     const changed: string[] = []
@@ -34256,7 +34257,15 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
             if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Unexpected automation action.')
             const index = records.findIndex(record => record.automationId === request.lookup)
             if (index < 0) throw new Error('Managed automation must be preserved.')
-            return fixtures[index]!.request(request, options)
+            const response = await fixtures[index]!.request(request, options)
+            if (request.action === 'inspect' && response.action === 'inspect') {
+              expect(request.view).toBe('model_review')
+              const { executionInspection: _history, occurrenceProjection: _timing,
+                effectiveTimeZone: _zone, instructions, ...configuration } = response
+              return { ...configuration, view: 'model_review',
+                ...(response.managed ? { instructionsOmitted: 'managed_model_preserved' } : { instructions }) }
+            }
+            return response
           } },
           usageDiagnostics: { async read(request) { usageRequests.push(request); return syntheticUsageDiagnostics() } },
           sendVaultFile: async () => { throw new Error('Unexpected file send.') },
@@ -34272,13 +34281,14 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
         reply: result.finalMessage, feedback: feedback?.summary }) + '\n')
       expect(usageRequests).toEqual([{ days: 7, limit: 10 }])
       expect(changed.sort()).toEqual(['cue', 'lookup'])
+      expect(actions.filter(action => action.kind === 'dynamic' && action.tool === MURPH_AUTOMATION_TOOL.name)).toHaveLength(3)
       expect(fixtures.every(fixture => fixture.requests.filter(request => request.action === 'inspect').length === 1)).toBe(true)
       expect(actions.filter(action => action.kind === 'dynamic' && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name)).toHaveLength(1)
       expect(feedback).toMatchObject({ kind: 'feature_request', relatedChangelogItemIds: [] })
       expect(feedback?.summary).toMatch(/^Usage optimization audit:/u)
       expect(feedback?.summary).toMatch(/bytes|KB|kB/u)
       expect(feedback?.summary).toMatch(/1\.25/u)
-      expect(feedback?.summary).toMatch(/(?:two|2) (?:confirmed |verified |successful |model-only )?(?:model )?(?:changes|downgrades|patches|reminders|automations)/iu)
+      expect(feedback?.summary).toMatch(/(?:two|2) (?:confirmed |verified |successful |model-only )?(?:model )?(?:Luna(?:\/high)? )?(?:changes|downgrades|patches|reminders|automations)/iu)
       expect(feedback?.summary).not.toMatch(/zero model changes|omitted model|obscured|result.*truncation/iu)
       expect(feedback?.summary).not.toMatch(/automation_synthetic|synthetic-member|turn_|session_|Weather walk|Research review/iu)
       expect(JSON.parse(result.finalMessage.trim())).toMatchObject({ kind: 'skip' })
@@ -42246,7 +42256,7 @@ function tomlKey(value: string): string {
 }
 
 describeRealCodex('real Codex Murph service discovery e2e', () => {
-  it('uses an available Murph service without requesting a member connection', async () => {
+  it('reuses weather service discovery across two reads without requesting a member connection', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-service-discovery-e2e-'))
     const requests: Array<{ operation: string; input: Record<string, unknown> }> = []
@@ -42277,23 +42287,28 @@ describeRealCodex('real Codex Murph service discovery e2e', () => {
               } },
             } }
             if (request.operation !== 'execute') throw new Error('No member connection is needed for this service.')
-            return { result: { main: { temp: 18 }, weather: [{ description: 'clear sky' }], units: 'metric' } }
+            return { result: { main: { temp: request.input.arguments.lat === 40 ? 18 : 12 }, weather: [{ description: request.input.arguments.lat === 40 ? 'clear sky' : 'light rain' }], units: 'metric' } }
           } },
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => { throw new Error('No file send authorized.') }, vaultFileSendAvailable: false,
         },
         model: config.model, modelProvider: config.modelProvider,
-        prompt: 'I am heading out for a walk now near latitude 40, longitude -75. Please use Murph’s built-in weather service to check the current temperature and sky conditions, in Celsius.',
+        prompt: 'I am choosing between two walking spots: A is latitude 40, longitude -75; B is latitude 41, longitude -76. Please check the current temperature and sky conditions at both, in Celsius, using Murph’s built-in weather service, and compare them.',
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
       process.stdout.write(JSON.stringify({ scenario: 'Murph-provided service discovery', reply: result.finalMessage, operations: requests.map((request) => request.operation) }) + '\n')
       expect(requests.filter((request) => request.operation === 'manage')).toEqual([])
       const executions = requests.filter((request) => request.operation === 'execute')
-      expect(executions).toHaveLength(1)
+      expect(executions).toHaveLength(2)
+      expect(requests.filter(request => request.operation === 'search').length).toBeLessThanOrEqual(1)
+      executions.sort((left, right) => Number((left.input.arguments as Record<string, unknown>).lat) - Number((right.input.arguments as Record<string, unknown>).lat))
       expect(executions[0]?.input).toMatchObject({ toolSlug: 'OPENWEATHER_API_GET_CURRENT_WEATHER', arguments: { lat: 40, lon: -75, units: 'metric' } })
-      expect(executions[0]?.input.account).toBeUndefined()
+      expect(executions[1]?.input).toMatchObject({ toolSlug: 'OPENWEATHER_API_GET_CURRENT_WEATHER', arguments: { lat: 41, lon: -76, units: 'metric' } })
+      expect(executions.every(execution => execution.input.account === undefined)).toBe(true)
       expect(result.finalMessage).toMatch(/18/)
       expect(result.finalMessage).toMatch(/clear/iu)
+      expect(result.finalMessage).toMatch(/12/)
+      expect(result.finalMessage).toMatch(/rain/iu)
       expect(result.finalMessage).not.toMatch(/connect.*(?:account|weather)|API key|credentials|sign in/iu)
     } finally { await rm(workingDirectory, { force: true, recursive: true }) }
   }, 720_000)
