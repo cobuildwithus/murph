@@ -2405,8 +2405,27 @@ export class RunnerContainer extends Container {
         command: { operation: "reconcile" },
         timeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
       });
-      return cutover === "postgres" && status === "observed"
-        && (owner?.runnerContainerName !== binding.slotName || owner.phase === "idle");
+      if (cutover !== "postgres" || status !== "observed") return false;
+      if (owner?.runnerContainerName !== binding.slotName || owner.phase === "idle") return true;
+      // A lost outer result can leave a completed owner retiring after its
+      // mailbox drains. The existing lifecycle alarm must recover it even when
+      // there is no new work for Temporal to dispatch. Receipt alone is not
+      // stoppedness: require the exact identity and an inactive native fence.
+      if (owner.phase !== "retiring" || owner.completedAt === null) return false;
+      const receipt = this.requireInvocationReceiptStore().read();
+      if (receipt?.state === "completed" && receipt.attemptId === owner.attemptId
+        && receipt.generation === owner.generation
+        && !(await this.readActiveRuntimeUserFence()).active) {
+        await recordHostedRuntimeOwnerCompletion({
+          source: this.environment, userId: binding.userId,
+          attemptId: receipt.attemptId, generation: receipt.generation,
+          result: receipt.immediateRecheckRequested ? { immediateRecheckRequested: true } : {},
+          settledRunnerContainerName: binding.slotName,
+        });
+      }
+      // Re-read canonical ownership on the already-scheduled next lifecycle
+      // pass before destruction; a concurrent successor may now own this slot.
+      return false;
     } catch (error) {
       this.logLifecycleCleanupFailure(
         "Hosted execution container could not verify runtime ownership during idle cleanup.",
