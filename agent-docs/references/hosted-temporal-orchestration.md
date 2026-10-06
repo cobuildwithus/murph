@@ -464,6 +464,34 @@ mailbox/signal nudges and read per-user reconciliation facts, but they do not
 scan global device-sync tables or keep users alive just to poll for due
 reconciles.
 
+## Inactive member scheduling
+
+Web's `user_not_active` reconciliation reason suppresses ordinary runtime work
+whether or not a canonical workspace remains. Empty mailbox lag and a null
+system frontier in these blocked facts are redacted scheduling inputs, not
+proof that a carried pointer was consumed. Temporal preserves that pointer for
+a later activation signal and discards system/default backoff and wake ownership.
+Only the workspace's inbox media retention deadline can schedule inactive work;
+a due deadline uses `inbox_media_retention` with its existing failure retry and
+accepted-owner recheck. Stale device-sync or assistant wakes cannot shorten that
+wait. A new signal always re-reads Web's access facts before admission.
+
+The private scheduler guards workspace-present quiescence with
+`hosted-runtime-inactive-workspace-quiescence-v1`, evaluated after each successful
+reconciliation so an existing execution adopts it at the live frontier. Keep
+old command order for histories without the marker during replay. This is a
+patch-introducing, direct-Current release with no older traffic-bearing reader;
+retain the patch until pre-marker histories drain. No operator signal or reset
+is required for a workflow already retrying to reach its next reconciliation.
+
+Defense in depth: Web's owner `claim` also reports `blockedReason: "admission"`
+for these members, and the Worker answers a dispatch that still arrives with a
+five-minute `admission_blocked` retry instead of the three-second contention
+retry (`hosted-postgres-runtime.md` owns that contract). The runtime-log
+runaway alert opens at 60 processing attempts per member-hour. Consent
+withdrawal, disconnect authority, and retention claim checks remain with their
+existing owners.
+
 ## Workflow Replay And Versioning
 
 Private `cobuildwithus/murph-cloud` owns the long-lived per-user Temporal

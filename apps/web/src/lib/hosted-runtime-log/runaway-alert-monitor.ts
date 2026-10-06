@@ -13,6 +13,10 @@ import { getHostedRuntimeLogPool, isHostedRuntimeLogDatabaseConfigured } from ".
 import type { HostedRuntimeLogSqlDatabase } from "./store";
 
 export const HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD = 25;
+// Every Worker ensure-processing call writes one row, accepted or retried.
+// Normal members stay under 20 per hour (p999 16 over 7.8k member-hours); one
+// per minute is a retry storm that is also hitting Web on every attempt.
+export const HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD = 60;
 export const HOSTED_RUNTIME_RUNAWAY_WINDOW_MS = 60 * 60_000;
 export const HOSTED_RUNTIME_RUNAWAY_SUBJECT_LIMIT = 10;
 export const HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
@@ -22,20 +26,31 @@ export const HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
 const EMAIL_WAKE_REASONS = [
   "assistant", "assistant_delivery", "device-sync.reconcile", "inbox_media_retention", "mailbox",
 ];
+const EMAIL_PROCESSING_OUTCOMES = ["runtime_processing_accepted", "retry_later", "threw"];
+// Worker retry reasons; a reason added later reads as unknown until listed.
+const EMAIL_RETRY_REASONS = [
+  "active_child_rejected", "admission_blocked", "checkpoint_handoff_pending", "claim_blocked",
+  "command_budget_exhausted", "completion_unconfirmed", "container_busy", "container_not_ready",
+  "container_rpc_error", "container_rpc_timeout", "cutover_blocked", "missing_container_binding",
+  "processing_mode_conflict", "retirement_pending", "starting_fence_preserved", "wake_unconfirmed",
+];
 
 type RunawaySubject = {
   subjectPrefix: string;
   invocationCount: number;
+  processingAttemptCount: number;
   processingMode: string;
   nextWakeReason: string;
+  processingOutcome: string;
 };
 type RunawayHealth = {
   anomalous: boolean;
   runawaySubjectCount: number;
   subjects: RunawaySubject[];
 };
-type RunawayRow = Omit<RunawaySubject, "invocationCount"> & {
+type RunawayRow = Omit<RunawaySubject, "invocationCount" | "processingAttemptCount"> & {
   invocationCount: string;
+  processingAttemptCount: string;
   runawaySubjectCount: string;
 };
 type LogDatabase = Pick<HostedRuntimeLogSqlDatabase, "query">;
@@ -47,36 +62,54 @@ export async function readHostedRuntimeRunawayHealth(input: {
   const database = input.database ?? getHostedRuntimeLogPool();
   // One time-indexed aggregate, no member lookup or raw diagnostic payload.
   // Window count runs after HAVING and before LIMIT, retaining the full total.
+  // A subject alerts on either count; the worse ratio to its threshold ranks it.
   const result = await database.query<RunawayRow>(`
     SELECT
       CASE WHEN subject_key ~ '^[a-f0-9]{64}$'
         THEN left(subject_key, 8) ELSE 'unknown' END AS "subjectPrefix",
-      count(*)::text AS "invocationCount",
+      count(*) FILTER (WHERE event_code = 'runtime.invocation_finished')::text AS "invocationCount",
+      count(*) FILTER (WHERE event_code = 'runner.processing_finished')::text AS "processingAttemptCount",
       count(*) OVER ()::text AS "runawaySubjectCount",
       mode() WITHIN GROUP (ORDER BY CASE
-        WHEN redacted_json->>'processingMode' = ANY($5::text[])
-        THEN redacted_json->>'processingMode' ELSE 'unknown' END) AS "processingMode",
-      mode() WITHIN GROUP (ORDER BY CASE
-        WHEN redacted_json->>'nextWakeReason' = ANY($6::text[])
-        THEN redacted_json->>'nextWakeReason' ELSE 'unknown' END) AS "nextWakeReason"
+        WHEN coalesce(redacted_json->>'processingMode',
+          redacted_json->>'runtimeProcessingRequestedMode') = ANY($6::text[])
+        THEN coalesce(redacted_json->>'processingMode',
+          redacted_json->>'runtimeProcessingRequestedMode') ELSE 'unknown' END) AS "processingMode",
+      coalesce(mode() WITHIN GROUP (ORDER BY CASE
+        WHEN redacted_json->>'nextWakeReason' = ANY($7::text[])
+        THEN redacted_json->>'nextWakeReason' ELSE 'unknown' END)
+        FILTER (WHERE event_code = 'runtime.invocation_finished'), 'none') AS "nextWakeReason",
+      coalesce(mode() WITHIN GROUP (ORDER BY CASE
+        WHEN redacted_json->>'runtimeProcessingOutcome' = 'retry_later'
+          AND redacted_json->>'runtimeProcessingRetryReason' = ANY($8::text[])
+        THEN 'retry_later:' || (redacted_json->>'runtimeProcessingRetryReason')
+        WHEN redacted_json->>'runtimeProcessingOutcome' = ANY($9::text[])
+        THEN redacted_json->>'runtimeProcessingOutcome' ELSE 'unknown' END)
+        FILTER (WHERE event_code = 'runner.processing_finished'), 'none') AS "processingOutcome"
     FROM hosted_runtime_log
     WHERE at >= $1 AND at <= $2
-      AND event_code = 'runtime.invocation_finished'
+      AND event_code IN ('runtime.invocation_finished', 'runner.processing_finished')
     GROUP BY subject_key
-    HAVING count(*) >= $3
-    ORDER BY count(*) DESC, subject_key
-    LIMIT $4
+    HAVING count(*) FILTER (WHERE event_code = 'runtime.invocation_finished') >= $3
+      OR count(*) FILTER (WHERE event_code = 'runner.processing_finished') >= $4
+    ORDER BY greatest(
+      count(*) FILTER (WHERE event_code = 'runtime.invocation_finished')::float8 / $3,
+      count(*) FILTER (WHERE event_code = 'runner.processing_finished')::float8 / $4) DESC, subject_key
+    LIMIT $5
   `, [new Date(input.now.getTime() - HOSTED_RUNTIME_RUNAWAY_WINDOW_MS), input.now,
-    HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD, HOSTED_RUNTIME_RUNAWAY_SUBJECT_LIMIT,
-    HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES, EMAIL_WAKE_REASONS]);
+    HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD, HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD,
+    HOSTED_RUNTIME_RUNAWAY_SUBJECT_LIMIT, HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+    EMAIL_WAKE_REASONS, EMAIL_RETRY_REASONS, EMAIL_PROCESSING_OUTCOMES]);
   return {
     anomalous: result.rows.length > 0,
     runawaySubjectCount: Number(result.rows[0]?.runawaySubjectCount ?? 0),
     subjects: result.rows.map(row => ({
       subjectPrefix: row.subjectPrefix,
       invocationCount: Number(row.invocationCount),
+      processingAttemptCount: Number(row.processingAttemptCount),
       processingMode: row.processingMode,
       nextWakeReason: row.nextWakeReason,
+      processingOutcome: row.processingOutcome,
     })),
   };
 }
@@ -102,7 +135,7 @@ export async function runHostedRuntimeRunawayAlertMonitor(input: {
     id: "hosted-runtime-runaway-monitor:v1",
     kind: "hosted_runtime_runaway_monitor",
     idempotencyScope: "murph/runtime-runaway",
-    subject: "Hosted runtime runaway invocations",
+    subject: "Hosted runtime runaway activity",
     reminderIntervalMs: HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS,
     sendDuringQuietHours: true,
     status: { healthy: "runaway_healthy", alerting: "runaway_alerting",
@@ -121,9 +154,9 @@ export async function runHostedRuntimeRunawayAlertMonitor(input: {
     }),
     buildMessage: ({ health, now }) => [
       `Runaway subjects: ${health.runawaySubjectCount}.`,
-      `Threshold: at least ${HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD} runtime.invocation_finished events in the trailing ${HOSTED_RUNTIME_RUNAWAY_WINDOW_MS / 60_000} minutes.`,
+      `Threshold: at least ${HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD} runtime.invocation_finished or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD} runner.processing_finished events in the trailing ${HOSTED_RUNTIME_RUNAWAY_WINDOW_MS / 60_000} minutes.`,
       `Top ${health.subjects.length} subjects (digest prefixes):`,
-      ...health.subjects.map(subject => `${subject.subjectPrefix}: ${subject.invocationCount} invocations; dominant processingMode=${subject.processingMode}; dominant nextWakeReason=${subject.nextWakeReason}.`),
+      ...health.subjects.map(subject => `${subject.subjectPrefix}: ${subject.invocationCount} invocations; ${subject.processingAttemptCount} processing attempts; dominant processingMode=${subject.processingMode}; dominant nextWakeReason=${subject.nextWakeReason}; dominant processing outcome=${subject.processingOutcome}.`),
       `Checked ${now.toISOString()}.`,
     ].join("\n"),
   };

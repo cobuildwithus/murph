@@ -27,6 +27,10 @@ import {
   type HostedStandbySlotBinding,
 } from "./standby-runner-contract.ts";
 
+/** Member activation and new inbound work signal orchestration directly, so a
+ * member denied admission is rechecked slowly instead of every few seconds. */
+export const HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS = 5 * 60_000;
+
 type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
   commandStartedAtEpochMs?: number;
   commandTimeoutMs?: number;
@@ -68,6 +72,9 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
   for (let admission = 0; admission < 3; admission += 1) {
     if (claim.cutover !== "postgres") return retryProcessing(ctx, "cutover_blocked");
     const owner = claim.owner;
+    if (claim.blockedReason === "admission") {
+      return retryProcessing(ctx, "admission_blocked", Date.now() + HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS);
+    }
     if (!owner || (claim.status !== "claimed" && claim.status !== "existing")) return retryProcessing(ctx, "claim_blocked");
     if (owner.userId !== ctx.input.userId) throw new TypeError("Runtime admission belongs to a different member.");
     if (owner.generation === previousGeneration) return retryProcessing(ctx, "claim_blocked");
@@ -132,7 +139,7 @@ function createProcessingContext(source: RuntimeProcessingSource, input: Runtime
 }
 
 function retryProcessing(ctx: { diagnostics: RuntimeProcessingDiagnostics }, reason:
-  | "cutover_blocked" | "missing_container_binding"
+  | "cutover_blocked" | "missing_container_binding" | "admission_blocked"
   | "claim_blocked" | "retirement_pending" | "completion_unconfirmed" | "starting_fence_preserved"
   | "processing_mode_conflict" | "wake_unconfirmed" | "container_not_ready"
   | "command_budget_exhausted" | "container_rpc_timeout",

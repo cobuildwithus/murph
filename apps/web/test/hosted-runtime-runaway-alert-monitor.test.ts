@@ -14,6 +14,7 @@ vi.mock("@/src/lib/hosted-runtime-log/database", () => ({
 
 import {
   HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD,
+  HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD,
   HOSTED_RUNTIME_RUNAWAY_WINDOW_MS,
   runHostedRuntimeRunawayAlertMonitor,
 } from "@/src/lib/hosted-runtime-log/runaway-alert-monitor";
@@ -48,10 +49,11 @@ beforeEach(() => {
   });
 });
 
-function alertRows(count = 40) {
+function alertRows(count = 40, processingAttempts = 0) {
   return { rows: [{ subjectPrefix: "abcdef01", invocationCount: String(count),
+    processingAttemptCount: String(processingAttempts),
     runawaySubjectCount: "1", processingMode: "system_mailbox",
-    nextWakeReason: "device-sync.reconcile" }] };
+    nextWakeReason: "device-sync.reconcile", processingOutcome: "retry_later:claim_blocked" }] };
 }
 
 describe("runtime runaway incident monitor", () => {
@@ -62,8 +64,8 @@ describe("runtime runaway incident monitor", () => {
     expect(mocks.query).toHaveBeenCalledOnce();
     expect(mocks.query.mock.calls[0]?.[1]).toEqual([
       new Date(+now - HOSTED_RUNTIME_RUNAWAY_WINDOW_MS), now,
-      HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD, 10,
-      expect.any(Array), expect.any(Array),
+      HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD, HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD, 10,
+      expect.any(Array), expect.any(Array), expect.any(Array), expect.any(Array),
     ]);
   });
 
@@ -82,6 +84,18 @@ describe("runtime runaway incident monitor", () => {
     expect(details.message).toContain("nextWakeReason=device-sync.reconcile");
     expect(JSON.stringify(details)).not.toMatch(/userId|memberId|@|phone|subjectKey/iu);
     expect(state?.status).toBe("runaway_alerting");
+  });
+
+  it("alerts on a processing-attempt storm without runaway invocations", async () => {
+    mocks.query.mockResolvedValue(alertRows(0, 1_100));
+    expect((await runHostedRuntimeRunawayAlertMonitor({ now, env, sendAlert })).outcome).toBe("alert_sent");
+    expect(sendAlert).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining("abcdef01: 0 invocations; 1100 processing attempts"),
+    }));
+    const details = state?.detailsJson as Prisma.JsonObject;
+    expect(details.message).toContain("dominant processing outcome=retry_later:claim_blocked");
+    expect(details.message).toContain(
+      `or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD} runner.processing_finished events`);
   });
 
   it("clears a recovered incident without sending a recovery email", async () => {

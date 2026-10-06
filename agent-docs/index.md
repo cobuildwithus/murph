@@ -1051,3 +1051,9 @@ Replica physical purge deadline proof: [replica purge batch](exec-plans/complete
 Compact automation model-review readbacks and measured context reductions are
 tracked in [the compact review plan](exec-plans/completed/2026-10-05-compact-automation-review.md);
 `../ARCHITECTURE.md` owns the runtime contract.
+
+Admission-denied claim spacing (`blockedReason`), inactive-member scheduling,
+and the processing-attempt runaway alert are tracked in
+[the inactive claim plan](exec-plans/completed/2026-10-06-inactive-claim-backoff-alert.md);
+`references/hosted-postgres-runtime.md`, `references/hosted-temporal-orchestration.md`
+and `../docs/hosted-runtime-log-database.md` own the contracts.

@@ -881,8 +881,12 @@ callback statements retain the 5,000-row statement cap and use a dedicated
 
 The existing five-minute `/api/internal/hosted-runtime/latency-alert/cron` also
 runs the runaway invocation monitor. A subject with at least 25
-`runtime.invocation_finished` rows in the trailing 60 minutes opens the shared
-operational email incident. Threshold and window are named constants; recipient
+`runtime.invocation_finished` rows, or at least 60 `runner.processing_finished`
+rows, in the trailing 60 minutes opens the shared operational email incident.
+Every Worker ensure-processing call writes one `runner.processing_finished` row
+and calls Web, so the second count catches retry storms that never start a run
+(normal members stay under 20 per hour). Subjects rank by their worse ratio to
+either threshold. Thresholds and window are named constants; recipient
 and timezone configuration is shared with the latency monitor. Reminders use
 the existing six-hour interval and jitter, including quiet hours like the runtime
 progress monitor. A healthy evaluation clears the incident without a recovery
@@ -893,8 +897,9 @@ Each evaluation uses one aggregate over the existing `(at, id)` time index,
 including the incident owner's fresh pre-send evaluation. It returns the total
 qualifying subject count and at most ten highest-count subjects. Email and
 incident details contain only counts, eight-character digest prefixes, and
-dominant allowlisted `processingMode`/`nextWakeReason` labels (`unknown` for
-missing or unrecognized values). No raw identity lookup, payload export,
+dominant allowlisted `processingMode`/`nextWakeReason` labels plus the dominant
+processing outcome (`retry_later:<allowlisted reason>`, a bare outcome, or
+`unknown` for missing or unrecognized values). No raw identity lookup, payload export,
 migration, or runtime control action is required.
 
 ### Bounded event inventories
