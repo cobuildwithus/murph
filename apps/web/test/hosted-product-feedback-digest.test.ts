@@ -479,7 +479,7 @@ describe("hosted product feedback digest", () => {
   });
 
   it("sends bounded usage reports separately and retries with independent delivery keys", async () => {
-    const reportSummary = "Usage optimization audit: Synthetic weekly report.";
+    const reportSummary = "Usage optimization audit: Synthetic biweekly report.";
     mocks.groupBy.mockImplementation(async ({ where }) => [{
       kind: "feature_request",
       _count: { _all: where.summary.startsWith ? 203 : 1 },
@@ -539,7 +539,7 @@ describe("hosted product feedback digest", () => {
     expect(feedback.text).toContain("Requested a calendar export.");
     expect(feedback.text).not.toContain(reportSummary);
     expect(usage).toMatchObject({
-      subject: "Weekly usage reports — 2026-07-30",
+      subject: "Biweekly usage reports — 2026-07-30",
       to: feedback.to,
     });
     expect(usage.text).toContain(reportSummary);

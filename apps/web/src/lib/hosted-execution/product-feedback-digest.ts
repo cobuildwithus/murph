@@ -8,6 +8,7 @@ import {
   HOSTED_PATTERN_ENGINE_AUDIT_PREFIX,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+  HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX,
   type HostedProductFeedbackKind,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -23,7 +24,6 @@ export const HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS = 200;
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_RECIPIENTS_ENV =
   "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS";
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_SUBJECT = "Murph feedback";
-const HOSTED_USAGE_REPORT_PREFIX = "Usage optimization audit:";
 
 type HostedProductFeedbackDigestRow = {
   kind: HostedProductFeedbackKind;
@@ -117,7 +117,7 @@ export async function runHostedProductFeedbackDigest(input: {
       config: emailConfig.resend,
       idempotencyKey: `hosted-usage-report-digest/${window.dayKey}`,
       ...(input.signal ? { signal: input.signal } : {}),
-      subject: `Weekly usage reports — ${window.dayKey}`,
+      subject: `Biweekly usage reports — ${window.dayKey}`,
       text: [
         `Usage optimization reports (${usageReportCount})`,
         ...usageReports.rows.map((row) => `- ${row.summary}`),
@@ -184,13 +184,13 @@ export async function readHostedProductFeedbackDigestBatch(input: {
         },
       },
       ...(!input.usageReportsOnly
-        ? [{ summary: { startsWith: HOSTED_USAGE_REPORT_PREFIX } }]
+        ? [{ summary: { startsWith: HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX } }]
         : []),
     ],
     summary: {
       not: null,
       ...(input.usageReportsOnly
-        ? { startsWith: HOSTED_USAGE_REPORT_PREFIX }
+        ? { startsWith: HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX }
         : {}),
     },
   };

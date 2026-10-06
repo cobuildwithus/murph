@@ -34229,7 +34229,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
         totalCount: records.length + 1, nextCursor: null,
         items: [...records.map(({ instructions: _instructions, ...record }) => record), {
           automationId: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.automationId,
-          title: 'Weekly usage review', status: 'active', tags: ['murph-managed:weekly-usage-optimizer'],
+          title: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.title, status: 'active', tags: ['murph-managed:weekly-usage-optimizer'],
           assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' },
         }],
       } }
@@ -34269,8 +34269,8 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
       const actions = readCapabilityRoutingActions(result.jsonEvents)
       const feedback = feedbackRecorder.readProductFeedback()
       process.stdout.write('[weekly-optimizer-live] ' + JSON.stringify({ model: config.model, changed,
-        reply: result.finalMessage, feedback: feedback?.summary }) + '\n')
-      expect(usageRequests).toEqual([{ days: 7, limit: 10 }])
+        reply: result.finalMessage, feedback: feedback?.summary, actions }) + '\n')
+      expect(usageRequests).toEqual([{ days: 14, limit: 10 }])
       expect(changed.sort()).toEqual(['cue', 'lookup'])
       expect(fixtures.every(fixture => fixture.requests.filter(request => request.action === 'inspect').length === 1)).toBe(true)
       expect(actions.filter(action => action.kind === 'dynamic' && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name)).toHaveLength(1)

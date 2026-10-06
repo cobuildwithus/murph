@@ -27,11 +27,13 @@ function recorder(memberId = 'synthetic-member', occurrenceAt = messageInput.sch
 }
 
 describe('weekly usage optimizer', () => {
-  it('registers one private hosted fresh weekly Sol medium seed with bounded work', () => {
+  it('registers one private hosted fresh biweekly Sol medium seed with bounded work', () => {
     expect(MURPH_MANAGED_AUTOMATIONS.filter(item => item.automationId === seed.automationId)).toEqual([seed])
     expect(seed).toMatchObject({ ownerScope: 'member', hostedRuntimeOnly: true, continuityPolicy: 'fresh',
-      schedule: { kind: 'cron', expression: '0 4 * * 1' },
+      schedule: { kind: 'every', everyMs: 14 * 24 * 60 * 60 * 1000 },
       assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' } })
+    expect(seed.instructions).toContain('days=14 and limit=10')
+    expect(seed.instructions).not.toContain('days=7')
     expect(seed.instructions).toContain('At most ten model changes per run')
     expect(seed.instructions).toContain('Do not copy usage rows into the vault')
     expect(seed.instructions).toContain('bytes are not tokens')
