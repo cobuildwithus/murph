@@ -487,6 +487,7 @@ describe('bounded CLI validation completion metadata', () => {
     ['automation list', 'status', 'invalid_value', false],
     ['food search-labels', 'limit', 'too_big', false],
     ['food search-labels', 'query', 'invalid_type', true],
+    ['knowledge show', 'arguments', 'custom', false],
     ['knowledge upsert', 'body', 'invalid_type', true],
     ['knowledge upsert', 'slug', 'invalid_format', false],
     ['knowledge upsert', 'arguments', 'custom', false],
@@ -682,7 +683,12 @@ describe('existing diagnostic transport and denominator', () => {
     })
   })
 
-  it('round-trips new details through the real sanitizer/parser with the existing cap and best-effort writes', async () => {
+  it.each([
+    ['knowledge upsert', 'body', 'invalid_type', true],
+    ['knowledge show', 'arguments', 'custom', false],
+    ['knowledge upsert', 'arguments', 'custom', false],
+    ['meal edit', 'arguments', 'custom', false],
+  ] as const)('round-trips %s %s details through the real sanitizer/parser with the existing cap and best-effort writes', async (command, field, code, missing) => {
     const automation = await dispatch(requests[0], { automationTool: { request: vi.fn<AssistantHostedAutomationTool['request']>().mockRejectedValue(
       Object.assign(new Error(sentinel), { code: 'invalid_option', cause: { content: sentinel } }),
     ) } })
@@ -696,11 +702,11 @@ describe('existing diagnostic transport and denominator', () => {
       expect(memory.details?.vaultCliErrorCode).toBe(code)
       issues.push(memory)
     }
-    const validation = commandIssue(JSON.stringify({ ...envelope('VALIDATION_ERROR'),
-      fieldErrors: [{ path: 'body', code: 'invalid_type', missing: true, value: sentinel, message: sentinel }] }),
-      'vault-cli knowledge upsert')
+    const validation = commandIssue(JSON.stringify({ ...envelope('VALIDATION_ERROR', 'validation'),
+      fieldErrors: [{ path: field, code, missing, value: sentinel, message: sentinel }] }),
+      `vault-cli ${command}`)
     if (!validation) throw new Error('Expected synthetic validation diagnostic')
-    expect(validation.details).toMatchObject({ vaultCliValidationField: 'body', vaultCliValidationCode: 'invalid_type', vaultCliValidationMissing: true })
+    expect(validation.details).toMatchObject({ vaultCliValidationField: field, vaultCliValidationCode: code, vaultCliValidationMissing: missing })
     issues.push(validation)
     for (const code of ['knowledge_source_unreadable', 'knowledge_invalid_source_path', 'knowledge_invalid_library_slug']) {
       const source = commandIssue(JSON.stringify(envelope(code)), 'vault-cli knowledge upsert')
