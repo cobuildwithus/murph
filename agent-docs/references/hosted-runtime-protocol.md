@@ -409,7 +409,7 @@ authorization succeeds.
 The pinned Codex release has a test-only, version-bound route-disposition
 inventory whose authoritative review input is the upstream
 `codex-rs/codex-api/src` tree. Required Linux CI resolves the version-derived
-OpenAI tag and verifies its exact commit and source-tree object, so stale
+OpenAI tag and verifies its exact commit, which pins that source tree, so stale
 provenance cannot pass after a pin change. Offline tests scan the installed
 native artifact for conservative `/v1/**` plus separated provider-relative
 candidates, require every discovered candidate to be explicitly classified,
