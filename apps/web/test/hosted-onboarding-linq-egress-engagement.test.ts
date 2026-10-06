@@ -69,6 +69,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-phone-codec", () => ({
     mocks.encryptHostedLinqLinePhoneNumber,
 }));
 
+import * as contactPrivacy from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
@@ -88,7 +89,10 @@ import {
 import {
   buildHostedSourceDeliveryStallNoticeKey,
 } from "@/src/lib/device-sync/source-delivery-stall-episode";
-import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  type HostedLinqRouteAuthorityMismatchReason,
+} from "@/src/lib/hosted-onboarding/errors";
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
 
@@ -305,7 +309,7 @@ describe("hosted Linq egress authority", () => {
     ["requested_target_missing", { threadRouteContainerMemberId: "member-1" }, null],
     ["member_routing_missing", {}, "chat-home"],
     ["target_not_owned", {}, "chat-other"],
-    ["route_projection_mismatch", {}, "chat-home"],
+    ["route_projection_chat_missing", {}, "chat-home"],
     ["pending_recipient_invalid", {
       pendingChatId: "chat-pending", pendingParticipantContact: "+15550100999",
       pendingParticipantContactLookupKey: createRequiredPhoneLookupKey("+15550100001"),
@@ -318,7 +322,7 @@ describe("hosted Linq egress authority", () => {
     const prisma = createPrismaStub({ homeChatId: "chat-home", homeLinePhone: "+15550100099", ...options });
     if (reason === "member_routing_missing") prisma.hostedMemberRouting.findUnique.mockResolvedValue(null);
     if (reason === "member_identity_missing") prisma.hostedMemberIdentity.findUnique.mockResolvedValue(null);
-    if (reason === "route_projection_mismatch") {
+    if (reason === "route_projection_chat_missing") {
       const routing = await prisma.hostedMemberRouting.findUnique();
       prisma.hostedMemberRouting.findUnique.mockResolvedValue({ ...routing, linqChatIdEncrypted: null }).mockClear();
     }
@@ -326,29 +330,8 @@ describe("hosted Linq egress authority", () => {
     captureRouteAuthorityLogs();
 
     const response = await postHostedLinqEgressEngagement(routeAuthorityRequest({ target }));
-    const code = "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH";
-    const message = "Linq egress target does not match the runtime user's Linq route.";
-    expect(response.status).toBe(403);
-    await expect(response.text()).resolves.toBe(JSON.stringify({ error: { code, message, retryable: false } }));
-    expect(console.warn).toHaveBeenCalledOnce();
-    expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", {
-      errorType: "HostedOnboardingError", errorMessage: message, errorCode: code,
-      internalMessage: "Hosted onboarding route failed unexpectedly.", requestMethod: "POST",
-      errorResponseCode: code, errorResponseStatus: 403, errorResponseRetryable: false,
-      linqRouteAuthorityMismatchReason: reason,
-    });
-    expect(console.error).not.toHaveBeenCalled();
+    await expectRouteAuthorityMismatchResponse(response, reason, prisma);
     expect(prisma.$transaction).toHaveBeenCalledOnce();
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
-    expect(prisma.hostedLinqChatHealth.findFirst).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqLine.findFirst).not.toHaveBeenCalled();
-    expect(mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqLine.update).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqLine.upsert).not.toHaveBeenCalled();
-    expect(prisma.$executeRaw).not.toHaveBeenCalled();
     if (reason === "requested_target_missing") {
       // Empty identity lookup returns null before querying a durable route;
       // the later durable_target_missing defense is unreachable here.
@@ -376,6 +359,190 @@ describe("hosted Linq egress authority", () => {
     expect(console.warn).not.toHaveBeenCalled();
     expect(console.error).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["current", "route_projection_chat_missing", null, false, null],
+    ["pending", "route_projection_chat_missing", null, false, null],
+    ["current", "route_projection_chat_missing", " \t ", false, "+15550100999"],
+    ["pending", "route_projection_chat_missing", " \t ", false, "+15550100999"],
+    ["current", "route_projection_chat_lookup_key_mismatch", "chat-other", false, null],
+    ["pending", "route_projection_chat_lookup_key_mismatch", "chat-other", false, null],
+    ["current", "route_projection_chat_lookup_key_mismatch", "chat-other", false, "+15550100999"],
+    ["pending", "route_projection_chat_lookup_key_mismatch", "chat-other", false, "+15550100999"],
+    ["current", "route_projection_sender_phone_missing_or_invalid", "chat-projection", false, null],
+    ["pending", "route_projection_sender_phone_missing_or_invalid", "chat-projection", false, null],
+    ["current", "route_projection_sender_phone_missing_or_invalid", "chat-projection", false, "not-a-phone"],
+    ["pending", "route_projection_sender_phone_missing_or_invalid", "chat-projection", false, "not-a-phone"],
+    ["current", "route_projection_sender_lookup_key_mismatch", "chat-projection", false, "+15550100999"],
+    ["pending", "route_projection_sender_lookup_key_mismatch", "chat-projection", false, "+15550100999"],
+    // Only current-route preflight fallback can reach a missing chat blind.
+    ["current", "route_projection_chat_missing", null, true, null],
+    ["current", "route_projection_chat_lookup_key_missing", "chat-projection", true, null],
+    ["current", "route_projection_chat_lookup_key_missing", "chat-other", true, "+15550100999"],
+  ] as const)("distinguishes %s %s without changing authority %#", async (
+    routeKind, reason, chat, missingChatKey, sender,
+  ) => {
+    const target = "chat-projection";
+    const prisma = createPrismaStub(routeKind === "current"
+      ? { homeChatId: target, homeLinePhone: "+15550100099" }
+      : { pendingChatId: target, pendingLinePhone: "+15550100099" });
+    const routing = await prisma.hostedMemberRouting.findUnique();
+    const prefix = routeKind === "current" ? "linq" : "pendingLinq";
+    prisma.hostedMemberRouting.findUnique.mockResolvedValue({
+      ...routing,
+      [`${prefix}ChatIdEncrypted`]: encodeTestEncryptedValue(chat),
+      [`${prefix}RecipientPhoneEncrypted`]: encodeTestEncryptedValue(sender),
+      ...(missingChatKey ? { [`${prefix}ChatLookupKey`]: null } : {}),
+    }).mockClear();
+    const chatKeys = vi.spyOn(contactPrivacy, "createHostedLinqChatLookupKeyReadCandidates");
+    const phoneKeys = vi.spyOn(contactPrivacy, "createHostedPhoneLookupKeyReadCandidates");
+    onTestFinished(() => { chatKeys.mockRestore(); phoneKeys.mockRestore(); });
+    mocks.getPrisma.mockReturnValue(prisma);
+    captureRouteAuthorityLogs();
+
+    const response = await postHostedLinqEgressEngagement(routeAuthorityRequest({
+      authorityCheckOnly: missingChatKey,
+      homeRouteFallbackAllowed: missingChatKey,
+      target,
+    }));
+
+    await expectRouteAuthorityMismatchResponse(response, reason, prisma);
+    if (!missingChatKey) expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledOnce();
+    expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledOnce();
+    expect(prisma.hostedMemberIdentity.findUnique).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberIdentityPhoneNumber).not.toHaveBeenCalled();
+    expect(prisma.hostedMailboxItem.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMailboxPayload.findMany).not.toHaveBeenCalled();
+
+    // Ignore earlier ownership/hint lookups; these are the real, call-through
+    // lookup operations after the single private-state read, in order.
+    const privateReadOrder = mocks.readHostedMemberRoutingPrivateState.mock.invocationCallOrder[0]
+      ?? Number.POSITIVE_INFINITY;
+    const projectionLookups = ([ ["chat", chatKeys], ["phone", phoneKeys] ] as const)
+      .flatMap(([kind, spy]) => spy.mock.calls.map(([value], index) => ({
+        call: [kind, value], order: spy.mock.invocationCallOrder[index] ?? 0,
+      })))
+      .filter(({ order }) => order > privateReadOrder)
+      .sort((left, right) => left.order - right.order)
+      .map(({ call }) => call);
+    expect(projectionLookups).toEqual(missingChatKey || !chat?.trim()
+      ? []
+      : reason === "route_projection_sender_lookup_key_mismatch"
+        ? [["chat", chat], ["phone", sender]]
+        : [["chat", chat]]);
+  });
+
+  it("rejects a pending target without its chat blind before private projection", async () => {
+    const prisma = createPrismaStub({
+      pendingChatId: "chat-pending", pendingLinePhone: "+15550100099",
+    });
+    const routing = await prisma.hostedMemberRouting.findUnique();
+    prisma.hostedMemberRouting.findUnique.mockResolvedValue({
+      ...routing, pendingLinqChatLookupKey: null,
+    }).mockClear();
+    mocks.getPrisma.mockReturnValue(prisma);
+    captureRouteAuthorityLogs();
+
+    const response = await postHostedLinqEgressEngagement(routeAuthorityRequest({ target: "chat-pending" }));
+
+    await expectRouteAuthorityMismatchResponse(response, "target_not_owned", prisma);
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledOnce();
+    expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
+  });
+
+  it.each(([
+    "current", "pending",
+  ] as const).flatMap((routeKind) => [false, true].map((hinted) => ({ routeKind, hinted }))))(
+    "preserves the exact $routeKind preflight response with hinted=$hinted and no diagnostics",
+    async ({ routeKind, hinted }) => {
+      const target = "chat-accepted";
+      const memberPhone = "+15550100001";
+      const linePhone = "+15550100099";
+      const prisma = createPrismaStub(routeKind === "current"
+        ? { homeChatId: target, homeLinePhone: linePhone }
+        : { pendingChatId: target, pendingLinePhone: linePhone });
+      const notificationRoute = resolveHostedMemberAssistantNotificationRoute({
+        linqChatId: target,
+        linqContactLookupKey: createRequiredPhoneLookupKey(memberPhone),
+        memberId: "member-1",
+        messaging: resolveHostedMemberMessagingState({
+          identity: null, routing: { linqChatId: target },
+        }),
+      });
+      if (!notificationRoute?.threadId) throw new Error("Expected a direct conversation locator.");
+      const resolvedRoute = {
+        conversationThreadId: notificationRoute.threadId,
+        directRecipientPhoneNumber: memberPhone,
+        fromPhoneNumber: linePhone,
+        target, targetKind: "thread", threadIsDirect: true,
+      };
+      mocks.getPrisma.mockReturnValue(prisma);
+      captureRouteAuthorityLogs();
+
+      const response = await postHostedLinqEgressEngagement(routeAuthorityRequest({
+        authorityCheckOnly: true, target,
+        ...(hinted ? { expectedResolvedRoute: resolvedRoute } : {}),
+      }));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      await expect(response.json()).resolves.toEqual({ ok: true, resolvedRoute });
+      expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(hinted ? 0 : 1);
+      expect(mocks.readHostedMemberIdentityPhoneNumber)
+        .toHaveBeenCalledTimes(!hinted && routeKind === "current" ? 1 : 0);
+      for (const write of [
+        prisma.hostedLinqDelivery.create, prisma.hostedLinqDelivery.createMany,
+        prisma.hostedLinqDelivery.updateMany, prisma.hostedLinqLine.update,
+        prisma.hostedLinqLine.upsert, prisma.$executeRaw,
+      ]) expect(write).not.toHaveBeenCalled();
+      expect(console.warn).not.toHaveBeenCalled();
+      expect(console.error).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(([
+    "current", "pending",
+  ] as const).flatMap((routeKind) => ([
+    [null, null], ["not-a-phone", null], ["+15550100999", "+15550100999"],
+  ] as const).map(([sender, normalizedSender]) => ({ routeKind, sender, normalizedSender }))))(
+    "keeps sender lookup validation gated by the persisted line blind for $routeKind %#",
+    async ({ routeKind, sender, normalizedSender }) => {
+      const target = "chat-no-line-blind";
+      const prisma = createPrismaStub(routeKind === "current"
+        ? { homeChatId: target }
+        : { pendingChatId: target });
+      const routing = await prisma.hostedMemberRouting.findUnique();
+      const prefix = routeKind === "current" ? "linq" : "pendingLinq";
+      prisma.hostedMemberRouting.findUnique.mockResolvedValue({
+        ...routing, [`${prefix}RecipientPhoneEncrypted`]: encodeTestEncryptedValue(sender),
+      }).mockClear();
+      const phoneKeys = vi.spyOn(contactPrivacy, "createHostedPhoneLookupKeyReadCandidates");
+      onTestFinished(() => phoneKeys.mockRestore());
+      captureRouteAuthorityLogs();
+
+      const result = await assertHostedLinqRecentInboundEngagementForRuntime({
+        authorityCheckOnly: false, memberId: "member-1",
+        prisma: asRuntimeEngagementPrisma(prisma), target, targetKind: "thread",
+      });
+
+      expect(result).not.toHaveProperty("linePhoneNumberLookupKey");
+      expect(result.resolvedRoute).toMatchObject({
+        directRecipientPhoneNumber: "+15550100001", fromPhoneNumber: normalizedSender,
+        target, targetKind: "thread", threadIsDirect: true,
+      });
+      expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledOnce();
+      const privateReadOrder = mocks.readHostedMemberRoutingPrivateState.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY;
+      // Only the participant phone is checked, never a sender without a blind.
+      expect(phoneKeys.mock.calls.filter((_, index) =>
+        (phoneKeys.mock.invocationCallOrder[index] ?? 0) > privateReadOrder,
+      )).toEqual([["+15550100001"]]);
+      expect(console.warn).not.toHaveBeenCalled();
+      expect(console.error).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps the separate thread-authority assertion unclassified with its original message", async () => {
     captureRouteAuthorityLogs();
@@ -2385,6 +2552,36 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
   });
 });
+
+async function expectRouteAuthorityMismatchResponse(
+  response: Response,
+  reason: HostedLinqRouteAuthorityMismatchReason,
+  prisma: ReturnType<typeof createPrismaStub>,
+): Promise<void> {
+  const code = "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH";
+  const message = "Linq egress target does not match the runtime user's Linq route.";
+  expect(response.status).toBe(403);
+  expect(response.headers.get("Cache-Control")).toBe("no-store");
+  await expect(response.text()).resolves.toBe(JSON.stringify({ error: { code, message, retryable: false } }));
+  expect(console.warn).toHaveBeenCalledOnce();
+  expect(console.warn).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+    errorType: "HostedOnboardingError", errorMessage: message, errorCode: code,
+    internalMessage: "Hosted onboarding route failed unexpectedly.", requestMethod: "POST",
+    errorResponseCode: code, errorResponseStatus: 403, errorResponseRetryable: false,
+    linqRouteAuthorityMismatchReason: reason,
+  });
+  expect(console.error).not.toHaveBeenCalled();
+  expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
+  expect(prisma.hostedLinqChatHealth.findFirst).not.toHaveBeenCalled();
+  expect(prisma.hostedLinqLine.findFirst).not.toHaveBeenCalled();
+  expect(mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx).not.toHaveBeenCalled();
+  expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+  expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+  expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+  expect(prisma.hostedLinqLine.update).not.toHaveBeenCalled();
+  expect(prisma.hostedLinqLine.upsert).not.toHaveBeenCalled();
+  expect(prisma.$executeRaw).not.toHaveBeenCalled();
+}
 
 function captureRouteAuthorityLogs(): void {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

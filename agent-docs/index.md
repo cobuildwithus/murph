@@ -112,6 +112,10 @@ Expected Linq dispatch-claim responses and preserved runtime replay safety are
 recorded in [dispatch claim results](exec-plans/completed/2026-10-02-linq-dispatch-result.md);
 the callback contract is owned by `apps/web/README.md`.
 
+Private Linq projection rejection reasons and their behavior-preserving proof
+are tracked in [projection diagnostics](exec-plans/active/2026-10-06-linq-projection-diagnostics.md);
+`apps/web/README.md` owns the diagnostic vocabulary.
+
 Static iMessage card fallbacks leave the upper-left badge footprint empty for
 the Messages-drawn App Store art; the contract is owned by
 `operations/imessage-deliverability.md`.
