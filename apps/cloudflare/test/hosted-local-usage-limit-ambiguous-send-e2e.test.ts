@@ -3,12 +3,14 @@ import { createHmac } from "node:crypto";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import { HOSTED_USER_RUNTIME_STATUS_QUERY_NAME } from "@murphai/hosted-execution/orchestration-control";
 import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   grantHostedUsageCreditForTest,
   listHostedLinqDeliveriesForTest,
+  queryHostedRuntimeWorkflowForTest,
   readHostedAiUsageLimitPeriodForTest,
   readHostedMailboxItemForTest,
   seedHostedAiUsageLimitPeriodForTest,
@@ -671,17 +673,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       });
     }
 
-    const blockedStatus = await vi.waitFor(async () => {
-      const status = await requireScenario().harness.readUserStatus(
-        containerMemberId,
-      );
-      expect(status.inFlight).toBe(false);
-      expect(readConversationMailboxLag(status)).not.toBe("0");
-      return status;
-    }, {
-      interval: 250,
-      timeout: 30_000,
-    });
+    const blockedStatus = await waitForUsageBlockedBacklog(containerMemberId);
     expect(blockedStatus.lastErrorCode ?? null).toBeNull();
     expect(countAssistantResponseRequests()).toBe(providerBaseline);
     for (const input of backlogInputs) {
@@ -973,17 +965,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       reason: "wake-appended-thread-route",
     });
 
-    const blockedStatus = await vi.waitFor(async () => {
-      const status = await requireScenario().harness.readUserStatus(
-        containerMemberId,
-      );
-      expect(status.inFlight).toBe(false);
-      expect(readConversationMailboxLag(status)).not.toBe("0");
-      return status;
-    }, {
-      interval: 250,
-      timeout: 30_000,
-    });
+    const blockedStatus = await waitForUsageBlockedBacklog(containerMemberId);
     expect(blockedStatus.lastErrorCode ?? null).toBeNull();
     expect(countAssistantResponseRequests()).toBe(providerBaseline);
     expect(findAssistantResponseRequestsContainingAll([
@@ -1207,6 +1189,31 @@ function requireLinqStub(): HostedLocalLinqStub {
     throw new Error("Hosted local usage-limit Linq stub was not initialized.");
   }
   return linqStub;
+}
+
+async function waitForUsageBlockedBacklog(
+  containerMemberId: string,
+): Promise<HostedRunnerStatusResponse> {
+  return await vi.waitFor(async () => {
+    // Usage denial pauses assistant work, not model-free system-mailbox work.
+    // A busy retained container can leave a starting ownership fence inFlight
+    // until renewed work reconciles it; idle is not the usage-blocked state.
+    const workflow = await queryHostedRuntimeWorkflowForTest({
+      environment: requireScenario().runtimeEnv,
+      queryName: HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+      workflowId: `hosted-user-runtime:${containerMemberId}`,
+    });
+    expect(workflow).toMatchObject({
+      lastReconciliationStatus: "blocked",
+      lastReconciliationBlockedReason: "ai_usage_denied",
+    });
+    const status = await requireScenario().harness.readUserStatus(containerMemberId);
+    expect(readConversationMailboxLag(status)).not.toBe("0");
+    return status;
+  }, {
+    interval: 250,
+    timeout: 30_000,
+  });
 }
 
 function requireScenario(): HostedLocalFullStackScenario {
