@@ -4,6 +4,8 @@ import { parseAllowedString, readNullableString, requireBoolean, requireNonNegat
 export const HOSTED_RUNTIME_OWNER_PATH = "/api/internal/hosted-runtime/owner";
 export const HOSTED_RUNTIME_OWNER_PHASES = ["idle", "starting", "active", "retiring"] as const;
 export const HOSTED_RUNTIME_CUTOVER_PHASES = ["legacy", "draining", "postgres"] as const;
+/** `admission`: the member is inactive, suspended or withdrew health-data consent. */
+export const HOSTED_RUNTIME_OWNER_BLOCKED_REASONS = ["admission", "cutover"] as const;
 
 export interface HostedRuntimeOwnerIdentity {
   attemptId: string;
@@ -51,6 +53,8 @@ export interface HostedRuntimeOwnerResponse {
   cutover: (typeof HOSTED_RUNTIME_CUTOVER_PHASES)[number];
   status: "claimed" | "existing" | "blocked" | "updated" | "stale" | "observed" | "authorized";
   owner: HostedRuntimeOwnerSnapshot | null;
+  /** Advisory claim detail; absent from older Web releases and other commands. */
+  blockedReason?: (typeof HOSTED_RUNTIME_OWNER_BLOCKED_REASONS)[number];
 }
 
 export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwnerCommand {
@@ -117,10 +121,16 @@ function parseInvocationCommand(r: Record<string, unknown>, operation: string): 
 export function parseHostedRuntimeOwnerResponse(value: unknown): HostedRuntimeOwnerResponse {
   const r = requireObject(value, "Runtime ownership response");
   const owner = r.owner === null ? null : parseOwner(r.owner);
+  const status = parseAllowedString(r.status, "Runtime ownership status", ["claimed", "existing", "blocked", "updated", "stale", "observed", "authorized"] as const);
+  // Unknown reasons are dropped, not rejected: a newer Web must not break claims.
+  const blockedReason = status === "blocked"
+    ? HOSTED_RUNTIME_OWNER_BLOCKED_REASONS.find((reason) => reason === r.blockedReason)
+    : undefined;
   return {
     cutover: parseAllowedString(r.cutover, "Runtime cutover phase", HOSTED_RUNTIME_CUTOVER_PHASES),
-    status: parseAllowedString(r.status, "Runtime ownership status", ["claimed", "existing", "blocked", "updated", "stale", "observed", "authorized"] as const),
+    status,
     owner,
+    ...(blockedReason ? { blockedReason } : {}),
   };
 }
 

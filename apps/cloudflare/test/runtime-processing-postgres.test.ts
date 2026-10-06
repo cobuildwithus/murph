@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeProcessingDiagnostics } from "../src/user-runner/diagnostics.ts";
 import type { HostedRuntimeOwnerResponse, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
-import { ensurePostgresRuntimeProcessing } from "../src/runtime-processing.ts";
+import { ensurePostgresRuntimeProcessing, HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS } from "../src/runtime-processing.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "../src/runtime-owner-completion.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
@@ -414,6 +414,25 @@ describe("Postgres runtime orchestration", () => {
     await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toMatchObject({ kind: "retry_later" });
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe(reason);
     if (scenario === "uncertain-wake") expect(diagnostics).toMatchObject({ attemptId: "attempt-a", leaseGeneration: "1", stage: "active_wake" });
+  });
+
+  it.each([
+    ["admission", "admission_blocked", HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS],
+    [undefined, "claim_blocked", 3_000],
+  ] as const)("spaces a blocked claim by its Web reason (%s)", async (blockedReason, reason, delayMs) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
+    const { source, container } = harness();
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({
+      ...response(null, "blocked"), ...(blockedReason ? { blockedReason } : {}),
+    });
+    await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toEqual({
+      kind: "retry_later", retryAt: new Date(Date.now() + delayMs).toISOString(),
+    });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe(reason);
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledOnce();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
   });
 
   it.each(["legacy", "draining"] as const)("keeps an unretired %s database closed without calling a legacy object", async cutover => {

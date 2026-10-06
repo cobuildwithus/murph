@@ -778,7 +778,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("preserves inactive workspace retention clocks for retention-only workflow dispatch", async () => {
+  it.each([null, FIXED_NOW, "2026-05-20T12:14:00.000Z"])("preserves inactive workspace retention clocks for retention-only workflow dispatch (%s)", async (retentionWakeAt) => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "canceled",
     }));
@@ -786,7 +786,7 @@ describe("hosted orchestration reconciliation facts", () => {
       billingStatus: "canceled",
     }));
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      inboxMediaRetentionWakeAt: FIXED_NOW,
+      inboxMediaRetentionWakeAt: retentionWakeAt,
     }));
 
     const response = await reconciliationRoute.GET(
@@ -796,12 +796,13 @@ describe("hosted orchestration reconciliation facts", () => {
     const facts = parseHostedRuntimeReconciliationFacts(await response.json());
 
     expect(response.status).toBe(200);
+    expect(facts.mailboxLag).toEqual([]);
     expect(facts.blocked).toEqual({
       reason: "user_not_active",
-      retryAt: null,
+      retryAt: retentionWakeAt !== null && retentionWakeAt > FIXED_NOW ? retentionWakeAt : null,
     });
     expect(facts.workspace).toMatchObject({
-      inboxMediaRetentionWakeAt: FIXED_NOW,
+      inboxMediaRetentionWakeAt: retentionWakeAt,
       systemMailboxFrontier: null,
       version: "4",
     });
