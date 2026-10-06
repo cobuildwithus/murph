@@ -113,26 +113,47 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
   });
 
-  it.each([false, true])("links accepted instant replies after response even when the wake fails: %s", async (wakeFails) => {
-    const tasks: Array<() => Promise<void>> = [];
-    if (wakeFails) mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("synthetic signal failure"));
-    const result = maybeHandoffHostedExecutionWebhookWake({
-      response,
-      webhookReceivedAt: new Date("2026-09-01T12:00:00Z"),
-      scheduleAfterResponse: (task) => { tasks.push(task); },
-      wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant" }),
+  for (const wakeFails of [false, true]) {
+    it.each([
+      { originalInboundMailboxItemId: undefined, answeredMailboxItemIds: ["mailbox_123"] },
+      { originalInboundMailboxItemId: "mailbox_inbound", answeredMailboxItemIds: ["mailbox_123", "mailbox_inbound"] },
+      { originalInboundMailboxItemId: "mailbox_123", answeredMailboxItemIds: ["mailbox_123"] },
+    ])(`links instant replies after response with $originalInboundMailboxItemId and wake failure=${wakeFails}`, async ({ originalInboundMailboxItemId, answeredMailboxItemIds }) => {
+      const tasks: Array<() => Promise<void>> = [];
+      if (wakeFails) mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("synthetic signal failure"));
+      const result = maybeHandoffHostedExecutionWebhookWake({
+        response,
+        webhookReceivedAt: new Date("2026-09-01T12:00:00Z"),
+        scheduleAfterResponse: (task) => { tasks.push(task); },
+        wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant", originalInboundMailboxItemId }),
+      });
+      if (wakeFails) await expect(result).rejects.toThrow("synthetic signal failure");
+      else await result;
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledExactlyOnceWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId: "member_123",
+        knownCheckpoint: { lane: "conversation", laneSeq: "42", userId: "member_123" },
+        mailboxItemId: "mailbox_123",
+        onSignalStarted: expect.any(Function),
+      });
+      if (wakeFails) expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+      else expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledExactlyOnceWith({
+        commandTimeoutMs: 25_000,
+        onTiming: expect.any(Function),
+        orchestrationAttemptId: expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u),
+        signal: expect.any(AbortSignal),
+        userId: "member_123",
+      });
+      expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+      for (const task of tasks) await task();
+      expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).toHaveBeenCalledExactlyOnceWith({
+        authenticatedUserId: "member_123",
+        answeredMailboxItemIds,
+        linqDeliveryId: "delivery_instant",
+        replyRuntimeAttemptId: null,
+      });
     });
-    if (wakeFails) await expect(result).rejects.toThrow("synthetic signal failure");
-    else await result;
-    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
-    for (const task of tasks) await task();
-    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).toHaveBeenCalledExactlyOnceWith({
-      authenticatedUserId: "member_123",
-      answeredMailboxItemIds: ["mailbox_123"],
-      linqDeliveryId: "delivery_instant",
-      replyRuntimeAttemptId: null,
-    });
-  });
+  }
 
   it("retains ingress timing when optional instant-reply linking fails", async () => {
     const tasks: Array<() => Promise<void>> = [];
@@ -141,7 +162,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     await maybeHandoffHostedExecutionWebhookWake({
       response,
       scheduleAfterResponse: (task) => { tasks.push(task); },
-      wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant" }),
+      wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant", originalInboundMailboxItemId: "mailbox_inbound" }),
     });
     for (const task of tasks) await expect(task()).resolves.toBeUndefined();
     expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalled();

@@ -428,6 +428,45 @@ describe("foreground checkpoint lease diagnostics", () => {
 });
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
+  test.each([
+    { recorded: "0", fetched: "64", expected: "64" },
+    { recorded: "65", fetched: "64", expected: "65" },
+    { recorded: "65", fetched: null, expected: "65" },
+  ])("keeps empty-import consumption monotonic ($recorded / $fetched)", async ({ recorded, fetched, expected }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-empty-consumed-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const builder = createHostedWorkspaceCheckpointRequestBuilder({
+      attemptId: "attempt_empty_consumed", expectedWorkspaceVersion: "0",
+      leaseGeneration: "1", snapshotRef: null,
+    });
+    builder.recordRedactedStatus({ hostedMailboxConversationConsumedSeq: recorded });
+    try {
+      const state = createEmptyHostedMailboxImportState();
+      state.watermarks.conversation = "65";
+      await writeHostedMailboxImportState({ state, vaultRoot });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: builder,
+        expectedUserId: TEST_USER_ID,
+        async importItem() { throw new Error("Empty imports cannot stage work."); },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            items: [],
+            consumedSeqByLane: fetched === null ? undefined : [{ lane: "conversation", consumedSeq: fetched }],
+          }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_empty_consumed",
+        async runAssistantPhase() { return { progressed: false }; },
+        vaultRoot, workspace: createWorkspaceState({ version: "0" }), now: () => TEST_NOW,
+      });
+      assert.equal(result.initialMailboxImport.stateChanged, false);
+      assert.equal(builder.readRedactedStatus()?.hostedMailboxConversationConsumedSeq, expected);
+      assert.equal(checkpointRequests.length, 0, "The frontier update uses the existing idle checkpoint.");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
   test("keeps a newly staged receipt when an older metadata publication finishes", async () => {
     const builder = createHostedWorkspaceCheckpointRequestBuilder({
       attemptId: "attempt_synthetic_publication", expectedWorkspaceVersion: "0",

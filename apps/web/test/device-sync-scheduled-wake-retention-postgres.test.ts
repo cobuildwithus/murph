@@ -10,6 +10,7 @@ import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-
 import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
 import { runHostedDeviceSyncDueReconcileSweeper } from "@/src/lib/device-sync/due-reconcile-sweeper";
 import { runHostedDeviceSyncRecoverySweep } from "@/src/lib/device-sync/recovery-sweeper";
+import { runHostedDeviceSyncDeferredWakeSweeper } from "@/src/lib/device-sync/deferred-wake-sweeper";
 import { appendHostedDeviceSyncScheduledReconcileWake } from "@/src/lib/device-sync/wake-service";
 import * as cryptoEnv from "@/src/lib/hosted-crypto/env";
 import * as runtimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
@@ -317,6 +318,110 @@ describe.skipIf(!runPostgresProof)(
       },
     );
 
+    it("defers a routine batch and releases its ordinary dirty wake exactly once", async () => {
+      const client = requirePrisma(prisma);
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `member_deferred_wake_${suffix}`;
+      const connectionId = `dsc_deferred_wake_${suffix}`;
+      memberIds.push(memberId);
+      await client.hostedMember.create({ data: { billingStatus: "active", id: memberId } });
+      await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+        domain: "ingress", prisma: client, reason: "deferred-wake-test", userId: memberId,
+      });
+      await client.deviceConnection.create({ data: {
+        id: connectionId, userId: memberId, provider: "junction", status: "active",
+        providerAccountBlindIndex: `synthetic-${connectionId}`,
+        connectedAt: new Date("2026-09-04T11:00:00.000Z"),
+        dirtyState: { create: {
+          userId: memberId, provider: "junction", dirtyRevision: 2n, processedRevision: 1n,
+          firstDirtyAt: new Date("2026-09-04T11:58:00.000Z"),
+          latestDirtyAt: new Date("2026-09-04T11:59:00.000Z"),
+          latestEventType: "daily.data.steps.updated",
+          latestResourceCategory: "timeseries",
+        } },
+      } });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma: client });
+      const readDirty = () => client.deviceSyncDirtyConnection.findUniqueOrThrow({ where: { connectionId } });
+      const before = await readDirty();
+
+      await client.$transaction((tx) => store.deferDirtyConnectionWakeTx({
+        connectionId, deferredUntil: new Date("2026-09-04T12:15:00.000Z"), tx, userId: memberId,
+      }));
+      const deferred = await readDirty();
+      expect(deferred.wakeDeferredUntil).toEqual(new Date("2026-09-04T12:15:00.000Z"));
+      // Batching bookkeeping must not move the content preparation fence.
+      expect(deferred.updatedAt).toEqual(before.updatedAt);
+      expect(await store.listDueDeferredDirtyConnectionWakes({
+        dueAt: new Date("2026-09-04T12:14:59.000Z"), limit: 10,
+      })).not.toContainEqual({ connectionId, userId: memberId });
+
+      // An urgent hint only ever moves a pending deadline earlier.
+      for (const dueAt of ["2026-09-04T12:05:00.000Z", "2026-09-04T12:10:00.000Z"]) {
+        await client.$transaction((tx) => store.advanceDeferredDirtyConnectionWakeTx({
+          connectionId, dueAt: new Date(dueAt), tx, userId: memberId,
+        }));
+      }
+      expect((await readDirty()).wakeDeferredUntil).toEqual(new Date("2026-09-04T12:05:00.000Z"));
+
+      vi.spyOn(prismaModule, "getPrisma").mockReturnValue(client);
+      const signal = vi.spyOn(runtimeSignal, "signalHostedDeviceSyncMailboxRuntime")
+        .mockResolvedValue({ signalAccepted: true, workflowId: "synthetic-workflow" } as never);
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value.replace(/^enc:/u, ""),
+        encrypt: ({ value }) => `enc:${value}`,
+      });
+      try {
+        const sweep = () => runHostedDeviceSyncDeferredWakeSweeper({
+          logger: { info: () => {}, warn: console.warn },
+          now: new Date("2026-09-04T12:06:00.000Z"),
+          store: {
+            listDueDeferredDirtyConnectionWakes: async (input) =>
+              (await store.listDueDeferredDirtyConnectionWakes(input))
+                .filter((row) => row.connectionId === connectionId),
+            postponeDeferredDirtyConnectionWake: (input) =>
+              store.postponeDeferredDirtyConnectionWake(input),
+          },
+        });
+        await expect(sweep()).resolves.toMatchObject({ released: 1, releaseFailed: 0 });
+        const wakes = await client.hostedMailboxItem.findMany({
+          where: { kind: "device-sync.wake", userId: memberId },
+        });
+        expect(wakes).toHaveLength(1);
+        expect(signal).toHaveBeenCalledOnce();
+        expect((await readDirty()).wakeDeferredUntil).toBeNull();
+        await expect(sweep()).resolves.toMatchObject({ dueConnections: 0, released: 0 });
+
+        // Fully processed work cannot leave a deadline for a later sweep.
+        await client.$transaction((tx) => store.deferDirtyConnectionWakeTx({
+          connectionId, deferredUntil: new Date("2026-09-04T12:30:00.000Z"), tx, userId: memberId,
+        }));
+        await store.markDirtyConnectionProcessed({
+          connectionId, processedRevision: 2n, userId: memberId,
+        });
+        expect((await readDirty()).wakeDeferredUntil).toBeNull();
+
+        // A delayed delivery can open a newer batch whose deadline is already
+        // due; cleanup for the earlier observed revision must not erase it.
+        await client.deviceSyncDirtyConnection.update({
+          where: { connectionId }, data: { dirtyRevision: 3n },
+        });
+        await client.$transaction((tx) => store.deferDirtyConnectionWakeTx({
+          connectionId, deferredUntil: new Date("2026-09-04T12:01:00.000Z"), tx, userId: memberId,
+        }));
+        await store.clearDeferredDirtyConnectionWake({
+          connectionId, dirtyRevision: 2n, dueAt: new Date("2026-09-04T12:06:00.000Z"), userId: memberId,
+        });
+        expect((await readDirty()).wakeDeferredUntil).toEqual(new Date("2026-09-04T12:01:00.000Z"));
+        await expect(sweep()).resolves.toMatchObject({ released: 1, releaseFailed: 0 });
+        expect(await client.hostedMailboxItem.count({
+          where: { kind: "device-sync.wake", userId: memberId },
+        })).toBe(2);
+        expect((await readDirty()).wakeDeferredUntil).toBeNull();
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+      }
+    });
+
     it("recovers dirty work after its scheduled mailbox owner was fully consumed", async () => {
       const client = requirePrisma(prisma);
       const fixture = await seedRetiredScheduledWake({
@@ -547,6 +652,14 @@ describe.skipIf(!runPostgresProof)(
         }
 
         const recovery = await runHostedDeviceSyncRecoverySweep({
+          // Deferred batches belong to their own case; keep this one hermetic.
+          runDeferredWakeSweeper: () => runHostedDeviceSyncDeferredWakeSweeper({
+            logger: { info: () => {}, warn: console.warn },
+            store: {
+              listDueDeferredDirtyConnectionWakes: async () => [],
+              postponeDeferredDirtyConnectionWake: async () => {},
+            },
+          }),
           runDueReconcileSweeper: () => runHostedDeviceSyncDueReconcileSweeper({
             logger: { info: () => {}, warn: console.warn },
             now: new Date("2026-09-04T12:00:00.000Z"),

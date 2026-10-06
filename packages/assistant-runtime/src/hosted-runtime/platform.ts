@@ -64,10 +64,8 @@ import type {
   HostedRuntimeAssistantPersonalizationToolRequest,
   HostedRuntimeAssistantPersonalizationToolResponse,
 } from "@murphai/hosted-execution/assistant-personalization";
-import {
-  assistantResponseMediaSchema,
-  type AssistantResponseMedia,
-} from "@murphai/operator-config/assistant-cli-contracts";
+import { assistantResponseMediaSchema } from "@murphai/operator-config/assistant-delivery-contracts";
+import type { AssistantResponseMedia } from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   AssistantResponseCard,
 } from "@murphai/operator-config/assistant-response-cards";

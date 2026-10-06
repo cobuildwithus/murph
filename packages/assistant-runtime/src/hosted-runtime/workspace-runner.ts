@@ -3571,6 +3571,19 @@ function createHostedWorkspaceCheckpointRequestSession(
       const importedConsumedSeq = parseHostedConversationMailboxSeq(
         result.importResult.consumedSeqByLane?.conversation ?? null,
       );
+      const recordedConsumedValue = checkpointRequestBuilder.readRedactedStatus()
+        ?.hostedMailboxConversationConsumedSeq;
+      const recordedConsumedSeq = parseHostedConversationMailboxSeq(
+        typeof recordedConsumedValue === "string" ? recordedConsumedValue : null,
+      );
+      // Empty imports can still observe committed acknowledgments. Preserve
+      // them for idle compaction without creating a separate checkpoint.
+      if (importedConsumedSeq !== null
+        && (recordedConsumedSeq === null || importedConsumedSeq > recordedConsumedSeq)) {
+        checkpointRequestBuilder.recordRedactedStatus({
+          hostedMailboxConversationConsumedSeq: importedConsumedSeq.toString(),
+        });
+      }
       if (
         importedConsumedSeq !== null
         && (

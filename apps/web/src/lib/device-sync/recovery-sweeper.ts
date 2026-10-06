@@ -1,4 +1,8 @@
 import {
+  runHostedDeviceSyncDeferredWakeSweeper,
+  type HostedDeviceSyncDeferredWakeSweeperResult,
+} from "./deferred-wake-sweeper";
+import {
   runHostedDeviceSyncDueReconcileSweeper,
   type HostedDeviceSyncDueReconcileSweeperResult,
 } from "./due-reconcile-sweeper";
@@ -11,6 +15,7 @@ import {
 } from "../hosted-orchestration/preference-handoff-sweeper";
 
 export interface HostedDeviceSyncRecoverySweepResult {
+  deferredWakeSweeper: HostedDeviceSyncDeferredWakeSweeperResult;
   dueReconcileSweeper: HostedDeviceSyncDueReconcileSweeperResult;
   preferenceHandoffSweeper: HostedPreferenceHandoffSweepResult;
 }
@@ -20,11 +25,14 @@ type HostedDeviceSyncDueReconcileSweepRunner =
   typeof runHostedDeviceSyncDueReconcileSweeper;
 type HostedPreferenceHandoffSweepRunner =
   typeof runHostedPreferenceHandoffSweeper;
+type HostedDeviceSyncDeferredWakeSweepRunner =
+  typeof runHostedDeviceSyncDeferredWakeSweeper;
 
 // The route/API name is legacy compatibility. The current behavior is a bounded
 // scheduled-reconcile mailbox wake sweep, not recovery-signal production.
 export async function runHostedDeviceSyncRecoverySweep(input: {
   logger?: HostedDeviceSyncRecoverySweepLogger;
+  runDeferredWakeSweeper?: HostedDeviceSyncDeferredWakeSweepRunner;
   runDueReconcileSweeper?: HostedDeviceSyncDueReconcileSweepRunner;
   runPreferenceHandoffSweeper?: HostedPreferenceHandoffSweepRunner;
 } = {}): Promise<HostedDeviceSyncRecoverySweepResult> {
@@ -33,6 +41,15 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
     ?? runHostedDeviceSyncDueReconcileSweeper;
   const runPreferenceHandoffSweeper = input.runPreferenceHandoffSweeper
     ?? runHostedPreferenceHandoffSweeper;
+  const runDeferredWakeSweeper = input.runDeferredWakeSweeper
+    ?? runHostedDeviceSyncDeferredWakeSweeper;
+
+  // Release due routine batches first; their appended wakes are then visible
+  // to the scheduled sweep's idle-mailbox recovery check.
+  const {
+    error: deferredWakeError,
+    result: deferredWakeSweep,
+  } = await runDeferredWakeSweepStage(runDeferredWakeSweeper);
 
   let dueReconcileSweep: HostedDeviceSyncDueReconcileSweeperResult | null = null;
   let dueReconcileError: unknown = null;
@@ -90,18 +107,47 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
     );
   }
 
+  if (deferredWakeError !== null) {
+    logger.warn("Hosted device-sync deferred wake sweep failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(deferredWakeError, {
+        code: "HOSTED_DEVICE_SYNC_DEFERRED_WAKE_SWEEP_FAILED",
+      }),
+    });
+    throw deferredWakeError;
+  }
   if (dueReconcileError !== null) {
     throw dueReconcileError;
   }
   if (preferenceHandoffError !== null) {
     throw preferenceHandoffError;
   }
-  if (dueReconcileSweep === null || preferenceHandoffSweep === null) {
+  if (
+    deferredWakeSweep === null
+    || dueReconcileSweep === null
+    || preferenceHandoffSweep === null
+  ) {
     throw new Error("Hosted scheduled recovery sweep completed without a result.");
   }
 
   return {
+    deferredWakeSweeper: deferredWakeSweep,
     dueReconcileSweeper: dueReconcileSweep,
     preferenceHandoffSweeper: preferenceHandoffSweep,
   };
+}
+
+async function runDeferredWakeSweepStage(
+  run: HostedDeviceSyncDeferredWakeSweepRunner,
+): Promise<{ error: unknown; result: HostedDeviceSyncDeferredWakeSweeperResult | null }> {
+  try {
+    const result = await run();
+    return {
+      error: result.releaseFailed > 0
+        ? new Error("Hosted device-sync deferred wake sweep failed to release one or more wakes.")
+        : null,
+      result,
+    };
+  } catch (error) {
+    return { error, result: null };
+  }
 }

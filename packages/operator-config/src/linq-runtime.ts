@@ -48,7 +48,7 @@ import {
   errorMessage,
   normalizeNullableString,
 } from './text/shared.js'
-import { normalizeAssistantResponseMediaUrl } from './assistant-cli-contracts.js'
+import { normalizeAssistantResponseMediaUrl } from './assistant-delivery-contracts.js'
 import {
   renderMarkdownMessageText,
   sanitizeUserFacingMessageLinks,

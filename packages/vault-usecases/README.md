@@ -266,3 +266,26 @@ while query reuses the existing focused event acquisition owner. The same paired
 proof now includes blood workflows and full raw/default Browser Vault replicas;
 all necessary later global work remains counted. The proposed metric-aggregation
 sort deletion is deferred for the documented public-input ordering counterexample.
+
+## Experiment follow-up decisions
+
+`query.showExperimentFollowupDue` reuses `readExperimentQuerySource`: one strict
+canonical snapshot under the reentrant writer lock, with metrics left lazy.
+Missed-log and weekly-digest decisions retain the existing resolver, timezone,
+lifecycle and event/adherence semantics. The read does not rebuild or certify a
+global projection. It still reads the canonical source; repeated reads and a
+later global query each do their own work, and an active writer can delay it.
+
+Run the same `bench/experiment-followup.ts` in base and candidate checkouts:
+
+```sh
+pnpm exec tsx --tsconfig tsconfig.base.json packages/vault-usecases/bench/experiment-followup.ts cold
+```
+
+Other scenarios are `fresh`, `stale`, `repeat` (three reads), and `mixed`
+(follow-up, global read, follow-up). Setup is excluded; measurements include
+actual public service execution, wall/CPU time, full-result bytes and hashes,
+and bounded CLI phases. Use alternating base/head pairs after warm-up and a
+base/base control. Compare complete hashes and the whole mixed journey, not
+only the first operation. Process startup and future model round trips are not
+measured by the operation timer.
