@@ -112,6 +112,11 @@ timestamp and restores it after each case. An explicit clock advance proves the 
 decryption and authority proof with
 `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-production-canary-outcome.test.ts`.
 
+The live runner defaults to the pinned npm Codex binary. Select a locally built
+native binary with `--codex-command <absolute-path>`; the same executable handles
+subscription login preflight and the selected journey. Ambient
+`MURPH_REAL_CODEX_COMMAND` does not override this explicit command-line choice.
+
 A rejected live selector prints up to 20 exact matching names, an omitted count,
 and a read-only discovery command. Use a distinctive part of a rendered name
 as the `--test` regular-expression pattern, preserving parameterized values
