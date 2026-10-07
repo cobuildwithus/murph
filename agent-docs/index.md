@@ -19,6 +19,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Lost-active-operation E2E steering synchronization and local control/repeat proof
+are recorded in [the steering barrier follow-up](exec-plans/completed/2026-10-06-lost-op-steer-barrier.md).
+
 Focused wearable/blood reads, Browser Vault bundle reuse and finite empty-envelope
 verification (with metric sort deletion deferred for parity) are tracked
 in [the completed global-projection plan](exec-plans/completed/2026-10-02-focused-global-projection.md).
