@@ -653,6 +653,14 @@ const JUNCTION_JOB_MAX_OWNER_UNITS = 16;
 // Stop starting cheap full-job units after five seconds. Each unit retains its
 // existing request bounds and the worker's foreground/abort deadline.
 const JUNCTION_FULL_JOB_TIMESERIES_BATCH_MS = 5_000;
+// Every canonical write persists a receipt and its artifacts, and a hosted
+// runtime yields after 63 receipts. One write per closed day made historical
+// imports write-bound, so uncapped closed-day resources commit up to eight
+// consecutive days at once. Replays restart at the first uncommitted day, and
+// record identity keeps them idempotent. Records stay far below the
+// importer's 10,000 normalized event bound.
+const JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_DAYS = 8;
+const JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_RECORDS = 4_000;
 // A date-only provider query can contain source-local records from UTC-12.
 // Delay calendar-day ownership until that date has closed in every admitted
 // civil offset instead of treating UTC midnight as globally complete.
@@ -5153,6 +5161,18 @@ export function createJunctionDeviceSyncProvider(
     workoutStreamEmptySeen = false,
     historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget,
   ): Promise<JunctionDailyTimeseriesImportResult> {
+    if (canBatchJunctionDailyTimeseriesImports(resource)) {
+      return await importBatchedTimeseriesDailySnapshots({
+        context,
+        historicalResourceJobWorkBudget,
+        resource,
+        skippedOptionalResources,
+        sourceProviderSlug,
+        sourceProviders,
+        windowEnd,
+        windowStart,
+      });
+    }
     let resumeWorkoutStreamIdentities = new Set(completedWorkoutStreamIdentities);
     let madeProgress = false;
 
@@ -5263,6 +5283,159 @@ export function createJunctionDeviceSyncProvider(
       workoutStreamEmptySeen: false,
       yieldedAt: null,
     };
+  }
+
+  // Same per-day fetches, source admission and canonical import as the
+  // single-day owner; only the commit spans consecutive closed days. A batch is
+  // never written after a yield once this job has committed, so the receipt
+  // admission boundary still admits at most one write past the yield signal.
+  async function importBatchedTimeseriesDailySnapshots(input: {
+    context: ProviderJobContext;
+    historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget;
+    resource: string;
+    skippedOptionalResources: JunctionSkippedOptionalResource[];
+    sourceProviderSlug?: string | null;
+    sourceProviders: readonly JunctionProviderConnection[];
+    windowEnd: string;
+    windowStart: string;
+  }): Promise<JunctionDailyTimeseriesImportResult> {
+    const { context } = input;
+    let pending: JunctionDailyImportBatch | null = null;
+    let committedProgress = false;
+    let currentWindowStart = input.windowStart;
+    const finish = (yieldedAt: string | null): JunctionDailyTimeseriesImportResult => ({
+      workoutStreamCursor: null,
+      workoutStreamEmptySeen: false,
+      yieldedAt,
+    });
+    // Uncommitted days replay from the batch start; committed days never do.
+    const firstUncommittedDay = (): string => pending?.windowStart ?? currentWindowStart;
+    const yieldBeforeWrite = (): boolean =>
+      committedProgress && context.shouldYield?.() === true;
+    const flush = async (): Promise<void> => {
+      if (!pending) return;
+      await commitJunctionDailyImportBatch(input, pending);
+      pending = null;
+      committedProgress = true;
+    };
+
+    try {
+      for (const window of buildClosedDailyWindows(input.windowStart, input.windowEnd)) {
+        currentWindowStart = window.windowStart;
+        if (context.shouldYield?.()) {
+          if (committedProgress) return finish(firstUncommittedDay());
+          if (pending) {
+            // As before, a job admits one write past the yield signal.
+            await flush();
+            return finish(window.windowStart);
+          }
+          context.throwIfAborted?.();
+        }
+        if (!tryStartJunctionHistoricalResourceJobOwnerUnit(input.historicalResourceJobWorkBudget)) {
+          if (yieldBeforeWrite()) return finish(firstUncommittedDay());
+          await flush();
+          return finish(window.windowStart);
+        }
+        const records = await fetchJunctionDailyTimeseriesRecords(input, window, async () => {
+          // Keep the days already read, as one-day owners did, before the
+          // retryable failure schedules a resume at the failing day.
+          if (!yieldBeforeWrite()) await flush();
+        });
+        if (records.length === 0 && !pending) {
+          committedProgress = true;
+          continue;
+        }
+        pending = appendJunctionDailyImportBatch(pending, records, window);
+        if (isJunctionDailyImportBatchFull(pending)) {
+          if (yieldBeforeWrite()) return finish(firstUncommittedDay());
+          await flush();
+        }
+      }
+      if (pending && yieldBeforeWrite()) return finish(firstUncommittedDay());
+      await flush();
+      return finish(null);
+    } catch (error) {
+      if (isJunctionJobSignalAbort(error, context.signal)) {
+        if (committedProgress) return finish(firstUncommittedDay());
+        throw error;
+      }
+      if (isRetryableDeviceSyncFailure(error)) {
+        throw new JunctionTimeseriesProgressError(error, firstUncommittedDay(), null);
+      }
+      throw error;
+    }
+  }
+
+  async function fetchJunctionDailyTimeseriesRecords(
+    input: {
+      context: ProviderJobContext;
+      resource: string;
+      skippedOptionalResources: JunctionSkippedOptionalResource[];
+      sourceProviderSlug?: string | null;
+    },
+    window: { windowEnd: string; windowStart: string },
+    beforeRetryableFailure: () => Promise<void>,
+  ): Promise<unknown[]> {
+    const skippedResourceCountBeforeFetch = input.skippedOptionalResources.length;
+    let fetched: Awaited<ReturnType<typeof fetchTimeseriesResourceInChunks>>;
+    try {
+      fetched = await fetchTimeseriesResourceInChunks(
+        input.context,
+        input.resource,
+        window.windowStart,
+        window.windowEnd,
+        input.skippedOptionalResources,
+        input.sourceProviderSlug,
+        { dateQueryFormat: "date" },
+      );
+    } catch (error) {
+      if (isRetryableDeviceSyncFailure(error)) await beforeRetryableFailure();
+      throw error;
+    }
+    return input.skippedOptionalResources.length > skippedResourceCountBeforeFetch
+      ? []
+      : scopeJunctionRecordsToSourceProvider(fetched.records, input.sourceProviderSlug);
+  }
+
+  // The batch's live source-authority read follows every provider read in it.
+  async function commitJunctionDailyImportBatch(
+    input: {
+      context: ProviderJobContext;
+      resource: string;
+      sourceProviders: readonly JunctionProviderConnection[];
+    },
+    batch: JunctionDailyImportBatch,
+  ): Promise<void> {
+    const { context } = input;
+    const currentSources = await readJunctionTimeseriesImportSources({
+      context,
+      hasCanonicalWork: true,
+      sourceLifecycleFence: null,
+    });
+    if (!currentSources) return;
+    const preparedImport = prepareJunctionImportSnapshotForSources(
+      { [input.resource]: batch.records },
+      input.sourceProviders,
+      currentSources,
+      {},
+      {
+        allowUnlistedSources: context.connectionSourceAdmissionMode !== "listed_only",
+        sourceStatusRequirement: "not_disconnected",
+      },
+    );
+    if (!hasJunctionSnapshotRecords(preparedImport.snapshots)) return;
+    await commitPreparedJunctionCanonicalImport(
+      context,
+      preparedImport,
+      {
+        importedAt: batch.windowEnd,
+        windowStart: batch.windowStart,
+        windowEnd: batch.windowEnd,
+        summaries: {},
+        timeseries: preparedImport.snapshots,
+      },
+      context.now,
+    );
   }
 
   async function executeFullJobTimeseriesContinuation(
@@ -10749,6 +10922,51 @@ function floorUtcDayTimestamp(timestamp: string): string {
     date.getUTCMonth(),
     date.getUTCDate(),
   )).toISOString();
+}
+
+// Only uncapped dense day/hour aggregates batch: their normalizers already
+// accept multi-day snapshots, as accumulated precise imports do. Capped
+// windows would truncate, calendar-day resources own per-day closure, and
+// workout streams and ECG own their cursors, so those keep one day per write.
+function canBatchJunctionDailyTimeseriesImports(resource: string): boolean {
+  const policy = resolveJunctionTimeseriesResourcePolicy(resource);
+  return policy !== undefined && policy !== null
+    && policy.historyWindow === "dense_timeseries"
+    && (policy.normalizationMode === "daily_aggregate"
+      || policy.normalizationMode === "hourly_or_session_feature")
+    && policy.fetchMode === undefined
+    && policy.maxCanonicalRecordsPerWindow === undefined
+    && policy.maxRecordsPerWindow === undefined
+    && policy.maxSamplesPerRecord === undefined
+    && policy.maxSamplesPerWindow === undefined
+    && !JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource);
+}
+
+interface JunctionDailyImportBatch {
+  days: number;
+  records: unknown[];
+  windowEnd: string;
+  windowStart: string;
+}
+
+function appendJunctionDailyImportBatch(
+  batch: JunctionDailyImportBatch | null,
+  records: readonly unknown[],
+  window: { windowEnd: string; windowStart: string },
+): JunctionDailyImportBatch {
+  return batch
+    ? {
+        days: batch.days + 1,
+        records: batch.records.concat(records),
+        windowEnd: window.windowEnd,
+        windowStart: batch.windowStart,
+      }
+    : { days: 1, records: [...records], windowEnd: window.windowEnd, windowStart: window.windowStart };
+}
+
+function isJunctionDailyImportBatchFull(batch: JunctionDailyImportBatch): boolean {
+  return batch.days >= JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_DAYS
+    || batch.records.length >= JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_RECORDS;
 }
 
 function hasJunctionSnapshotRecords(snapshot: Record<string, unknown[]>): boolean {

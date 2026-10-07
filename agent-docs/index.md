@@ -1099,3 +1099,7 @@ Frog reconciliation PR evidence generation is tracked in
 The runaway alert retry-storm trigger (20 retry_later attempts per member-hour) is
 tracked in [the retry alert plan](exec-plans/completed/2026-10-07-runaway-retry-alert.md);
 `../docs/hosted-runtime-log-database.md` owns the operational contract.
+
+Junction historical/webhook dense imports commit up to eight closed days per canonical import; see
+[the batched canonical writes plan](exec-plans/completed/2026-10-07-device-import-batched-canonical-writes.md).
+`../packages/device-syncd/README.md` owns the contract.

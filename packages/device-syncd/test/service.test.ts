@@ -2651,12 +2651,21 @@ test("Junction historical suffix persistence lets a same-priority update run fir
       async importDeviceProviderSnapshot(input) {
         const snapshot = input.snapshot as {
           timeseries?: { floors_climbed?: unknown[] };
+          windowEnd?: string;
           windowStart?: string;
         };
-        assert.equal(snapshot.timeseries?.floors_climbed?.length, 1);
-        const importedWindowStart = snapshot.windowStart;
-        assert.ok(importedWindowStart);
-        importedDays.push(importedWindowStart.slice(0, 10));
+        assert.ok(snapshot.windowStart && snapshot.windowEnd);
+        // Consecutive closed days share one canonical import; each day has one record.
+        const batchDays: string[] = [];
+        for (
+          let dayMs = Date.parse(snapshot.windowStart);
+          dayMs < Date.parse(snapshot.windowEnd);
+          dayMs += 24 * 60 * 60_000
+        ) {
+          batchDays.push(new Date(dayMs).toISOString().slice(0, 10));
+        }
+        assert.equal(snapshot.timeseries?.floors_climbed?.length, batchDays.length);
+        importedDays.push(...batchDays);
         if (!competingUpdateId) {
           const enqueue = queueCompetingUpdate;
           assert.ok(enqueue);

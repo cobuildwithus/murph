@@ -125,8 +125,15 @@ test("Junction cheap 365-day dense history advances in bounded multi-day suffixe
     account: createAccount({ sources: [source] }),
     connectionSourceAdmissionMode: "listed_only",
     importSnapshot: async (snapshot) => {
-      const window = snapshot as { windowStart?: string };
-      importedDays.push(requireValue(window.windowStart, "dense import window").slice(0, 10));
+      const window = snapshot as { windowEnd?: string; windowStart?: string };
+      // One import may commit several consecutive closed days.
+      for (
+        let day = Date.parse(requireValue(window.windowStart, "dense import window"));
+        day < Date.parse(requireValue(window.windowEnd, "dense import window end"));
+        day += 86_400_000
+      ) {
+        importedDays.push(new Date(day).toISOString().slice(0, 10));
+      }
       return { canonicalEventCount: 1, durableDeliveryAccepted: true };
     },
     now: "2026-04-04T12:00:00.000Z",
@@ -468,7 +475,9 @@ test("overlapping Garmin pull windows import identical days with 150 versus 42 f
   const day = (offset: number) => new Date(Date.UTC(2026, 0, 1 + offset)).toISOString();
   async function replay(windows: readonly { start: number; end: number }[]) {
     const requestedDays: string[] = [];
+    // Imported records by day: batch boundaries differ, day content must not.
     const imports = new Map<string, unknown>();
+    let importCalls = 0;
     const provider = createJunctionProvider(async (input) => {
       const url = new URL(readUrl(input));
       if (url.pathname === "/v2/user/providers/junction-user-1") {
@@ -488,8 +497,10 @@ test("overlapping Garmin pull windows import identical days with 150 versus 42 f
       connectionSourceAdmissionMode: "listed_only",
       now: "2026-04-04T12:00:00.000Z",
       importSnapshot: async (snapshot) => {
-        const key = (snapshot as { windowStart: string }).windowStart;
-        imports.set(key, snapshot);
+        importCalls += 1;
+        for (const record of (snapshot as { timeseries: { steps: { start: string }[] } }).timeseries.steps) {
+          imports.set(record.start.slice(0, 10), record);
+        }
         return { canonicalEventCount: 1, durableDeliveryAccepted: true };
       },
     });
@@ -499,7 +510,7 @@ test("overlapping Garmin pull windows import identical days with 150 versus 42 f
         sourceProviderSlug: "garmin", windowStart: day(window.start), windowEnd: day(window.end),
       }));
     }
-    return { requestedDays, imports };
+    return { requestedDays, imports, importCalls };
   }
   const original = await replay(Array.from({ length: 5 }, (_, index) => ({ start: index * 3, end: 30 + index * 3 })));
   const coalesced = await replay([{ start: 0, end: 42 }]);
@@ -508,4 +519,5 @@ test("overlapping Garmin pull windows import identical days with 150 versus 42 f
   assert.deepEqual(new Set(coalesced.requestedDays), new Set(original.requestedDays));
   assert.equal(coalesced.imports.size, 42);
   assert.deepEqual(coalesced.imports, original.imports);
+  assert.equal(coalesced.importCalls, 6, "42 closed days commit in eight-day batches");
 });
