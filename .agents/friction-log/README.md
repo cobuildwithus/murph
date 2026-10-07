@@ -66,6 +66,9 @@ fall back to `GITHUB_TOKEN`.
 
 The same job owns Murph PR-body normalization. It selects only the
 repository-owned `frog/sync` pull request created by the configured App bot and
-replaces one private marker-owned Architecture and Changelog footer. Zero
+replaces one private marker-owned PR evidence footer. Its change-shape table
+derives from one PR response containing the body, complete file inventory, and
+line totals. Truncated inventories, duplicate or unsupported paths, renames,
+missing text deltas, and mismatched counts fail before the body is edited. Zero
 matches are a no-op, ambiguous or untrusted matches fail closed, and retries are
 byte-identical.

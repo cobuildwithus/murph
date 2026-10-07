@@ -156,13 +156,15 @@ jobs:
           fi
 
           frog_current_body_file="$(mktemp "${RUNNER_TEMP%/}/frog-pr-current.XXXXXX")"
+          frog_pull_request_file="$(mktemp "${RUNNER_TEMP%/}/frog-pr-snapshot.XXXXXX")"
           frog_body_file="$(mktemp "${RUNNER_TEMP%/}/frog-pr-body.XXXXXX")"
           gh pr view "$frog_pr_number" \
             --repo "$GITHUB_REPOSITORY" \
-            --json body \
-            --jq .body > "$frog_current_body_file"
+            --json body,files,changedFiles,additions,deletions \
+            > "$frog_pull_request_file"
+          jq -r .body "$frog_pull_request_file" > "$frog_current_body_file"
           pnpm exec tsx scripts/frog-pr-context.ts normalize \
-            < "$frog_current_body_file" \
+            < "$frog_pull_request_file" \
             > "$frog_body_file"
 
           if cmp -s "$frog_current_body_file" "$frog_body_file"; then

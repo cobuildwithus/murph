@@ -73,7 +73,56 @@ function markerIndexes(body: string, marker: string): number[] {
   return indexes;
 }
 
-function normalizeFrogPullRequestBody(body: string, footer: string): string {
+function isLineCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function renderFrogChangeShape(value: unknown): string {
+  if (!isRecord(value) || !Array.isArray(value.files)
+    || !isLineCount(value.additions) || !isLineCount(value.deletions)
+    || value.changedFiles !== value.files.length) {
+    throw new Error("The Frog pull-request file inventory is incomplete.");
+  }
+  const paths = new Set<string>();
+  const docs = { added: 0, deleted: 0 };
+  const generated = { added: 0, deleted: 0 };
+  for (const file of value.files) {
+    if (!isRecord(file) || typeof file.path !== "string" || paths.has(file.path)) {
+      throw new Error("The Frog pull-request file inventory is invalid or duplicated.");
+    }
+    paths.add(file.path);
+    const totals = file.path === ".agents/friction-log/.sync.json"
+      ? generated
+      : /^\.agents\/friction-log\/[A-Za-z0-9_-]+\/friction\.md$/u.test(file.path)
+        ? docs
+        : undefined;
+    if (!totals || !["ADDED", "MODIFIED", "DELETED"].includes(String(file.changeType))) {
+      throw new Error("The Frog pull request contains unsupported metadata changes.");
+    }
+    if (!isLineCount(file.additions) || !isLineCount(file.deletions)
+      || file.additions + file.deletions === 0) {
+      throw new Error("The Frog pull-request line counts are invalid.");
+    }
+    totals.added += file.additions;
+    totals.deleted += file.deletions;
+  }
+  const added = docs.added + generated.added;
+  const deleted = docs.deleted + generated.deleted;
+  if (added !== value.additions || deleted !== value.deletions) {
+    throw new Error("The Frog pull-request line totals do not match its file inventory.");
+  }
+  return [
+    "## Change-shape breakdown", "",
+    "Classification rule: Friction Markdown entries are Docs; the synchronization JSON is Generated / other. Counts come from the complete GitHub PR file inventory; entries without a text delta, including binary-only changes, are rejected.", "",
+    "| Category | Added | Deleted |", "| --- | ---: | ---: |",
+    "| Source | 0 | 0 |", "| Tests / fixtures | 0 | 0 |",
+    `| Docs | ${docs.added} | ${docs.deleted} |`, "| Config / tooling | 0 | 0 |",
+    `| Generated / other | ${generated.added} | ${generated.deleted} |`,
+    `| **Total** | **${added}** | **${deleted}** |`,
+  ].join("\n");
+}
+
+function normalizeFrogPullRequestBody(body: string, footer: string, changeShape: string): string {
   const normalizedFooter = footer.trim();
   if (normalizedFooter.length === 0) {
     throw new Error("The Frog pull-request footer cannot be empty.");
@@ -87,7 +136,7 @@ function normalizeFrogPullRequestBody(body: string, footer: string): string {
 
   const starts = markerIndexes(body, contextStart);
   const ends = markerIndexes(body, contextEnd);
-  const ownedBlock = `${contextStart}\n${normalizedFooter}\n${contextEnd}`;
+  const ownedBlock = `${contextStart}\n${normalizedFooter}\n\n${changeShape}\n${contextEnd}`;
   if (starts.length === 0 && ends.length === 0) {
     const generatedBody = body.trimEnd();
     return generatedBody.length > 0
@@ -126,10 +175,15 @@ function run(): void {
     return;
   }
   if (command === "normalize") {
+    const pullRequest: unknown = JSON.parse(input);
+    if (!isRecord(pullRequest) || typeof pullRequest.body !== "string") {
+      throw new Error("The Frog pull-request response must contain its body.");
+    }
     process.stdout.write(
       normalizeFrogPullRequestBody(
-        input,
+        pullRequest.body,
         requiredEnvironment("FROG_PR_BODY_FOOTER"),
+        renderFrogChangeShape(pullRequest),
       ),
     );
     return;
@@ -153,5 +207,5 @@ if (isDirectRun) {
   }
 }
 
-export { normalizeFrogPullRequestBody, selectFrogPullRequest };
+export { normalizeFrogPullRequestBody, renderFrogChangeShape, selectFrogPullRequest };
 export type { ExpectedPullRequest };
