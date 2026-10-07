@@ -7,6 +7,8 @@ is recorded in `exec-plans/completed/2026-10-02-db-pool-pressure.md`.
 
 ReviewGPT registry 0.5.152 consumer installation and retained compatibility proof
 are tracked in [the consumer repair plan](exec-plans/completed/2026-10-05-frog-reviewgpt-consumer-3937.md).
+The current GPT-6 picker and concrete-model proof contract is owned by
+[the ReviewGPT loop](operations/pr-reviewgpt-loop.md).
 
 Pinned native source review context and provenance proof are recorded in
 [the native review context plan](exec-plans/completed/2026-10-07-frog-native-review-context.md).
