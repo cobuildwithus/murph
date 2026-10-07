@@ -17,6 +17,10 @@ export const HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD = 25;
 // Normal members stay under 20 per hour (p999 16 over 7.8k member-hours); one
 // per minute is a retry storm that is also hitting Web on every attempt.
 export const HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD = 60;
+// Retries are waste, not activity: over 8.1k member-hours (2026-09-23 to
+// 2026-10-07) every hour with 20+ retry_later rows was a retry storm, while
+// busy healthy members mostly see accepted attempts.
+export const HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD = 20;
 export const HOSTED_RUNTIME_RUNAWAY_WINDOW_MS = 60 * 60_000;
 export const HOSTED_RUNTIME_RUNAWAY_SUBJECT_LIMIT = 10;
 export const HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
@@ -39,6 +43,7 @@ type RunawaySubject = {
   subjectPrefix: string;
   invocationCount: number;
   processingAttemptCount: number;
+  processingRetryCount: number;
   processingMode: string;
   nextWakeReason: string;
   processingOutcome: string;
@@ -48,9 +53,10 @@ type RunawayHealth = {
   runawaySubjectCount: number;
   subjects: RunawaySubject[];
 };
-type RunawayRow = Omit<RunawaySubject, "invocationCount" | "processingAttemptCount"> & {
+type RunawayRow = Omit<RunawaySubject, "invocationCount" | "processingAttemptCount" | "processingRetryCount"> & {
   invocationCount: string;
   processingAttemptCount: string;
+  processingRetryCount: string;
   runawaySubjectCount: string;
 };
 type LogDatabase = Pick<HostedRuntimeLogSqlDatabase, "query">;
@@ -62,13 +68,15 @@ export async function readHostedRuntimeRunawayHealth(input: {
   const database = input.database ?? getHostedRuntimeLogPool();
   // One time-indexed aggregate, no member lookup or raw diagnostic payload.
   // Window count runs after HAVING and before LIMIT, retaining the full total.
-  // A subject alerts on either count; the worse ratio to its threshold ranks it.
+  // A subject alerts on any count; the worst ratio to its threshold ranks it.
   const result = await database.query<RunawayRow>(`
     SELECT
       CASE WHEN subject_key ~ '^[a-f0-9]{64}$'
         THEN left(subject_key, 8) ELSE 'unknown' END AS "subjectPrefix",
       count(*) FILTER (WHERE event_code = 'runtime.invocation_finished')::text AS "invocationCount",
       count(*) FILTER (WHERE event_code = 'runner.processing_finished')::text AS "processingAttemptCount",
+      count(*) FILTER (WHERE event_code = 'runner.processing_finished'
+        AND redacted_json->>'runtimeProcessingOutcome' = 'retry_later')::text AS "processingRetryCount",
       count(*) OVER ()::text AS "runawaySubjectCount",
       mode() WITHIN GROUP (ORDER BY CASE
         WHEN coalesce(redacted_json->>'processingMode',
@@ -92,14 +100,19 @@ export async function readHostedRuntimeRunawayHealth(input: {
     GROUP BY subject_key
     HAVING count(*) FILTER (WHERE event_code = 'runtime.invocation_finished') >= $3
       OR count(*) FILTER (WHERE event_code = 'runner.processing_finished') >= $4
+      OR count(*) FILTER (WHERE event_code = 'runner.processing_finished'
+        AND redacted_json->>'runtimeProcessingOutcome' = 'retry_later') >= $10
     ORDER BY greatest(
       count(*) FILTER (WHERE event_code = 'runtime.invocation_finished')::float8 / $3,
-      count(*) FILTER (WHERE event_code = 'runner.processing_finished')::float8 / $4) DESC, subject_key
+      count(*) FILTER (WHERE event_code = 'runner.processing_finished')::float8 / $4,
+      count(*) FILTER (WHERE event_code = 'runner.processing_finished'
+        AND redacted_json->>'runtimeProcessingOutcome' = 'retry_later')::float8 / $10) DESC, subject_key
     LIMIT $5
   `, [new Date(input.now.getTime() - HOSTED_RUNTIME_RUNAWAY_WINDOW_MS), input.now,
     HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD, HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD,
     HOSTED_RUNTIME_RUNAWAY_SUBJECT_LIMIT, HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
-    EMAIL_WAKE_REASONS, EMAIL_RETRY_REASONS, EMAIL_PROCESSING_OUTCOMES]);
+    EMAIL_WAKE_REASONS, EMAIL_RETRY_REASONS, EMAIL_PROCESSING_OUTCOMES,
+    HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD]);
   return {
     anomalous: result.rows.length > 0,
     runawaySubjectCount: Number(result.rows[0]?.runawaySubjectCount ?? 0),
@@ -107,6 +120,7 @@ export async function readHostedRuntimeRunawayHealth(input: {
       subjectPrefix: row.subjectPrefix,
       invocationCount: Number(row.invocationCount),
       processingAttemptCount: Number(row.processingAttemptCount),
+      processingRetryCount: Number(row.processingRetryCount),
       processingMode: row.processingMode,
       nextWakeReason: row.nextWakeReason,
       processingOutcome: row.processingOutcome,
@@ -154,9 +168,9 @@ export async function runHostedRuntimeRunawayAlertMonitor(input: {
     }),
     buildMessage: ({ health, now }) => [
       `Runaway subjects: ${health.runawaySubjectCount}.`,
-      `Threshold: at least ${HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD} runtime.invocation_finished or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD} runner.processing_finished events in the trailing ${HOSTED_RUNTIME_RUNAWAY_WINDOW_MS / 60_000} minutes.`,
+      `Threshold: at least ${HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD} runtime.invocation_finished or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD} runner.processing_finished (or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD} of them retry_later) events in the trailing ${HOSTED_RUNTIME_RUNAWAY_WINDOW_MS / 60_000} minutes.`,
       `Top ${health.subjects.length} subjects (digest prefixes):`,
-      ...health.subjects.map(subject => `${subject.subjectPrefix}: ${subject.invocationCount} invocations; ${subject.processingAttemptCount} processing attempts; dominant processingMode=${subject.processingMode}; dominant nextWakeReason=${subject.nextWakeReason}; dominant processing outcome=${subject.processingOutcome}.`),
+      ...health.subjects.map(subject => `${subject.subjectPrefix}: ${subject.invocationCount} invocations; ${subject.processingAttemptCount} processing attempts (${subject.processingRetryCount} retries); dominant processingMode=${subject.processingMode}; dominant nextWakeReason=${subject.nextWakeReason}; dominant processing outcome=${subject.processingOutcome}.`),
       `Checked ${now.toISOString()}.`,
     ].join("\n"),
   };

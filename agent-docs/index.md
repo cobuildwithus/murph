@@ -1095,3 +1095,7 @@ Usage-blocked backlog E2E synchronization is recorded in
 
 Frog reconciliation PR evidence generation is tracked in
 [the change-shape repair plan](exec-plans/completed/2026-10-07-frog-pr-change-shape.md).
+
+The runaway alert retry-storm trigger (20 retry_later attempts per member-hour) is
+tracked in [the retry alert plan](exec-plans/completed/2026-10-07-runaway-retry-alert.md);
+`../docs/hosted-runtime-log-database.md` owns the operational contract.
