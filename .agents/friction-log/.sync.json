@@ -1815,6 +1815,38 @@
     {
       "issue": "cobuildwithus/murph#4013",
       "path": ".agents/friction-log/20261004225524-usage-denial-postgresql/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4034",
+      "path": ".agents/friction-log/20261005112129-worker-startup-profiling/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4040",
+      "path": ".agents/friction-log/20261005112407-package-verifier-can/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4044",
+      "path": ".agents/friction-log/20261005222243-usage-optimizer-live/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4049",
+      "path": ".agents/friction-log/20261005113402-live-assistant-runner/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4050",
+      "path": ".agents/friction-log/20261005113402-reviewgpt-snapshot-lacks/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4053",
+      "path": ".agents/friction-log/20261005171331-cloudflare-typecheck-fails/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4058",
+      "path": ".agents/friction-log/20261006103724-system-mailbox-entrypoint/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4073",
+      "path": ".agents/friction-log/20261007001040-frog-reconciliation-pull/friction.md"
     }
   ],
   "version": 1
