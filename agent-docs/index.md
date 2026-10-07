@@ -1107,3 +1107,6 @@ tracked in [the retry alert plan](exec-plans/completed/2026-10-07-runaway-retry-
 Junction historical/webhook dense imports commit up to eight closed days per canonical import; see
 [the batched canonical writes plan](exec-plans/completed/2026-10-07-device-import-batched-canonical-writes.md).
 `../packages/device-syncd/README.md` owns the contract.
+
+Final usage-envelope fitting after trusted Worker attribution is tracked in
+[the usage reporting plan](exec-plans/active/2026-10-07-usage-reporting-envelope.md).
