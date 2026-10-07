@@ -14,6 +14,8 @@ async function createBurstFixture(batching = true) {
   const store = new SqliteDeviceSyncStore(path.join(vaultRoot, "device-sync.sqlite"));
   const counts = { fetches: 0, sources: 0, imports: 0, noops: 0 };
   const seen = new Set<string>();
+  // Closed days covered by applied imports; one import may span several days.
+  const importedDays = new Set<string>();
   const controls = { now: NOW, yield: false, disconnected: false, onFetch: () => {}, onImport: () => {} };
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));
@@ -68,6 +70,12 @@ async function createBurstFixture(batching = true) {
       const applied = !seen.has(key);
       if (!applied) counts.noops += 1;
       seen.add(key);
+      const window = input.snapshot as { windowEnd?: string; windowStart?: string };
+      if (applied && window.windowStart && window.windowEnd) {
+        for (let day = Date.parse(window.windowStart); day < Date.parse(window.windowEnd); day += 86_400_000) {
+          importedDays.add(new Date(day).toISOString().slice(0, 10));
+        }
+      }
       controls.onImport();
       return { applied, events: [] };
     } },
@@ -84,7 +92,7 @@ async function createBurstFixture(batching = true) {
       },
     });
   }
-  return { account, controls, counts, enqueue, provider, service, store,
+  return { account, controls, counts, enqueue, importedDays, provider, service, store,
     async close() { service.close(); store.close(); await rm(vaultRoot, { recursive: true, force: true }); },
   };
 }
@@ -95,9 +103,10 @@ test("queued dense webhook burst scans shared days once", async () => {
     const jobs = Array.from({ length: 8 }, (_, index) => f.enqueue(index));
     assert.equal(await f.service.drainWorker(8, f.account.id), 8);
     assert.equal(f.counts.fetches, 2);
-    assert.equal(f.counts.imports, 2);
+    assert.equal(f.counts.imports, 2, "the first day commits alone; the rest form one batch");
     assert.equal(f.counts.noops, 0);
-    assert.equal(f.counts.sources, 3, "one projection read and one fresh authority read per fetched day");
+    assert.equal(f.counts.sources, 3, "one projection read and one fresh authority read per import");
+    assert.deepEqual([...f.importedDays].sort(), ["2026-04-01", "2026-04-02"]);
     assert.ok(jobs.every((job) => f.store.getJobById(job.id)?.status === "succeeded"));
   } finally { await f.close(); }
 });
@@ -121,7 +130,7 @@ test("batched dense imports retain live revocation checks after provider reads",
     f.controls.onFetch = () => { f.controls.disconnected = true; };
     assert.equal(await f.service.drainWorker(2, f.account.id), 2);
     assert.equal(f.counts.imports, 0);
-    assert.equal(f.counts.sources, 3);
+    assert.equal(f.counts.sources, 3, "each import's authority read follows its provider reads");
   } finally { await f.close(); }
 });
 
@@ -142,7 +151,8 @@ test("different closed-day ranges keep their own scans", async () => {
     f.enqueue(0); f.enqueue(1, "04");
     assert.equal(await f.service.drainWorker(2, f.account.id), 2);
     assert.equal(f.counts.fetches, 5);
-    assert.equal(f.counts.imports - f.counts.noops, 3, "the additional day is imported");
+    assert.equal(f.counts.imports - f.counts.noops, 3, "first days commit alone; later days batch");
+    assert.deepEqual([...f.importedDays].sort(), ["2026-04-01", "2026-04-02", "2026-04-03"], "the additional day is imported");
   } finally { await f.close(); }
 });
 
@@ -165,23 +175,27 @@ test("partial batch failure retains every job and eventually imports all days", 
       });
     };
     assert.equal(await f.service.drainWorker(2, f.account.id), 2);
-    assert.equal(f.counts.imports, 1);
+    assert.equal(f.counts.imports, 1, "days read before the retryable failure still commit");
+    assert.deepEqual([...f.importedDays], ["2026-04-01"]);
     assert.ok(jobs.every((job) => f.store.getJobById(job.id)?.status === "queued"));
     f.controls.onFetch = () => {};
     f.controls.now = "2026-04-05T13:00:00.000Z";
     assert.equal(await f.service.drainWorker(2, f.account.id), 2);
     assert.ok(jobs.every((job) => f.store.getJobById(job.id)?.status === "succeeded"));
-    assert.equal(f.counts.imports - f.counts.noops, 2);
+    assert.deepEqual([...f.importedDays].sort(), ["2026-04-01", "2026-04-02"]);
   } finally { await f.close(); }
 });
 
 test("yielded batches durably retain and resume the unfinished daily range", async () => {
   const f = await createBurstFixture();
   try {
-    f.enqueue(0); f.enqueue(1);
+    // Ten closed days: the first commits alone, then the yield stops the job
+    // before its next read; the resumed suffix batches its remaining days.
+    f.enqueue(0, "11"); f.enqueue(1, "11");
     f.controls.onImport = () => { f.controls.yield = true; };
     assert.equal(await f.service.drainWorker(2, f.account.id), 2);
     assert.equal(f.counts.imports, 1);
+    assert.equal(f.importedDays.size, 1);
     const pending = f.store.listPendingJobsForAccount(f.account.id, 10);
     assert.equal(pending.length, 1);
     assert.equal(pending[0]?.payload.windowStart, "2026-04-02T00:00:00.000Z");
@@ -189,8 +203,9 @@ test("yielded batches durably retain and resume the unfinished daily range", asy
     f.controls.now = pending[0]!.availableAt;
     f.controls.onImport = () => {};
     await f.service.drainWorker(8, f.account.id);
-    assert.equal(f.counts.imports - f.counts.noops, 2);
-    assert.equal(f.counts.fetches, 2, "resume imports only the unfinished day");
+    assert.equal(f.importedDays.size, 10);
+    assert.equal(f.counts.imports, 3, "one first day, then one first day plus one eight-day batch");
+    assert.equal(f.counts.fetches, 10, "resume imports only the unfinished days");
   } finally { await f.close(); }
 });
 
