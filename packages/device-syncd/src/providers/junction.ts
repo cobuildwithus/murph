@@ -661,6 +661,10 @@ const JUNCTION_FULL_JOB_TIMESERIES_BATCH_MS = 5_000;
 // importer's 10,000 normalized event bound.
 const JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_DAYS = 8;
 const JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_RECORDS = 4_000;
+// A yield or pass deadline aborts the job and rejects later writes, so slow
+// but successful reads must not hold uncommitted days: a batch also commits
+// once it has accumulated for five seconds, like full-job continuations.
+const JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MS = 5_000;
 // A date-only provider query can contain source-local records from UTC-12.
 // Delay calendar-day ownership until that date has closed in every admitted
 // civil offset instead of treating UTC midnight as globally complete.
@@ -5286,9 +5290,10 @@ export function createJunctionDeviceSyncProvider(
   }
 
   // Same per-day fetches, source admission and canonical import as the
-  // single-day owner; only the commit spans consecutive closed days. A batch is
-  // never written after a yield once this job has committed, so the receipt
-  // admission boundary still admits at most one write past the yield signal.
+  // single-day owner; only the commit spans consecutive closed days, bounded by
+  // days, records and accumulation time. Yield handling mirrors the one-day
+  // owner: once committed, stop before the next read; a yielded job's writes
+  // are rejected by the service, so uncommitted days replay from batch start.
   async function importBatchedTimeseriesDailySnapshots(input: {
     context: ProviderJobContext;
     historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget;
@@ -5324,11 +5329,6 @@ export function createJunctionDeviceSyncProvider(
         currentWindowStart = window.windowStart;
         if (context.shouldYield?.()) {
           if (committedProgress) return finish(firstUncommittedDay());
-          if (pending) {
-            // As before, a job admits one write past the yield signal.
-            await flush();
-            return finish(window.windowStart);
-          }
           context.throwIfAborted?.();
         }
         if (!tryStartJunctionHistoricalResourceJobOwnerUnit(input.historicalResourceJobWorkBudget)) {
@@ -5336,6 +5336,7 @@ export function createJunctionDeviceSyncProvider(
           await flush();
           return finish(window.windowStart);
         }
+        const dayStartedAtMs = Date.now();
         const records = await fetchJunctionDailyTimeseriesRecords(input, window, async () => {
           // Keep the days already read, as one-day owners did, before the
           // retryable failure schedules a resume at the failing day.
@@ -5345,8 +5346,8 @@ export function createJunctionDeviceSyncProvider(
           committedProgress = true;
           continue;
         }
-        pending = appendJunctionDailyImportBatch(pending, records, window);
-        if (isJunctionDailyImportBatchFull(pending)) {
+        pending = appendJunctionDailyImportBatch(pending, records, window, dayStartedAtMs);
+        if (isJunctionDailyImportBatchFull(pending, Date.now())) {
           if (yieldBeforeWrite()) return finish(firstUncommittedDay());
           await flush();
         }
@@ -10945,6 +10946,7 @@ function canBatchJunctionDailyTimeseriesImports(resource: string): boolean {
 interface JunctionDailyImportBatch {
   days: number;
   records: unknown[];
+  startedAtMs: number;
   windowEnd: string;
   windowStart: string;
 }
@@ -10953,20 +10955,28 @@ function appendJunctionDailyImportBatch(
   batch: JunctionDailyImportBatch | null,
   records: readonly unknown[],
   window: { windowEnd: string; windowStart: string },
+  dayStartedAtMs: number,
 ): JunctionDailyImportBatch {
   return batch
     ? {
+        ...batch,
         days: batch.days + 1,
         records: batch.records.concat(records),
         windowEnd: window.windowEnd,
-        windowStart: batch.windowStart,
       }
-    : { days: 1, records: [...records], windowEnd: window.windowEnd, windowStart: window.windowStart };
+    : {
+        days: 1,
+        records: [...records],
+        startedAtMs: dayStartedAtMs,
+        windowEnd: window.windowEnd,
+        windowStart: window.windowStart,
+      };
 }
 
-function isJunctionDailyImportBatchFull(batch: JunctionDailyImportBatch): boolean {
+function isJunctionDailyImportBatchFull(batch: JunctionDailyImportBatch, nowMs: number): boolean {
   return batch.days >= JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_DAYS
-    || batch.records.length >= JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_RECORDS;
+    || batch.records.length >= JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MAX_RECORDS
+    || nowMs - batch.startedAtMs >= JUNCTION_DAILY_TIMESERIES_IMPORT_BATCH_MS;
 }
 
 function hasJunctionSnapshotRecords(snapshot: Record<string, unknown[]>): boolean {

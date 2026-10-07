@@ -18,11 +18,12 @@ Updated: 2026-10-07
 - Historical and webhook resource jobs for uncapped dense `daily_aggregate`
   and `hourly_or_session_feature` resources still fetch one closed UTC day per
   request, but commit up to eight consecutive closed days (at most 4,000
-  records) in one canonical import after one fresh source-authority read.
+  records, or what has accumulated after five seconds) in one canonical import
+  after one fresh source-authority read.
 - Yield, abort and retryable failure resume at the first uncommitted day; days
-  already read commit before a retryable fetch failure; after a job commits,
-  no batch is written past a yield signal, preserving the receipt boundary's
-  single admitted write.
+  already read commit before a retryable fetch failure. A yielded or aborted
+  job's writes are rejected by the service, so the five-second accumulation
+  bound guarantees progress before a pass deadline even when reads are slow.
 - Calendar-day, capped, workout-stream and ECG resources keep one canonical day
   per write; full-job continuations are unchanged.
 
@@ -68,6 +69,17 @@ Updated: 2026-10-07
 - Eight days and 4,000 records per batch: a 16-day job needs two writes instead
   of 16 while staying far below importer bounds.
 - Changelog: internal performance change; no member-visible behavior.
+
+## Review follow-up
+
+- ReviewGPT round 1 (High, accepted): without a time bound, eight slow but
+  successful reads could exceed the 300 s hosted pass before the first commit,
+  and every later pass would repeat the same uncommitted prefix. Fix: flush
+  after five seconds of accumulation (the full-job continuation budget), and
+  mirror the one-day owner's yield handling instead of attempting a write
+  after yield. Regression: six-second reads with a deadline every three reads
+  import every day exactly once with no committed day re-read; it fails with
+  the time bound disabled.
 
 ## Verification
 

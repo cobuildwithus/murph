@@ -137,11 +137,13 @@ Current providers:
   hour; daily aggregates remain day-atomic. Historical and webhook resource jobs
   for uncapped dense daily-aggregate and hourly/session resources still fetch one
   closed UTC day per request, but commit up to eight consecutive closed days (at
-  most 4,000 records) in one canonical import after one fresh source-authority
-  read. A yield, abort, or retryable failure resumes at the first uncommitted
-  day, already-read days commit before a retryable failure, and once a job has
-  committed no batch is written after a yield signal. Calendar-day, capped,
-  workout-stream, and ECG resources keep one canonical day per write. Workout streams use the same bounded
+  most 4,000 records, or whatever has accumulated after five seconds) in one
+  canonical import after one fresh source-authority read. The time bound keeps
+  slow but successful reads from holding uncommitted days past a pass deadline,
+  because a yielded or aborted job's writes are rejected. A yield, abort, or
+  retryable failure resumes at the first uncommitted day, and already-read days
+  commit before a retryable failure. Calendar-day, capped, workout-stream, and
+  ECG resources keep one canonical day per write. Workout streams use the same bounded
   three-page index and carry only at-most-32 completed workout identities between
   serial stream reads. Each reduced unit is imported before the scalar resource
   and window coordinate advance. A deployed v1 resource envelope is accepted
