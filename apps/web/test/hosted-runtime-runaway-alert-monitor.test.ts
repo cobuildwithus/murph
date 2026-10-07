@@ -15,6 +15,7 @@ vi.mock("@/src/lib/hosted-runtime-log/database", () => ({
 import {
   HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD,
   HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD,
+  HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD,
   HOSTED_RUNTIME_RUNAWAY_WINDOW_MS,
   runHostedRuntimeRunawayAlertMonitor,
 } from "@/src/lib/hosted-runtime-log/runaway-alert-monitor";
@@ -49,9 +50,9 @@ beforeEach(() => {
   });
 });
 
-function alertRows(count = 40, processingAttempts = 0) {
+function alertRows(count = 40, processingAttempts = 0, processingRetries = processingAttempts) {
   return { rows: [{ subjectPrefix: "abcdef01", invocationCount: String(count),
-    processingAttemptCount: String(processingAttempts),
+    processingAttemptCount: String(processingAttempts), processingRetryCount: String(processingRetries),
     runawaySubjectCount: "1", processingMode: "system_mailbox",
     nextWakeReason: "device-sync.reconcile", processingOutcome: "retry_later:claim_blocked" }] };
 }
@@ -66,6 +67,7 @@ describe("runtime runaway incident monitor", () => {
       new Date(+now - HOSTED_RUNTIME_RUNAWAY_WINDOW_MS), now,
       HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD, HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD, 10,
       expect.any(Array), expect.any(Array), expect.any(Array), expect.any(Array),
+      HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD,
     ]);
   });
 
@@ -90,12 +92,12 @@ describe("runtime runaway incident monitor", () => {
     mocks.query.mockResolvedValue(alertRows(0, 1_100));
     expect((await runHostedRuntimeRunawayAlertMonitor({ now, env, sendAlert })).outcome).toBe("alert_sent");
     expect(sendAlert).toHaveBeenCalledWith(expect.objectContaining({
-      text: expect.stringContaining("abcdef01: 0 invocations; 1100 processing attempts"),
+      text: expect.stringContaining("abcdef01: 0 invocations; 1100 processing attempts (1100 retries)"),
     }));
     const details = state?.detailsJson as Prisma.JsonObject;
     expect(details.message).toContain("dominant processing outcome=retry_later:claim_blocked");
     expect(details.message).toContain(
-      `or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD} runner.processing_finished events`);
+      `or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD} runner.processing_finished (or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD} of them retry_later) events`);
   });
 
   it("clears a recovered incident without sending a recovery email", async () => {

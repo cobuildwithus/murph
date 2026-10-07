@@ -882,12 +882,17 @@ callback statements retain the 5,000-row statement cap and use a dedicated
 
 The existing five-minute `/api/internal/hosted-runtime/latency-alert/cron` also
 runs the runaway invocation monitor. A subject with at least 25
-`runtime.invocation_finished` rows, or at least 60 `runner.processing_finished`
-rows, in the trailing 60 minutes opens the shared operational email incident.
+`runtime.invocation_finished` rows, at least 60 `runner.processing_finished`
+rows, or at least 20 `runner.processing_finished` rows with outcome
+`retry_later`, in the trailing 60 minutes opens the shared operational email
+incident.
 Every Worker ensure-processing call writes one `runner.processing_finished` row
 and calls Web, so the second count catches retry storms that never start a run
-(normal members stay under 20 per hour). Subjects rank by their worse ratio to
-either threshold. Thresholds and window are named constants; recipient
+(normal members stay under 20 per hour). The retry count isolates waste from
+activity: from 2026-09-23 to 2026-10-07 every member-hour with 20 or more
+retries was a retry storm, while busy healthy members mostly log accepted
+attempts. Subjects rank by their worst ratio to any threshold, and the email
+shows each subject's retry count. Thresholds and window are named constants; recipient
 and timezone configuration is shared with the latency monitor. Reminders use
 the existing six-hour interval and jitter, including quiet hours like the runtime
 progress monitor. A healthy evaluation clears the incident without a recovery
