@@ -1089,3 +1089,6 @@ Deterministic reminder/device-sync overlap proof and barrier regression coverage
 
 Usage-blocked backlog E2E synchronization is recorded in
 [`usage backlog state wait`](exec-plans/completed/2026-10-06-usage-backlog-state-wait.md).
+
+Frog reconciliation PR evidence generation is tracked in
+[the change-shape repair plan](exec-plans/active/2026-10-07-frog-pr-change-shape.md).
