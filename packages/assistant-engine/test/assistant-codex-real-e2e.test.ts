@@ -102,7 +102,10 @@ import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
-import { OPENAI_CODEX_MODEL_PROVIDER_CONFIG } from '@murphai/operator-config/assistant/target-runtime'
+import {
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
+} from '@murphai/operator-config/assistant/target-runtime'
 import { DAILY_NUTRITION_OPTIONAL_GOALS_INTRO, renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
 import { NUTRITION_GOAL_INVITATION_SENT_MEMORY } from '../src/assistant/nutrition-card-introduction.js'
 import { renderMarkdownMessageText } from '@murphai/operator-config/message-formatting'
@@ -1580,7 +1583,7 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
 } as const
 type RealCodexOnboardingScenario =
   keyof typeof REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS
-const OPENAI_ENV_MODEL_PROVIDER = 'openai-env'
+const OPENAI_ENV_MODEL_PROVIDER = HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
 const OPENAI_SUBSCRIPTION_MODEL_PROVIDER = 'openai'
 const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 const OPENAI_API_KEY_ENV = 'OPENAI_API_KEY'
@@ -3545,7 +3548,7 @@ describe('real Codex live fixture contracts', () => {
   }, 120_000)
 
   it('uses production Responses websocket configuration for canonical provider journeys', () => {
-    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-6-sol', modelProvider: 'openai-env', productionTransport: true })
+    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-6-sol', modelProvider: OPENAI_ENV_MODEL_PROVIDER, productionTransport: true })
     expect(toml).toContain('wire_api = "responses"')
     expect(toml).toContain('supports_websockets = true')
     expect(toml).toContain(`base_url = "${OPENAI_CODEX_MODEL_PROVIDER_CONFIG.baseUrl}"`)
@@ -3553,7 +3556,7 @@ describe('real Codex live fixture contracts', () => {
     expect(toml.split('[model_providers.')[0]).not.toContain('OPENAI_API_KEY')
   })
   it('executes canonical gate CLI commands and rejects an unknown command without a model', async () => {
-    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6-sol', modelProvider: 'openai-env' })
+    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6-sol', modelProvider: OPENAI_ENV_MODEL_PROVIDER })
     try {
       const codex = await execFileAsync(fixture.codexCommand, ['-c', 'default_permissions="murph-member-read"', 'features', 'list'], { env: fixture.env, timeout: 60_000 })
       expect(codex.stdout.trim()).not.toBe('')
@@ -30899,7 +30902,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(configToml).toContain('[shell_environment_policy]')
     expect(configToml).toContain('sandbox_mode = "workspace-write"')
     expect(configToml).toContain('include_only = [')
-    expect(configToml).toContain('[model_providers.openai-env]')
+    expect(configToml).toContain(`[model_providers.${OPENAI_ENV_MODEL_PROVIDER}]`)
     expect(configToml).toContain('env_key = "PROVIDER_AUTH"')
     expect(configToml).not.toContain('provider-value')
     expect(hostedPermissionConfigToml).toContain('env_key = "PROVIDER_AUTH"')

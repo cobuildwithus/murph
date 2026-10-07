@@ -1,3 +1,6 @@
+OpenAI-only CI fixture corrections and their focused proof are recorded in
+[the fixture correction plan](exec-plans/completed/2026-10-07-openai-only-ci-fixtures.md).
+
 Native Codex patch inclusion in full review snapshots is owned by
 
 Callback preflight snapshots and shared mailbox progress reads are owned by
