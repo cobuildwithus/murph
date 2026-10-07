@@ -1,6 +1,7 @@
 ---
 title: 'Cloudflare typecheck fails in a fresh worktree until the web Prisma client is generated'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4053'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Usage optimizer live proof rejects equivalent report wording'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4044'
 ---
 
 ## Expected Behavior

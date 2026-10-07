@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT snapshot lacks native Codex source for codex-public-live.patch changes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4050'
 ---
 
 ## Expected Behavior

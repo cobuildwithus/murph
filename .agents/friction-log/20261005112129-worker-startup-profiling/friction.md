@@ -1,6 +1,7 @@
 ---
 title: 'Worker startup profiling requires Docker and an ad hoc config copy'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4034'
 ---
 
 ## Expected Behavior

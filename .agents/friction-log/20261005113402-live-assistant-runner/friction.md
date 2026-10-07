@@ -1,6 +1,7 @@
 ---
 title: 'Live assistant runner cannot target a locally built Codex binary'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4049'
 ---
 
 ## Expected Behavior

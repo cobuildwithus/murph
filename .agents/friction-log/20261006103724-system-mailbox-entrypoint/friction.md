@@ -1,6 +1,7 @@
 ---
 title: 'System mailbox entrypoint fixtures fail projection and dirty acknowledgement on unchanged main'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4058'
 ---
 
 ## Expected Behavior

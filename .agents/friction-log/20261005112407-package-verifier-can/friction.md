@@ -1,6 +1,7 @@
 ---
 title: 'Package verifier can report failure after a successful worker exit'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4040'
 ---
 
 ## Expected Behavior
