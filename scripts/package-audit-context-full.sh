@@ -425,6 +425,13 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       "$review_gpt_pr_context_dir"
   fi
 
+  if grep -Fxq 'patches/codex-public-live.patch' "$review_gpt_pr_context_dir/changed-files.txt"; then
+    pnpm exec tsx scripts/review-gpt-native-context.ts \
+      "$review_gpt_head_oid" \
+      "$review_gpt_pr_context_dir/changed-files.txt" \
+      "$review_gpt_pr_context_dir"
+  fi
+
   if [[ "$review_gpt_context_mode" == "same_thread_delta" ]]; then
     review_gpt_correction_paths=""
     while IFS= read -r review_gpt_correction_path; do

@@ -327,6 +327,15 @@ the current user explicitly asks for it.
    because the hosted runner applies that production-source patch during its
    native Codex build. Keep it with the Dockerfiles in the mandatory snapshot paths.
 
+   When the PR changes that patch, the existing packager also includes complete
+   patched native text files and the bounded transport/recovery owner list under
+   `review-gpt-pr-context/dependencies/codex-<version>/`. It reads the reviewed
+   commit's package pin, Docker source SHA, and patch, verifies the official
+   upstream tag, and applies the patch only to an isolated Git index. The
+   provenance manifest records file hashes and omitted generated/binary paths.
+   No upstream code runs; unavailable source, mismatched pins, unsafe paths,
+   failed patch application, or exceeded bounds stop packaging.
+
    - `review-gpt-pr-context/pr-body.md`
    - `review-gpt-pr-context/pr.diff`
    - `review-gpt-pr-context/changed-files.txt`
