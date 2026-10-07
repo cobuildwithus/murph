@@ -59,7 +59,7 @@ export async function startHostedTelegramLogin(request: Request): Promise<Respon
   return createHostedTelegramProof(prisma, body.data.reauthenticate ? await hostedReauthenticationBinding(request) : "telegram-login");
 }
 
-export async function createHostedTelegramProof(prisma: PrismaClient, binding: string): Promise<Response> {
+export async function createHostedTelegramProof(prisma: PrismaClient, binding: string, transport: "browser" | "native" = "browser"): Promise<Response> {
   const config = requireHostedBetterAuthConfig();
   const clientId = requireHostedTelegramClientId();
   const nonce = randomBytes(32).toString("base64url");
@@ -69,12 +69,13 @@ export async function createHostedTelegramProof(prisma: PrismaClient, binding: s
     expiresAt: new Date(now.getTime() + 300_000), createdAt: now, updatedAt: now,
   } });
   const response = jsonOk({ ok: true, nonce, clientId });
-  response.headers.append("Set-Cookie", nonceCookie(nonce, config.baseURL, 300));
+  if (transport === "browser") response.headers.append("Set-Cookie", nonceCookie(nonce, config.baseURL, 300));
   return response;
 }
 
-export async function readHostedTelegramProof(input: { request: Request; token: string; prisma: PrismaClient; binding: string }) {
-  const nonce = readNonce(input.request);
+export async function readHostedTelegramProof(input: { request: Request; token: string; prisma: PrismaClient; binding: string; nativeNonce?: string }) {
+  const nonce = input.nativeNonce ?? readNonce(input.request);
+  if (!noncePattern.test(nonce)) throw invalidLogin("pending_proof");
   const where = [{ field: "identifier", value: identifier(nonce) }];
   const pending = await hostedAuthAdapter(input.prisma)({}).findOne<AuthRecord>({ model: "verification", where });
   if (!pending || pending.value !== input.binding || !(pending.expiresAt instanceof Date) || pending.expiresAt <= new Date()) throw invalidLogin("pending_proof");

@@ -1,7 +1,8 @@
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const provider = vi.hoisted(() => ({ read: vi.fn(), signal: vi.fn(), codes: new Map<string, string>(), telegram: vi.fn() }));
+const provider = vi.hoisted(() => ({ read: vi.fn(), signal: vi.fn(), codes: new Map<string, string>(), telegram: vi.fn(), key: vi.fn() }));
+vi.mock("jose", async (original) => ({ ...await original<typeof import("jose")>(), createRemoteJWKSet: () => provider.key }));
 vi.mock("../src/lib/hosted-orchestration/signal-runtime", async (original) => ({
   ...await original<typeof import("../src/lib/hosted-orchestration/signal-runtime")>(), signalHostedMailboxAppendRuntime: provider.signal,
 }));
@@ -29,7 +30,8 @@ import { POST as sendNativePhone } from "../app/api/device-sync/companion/auth/m
 import { POST as verifyNativePhone } from "../app/api/device-sync/companion/auth/messaging/phone/verify/route";
 import { POST as startNativeTelegram } from "../app/api/device-sync/companion/auth/messaging/telegram/start/route";
 import { POST as completeNativeTelegram } from "../app/api/device-sync/companion/auth/messaging/telegram/complete/route";
-import { captureNativeMessagingTelegramProof } from "../src/lib/better-auth/native-messaging-telegram";
+import { generateKeyPair, SignJWT } from "jose";
+import { readHostedMemberRoutingState } from "../src/lib/hosted-onboarding/hosted-member-routing-store";
 import { isHostedMemberMessagingSetupRequired } from "../src/lib/hosted-onboarding/messaging-state";
 import { POST as legacyRepairOptions } from "../app/api/settings/approval-passkeys/legacy-options/route";
 import { GET as passkeyStatus } from "../app/api/settings/approval-passkeys/route";
@@ -586,94 +588,119 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
 
   async function nativeTelegramFixture(f: Parameters<Parameters<typeof withInitialPasskeyMember>[0]>[0]) {
     vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+    vi.stubEnv("HOSTED_AUTH_TELEGRAM_CLIENT_ID", "123456789");
     vi.stubEnv("TELEGRAM_BOT_USERNAME", "synthetic_murph_bot");
     vi.stubEnv("VERCEL", "1");
-    provider.telegram.mockReset().mockResolvedValue(null);
+    const keys = await generateKeyPair("ES256");
+    provider.key.mockResolvedValue(keys.publicKey);
+    provider.telegram.mockReset().mockResolvedValue({ ok: true, result: { message_id: 1, chat: { id: 123456789, type: "private" } } });
     expect((await startNativeTelegram(nativeRequest(f.token, {}, true))).status).toBe(401);
     const start = await startNativeTelegram(nativeRequest(f.token, {}));
     expect(start.status).toBe(200);
-    const link: { token: string; url: string } = await start.json();
-    expect(link.url).toContain(`?start=link_${link.token}`);
-    const update = { update_id: 1, message: { message_id: 1, date: Math.floor(Date.now() / 1000),
-      from: { id: 123456789, is_bot: false, first_name: "Synthetic" }, chat: { id: 123456789, type: "private" as const }, text: `/start link_${link.token}` } };
-    const body = (proof?: string) => ({ token: link.token, ...(proof ? { proof } : {}) });
-    const receive = async () => {
-      expect(await captureNativeMessagingTelegramProof(update, f.prisma)).toBe(true);
-      const delivered = provider.telegram.mock.calls.at(-1)?.[0];
-      expect(delivered.body.chat_id).toBe("123456789");
-      const url = new URL(delivered.body.reply_markup.inline_keyboard[0][0].url);
-      expect(url.origin + url.pathname).toBe("https://www.withmurph.ai/companion/telegram-return");
-      expect(url.search).toBe("");
-      const fields = new URLSearchParams(url.hash.slice(1));
-      expect(fields.get("token")).toBe(link.token);
-      return fields.get("proof")!;
-    };
-    return { link, update, body, receive };
+    expect(start.headers.has("set-cookie")).toBe(false);
+    const link: { nonce: string; clientId: string } = await start.json();
+    expect(link.clientId).toBe("123456789");
+    const token = (claims: Record<string, unknown> = {}) => new SignJWT({ id: 123456789, nonce: link.nonce, ...claims })
+      .setProtectedHeader({ alg: "ES256" }).setIssuer("https://oauth.telegram.org").setAudience(link.clientId)
+      .setIssuedAt().setExpirationTime("5m").sign(keys.privateKey);
+    const body = { nonce: link.nonce, idToken: await token() };
+    return { link, body, token };
   }
 
-  it("native Telegram forwarded link cannot bind the recipient through creator polling", () => withInitialPasskeyMember(async (f) => {
+  it("native Telegram binds signed nonce to the originating member and session, rejecting cookies and replay", () => withInitialPasskeyMember(async (f) => {
     const t = await nativeTelegramFixture(f);
-    const recipientProof = await t.receive();
-    expect((await (await completeNativeTelegram(nativeRequest(f.token, t.body()))).json())).toEqual({ ok: true, linked: false });
-    expect((await completeNativeTelegram(nativeRequest(f.token, t.body("x".repeat(43))))).status).toBe(400);
-    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBeNull();
-    // The recipient has the return proof but not the initiating app session.
-    await withInitialPasskeyMember(async (recipient) => {
-      expect((await completeNativeTelegram(nativeRequest(recipient.token, t.body(recipientProof)))).status).toBe(400);
-      expect((await readHostedLoginMethods(recipient.prisma, recipient.memberId)).methods.telegram).toBeNull();
-    });
-  }));
-
-  it("native Telegram requires private recipient proof plus the original session and consumes it once", () => withInitialPasskeyMember(async (f) => {
-    const t = await nativeTelegramFixture(f);
-    expect(await captureNativeMessagingTelegramProof({ ...t.update, message: { ...t.update.message, chat: { id: -123, type: "group" } } }, f.prisma)).toBe(true);
-    expect(provider.telegram).not.toHaveBeenCalled();
-    expect((await (await completeNativeTelegram(nativeRequest(f.token, t.body()))).json()).linked).toBe(false);
-    const proof = await t.receive();
-    expect(await t.receive()).toBe(proof); // Recover an interrupted bot response.
-    const otherSender = { ...t.update, message: { ...t.update.message, from: { ...t.update.message.from, id: 987654321 }, chat: { id: 987654321, type: "private" as const } } };
-    await captureNativeMessagingTelegramProof(otherSender, f.prisma);
-    expect(provider.telegram).toHaveBeenCalledTimes(2);
     const wrongSession = await f.loginAgainNative();
-    expect((await completeNativeTelegram(nativeRequest(wrongSession, t.body(proof)))).status).toBe(400);
-    expect((await completeNativeTelegram(nativeRequest(f.token, t.body(proof), true))).status).toBe(401);
-    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBeNull();
-    expect(await (await completeNativeTelegram(nativeRequest(f.token, t.body(proof)))).json()).toEqual({ ok: true, linked: true });
+    expect((await completeNativeTelegram(nativeRequest(wrongSession, t.body))).status).toBe(401);
+    await withInitialPasskeyMember(async (other) => {
+      expect((await completeNativeTelegram(nativeRequest(other.token, t.body))).status).toBe(401);
+    });
+    expect((await completeNativeTelegram(nativeRequest(f.token, t.body, true))).status).toBe(401);
+    expect(provider.telegram).not.toHaveBeenCalled();
+    const completed = await completeNativeTelegram(nativeRequest(f.token, t.body));
+    expect(await completed.json()).toMatchObject({ ok: true, linked: true, telegramAwaitingInbound: false });
     expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBe("123456789");
-    expect((await completeNativeTelegram(nativeRequest(f.token, t.body(proof)))).status).toBe(400);
-    await captureNativeMessagingTelegramProof(t.update, f.prisma);
-    expect(provider.telegram).toHaveBeenCalledTimes(2);
+    const routing = await readHostedMemberRoutingState(f);
+    expect(routing?.telegramThreadId).toBe("123456789");
+    expect(isHostedMemberMessagingSetupRequired({ identity: await readHostedMemberIdentity(f), routing })).toBe(false);
+    expect((await completeNativeTelegram(nativeRequest(f.token, t.body))).status).toBe(401);
+    expect(provider.telegram).toHaveBeenCalledTimes(1);
   }));
 
-  it("native Telegram proof cannot claim another member's linked identity", () => withInitialPasskeyMember(async (f) => {
+  it.each(["missing", "wrong"])("native Telegram rejects a signed token with %s nonce before linking", (kind) => withInitialPasskeyMember(async (f) => {
+    const t = await nativeTelegramFixture(f);
+    const idToken = await t.token({ nonce: kind === "missing" ? undefined : "x".repeat(43) });
+    expect((await completeNativeTelegram(nativeRequest(f.token, { ...t.body, idToken }))).status).toBe(401);
+    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBeNull();
+    expect(provider.telegram).not.toHaveBeenCalled();
+  }));
+
+  it("native Telegram rejects an expired proof", () => withInitialPasskeyMember(async (f) => {
+    const t = await nativeTelegramFixture(f);
+    await hostedAuthAdapter(f.prisma)({}).update({ model: "verification", where: [{ field: "identifier", value: `telegram-login:${t.link.nonce}` }], update: { expiresAt: new Date(0) } });
+    expect((await completeNativeTelegram(nativeRequest(f.token, t.body))).status).toBe(401);
+    expect(provider.telegram).not.toHaveBeenCalled();
+  }));
+
+  it("native Telegram preserves conflict ownership", () => withInitialPasskeyMember(async (f) => {
     const first = await nativeTelegramFixture(f);
-    const proof = await first.receive();
-    expect((await completeNativeTelegram(nativeRequest(f.token, first.body(proof)))).status).toBe(200);
+    expect((await completeNativeTelegram(nativeRequest(f.token, first.body))).status).toBe(200);
     await withInitialPasskeyMember(async (other) => {
       const second = await nativeTelegramFixture(other);
-      const conflictingProof = await second.receive();
-      const response = await completeNativeTelegram(nativeRequest(other.token, second.body(conflictingProof)));
-      expect(await response.json()).toMatchObject({ error: { code: "AUTH_CONTACT_IN_USE" } });
+      const conflict = await completeNativeTelegram(nativeRequest(other.token, second.body));
+      expect(await conflict.json()).toMatchObject({ error: { code: "AUTH_CONTACT_IN_USE" } });
       expect((await readHostedLoginMethods(other.prisma, other.memberId)).methods.telegram).toBeNull();
-      expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBe("123456789");
+      expect(provider.telegram).not.toHaveBeenCalled();
     });
   }));
 
-  it("native Telegram expiry rejects both bot redemption and completion", () => withInitialPasskeyMember(async (f) => {
+  it("native Telegram completion preserves the member attempt budget across bad proofs", () => withInitialPasskeyMember(async (f) => {
     const t = await nativeTelegramFixture(f);
-    const proof = await t.receive();
-    await hostedAuthAdapter(f.prisma)({}).update({ model: "verification", where: [{ field: "identifier", value: `native-telegram-link:${t.link.token}` }], update: { expiresAt: new Date(0) } });
-    expect((await completeNativeTelegram(nativeRequest(f.token, t.body(proof)))).status).toBe(400);
-    await captureNativeMessagingTelegramProof(t.update, f.prisma);
-    expect(provider.telegram).toHaveBeenCalledTimes(1);
-    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBeNull();
+    for (let attempt = 0; attempt < 20; attempt++) expect((await completeNativeTelegram(nativeRequest(f.token, { ...t.body, idToken: "invalid" }))).status).toBe(401);
+    expect((await completeNativeTelegram(nativeRequest(f.token, t.body))).status).toBe(429);
+    expect(provider.telegram).not.toHaveBeenCalled();
   }));
 
-  it("native Telegram completion preserves the member attempt budget", () => withInitialPasskeyMember(async (f) => {
+  it.each(["stale", "revoked", "protected"] as const)("native Telegram preserves %s rejection", (kind) => withInitialPasskeyMember(async (f) => {
     const t = await nativeTelegramFixture(f);
-    for (let attempt = 0; attempt < 20; attempt++) expect((await completeNativeTelegram(nativeRequest(f.token, t.body()))).status).toBe(200);
-    expect((await completeNativeTelegram(nativeRequest(f.token, t.body()))).status).toBe(429);
+    if (kind === "revoked") await logoutBrowser(f.request({}));
+    else if (kind === "protected") await registerPasskey(f.request(await initialEnrollment(f.request)));
+    else await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt: new Date(Date.now() - 360_000) },
+    });
+    expect([401, 403]).toContain((await completeNativeTelegram(nativeRequest(f.token, t.body))).status);
     expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBeNull();
+    expect(provider.telegram).not.toHaveBeenCalled();
+  }));
+
+  it("native Telegram concurrent completion sends at most one welcome", () => withInitialPasskeyMember(async (f) => {
+    const t = await nativeTelegramFixture(f);
+    const responses = await Promise.all([0, 1].map(() => completeNativeTelegram(nativeRequest(f.token, t.body))));
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    expect(provider.telegram).toHaveBeenCalledTimes(1);
+  }));
+
+  it("native Telegram delivery cannot restore an identity removed during the send", () => withInitialPasskeyMember(async (f) => {
+    const t = await nativeTelegramFixture(f);
+    provider.telegram.mockImplementationOnce(async () => {
+      await f.prisma.$transaction((tx) => removeHostedMemberLinkedAccountProjectionTx({
+        memberId: f.memberId, method: "telegram", expectedIdentity: "123456789", authSource: "better-auth", prisma: tx,
+      }));
+      return { ok: true, result: { message_id: 1, chat: { id: 123456789, type: "private" } } };
+    });
+    expect((await completeNativeTelegram(nativeRequest(f.token, t.body))).status).toBe(409);
+    expect((await readHostedMemberRoutingState(f))?.telegramUserId).toBeNull();
+  }));
+
+  it.each(["forbidden", "network", "invalid-chat"])("native Telegram keeps awaiting-inbound after %s delivery", (kind) => withInitialPasskeyMember(async (f) => {
+    const t = await nativeTelegramFixture(f);
+    if (kind === "invalid-chat") provider.telegram.mockResolvedValue({ ok: true, result: { message_id: 1, chat: { id: 987654321, type: "private" } } });
+    else provider.telegram.mockRejectedValue(new Error(kind === "forbidden" ? "Synthetic Telegram 403" : "Synthetic timeout"));
+    const completed = await completeNativeTelegram(nativeRequest(f.token, t.body));
+    expect(await completed.json()).toMatchObject({ ok: true, linked: true, telegramAwaitingInbound: true, telegramUrl: "https://t.me/synthetic_murph_bot?text=Hey+Murph" });
+    const routing = await readHostedMemberRoutingState(f);
+    expect(routing?.telegramUserId).toBe("123456789");
+    expect(routing?.telegramThreadId).toBeNull();
+    expect(isHostedMemberMessagingSetupRequired({ identity: await readHostedMemberIdentity(f), routing })).toBe(false);
   }));
 
   it("completes initial phone setup with phone proof alone and rejects replay and replacement", () => withInitialPhoneMember(async (f) => {

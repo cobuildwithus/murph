@@ -174,6 +174,21 @@ describe("companion initial onboarding routes", () => {
     });
   });
 
+  it.each([null, "123456789"])("projects Telegram awaiting-inbound separately from legacy setup readiness (%s)", async (telegramThreadId) => {
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: null },
+      routing: { telegramUserId: "123456789", telegramThreadId },
+    });
+    const response = await route.GET(new Request(
+      "https://app.example.test/api/device-sync/companion/initial-onboarding",
+      { headers: { authorization: "Bearer identity-token" } },
+    ));
+    await expect(response.json()).resolves.toMatchObject({
+      messagingSetupRequired: false,
+      telegramAwaitingInbound: telegramThreadId === null,
+    });
+  });
+
   it("retains the assigned contact route after onboarding completes", async () => {
     mocks.readHostedInitialOnboardingState.mockResolvedValue({
       completedAt: new Date("2026-08-04T12:00:00.000Z"),

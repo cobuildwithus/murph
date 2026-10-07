@@ -2,64 +2,70 @@
 
 Status: active
 Created: 2026-10-06
-Updated: 2026-10-06
+Updated: 2026-10-07
 
-## Goal
+## Outcome and authority
 
-Members link their first phone or Telegram account inside either native app and
-continue through canonical onboarding without a second Murph browser login.
+Members link their first phone or Telegram identity inside either native app,
+using the canonical credential owner without another Murph browser sign-in.
+Murph is the source of truth; downstream changes belong to Android PR 52 and
+iOS PR 177. Android remains stacked on the unchanged PR 51.
 
-## Scope and order
+After required CI and ReviewGPT pass, merge order is backend, production Ready
+and unauthenticated endpoint smoke, Android 51 then 52, then iOS. Android 52 also
+waits for its registered native redirect host. App publication, native canary
+pins, secret changes and real-member mutations are excluded.
 
-Murph is the source of truth. Implement its additive native protocol first,
-then iOS and Android consumers in isolated worktrees. Android starts at the
-unchanged PR 51 head. Open one PR per repository; no merge, deploy or publication.
+## Current protocol
 
-## Decisions and boundaries
-
-- Reuse the existing credential owner and first-messaging exception. Preserve
-  canonical conflicts, fresh primary proof, established approval, SMS limits,
-  atomic writes, session fences and channel wake. Account settings remains the
-  fallback for protected accounts; stale sessions require primary login.
-- Current main accepts a canonical phone before Linq thread materialization.
-  Reuse its readiness projection rather than the task's older thread-only note.
-- Telegram uses a random five-minute link in the encrypted auth verification
-  store. Authenticated private bot ingress records proof; the original native
-  member/session consumes it through the credential owner. No bot-link login,
-  member creation, raw session storage or new table.
-- Native drafts and tokens remain in memory. Sign-out/member changes reject late
-  completions. Both clients recheck readiness after proof and Telegram return.
+- Reuse first-messaging eligibility, canonical identity conflicts, fresh primary
+  proof, current-session revalidation, SMS limits and atomic credential writes.
+  Protected members retain account-settings approval; stale proof needs login.
+- Native Telegram start uses the web proof owner with a separate member/session
+  purpose and no cookies. The signed ID token must contain the exact server
+  nonce. The proof expires in five minutes and is consumed with the credential.
+- Remove the bot start-link, recipient proof and hosted return page. No Murph
+  code exchange or new client secret. Official native SDKs own authentication.
+- Attempt the normal welcome once through the existing Telegram API owner.
+  Accepted private-chat delivery promotes the canonical thread after checking
+  that the identity has not changed. Failure preserves awaiting-inbound.
+- The additive initial-onboarding flag exposes awaiting-inbound to new clients;
+  existing messagingSetupRequired semantics and older browser apps are preserved.
 
 ## Product UX
 
-Feature effort. Journeys: email signup to phone/code/continue; Telegram Start and
-return; wrong number/code, conflict, rate limit, stale session, protected account,
-network failure, duplicate submission and sign-out during a request. Browser
-fallback and Sign out remain reachable. Use matching cream/slate native layouts,
-existing country selection and code inputs, and synthetic screenshots.
+Default phone entry uses the existing country picker and Send code button,
+then a muted or divider and secondary Connect Telegram. Sign out stays in the
+bar. SMS code entry remains the existing login pattern. Telegram uses centered
+confirming progress, then continuation or an explicit say-hi fallback. Errors
+are inline, with settings fallback only where existing policy requires it.
+Pending native state stays in memory and is fenced on sign-out/member changes.
 
-## Verification
+Journeys to prove: phone verification, Telegram approval and cancellation,
+accepted welcome, rejected send and inbound recovery, conflict, expiry,
+rate limit, stale/revoked sessions, duplicate submission and account switching.
+Both native apps need fresh matching synthetic captures, including large text.
 
-- Isolated local PostgreSQL, synthetic SMS and crypto ports: 142 tests pass across
-  canonical credential/Telegram, transport and Telegram route suites.
-- Web typecheck and complexity guard pass; existing unrelated webhook hotspots
-  are unchanged. No new database work for ordinary Telegram messages.
-- Android full verification passed with CI public placeholders; the resumed iOS
-  unit suite passed 911 tests with one skip. Full simulator UI proof is in progress.
-- Remaining: final native fixtures/evidence, source review, PRs, exact-head CI and
-  required ReviewGPT. Real SMS, Telegram and physical-device delivery unverified.
+## Implementation and proof
 
-## Resumed review remediation
+Backend implementation now replaces the earlier bot-link protocol with signed
+nonce proof and accepted-welcome promotion. Five focused suites pass 157 tests:
+member PostgreSQL composition, Telegram PostgreSQL composition, transport,
+Telegram webhook routing and companion initial-onboarding projection. Tests
+cover wrong nonce/member/session, cookies, replay, expiry, conflict, rate limit,
+stale/revoked/protected accounts, concurrent completion, accepted/rejected sends
+and identity removal during delivery. Web typecheck and complexity guard pass.
 
-The human approved resuming the accepted review findings and requested the
-simplified native method states. The source-confirmed forwarded-link attack
-required recipient-only proof in addition to the original session binding.
-The revised protocol privately returns that proof from Telegram and checks both
-proofs before the canonical transaction. iOS now refreshes admission only after
-successful completion, preserving pending tokens across foreground retries.
-The docs-index base conflict was resolved by preserving both routing entries.
+## Current external SDK boundary
 
-Verification in progress: forwarded-link, wrong-session/member, replay, expiry,
-provider retry, rate-limit and callback parsing tests; full native checks;
-matching synthetic state captures; fresh exact-head review and hosted gates.
-No production delivery, deployment or app publication is authorized.
+The current official iOS revision 215851df7e3cd32787a0054e5d1a97d7aa62796e
+and Android revision f9d5ec36ba2433bc5f103b5cd8289f43a05f9336 have no nonce
+argument or nonce serialization on either login path. Unmodified SDK tokens
+therefore cannot pass the required backend verification. A minimal pinned nonce
+patch versus waiting for upstream support needs a decision. Do not silently
+accept tokens lacking the signed nonce or replace it with local session state.
+
+Both registered iOS domains publicly serve the correct app associations. Native
+entitlements, SDK integration, UI, captures, focused tests, CI and final review
+remain outstanding. Android's real redirect host is pending. No production
+SMS, Telegram approval/delivery or physical-device behavior has been verified.

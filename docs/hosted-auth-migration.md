@@ -344,51 +344,54 @@ import members, or bypass existing approval state. Protected members use account
 settings; stale primary proof requires signing in again. Additions preserve
 sessions. Existing browser credential routes are unchanged.
 
-Telegram start accepts `{}` and returns `{ ok: true, token, url }`. A random
-256-bit, five-minute token travels in the bot deep link and app memory. The
-existing encrypted auth verification store binds it to the initiating member
-and native session. Authenticated webhook ingress accepts only a non-bot sender
-in their own private chat, locks the first recipient, and privately sends that
-recipient a separate random 256-bit return proof. Repeated ingress for the same
-recipient can resend the proof within a bounded budget; another sender cannot
-replace the recipient or receive their proof. No credential is linked by ingress.
+Telegram start accepts `{}` and returns `{ ok: true, nonce, clientId }`, without
+cookies. A random 256-bit nonce expires after five minutes in the existing
+encrypted auth verification store, bound to the native member and session under
+a purpose distinct from browser login and credential changes. The official
+native login requests `openid profile telegram:bot_access` and the same nonce.
+Completion accepts `{ nonce, idToken }` with the original bearer. It reuses the
+web verifier's JWKS, algorithm, issuer, audience, signed nonce and token-age
+checks, then the canonical credential owner. Proof consumption and linking are
+atomic. Wrong member/session, missing/mismatched nonce, expiry, replay and
+conflicts fail closed; the existing member/IP attempt budgets apply.
+No Murph backend code exchange or additional client secret is introduced.
 
-Complete accepts `{ token, proof? }` with the original native bearer. Without
-the recipient proof it returns only `{ ok: true, linked: false }`, even after
-Telegram ingress. Polling never reveals the proof or Telegram identity. The
-creator of a forwarded start link therefore cannot link its recipient by polling.
-The recipient's return link alone also cannot complete another app's pending
-flow. Completion requires the original session, its memory-held token, and the
-private recipient proof; it reuses the credential owner and atomically consumes
-the pending record with canonical/login writes and the channel wake. Expired,
-replayed, wrong-member/session, conflicting and stale-primary requests fail closed.
+After the committed link, one bounded Bot API send attempts the existing
+`assistant.signup_welcome` content. Telegram documents no bot-access token claim;
+requesting the scope alone is not proof that a message can be delivered. Only a
+successful Bot API message response naming the verified private chat promotes
+`telegramThreadId`, through the existing routing owner and channel-update wake.
+Promotion rechecks the identity under the member lock so removal/replacement
+while the send was in flight cannot restore a stale link. Replay cannot resend.
+Provider rejection, missing access, blocked bots, malformed responses and network
+uncertainty leave the identity linked but awaiting inbound. This narrow native
+link welcome does not enable general proactive Telegram activation welcomes.
 
-The bot's HTTPS `/companion/telegram-return#token=...&proof=...` link carries
-proof only in its fragment. This standalone handoff removes the fragment from
-history and offers one fixed `murph-messaging://telegram/complete` app link. It
-has no analytics, application shell or network requests, and uses no-store,
-no-referrer and restrictive CSP headers. Native handlers accept only the exact
-route and a token matching the existing in-memory flow. Cold starts and other
-flows fail closed. No bearer enters either URL. The next ordinary Telegram
-message uses existing direct-thread admission.
+Completion also returns `telegramAwaitingInbound` and `telegramUrl` (the bot chat
+with a prefilled greeting, or null if unconfigured). The initial-onboarding
+projection includes the additive `telegramAwaitingInbound` flag for recovery
+across process restarts. Legacy `messagingSetupRequired` semantics are unchanged:
+a verified canonical phone or linked Telegram identity clears that flag. New
+clients show the explicit say-hi step while Telegram awaits inbound and refresh
+on return; they must not infer a direct route from a successful SDK callback.
+The bot-start linking protocol, recipient proof and custom return page are gone.
 
-Current messaging readiness accepts the canonical phone lookup or a linked
-Telegram identity awaiting inbound. Provider acceptance still owns materializing
-a Linq home thread; the app does not infer delivery from an SMS verification.
-Both apps reread initial onboarding after successful linking. Telegram returns
-check completion first; pending/error checks retain the same in-memory token
-and screen so the member can retry. The screen has one primary action per
-method, automatic six-digit SMS submission, quiet method switching, and a
-top-bar Sign out. Account settings appears only in applicable inline errors.
+The native setup default contains the existing phone input and Send code action,
+a quiet divider and secondary Connect Telegram button, with Sign out in the top
+bar. SMS uses the existing six-digit input. Telegram login uses the centered
+confirming state, then either readiness continuation or the say-hi fallback.
+Cancellation and errors stay inline; account settings appears only for changes
+that need its existing approval or conflict controls.
 
 Deploy this backend before distributing either native consumer. Older apps keep
-using browser settings. New apps against an older backend show a retryable error
-and retain that fallback. No schema, Worker protocol, canary pin, secret or app
-minimum changes are required. Rollback to the prior backend interrupts new native
-link attempts, while committed contacts and sessions retain existing readers;
-prefer keeping these additive endpoints until dependent apps have drained.
-Real SMS delivery, bot redemption and device lifecycle must be qualified in a
-separately authorized environment before app publication.
+using browser settings, and the new initial-onboarding field is additive. New
+apps against an older backend fail the native operation without weakening proof.
+Rollback to a backend without these endpoints requires pausing dependent native
+distribution; already installed newer apps retain SMS/browser error recovery.
+Production merge qualification includes an unauthenticated endpoint rejection
+smoke. Native distribution additionally needs registered callback domains and
+real-device Telegram approval. Never substitute a missing nonce with local
+session state: the currently published SDKs need nonce support before release.
 
 ## Browser and native continuity
 
