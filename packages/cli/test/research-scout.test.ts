@@ -9,6 +9,8 @@ import {
   registerResearchCommands,
 } from '../src/commands/research.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
+import { projectVaultCliError } from '../src/vault-cli-error-projection.js'
+import { MAX_RESEARCH_SCOUT_BATCH_LANES } from '../src/research-scout.js'
 import {
   buildExaResearchScoutRequest,
   fetchExaResearchScoutBatchCandidates,
@@ -266,6 +268,51 @@ describe('research scout', () => {
         ],
         since: '2024-06-18T00:00:00.000Z',
       })).toThrow(/Pass since, until, and maxCandidatesPerLane as CLI options/u)
+  })
+
+  it('attaches only a private finite first-rejection category to the unchanged batch error', () => {
+    const lane = { label: 'sleep', profile: { topics: ['sleep'] } }
+    const cases: Array<[unknown, string]> = [
+      [{}, 'envelope'],
+      [{ lanes: 'PRIVATE_VALUE' }, 'envelope'],
+      [{ lanes: [null] }, 'envelope'],
+      [{ lanes: [lane], since: '2024-06-18T00:00:00.000Z' }, 'unexpected_root_field'],
+      [{ lanes: [lane], PRIVATE_KEY: 'PRIVATE_VALUE' }, 'unexpected_root_field'],
+      [{ lanes: [] }, 'lane_count'],
+      [{ lanes: Array.from({ length: MAX_RESEARCH_SCOUT_BATCH_LANES + 1 }, () => lane) }, 'lane_count'],
+      [{ lanes: [{ profile: lane.profile }] }, 'lane_label'],
+      [{ lanes: [{ label: 'PRIVATE Label 555', profile: lane.profile }] }, 'lane_label'],
+      [{ lanes: [{ ...lane, tags: ['sleep'] }] }, 'unexpected_lane_field'],
+      [{ lanes: [{ label: 'sleep', profile: { topics: ['sleep'], mode: 'focused' } }] }, 'unexpected_lane_field'],
+      [{ lanes: [{ label: 'sleep', profile: { tags: ['sleep'] } }] }, 'unexpected_lane_field'],
+      [{ lanes: [{ label: 'sleep' }] }, 'profile_shape'],
+      [{ lanes: [{ label: 'sleep', profile: {} }] }, 'profile_shape'],
+      [{ lanes: [{ label: 'sleep', profile: { topics: 'sleep' } }] }, 'profile_shape'],
+      [{ lanes: [{ label: 'sleep', profile: { topics: Array.from({ length: 25 }, () => 'sleep') } }] }, 'profile_shape'],
+      [{ lanes: [{ label: 'sleep', profile: { topics: ['PRIVATE_CONCEPT'] } }] }, 'public_concept'],
+      [{ lanes: [{ label: 'sleep', profile: { topics: [3] } }] }, 'public_concept'],
+      // Deterministic first-issue precedence: nested lane order, then root keys.
+      [{ lanes: [{ label: 'PRIVATE Label', profile: { topics: ['PRIVATE_CONCEPT'] } }], extra: 1 }, 'lane_label'],
+      [{ lanes: [{ label: 'sleep', profile: { topics: ['PRIVATE_CONCEPT'] } }, { label: 'PRIVATE Label' }] },
+        'public_concept'],
+      // Root non-records never reach this parser from --input; classification is still closed.
+      ['PRIVATE_VALUE', 'envelope'],
+    ]
+    for (const [input, expected] of cases) {
+      let caught: unknown
+      try { parseResearchScoutBatchCliPayloadInput(input) } catch (error) { caught = error }
+      expect(caught).toBeInstanceOf(VaultCliError)
+      const error = caught as VaultCliError
+      const plain = new VaultCliError(error.code, error.message, error.context)
+      expect(error.code).toBe('research_scout_invalid_batch_payload')
+      expect(Object.keys(error)).toEqual(Object.keys(plain))
+      expect(JSON.stringify(error)).toBe(JSON.stringify(plain))
+      expect(projectVaultCliError(error)).toEqual(projectVaultCliError(plain))
+      expect(Object.getOwnPropertyDescriptor(error, 'cliTimingRejection')).toEqual({
+        value: expected, enumerable: false, writable: false, configurable: false,
+      })
+      expect(`${error.message}${JSON.stringify(error)}`).not.toMatch(/PRIVATE|cliTimingRejection|lane_|_field|envelope/u)
+    }
   })
 
   it('normalizes date-only research scout bounds before provider work', () => {

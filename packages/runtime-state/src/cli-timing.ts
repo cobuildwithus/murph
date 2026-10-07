@@ -46,6 +46,7 @@ export interface CliFailureTiming {
   stage: typeof CLI_TIMING_FAILURE_STAGES[number];
   count: number;
   validation?: CliValidationDiagnostic;
+  rejection?: CliTimingRejection;
 }
 export function cliTimingFailureCode(value: unknown): CliFailureTiming["code"] {
   return CLI_TIMING_FAILURE_CODES.find((code) => code === value) ?? "unknown";
@@ -132,10 +133,29 @@ export function cliTimingValidationFailure(
   } catch { return {}; }
 }
 
+// First rejected invariant of `research scout-batch`'s existing schema, classified
+// by the CLI parser from fixed issue code/path shape. Never issue paths, indices,
+// keys, labels, values or messages; unclassified rejections are absent.
+export const CLI_TIMING_REJECTIONS = [
+  "envelope", "unexpected_root_field", "lane_count", "lane_label",
+  "profile_shape", "unexpected_lane_field", "public_concept",
+] as const;
+export type CliTimingRejection = typeof CLI_TIMING_REJECTIONS[number];
+
+/** Optional, independently dropped like validation detail; same own-data rules. */
+export function cliTimingRejectionFailure(
+  command: unknown, code: unknown, source: unknown, property: "cliTimingRejection" | "rejection",
+): Pick<CliFailureTiming, "rejection"> {
+  if (command !== "research scout-batch" || code !== "research_scout_invalid_batch_payload") return {};
+  const value = readCliTimingOwnData(source, property);
+  const rejection = CLI_TIMING_REJECTIONS.find((candidate) => candidate === value);
+  return rejection ? { rejection } : {};
+}
+
 function sameFailureVariant(left: CliFailureTiming, right: CliFailureTiming): boolean {
   return left.code === right.code && left.stage === right.stage &&
     left.validation?.field === right.validation?.field && left.validation?.code === right.validation?.code &&
-    left.validation?.missing === right.validation?.missing;
+    left.validation?.missing === right.validation?.missing && left.rejection === right.rejection;
 }
 
 
@@ -295,6 +315,7 @@ function normalizeCommandFailures(command: {
     const length = readCliTimingOwnData(entries, "length");
     if (!integer(length) || length > CLI_TIMING_MAX_FAILURES) return {};
     const failures: CliFailureTiming[] = [];
+    const name = readCliTimingOwnData(command, "command");
     let observations = dropped;
     // Bound indexed reads; do not trust a supplied array iterator or reread a
     // property after validation (accessors could return a different value).
@@ -309,7 +330,8 @@ function normalizeCommandFailures(command: {
       const code = cliTimingFailureCode(readCliTimingOwnData(entry, "code"));
       const stage = cliTimingFailureStage(readCliTimingOwnData(entry, "stage"));
       const failure: CliFailureTiming = { code, stage, count,
-        ...cliTimingValidationFailure(readCliTimingOwnData(command, "command"), code, entry, "validation") };
+        ...cliTimingValidationFailure(name, code, entry, "validation"),
+        ...cliTimingRejectionFailure(name, code, entry, "rejection") };
       const current = failures.find((item) => sameFailureVariant(item, failure));
       if (current) current.count += count;
       else failures.push(failure);

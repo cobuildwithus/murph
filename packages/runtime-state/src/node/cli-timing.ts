@@ -3,7 +3,8 @@ import { createSocket, type Socket } from "node:dgram";
 import {
   CLI_TIMING_ENDPOINT_ENV, addCliPhaseSample, cliTimingCommand, CLI_TIMING_MAX_REPORT_BYTES, CLI_TIMING_MAX_SPANS,
   emptyCliTiming, incrementCliTimingDrop, mergeCliTiming, normalizeCliTiming,
-  cliTimingFailureCode, cliTimingFailureStage, cliTimingValidationFailure, readCliTimingOwnData as ownData, type CliFailureTiming,
+  cliTimingFailureCode, cliTimingFailureStage, cliTimingRejectionFailure, cliTimingValidationFailure,
+  readCliTimingOwnData as ownData, type CliFailureTiming,
   type CliPhaseTiming, type CliTiming, type CliTimingOutcome, type CliTimingPhase,
 } from "../cli-timing.ts";
 
@@ -136,7 +137,8 @@ export function noteCliTimingFailure(error: unknown): void {
   // Domain validation uses fieldErrors; schema-owned publicIssues take precedence.
   invocation.failure = { code: cliTimingFailureCode(code), stage: cliTimingFailureStage(stage), count: 1,
     ...cliTimingValidationFailure(invocation.command, code, error, "fieldErrors"),
-    ...cliTimingValidationFailure(invocation.command, code, error, "publicIssues") };
+    ...cliTimingValidationFailure(invocation.command, code, error, "publicIssues"),
+    ...cliTimingRejectionFailure(invocation.command, code, error, "cliTimingRejection") };
 }
 
 // Incur may call process.exit before an outer finally executes. Observe the

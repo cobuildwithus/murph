@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { randomInt } from 'node:crypto'
 import { createSocket } from 'node:dgram'
 import { once } from 'node:events'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Cli, Errors, z } from 'incur'
@@ -396,8 +396,19 @@ test('real research scout-batch rejects before egress and preserves output/exit 
   delete process.env.MURPH_CLI_TIMING_ENDPOINT
   const fixtures = [
     { payload: '{"PRIVATE_PAYLOAD":', code: 'invalid_payload' },
-    { payload: '{}', code: 'research_scout_invalid_batch_payload' },
-    { payload: '{"lanes":[],"PRIVATE_PAYLOAD":"PRIVATE_VALUE"}', code: 'research_scout_invalid_batch_payload' },
+    { payload: '{}', code: 'research_scout_invalid_batch_payload', rejection: 'envelope' },
+    { payload: '{"lanes":[],"PRIVATE_PAYLOAD":"PRIVATE_VALUE"}', code: 'research_scout_invalid_batch_payload',
+      rejection: 'lane_count' },
+    { payload: `${valid.slice(0, -1)},"since":"PRIVATE_VALUE"}`, code: 'research_scout_invalid_batch_payload',
+      rejection: 'unexpected_root_field' },
+    { payload: valid.replace('"sleep"', '"PRIVATE Label"'), code: 'research_scout_invalid_batch_payload',
+      rejection: 'lane_label' },
+    { payload: valid.replace('"topics"', '"mode":"focused","topics"'), code: 'research_scout_invalid_batch_payload',
+      rejection: 'unexpected_lane_field' },
+    { payload: valid.replace('["sleep"]', '"sleep"'), code: 'research_scout_invalid_batch_payload',
+      rejection: 'profile_shape' },
+    { payload: valid.replace('["sleep"]', '["PRIVATE_CONCEPT"]'), code: 'research_scout_invalid_batch_payload',
+      rejection: 'public_concept' },
     { payload: valid, code: 'research_scout_invalid_window', since: '2026-06-18' },
     { payload: valid, code: 'research_exa_token_missing', token: '' },
   ]
@@ -419,10 +430,16 @@ test('real research scout-batch rejects before egress and preserves output/exit 
     assert.equal(captured.timing.commands[0]!.command, 'research scout-batch')
     assert.equal(captured.timing.commands[0]!.outcome, 'error')
     assert.equal(captured.timing.commands[0]!.calls, 1)
-    assert.deepEqual(captured.timing.commands[0]!.failures, [{ code: fixture.code, stage: 'unknown', count: 1 }])
+    assert.deepEqual(captured.timing.commands[0]!.failures, [{ code: fixture.code, stage: 'unknown', count: 1,
+      ...(fixture.rejection ? { rejection: fixture.rejection } : {}) }])
     assert.equal(captured.timing.droppedCalls, 0)
     assert.equal(captured.timing.commands[0]!.droppedFailures, undefined)
-    assert.equal(captured.wire.includes('PRIVATE_'), false)
+    assert.equal(captured.wire.includes('PRIVATE'), false)
+    // The category exists only on the timing wire, never in model-visible output.
+    for (const text of [captured.result.stdout, captured.result.stderr]) {
+      assert.equal(/cliTimingRejection|"rejection"|_field|lane_|public_concept|profile_shape|envelope/u.test(text), false)
+    }
+    assert.deepEqual(await readdir(directory), [path.basename(file)], 'Rejected input performs no canonical writes.')
   }
   // Nearby valid input uses the real client; only the external provider is fake.
   vi.stubEnv('EXA_API_KEY', 'PRIVATE_TOKEN')
