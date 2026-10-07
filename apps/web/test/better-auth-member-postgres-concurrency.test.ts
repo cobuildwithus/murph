@@ -598,16 +598,16 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     const start = await startNativeTelegram(nativeRequest(f.token, {}));
     expect(start.status).toBe(200);
     expect(start.headers.has("set-cookie")).toBe(false);
-    const link: { nonce: string; clientId: string } = await start.json();
+    const link: { startId: string; clientId: string } = await start.json();
     expect(link.clientId).toBe("123456789");
-    const token = (claims: Record<string, unknown> = {}) => new SignJWT({ id: 123456789, nonce: link.nonce, ...claims })
-      .setProtectedHeader({ alg: "ES256" }).setIssuer("https://oauth.telegram.org").setAudience(link.clientId)
-      .setIssuedAt().setExpirationTime("5m").sign(keys.privateKey);
-    const body = { nonce: link.nonce, idToken: await token() };
+    const token = (claims: Record<string, unknown> = {}) => new SignJWT({ id: 123456789, sub: "synthetic-subject", iss: "https://oauth.telegram.org", aud: link.clientId,
+      iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 300, ...claims })
+      .setProtectedHeader({ alg: "ES256" }).sign(keys.privateKey);
+    const body = { startId: link.startId, idToken: await token() };
     return { link, body, token };
   }
 
-  it("native Telegram binds signed nonce to the originating member and session, rejecting cookies and replay", () => withInitialPasskeyMember(async (f) => {
+  it("native Telegram binds a fresh signed proof to the originating member and session, rejecting cookies and replay", () => withInitialPasskeyMember(async (f) => {
     const t = await nativeTelegramFixture(f);
     const wrongSession = await f.loginAgainNative();
     expect((await completeNativeTelegram(nativeRequest(wrongSession, t.body))).status).toBe(401);
@@ -626,19 +626,43 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect(provider.telegram).toHaveBeenCalledTimes(1);
   }));
 
-  it.each(["missing", "wrong"])("native Telegram rejects a signed token with %s nonce before linking", (kind) => withInitialPasskeyMember(async (f) => {
+  it.each([
+    ["stale iat", { iat: Math.floor(Date.now() / 1000) - 121 }],
+    ["future iat", { iat: Math.floor(Date.now() / 1000) + 60 }],
+    ["missing iat", { iat: undefined }],
+    ["expired token", { exp: 1 }],
+    ["wrong audience", { aud: "987654321" }],
+    ["wrong issuer", { iss: "https://invalid.example" }],
+  ])("native Telegram rejects %s before linking", (_kind, claims) => withInitialPasskeyMember(async (f) => {
     const t = await nativeTelegramFixture(f);
-    const idToken = await t.token({ nonce: kind === "missing" ? undefined : "x".repeat(43) });
+    const idToken = await t.token(claims as Record<string, unknown>);
     expect((await completeNativeTelegram(nativeRequest(f.token, { ...t.body, idToken }))).status).toBe(401);
     expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBeNull();
     expect(provider.telegram).not.toHaveBeenCalled();
   }));
 
-  it("native Telegram rejects an expired proof", () => withInitialPasskeyMember(async (f) => {
+  it.each(["expired", "missing", "token-before-start"])("native Telegram rejects %s pending start", (kind) => withInitialPasskeyMember(async (f) => {
     const t = await nativeTelegramFixture(f);
-    await hostedAuthAdapter(f.prisma)({}).update({ model: "verification", where: [{ field: "identifier", value: `telegram-login:${t.link.nonce}` }], update: { expiresAt: new Date(0) } });
+    const adapter = hostedAuthAdapter(f.prisma)({});
+    const where = [{ field: "identifier", value: `native-telegram-start:${t.link.startId}` }];
+    if (kind === "missing") await adapter.delete({ model: "verification", where });
+    else await adapter.update({ model: "verification", where, update: kind === "expired"
+      ? { expiresAt: new Date(0) } : { createdAt: new Date(Date.now() + 60_000) } });
     expect((await completeNativeTelegram(nativeRequest(f.token, t.body))).status).toBe(401);
     expect(provider.telegram).not.toHaveBeenCalled();
+  }));
+
+  it("native Telegram rejects a consumed token with a new start from another member", () => withInitialPasskeyMember(async (f) => {
+    const first = await nativeTelegramFixture(f);
+    expect((await completeNativeTelegram(nativeRequest(f.token, first.body))).status).toBe(200);
+    await withInitialPasskeyMember(async (other) => {
+      const start = await startNativeTelegram(nativeRequest(other.token, {}));
+      const { startId } = await start.json();
+      const replay = await completeNativeTelegram(nativeRequest(other.token, { startId, idToken: first.body.idToken }));
+      expect(replay.status).toBe(401);
+      expect((await readHostedLoginMethods(other.prisma, other.memberId)).methods.telegram).toBeNull();
+    });
+    expect(provider.telegram).toHaveBeenCalledTimes(1);
   }));
 
   it("native Telegram preserves conflict ownership", () => withInitialPasskeyMember(async (f) => {

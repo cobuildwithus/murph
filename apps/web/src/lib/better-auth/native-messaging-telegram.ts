@@ -11,10 +11,10 @@ import { assertInitialMessagingSetupFresh, prepareHostedCredentialChange, readHo
 import { nativeMessagingApprovalRequired, requireNativeMessagingSession } from "./native-messaging-session";
 import { hostedAuthRateLimitStorage } from "./rate-limit";
 import { authLookupKey } from "./record-crypto";
-import { createHostedTelegramProof, readHostedTelegramProof } from "./telegram-request";
+import { createNativeTelegramProof, readNativeTelegramProof } from "./native-telegram-proof";
 import { welcomeNativeMessagingTelegram } from "./native-messaging-telegram-welcome";
 
-const completeBody = z.object({ nonce: z.string().regex(/^[A-Za-z0-9_-]{43}$/u), idToken: z.string().min(1).max(8_192) }).strict();
+const completeBody = z.object({ startId: z.string().regex(/^[A-Za-z0-9_-]{43}$/u), idToken: z.string().min(1).max(8_192) }).strict();
 
 export async function nativeMessagingTelegramRequest(request: Request, operation: "start" | "complete"): Promise<Response> {
   assertHostedBetterAuthIssuanceEnabled();
@@ -32,11 +32,11 @@ export async function nativeMessagingTelegramRequest(request: Request, operation
       const current = await readHostedLoginMethods(prisma, session.member.id);
       if (!await readHostedInitialMessagingSetupAllowed(prisma, session, current)) throw nativeMessagingApprovalRequired();
       assertInitialMessagingSetupFresh(session);
-      return createHostedTelegramProof(prisma, binding, "native");
+      return createNativeTelegramProof(prisma, binding);
     }
     const parsed = completeBody.safeParse(body);
     if (!parsed.success) throw invalidRequest();
-    const proof = await readHostedTelegramProof({ request, token: parsed.data.idToken, nativeNonce: parsed.data.nonce, prisma, binding });
+    const proof = await readNativeTelegramProof({ token: parsed.data.idToken, startId: parsed.data.startId, prisma, binding });
     const prepared = await prepareHostedCredentialChange({
       request, session, prisma, transport: "native",
       change: { method: "telegram", operation: "set", expectedIdentity: null, value: proof.verified.telegramUserId },

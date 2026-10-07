@@ -21,9 +21,10 @@ pins, secret changes and real-member mutations are excluded.
 - Reuse first-messaging eligibility, canonical identity conflicts, fresh primary
   proof, current-session revalidation, SMS limits and atomic credential writes.
   Protected members retain account-settings approval; stale proof needs login.
-- Native Telegram start uses the web proof owner with a separate member/session
-  purpose and no cookies. The signed ID token must contain the exact server
-  nonce. The proof expires in five minutes and is consumed with the credential.
+- Native Telegram start binds a five-minute pending record to the exact native
+  member/session. The approved unmodified SDK path verifies signature, issuer,
+  audience, expiry and two-minute iat freshness. Atomic global token-hash
+  consumption prevents replay across fresh starts. Web nonce checks stay intact.
 - Remove the bot start-link, recipient proof and hosted return page. No Murph
   code exchange or new client secret. Official native SDKs own authentication.
 - Attempt the normal welcome once through the existing Telegram API owner.
@@ -48,24 +49,22 @@ Both native apps need fresh matching synthetic captures, including large text.
 
 ## Implementation and proof
 
-Backend implementation now replaces the earlier bot-link protocol with signed
-nonce proof and accepted-welcome promotion. Five focused suites pass 157 tests:
-member PostgreSQL composition, Telegram PostgreSQL composition, transport,
-Telegram webhook routing and companion initial-onboarding projection. Tests
-cover wrong nonce/member/session, cookies, replay, expiry, conflict, rate limit,
-stale/revoked/protected accounts, concurrent completion, accepted/rejected sends
-and identity removal during delivery. Web typecheck and complexity guard pass.
+The current backend candidate passes 164 tests in five focused suites, including
+wrong member/session, cookies, no/expired start, stale/future/missing iat,
+wrong issuer/audience, replay across a fresh member start, conflicts, rate limits,
+concurrency and accepted/rejected delivery. Web typecheck passes.
 
-## Current external SDK boundary
+## SDK and completion boundary
 
-The current official iOS revision 215851df7e3cd32787a0054e5d1a97d7aa62796e
-and Android revision f9d5ec36ba2433bc5f103b5cd8289f43a05f9336 have no nonce
-argument or nonce serialization on either login path. Unmodified SDK tokens
-therefore cannot pass the required backend verification. A minimal pinned nonce
-patch versus waiting for upstream support needs a decision. Do not silently
-accept tokens lacking the signed nonce or replace it with local session state.
+The human approved using both official SDKs unmodified, with the native proof
+controls above instead of a nonce. iOS SDK revision is
+215851df7e3cd32787a0054e5d1a97d7aa62796e. Android uses official Maven
+org.telegram:login-sdk:1.0.0. Both registered iOS domains serve their app
+associations. Android's redirect host and GitHub Packages read credentials remain
+human setup. Native work, exact-head evidence and final review are ongoing.
 
-Both registered iOS domains publicly serve the correct app associations. Native
-entitlements, SDK integration, UI, captures, focused tests, CI and final review
-remain outstanding. Android's real redirect host is pending. No production
-SMS, Telegram approval/delivery or physical-device behavior has been verified.
+The human authorized manual ReviewGPT submission using normal packaged prompts
+and normal result validation while another engineer repairs the launcher. Do not
+change or publish ReviewGPT; perform manual submissions only after implementation
+and verification. No real SMS, Telegram approval/delivery or physical-device
+proof has been performed. All merges still require passed review and hosted CI.

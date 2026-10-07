@@ -344,17 +344,31 @@ import members, or bypass existing approval state. Protected members use account
 settings; stale primary proof requires signing in again. Additions preserve
 sessions. Existing browser credential routes are unchanged.
 
-Telegram start accepts `{}` and returns `{ ok: true, nonce, clientId }`, without
-cookies. A random 256-bit nonce expires after five minutes in the existing
+Telegram start accepts `{}` and returns `{ ok: true, startId, clientId }`, without
+cookies. The random 256-bit start ID expires after five minutes in the existing
 encrypted auth verification store, bound to the native member and session under
-a purpose distinct from browser login and credential changes. The official
-native login requests `openid profile telegram:bot_access` and the same nonce.
-Completion accepts `{ nonce, idToken }` with the original bearer. It reuses the
-web verifier's JWKS, algorithm, issuer, audience, signed nonce and token-age
-checks, then the canonical credential owner. Proof consumption and linking are
-atomic. Wrong member/session, missing/mismatched nonce, expiry, replay and
-conflicts fail closed; the existing member/IP attempt budgets apply.
-No Murph backend code exchange or additional client secret is introduced.
+a purpose distinct from browser login and credential changes. Completion accepts
+`{ startId, idToken }` with the original bearer. The unmodified official SDKs
+request `openid profile telegram:bot_access` and own registered HTTPS App Link /
+Universal Link callbacks and PKCE. No Murph-hosted browser intermediary, backend
+code exchange, SDK fork or client secret is introduced. The SDK may use its own
+platform authentication-session fallback when Telegram is not installed.
+
+The human-approved native exception does not require the nonce the SDKs cannot
+send. It retains the shared verifier's JWKS, algorithms, issuer, audience and
+expiry checks, requires `sub` and `iat`, limits token age to two minutes with at
+most five seconds of future clock skew, and rejects tokens issued before the
+pending start (allowing five seconds for clock skew). A SHA-256 token digest
+becomes a globally unique consumed verification record, retained beyond its
+acceptance window. Pending-start consumption, replay reservation and canonical
+credential mutation commit atomically. Wrong member/session, missing start,
+stale token, replay and conflicts fail closed; member/IP attempt budgets apply.
+The trust rationale is delivery through the registered app callback with SDK
+PKCE, plus current native bearer authority and short-lived one-use proof. This
+is not a cryptographic token-to-start nonce binding. A stolen fresh token remains
+a bearer proof until consumption; never log, persist or expose it in app URLs.
+Browser login and browser credential changes still require the exact signed
+nonce and cookie binding without this exception.
 
 After the committed link, one bounded Bot API send attempts the existing
 `assistant.signup_welcome` content. Telegram documents no bot-access token claim;
@@ -390,8 +404,8 @@ Rollback to a backend without these endpoints requires pausing dependent native
 distribution; already installed newer apps retain SMS/browser error recovery.
 Production merge qualification includes an unauthenticated endpoint rejection
 smoke. Native distribution additionally needs registered callback domains and
-real-device Telegram approval. Never substitute a missing nonce with local
-session state: the currently published SDKs need nonce support before release.
+real-device Telegram approval. Android distribution also requires its real
+registered redirect host and the official SDK package-fetch credentials.
 
 ## Browser and native continuity
 
