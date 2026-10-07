@@ -18,6 +18,7 @@ import {
   CLI_TIMING_MAX_REPORT_BYTES,
   CLI_TIMING_MAX_REPORTS,
   CLI_TIMING_PHASES,
+  CLI_TIMING_REJECTIONS,
   emptyCliTiming,
   mergeCliTiming,
   normalizeCliTiming,
@@ -299,4 +300,12 @@ test("failure detail survives usage fitting; trimming drops whole calls without 
   assert.equal(normalized.commands[0]!.calls, 10);
   assert.equal(normalized.commands[0]!.failures, undefined);
   assert.equal(normalized.commands[0]!.droppedFailures, undefined);
+  // Optional research rejection detail rides the same whole-entry fitter unchanged.
+  const research: CliTiming = { ...emptyCliTiming(), commands: [{ ...structuredClone(original.commands[0]!),
+    command: "research scout-batch", calls: CLI_TIMING_REJECTIONS.length + 1, droppedFailures: 1,
+    failures: CLI_TIMING_REJECTIONS.map((rejection) => ({
+      code: "research_scout_invalid_batch_payload" as const, stage: "unknown" as const, count: 1, rejection,
+    })) }] };
+  assert.deepEqual(normalizeCliTiming(research), research);
+  assert.deepEqual(inspect(await send(withTiming(cleanLegacy, research)), cleanLegacy), research);
 });

@@ -1671,6 +1671,94 @@ model/RPC text or retry guidance, or expand provider-code catalogs. Unknown code
 and lookalikes remain `unknown`; no arguments, paths, tokens, payloads or error
 messages enter this telemetry. The same consumer-first order below applies.
 
+#### Optional research batch first-rejection category
+
+Many distinct invalid lane bodies produce the same
+`research_scout_invalid_batch_payload / unknown` pair, so code/stage alone cannot
+choose a reproduction. For `research scout-batch` with exactly that code only, a
+failure may carry `rejection`, one of: `envelope` (lanes missing/not an array,
+or a lane not an object), `unexpected_root_field` (extra top-level key such as a
+CLI option inside `--input`), `lane_count`, `lane_label`, `profile_shape`
+(missing/non-object/empty profile, a non-array field or too many values),
+`unexpected_lane_field` (extra lane or profile key, e.g. `mode` or `tags`), and
+`public_concept` (a profile value that is not an exact server-owned concept).
+`parseResearchScoutBatchCliPayloadInput` derives it from the **first** issue of
+the existing `researchScoutBatchPayloadSchema.safeParse`, using only the issue
+code and schema-owned path shape; other shapes are omitted, never `unknown`.
+Zod's order is deterministic (nested lane issues in lane order precede root
+extra keys). The schema stays the sole acceptance owner: validation order,
+error code/message/hint, RPC bytes, exits, fetches and writes are unchanged.
+
+The category is a non-enumerable, non-writable own data property
+`cliTimingRejection` on the original `VaultCliError`, attached whether or not
+timing is active. Incur projection and JSON output never read it. The node
+observer and wire normalizer use `cliTimingRejectionFailure`, which reads one
+own data descriptor and admits its value only if it strictly equals one of the
+seven literals above. It never invokes getters, coerces values or walks
+prototypes. This is not proxy detection: a proxy source's descriptor trap may run
+and may supply an allowlisted literal, but only that fixed primitive can leave;
+any other value, an accessor descriptor or a throwing trap omits the detail
+without affecting the failure's code, stage or count. No issue paths, indices,
+keys, labels, values or messages are retained. It joins failure identity (and the 8-variant cap) like validation
+detail; malformed detail is dropped independently of counts. Native shell
+output, assistant categories and the model-visible error are unaffected.
+
+Roll out **reader before writer**: Web/hosted usage, usage-body fitting and
+engine/profile consumers first, then runner/CLI producers. Older readers drop
+`rejection` and coalesce equal code/stage counts, keeping calls, phases,
+outcomes, drops and token accounting; new readers accept old reports without
+it. Run the actual old-reader tests in runtime-state and assistant-engine with
+`MURPH_CLI_RESEARCH_REJECTION_COMPAT_BASE=ec9ede5a5e756d356d24e492d9457e25310b6284`.
+
+After convergence, run read-only on the primary usage database for a fixed
+natural window (consecutive 12-hour windows for comparison). Absent `rejection`
+means an older writer/reader, an unclassified first issue or a non-research
+failure; it never means "no rejection". Counts are observed lower bounds; a
+10,000-row cap hit requires a narrower window.
+
+```sql
+WITH rows AS MATERIALIZED (
+  SELECT turn_id, turn_profile_json -> 'cliTiming' AS t
+  FROM hosted_ai_usage
+  WHERE provider = 'codex-cli'
+    AND occurred_at >= :window_start_utc
+    AND occurred_at < :window_end_utc
+  ORDER BY occurred_at DESC
+  LIMIT 10000
+), per_turn AS (
+  -- max per turn: repeated profile snapshots of one turn are not summed.
+  SELECT turn_id, f.rejection, max(f.observations) AS observations
+  FROM rows
+  CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
+  CROSS JOIN LATERAL (
+    SELECT CASE WHEN e ->> 'rejection' IN ('envelope', 'unexpected_root_field', 'lane_count',
+             'lane_label', 'profile_shape', 'unexpected_lane_field', 'public_concept')
+             THEN e ->> 'rejection' END AS rejection,
+           sum((e ->> 'count')::numeric) AS observations
+    FROM jsonb_array_elements(c -> 'failures') e
+    WHERE e ->> 'code' = 'research_scout_invalid_batch_payload'
+    GROUP BY 1
+  ) f
+  WHERE t ->> 'schema' = 'murph.cli-timing.v1'
+    AND c ->> 'command' = 'research scout-batch'
+    AND c ->> 'outcome' = 'error'
+  GROUP BY turn_id, f.rejection
+)
+SELECT rejection, count(*) AS independent_turns,
+       sum(observations) AS observed_failures_lower_bound,
+       (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
+FROM per_turn
+GROUP BY rejection
+ORDER BY independent_turns DESC, rejection
+LIMIT 10;
+```
+
+Decision threshold: **any** natural attributed singleton (one turn with a
+non-null `rejection`) is sufficient to build a concrete synthetic reproduction
+of that category; recurrence is not required. A null-only result remains
+unresolved and justifies no prompt, schema or guidance change. The category
+identifies the first schema invariant, not why the model produced the input.
+
 #### Optional schema-validation detail
 
 For `VALIDATION_ERROR` only, `validation: { field, code, missing? }` is one finite
@@ -1728,8 +1816,8 @@ Stop-on-error and the existing rejection of nested batch before child entry are
 unchanged. An unentered child has no invented diagnostic.
 
 There are at most **8 failure variants per command/outcome**, within the existing
-32-command limit. Identity is code/stage plus optional validation field/code/missing,
-including absence versus explicit false. Additional distinct variants increment
+32-command limit. Identity is code/stage plus optional validation field/code/missing
+and optional research `rejection`, including absence versus explicit false. Additional distinct variants increment
 optional `droppedFailures` by their observation count; retained variants still aggregate.
 `sum(failures.count) + droppedFailures <= calls`. These are safe positive counts
 (or a safe nonnegative drop count), not extra CLI calls. Malformed optional

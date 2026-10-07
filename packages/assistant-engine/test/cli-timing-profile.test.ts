@@ -340,6 +340,78 @@ test.skipIf(!researchCompatibilityBase)('actual pre-research hosted reader loses
   }
 })
 
+async function researchRejectionReport(): Promise<CliTiming> {
+  let report!: CliTiming
+  await withCliTiming(() => timeCliDispatch('batch', async () => {
+    for (const rejection of ['public_concept', 'public_concept', 'unexpected_lane_field', undefined]) {
+      const error = Object.assign(new Error('PRIVATE_SENTINEL'), { code: 'research_scout_invalid_batch_payload' })
+      if (rejection) Object.defineProperty(error, 'cliTimingRejection', { value: rejection })
+      await assert.rejects(withCliTiming(() => timeCliDispatch('research scout-batch', async () => { throw error })),
+        (caught) => caught === error)
+    }
+    await withCliTiming(() => timeCliDispatch('research scout-batch', async () => {}))
+  }), (value) => { report = value })
+  return report
+}
+
+test('research batch rejection category survives profile and hosted readback; native accounting is unchanged', async () => {
+  const report = await researchRejectionReport()
+  const code = 'research_scout_invalid_batch_payload'
+  assert.deepEqual(report.commands[0]!.failures, [
+    { code, stage: 'unknown', count: 2, rejection: 'public_concept' },
+    { code, stage: 'unknown', count: 1, rejection: 'unexpected_lane_field' },
+    { code, stage: 'unknown', count: 1 },
+  ])
+  assert.equal(report.commands[1]!.failures, undefined)
+  const rawEvents = [...baseEvents, native('vault-cli research scout-batch --input @/PRIVATE_SENTINEL',
+    'PRIVATE_SENTINEL', { exitCode: 1 })]
+  const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
+  const profile = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents,
+    { method: 'murph/cliTiming', params: { turnId, timing: report } }], turnId })!
+  const { cliTiming, ...legacy } = profile
+  assert.deepEqual(legacy, baseline)
+  assert.deepEqual(cliTiming, report)
+  const parsed = usage(JSON.parse(JSON.stringify(profile)))
+  assert.deepEqual(parsed.turnProfileJson, profile)
+  assert.equal(parsed.inputTokens, 17)
+  assert.ok(!JSON.stringify(parsed).includes('PRIVATE_SENTINEL'))
+  // Unknown future categories drop only the detail, never the observation.
+  const future = structuredClone(report)
+  future.commands[0]!.failures![0] = { ...future.commands[0]!.failures![0]!, rejection: 'PRIVATE_FUTURE' as 'envelope' }
+  const expected = structuredClone(report)
+  expected.commands[0]!.failures = [
+    { code, stage: 'unknown', count: 3 },
+    { code, stage: 'unknown', count: 1, rejection: 'unexpected_lane_field' },
+  ]
+  assert.deepEqual(usage({ ...profile, cliTiming: future }).turnProfileJson, { ...profile, cliTiming: expected })
+})
+
+const researchRejectionCompatibilityBase = process.env.MURPH_CLI_RESEARCH_REJECTION_COMPAT_BASE
+test.skipIf(!researchRejectionCompatibilityBase)('actual pre-rejection hosted reader drops only the category', async () => {
+  assert.match(researchRejectionCompatibilityBase ?? '', /^[a-f0-9]{40}$/u)
+  const source = (file: string) => execFileSync('git', ['show', `${researchRejectionCompatibilityBase}:${file}`],
+    { encoding: 'utf8', maxBuffer: 1_000_000 })
+  const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(text)).toString('base64')}`
+  const oldTimingUrl = moduleUrl(source('packages/runtime-state/src/cli-timing.ts'))
+  const oldUsageSource = source('packages/hosted-execution/src/assistant-usage.ts')
+  assert.ok(oldUsageSource.includes('"@murphai/runtime-state/cli-timing"'))
+  const old: { parseAssistantUsageRecord: typeof parseAssistantUsageRecord } = await import(moduleUrl(
+    oldUsageSource.replace('"@murphai/runtime-state/cli-timing"', JSON.stringify(oldTimingUrl))))
+  const report = await researchRejectionReport()
+  const oldReport = structuredClone(report)
+  oldReport.commands[0]!.failures = [{ code: 'research_scout_invalid_batch_payload', stage: 'unknown', count: 4 }]
+  const legacy = buildAssistantCodexTurnProfileJson({ rawEvents: baseEvents, turnId })!
+  for (const schema of ['murph.assistant-turn-profile.v1', 'murph.assistant-turn-profile.v2']) {
+    const profile = { ...legacy, schema, tools: [], cliTiming: report }
+    const input = usage(profile)
+    const expected = { ...input, turnProfileJson: { ...profile, cliTiming: oldReport } }
+    assert.deepEqual(old.parseAssistantUsageRecord(JSON.parse(JSON.stringify(input))), expected)
+    assert.deepEqual(parseAssistantUsageRecord(expected), expected)
+    assert.equal(expected.inputTokens, 17)
+    assert.equal(expected.outputTokens, 11)
+  }
+})
+
 const patternTimingCompatibilityBase = process.env.MURPH_PATTERN_TIMING_COMPAT_BASE
 test.skipIf(!patternTimingCompatibilityBase)('Patterns stages survive new consumers while old consumers preserve legacy usage', async () => {
   assert.match(patternTimingCompatibilityBase ?? '', /^[a-f0-9]{40}$/u)

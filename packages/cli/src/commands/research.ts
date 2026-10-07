@@ -1,6 +1,7 @@
 import { Cli, z } from 'incur'
 import { isStrictIsoDate, isStrictIsoDateTime } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { CliTimingRejection } from '@murphai/runtime-state/cli-timing'
 import {
   inputFileOptionSchema,
   loadJsonInputObject,
@@ -269,6 +270,7 @@ export function parseResearchScoutBatchCliPayloadInput(
     return payload.data
   }
 
+  const rejection = researchScoutBatchRejection(payload.error.issues[0])
   if (isJsonRecord(rawInput) && Object.hasOwn(rawInput, 'lanes')) {
     const keys = Object.keys(rawInput)
     if (keys.some((key) =>
@@ -276,11 +278,44 @@ export function parseResearchScoutBatchCliPayloadInput(
     )) {
       throw invalidResearchScoutBatchPayloadError(
         'Put only compact lanes in --input. Pass since, until, and maxCandidatesPerLane as CLI options.',
+        rejection,
       )
     }
   }
 
-  throw invalidResearchScoutBatchPayloadError()
+  throw invalidResearchScoutBatchPayloadError(undefined, rejection)
+}
+
+/**
+ * Telemetry-only: the schema's first issue, reduced to a fixed category from its
+ * code and schema-owned path shape. Paths, indices, keys and values are never
+ * retained; any other shape is unclassified. Acceptance stays with the schema.
+ */
+function researchScoutBatchRejection(
+  issue: { code: string, path: readonly PropertyKey[] } | undefined,
+): CliTimingRejection | undefined {
+  if (!issue) return undefined
+  const [root, lane] = issue.path
+  const extra = issue.code === 'unrecognized_keys'
+  if (issue.path.length === 0) return extra ? 'unexpected_root_field' : 'envelope'
+  if (root !== 'lanes') return undefined
+  if (issue.path.length === 1) {
+    return issue.code === 'too_small' || issue.code === 'too_big' ? 'lane_count' : 'envelope'
+  }
+  return typeof lane === 'number' ? researchScoutLaneRejection(issue.path, extra) : undefined
+}
+
+function researchScoutLaneRejection(
+  path: readonly PropertyKey[],
+  extra: boolean,
+): CliTimingRejection | undefined {
+  const [, , field, , item] = path
+  if (path.length === 2) return extra ? 'unexpected_lane_field' : 'envelope'
+  if (field === 'label') return path.length === 3 ? 'lane_label' : undefined
+  if (field !== 'profile') return undefined
+  if (path.length === 3) return extra ? 'unexpected_lane_field' : 'profile_shape'
+  if (path.length === 4) return 'profile_shape'
+  return path.length === 5 && typeof item === 'number' ? 'public_concept' : undefined
 }
 
 export function normalizeResearchScoutTimestampOption(
@@ -360,8 +395,11 @@ function invalidResearchScoutProfileError(extraDetail?: string): VaultCliError {
   )
 }
 
-function invalidResearchScoutBatchPayloadError(extraDetail?: string): VaultCliError {
-  return new VaultCliError(
+function invalidResearchScoutBatchPayloadError(
+  extraDetail?: string,
+  rejection?: CliTimingRejection,
+): VaultCliError {
+  const error = new VaultCliError(
     'research_scout_invalid_batch_payload',
     [
       extraDetail,
@@ -369,6 +407,10 @@ function invalidResearchScoutBatchPayloadError(extraDetail?: string): VaultCliEr
       `Use {"lanes":[{"label":"sleep","profile":{"topics":["sleep"],"behaviors":["morning light"]}}]}; lane values must use these exact server-owned public concepts: ${RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE}. Do not use focused mode, generic tags, raw notes, raw labs, or full request fields.`,
     ].filter(Boolean).join(' '),
   )
+  // Private, non-enumerable own data for the CLI timing observer only; Incur
+  // projection, JSON output and the model-visible error never include it.
+  if (rejection) Object.defineProperty(error, 'cliTimingRejection', { value: rejection })
+  return error
 }
 
 function isJsonRecord(value: unknown): value is Record<string, unknown> {

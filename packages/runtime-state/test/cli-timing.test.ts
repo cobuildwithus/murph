@@ -7,6 +7,7 @@ import {
   addCliPhaseSample, CLI_TIMING_MAX_COMMANDS, CLI_TIMING_MAX_SPANS,
   CLI_TIMING_PHASES, cliTimingCommand, cliTimingFailureCode, emptyCliTiming, mergeCliTiming,
   normalizeCliTiming, cliTimingValidationFailure, CLI_TIMING_MAX_VALIDATION_ISSUES, type CliTiming, type CliValidationDiagnostic,
+  CLI_TIMING_REJECTIONS, cliTimingRejectionFailure,
 } from "../src/cli-timing.ts";
 import {
   finishCliTimingAction, isCliTimingActive, noteCliTimingExit,
@@ -992,6 +993,154 @@ test("research timing admits only three exact source codes without inferring a s
     assert.deepEqual(normalizeCliTiming(wire), report);
     assert.ok(!JSON.stringify(report).includes("PRIVATE_"));
   }
+});
+
+function researchRejectionError(value?: unknown, descriptor: PropertyDescriptor = { value }): Error {
+  const error = Object.assign(new Error("PRIVATE_ERROR_MESSAGE"), { code: "research_scout_invalid_batch_payload" });
+  if (value !== undefined || !("value" in descriptor)) Object.defineProperty(error, "cliTimingRejection", descriptor);
+  return error;
+}
+
+test("research batch rejection is private own data, finite, gated and inert to hostile metadata", async () => {
+  const capture = async (error: Error, command = "research scout-batch") => {
+    const visible = { keys: Object.keys(error), json: JSON.stringify(error), name: error.name, message: error.message };
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw error; }),
+      (value) => { report = value; }), (caught) => caught === error);
+    assert.deepEqual({ keys: Object.keys(error), json: JSON.stringify(error), name: error.name, message: error.message }, visible);
+    // Disabled timing has the same throw identity and visible error shape.
+    await assert.rejects(withCliTiming(async () => { throw error; }, undefined), (caught) => caught === error);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    assert.ok(!JSON.stringify(report).includes("PRIVATE"));
+    return report.commands[0]!.failures;
+  };
+  const base = { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 } as const;
+  for (const rejection of CLI_TIMING_REJECTIONS) {
+    assert.deepEqual(await capture(researchRejectionError(rejection)), [{ ...base, rejection }]);
+    // Other commands/codes never admit the field, even with identical metadata.
+    assert.deepEqual(await capture(researchRejectionError(rejection), "research scout"), [{ ...base }]);
+    const window = Object.assign(researchRejectionError(rejection), { code: "research_scout_invalid_window" });
+    assert.deepEqual(await capture(window), [{ ...base, code: "research_scout_invalid_window" }]);
+  }
+  let reads = 0;
+  const hostile: Error[] = [
+    researchRejectionError(), researchRejectionError("PRIVATE_REASON"), researchRejectionError("Envelope"),
+    researchRejectionError("envelope "), researchRejectionError(["envelope"]), researchRejectionError({ toString: () => "envelope" }),
+    researchRejectionError(new String("envelope")), researchRejectionError(1),
+    researchRejectionError(new Proxy({}, { get: () => { reads += 1; return "envelope"; } })),
+    researchRejectionError(undefined, { get: () => { reads += 1; return "envelope"; } }),
+    Object.setPrototypeOf(researchRejectionError(), { cliTimingRejection: "envelope" }) as Error,
+  ];
+  for (const error of hostile) assert.deepEqual(await capture(error), [{ ...base }]);
+  assert.equal(reads, 0);
+  assert.deepEqual(cliTimingRejectionFailure("research scout-batch", "research_scout_invalid_batch_payload",
+    new Proxy({}, { getOwnPropertyDescriptor: () => { throw new Error("PRIVATE_TRAP"); } }), "cliTimingRejection"), {});
+});
+
+test("a source proxy's descriptor trap can supply only an allowlisted literal, never arbitrary data", async () => {
+  // Not proxy detection: the descriptor trap may run. Only a fixed primitive leaves.
+  const proxied = (rejection: unknown) => new Proxy(new Error("PRIVATE_ERROR_MESSAGE"), {
+    getOwnPropertyDescriptor: (target, key) => {
+      if (key === "code") return { value: "research_scout_invalid_batch_payload", configurable: true, enumerable: true, writable: true };
+      if (key === "cliTimingRejection") return { value: rejection, configurable: true, enumerable: false, writable: false };
+      if (key === "context" || key === "stage") return { value: { stage: "PRIVATE_STAGE" }, configurable: true, enumerable: true, writable: true };
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    },
+  });
+  const capture = async (error: object) => {
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch("research scout-batch", async () => { throw error; }),
+      (value) => { report = value; }), (caught) => caught === error);
+    assert.ok(!JSON.stringify(report).includes("PRIVATE"));
+    return report.commands[0]!.failures;
+  };
+  const base = { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 } as const;
+  assert.deepEqual(await capture(proxied("public_concept")), [{ ...base, rejection: "public_concept" }]);
+  for (const value of ["PRIVATE_REASON", { PRIVATE: "PRIVATE_VALUE" }, ["envelope"], new String("envelope")]) {
+    const failures = await capture(proxied(value));
+    assert.deepEqual(failures, [{ ...base }]);
+    assert.deepEqual(cliTimingRejectionFailure("research scout-batch", base.code, proxied(value), "cliTimingRejection"), {});
+  }
+});
+
+test("rejection variants share failure caps, coalesce exactly and drop only detail when malformed on the wire", () => {
+  const aggregate = emptyCliTiming();
+  const variants = [...CLI_TIMING_REJECTIONS, undefined, CLI_TIMING_REJECTIONS[0]];
+  for (const rejection of variants) {
+    const incoming = sample("research scout-batch");
+    incoming.commands[0]!.outcome = "error";
+    incoming.commands[0]!.failures = [{ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1,
+      ...(rejection ? { rejection } : {}) }];
+    mergeCliTiming(aggregate, incoming);
+  }
+  const command = aggregate.commands[0]!;
+  assert.equal(command.calls, 9);
+  assert.equal(command.failures!.length, 8);
+  assert.equal(command.failures![0]!.count, 2);
+  assert.deepEqual(command.failures!.map((failure) => failure.rejection), [...CLI_TIMING_REJECTIONS, undefined]);
+  assert.equal(command.droppedFailures, undefined);
+  assert.deepEqual(normalizeCliTiming(aggregate), aggregate);
+  const extra = sample("research scout-batch");
+  extra.commands[0]!.outcome = "error";
+  extra.commands[0]!.failures = [{ code: "research_scout_invalid_batch_payload", stage: "validation", count: 1,
+    rejection: "envelope" }];
+  mergeCliTiming(aggregate, extra);
+  assert.equal(aggregate.commands[0]!.droppedFailures, 1);
+  assert.equal(aggregate.commands[0]!.failures!.reduce((sum, failure) => sum + failure.count, 0) + 1, 10);
+  // Wire detail is admitted only for the exact command/code; hostile values drop only the detail.
+  const wire = sample("research scout-batch");
+  wire.commands[0]!.outcome = "error";
+  wire.commands[0]!.calls = 4;
+  const entries = [
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1, rejection: "PRIVATE_REASON" },
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 },
+    { code: "research_scout_invalid_window", stage: "unknown", count: 1, rejection: "envelope" },
+    Object.defineProperty({ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 }, "rejection",
+      { enumerable: true, get: () => "envelope" }),
+  ];
+  const normalized = normalizeCliTiming({ ...wire, commands: [{ ...wire.commands[0]!, failures: entries }] });
+  assert.deepEqual(normalized?.commands[0]!.failures, [
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 3 },
+    { code: "research_scout_invalid_window", stage: "unknown", count: 1 },
+  ]);
+  const other = sample("research scout");
+  other.commands[0]!.outcome = "error";
+  other.commands[0]!.failures = [{ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1,
+    rejection: "envelope" }];
+  assert.deepEqual(normalizeCliTiming(other)?.commands[0]!.failures,
+    [{ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 }]);
+});
+
+// Actual pre-rejection reader (named in the active plan), never a copied parser.
+const researchRejectionCompatibilityBase = process.env.MURPH_CLI_RESEARCH_REJECTION_COMPAT_BASE;
+test.skipIf(!researchRejectionCompatibilityBase)("actual pre-rejection reader drops only the category and keeps counts", async () => {
+  assert.match(researchRejectionCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${researchRejectionCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; mergeCliTiming: typeof mergeCliTiming } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  const report = sample("research scout-batch");
+  report.commands[0]!.outcome = "error";
+  report.commands[0]!.calls = 4;
+  report.commands[0]!.failures = [
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1, rejection: "public_concept" },
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1, rejection: "envelope" },
+    { code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 },
+  ];
+  report.commands[0]!.droppedFailures = 1;
+  assert.deepEqual(normalizeCliTiming(report), report);
+  const legacy = structuredClone(report);
+  legacy.commands[0]!.failures = [{ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 3 }];
+  assert.deepEqual(old.normalizeCliTiming(report), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy);
+  const oldMerged = emptyCliTiming();
+  old.mergeCliTiming(oldMerged, report);
+  assert.deepEqual(oldMerged.commands, legacy.commands);
+  delete legacy.commands[0]!.failures;
+  delete legacy.commands[0]!.droppedFailures;
+  assert.deepEqual(old.normalizeCliTiming(legacy), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy);
 });
 
 // Actual history-backed reader, not a copied parser or current-reader roundtrip.
