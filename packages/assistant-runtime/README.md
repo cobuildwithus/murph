@@ -326,3 +326,6 @@ from a fresh checkout. Vault-share entrypoint cases use the real isolated captur
 worker through its published package entrypoint; Vitest source aliases do not
 compile that separate Node worker. The prepared build includes this package and
 checks the compiled worker and its public import before reporting success.
+
+Device import yield reasons and receipt-capacity slicing are specified in
+[`agent-docs/RELIABILITY.md`](../../agent-docs/RELIABILITY.md).

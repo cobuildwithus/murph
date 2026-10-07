@@ -374,6 +374,85 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("labels live system device receipt pressure without claiming foreground input", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-device-receipt-yield-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const events: string[] = [];
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:live-receipt-pressure",
+      id: "mailbox_item_live_receipt_pressure",
+      kind: "device-sync.wake", lane: "system", laneSeq: "1",
+    });
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueDeviceSyncSystemMailboxItemForTest({ item: deviceItem, vaultRoot });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restored = await createVaultSnapshotBundle({ vaultRoot });
+      const receipts = createCanonicalReceiptLogArtifacts(
+        HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD - 1,
+      );
+      receipts.artifactBytesByHash.set(restored.hash, restored.bytes);
+      const deviceSyncPort = createSnapshotDeviceSyncPort({
+        connectionId: "device_sync_connection_live_receipt_pressure",
+        nextReconcileAt: "2026-04-27T00:05:00.000Z",
+        onFetchSnapshot: async () => {
+          await runCanonicalWrite({
+            mutate: async ({ batch }) => {
+              await batch.stageTextWrite("audit/device-receipt-pressure.md", "Synthetic import progress.\n");
+            },
+            occurredAt: TEST_NOW,
+            operationType: "device_receipt_pressure_test",
+            summary: "Persist synthetic device progress",
+            vaultRoot,
+          });
+        },
+      });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: { processingMode: "system_mailbox", workspaceVersion: "0" },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+            receipts.artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+            return { snapshotRef: snapshot.snapshotRef };
+          },
+          async importItem() { throw new Error("No new mailbox input is expected."); },
+          async runAssistantPhase() { throw new Error("No foreground input is present."); },
+          platform: createPlatform({
+            artifactBytesByHash: receipts.artifactBytesByHash,
+            deviceSyncPort, logRequests,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests, events,
+              workspace: createWorkspaceState({
+                version: "0", snapshotRef: restored.snapshotRef,
+                redactedStatus: {
+                  hostedCanonicalWriteReceiptLogByteSize: receipts.receiptLogBytes.byteLength,
+                  hostedCanonicalWriteReceiptLogSha256: receipts.receiptLogHash,
+                },
+              }),
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+      const finished = logRequests.flatMap(({ entries }) => entries)
+        .find(({ eventCode }) => eventCode === "device-sync.pass_finished");
+      assert.equal(finished?.redactedJson?.yieldReason, "canonical_receipt_capacity");
+      assert.equal(finished?.redactedJson?.outcome, "yielded");
+      assert.ok(checkpointRequests.some(({ reason }) => reason === "idle_shutdown"));
+      assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256, undefined);
+      assert.notEqual(result.status, "failed");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("foreground wake during the initial system fetch upgrades after the import settles", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
