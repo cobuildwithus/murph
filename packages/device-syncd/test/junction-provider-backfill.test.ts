@@ -840,6 +840,7 @@ test("Junction dense resource jobs import only complete closed UTC days", async 
       const entry = snapshot as { windowEnd?: string; windowStart?: string };
       return [entry.windowStart, entry.windowEnd];
     }),
+    // The first closed day commits alone; the open day is excluded.
     [
       ["2026-04-22T00:00:00.000Z", "2026-04-23T00:00:00.000Z"],
       ["2026-04-23T00:00:00.000Z", "2026-04-24T00:00:00.000Z"],
