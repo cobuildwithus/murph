@@ -1222,6 +1222,41 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["stripe.customer.subscription.deleted", "member_owner", "canceled", true],
+    ["stripe.customer.subscription.updated", "member_owner", "canceled", false],
+    ["stripe.customer.subscription.deleted", undefined, "canceled", false],
+    ["stripe.customer.subscription.deleted", "member_owner", "incomplete_expired", false],
+  ] as const)("routes Family cancellation email for %s with owner %s", async (sourceType, ownerMemberId, status, sendsEmail) => {
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      activations: [],
+      terminalOwnerMemberId: ownerMemberId,
+      groupId: "hbag_family",
+    });
+    await expect(applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        id: "sub_family",
+        status,
+        metadata: { accountGroupId: "hbag_family", kind: "hosted_family_plan" },
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_family_deleted",
+        sourceType,
+      },
+      {} as never,
+    )).resolves.toMatchObject({
+      subscriptionCancellationEmail: sendsEmail ? {
+        accountGroupId: "hbag_family",
+        memberId: "member_owner",
+        stripeSubscriptionId: "sub_family",
+      } : null,
+    });
+    expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
   it("returns exact Family activation targets when subscription replay finds durable wakes", async () => {
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
       activations: [{

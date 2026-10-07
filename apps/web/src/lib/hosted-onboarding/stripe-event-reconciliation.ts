@@ -1193,10 +1193,8 @@ async function processClaimedHostedStripeEvent(
         if (!claimed.subscriptionCancellationEmailSentAt) {
           const cancellationEmailResult =
             await sendHostedSubscriptionCancellationEmailForMember({
-              memberId: result.subscriptionCancellationEmail.memberId,
+              ...result.subscriptionCancellationEmail,
               prisma,
-              stripeSubscriptionId:
-                result.subscriptionCancellationEmail.stripeSubscriptionId,
             });
 
           if (cancellationEmailResult.status === "sent") {

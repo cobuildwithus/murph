@@ -489,6 +489,7 @@ export type HostedFamilyStripeSubscriptionResult = {
   accessRestoredMemberIds?: string[];
   activations: HostedMemberActivationResult[];
   billingModeChangedMemberIds?: string[];
+  terminalOwnerMemberId?: string;
   groupId: string | null;
   runtimeRecheckMemberIds?: string[];
 };
@@ -2330,6 +2331,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     });
     return {
       activations: [],
+      terminalOwnerMemberId: group.ownerMemberId,
       billingModeChangedMemberIds: billingModeChanged
         ? [group.ownerMemberId]
         : [],
