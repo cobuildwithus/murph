@@ -57,27 +57,21 @@ workspace proof.
 
 ## Worker startup profiling
 
-Use the pinned Wrangler's `check startup` to profile the Worker, separately from
-container startup. Its nested deployment dry run also builds configured container
-images, so a fresh checkout needs a profiling-only scratch config:
-
-1. Copy `apps/cloudflare/wrangler.jsonc` to the ignored
-   `apps/cloudflare/.tmp/startup/wrangler.jsonc`.
-2. Remove `containers` and set `main` to `../../src/index.ts`. Preserve the
-   compatibility date, compatibility flags, and bundling options. Do not add a
-   `tsconfig` override; resolution follows the source entrypoint.
-3. From the repository root, run:
+Profile the Worker's global-scope startup locally with the pinned Wrangler:
 
 ```bash
-WRANGLER_WRITE_LOGS=false WRANGLER_SEND_METRICS=false \
-  pnpm --dir apps/cloudflare exec wrangler check startup \
-  --args="--config .tmp/startup/wrangler.jsonc" \
-  --outfile=.tmp/startup/worker.cpuprofile
+pnpm --dir apps/cloudflare worker:startup:profile
 ```
 
-Pass the scratch config through `--args`: the outer `--config` alone does not
-configure the nested build in the pinned Wrangler. This command stays local and
-does not require production credentials or a container image.
+The command passes `--containers-rollout=none` to Wrangler's nested deployment
+**dry run**, so it neither builds container images nor deploys anything. It uses
+the checked-in Wrangler configuration directly, preserving the entrypoint,
+compatibility flags, and bundling options without a scratch config copy. Docker
+and production credentials are not required.
+
+The profile is written to the ignored
+`apps/cloudflare/.tmp/startup/worker.cpuprofile`; each run replaces that file.
+Open it in Chrome DevTools or VS Code to inspect the flamegraph.
 
 Compare alternating runs of the baseline and candidate on the same machine,
 excluding idle samples from CPU totals. `--worker=<multipart-bundle>` can reuse

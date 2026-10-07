@@ -974,6 +974,10 @@ When that fast path applies:
 
 ## Current Command Meaning
 
+For local Worker initialization measurements, use the container-free
+[Worker startup profiling command](../../apps/cloudflare/README.md#worker-startup-profiling).
+It profiles the checked-in Worker configuration without building images.
+
 Keep hand-authored test modules behavior-cohesive. When one module mixes
 independent behavior families or repeatedly loads one heavy mock/import graph,
 split it at those behavior seams and keep only genuinely shared setup in one
