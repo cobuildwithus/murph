@@ -21,4 +21,4 @@ Validate a registry-sourced selector release or a narrowly reviewed compatibilit
 
 ## Context
 
-The required authoring and candidate-review gates are blocked before a request is submitted. This is a repository-pinned tooling compatibility issue; account authentication and model requirements should remain unchanged.
+The automatic authoring and candidate-review path stops before a request is submitted. With explicit task authorization, manual Computer interaction selected the named GPT-6 row and Pro power, then submitted the canonical guarded packet and review prompt. That completes a review without repairing the pinned automatic selector. This remains a repository-pinned tooling compatibility issue; account authentication and model requirements should remain unchanged.

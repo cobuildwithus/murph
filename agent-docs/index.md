@@ -1109,4 +1109,4 @@ Junction historical/webhook dense imports commit up to eight closed days per can
 `../packages/device-syncd/README.md` owns the contract.
 
 Final usage-envelope fitting after trusted Worker attribution is tracked in
-[the usage reporting plan](exec-plans/active/2026-10-07-usage-reporting-envelope.md).
+[the usage reporting plan](exec-plans/completed/2026-10-07-usage-reporting-envelope.md).
