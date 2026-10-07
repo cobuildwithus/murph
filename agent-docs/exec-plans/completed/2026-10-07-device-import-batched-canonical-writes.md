@@ -17,9 +17,9 @@ Updated: 2026-10-07
 
 - Historical and webhook resource jobs for uncapped dense `daily_aggregate`
   and `hourly_or_session_feature` resources still fetch one closed UTC day per
-  request, but commit up to eight consecutive closed days (at most 4,000
-  records, or what has accumulated after five seconds) in one canonical import
-  after one fresh source-authority read.
+  request. A job's first nonempty day commits alone; later consecutive closed
+  days share one canonical import (up to eight days, 4,000 records, or what has
+  accumulated after five seconds) after one fresh source-authority read.
 - Yield, abort and retryable failure resume at the first uncommitted day; days
   already read commit before a retryable fetch failure. A yielded or aborted
   job's writes are rejected by the service, so the five-second accumulation
@@ -81,11 +81,20 @@ Updated: 2026-10-07
   import every day exactly once with no committed day re-read; it fails with
   the time bound disabled.
 
+- ReviewGPT round 2 (High, accepted): the elapsed check runs only after a day
+  is read, so a sub-five-second first day followed by a near-300 s paginated
+  day still left nothing committed. Fix: a job's first nonempty day commits
+  alone (as the one-day owner did), so every pass that completes a day keeps
+  it; later days still batch. A 16-day job makes three writes instead of 16.
+  Regression: a 4 s day then a 297 s day in a 300 s pass commits day one,
+  resumes at day two without re-reading day one, and finishes in two passes;
+  it fails without the first-day rule.
+
 ## Verification
 
 - `pnpm --dir packages/device-syncd typecheck` passed.
 - `pnpm exec vitest run --config vitest.config.ts --no-coverage` in
-  `packages/device-syncd`: 1,644 passed (69 files), including updated tests that
+  `packages/device-syncd`: 1,646 passed (69 files), including updated tests that
   assert per-day coverage instead of per-day import counts, commit-before-retry,
   live revocation after batch reads, and an eight-day batch yield resuming at
   day nine with no re-fetch of committed days.

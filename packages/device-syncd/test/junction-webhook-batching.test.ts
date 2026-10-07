@@ -103,9 +103,9 @@ test("queued dense webhook burst scans shared days once", async () => {
     const jobs = Array.from({ length: 8 }, (_, index) => f.enqueue(index));
     assert.equal(await f.service.drainWorker(8, f.account.id), 8);
     assert.equal(f.counts.fetches, 2);
-    assert.equal(f.counts.imports, 1, "consecutive closed days share one canonical import");
+    assert.equal(f.counts.imports, 2, "the first day commits alone; the rest form one batch");
     assert.equal(f.counts.noops, 0);
-    assert.equal(f.counts.sources, 2, "one projection read and one fresh authority read per import batch");
+    assert.equal(f.counts.sources, 3, "one projection read and one fresh authority read per import");
     assert.deepEqual([...f.importedDays].sort(), ["2026-04-01", "2026-04-02"]);
     assert.ok(jobs.every((job) => f.store.getJobById(job.id)?.status === "succeeded"));
   } finally { await f.close(); }
@@ -119,7 +119,7 @@ test("an update arriving after a batch is claimed gets a fresh provider scan", a
     f.controls.onFetch = () => { if (!added) { added = true; f.enqueue(2); } };
     assert.equal(await f.service.drainWorker(3, f.account.id), 3);
     assert.equal(f.counts.fetches, 4, "two days for the batch and two for the later update");
-    assert.equal(f.counts.imports, 2, "one batched import per scan");
+    assert.equal(f.counts.imports, 4);
   } finally { await f.close(); }
 });
 
@@ -130,7 +130,7 @@ test("batched dense imports retain live revocation checks after provider reads",
     f.controls.onFetch = () => { f.controls.disconnected = true; };
     assert.equal(await f.service.drainWorker(2, f.account.id), 2);
     assert.equal(f.counts.imports, 0);
-    assert.equal(f.counts.sources, 2, "the batch authority read follows every provider read");
+    assert.equal(f.counts.sources, 3, "each import's authority read follows its provider reads");
   } finally { await f.close(); }
 });
 
@@ -151,7 +151,7 @@ test("different closed-day ranges keep their own scans", async () => {
     f.enqueue(0); f.enqueue(1, "04");
     assert.equal(await f.service.drainWorker(2, f.account.id), 2);
     assert.equal(f.counts.fetches, 5);
-    assert.equal(f.counts.imports, 2, "each range commits its closed days in one import");
+    assert.equal(f.counts.imports - f.counts.noops, 3, "first days commit alone; later days batch");
     assert.deepEqual([...f.importedDays].sort(), ["2026-04-01", "2026-04-02", "2026-04-03"], "the additional day is imported");
   } finally { await f.close(); }
 });
@@ -189,21 +189,22 @@ test("partial batch failure retains every job and eventually imports all days", 
 test("yielded batches durably retain and resume the unfinished daily range", async () => {
   const f = await createBurstFixture();
   try {
-    // Ten closed days exceed one eight-day import batch, so the yield after the
-    // first committed batch leaves an unfinished suffix.
+    // Ten closed days: the first commits alone, then the yield stops the job
+    // before its next read; the resumed suffix batches its remaining days.
     f.enqueue(0, "11"); f.enqueue(1, "11");
     f.controls.onImport = () => { f.controls.yield = true; };
     assert.equal(await f.service.drainWorker(2, f.account.id), 2);
     assert.equal(f.counts.imports, 1);
-    assert.equal(f.importedDays.size, 8);
+    assert.equal(f.importedDays.size, 1);
     const pending = f.store.listPendingJobsForAccount(f.account.id, 10);
     assert.equal(pending.length, 1);
-    assert.equal(pending[0]?.payload.windowStart, "2026-04-09T00:00:00.000Z");
+    assert.equal(pending[0]?.payload.windowStart, "2026-04-02T00:00:00.000Z");
     f.controls.yield = false;
     f.controls.now = pending[0]!.availableAt;
     f.controls.onImport = () => {};
     await f.service.drainWorker(8, f.account.id);
     assert.equal(f.importedDays.size, 10);
+    assert.equal(f.counts.imports, 3, "one first day, then one first day plus one eight-day batch");
     assert.equal(f.counts.fetches, 10, "resume imports only the unfinished days");
   } finally { await f.close(); }
 });
@@ -233,7 +234,7 @@ test("the same burst without batching repeats fetches and canonical no-op import
   try {
     Array.from({ length: 8 }, (_, index) => f.enqueue(index));
     assert.equal(await f.service.drainWorker(8, f.account.id), 8);
-    assert.deepEqual(f.counts, { fetches: 16, sources: 9, imports: 8, noops: 7 });
+    assert.deepEqual(f.counts, { fetches: 16, sources: 17, imports: 16, noops: 14 });
   } finally { await f.close(); }
 });
 
@@ -264,6 +265,6 @@ test("signed dense notifications with distinct sub-day windows share their close
     }
     assert.equal(ids.size, 8, "the existing ingress dedupe retains distinct notifications");
     assert.equal(await f.service.drainWorker(8, f.account.id), 8);
-    assert.deepEqual(f.counts, { fetches: 2, sources: 2, imports: 1, noops: 0 });
+    assert.deepEqual(f.counts, { fetches: 2, sources: 3, imports: 2, noops: 0 });
   } finally { await f.close(); }
 });

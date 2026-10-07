@@ -5290,10 +5290,11 @@ export function createJunctionDeviceSyncProvider(
   }
 
   // Same per-day fetches, source admission and canonical import as the
-  // single-day owner; only the commit spans consecutive closed days, bounded by
-  // days, records and accumulation time. Yield handling mirrors the one-day
-  // owner: once committed, stop before the next read; a yielded job's writes
-  // are rejected by the service, so uncommitted days replay from batch start.
+  // single-day owner. The first nonempty day commits alone; later consecutive
+  // closed days share a commit bounded by days, records and accumulation time.
+  // Yield handling mirrors the one-day owner: once committed, stop before the
+  // next read; a yielded job's writes are rejected by the service, so
+  // uncommitted days replay from the batch start.
   async function importBatchedTimeseriesDailySnapshots(input: {
     context: ProviderJobContext;
     historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget;
@@ -5347,7 +5348,9 @@ export function createJunctionDeviceSyncProvider(
           continue;
         }
         pending = appendJunctionDailyImportBatch(pending, records, window, dayStartedAtMs);
-        if (isJunctionDailyImportBatchFull(pending, Date.now())) {
+        // A job's first nonempty day commits alone, as the one-day owner did, so
+        // every pass that completes a day keeps it even if the next read is slow.
+        if (!committedProgress || isJunctionDailyImportBatchFull(pending, Date.now())) {
           if (yieldBeforeWrite()) return finish(firstUncommittedDay());
           await flush();
         }

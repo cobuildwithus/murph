@@ -136,11 +136,12 @@ Current providers:
   An hourly/session feature exceeding either the page or record cap retries as one complete
   hour; daily aggregates remain day-atomic. Historical and webhook resource jobs
   for uncapped dense daily-aggregate and hourly/session resources still fetch one
-  closed UTC day per request, but commit up to eight consecutive closed days (at
-  most 4,000 records, or whatever has accumulated after five seconds) in one
-  canonical import after one fresh source-authority read. The time bound keeps
-  slow but successful reads from holding uncommitted days past a pass deadline,
-  because a yielded or aborted job's writes are rejected. A yield, abort, or
+  closed UTC day per request. A job's first nonempty day commits alone, as the
+  one-day owner did; later consecutive closed days share one canonical import
+  (up to eight days, 4,000 records, or whatever has accumulated after five
+  seconds) after one fresh source-authority read. Because a yielded or aborted
+  job's writes are rejected, these bounds keep every pass that completes a day
+  from losing it to a later slow read or pass deadline. A yield, abort, or
   retryable failure resumes at the first uncommitted day, and already-read days
   commit before a retryable failure. Calendar-day, capped, workout-stream, and
   ECG resources keep one canonical day per write. Workout streams use the same bounded

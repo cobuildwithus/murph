@@ -519,7 +519,7 @@ test("overlapping Garmin pull windows import identical days with 150 versus 42 f
   assert.deepEqual(new Set(coalesced.requestedDays), new Set(original.requestedDays));
   assert.equal(coalesced.imports.size, 42);
   assert.deepEqual(coalesced.imports, original.imports);
-  assert.equal(coalesced.importCalls, 6, "42 closed days commit in eight-day batches");
+  assert.equal(coalesced.importCalls, 7, "the first day commits alone, then 41 days in eight-day batches");
 });
 
 test("slow successful historical reads commit before a pass deadline and resume without re-reading committed days", async () => {
@@ -600,6 +600,75 @@ test("slow successful historical reads commit before a pass deadline and resume 
       const readsAfterResume = requestedDays.slice(3 * (index + 1));
       assert.ok(committedBefore.every((day) => !readsAfterResume.includes(day)));
     }
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a fast first day commits before a slow paginated day can exhaust the pass", async () => {
+  // Day one reads in four seconds, day two in 297; a pass ends at 300 seconds
+  // of reads and the service then rejects writes, as production does.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-04-04T12:00:00.000Z"));
+  try {
+    const windowStart = "2026-03-01T00:00:00.000Z";
+    const windowEnd = "2026-03-03T00:00:00.000Z";
+    const [firstDay, secondDay] = buildUtcDayKeys(windowStart, windowEnd);
+    const readSeconds = new Map([[firstDay, 4], [secondDay, 297]]);
+    const requestedDays: string[] = [];
+    const importedDays: string[] = [];
+    let pass = new AbortController();
+    let passSeconds = 0;
+    const provider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [createHistoricalProviderConnection("floors_climbed")] });
+      }
+      pass.signal.throwIfAborted();
+      const dayKey = requireValue(url.searchParams.get("start_date"), "paginated history day");
+      requestedDays.push(dayKey);
+      const seconds = requireValue(readSeconds.get(dayKey), "read duration");
+      vi.setSystemTime(Date.now() + seconds * 1_000);
+      passSeconds += seconds;
+      if (passSeconds >= 300) pass.abort(new Error("synthetic pass deadline"));
+      return createJsonResponse({ groups: { garmin: [{
+        data: [{ end: `${dayKey}T10:00:00.000Z`, start: `${dayKey}T09:00:00.000Z`, unit: "count", value: 1 }],
+        source: { provider: "garmin", type: "watch" },
+      }] } });
+    }, { summaryResources: [], timeseriesResources: ["floors_climbed"] });
+    const runPass = (job: ReturnType<typeof createJob>) => executeJunctionJob(provider, createJunctionJobContext({
+      account: createAccount({ sources: [createHistoricalSource("floors_climbed")] }),
+      connectionSourceAdmissionMode: "listed_only",
+      importSnapshot: async (snapshot) => {
+        pass.signal.throwIfAborted();
+        const window = snapshot as { windowEnd: string; windowStart: string };
+        importedDays.push(...buildUtcDayKeys(window.windowStart, window.windowEnd));
+        return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+      },
+      now: "2026-04-04T12:00:00.000Z",
+      shouldYield: () => pass.signal.aborted,
+      signal: pass.signal,
+      throwIfAborted: () => pass.signal.throwIfAborted(),
+    }), job);
+
+    const first = await runPass(createJob("resource", {
+      eventType: HISTORICAL_FLOORS_EVENT,
+      resource: "floors_climbed",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowEnd,
+      windowStart,
+    }));
+    const continuation = readHistoricalContinuation(first, HISTORICAL_FLOORS_EVENT);
+    assert.equal(continuation?.payload?.windowStart, `${secondDay}T00:00:00.000Z`);
+    assert.deepEqual(importedDays, [firstDay]);
+
+    pass = new AbortController();
+    passSeconds = 0;
+    const second = await runPass(createJobFromInput(requireValue(continuation, "slow day continuation"), 1));
+    assert.equal(readHistoricalContinuation(second, HISTORICAL_FLOORS_EVENT), null);
+    assert.deepEqual(importedDays, [firstDay, secondDay]);
+    assert.deepEqual(requestedDays, [firstDay, secondDay, secondDay], "the committed first day is not read again");
   } finally {
     vi.useRealTimers();
   }
