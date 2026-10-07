@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 
 import { SiteFooter } from "@/src/components/homepage/site-footer";
-import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
-import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -53,9 +51,6 @@ export default async function SecurityPage() {
         <HeroSection />
         <PromisesSection />
         <HostedOverviewSection />
-        {isHostedVeniceAssistantEnabled()
-          ? <ModelProviderSecuritySection />
-          : null}
         <EncryptionSection />
         <LocalSection installCommandUrl={installCommandUrl} />
       </main>

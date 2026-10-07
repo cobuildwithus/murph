@@ -1,32 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
-  type HostedRuntimeWorkflowState,
-} from "@murphai/hosted-execution/orchestration-control";
-
-import {
-  listHostedRuntimeLogsForTest,
-  queryHostedRuntimeWorkflowForTest,
-  signalHostedRuntimeWakeRuntimeForTest,
-  updateHostedMemberAssistantProviderForTest,
-} from "#hosted-web-testing";
-
-import { buildHostedVeniceResponsesRequestBody } from "../src/runner-egress-venice.ts";
-import {
   startHostedLocalLinqEgressScenario,
   type HostedLocalEgressScenario,
 } from "./helpers/hosted-local-egress-scenario.js";
 
-const runtimeLogLimit = 500;
-// The hosted-local recorder observes Murph's canonical product model. The
-// production Venice egress boundary owns provider-specific model translation.
-const veniceProductModel = "gpt-5.6-sol";
-
-type RuntimeWakeObservation = Pick<
-  HostedRuntimeWorkflowState,
-  "lastExecutionAt" | "signalVersion"
->;
+const terraProductModel = "gpt-5.6-terra";
 
 let egress: HostedLocalEgressScenario | null = null;
 
@@ -34,17 +13,12 @@ describe("hosted local resident-container egress e2e", () => {
   beforeAll(async () => {
     egress = await startHostedLocalLinqEgressScenario({
       additionalEnv: {
-        HOSTED_VENICE_ENABLED: "1",
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "30000",
-        VENICE_API_KEY: "stub-local-venice-key",
       },
       persistDirPrefix: "murph-hosted-local-warm-reuse-egress-",
       scenarioLabel: "Local hosted warm reuse egress e2e",
       userIdPrefix: "member_local_warm_reuse_egress",
     });
-    expect(egress.scenario.harness.workerRuntimeEnv?.VENICE_API_KEY).toBe(
-      "stub-local-venice-key",
-    );
   }, 300_000);
 
   afterAll(async () => {
@@ -52,7 +26,7 @@ describe("hosted local resident-container egress e2e", () => {
     egress = null;
   }, 120_000);
 
-  it("keeps OpenAI egress authorized and hands a saved provider change to a fresh invocation", async () => {
+  it("keeps OpenAI egress authorized across consecutive resident-container turns", async () => {
     const harness = requireEgress();
     await harness.seedActiveMemberAndChat();
     const baselineResponses = harness.countProviderRequests("/v1/responses");
@@ -67,86 +41,23 @@ describe("hosted local resident-container egress e2e", () => {
       expectedReplyText: "Second warm-reuse turn completed.",
       text: "This is the second warm-reuse egress turn.",
     });
-
-    expect(harness.countProviderRequests("/v1/responses")).toBeGreaterThanOrEqual(
-      baselineResponses + 2,
-    );
-    await harness.assertHealthy({ expectAssistantProviderRequest: true });
-
-    const providerRequestsBeforeSwitch =
-      harness.countProviderRequests("/v1/responses");
-    const switchStartedAt = new Date().toISOString();
-    const workflowStateBeforeSwitch = await readRuntimeWorkflowState({
-      environment: harness.scenario.runtimeEnv,
-      userId: harness.userId,
-    });
-    await expect(updateHostedMemberAssistantProviderForTest({
-      environment: harness.scenario.runtimeEnv,
-      provider: "venice",
-      userId: harness.userId,
-    })).resolves.toMatchObject({
-      effectiveProviderUpdated: true,
-      provider: "venice",
-      updated: true,
-    });
-    await expect(signalHostedRuntimeWakeRuntimeForTest({
-      environment: harness.scenario.runtimeEnv,
-      userId: harness.userId,
-    })).resolves.toMatchObject({
-      signalAccepted: true,
-    });
-    await waitForRuntimeWakeExecution({
-      environment: harness.scenario.runtimeEnv,
-      previousState: workflowStateBeforeSwitch,
-      userId: harness.userId,
-    });
-    expect(harness.countProviderRequests("/v1/responses")).toBe(
-      providerRequestsBeforeSwitch,
-    );
-
-    const thirdTurn = await harness.startInboundTurn({
+    const thirdTurn = await harness.sendInboundTurnUntilReply({
       eventSuffix: "warm_reuse_third",
-      expectedReplyText: "Venice reply after handoff.",
-      text: "This is the first turn after the provider handoff.",
+      expectedReplyText: "Third warm-reuse turn completed.",
+      text: "This is the third warm-reuse egress turn.",
     });
-    await waitForReplyAfterProviderSwitch({
-      harness,
-      reply: thirdTurn.send,
-      startedAt: switchStartedAt,
-    });
-    const providerRequestsAfterSwitch = harness
-      .listProviderRequests("/v1/responses")
-      .slice(providerRequestsBeforeSwitch);
-    expect(providerRequestsAfterSwitch).toHaveLength(1);
-    const providerRequestBody = providerRequestsAfterSwitch[0]?.body ?? "";
-    expect(readProviderRequestModel(providerRequestBody))
-      .toBe(veniceProductModel);
-    expectCurrentResponsesLiteToolEnvelope(providerRequestBody);
-    expectCurrentVeniceCacheCompatibility(providerRequestBody);
 
-    await Promise.all([
-      secondTurn.completion,
-      thirdTurn.completion,
-    ]);
-    const runtimeLogsAfterSecondTurn = await listHostedRuntimeLogsForTest({
-      environment: harness.scenario.runtimeEnv,
-      limit: runtimeLogLimit,
-      userId: harness.userId,
-    });
-    expect(runtimeLogsAfterSecondTurn.length).toBeLessThan(runtimeLogLimit);
-    const codexTimingLogs = runtimeLogsAfterSecondTurn
-      .filter((entry) =>
-        entry.eventCode === "assistant.automation_detail"
-        && entry.redactedJson?.providerTraceKind === "codex.app_server_timing"
-      );
-    expect(codexTimingLogs.map((entry) => entry.redactedJson?.codexTimingStage))
-      .not.toContain("warm-reused");
-    expect(codexTimingLogs.map((entry) =>
-      entry.redactedJson?.codexTimingColdStartReason
-    )).toContain("previous-explicit-stop");
-    expect(harness.countProviderRequests("/v1/responses")).toBe(
-      providerRequestsBeforeSwitch + 1,
-    );
+    await Promise.all([secondTurn.completion, thirdTurn.completion]);
+    const providerRequests = harness
+      .listProviderRequests("/v1/responses")
+      .slice(baselineResponses);
+    expect(providerRequests.length).toBeGreaterThanOrEqual(3);
+    for (const request of providerRequests) {
+      const providerRequestBody = request.body ?? "";
+      expect(readProviderRequestModel(providerRequestBody)).toBe(terraProductModel);
+      expectCurrentResponsesLiteToolEnvelope(providerRequestBody);
+    }
+    await harness.assertHealthy({ expectAssistantProviderRequest: true });
   }, 420_000);
 });
 
@@ -155,94 +66,6 @@ function readProviderRequestModel(body: string): unknown {
   return payload && typeof payload === "object" && !Array.isArray(payload)
     ? Reflect.get(payload, "model")
     : null;
-}
-
-function expectCurrentVeniceCacheCompatibility(body: string): void {
-  const source = readJsonObject(body);
-  const promptCacheKey = Reflect.get(source, "prompt_cache_key");
-  if (typeof promptCacheKey !== "string" || promptCacheKey.length === 0) {
-    throw new TypeError("Expected current Codex to send a stable prompt cache key.");
-  }
-
-  const encodedBody = new TextEncoder().encode(body);
-  const transformedBody = buildHostedVeniceResponsesRequestBody({
-    body: encodedBody.buffer.slice(
-      encodedBody.byteOffset,
-      encodedBody.byteOffset + encodedBody.byteLength,
-    ) as ArrayBuffer,
-    pathnameSuffix: "/responses",
-  });
-  if (transformedBody === null) {
-    throw new TypeError("Expected the current Codex request to be Venice-compatible.");
-  }
-  const transformed = readJsonObject(transformedBody);
-  expect(Reflect.get(transformed, "prompt_cache_key")).toBe(promptCacheKey);
-
-  const tools = Reflect.get(transformed, "tools");
-  if (!Array.isArray(tools) || tools.length === 0) {
-    throw new TypeError("Expected Responses Lite tools to be restored at top level.");
-  }
-
-  const input = Reflect.get(transformed, "input");
-  if (!Array.isArray(input)) {
-    throw new TypeError("Expected transformed Venice input to be an array.");
-  }
-  expect(input.some((item) =>
-    isJsonObject(item) && item.type === "additional_tools"
-  )).toBe(false);
-
-  const leadingDeveloperMessages: Record<string, unknown>[] = [];
-  for (const item of input) {
-    if (
-      !isJsonObject(item)
-      || item.type !== "message"
-      || item.role !== "developer"
-    ) {
-      break;
-    }
-    leadingDeveloperMessages.push(item);
-  }
-  expect(leadingDeveloperMessages.length).toBeGreaterThan(0);
-
-  const supportedPrefixBlocks = leadingDeveloperMessages.flatMap((message) => {
-    const content = message.content;
-    return Array.isArray(content)
-      ? content.filter((block): block is Record<string, unknown> =>
-        isJsonObject(block)
-        && (
-          block.type === "input_text"
-          || block.type === "input_image"
-          || block.type === "input_file"
-        )
-      )
-      : [];
-  });
-  expect(supportedPrefixBlocks.length).toBeGreaterThan(0);
-  expect(supportedPrefixBlocks.at(-1)?.prompt_cache_breakpoint).toEqual({
-    mode: "explicit",
-  });
-
-  const breakpoints = input.flatMap((item) => {
-    if (!isJsonObject(item) || !Array.isArray(item.content)) {
-      return [];
-    }
-    return item.content.filter((block) =>
-      isJsonObject(block) && block.prompt_cache_breakpoint !== undefined
-    );
-  });
-  expect(breakpoints).toHaveLength(1);
-}
-
-function readJsonObject(body: string): Record<string, unknown> {
-  const payload: unknown = JSON.parse(body);
-  if (!isJsonObject(payload)) {
-    throw new TypeError("Expected the provider request to be a JSON object.");
-  }
-  return payload;
-}
-
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function expectCurrentResponsesLiteToolEnvelope(body: string): void {
@@ -291,107 +114,6 @@ function expectCurrentResponsesLiteToolEnvelope(body: string): void {
     }
     expect(Reflect.get(tool, "type")).toEqual(expect.any(String));
   }
-}
-
-async function readRuntimeWorkflowState(input: {
-  environment: NodeJS.ProcessEnv;
-  userId: string;
-}): Promise<RuntimeWakeObservation> {
-  const value = await queryHostedRuntimeWorkflowForTest({
-    environment: input.environment,
-    queryName: HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
-    workflowId: `hosted-user-runtime:${input.userId}`,
-  });
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted runtime workflow query returned an invalid state.");
-  }
-  const lastExecutionAt: unknown = Reflect.get(value, "lastExecutionAt");
-  const signalVersion: unknown = Reflect.get(value, "signalVersion");
-  if (
-    (lastExecutionAt !== null && typeof lastExecutionAt !== "string")
-    || !Number.isSafeInteger(signalVersion)
-    || typeof signalVersion !== "number"
-    || signalVersion < 0
-  ) {
-    throw new TypeError("Hosted runtime workflow query returned an invalid state.");
-  }
-  return {
-    lastExecutionAt,
-    signalVersion,
-  };
-}
-
-async function waitForRuntimeWakeExecution(input: {
-  environment: NodeJS.ProcessEnv;
-  previousState: RuntimeWakeObservation;
-  userId: string;
-}): Promise<void> {
-  const deadlineMs = Date.now() + 30_000;
-  let latestState = input.previousState;
-
-  while (Date.now() < deadlineMs) {
-    latestState = await readRuntimeWorkflowState(input);
-    if (
-      latestState.signalVersion > input.previousState.signalVersion
-      && latestState.lastExecutionAt !== input.previousState.lastExecutionAt
-    ) {
-      return;
-    }
-    await sleep(250);
-  }
-
-  throw new Error(
-    `Timed out waiting for the provider wake to reach Cloudflare. Temporal state: ${JSON.stringify(latestState)}.`,
-  );
-}
-
-async function waitForReplyAfterProviderSwitch(input: {
-  harness: HostedLocalEgressScenario;
-  reply: Promise<unknown>;
-  startedAt: string;
-}): Promise<void> {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  try {
-    await Promise.race([
-      input.reply,
-      new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => {
-          reject(new Error("Timed out waiting for the first reply after provider switch."));
-        }, 60_000);
-      }),
-    ]);
-  } catch (error) {
-    void input.reply.catch(() => undefined);
-    const logs = await listHostedRuntimeLogsForTest({
-      environment: input.harness.scenario.runtimeEnv,
-      limit: runtimeLogLimit,
-      userId: input.harness.userId,
-    });
-    const switchLogs = logs
-      .filter((entry) => entry.at >= input.startedAt)
-      .map((entry) => ({
-        at: entry.at,
-        component: entry.component,
-        eventCode: entry.eventCode,
-        phase: entry.phase,
-        redactedJson: entry.redactedJson ?? null,
-      }));
-    throw new Error(await input.harness.scenario.buildFailureMessage(
-      input.harness.userId,
-      [
-        error instanceof Error ? error.message : String(error),
-        `provider-switch runtime logs: ${JSON.stringify(switchLogs)}`,
-      ],
-    ));
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  }
-}
-
-function sleep(durationMs: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
 function requireEgress(): HostedLocalEgressScenario {

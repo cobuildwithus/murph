@@ -1200,7 +1200,7 @@ export function buildCodexAppServerArgs(
   }
 
   if (input.oss) {
-    args.push('--oss')
+    throw new VaultCliError('invalid_option', 'Assistant models must use OpenAI.')
   }
 
   args.push(CODEX_APP_SERVER_COMMAND)

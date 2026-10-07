@@ -3496,7 +3496,7 @@ test.each([false, true])("phone channel welcome prepares real routing and mailbo
   const member = {
     id: memberId, billingStatus: HostedBillingStatus.active, suspendedAt: null,
     createdAt: new Date(), updatedAt: new Date(), billingRef: null, emailAuthorization: null,
-    routing: null, threadContainer: null, accountGroupMemberships: [], assistantProviderPreference: null,
+    routing: null, threadContainer: null, accountGroupMemberships: [],
     identity: { ...identity, memberId, phoneLookupKey: createHostedPhoneLookupKey(phone), phoneNumberVerifiedAt: new Date() },
   };
   const routingWrite = vi.fn(async (_input: { create: { linqRecipientPhoneEncrypted: string } }) => {
@@ -4079,7 +4079,7 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
             ? null
             : BigInt(input.data.assistantHumorCausalSeq),
         assistantModelPreference: null,
-        assistantProviderPreference: null,
+
         assistantReasoningEffortPreference: null,
         assistantPush: null,
         assistantPushCausalSeq:

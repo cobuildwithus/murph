@@ -713,10 +713,7 @@ runtime/provider layer still enforces spend before any actual model call. There
 is no Activity-local signed usage-decision endpoint in the Temporal execution
 path.
 
-The facts owner retains authoritative usage admission and queries a selected
-custom inference override only when a denied managed allowance needs that
-exemption. Allowed and consent-withdrawn decisions do not depend on unrelated
-custom inference configuration. The existing route stage callback records
+The facts owner retains authoritative usage admission. The existing route stage callback records
 bounded, numeric durations for authentication and facts processing, including
 repeated stages. Timing records contain no member or request identifiers and
 cannot change the response or failure behavior. Temporal activity duration

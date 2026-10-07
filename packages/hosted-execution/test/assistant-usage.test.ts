@@ -103,7 +103,7 @@ test("measured maintenance identities isolate members, providers, and response o
   };
   const record = buildAssistantMaintenanceUsageRecord(input);
   assert.deepEqual(buildAssistantMaintenanceUsageRecord(input), record);
-  for (const changed of [{ memberId: "member_other" }, { providerName: "venice" }, { providerRequestId: "response_retry_fixture" }]) {
+  for (const changed of [{ memberId: "member_other" }, { providerName: "other-provider" }, { providerRequestId: "response_retry_fixture" }]) {
     assert.notEqual(buildAssistantMaintenanceUsageRecord({ ...input, ...changed }).usageId, record.usageId);
   }
   assert.equal(record.cacheWriteTokens, 10);

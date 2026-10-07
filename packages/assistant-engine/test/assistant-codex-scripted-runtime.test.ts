@@ -8547,12 +8547,10 @@ text(JSON.stringify(result));
         'gpt-6-sol',
         'gpt-5.6-sol',
       ],
-      availableProviders: ['openai'],
       availableReasoningEfforts: ['low'],
       configurationAvailable: true,
       dormantSolPreference: false,
       model,
-      provider: 'openai' as const,
       reasoningEffort: 'low' as const,
       solAvailable: true,
     })

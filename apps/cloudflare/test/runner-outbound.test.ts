@@ -2435,7 +2435,7 @@ describe("handleRunnerOutboundRequest", () => {
       cutover: "postgres", status: "observed", owner: {
         userId: "member_123", attemptId: "attempt_1", generation: "9", phase: "active",
         processingMode: "default", allocationId: "allocation_synthetic", runnerContainerName: "runner_synthetic",
-        workspaceVersion: "4", customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        workspaceVersion: "4", platformAiUsageAllowed: true,
         startedAt: "2026-09-17T00:00:00.000Z", acceptedAt: null, completedAt: null,
         failureCount: 0, lastErrorCode: null,
       },

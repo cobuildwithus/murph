@@ -77,7 +77,6 @@ test('buildCodexAppServerArgs keeps sandbox and approval out of process args', (
   const args = buildCodexAppServerArgs({
     approvalPolicy: 'never',
     configOverrides: ['mcp_servers.murph_memory.command="node"'],
-    oss: true,
     profile: 'primary',
     sandbox: 'read-only',
   })
@@ -87,7 +86,6 @@ test('buildCodexAppServerArgs keeps sandbox and approval out of process args', (
     'mcp_servers.murph_memory.command="node"',
     '--profile',
     'primary',
-    '--oss',
     'app-server',
   ])
 })

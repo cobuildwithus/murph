@@ -53,7 +53,7 @@ type ContinuityLocator = typeof locator | typeof telegramLocator
 const ordinaryTarget = createAssistantModelTarget({
   approvalPolicy: 'never',
   model: 'gpt-5.6-terra',
-  modelProvider: 'vercel-ai-gateway',
+  modelProvider: 'hosted-openai',
   oss: false,
   profile: null,
   provider: 'codex-cli',
@@ -63,7 +63,7 @@ const ordinaryTarget = createAssistantModelTarget({
 const detachedTarget = createAssistantModelTarget({
   approvalPolicy: 'never',
   model: 'gpt-5.6-terra',
-  modelProvider: 'vercel-ai-gateway',
+  modelProvider: 'hosted-openai',
   oss: false,
   profile: null,
   provider: 'codex-cli',

@@ -13,7 +13,6 @@ export interface RunnerInvocationIdentity {
 
 export interface RunnerProviderContext {
   workspaceVersion: string;
-  customInferenceEnvelope: string | null;
   platformAiUsageAllowed: boolean;
 }
 

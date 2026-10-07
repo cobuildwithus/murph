@@ -472,12 +472,9 @@ retention/deletion, and security practices.
 The hosted Prisma schema keeps ownership sharp and nested:
 
 - `HostedMember` is the core member row plus activation/billing status. Its
-  nullable assistant provider/model/reasoning fields are the Web-owned
-  execution preference; OpenAI is the default, and the nullable Venice override
-  is projected only while `HOSTED_VENICE_ENABLED` is enabled. Settings and the
-  input-bound assistant-configuration tool share the same transaction, rollout
-  gate, and canonical response so a model-only save cannot preserve a stale
-  provider in the client. Its nullable
+  nullable assistant model/reasoning fields are the Web-owned execution
+  preference for OpenAI. Settings and the input-bound assistant-configuration
+  tool share the same transaction and canonical response. Its nullable
   assistant tone, voice, Humor, Push, and Detail columns are only the
   authenticated Settings display/write projection; canonical personality
   preferences remain in `bank/preferences.json`. Settings writes strict sparse
@@ -1221,7 +1218,7 @@ Hosted AI usage metering:
   Codex keeps Astra context at 272K, so cumulative turn/subagent usage is charged
   at ordinary rates even when several requests together exceed that threshold.
   Rates: https://developers.openai.com/api/docs/models/gpt-6-astra
-- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows by canonical model and recorded provider into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. OpenAI and Venice GPT-5.6 usage therefore use their respective documented input, cache-read, cache-write, and output rates. Settings discloses Venice's higher provider-rate capacity use both while it is selected as a pending choice and after it is saved. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
+- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows by canonical model and recorded provider into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. OpenAI usage uses the supported model rate table; previously settled usage retains its original pricing snapshot. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog, including the active Family owner's authorized own-seat target. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.

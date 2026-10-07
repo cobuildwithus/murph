@@ -68,7 +68,6 @@ describe("createCloudflareHostedControlClient", () => {
       "sendTelegramUsageLimitNotice",
       "stageEnvironmentVoice",
       "stageMealPhoto",
-      "verifyInferenceConnection",
     ]);
   });
 
@@ -115,47 +114,6 @@ describe("createCloudflareHostedControlClient", () => {
     expect(new Headers(init.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBeNull();
   });
 
-  it("verifies a bounded inference candidate through the user-bound route", async () => {
-    const fetchImpl = vi.fn(async () => createJsonResponse({
-      verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
-      verified: true,
-    })) as typeof fetch;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test",
-      fetchImpl,
-      getBearerToken: async () => "token-123",
-    });
-
-    await expect(client.verifyInferenceConnection({
-      request: {
-        auth: { kind: "bearer", secret: "synthetic-secret" },
-        contextWindowTokens: 131_072,
-        endpointUrl: "https://inference.example.test/v1/responses",
-        model: "example-model",
-        protocol: "responses",
-        supportsImages: false,
-      },
-      userId: "user_123",
-    })).resolves.toEqual({
-      verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
-      verified: true,
-    });
-
-    const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [
-      string,
-      RequestInit,
-    ];
-    expect(url).toBe(
-      "https://runner.example.test/internal/users/user_123/inference/verify",
-    );
-    expect(init.method).toBe("POST");
-    expect(new Headers(init.headers).get("authorization")).toBe(
-      "Bearer token-123",
-    );
-    expect(new Headers(init.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
-      "user_123",
-    );
-  });
 
   it("stages and deletes environment voice bytes through the bound user routes", async () => {
     const bytes = Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]);
@@ -399,7 +357,7 @@ describe("createCloudflareHostedControlClient", () => {
         userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
         processingMode: "default" as const, allocationId: "allocation-test",
         runnerContainerName: "runner-test", workspaceVersion: "0",
-        customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        platformAiUsageAllowed: true,
         startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
         failureCount: 0, lastErrorCode: null,
       },

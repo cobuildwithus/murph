@@ -308,100 +308,6 @@ function findProviderPromptSizeTraceRawEvent(
 }
 
 describe('Codex assistant registry helpers', () => {
-  it.each(['hosted-openai', 'venice', 'hosted-custom-inference'] as const)(
-    'shares preparation, voice, and backing-turn process identity for %s', async (modelProvider) => {
-    const target = {
-      adapter: 'codex-cli',
-      approvalPolicy: 'never',
-      codexCommand: '/runtime/bin/codex',
-      codexHome: '/runtime/codex-home',
-      model: 'gpt-5.6-terra',
-      modelProvider,
-      oss: false,
-      profile: 'hosted',
-      reasoningEffort: 'low',
-      sandbox: 'danger-full-access',
-    } as const
-    const env = {
-      [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
-      CODEX_HOME: '/runtime/codex-home',
-      GEMINI_API_KEY: 'worker-owned-sentinel',
-      HOME: '/runtime/home',
-      PATH: '/usr/bin',
-    }
-    const signal = new AbortController().signal
-    codexAppServerMocks.preinitializeCodexAppServer.mockResolvedValue(null)
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
-      finalMessage: 'ok',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'ok',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'codex-thread-preinitialized',
-      stderr: '',
-      stdout: '',
-      threadId: 'codex-thread-preinitialized',
-      turnId: 'turn-preinitialized',
-    })
-
-    await prepareHostedCodexAssistantProcess({
-      env,
-      signal,
-      target,
-      workingDirectory: '/runtime/vault',
-    })
-    const onInput = vi.fn()
-    const onUsage = vi.fn()
-    await startHostedCodexAssistantVoice({
-      env, signal, target, workingDirectory: '/runtime/vault',
-      mediaModel: 'gpt-5.6-terra', mediaModelProvider: 'hosted-openai',
-      sessionId: 'call-synthetic', sdp: 'synthetic-offer', prompt: 'Relay accepted speech.',
-      onInput, onUsage,
-    })
-    await executeCodexAssistantTurnAttemptFromInput({
-      providerConfig: assistantModelTargetToProviderConfigInput(target),
-      turn: {
-        dynamicTools: [],
-        env,
-        prompt: 'Answer the current message.',
-        workingDirectory: '/runtime/vault',
-      },
-    })
-
-    const voiceInput = codexAppServerMocks.startCodexAppServerRealtime.mock.calls[0]?.[0]
-    const preparationInput =
-      codexAppServerMocks.preinitializeCodexAppServer.mock.calls[0]?.[0]
-    const turnInput =
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
-    for (const key of [
-      'codexCommand',
-      'codexHome',
-      'configOverrides',
-      'env',
-      'oss',
-      'profile',
-      'workingDirectory',
-    ] as const) {
-      expect(preparationInput?.[key]).toEqual(turnInput?.[key])
-      expect(voiceInput?.[key]).toEqual(turnInput?.[key])
-    }
-    expect(voiceInput).toMatchObject({
-      modelProvider: 'hosted-openai', model: 'gpt-5.6-terra', signal,
-      sessionId: 'call-synthetic', onInput, onUsage,
-    })
-    expect(voiceInput).not.toHaveProperty('dynamicTools')
-    expect(voiceInput?.env).not.toHaveProperty('GEMINI_API_KEY')
-    expect(preparationInput?.signal).toBe(signal)
-    expect(preparationInput?.env).not.toHaveProperty('GEMINI_API_KEY')
-    expect(turnInput?.env).not.toHaveProperty('GEMINI_API_KEY')
-    expect(turnInput?.analyzeVideoRuntime).toMatchObject({
-      apiKey: 'worker-owned-sentinel',
-    })
-    expect(preparationInput).not.toHaveProperty('prompt')
-    expect(preparationInput).not.toHaveProperty('resumeSessionId')
-    expect(preparationInput).not.toHaveProperty('dynamicTools')
-  })
 
   it('finish_without_reply description does not claim to withdraw completed replies', () => {
     const finishWithoutReply = MURPH_DYNAMIC_TOOLS.find(
@@ -422,14 +328,8 @@ describe('Codex assistant registry helpers', () => {
       ),
     ).toBe('Codex app-server')
 
-    expect(
-      resolveCodexAssistantLabel(
-        normalizeAssistantProviderConfig({
-          provider: 'codex-cli',
-          oss: true,
-        }),
-      ),
-    ).toBe('Codex OSS app-server')
+    expect(() => normalizeAssistantProviderConfig({ provider: 'codex-cli', oss: true }))
+      .toThrow(/must use OpenAI/u)
   })
 
   it('extracts Codex usage from sparse provider metadata', () => {
@@ -438,7 +338,7 @@ describe('Codex assistant registry helpers', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           model: 'codex-mini',
-          modelProvider: 'vercel-ai-gateway',
+          modelProvider: 'hosted-openai',
           oss: false,
         }),
         rawEvents: [
@@ -450,7 +350,7 @@ describe('Codex assistant registry helpers', () => {
     ).toMatchObject({
       inputTokens: null,
       outputTokens: null,
-      providerName: 'vercel-ai-gateway',
+      providerName: 'hosted-openai',
       providerMetadataJson: null,
       providerRequestId: null,
       rawUsageJson: null,
@@ -743,9 +643,9 @@ describe('Codex assistant registry helpers', () => {
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       serviceTier: 'flex',
-    })).toBe('standard')
+    })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
       model: 'gpt-5.6-terra',
       modelProvider: 'openai',
@@ -866,14 +766,14 @@ describe('Codex assistant registry helpers', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           model: 'codex-mini',
-          modelProvider: 'vercel-ai-gateway',
+          modelProvider: 'hosted-openai',
           oss: false,
         }),
         rawEvents: [codexSettingsFlexEvent],
         serviceTier: 'flex',
       }),
     ).toMatchObject({
-      providerName: 'vercel-ai-gateway',
+      providerName: 'hosted-openai',
       tokenPricingBasis: 'standard',
     })
     expect(
@@ -3580,7 +3480,7 @@ describe('Codex assistant registry helpers', () => {
     expect(prompt).not.toContain(deliveryTarget)
   })
 
-  it('prepends turn context to explicit prompts before Codex execution', async () => {
+  it('pins an unconfigured provider to OpenAI while prepending turn context', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
       precedingAgentMessageSegments: [],
@@ -3608,6 +3508,8 @@ describe('Codex assistant registry helpers', () => {
     })
 
     expect(attempt.ok).toBe(true)
+    expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]?.modelProvider)
+      .toBe('openai')
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]?.prompt,
     ).toBe(
@@ -3867,37 +3769,6 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
-  it('exposes Codex-only registry capabilities and static model lists', () => {
-    expect(resolveCodexAssistantCapabilities()).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsNativeResume: true,
-      supportsReasoningEffort: true,
-      supportsRichUserMessageContent: true,
-    })
-
-    expect(
-      resolveCodexAssistantTargetCapabilities({
-        provider: 'codex-cli',
-      }),
-    ).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsNativeResume: true,
-      supportsReasoningEffort: true,
-      supportsRichUserMessageContent: true,
-    })
-    expect(
-      resolveCodexAssistantTargetCapabilities({
-        modelProvider: 'hosted-custom-inference',
-        provider: 'codex-cli',
-      }),
-    ).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsNativeResume: true,
-      supportsReasoningEffort: false,
-      supportsRichUserMessageContent: true,
-    })
-
-  })
 
   it('merges progress activity labels into successful delegated execution attempts', async () => {
     const executionResult: AssistantProviderTurnExecutionResult = {
@@ -4245,48 +4116,6 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.result.responseDeliveryContextOrdinal).toBe(0)
   })
 
-  it('passes Venice provider id and config overrides through the Codex app-server seam', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
-      finalMessage: 'Completed with Venice.',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'Completed with Venice.',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'venice-thread',
-      stderr: '',
-      stdout: '',
-      threadId: 'venice-thread',
-      turnId: 'turn-venice',
-    })
-
-    const attempt = await executeCodexAssistantTurnAttempt({
-      providerConfig: normalizeAssistantProviderConfig({
-        provider: 'codex-cli',
-        model: 'venice-model',
-        modelProvider: 'venice',
-      }),
-      userPrompt: 'Run Venice.',
-      workingDirectory: '/tmp/provider-tests',
-    })
-
-    expect(attempt.ok).toBe(true)
-    const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
-      .calls[0]?.[0]
-    expect(appServerInput).toMatchObject({
-      model: 'venice-model',
-      modelProvider: 'venice',
-    })
-    expect(appServerInput?.configOverrides).toEqual(
-      expect.arrayContaining([
-        'model_providers.venice.name="Venice.ai"',
-        'model_providers.venice.base_url="https://api.venice.ai/api/v1"',
-        'model_providers.venice.env_key="VENICE_API_KEY"',
-        'model_providers.venice.wire_api="responses"',
-        'model_providers.venice.requires_openai_auth=false',
-      ]),
-    )
-  })
 
   it('never passes a multi_agent_v2 CLI override on hosted turns', async () => {
     // Hosted config.toml owns [features.multi_agent_v2] (including
@@ -4329,98 +4158,6 @@ describe('Codex assistant registry helpers', () => {
         (override: string) => override.includes('multi_agent'),
       ) ?? false,
     ).toBe(false)
-  })
-
-  it('forwards the selected hosted provider credential to the Codex process', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
-      finalMessage: 'Completed hosted Venice turn.',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'Completed hosted Venice turn.',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'hosted-venice-thread',
-      stderr: '',
-      stdout: '',
-      threadId: 'hosted-venice-thread',
-      turnId: 'turn-hosted-venice',
-    })
-
-    const attempt = await executeCodexAssistantTurnAttempt({
-      env: {
-        [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
-        HOSTED_ASSISTANT_PROVIDER: 'venice',
-        PATH: '/usr/bin',
-        VENICE_API_KEY: 'signed-venice-egress-credential',
-      },
-      providerConfig: normalizeAssistantProviderConfig({
-        provider: 'codex-cli',
-        model: 'venice-model',
-        modelProvider: 'venice',
-      }),
-      userPrompt: 'Run hosted Venice turn.',
-      workingDirectory: '/tmp/provider-tests',
-    })
-
-    expect(attempt.ok).toBe(true)
-    expect(
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]?.env,
-    ).toMatchObject({
-      HOSTED_ASSISTANT_PROVIDER: 'venice',
-      VENICE_API_KEY: 'signed-venice-egress-credential',
-    })
-  })
-
-  it('keeps thread restrictions out of provider launch configuration', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
-      finalMessage: 'Completed turn-local override.',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'Completed turn-local override.',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'turn-local-override-thread',
-      stderr: '',
-      stdout: '',
-      threadId: 'turn-local-override-thread',
-      turnId: 'turn-local-override',
-    })
-
-    const attempt = await executeCodexAssistantTurnAttempt({
-      codexThreadConfig: {
-        'features.shell_tool': false,
-        'memories.generate_memories': false,
-        'memories.use_memories': false,
-      },
-      providerConfig: normalizeAssistantProviderConfig({
-        codexHome: '/tmp/provider-tests/shared-codex-home',
-        provider: 'codex-cli',
-        model: 'hosted-model',
-        modelProvider: 'venice',
-      }),
-      showThinkingTraces: true,
-      userPrompt: 'Run with turn-local overrides.',
-      workingDirectory: '/tmp/provider-tests',
-    })
-
-    expect(attempt.ok).toBe(true)
-    const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
-      .calls[0]?.[0]
-    expect(appServerInput?.configOverrides).toEqual([
-      'model_providers.venice.name="Venice.ai"',
-      'model_providers.venice.base_url="https://api.venice.ai/api/v1"',
-      'model_providers.venice.env_key="VENICE_API_KEY"',
-      'model_providers.venice.wire_api="responses"',
-      'model_providers.venice.requires_openai_auth=false',
-    ])
-    expect(appServerInput?.threadConfig).toEqual({
-      'features.shell_tool': false,
-      'memories.generate_memories': false,
-      'memories.use_memories': false,
-      hide_agent_reasoning: false,
-      model_reasoning_summary: 'auto',
-    })
-    expect(appServerInput?.codexHome).toBe('/tmp/provider-tests/shared-codex-home')
   })
 
   it('forwards ephemeral read-only turns while preserving dynamic tools', async () => {
@@ -5434,53 +5171,6 @@ describe('Codex assistant registry helpers', () => {
     expect(JSON.stringify(traceEvents)).not.toContain('example.invalid')
   })
 
-  it('adds the Venice runtime hint when native resume has invalid output', async () => {
-    const authHeaderPrefix = ['Authorization:', 'Bearer'].join(' ')
-    const sentinel = 'venice_secret_SENTINEL'
-    const expectedError = new VaultCliError(
-      'ASSISTANT_CODEX_FAILED',
-      'Codex app-server turn failed. status failed. {"error":{"type":"invalid_request_error","message":"input.7.output: Invalid input"}}',
-    )
-    const fallbackError = new VaultCliError(
-      'ASSISTANT_CODEX_FAILED',
-      `fallback failed: ${authHeaderPrefix} ${sentinel}; VENICE_API_KEY=${sentinel}; raw ${sentinel}`,
-    )
-
-    codexAppServerMocks.executeCodexAppServerTurn
-      .mockRejectedValueOnce(expectedError)
-      .mockRejectedValueOnce(fallbackError)
-    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
-      jsonEvents: [{ method: 'turn/completed' }],
-      providerActionCount: 0,
-      codexThreadId: 'corrupt-venice-thread',
-      providerTurnId: 'turn-invalid-output',
-    })
-
-    const attempt = await executeCodexAssistantTurnAttempt({
-      providerConfig: normalizeAssistantProviderConfig({
-        provider: 'codex-cli',
-        modelProvider: 'venice',
-      }),
-      env: {
-        VENICE_API_KEY: sentinel,
-      },
-      resume: testCodexResume('corrupt-venice-thread'),
-      userPrompt: 'late follow up',
-      workingDirectory: '/tmp/provider-tests',
-    })
-
-    expect(attempt.ok).toBe(false)
-    if (attempt.ok) {
-      throw new Error('expected failed provider attempt')
-    }
-    expect(attempt.error).toMatchObject({
-      code: 'ASSISTANT_CODEX_FAILED',
-      message: expect.stringContaining('Venice via Codex Responses failed.'),
-    })
-    const error = attempt.error as Error
-    expect(error.message).not.toContain(sentinel)
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
-  })
 
   it('returns failed delegated execution attempts with merged labels from emitted progress', async () => {
     const expectedError = new Error('provider crashed')

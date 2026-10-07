@@ -1504,7 +1504,7 @@ function emptySourceShape() {
     assistantModelPreference: null,
     assistantPersona: null,
     assistantPersonaCausalSeq: null,
-    assistantProviderPreference: null,
+
     assistantPush: null,
     assistantPushCausalSeq: null,
     assistantReasoningEffortPreference: null,

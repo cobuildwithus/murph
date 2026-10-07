@@ -415,9 +415,6 @@ describe("hosted AI usage allowance pricing", () => {
         });
       }
     }
-    expect(() => priceHostedAiUsageForAllowance({
-      ...BASE_USAGE_RECORD, requestedModel: model, servedModel: model, providerName: "venice",
-    })).toThrow("pricing is missing for the provider model");
   });
 
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
@@ -507,10 +504,6 @@ describe("hosted AI usage allowance pricing", () => {
       usageExtractionSourcePath: "thread.tokenUsage.total.delta",
     });
     expect(result.costUsdMicros).toBe(model === "gpt-6-astra" ? 4_500_000n : (model === "gpt-6-sol" || model === "gpt-6.1-sol") ? 900_000n : 45_000n);
-  });
-
-  it("does not invent Venice pricing for Astra", () => {
-    expect(() => priceHostedAiUsageForAllowance({ ...BASE_USAGE_RECORD, requestedModel: "gpt-6-astra", servedModel: "gpt-6-astra", providerName: "venice" })).toThrow("pricing is missing for the provider model");
   });
 
   it("prices GPT-5.6 model slugs with official standard and flex accounting", () => {
@@ -616,92 +609,6 @@ describe("hosted AI usage allowance pricing", () => {
         requestedModel: "gpt-5.6-sol",
         servedModel: "gpt-5.6-luna",
       },
-    });
-  });
-
-  it("prices Venice GPT-5.6 usage at Venice's official provider rates", () => {
-    const cases = [
-      {
-        costUsdMicros: 2_230_000n,
-        model: "gpt-5.6-luna",
-        providerModel: "openai-gpt-56-luna",
-        rates: {
-          cachedInput: "30000",
-          cacheWrite: "330000",
-          input: "270000",
-          output: "1600000",
-        },
-      },
-      {
-        costUsdMicros: 26_100_000n,
-        model: "gpt-5.6-terra",
-        providerModel: "openai-gpt-56-terra",
-        rates: {
-          cachedInput: "310000",
-          cacheWrite: "3910000",
-          input: "3130000",
-          output: "18750000",
-        },
-      },
-      {
-        costUsdMicros: 52_190_000n,
-        model: "gpt-5.6-sol",
-        providerModel: "openai-gpt-56-sol",
-        rates: {
-          cachedInput: "630000",
-          cacheWrite: "7810000",
-          input: "6250000",
-          output: "37500000",
-        },
-      },
-    ] as const;
-
-    for (const testCase of cases) {
-      expect(priceHostedAiUsageForAllowance({
-        ...BASE_USAGE_RECORD,
-        cachedInputTokens: 1_000_000,
-        cacheWriteTokens: 1_000_000,
-        inputTokens: 3_000_000,
-        outputTokens: 1_000_000,
-        providerName: "venice",
-        requestedModel: testCase.model,
-        servedModel: testCase.model,
-        totalTokens: 4_000_000,
-      })).toMatchObject({
-        costUsdMicros: testCase.costUsdMicros,
-        counted: true,
-        pricingSnapshot: {
-          model: testCase.model,
-          pricingSource: "https://docs.venice.ai/overview/pricing",
-          providerModel: testCase.providerModel,
-          ratesUsdMicrosPerMillionTokens: testCase.rates,
-          standardCostUsdMicros: testCase.costUsdMicros.toString(),
-          tokenPricingBasis: "standard",
-        },
-        pricingVersion: "venice-api-pricing-2026-08-30-gpt-5.6-standard",
-      });
-    }
-  });
-
-  it("prices regular Venice Luna without applying Luna Pro rates", () => {
-    expect(priceHostedAiUsageForAllowance({
-      ...BASE_USAGE_RECORD,
-      cachedInputTokens: 0,
-      cacheWriteTokens: 0,
-      inputTokens: 1_000_000,
-      outputTokens: 1_000_000,
-      providerName: "venice",
-      requestedModel: "gpt-5.6-luna",
-      servedModel: "gpt-5.6-luna",
-      totalTokens: 2_000_000,
-    })).toMatchObject({
-      costUsdMicros: 1_870_000n,
-      counted: true,
-      pricingSnapshot: {
-        providerModel: "openai-gpt-56-luna",
-        standardCostUsdMicros: "1870000",
-      },
-      pricingVersion: "venice-api-pricing-2026-08-30-gpt-5.6-standard",
     });
   });
 
@@ -960,7 +867,7 @@ describe("hosted AI usage allowance pricing", () => {
   it("rejects OpenAI flex token pricing without OpenAI provider evidence", () => {
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      providerName: "venice",
+      providerName: "unsupported-provider",
       tokenPricingBasis: "openai-flex",
     })).toThrow(
       "OpenAI token pricing adjustments require OpenAI provider evidence",
@@ -981,7 +888,7 @@ describe("hosted AI usage allowance pricing", () => {
     );
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      providerName: "venice",
+      providerName: "unsupported-provider",
       tokenPricingBasis: "openai-priority",
     })).toThrow(
       "OpenAI token pricing adjustments require OpenAI provider evidence",
@@ -1002,7 +909,7 @@ describe("hosted AI usage allowance pricing", () => {
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       credentialSource: "member",
-      providerName: "venice",
+      providerName: "unsupported-provider",
       tokenPricingBasis: "openai-flex",
     })).toThrow(
       "OpenAI token pricing adjustments require OpenAI provider evidence",

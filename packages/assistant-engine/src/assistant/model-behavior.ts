@@ -17,15 +17,11 @@ export function resolveAssistantModelBehaviorProfile(
 ): AssistantModelBehaviorProfile {
   const normalized = normalizeAssistantProviderConfig(input)
 
-  if (normalized.target.oss) {
-    return 'default'
-  }
-
   if (isAssistantGpt5FamilyModel(normalized.target.model)) {
     return 'gpt5-agentic'
   }
 
-  if (!normalized.target.oss && !normalized.target.model) {
+  if (!normalized.target.model) {
     return 'gpt5-agentic'
   }
 

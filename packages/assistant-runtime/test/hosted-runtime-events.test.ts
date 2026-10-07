@@ -3612,7 +3612,7 @@ describe("executeHostedMailboxEvent", () => {
         code: "invalid_api_key",
         details: {
           assistantNotificationProvider: "codex-cli",
-          assistantNotificationProviderBaseUrlOrigin: "https://ai-gateway.vercel.sh",
+          assistantNotificationProviderBaseUrlOrigin: "https://api.openai.com",
           assistantNotificationProviderModel: "gpt-5.6-terra",
           assistantNotificationStage: "provider",
         },

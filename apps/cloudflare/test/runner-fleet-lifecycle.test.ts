@@ -263,7 +263,7 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
     return {
       userId: MEMBER, attemptId: "attempt-starting", generation: "1", phase,
       processingMode: "default", allocationId: "synthetic-allocation", runnerContainerName,
-      workspaceVersion: null, customInferenceEnvelope: null, platformAiUsageAllowed: false,
+      workspaceVersion: null, platformAiUsageAllowed: false,
       startedAt: new Date().toISOString(), acceptedAt: null, completedAt: null,
       failureCount: 0, lastErrorCode: null,
     };

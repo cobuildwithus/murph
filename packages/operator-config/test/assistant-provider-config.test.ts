@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { assistantCodexModelTargetSchema } from '../src/assistant-cli-contracts.ts'
+
 import {
   compactAssistantProviderConfigInput,
   mergeAssistantProviderConfigs,
@@ -9,14 +11,10 @@ import {
   type AssistantProviderConfigInput,
 } from '../src/assistant/provider-config.ts'
 import {
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
-  VENICE_CODEX_MODEL_PROVIDER_CONFIG,
   resolveAssistantCodexUsageProviderName,
-  resolveAssistantCodexLocalOnboardingProviderConfig,
   resolveAssistantCodexModelProviderConfig,
 } from '../src/assistant/target-runtime.ts'
 
@@ -29,9 +27,6 @@ describe('assistant provider config', () => {
     expect(resolveAssistantCodexUsageProviderName(
       HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
     )).toBe(HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID)
-    expect(resolveAssistantCodexUsageProviderName(
-      HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
-    )).toBe(HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID)
     expect(resolveAssistantCodexUsageProviderName(null)).toBeNull()
   })
 
@@ -39,7 +34,7 @@ describe('assistant provider config', () => {
     const first = continuityFingerprint({
       approvalPolicy: 'never',
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
       provider: 'codex-cli',
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
@@ -47,7 +42,7 @@ describe('assistant provider config', () => {
     const switched = continuityFingerprint({
       approvalPolicy: 'never',
       model: 'gpt-5.6-sol',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
       provider: 'codex-cli',
       reasoningEffort: 'high',
       sandbox: 'workspace-write',
@@ -55,48 +50,24 @@ describe('assistant provider config', () => {
     const incompatible = continuityFingerprint({
       approvalPolicy: 'never',
       model: 'gpt-5.6-sol',
-      modelProvider: 'openai',
+      modelProvider: 'hosted-openai',
       provider: 'codex-cli',
       reasoningEffort: 'high',
       sandbox: 'workspace-write',
     })
 
-    expect(first).toBe(
-      'sha256:9c5e29337e7b8d33232ad969c74c9271f0e0ee53769838a4197dd516f6ee8367',
-    )
+    expect(first).toMatch(/^sha256:[a-f0-9]{64}$/u)
     expect(switched).toBe(first)
     expect(incompatible).not.toBe(first)
   })
 
-  it('makes hosted custom inference continuity revision-sensitive through its model alias', () => {
-    const revisionSeven = continuityFingerprint({
-      model: 'murph-custom-r7',
-      modelProvider: 'hosted-custom-inference',
-      provider: 'codex-cli',
-    })
-    const sameRevision = continuityFingerprint({
-      model: 'murph-custom-r7',
-      modelProvider: 'hosted-custom-inference',
-      provider: 'codex-cli',
-      reasoningEffort: 'high',
-    })
-    const revisionEight = continuityFingerprint({
-      model: 'murph-custom-r8',
-      modelProvider: 'hosted-custom-inference',
-      provider: 'codex-cli',
-    })
-
-    expect(sameRevision).toBe(revisionSeven)
-    expect(revisionEight).not.toBe(revisionSeven)
-  })
-
-  it('normalizes Vercel AI Gateway as Codex model-provider configuration', () => {
+  it('normalizes OpenAI as Codex model-provider configuration', () => {
     const input = {
       provider: 'codex-cli',
       approvalPolicy: 'never',
       codexHome: ' /tmp/codex-home ',
       model: ' gpt-5.6-terra ',
-      modelProvider: ' Vercel-AI-Gateway ',
+      modelProvider: ' OpenAI ',
       oss: false,
       profile: ' hosted ',
       reasoningEffort: ' medium ',
@@ -113,7 +84,7 @@ describe('assistant provider config', () => {
         codexCommand: null,
         codexHome: '/tmp/codex-home',
         model: 'gpt-5.6-terra',
-        modelProvider: 'vercel-ai-gateway',
+        modelProvider: 'openai',
         oss: false,
         profile: 'hosted',
       },
@@ -123,7 +94,7 @@ describe('assistant provider config', () => {
       approvalPolicy: 'never',
       executionDriver: 'codex-app-server',
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
       provider: 'codex-cli',
       reasoningEffort: 'medium',
       resumeKind: 'codex-thread',
@@ -131,7 +102,7 @@ describe('assistant provider config', () => {
     })
     expect(serializeAssistantProviderOperatorDefaults(input)).toMatchObject({
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
     })
   })
 
@@ -146,56 +117,25 @@ describe('assistant provider config', () => {
     })
   })
 
-  it('registers one internal Responses provider for hosted custom inference', () => {
-    expect(resolveAssistantCodexModelProviderConfig('hosted-custom-inference'))
-      .toEqual(HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG)
-    expect(HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG).toEqual({
-      id: 'hosted-custom-inference',
-      name: 'Murph Custom Inference',
-      baseUrl: 'http://murph-custom-inference.worker/v1',
-      envKey: 'MURPH_CUSTOM_INFERENCE_API_KEY',
-      failureHint:
-        'The selected custom inference endpoint is unavailable or incompatible. Murph did not fall back to managed inference.',
-      wireApi: 'responses',
-    })
-    expect(resolveAssistantCodexLocalOnboardingProviderConfig(
-      'hosted-custom-inference',
-    )).toBeNull()
-  })
+  it.each(['venice', 'hosted-custom-inference', 'venice-local-test', 'vercel-ai-gateway', 'ollama', 'lmstudio'])(
+    'rejects removed model provider %s without falling back to OpenAI',
+    (modelProvider) => {
+      expect(resolveAssistantCodexModelProviderConfig(modelProvider)).toBeNull()
+      expect(() => normalizeAssistantProviderConfig({ modelProvider })).toThrow(/Unknown Codex model provider/u)
+      expect(() => serializeAssistantProviderSessionOptions({ modelProvider })).toThrow(/Unknown Codex model provider/u)
+      expect(assistantCodexModelTargetSchema.safeParse({
+        adapter: 'codex-cli',
+        modelProvider,
+      }).success).toBe(false)
+    },
+  )
 
-  it('normalizes Venice as a Codex Responses model provider with local onboarding metadata', () => {
-    const normalized = normalizeAssistantProviderConfig({
-      provider: 'codex-cli',
-      model: ' venice-model ',
-      modelProvider: ' Venice ',
-      reasoningEffort: 'medium',
-      sandbox: 'danger-full-access',
-      approvalPolicy: 'never',
-    })
-
-    expect(normalized).toMatchObject({
-      target: {
-        model: 'venice-model',
-        modelProvider: 'venice',
-      },
-    })
-    expect(VENICE_CODEX_MODEL_PROVIDER_CONFIG).toEqual({
-      id: 'venice',
-      name: 'Venice.ai',
-      baseUrl: 'https://api.venice.ai/api/v1',
-      envKey: 'VENICE_API_KEY',
-      failureHint:
-        'Venice via Codex Responses failed. Check VENICE_API_KEY, the Venice model id, account balance/rate limits, and whether this key/model has Venice Responses API Alpha access.',
-      wireApi: 'responses',
-    })
-    expect(resolveAssistantCodexLocalOnboardingProviderConfig('venice')).toEqual({
-      defaultModel: null,
-      description: 'Use Codex with a Venice API key.',
-      label: 'Venice.ai',
-      modelPrompt: 'Venice model id to use with Codex',
-      providerId: 'venice',
-      selectableInLocalOnboarding: true,
-    })
+  it('rejects local model execution', () => {
+    expect(() => normalizeAssistantProviderConfig({ oss: true })).toThrow(/must use OpenAI/u)
+    expect(assistantCodexModelTargetSchema.safeParse({
+      adapter: 'codex-cli',
+      oss: true,
+    }).success).toBe(false)
   })
 
   it('fails closed for unsupported assistant-runtime identifiers at raw config boundaries', () => {

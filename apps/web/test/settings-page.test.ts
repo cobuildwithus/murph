@@ -67,12 +67,9 @@ const mocks = vi.hoisted(() => ({
   HostedAssistantModelSettings: vi.fn((props: {
     canUpgradeToEdge: boolean;
     configurationAvailable: boolean;
-    customInferenceAvailable: boolean;
     initialDormantSolPreference: boolean;
     initialModel: string;
-    initialProvider: string;
     solAvailable: boolean;
-    veniceAvailable: boolean;
   }) =>
     React.createElement(
       "div",
@@ -1129,16 +1126,11 @@ test("SettingsPage reads the app session and persisted account settings into the
     }), undefined);
     expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
       canUpgradeToEdge: true,
-      chatCompletionsAvailable: false,
       configurationAvailable: true,
-      customInferenceAvailable: false,
       expectedCurrentPlanCode: "launch_monthly",
-      initialConnection: null,
       initialDormantSolPreference: false,
       initialModel: "gpt-5.6-sol",
-      initialProvider: "openai",
       solAvailable: true,
-      veniceAvailable: false,
     }, undefined);
     expect(mocks.readHostedAccountSettingsPageSnapshot).toHaveBeenCalledWith({
       memberId: "member_123",

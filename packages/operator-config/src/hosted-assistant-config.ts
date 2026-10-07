@@ -19,10 +19,8 @@ import {
   type HostedAssistantProfile,
 } from './assistant/hosted-config.js'
 import {
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
-  VENICE_CODEX_MODEL_PROVIDER_ID,
   resolveAssistantCodexModelProviderConfig,
 } from './assistant/target-runtime.js'
 import type { AssistantProviderConfigInput } from './assistant/provider-config.js'
@@ -37,7 +35,6 @@ import {
   HOSTED_ASSISTANT_BASE_URL_ENV,
   HOSTED_ASSISTANT_CODEX_COMMAND_ENV,
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
-  HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
   HOSTED_ASSISTANT_MODEL_ENV,
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_PROFILE_ENV,
@@ -54,7 +51,6 @@ export {
   HOSTED_ASSISTANT_BASE_URL_ENV,
   HOSTED_ASSISTANT_CODEX_COMMAND_ENV,
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
-  HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
   HOSTED_ASSISTANT_MODEL_ENV,
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_PROFILE_ENV,
@@ -73,8 +69,6 @@ const hostedAssistantAllowedApiKeyEnvNameSet = new Set<string>(
 const HOSTED_ASSISTANT_PLATFORM_PROFILE_ID = 'platform-default'
 export const HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS = [
   OPENAI_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-  VENICE_CODEX_MODEL_PROVIDER_ID,
 ] as const
 const HOSTED_ASSISTANT_SUPPORTED_PROVIDER_LABEL =
   HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS.join(' or ')
@@ -125,7 +119,6 @@ interface HostedAssistantRawEnvConfig {
   approvalPolicy: AssistantApprovalPolicy | null
   baseUrl: string | null
   codexCommand: string | null
-  gatewayOnlyProviders: readonly string[] | null
   model: string | null
   oss: boolean | null
   profile: string | null
@@ -430,7 +423,6 @@ function resolveHostedAssistantSeedPlan(
       [HOSTED_ASSISTANT_API_KEY_ENV, raw.apiKeyEnv],
       [HOSTED_ASSISTANT_BASE_URL_ENV, raw.baseUrl],
       [HOSTED_ASSISTANT_CODEX_COMMAND_ENV, raw.codexCommand],
-      [HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV, raw.gatewayOnlyProviders],
       [HOSTED_ASSISTANT_PROFILE_ENV, raw.profile],
       [HOSTED_ASSISTANT_PROVIDER_NAME_ENV, raw.providerName],
       [HOSTED_ASSISTANT_OSS_ENV, raw.oss],
@@ -468,9 +460,6 @@ function readHostedAssistantRawEnvConfig(
       normalizeHostedAssistantString(source[HOSTED_ASSISTANT_BASE_URL_ENV]),
     ),
     codexCommand: normalizeHostedAssistantString(source[HOSTED_ASSISTANT_CODEX_COMMAND_ENV]),
-    gatewayOnlyProviders: parseHostedAssistantGatewayOnlyProviders(
-      source[HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV],
-    ),
     model: normalizeHostedAssistantString(source[HOSTED_ASSISTANT_MODEL_ENV]),
     oss: parseHostedAssistantBoolean(rawOss, HOSTED_ASSISTANT_OSS_ENV),
     profile: normalizeHostedAssistantString(source[HOSTED_ASSISTANT_PROFILE_ENV]),
@@ -497,7 +486,6 @@ function readHostedAssistantRawEnvConfig(
       values.apiKeyEnv,
       values.providerName,
       values.codexCommand,
-      values.gatewayOnlyProviders,
       values.approvalPolicy,
       values.sandbox,
       values.profile,
@@ -588,46 +576,6 @@ function normalizeHostedAssistantString(value: unknown): string | null {
 
   const normalized = value.trim()
   return normalized.length > 0 ? normalized : null
-}
-
-function parseHostedAssistantGatewayOnlyProviders(
-  value: string | undefined,
-): readonly string[] | null {
-  const raw = normalizeHostedAssistantString(value)
-
-  if (raw === null) {
-    return null
-  }
-
-  const seen = new Set<string>()
-  const providers: string[] = []
-
-  for (const token of raw.split(',')) {
-    const normalized = normalizeHostedAssistantString(token)?.toLowerCase() ?? null
-
-    if (!normalized || !/^[a-z0-9][a-z0-9._-]*$/u.test(normalized)) {
-      throw new HostedAssistantConfigurationError(
-        'HOSTED_ASSISTANT_CONFIG_INVALID',
-        `${HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV} must be a comma-separated list of Vercel AI Gateway provider slugs.`,
-      )
-    }
-
-    if (seen.has(normalized)) {
-      continue
-    }
-
-    seen.add(normalized)
-    providers.push(normalized)
-  }
-
-  if (providers.length === 0) {
-    throw new HostedAssistantConfigurationError(
-      'HOSTED_ASSISTANT_CONFIG_INVALID',
-      `${HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV} must include at least one provider slug when set.`,
-    )
-  }
-
-  return providers
 }
 
 function parseHostedAssistantBoolean(

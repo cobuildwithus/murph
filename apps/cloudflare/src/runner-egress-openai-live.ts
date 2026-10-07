@@ -1,5 +1,4 @@
 import { Buffer } from "node:buffer";
-import { readHostedProviderEncryptionSecret } from "./hosted-inference-target-envelope.ts";
 import { readNativeRuntimeProviderAuthority, type RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
 import type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
@@ -78,7 +77,9 @@ export async function authorizeHostedLiveAttachment(input: {
 }
 
 async function signingKey(source: Readonly<Record<string, unknown>>): Promise<CryptoKey> {
-  return crypto.subtle.importKey("raw", new TextEncoder().encode(readHostedProviderEncryptionSecret(source)),
+  const secret = source.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET;
+  if (typeof secret !== "string" || !secret.trim()) throw new Error("Hosted provider encryption secret is missing.");
+  return crypto.subtle.importKey("raw", new TextEncoder().encode(secret.trim()),
     { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
 function signedBytes(payload: string, owner: HostedLiveResourceOwner): Uint8Array<ArrayBuffer> {

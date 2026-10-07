@@ -5,12 +5,8 @@ import {
 
 import type {
   HostedAssistantModelOverride,
-  HostedAssistantProviderOverride,
   HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
-import type {
-  HostedAssistantCustomInferenceOverride,
-} from "@murphai/hosted-execution/assistant-inference";
 import {
   HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
 } from "@murphai/hosted-execution/env";
@@ -31,7 +27,6 @@ import type {
 import {
   hasHostedRunnerModelCredential,
   isHostedRunnerOpenAiProvider,
-  isHostedRunnerVeniceProvider,
 } from "./hosted-env-policy.ts";
 import {
   buildHostedRunnerContainerEnv,
@@ -52,22 +47,12 @@ import {
   type HostedStandbySlotBinding,
 } from "./standby-runner-contract.js";
 import {
-  parseHostedInferenceRuntimeTarget,
-  type HostedInferenceRuntimeTarget,
-} from "./hosted-inference-runtime-target.ts";
-import {
-  sealHostedInferenceRuntimeTarget,
-} from "./hosted-inference-target-envelope.ts";
-import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
 import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
-import {
-  fetchHostedExecutionWebControlPlaneResponse,
-} from "./web-control-plane.ts";
 import {
   prepareHostedWorkspaceSnapshotRestore,
   type HostedWorkspaceSnapshotPreparedRestore,
@@ -91,15 +76,9 @@ import {
   type RunnerUserStores,
 } from "./user-runner/runner-store-cache.js";
 
-const HOSTED_INFERENCE_RUNTIME_TARGET_MAX_BODY_BYTES = 16 * 1024;
-const HOSTED_INFERENCE_RUNTIME_TARGET_PATH = "/api/internal/hosted-inference/resolve";
 const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = [
-  "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "OPENAI_API_KEY", "VENICE_API_KEY",
+  "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "OPENAI_API_KEY",
 ] as const;
-const HOSTED_CUSTOM_INFERENCE_PROVIDER = "hosted-custom-inference";
-const HOSTED_CUSTOM_INFERENCE_API_KEY_ENV = "MURPH_CUSTOM_INFERENCE_API_KEY";
-const HOSTED_CUSTOM_INFERENCE_CONTEXT_WINDOW_ENV =
-  "HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS";
 
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
   "murph.hosted.workspace-snapshot-path-hash.v1";
@@ -122,7 +101,6 @@ interface RuntimeInvocationPreparationInputs {
 }
 
 export interface PreparedRuntimeInvocation {
-  customInferenceEnvelope: string | null;
   platformAiUsageAllowed: boolean;
   input: RuntimeInvocationInput;
   job: HostedExecutionWorkspaceInvocationJobInput;
@@ -139,10 +117,8 @@ export class RuntimeInvocationPreparation {
     runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
     runnerStoreCache: RunnerStoreCache;
     assertWorkspaceBelongsToRunnerUser(workspace: HostedWorkspaceState | null, userId: string): void;
-    readHostedWebControlBaseUrl(): string;
     readHostedWorkspaceFromWeb(userId: string, input?: { timeoutMs?: number }): Promise<HostedWorkspaceReadResponse>;
     bindInvocation(input: {
-      customInferenceEnvelope: string | null;
       platformAiUsageAllowed: boolean | null;
       processingMode?: HostedWorkspaceInvocationProcessingMode | null;
       token: RunnerWriteFenceToken;
@@ -218,34 +194,10 @@ export class RuntimeInvocationPreparation {
     }
     const { workspaceRead, workspaceReadElapsedMs, stores, runtimeStoreEnsureElapsedMs } = preparation;
     const workspaceVersion = workspaceRead.workspace?.version ?? "0";
-    const hostedAssistantCustomInferenceOverride =
-      workspaceRead.hostedAssistantCustomInferenceOverride ?? null;
-    const hostedAssistantSubagentModelOverridesAllowed =
-      hostedAssistantCustomInferenceOverride === null
-      && workspaceRead.hostedAssistantSubagentModelOverridesAllowed === true;
-    const customInferenceTarget = hostedAssistantCustomInferenceOverride
-      ? await this.readHostedInferenceRuntimeTargetFromWeb({
-          override: hostedAssistantCustomInferenceOverride,
-          timeoutMs: input.commandBudget
-            ? readRuntimeProcessingCommandStepTimeoutMs({
-                budget: input.commandBudget,
-                stepTimeoutMs: this.input.env.webControlTimeoutMs,
-              })
-            : this.input.env.webControlTimeoutMs,
-          userId: input.input.userId,
-        })
-      : null;
     const { platformAiUsageAllowed, assistantExecutionBlocked, invocationProcessingMode } =
-      resolveInvocationAdmission(workspaceRead, input.input, Boolean(hostedAssistantCustomInferenceOverride));
-    const customInferenceEnvelope = customInferenceTarget
-      ? await sealHostedInferenceRuntimeTarget({
-          source: this.input.runnerRuntimeEnvSource,
-          target: customInferenceTarget,
-        })
-      : null;
+      resolveInvocationAdmission(workspaceRead, input.input);
     const admissionFinishedAtMs = Date.now();
     const token = await this.input.bindInvocation({
-      customInferenceEnvelope,
       platformAiUsageAllowed,
       processingMode: invocationProcessingMode,
       token: input.token,
@@ -257,15 +209,13 @@ export class RuntimeInvocationPreparation {
       stores,
       verifiedSlotBinding,
       commandBudget: input.commandBudget,
-      hostedAssistantCustomInferenceOverride,
       hostedAssistantPriorityUntil: workspaceRead.hostedAssistantPriorityUntil,
       hostedAssistantModelOverride:
         workspaceRead.hostedAssistantModelOverride ?? null,
-      hostedAssistantProviderOverride:
-        workspaceRead.hostedAssistantProviderOverride ?? null,
       hostedAssistantReasoningEffortOverride:
         workspaceRead.hostedAssistantReasoningEffortOverride ?? null,
-      hostedAssistantSubagentModelOverridesAllowed,
+      hostedAssistantSubagentModelOverridesAllowed:
+        workspaceRead.hostedAssistantSubagentModelOverridesAllowed === true,
       assistantExecutionBlocked,
       processingMode: invocationProcessingMode,
       token,
@@ -276,7 +226,6 @@ export class RuntimeInvocationPreparation {
     const preparedAtMs = Date.now();
 
     return {
-      customInferenceEnvelope,
       platformAiUsageAllowed: platformAiUsageAllowed !== false,
       input: {
         ...input.input,
@@ -304,63 +253,12 @@ export class RuntimeInvocationPreparation {
     };
   }
 
-  private async readHostedInferenceRuntimeTargetFromWeb(input: {
-    override: HostedAssistantCustomInferenceOverride;
-    timeoutMs: number;
-    userId: string;
-  }): Promise<HostedInferenceRuntimeTarget> {
-    const response = await fetchHostedExecutionWebControlPlaneResponse({
-      ...(this.input.env.hostedWebAllowHttpHosts
-        ? { allowHttpHosts: this.input.env.hostedWebAllowHttpHosts }
-        : {}),
-      baseUrl: this.input.readHostedWebControlBaseUrl(),
-      boundUserId: input.userId,
-      callbackSigning: this.input.env.webCallbackSigning,
-      method: "GET",
-      path: HOSTED_INFERENCE_RUNTIME_TARGET_PATH,
-      search: `?revision=${input.override.revision}`,
-      timeoutMs: input.timeoutMs,
-    });
-    if (!response.ok) {
-      throw new Error(
-        `Hosted custom inference resolution failed with HTTP ${response.status}.`,
-      );
-    }
-    const text = await response.text();
-    if (
-      new TextEncoder().encode(text).byteLength
-      > HOSTED_INFERENCE_RUNTIME_TARGET_MAX_BODY_BYTES
-    ) {
-      throw new RangeError("Hosted custom inference resolution response was too large.");
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw new TypeError("Hosted custom inference resolution response was invalid.");
-    }
-    const target = parseHostedInferenceRuntimeTarget(parsed);
-    if (
-      target.contextWindowTokens !== input.override.contextWindowTokens
-      || target.protocol !== input.override.protocol
-      || target.revision !== input.override.revision
-      || target.supportsImages !== input.override.supportsImages
-      || target.verificationProfile !== input.override.verificationProfile
-    ) {
-      throw new Error("Hosted custom inference resolution did not match workspace projection.");
-    }
-    return target;
-  }
-
   private async prepareWorkspaceRunnerInvocation(input: {
     voiceCallId?: string;
     assistantExecutionBlocked: boolean;
     commandBudget?: RuntimeProcessingCommandBudget;
-    hostedAssistantCustomInferenceOverride:
-      HostedAssistantCustomInferenceOverride | null;
     hostedAssistantPriorityUntil?: string;
     hostedAssistantModelOverride: HostedAssistantModelOverride | null;
-    hostedAssistantProviderOverride: HostedAssistantProviderOverride | null;
     hostedAssistantReasoningEffortOverride:
       HostedAssistantReasoningEffortOverride | null;
     hostedAssistantSubagentModelOverridesAllowed: boolean;
@@ -384,28 +282,12 @@ export class RuntimeInvocationPreparation {
     );
     forwardedEnv[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV] =
       input.hostedAssistantSubagentModelOverridesAllowed ? "1" : "0";
-    if (input.hostedAssistantCustomInferenceOverride !== null) {
-      forwardedEnv.HOSTED_ASSISTANT_PROVIDER = HOSTED_CUSTOM_INFERENCE_PROVIDER;
-      forwardedEnv.HOSTED_ASSISTANT_MODEL =
-        input.hostedAssistantCustomInferenceOverride.modelAlias;
-      forwardedEnv[HOSTED_CUSTOM_INFERENCE_API_KEY_ENV] =
-        HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
-      forwardedEnv[HOSTED_CUSTOM_INFERENCE_CONTEXT_WINDOW_ENV] =
-        String(input.hostedAssistantCustomInferenceOverride.contextWindowTokens);
-      delete forwardedEnv.HOSTED_ASSISTANT_REASONING_EFFORT;
-    } else {
-      if (input.hostedAssistantProviderOverride !== null) {
-        forwardedEnv.HOSTED_ASSISTANT_PROVIDER =
-          input.hostedAssistantProviderOverride;
-      }
-      if (input.hostedAssistantModelOverride !== null) {
-        forwardedEnv.HOSTED_ASSISTANT_MODEL =
-          input.hostedAssistantModelOverride;
-      }
-      if (input.hostedAssistantReasoningEffortOverride !== null) {
-        forwardedEnv.HOSTED_ASSISTANT_REASONING_EFFORT =
-          input.hostedAssistantReasoningEffortOverride;
-      }
+    if (input.hostedAssistantModelOverride !== null) {
+      forwardedEnv.HOSTED_ASSISTANT_MODEL = input.hostedAssistantModelOverride;
+    }
+    if (input.hostedAssistantReasoningEffortOverride !== null) {
+      forwardedEnv.HOSTED_ASSISTANT_REASONING_EFFORT =
+        input.hostedAssistantReasoningEffortOverride;
     }
     const configSource = this.input.runnerStoreCache.readRuntimeConfigSource();
     const stores = input.stores;
@@ -507,12 +389,8 @@ export class RuntimeInvocationPreparation {
         hostedAssistantProviderConfigured:
           typeof forwardedEnv.HOSTED_ASSISTANT_PROVIDER === "string"
           && forwardedEnv.HOSTED_ASSISTANT_PROVIDER.length > 0,
-        hostedAssistantCustomInferenceConfigured:
-          input.hostedAssistantCustomInferenceOverride !== null,
         hostedAssistantOpenAiConfigured:
           isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
-        hostedAssistantVeniceConfigured:
-          isHostedRunnerVeniceProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
         modelCredentialConfigured:
           hasHostedRunnerModelCredential({
             forwardedEnv,
@@ -674,41 +552,37 @@ export function normalizeHostedRunnerStringEnvValue(value: string | undefined): 
   return normalized.length > 0 ? normalized : null;
 }
 
-function resolveInvocationAdmission(workspaceRead: HostedWorkspaceReadResponse, runtimeInput: RuntimeInvocationInput, hasCustomInference: boolean) {
-    let platformAiUsageAllowed: boolean | null = null;
-    let assistantExecutionBlocked = runtimeInput.assistantExecutionBlocked === true;
-    let invocationProcessingMode = runtimeInput.processingMode ?? null;
-    if (hasCustomInference) {
-      if (typeof workspaceRead.platformAiUsageAllowed !== "boolean") {
-        throw new Error(
-          "Hosted custom inference workspace projection omitted the platform AI usage decision.",
-        );
-      }
-      platformAiUsageAllowed = workspaceRead.platformAiUsageAllowed;
-    } else if (workspaceRead.platformAiUsageAllowed === false) {
-      // A payloadless direct wake can win the race with Temporal's usage-block
-      // reconciliation. Keep that expected product block out of transport
-      // failure state and keep restored assistant work out of provider-failure
-      // handling. A due delivery-only wake must retain the default assistant
-      // phase because that phase owns outbox delivery, while the bound fence
-      // still rejects every metered provider egress if one is reached
-      // unexpectedly. Other default work remains narrowed to system-mailbox
-      // processing, and explicit retention-only work can proceed without a
-      // model call.
-      platformAiUsageAllowed = false;
-      const isDefaultDeliveryOnlyWake =
-        (invocationProcessingMode ?? "default") === "default"
-        && isDueHostedAssistantDeliveryWake(
-          workspaceRead.workspace,
-          Date.now(),
-        );
-      assistantExecutionBlocked = !isDefaultDeliveryOnlyWake;
-      if (
-        !isDefaultDeliveryOnlyWake
-        && (invocationProcessingMode ?? "default") === "default"
-      ) {
-        invocationProcessingMode = "system_mailbox";
-      }
+function resolveInvocationAdmission(
+  workspaceRead: HostedWorkspaceReadResponse,
+  runtimeInput: RuntimeInvocationInput,
+) {
+  let platformAiUsageAllowed: boolean | null = null;
+  let assistantExecutionBlocked = runtimeInput.assistantExecutionBlocked === true;
+  let invocationProcessingMode = runtimeInput.processingMode ?? null;
+  if (workspaceRead.platformAiUsageAllowed === false) {
+    // A payloadless direct wake can win the race with Temporal's usage-block
+    // reconciliation. Keep that expected product block out of transport
+    // failure state and keep restored assistant work out of provider-failure
+    // handling. A due delivery-only wake must retain the default assistant
+    // phase because that phase owns outbox delivery, while the bound fence
+    // still rejects every metered provider egress if one is reached
+    // unexpectedly. Other default work remains narrowed to system-mailbox
+    // processing, and explicit retention-only work can proceed without a
+    // model call.
+    platformAiUsageAllowed = false;
+    const isDefaultDeliveryOnlyWake =
+      (invocationProcessingMode ?? "default") === "default"
+      && isDueHostedAssistantDeliveryWake(
+        workspaceRead.workspace,
+        Date.now(),
+      );
+    assistantExecutionBlocked = !isDefaultDeliveryOnlyWake;
+    if (
+      !isDefaultDeliveryOnlyWake
+      && (invocationProcessingMode ?? "default") === "default"
+    ) {
+      invocationProcessingMode = "system_mailbox";
     }
-    return { platformAiUsageAllowed, assistantExecutionBlocked, invocationProcessingMode };
+  }
+  return { platformAiUsageAllowed, assistantExecutionBlocked, invocationProcessingMode };
 }

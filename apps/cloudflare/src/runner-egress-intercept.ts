@@ -38,7 +38,6 @@ import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 
 import {
   CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH,
-  CLOUDFLARE_HOSTED_CUSTOM_INFERENCE_HOST,
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
@@ -81,16 +80,6 @@ import {
 import {
   readHostedProviderCredentialDiagnosticKind,
 } from "./hosted-provider-credential-diagnostics.ts";
-import {
-  openHostedInferenceRuntimeTarget,
-} from "./hosted-inference-target-envelope.ts";
-import {
-  HOSTED_CUSTOM_INFERENCE_RESPONSES_MAX_BODY_BYTES,
-  HostedCustomInferenceRequestError,
-  adaptHostedCustomInferenceUpstreamResponse,
-  buildHostedCustomInferenceUpstreamRequestBody,
-  injectHostedCustomInferenceAuth,
-} from "./runner-egress-custom-inference.ts";
 import { readHostedOpenAiImageRequest } from "./runner-egress-openai-image-request.ts";
 import {
   HOSTED_OPENAI_LIVE_PATH, HOSTED_OPENAI_LIVE_BODY_LIMIT,
@@ -119,12 +108,6 @@ import {
   readHostedGeminiVideoAnalysisRequestModel,
   readHostedGeminiVideoAnalysisUsageMetadata,
 } from "./runner-egress-gemini.ts";
-import {
-  DEFAULT_VENICE_API_BASE_URL,
-  HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
-  buildHostedVeniceResponsesRequestBody,
-  isAllowedHostedVeniceRequest,
-} from "./runner-egress-venice.ts";
 import {
   buildHostedOpenAiCacheDiagnostic,
   type HostedRunnerDiagnosticJson,
@@ -187,7 +170,6 @@ export const HOSTED_DEPLOY_SMOKE_OPENAI_REQUEST_MAX_BODY_BYTES = 256 * 1024;
 export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   artifactStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
   browserVaultReplicaStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore,
-  customInference: CLOUDFLARE_HOSTED_CUSTOM_INFERENCE_HOST,
   dataApi: HOSTED_DATA_API_RUNTIME_HOST,
   effectsPort: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
   elevenLabs: "api.elevenlabs.io",
@@ -200,7 +182,6 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   runnerControl: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl,
   telegram: "api.telegram.org",
   transcribe: CLOUDFLARE_HOSTED_TRANSCRIBE_HOST,
-  venice: "api.venice.ai",
   webControlPlane: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
   workspaceSnapshotStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore,
   xai: "api.x.ai",
@@ -292,7 +273,6 @@ type HostedProviderEgressRejectReason = "bound_container_inactive" | "usage_sett
 interface HostedProviderEgressAuthorization {
   caller?: RuntimeProviderCaller;
   authorized: boolean;
-  customInferenceEnvelope?: string | null;
   durationMs: number;
   mode: HostedProviderEgressValidationMode;
   platformAiUsageAllowed?: boolean;
@@ -314,15 +294,12 @@ const HOSTED_PLATFORM_METERED_PROVIDER_KINDS = new Set([
   "exa",
   "mapbox",
   "openai",
-  "venice",
   "xai",
 ]);
 
 export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutboundHandler> = {
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.artifactStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.browserVaultReplicaStore]: handleHostedRunnerInternalOutbound,
-  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.customInference]:
-    handleHostedRunnerCustomInferenceOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.dataApi]: handleHostedRunnerOpenInternetOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.elevenLabs]: handleHostedRunnerElevenLabsOutbound,
@@ -335,7 +312,6 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.runnerControl]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram]: handleHostedRunnerTelegramOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe]: handleHostedRunnerOpenInternetOutbound,
-  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.venice]: handleHostedRunnerVeniceOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.xai]: handleHostedRunnerXaiOutbound,
@@ -358,13 +334,11 @@ export async function handleHostedRunnerOpenInternetOutbound(
 
   const handled =
     await maybeHandleHostedDataApiRequest({ ctx, env, request, url, userId })
-    ?? await maybeHandleCustomInferenceRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleHostedTranscribeRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleElevenLabsRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleXaiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleGeminiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
-    ?? await maybeHandleVeniceRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleExaRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleMapboxRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleLinqRequest({ ctx, env, request, url, userId })
@@ -504,23 +478,6 @@ async function emitHostedRunnerInternalOutboundResponseCompleted(input: {
   });
 }
 
-export async function handleHostedRunnerCustomInferenceOutbound(
-  request: Request,
-  env: RunnerOutboundEnvironmentSource,
-  ctx: HostedRunnerOutboundContext,
-): Promise<Response> {
-  const url = new URL(request.url);
-  return await requireHandledProviderEgress(
-    await maybeHandleCustomInferenceRequest({
-      ctx,
-      env,
-      request,
-      url,
-      userId: readHostedRunnerBoundUserId(request),
-    }),
-  );
-}
-
 export async function handleHostedRunnerOpenAiOutbound(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
@@ -534,23 +491,6 @@ export async function handleHostedRunnerOpenAiOutbound(
       env,
       request,
       upstreamFetchImpl,
-      url,
-      userId: readHostedRunnerBoundUserId(request),
-    }),
-  );
-}
-
-export async function handleHostedRunnerVeniceOutbound(
-  request: Request,
-  env: RunnerOutboundEnvironmentSource,
-  ctx: HostedRunnerOutboundContext,
-): Promise<Response> {
-  const url = new URL(request.url);
-  return await requireHandledProviderEgress(
-    await maybeHandleVeniceRequest({
-      ctx,
-      env,
-      request,
       url,
       userId: readHostedRunnerBoundUserId(request),
     }),
@@ -1189,120 +1129,6 @@ function readHostedTranscribeNonNegativeNumber(value: unknown): number | null {
     : null;
 }
 
-async function maybeHandleCustomInferenceRequest(input: {
-  ctx?: HostedRunnerOutboundContext;
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  upstreamFetchImpl?: typeof fetch;
-  url: URL;
-  userId: string | null;
-}): Promise<Response | null> {
-  if (input.url.hostname !== CLOUDFLARE_HOSTED_CUSTOM_INFERENCE_HOST) {
-    return null;
-  }
-  if (
-    input.request.method !== "POST"
-    || input.url.pathname !== "/v1/responses"
-  ) {
-    return disallowedProviderEgress();
-  }
-
-  const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ctx: input.ctx,
-    env: input.env,
-    providerKind: "custom_inference",
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!authorization.authorized) {
-    return unauthorizedProviderEgress({
-      authorization,
-      providerKind: "custom_inference",
-      request: input.request,
-      startedAt,
-      url: input.url,
-    });
-  }
-  if (!authorization.customInferenceEnvelope) {
-    return new Response("Custom inference is not active for this invocation.", {
-      status: 409,
-    });
-  }
-
-  let target;
-  try {
-    target = await openHostedInferenceRuntimeTarget({
-      envelope: authorization.customInferenceEnvelope,
-      source: input.env,
-    });
-  } catch {
-    return new Response("Hosted custom inference configuration is unavailable.", {
-      status: 500,
-    });
-  }
-  const body = await readBoundedRequestBody(
-    input.request,
-    HOSTED_CUSTOM_INFERENCE_RESPONSES_MAX_BODY_BYTES,
-  );
-  if (body === null) {
-    return new Response("Payload Too Large", { status: 413 });
-  }
-
-  let upstreamBody: string;
-  try {
-    upstreamBody = buildHostedCustomInferenceUpstreamRequestBody({
-      body,
-      target,
-    });
-  } catch (error) {
-    if (error instanceof HostedCustomInferenceRequestError) {
-      return new Response(error.message, { status: error.httpStatus });
-    }
-    return new Response("The custom inference request was invalid.", {
-      status: 400,
-    });
-  }
-
-  // The upstream endpoint is member-controlled, so the header set is built
-  // from scratch rather than stripped from the inbound request: only the
-  // JSON/SSE transport headers plus the one configured auth header may cross
-  // this boundary.
-  const headers = new Headers({
-    accept: "text/event-stream",
-    "content-type": "application/json",
-  });
-  injectHostedCustomInferenceAuth(headers, target);
-  try {
-    return await adaptHostedCustomInferenceUpstreamResponse({
-      protocol: target.protocol,
-      response: await fetchAuthorizedProviderUpstream({
-        authorization,
-        providerKind: "custom_inference",
-        request: input.request,
-        startedAt,
-        upstreamRequest: await createHostedRunnerUpstreamRequest(
-          input.request,
-          new URL(target.endpointUrl),
-          headers,
-          {
-            body: upstreamBody,
-            redirect: "manual",
-          },
-        ),
-        upstreamFetchImpl: input.upstreamFetchImpl,
-        url: input.url,
-      }),
-      revision: target.revision,
-    });
-  } catch (error) {
-    if (error instanceof HostedCustomInferenceRequestError) {
-      return new Response(error.message, { status: error.httpStatus });
-    }
-    throw error;
-  }
-}
-
 function reportOpenAiAuthorizationFailureSafely(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
@@ -1579,85 +1405,6 @@ async function wrapHostedLiveCreationResponse(
     transport: { type: "webrtc", sdp: transport.sdp },
   }, { status: response.status });
 }
-
-async function maybeHandleVeniceRequest(input: {
-  ctx?: HostedRunnerOutboundContext;
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  url: URL;
-  userId: string | null;
-}): Promise<Response | null> {
-  const providerBase = readProviderBaseConfig(
-    undefined,
-    DEFAULT_VENICE_API_BASE_URL,
-    input.env,
-  );
-  const pathMatch = readProviderPathMatch(input.url, providerBase);
-  if (!pathMatch) {
-    return isKnownProviderHost(input.url, providerBase)
-      ? disallowedProviderEgress()
-      : null;
-  }
-  if (!isAllowedHostedVeniceRequest(input.request.method, pathMatch.pathnameSuffix)) {
-    return disallowedProviderEgress();
-  }
-
-  const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ctx: input.ctx,
-    userId: input.userId,
-    env: input.env,
-    providerKind: "venice",
-    request: input.request,
-  });
-  if (!authorization.authorized) {
-    return unauthorizedProviderEgress({
-      authorization,
-      providerKind: "venice",
-      request: input.request,
-      startedAt,
-      url: input.url,
-    });
-  }
-
-  const body = await readBoundedRequestBody(
-    input.request,
-    HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
-  );
-  if (body === null) {
-    return new Response("Payload Too Large", { status: 413 });
-  }
-  const upstreamBody = buildHostedVeniceResponsesRequestBody({
-    body,
-    pathnameSuffix: pathMatch.pathnameSuffix,
-  });
-  if (upstreamBody === null) {
-    return disallowedProviderEgress();
-  }
-
-  const token = readRequiredInterceptSecret(input.env.VENICE_API_KEY, "VENICE_API_KEY");
-  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
-  headers.delete("content-encoding");
-  headers.delete("content-length");
-  headers.set("authorization", `Bearer ${token}`);
-  headers.set("content-type", "application/json");
-
-  const upstreamRequest = await createHostedRunnerUpstreamRequest(
-    input.request,
-    createProviderUpstreamUrl(input.url, pathMatch),
-    headers,
-    { body: upstreamBody },
-  );
-  return await fetchAuthorizedProviderUpstream({
-    authorization,
-    providerKind: "venice",
-    request: input.request,
-    startedAt,
-    upstreamRequest,
-    url: input.url,
-  });
-}
-
 
 async function maybeHandleElevenLabsRequest(input: {
   ctx?: HostedRunnerOutboundContext;
@@ -2744,7 +2491,7 @@ async function authorizeHostedProviderEgress(input: {
     authorized: Boolean(owner) && !owner?.retiring && !settlementPending,
     durationMs: Date.now() - startedAt, mode: "native_container",
     userId: owner?.userId ?? null,
-    ...(owner ? { platformAiUsageAllowed: owner.platformAiUsageAllowed, customInferenceEnvelope: owner.customInferenceEnvelope } : {}),
+    ...(owner ? { platformAiUsageAllowed: owner.platformAiUsageAllowed } : {}),
     ...(settlementPending ? { rejectReason: "usage_settlement_pending" as const }
       : !owner || owner.retiring ? { rejectReason: "bound_container_inactive" as const } : {}),
     writeFence: owner ? { attemptId: owner.attemptId, leaseGeneration: owner.generation,

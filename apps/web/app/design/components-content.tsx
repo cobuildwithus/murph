@@ -1,8 +1,5 @@
 "use client";
 
-import {
-  HOSTED_ASSISTANT_OPENAI_PROVIDER,
-} from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
 import { CheckCircle2, CheckIcon, ContactRound, Monitor } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
@@ -45,13 +42,6 @@ import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
 } from "@/src/components/settings/assistant-model-artwork";
-import {
-  AssistantProviderDialog,
-  AssistantProviderSummary,
-  type AssistantRoutingChoice,
-} from "@/src/components/settings/hosted-assistant-model-settings";
-import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-inference-connection-settings";
-import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
@@ -656,10 +646,6 @@ export function ComponentsContent() {
   const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
     useState<SegmentedControlDemoValue>("email");
   const [choiceCardValue, setChoiceCardValue] = useState("terra");
-  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
-  const [providerValue, setProviderValue] = useState<AssistantRoutingChoice>(
-    HOSTED_ASSISTANT_OPENAI_PROVIDER,
-  );
   const [addedContactAvatar, setAddedContactAvatar] =
     useState<MurphContactAvatarOption | null>(null);
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
@@ -1335,13 +1321,11 @@ export function ComponentsContent() {
         <Separator />
 
         <Section
-          id="assistant-provider-picker"
-          title="Radio group, choice cards & inference routing"
+          id="assistant-model-picker"
+          title="Radio group and model choice cards"
         >
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Compare model choice cards, provider privacy labels, and the
-            included-capacity disclosure and its accessible Save association
-            shown after Venice is selected.
+            Compare model choice cards and their selection states.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"
@@ -1378,36 +1362,6 @@ export function ComponentsContent() {
               value="sol"
             />
           </RadioGroup>
-          <AssistantProviderSummary
-            connection={DESIGN_INFERENCE_CONNECTION}
-            currentRouting={HOSTED_ASSISTANT_OPENAI_PROVIDER}
-            draftRouting={providerValue}
-            onChangeClick={() => setProviderDialogOpen(true)}
-          />
-          <AssistantProviderDialog
-            chatCompletionsAvailable
-            connection={DESIGN_INFERENCE_CONNECTION}
-            customInferenceAvailable
-            onOpenChange={setProviderDialogOpen}
-            onRoutingChange={setProviderValue}
-            open={providerDialogOpen}
-            routing={providerValue}
-            veniceAvailable
-          />
-        </Section>
-
-        <Separator />
-
-        <Section title="Custom inference endpoint pane">
-          <div inert>
-            <HostedInferenceConnectionPane
-              chatCompletionsAvailable
-              configurationAvailable={false}
-              connection={null}
-              onConnectionChange={() => {}}
-              selected={false}
-            />
-          </div>
         </Section>
 
         <Separator />

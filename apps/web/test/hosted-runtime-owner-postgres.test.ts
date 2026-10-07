@@ -135,7 +135,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       runnerContainerName: "synthetic-locked-owner",
       workspaceVersion: 9007199254740995n,
       providerEgressTokenHash: "synthetic-provider-hash",
-      customInferenceEnvelope: "synthetic-envelope",
+
       platformAiUsageAllowed: true,
       failureCount: 2,
       lastErrorCode: "SYNTHETIC_FAILURE",
@@ -190,7 +190,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const runtime = identity((await claim(userId)).owner);
     await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime,
       runnerContainerName: "synthetic-provider-slot", workspaceVersion: "0",
-      customInferenceEnvelope: null, platformAiUsageAllowed: true, providerEgressTokenHash: "a".repeat(64) });
+      platformAiUsageAllowed: true, providerEgressTokenHash: "a".repeat(64) });
     const locked = deferred();
     const release = deferred();
     const holding = first.$transaction(async tx => {
@@ -265,7 +265,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     }
     await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime,
       runnerContainerName: "synthetic-callback-boundaries", workspaceVersion: "0",
-      providerEgressTokenHash: null, customInferenceEnvelope: null, platformAiUsageAllowed: true });
+      providerEgressTokenHash: null, platformAiUsageAllowed: true });
     for (const phase of ["starting", "active", "retiring", "idle"]) {
       await observer.hostedRuntimeOwner.update({ where: { userId },
         data: { phase, attemptId: phase === "idle" ? null : runtime.attemptId } });
@@ -323,7 +323,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const commands = [
       { operation: "select_target" as const, ...runtime, runnerContainerName },
       { operation: "prepare_launch" as const, ...runtime, runnerContainerName, workspaceVersion: "0",
-        providerEgressTokenHash: null, customInferenceEnvelope: null, platformAiUsageAllowed: true, processingMode: "default" as const },
+        providerEgressTokenHash: null, platformAiUsageAllowed: true, processingMode: "default" as const },
     ];
     for (const command of commands) {
       const operations: PrismaOperationTiming[] = [];
@@ -342,7 +342,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     try {
       await expect(executeHostedRuntimeOwnerCommand({ prisma: first, userId, command: {
         operation, ...runtime, runnerContainerName: "synthetic-blocked-launch", workspaceVersion: "0",
-        providerEgressTokenHash: null, customInferenceEnvelope: null, platformAiUsageAllowed: true, processingMode: "default",
+        providerEgressTokenHash: null, platformAiUsageAllowed: true, processingMode: "default",
       } })).rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
       expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } }))
         .toMatchObject({ runnerContainerName: null, workspaceVersion: null });
@@ -357,7 +357,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const tokenHash = "c".repeat(64);
     await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime,
       runnerContainerName: "synthetic-provider-query-count", workspaceVersion: "0",
-      customInferenceEnvelope: null, platformAiUsageAllowed: true, providerEgressTokenHash: tokenHash });
+      platformAiUsageAllowed: true, providerEgressTokenHash: tokenHash });
     const operations: PrismaOperationTiming[] = [];
     const result = await runWithPrismaOperationTimings(operations, () => executeHostedRuntimeOwnerCommand({
       prisma: first, userId, command: { operation: "authorize_provider", runnerContainerName: null,
@@ -458,7 +458,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     } });
     const launch = (prisma: PrismaClient) => prepareHostedRuntimeLaunch({
       prisma, identity: original, runnerContainerName: target, workspaceVersion: "0",
-      customInferenceEnvelope: null, providerEgressTokenHash: null, platformAiUsageAllowed: true,
+      providerEgressTokenHash: null, platformAiUsageAllowed: true,
     });
     const locked = deferred();
     const release = deferred();
@@ -567,7 +567,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const original = identity((await claim(userId)).owner);
     await prepareHostedRuntimeLaunch({
       prisma: first, identity: original, runnerContainerName: "synthetic-slot-a",
-      workspaceVersion: "0", customInferenceEnvelope: null,
+      workspaceVersion: "0",
       platformAiUsageAllowed: true, providerEgressTokenHash: null,
     });
     expect(await recordHostedRuntimeAccepted({ prisma: first, identity: original })).toBe(true);
@@ -593,7 +593,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const original = identity(originalOwner);
     await prepareHostedRuntimeLaunch({
       prisma: first, identity: original, runnerContainerName: "synthetic-warm-slot",
-      workspaceVersion: "0", customInferenceEnvelope: null,
+      workspaceVersion: "0",
       platformAiUsageAllowed: true, providerEgressTokenHash: null,
     });
     await retireHostedRuntime({ prisma: first, identity: original });
@@ -618,7 +618,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const runnerContainerName = "synthetic-early-completion-slot";
     const providerEgressTokenHash = "e".repeat(64);
     await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime, runnerContainerName,
-      workspaceVersion: "0", customInferenceEnvelope: null,
+      workspaceVersion: "0",
       platformAiUsageAllowed: true, providerEgressTokenHash });
     await recordHostedRuntimeAccepted({ prisma: first, identity: runtime });
 
@@ -649,7 +649,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const runtime = identity(originalOwner);
     const runnerContainerName = "synthetic-completed-warm-slot";
     await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime, runnerContainerName,
-      workspaceVersion: "0", customInferenceEnvelope: "synthetic-inference-envelope",
+      workspaceVersion: "0",
       platformAiUsageAllowed: true, providerEgressTokenHash: "f".repeat(64) });
     const prefix = await hostedBrowserVaultReplicaUserPrefix({ userId });
     await executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command: {
@@ -667,7 +667,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const completedOwner = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
     expect(completedOwner).toMatchObject({
       phase: "idle", attemptId: null, allocationId: originalOwner.allocationId, runnerContainerName,
-      processingMode: null, workspaceVersion: null, customInferenceEnvelope: null,
+      processingMode: null, workspaceVersion: null,
       providerEgressTokenHash: null, platformAiUsageAllowed: false, completedAt: expect.any(Date),
     });
     const drains = await observer.hostedRuntimePutDrain.findMany({ where: { userId }, orderBy: { writeId: "asc" } });
@@ -1012,7 +1012,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const tokenHash = "c".repeat(64);
     const runnerContainerName = "synthetic-admitted-slot";
     await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime, runnerContainerName,
-      workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true, providerEgressTokenHash: tokenHash });
+      workspaceVersion: "0", platformAiUsageAllowed: true, providerEgressTokenHash: tokenHash });
     if (policy === "consent") {
       await observer.hostedConsentGrant.create({ data: {
         memberId: userId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE, status: "granted",
@@ -1093,7 +1093,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const owner = identity((await claim(userId)).owner);
     const launch = {
       prisma: first, identity: owner, runnerContainerName: "synthetic-retry-slot",
-      workspaceVersion: "0", customInferenceEnvelope: null,
+      workspaceVersion: "0",
       platformAiUsageAllowed: true, providerEgressTokenHash: null,
     };
     await prepareHostedRuntimeLaunch(launch);
@@ -1108,7 +1108,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const owner = identity((await claim(userId)).owner);
     await prepareHostedRuntimeLaunch({
       prisma: first, identity: owner, runnerContainerName: "synthetic-deletion-slot",
-      workspaceVersion: "0", customInferenceEnvelope: null,
+      workspaceVersion: "0",
       platformAiUsageAllowed: false, providerEgressTokenHash: null,
     });
     await observer.hostedMember.delete({ where: { id: userId } });
@@ -1479,7 +1479,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const runtime = identity((await claim(userId)).owner);
     await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime,
       runnerContainerName: "synthetic-replica-slot", workspaceVersion: "0",
-      customInferenceEnvelope: null, platformAiUsageAllowed: true, providerEgressTokenHash: null });
+      platformAiUsageAllowed: true, providerEgressTokenHash: null });
     const prefix = await hostedBrowserVaultReplicaUserPrefix({ userId });
     const admit = (writeId: string) => executeHostedRuntimeReplicaPutCommand({ prisma: first, userId,
       command: { operation: "admit", ...runtime, writeId, objectKey: `${prefix}${writeId}` } });
@@ -1522,7 +1522,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const tokenHash = "a".repeat(64);
     await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime,
       runnerContainerName: "synthetic-provider-slot", workspaceVersion: "0",
-      customInferenceEnvelope: null, platformAiUsageAllowed: true, providerEgressTokenHash: tokenHash });
+      platformAiUsageAllowed: true, providerEgressTokenHash: tokenHash });
     const authorize = (runnerContainerName: string | null, providerEgressTokenHash: string | null = null) =>
       authorizeHostedRuntimeProvider({ prisma: second, userId, runnerContainerName, providerEgressTokenHash, providerKind: "openai" }).then(result => result.owner);
     expect(await authorize("wrong-slot")).toBeNull();
@@ -1536,7 +1536,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const successor = identity((await claim(userId)).owner);
     await prepareHostedRuntimeLaunch({ prisma: first, identity: successor,
       runnerContainerName: "synthetic-successor-slot", workspaceVersion: "0",
-      customInferenceEnvelope: null, platformAiUsageAllowed: true, providerEgressTokenHash: null });
+      platformAiUsageAllowed: true, providerEgressTokenHash: null });
     expect(await recordHostedRuntimeTargetRetired({ prisma: first, userId, runnerContainerName: "synthetic-provider-slot" })).toBe(false);
     expect(await authorize("synthetic-successor-slot")).toMatchObject({ attemptId: successor.attemptId });
     await observer.hostedMember.update({ where: { id: userId }, data: { suspendedAt: new Date() } });

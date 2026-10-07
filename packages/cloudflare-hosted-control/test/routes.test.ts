@@ -167,7 +167,6 @@ describe("cloudflare hosted control routes", () => {
       environmentRealtimeCall: { method: "POST", suffix: "environment-realtime/call" },
       environmentVoiceDelete: { method: "DELETE", suffix: "environment-voice/delete" },
       environmentVoiceStage: { method: "POST", suffix: "environment-voice/stage" },
-      inferenceVerification: { method: "POST", suffix: "inference/verify" },
       mealPhotoDelete: { method: "DELETE", suffix: "meal-photos/delete" },
       mealPhotoStage: { method: "POST", suffix: "meal-photos/stage" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
@@ -201,7 +200,6 @@ describe("cloudflare hosted control routes", () => {
     expect(Object.keys(packageJson.exports ?? {}).sort()).toEqual([
       "./client",
       "./device-webhook-queue",
-      "./inference-verification",
       "./routes",
     ]);
     expect(packageJson).not.toHaveProperty("main");
@@ -235,7 +233,6 @@ describe("cloudflare hosted control routes", () => {
       "buildCloudflareHostedControlEnvironmentRealtimeCallPath",
       "buildCloudflareHostedControlEnvironmentVoiceDeletePath",
       "buildCloudflareHostedControlEnvironmentVoiceStagePath",
-      "buildCloudflareHostedControlInferenceVerificationPath",
       "buildCloudflareHostedControlMealPhotoDeletePath",
       "buildCloudflareHostedControlMealPhotoStagePath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",
@@ -252,7 +249,6 @@ describe("cloudflare hosted control routes", () => {
       buildCloudflareHostedControlEnvironmentVoiceDeletePath: expect.any(Function),
       buildCloudflareHostedControlEnvironmentRealtimeCallPath: expect.any(Function),
       buildCloudflareHostedControlEnvironmentVoiceStagePath: expect.any(Function),
-      buildCloudflareHostedControlInferenceVerificationPath: expect.any(Function),
       buildCloudflareHostedControlMealPhotoDeletePath: expect.any(Function),
       buildCloudflareHostedControlMealPhotoStagePath: expect.any(Function),
       buildCloudflareHostedControlRuntimeHealthDataConsentPath: expect.any(Function),

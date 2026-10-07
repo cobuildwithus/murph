@@ -166,9 +166,8 @@ describe("createHostedWebMailboxPort", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["openai", "venice"])("preserves the Web-owned empty mailbox prefix with provider %s", async (assistantProvider) => {
+  it("preserves the Web-owned empty mailbox prefix", async () => {
     const response = {
-      assistantProvider,
       consumedSeqByLane: [
         {
           consumedSeq: "7",

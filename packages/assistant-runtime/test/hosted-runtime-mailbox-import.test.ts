@@ -361,7 +361,6 @@ describe("hosted mailbox import loop", () => {
             });
         return {
           consumedSeqByLane: [{ consumedSeq: "0", lane }],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [{ lane, maxSeq: "1" }],
@@ -743,7 +742,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [nextItem],
           maxSeqByLane: [
@@ -829,7 +827,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [
@@ -895,7 +892,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [
@@ -1012,7 +1008,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [replayStart, replayNext, freshItem],
           maxSeqByLane: [
@@ -1214,7 +1209,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [retainedStart, retainedNext],
           maxSeqByLane: [
@@ -1282,7 +1276,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [freshItem],
           maxSeqByLane: [
@@ -1335,7 +1328,6 @@ describe("hosted mailbox import loop", () => {
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
         return {
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [item],
           maxSeqByLane: [
@@ -1411,7 +1403,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [staleReplay, freshTail],
           maxSeqByLane: [
@@ -1475,7 +1466,6 @@ describe("hosted mailbox import loop", () => {
               lane: "conversation",
             },
           ],
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [
             createMailboxItem({
@@ -2352,7 +2342,6 @@ function createMailboxPort(input: {
           ...(input.groupRunningBit === undefined
             ? {}
             : { groupRunningBit: input.groupRunningBit }),
-          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: input.items.filter((item) =>
             request.lanes.some((lane) =>

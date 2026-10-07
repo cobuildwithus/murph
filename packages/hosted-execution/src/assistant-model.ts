@@ -1,5 +1,5 @@
 import type {
-  HostedAiUsageAllowancePricedModel,
+  HostedRuntimeAssistantConfigurationChanges,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationSnapshot,
   HostedRuntimeAssistantConfigurationToolRequest,
@@ -36,43 +36,8 @@ export type HostedAssistantProductModel =
   (typeof HOSTED_ASSISTANT_PRODUCT_MODELS)[number];
 
 export const HOSTED_ASSISTANT_OPENAI_PROVIDER = "openai" as const;
-export const HOSTED_ASSISTANT_VENICE_PROVIDER = "venice" as const;
-
-export const HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS: Partial<Record<HostedAiUsageAllowancePricedModel, string>> = {
-  [HOSTED_ASSISTANT_LUNA_MODEL]: "openai-gpt-56-luna",
-  "gpt-5.6-terra": "openai-gpt-56-terra",
-  [HOSTED_ASSISTANT_SOL_MODEL]: "openai-gpt-56-sol",
-};
-
-export const HOSTED_ASSISTANT_PROVIDERS = [
-  HOSTED_ASSISTANT_OPENAI_PROVIDER,
-  HOSTED_ASSISTANT_VENICE_PROVIDER,
-] as const;
-
-export type HostedAssistantProvider =
-  (typeof HOSTED_ASSISTANT_PROVIDERS)[number];
-
 export const HOSTED_ASSISTANT_DEFAULT_PROVIDER =
   HOSTED_ASSISTANT_OPENAI_PROVIDER;
-
-export const HOSTED_ASSISTANT_PROVIDER_OVERRIDES = [
-  HOSTED_ASSISTANT_VENICE_PROVIDER,
-] as const;
-
-export type HostedAssistantProviderOverride =
-  (typeof HOSTED_ASSISTANT_PROVIDER_OVERRIDES)[number];
-
-export function isHostedAssistantProvider(
-  value: unknown,
-): value is HostedAssistantProvider {
-  return HOSTED_ASSISTANT_PROVIDERS.some((provider) => provider === value);
-}
-
-export function parseHostedAssistantProviderOverride(
-  value: unknown,
-): HostedAssistantProviderOverride | null {
-  return value === HOSTED_ASSISTANT_VENICE_PROVIDER ? value : null;
-}
 
 export const HOSTED_ASSISTANT_MODEL_OVERRIDES = HOSTED_ASSISTANT_PRODUCT_MODELS;
 
@@ -154,49 +119,15 @@ export function parseHostedRuntimeAssistantConfigurationToolRequest(
 
   assertAllowedObjectKeys(
     record,
-    new Set(["action", "model", "provider", "reasoningEffort"]),
+    new Set(["action", "model", "reasoningEffort"]),
     "Hosted runtime assistant configuration tool update request",
   );
-  const model =
-    record.model === undefined
-      ? undefined
-      : parseHostedRuntimeAssistantProductModel(
-          record.model,
-          "Hosted runtime assistant configuration tool model",
-        );
-  const reasoningEffort =
-    record.reasoningEffort === undefined
-      ? undefined
-      : parseHostedRuntimeAssistantReasoningEffort(
-          record.reasoningEffort,
-          "Hosted runtime assistant configuration tool reasoningEffort",
-        );
-  const provider =
-    record.provider === undefined
-      ? undefined
-      : parseHostedRuntimeAssistantProvider(
-          record.provider,
-          "Hosted runtime assistant configuration tool provider",
-        );
-  if (model === undefined) {
-    if (provider !== undefined) {
-      return reasoningEffort === undefined
-        ? { action, provider }
-        : { action, provider, reasoningEffort };
-    }
-    if (reasoningEffort === undefined) {
-      throw new TypeError(
-        "Hosted runtime assistant configuration update requires a model, provider, or reasoning effort.",
-      );
-    }
-    return { action, reasoningEffort };
-  }
-
   return {
     action,
-    model,
-    ...(provider === undefined ? {} : { provider }),
-    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    ...parseHostedRuntimeAssistantConfigurationChanges(
+      record,
+      "Hosted runtime assistant configuration tool",
+    ),
   };
 }
 
@@ -231,7 +162,6 @@ export function parseHostedRuntimeAssistantConfigurationControlRequest(
       "action",
       "assistantInputId",
       "model",
-      "provider",
       "reasoningEffort",
     ]),
     "Hosted runtime assistant configuration control update request",
@@ -255,33 +185,11 @@ export function parseHostedRuntimeAssistantConfigurationControlRequest(
 function parseHostedRuntimeAssistantConfigurationChanges(
   record: Record<string, unknown>,
   label: string,
-):
-  | {
-      model: HostedAssistantProductModel;
-      provider?: HostedAssistantProvider;
-      reasoningEffort?: HostedAssistantReasoningEffort;
-    }
-  | {
-      model?: never;
-      provider: HostedAssistantProvider;
-      reasoningEffort?: HostedAssistantReasoningEffort;
-    }
-  | {
-      model?: never;
-      provider?: never;
-      reasoningEffort: HostedAssistantReasoningEffort;
-    } {
+): HostedRuntimeAssistantConfigurationChanges {
   const model =
     record.model === undefined
       ? undefined
       : parseHostedRuntimeAssistantProductModel(record.model, `${label} model`);
-  const provider =
-    record.provider === undefined
-      ? undefined
-      : parseHostedRuntimeAssistantProvider(
-          record.provider,
-          `${label} provider`,
-        );
   const reasoningEffort =
     record.reasoningEffort === undefined
       ? undefined
@@ -290,21 +198,15 @@ function parseHostedRuntimeAssistantConfigurationChanges(
           `${label} reasoningEffort`,
         );
   if (model === undefined) {
-    if (provider !== undefined) {
-      return reasoningEffort === undefined
-        ? { provider }
-        : { provider, reasoningEffort };
-    }
     if (reasoningEffort === undefined) {
       throw new TypeError(
-        `${label} update requires a model, provider, or reasoning effort.`,
+        `${label} update requires a model or reasoning effort.`,
       );
     }
     return { reasoningEffort };
   }
   return {
     model,
-    ...(provider === undefined ? {} : { provider }),
     ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
   };
 }
@@ -389,12 +291,10 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
     record,
     new Set([
       "availableModels",
-      "availableProviders",
       "availableReasoningEfforts",
       "configurationAvailable",
       "dormantSolPreference",
       "model",
-      "provider",
       "reasoningEffort",
       "solAvailable",
       ...options.extraKeys,
@@ -414,26 +314,6 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
     record.configurationAvailable,
     "Hosted runtime assistant configuration configurationAvailable",
   );
-  const hasAvailableProviders = Object.hasOwn(record, "availableProviders");
-  const hasProvider = Object.hasOwn(record, "provider");
-  if (hasAvailableProviders !== hasProvider) {
-    throw new TypeError(
-      "Hosted runtime assistant configuration provider fields must be supplied together.",
-    );
-  }
-  const availableProviders = hasAvailableProviders
-    ? requireArray(
-        record.availableProviders,
-        "Hosted runtime assistant configuration availableProviders",
-      ).map((provider) =>
-        parseHostedRuntimeAssistantProvider(
-          provider,
-          "Hosted runtime assistant configuration available provider",
-        ),
-      )
-    : configurationAvailable
-    ? [HOSTED_ASSISTANT_DEFAULT_PROVIDER]
-    : [];
   const availableReasoningEfforts = requireArray(
     record.availableReasoningEfforts,
     "Hosted runtime assistant configuration availableReasoningEfforts",
@@ -446,7 +326,6 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
 
   return {
     availableModels,
-    availableProviders,
     availableReasoningEfforts,
     configurationAvailable,
     dormantSolPreference: requireBoolean(
@@ -457,12 +336,6 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
       record.model,
       "Hosted runtime assistant configuration model",
     ),
-    provider: hasProvider
-      ? parseHostedRuntimeAssistantProvider(
-          record.provider,
-          "Hosted runtime assistant configuration provider",
-        )
-      : HOSTED_ASSISTANT_DEFAULT_PROVIDER,
     reasoningEffort: parseHostedRuntimeAssistantReasoningEffort(
       record.reasoningEffort,
       "Hosted runtime assistant configuration reasoningEffort",
@@ -472,13 +345,6 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
       "Hosted runtime assistant configuration solAvailable",
     ),
   };
-}
-
-function parseHostedRuntimeAssistantProvider(value: unknown, label: string) {
-  if (!isHostedAssistantProvider(value)) {
-    throw new TypeError(`${label} is not supported.`);
-  }
-  return value;
 }
 
 function parseHostedRuntimeAssistantProductModel(
