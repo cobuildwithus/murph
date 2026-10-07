@@ -384,7 +384,9 @@ link welcome does not enable general proactive Telegram activation welcomes.
 Completion also returns `telegramAwaitingInbound` and `telegramUrl` (the bot chat
 with a prefilled greeting, or null if unconfigured). The initial-onboarding
 projection includes the additive `telegramAwaitingInbound` flag for recovery
-across process restarts. Legacy `messagingSetupRequired` semantics are unchanged:
+across process restarts, only when no other direct messaging route exists. A
+member with a canonical phone must not be held for an unrelated pending Telegram
+thread. Legacy `messagingSetupRequired` semantics are unchanged:
 a verified canonical phone or linked Telegram identity clears that flag. New
 clients show the explicit say-hi step while Telegram awaits inbound and refresh
 on return; they must not infer a direct route from a successful SDK callback.

@@ -68,3 +68,17 @@ and normal result validation while another engineer repairs the launcher. Do not
 change or publish ReviewGPT; perform manual submissions only after implementation
 and verification. No real SMS, Telegram approval/delivery or physical-device
 proof has been performed. All merges still require passed review and hosted CI.
+
+## Final projection regression
+
+Parent integration inspection reproduced an existing-phone plus pending-Telegram
+case where the additive native flag would reopen messaging setup despite a
+usable direct route. The new route matrix fails before the fix and passes when
+the native waiting flag is derived from both missing direct delivery and pending
+Telegram. Legacy setup semantics remain unchanged. The focused route suite has
+12 passing cases; web typecheck and ordinary guards are rerun for this change.
+
+The first manual round-three attempt at 91c27002ab8ae2020c7d707622d9e0559a794cfe
+returned no findings after 6m27s, but named PR UNKNOWN. Its identity is invalid;
+no valid round or PASS is recorded. Preserve its local response as diagnostics
+and retry round three with the canonical target invocation after this fix.

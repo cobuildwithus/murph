@@ -174,9 +174,14 @@ describe("companion initial onboarding routes", () => {
     });
   });
 
-  it.each([null, "123456789"])("projects Telegram awaiting-inbound separately from legacy setup readiness (%s)", async (telegramThreadId) => {
+  it.each([
+    { telegramThreadId: null, phoneLookupKey: null, expectedAwaiting: true },
+    { telegramThreadId: "123456789", phoneLookupKey: null, expectedAwaiting: false },
+    { telegramThreadId: null, phoneLookupKey: "synthetic-phone-lookup", expectedAwaiting: false },
+    { telegramThreadId: "123456789", phoneLookupKey: "synthetic-phone-lookup", expectedAwaiting: false },
+  ])("projects Telegram waiting only when no direct route exists (%j)", async ({ telegramThreadId, phoneLookupKey, expectedAwaiting }) => {
     mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
-      identity: { phoneLookupKey: null },
+      identity: { phoneLookupKey },
       routing: { telegramUserId: "123456789", telegramThreadId },
     });
     const response = await route.GET(new Request(
@@ -185,7 +190,7 @@ describe("companion initial onboarding routes", () => {
     ));
     await expect(response.json()).resolves.toMatchObject({
       messagingSetupRequired: false,
-      telegramAwaitingInbound: telegramThreadId === null,
+      telegramAwaitingInbound: expectedAwaiting,
     });
   });
 

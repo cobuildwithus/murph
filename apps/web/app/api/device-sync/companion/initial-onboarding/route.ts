@@ -230,9 +230,11 @@ async function readCompanionMessagingSetup(input: {
 }): Promise<CompanionMessagingSetup> {
   const state = await readHostedMemberMessagingSetupState(input);
   const messaging = { identity: state?.identity ?? null, routing: state?.routing ?? null };
+  const resolved = resolveHostedMemberMessagingState(messaging);
   return {
     messagingSetupRequired: isHostedMemberMessagingSetupRequired(messaging),
-    telegramAwaitingInbound: resolveHostedMemberMessagingState(messaging).telegramAwaitingInbound,
+    // The native say-hi step must not block an already usable phone/direct route.
+    telegramAwaitingInbound: !resolved.hasDirectMessagingChannel && resolved.telegramAwaitingInbound,
   };
 }
 
