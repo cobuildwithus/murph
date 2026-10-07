@@ -1,5 +1,9 @@
 import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  readHostedIngressLatencyTraceForTest,
+  readHostedMailboxItemForTest,
+} from "#hosted-web-testing";
 
 import {
   buildHostedExecutionMemberActivatedWake,
@@ -132,6 +136,8 @@ describe("hosted local Linq lost active-operation e2e", () => {
         "Expected the first hosted assistant turn to reach the provider before dropping active operation.",
       );
       firstTurnProviderRequestCount = countResponsesApiRequests();
+      const firstTurnFence = await readActiveRuntimeFenceForTest();
+      expect(firstTurnFence).not.toBeNull();
       await requireScenario().harness.dropRunnerActiveOperationForTest(userId, {
         loseCompletedInvocationResult: true,
       });
@@ -146,9 +152,27 @@ describe("hosted local Linq lost active-operation e2e", () => {
         },
       ));
       expect(secondWebhookResponse.status).toBe(202);
+
+      const secondMailboxItem = await readHostedMailboxItemForTest({
+        dedupeKey: `evt_lost_active_second_${userId}`,
+        environment: requireScenario().runtimeEnv,
+        userId,
+      });
+      // HTTP 202 proves admission only. Wait until the active-turn controller
+      // has queued this exact input and entered its pre-steer callback on the
+      // original runtime, while the first provider response is still held.
+      await waitForCondition(async () => {
+        const trace = await readHostedIngressLatencyTraceForTest({
+          environment: requireScenario().runtimeEnv,
+          mailboxItemId: secondMailboxItem.id,
+          userId,
+        }).catch(() => null); // Best-effort traces can lag mailbox admission.
+        return trace?.runtimeAttemptId === firstTurnFence?.attemptId
+          && typeof trace?.phaseBreakdown?.assistant
+            ?.assistantInputAcceptedForExecutionAtEpochMs === "number";
+      }, "Expected the second mailbox input to reach live steering on the original runtime before releasing the first tool call.");
     } finally {
-      // Only let the in-progress turn execute its tool after the pointer drop
-      // and second mailbox admission, independent of host scheduling speed.
+      // Also release on failure so scenario teardown cannot strand the stub.
       releaseFirstToolCall();
     }
 
