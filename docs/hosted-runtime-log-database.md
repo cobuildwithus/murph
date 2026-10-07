@@ -110,6 +110,226 @@ and existing best-effort event; no extra callback, health payload, source id,
 window date, or durable scheduling state is added. Old log rows lack the fields
 and must be excluded from the measured cohort rather than treated as zeros.
 
+### Device job lineage
+
+Question: did a specific failed logical device job later run, import, and reach
+an accepted checkpoint, or is it still retained, dead, or missing? Resource,
+pass outcome, a later attempt count of one, and queue-set fingerprints cannot
+answer that: cold handoff restarts the local attempt counter, and a set
+fingerprint does not show which member completed.
+
+`device-sync.job_failed` now carries the same typed `attemptId`,
+`leaseGeneration`, and `workspaceVersion` columns as the pass markers, plus:
+
+- `failureJobLineage`: digests of every row whose failure transition committed
+  in that attempt (each row of a failed batch).
+- `failureJobLineageTruncated`.
+
+Both are `null` when the diagnostic has no row identity or its local account has
+no hosted connection mapping. `device-sync.pass_finished` appends:
+
+- `deviceSyncJobLineage`: `<digest>:<outcome><import><claim>` for the first
+  100 mapped rows of the retained claimed attempts, in execution order.
+  `deviceSyncJobLineageCount` counts every mapped row, and
+  `deviceSyncJobLineageTruncated` is true when it exceeds the emitted rows.
+  `deviceSyncJobLineageUnknownCount` counts rows without identity, rows of
+  another connection, and processed rows evicted from the bounded service
+  buffer.
+- `incomingRetainedJobLineage` and `outgoingRetainedJobLineage`, each with a
+  `...Truncated` flag: sorted, deduplicated digests of the first 100 job hints,
+  in queue order, carried in by the wake and handed off at the end. The flag is
+  true when more hints existed; retained queues are intentionally unbounded.
+  `null` means the wake had hints but no hosted connection identity; a thrown
+  pass has a `null` outgoing list because its checkpoint keeps the incoming wake.
+
+Only those bounded prefixes are read and digested; the rest are only counted.
+
+The digest is the first 16 lowercase hex characters of SHA-256 over the JSON
+array `["device-sync-job-lineage-v1", memberId, hostedConnectionId, key]`. `key`
+is the cold-handoff identity from `hosted-device-sync-job-identity.ts`: the
+row's dedupe key; otherwise the `hosted-device-sync-job:` key recovery writes
+from the local row id; or, for an incoming hint without one, the event/position
+key hydration assigns. It stays stable through window or cursor advancement on
+the same row, retries, and warm or cold restores, and differs across members and
+connections. Like the connection key, it is pseudonymous rather than anonymous
+against guessing a low-entropy key with both identifiers; it adds no key, secret,
+or configuration. Raw keys, row/account/connection ids, windows, cursors,
+payloads, and health values never enter the log.
+
+A digest correlates logical work, not a globally unique, immutable window. The
+provider owner defines the dedupe key, a later admission can reuse it, and a
+row's window or cursor can advance under the same key. A matching completion
+shows that work under that key completed, not that the original window did.
+
+| Position | Code | Meaning |
+| --- | --- | --- |
+| Outcome | `c` | Row completed with no follow-up rows scheduled |
+| Outcome | `h` | Row completed and scheduled follow-up rows that own the remainder |
+| Outcome | `p` | Attempt failed after committing partial progress; row retained |
+| Outcome | `f` | Attempt failed |
+| Outcome | `d` / `y` / `x` | Deferred, yielded, or cancelled/superseded; no attempt result |
+| Import | `a` / `n` / `u` / `e` / `0` | Claim applied, no-op only, unknown, failed, or none |
+| Claim | `s` / `b` | Single row, or batch (import code is claim-wide) |
+
+Import precedence is failed, unknown, applied, then no-op. Lists hold at most
+the pass job limit (100) items as comma-joined chunks of at most 2,048
+characters, within the existing 16-item array and 96-key bounds. This adds at
+most about 6 KB to a pass marker and 2 KB to a failure; typical passes add a few
+hundred bytes. No event, request, callback, query, state, or retention changes.
+
+Classify each failed digest relative to its latest observed failure, using only
+later rows of the same subject. Codes read outcome, import, then claim:
+
+- **Completed with its own applied import:** a later `cas` row whose attempt has
+  a later `checkpoint.snapshot_finished` with `webCheckpointAccepted = true`.
+- **Batch claim applied:** an accepted `cab`. The batch applied something, but
+  that import may belong to a sibling row; this row's own import is unknown.
+- **Completed without new persistence:** an accepted `cn?` or `c0?`.
+- **Handed to successors:** an accepted `h??`; successor rows own the remainder.
+- **Not complete:** `p`, `f`, `d`, `y`, `x`, `cu?`, `ce?`, or any completion
+  without an accepted checkpoint. A pass outcome alone never counts.
+- **Dead:** the latest observed failure has `failureDisposition = dead`; dead
+  rows leave both lists. An older dead failure under a reused key does not apply.
+- **Retained:** present in a later accepted pass's outgoing list.
+- **Missing candidate:** absent from every later list, the failure's own
+  lineage is complete, and the failure's connection has at least one later
+  accepted pass. In addition, every later pass on that connection must carry
+  array lists, `...Truncated = false`, and `deviceSyncJobLineageUnknownCount = 0`.
+  No later pass, a truncation flag that is not `false` (`true`, null, or
+  absent), sparse telemetry, or a pre-deployment pass makes absence
+  inconclusive.
+
+First establish failure coverage, because a failure without usable lineage
+cannot appear in the classified cohort below:
+
+```sql
+SELECT
+  CASE
+    WHEN jsonb_typeof(redacted_json->'failureJobLineage') = 'array'
+      AND redacted_json->>'failureJobLineageTruncated' IS NOT DISTINCT FROM 'false'
+      THEN 'complete'
+    WHEN jsonb_typeof(redacted_json->'failureJobLineage') = 'array' THEN 'truncated_or_unflagged'
+    WHEN redacted_json->'failureJobLineage' IS NOT NULL THEN 'identity_unknown'
+    ELSE 'absent'
+  END AS failure_lineage_coverage,
+  COUNT(*) AS failure_event_count,
+  COUNT(DISTINCT subject_key) AS distinct_subject_count
+FROM hosted_runtime_log
+WHERE at >= :window_start AND at < :window_end
+  AND event_code = 'device-sync.job_failed'
+GROUP BY 1
+ORDER BY 1;
+```
+
+Report that result with the classification. Any count other than `complete`
+means the cohort understates failures. Then aggregate natural traffic only; never
+return subject keys, digests, or raw JSON:
+
+```sql
+WITH failure_items AS (
+  SELECT log.id, log.subject_key, log.attempt_id, log.at, item.fingerprint,
+    log.redacted_json->>'failureDisposition' AS disposition,
+    log.redacted_json->>'failureJobLineageTruncated' IS NOT DISTINCT FROM 'false' AS lineage_complete
+  FROM hosted_runtime_log AS log
+  CROSS JOIN LATERAL jsonb_array_elements_text(CASE
+    WHEN jsonb_typeof(log.redacted_json->'failureJobLineage') = 'array'
+    THEN log.redacted_json->'failureJobLineage' ELSE '[]'::jsonb END) AS chunk(value)
+  CROSS JOIN LATERAL regexp_split_to_table(chunk.value, ',') AS item(fingerprint)
+  WHERE log.at >= :window_start AND log.at < :window_end
+    AND log.event_code = 'device-sync.job_failed'
+), failed AS (
+  -- The latest observed failure supplies disposition and attempt.
+  SELECT DISTINCT ON (subject_key, fingerprint) subject_key, attempt_id, fingerprint,
+    at AS failed_at, disposition IS NOT DISTINCT FROM 'dead' AS dead_latest, lineage_complete
+  FROM failure_items
+  ORDER BY subject_key, fingerprint, at DESC, id DESC
+), accepted AS (
+  SELECT subject_key, attempt_id, at
+  FROM hosted_runtime_log
+  WHERE at >= :window_start AND at < :observation_end
+    AND event_code = 'checkpoint.snapshot_finished'
+    AND redacted_json->>'webCheckpointAccepted' = 'true'
+    AND subject_key IN (SELECT subject_key FROM failed)
+), passes AS (
+  SELECT pass.subject_key, pass.attempt_id, pass.at, pass.redacted_json AS d,
+    pass.redacted_json->>'deviceSyncConnectionKey' AS connection_key,
+    EXISTS (SELECT 1 FROM accepted WHERE accepted.subject_key = pass.subject_key
+      AND accepted.attempt_id = pass.attempt_id AND accepted.at >= pass.at) AS checkpointed
+  FROM hosted_runtime_log AS pass
+  WHERE pass.at >= :window_start AND pass.at < :observation_end
+    AND pass.event_code = 'device-sync.pass_finished'
+    AND pass.subject_key IN (SELECT subject_key FROM failed)
+), scoped AS (
+  -- The failure's own pass marker (same attempt, next marker) names its connection.
+  SELECT failed.*, (SELECT own.connection_key FROM passes AS own
+    WHERE own.subject_key = failed.subject_key AND own.attempt_id = failed.attempt_id
+      AND own.at >= failed.failed_at
+    ORDER BY own.at LIMIT 1) AS connection_key
+  FROM failed
+), items AS (
+  SELECT passes.subject_key, passes.at, passes.checkpointed, list.kind,
+    split_part(entry.value, ':', 1) AS fingerprint,
+    split_part(entry.value, ':', 2) AS code
+  FROM passes
+  CROSS JOIN LATERAL (VALUES ('executed', passes.d->'deviceSyncJobLineage'),
+    ('retained', passes.d->'outgoingRetainedJobLineage')) AS list(kind, value)
+  CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(list.value) = 'array'
+    THEN list.value ELSE '[]'::jsonb END) AS chunk(value)
+  CROSS JOIN LATERAL regexp_split_to_table(chunk.value, ',') AS entry(value)
+), classified AS (
+  SELECT scoped.subject_key,
+    CASE
+      WHEN bool_or(items.kind = 'executed' AND items.checkpointed AND items.code = 'cas') THEN 'single_row_applied_accepted'
+      WHEN bool_or(items.kind = 'executed' AND items.checkpointed AND items.code = 'cab') THEN 'batch_claim_applied_accepted'
+      WHEN bool_or(items.kind = 'executed' AND items.checkpointed AND items.code ~ '^c[n0]') THEN 'completed_without_new_persistence_accepted'
+      WHEN bool_or(items.kind = 'executed' AND items.checkpointed AND items.code ~ '^h') THEN 'handed_to_successors_accepted'
+      WHEN bool_or(items.kind = 'executed' AND items.code ~ '^[ch]') THEN 'completed_unaccepted_or_import_unresolved'
+      WHEN scoped.dead_latest THEN 'dead_latest'
+      WHEN bool_or(items.kind = 'retained' AND items.checkpointed) THEN 'retained_accepted'
+      ELSE 'unobserved'
+    END AS classification,
+    scoped.lineage_complete AND COALESCE((
+      SELECT COUNT(*) > 0 AND bool_or(later.checkpointed) AND bool_and(
+        jsonb_typeof(later.d->'deviceSyncJobLineage') IS NOT DISTINCT FROM 'array'
+        AND jsonb_typeof(later.d->'outgoingRetainedJobLineage') IS NOT DISTINCT FROM 'array'
+        AND later.d->>'deviceSyncJobLineageTruncated' IS NOT DISTINCT FROM 'false'
+        AND later.d->>'outgoingRetainedJobLineageTruncated' IS NOT DISTINCT FROM 'false'
+        AND later.d->>'deviceSyncJobLineageUnknownCount' IS NOT DISTINCT FROM '0')
+      FROM passes AS later
+      WHERE later.subject_key = scoped.subject_key AND later.at > scoped.failed_at
+        AND later.connection_key = scoped.connection_key
+    ), false) AS later_coverage_complete
+  FROM scoped
+  LEFT JOIN items ON items.subject_key = scoped.subject_key
+    AND items.fingerprint = scoped.fingerprint AND items.at > scoped.failed_at
+  GROUP BY scoped.subject_key, scoped.fingerprint, scoped.failed_at,
+    scoped.dead_latest, scoped.lineage_complete, scoped.connection_key
+)
+SELECT classification, later_coverage_complete,
+  COUNT(*) AS failed_job_count, COUNT(DISTINCT subject_key) AS distinct_subject_count
+FROM classified
+GROUP BY classification, later_coverage_complete
+ORDER BY classification, later_coverage_complete;
+```
+
+Only `unobserved` with `later_coverage_complete = true` is a missing-work
+candidate; every other `unobserved` row is inconclusive. A failure whose own
+pass marker is absent has no connection scope and is never complete. If the
+statement times out, use the bounded four-hour slices below and keep each
+slice's failed set with the shared observation end. Review both queries against
+isolated fixtures before relying on them.
+
+Observation: deploy the runner producer, wait until no pre-deployment runner
+revision emits device passes, then observe 24 to 72 hours of natural traffic
+with `:observation_end` at least 24 hours after `:window_end`; info rows keep
+seven days and warnings 14. Do not generate production traffic. Mixed versions
+are safe: Web parses these keys through the unchanged shared parser, and an
+older runner simply omits them. Exclude failures or later passes without the
+fields rather than treating absence as empty. Rollback removes the fields with
+no state to migrate. After the window, the device-sync owner keeps the fields
+only if they separated completed, retained, dead, and missing work, and
+otherwise removes them in code.
+
 ### Ensure-processing summaries
 
 `runner.processing_finished` is a best-effort summary from the Postgres
