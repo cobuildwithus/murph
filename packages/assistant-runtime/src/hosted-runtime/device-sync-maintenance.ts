@@ -96,6 +96,7 @@ import {
 import {
   createHostedBackgroundMaintenanceCancellation,
   type HostedBackgroundMaintenanceCancellationReason,
+  type HostedBackgroundMaintenanceYieldReason,
 } from "./background-maintenance-cancellation.ts";
 import {
   HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS,
@@ -1342,6 +1343,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  cooperativeYieldReason?: HostedBackgroundMaintenanceYieldReason;
   signal?: AbortSignal | null;
   skipDirtyPendingFetch?: boolean;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
@@ -1357,17 +1359,18 @@ export async function runHostedDeviceSyncWakeLane(input: {
   let processedJobs = 0;
   let jobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[] = [];
   let queueSnapshots: HostedDeviceSyncPassQueueSnapshots | null = null;
-  let foregroundYieldObserved = false;
+  let cooperativeYieldObserved = false;
   const shouldYieldDeviceSync = input.shouldYieldDeviceSync
     ? () => {
         const shouldYield = input.shouldYieldDeviceSync?.() === true;
-        foregroundYieldObserved ||= shouldYield;
+        cooperativeYieldObserved ||= shouldYield;
         return shouldYield;
       }
     : null;
   const cancellation = createHostedBackgroundMaintenanceCancellation({
     signal: input.signal ?? null,
     shouldYield: shouldYieldDeviceSync,
+    cooperativeYieldReason: input.cooperativeYieldReason,
     timeoutMs: input.timeoutMs,
   });
 
@@ -1449,7 +1452,8 @@ export async function runHostedDeviceSyncWakeLane(input: {
     ]);
     const yieldReason = resolveHostedDeviceSyncYieldReason({
       cancellationReason: cancellation.readReason(),
-      foregroundYieldObserved,
+      cooperativeYieldObserved,
+      cooperativeYieldReason: input.cooperativeYieldReason,
       passStage,
       result: deviceSyncResult,
     });
@@ -1496,7 +1500,8 @@ export async function runHostedDeviceSyncWakeLane(input: {
 
 function resolveHostedDeviceSyncYieldReason(input: {
   cancellationReason: HostedBackgroundMaintenanceCancellationReason | null;
-  foregroundYieldObserved: boolean;
+  cooperativeYieldObserved: boolean;
+  cooperativeYieldReason?: HostedBackgroundMaintenanceYieldReason;
   passStage: HostedDeviceSyncPassStage;
   result: Awaited<ReturnType<typeof runHostedDeviceSyncPass>>;
 }): HostedDeviceSyncYieldReason | null {
@@ -1509,8 +1514,8 @@ function resolveHostedDeviceSyncYieldReason(input: {
   if (input.cancellationReason) {
     return input.cancellationReason;
   }
-  if (input.foregroundYieldObserved) {
-    return "foreground";
+  if (input.cooperativeYieldObserved) {
+    return input.cooperativeYieldReason ?? "foreground";
   }
   return "unknown";
 }

@@ -2427,6 +2427,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       runtimeLogContext,
       shouldYieldBackgroundMaintenance:
         canonicalWriteReceiptLogBlocksBackgroundMaintenance,
+      backgroundMaintenanceYieldReason: "canonical_receipt_capacity",
       withCanonicalWritePersistence,
       vaultRoot: restored.vaultRoot,
       workspace: activeWorkspace,

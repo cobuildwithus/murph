@@ -88,6 +88,7 @@ import {
   type HostedRuntimeLogContext,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
+import type { HostedBackgroundMaintenanceYieldReason } from "./background-maintenance-cancellation.ts";
 
 const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
@@ -377,6 +378,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   retainProcessedItemUntilRecorded?: boolean;
   signal?: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   vaultRoot: string;
 }): Promise<HostedSystemMailboxCheckpointPreparation | null> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
@@ -571,6 +573,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       runtimeEnv: input.runtimeEnv,
       signal: input.signal ?? null,
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
+      backgroundMaintenanceYieldReason: input.backgroundMaintenanceYieldReason,
       vaultRoot: input.vaultRoot,
     });
     if (
@@ -1518,6 +1521,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   vaultRoot: string;
 }): Promise<HostedMailboxExecutionMetrics> {
   const executionContext =
@@ -1578,6 +1582,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     ...(input.shouldYieldBackgroundMaintenance
       ? {
           shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
+          backgroundMaintenanceYieldReason: input.backgroundMaintenanceYieldReason,
         }
       : {}),
     sourceMailboxItemId: input.pendingItem.itemId,

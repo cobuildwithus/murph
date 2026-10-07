@@ -125,6 +125,7 @@ import {
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "./workspace-restore.ts";
+import type { HostedBackgroundMaintenanceYieldReason } from "./background-maintenance-cancellation.ts";
 
 export interface HostedWorkspaceCheckpointMetadata {
   attemptId: string;
@@ -473,6 +474,7 @@ export interface HostedWorkspaceRunnerInput {
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   signal?: AbortSignal | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runAssistantPhase?: (

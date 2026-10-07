@@ -113,6 +113,7 @@ export function createHostedWorkspaceSystemWork(input: {
               runtimeLogContext: input.runnerInput.runtimeLogContext,
               retainProcessedItemUntilRecorded: true,
               shouldYieldBackgroundMaintenance: input.runnerInput.shouldYieldBackgroundMaintenance,
+              backgroundMaintenanceYieldReason: input.runnerInput.backgroundMaintenanceYieldReason,
               signal,
             }),
           });

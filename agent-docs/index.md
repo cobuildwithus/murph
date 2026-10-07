@@ -22,6 +22,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Receipt-capacity device import yield classification is owned by
+`RELIABILITY.md`; focused cancellation and composed runtime proof is recorded in
+[`device import yield diagnostics`](exec-plans/completed/2026-10-07-device-sync-backfill-slicing.md).
+
 Lost-active-operation E2E steering synchronization and local control/repeat proof
 are recorded in [the steering barrier follow-up](exec-plans/completed/2026-10-06-lost-op-steer-barrier.md).
 

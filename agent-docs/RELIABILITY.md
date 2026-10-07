@@ -1944,6 +1944,15 @@ to apply after cutover.
   clearing remain authoritative; secret filtering and size limits still apply.
   This prevents local metadata eviction from manufacturing a canonical apply
   conflict, without weakening Web's version or historical-progress fences.
+  Workspace-owned device sync receives the base runner's receipt-capacity
+  predicate, not the broader system-mailbox completion predicate. At 63 pending
+  canonical receipts it yields, allowing an already-admitted write to finish.
+  The system owner snapshots to clear receipt pressure and returns the retained
+  device wake. A progressing history import can therefore span many invocations
+  without failed jobs or new mailbox input. Its cooperative yield is labeled
+  `canonical_receipt_capacity`; callers without a specific reason retain the
+  `foreground` default. Outer abort and timeout reasons keep precedence. These
+  diagnostic labels do not change foreground priority or retry ownership.
   Every hosted device-sync lane also enqueues a best-effort
   `device-sync.pass_started` marker before snapshot/provider work and a paired
   `device-sync.pass_finished` marker before returning or rethrowing. Both use
@@ -1953,8 +1962,8 @@ to apply after cutover.
   generation, and workspace version in typed log columns. The terminal marker
   contains only bounded metadata: the last pass stage, outcome, elapsed time,
   processed-job count, checkpoint/retry presence, and a typed yield reason
-  (`foreground`, `timeout`, `invocation_preempted`, `container_destroyed`,
-  `outer_signal`, or `unknown`). It also carries up to 16 slowest claimed-job
+  (`foreground`, `canonical_receipt_capacity`, `timeout`, `invocation_preempted`,
+  `container_destroyed`, `outer_signal`, or `unknown`). It also carries up to 16 slowest claimed-job
   summaries with provider, job kind, code-owned resource class, outcome,
   attempt/job counts, durable-progress presence, total/provider execution time,
   provider time unattributed after subtracting measured callbacks, and measured

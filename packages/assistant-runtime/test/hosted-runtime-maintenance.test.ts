@@ -7472,12 +7472,13 @@ describe("runHostedDeviceSyncWakeLane", () => {
     );
   });
 
-  it.each(["drained", "foreground", "outer", "timeout"] as const)(
+  it.each(["drained", "foreground", "canonical_receipt_capacity", "outer", "timeout"] as const)(
     "drains a long device backlog until %s without weakening cancellation",
     async (stop) => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
       const controller = new AbortController();
+      const logRequests: HostedRuntimeLogRequest[] = [];
       let foregroundPending = false;
       let shouldYieldJobExecution: (() => boolean) | null = null;
       let markDrainStarted: () => void = () => undefined;
@@ -7510,6 +7511,16 @@ describe("runHostedDeviceSyncWakeLane", () => {
           deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
           resolvedConfig: { deviceSync: DEVICE_SYNC_CONFIG },
           shouldYieldDeviceSync: () => foregroundPending,
+          ...(stop !== "foreground"
+            ? { cooperativeYieldReason: "canonical_receipt_capacity" as const } : {}),
+          runtimeLogPlatform: {
+            logPort: {
+              async write(request) {
+                logRequests.push(parseHostedRuntimeLogRequest(request));
+                return { loggedCount: request.entries.length };
+              },
+            },
+          },
           signal: controller.signal,
           timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
           vaultRoot: FIXED_MAINTENANCE_VAULT_ROOT,
@@ -7522,15 +7533,21 @@ describe("runHostedDeviceSyncWakeLane", () => {
           },
         });
         await drainStarted;
-        if (stop === "foreground" || stop === "outer") {
+        if (stop === "foreground" || stop === "canonical_receipt_capacity" || stop === "outer") {
           await vi.advanceTimersByTimeAsync(149_975);
-          if (stop === "foreground") foregroundPending = true;
+          if (stop !== "outer") foregroundPending = true;
           else controller.abort(new Error("workspace invocation preempted"));
           await vi.advanceTimersByTimeAsync(25);
         } else {
           await vi.advanceTimersByTimeAsync(stop === "drained" ? 180_000 : 300_000);
         }
         const result = await resultPromise;
+        await drainHostedRuntimeLogWritesBestEffort();
+        const finished = logRequests.flatMap(({ entries }) => entries)
+          .find(({ eventCode }) => eventCode === "device-sync.pass_finished");
+        expect(finished?.redactedJson?.yieldReason).toBe(
+          stop === "drained" ? null : stop === "outer" ? "invocation_preempted" : stop,
+        );
         expect(result.deviceSyncProcessed).toBe(stop === "drained" ? 6 : stop === "timeout" ? 10 : 5);
         expect(result.deviceSyncSkipped).toBe(stop !== "drained");
         expect(drainWorker).toHaveBeenCalledWith(
