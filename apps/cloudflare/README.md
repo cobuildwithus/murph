@@ -35,8 +35,23 @@ activity expiry, and operation-drop controls still require the selected Postgres
 target. These routes exist only in the hosted-local test entrypoint and retain
 its environment, signature, and bound-member checks.
 
-Run these commands from the repository root. To run one Node workspace test,
-pass its repository-relative filename directly to Vitest:
+Run these commands from the repository root. After installing dependencies in a
+fresh checkout, prepare the Web-owned Prisma client before running the standalone
+Cloudflare typecheck:
+
+```bash
+pnpm --dir apps/web prisma:generate
+pnpm --dir apps/cloudflare typecheck
+```
+
+Cloudflare's hosted-runtime migration test helpers import that generated client.
+Repeat generation after changing the Prisma schema. The root typecheck and
+`pnpm --dir apps/cloudflare verify` already prepare it; app-local `typecheck`
+remains a no-emit check so prepared parallel verification does not regenerate
+shared inputs.
+
+To run one Node workspace test, pass its repository-relative filename directly
+to Vitest:
 
 ```bash
 pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/workspace-snapshot-local.test.ts
