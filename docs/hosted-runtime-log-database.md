@@ -908,6 +908,32 @@ processing outcome (`retry_later:<allowlisted reason>`, a bare outcome, or
 `unknown` for missing or unrecognized values). No raw identity lookup, payload export,
 migration, or runtime control action is required.
 
+### Scheduled automation loss alert
+
+The same five-minute cron runs the scheduled automation loss monitor. A lost run
+is an `assistant.automation_detail` row of type `cron.occurrence.expired` with a
+numeric `failurePriorFailureCount` above zero, or `cron.job.completed` with
+`failureRunOutcome: "failed"` and `failureRetryScheduled: false` other than a
+usage-limit error. When at least 3 distinct subjects lost a run in the trailing
+6 hours, the monitor opens the shared operational email incident.
+
+Requiring a prior failure excludes expiries that never reached the model:
+onboarding-gated research automations are evaluated on a later wake and expire
+with zero prior failures by design. `personal-patterns-update` is excluded
+because its own per-occurrence alert owns it. From 2026-09-30 to 2026-10-07 the
+rule would have opened an incident on each of 10-05, 10-06 and 10-07, when flex
+capacity rejections exhausted weekly digest and morning journal retries, and
+stayed quiet for two isolated single-subject onboarding follow-ups. Cron rows
+are capped per pass, so counts are lower bounds.
+
+Recipients, timezone, reminders, quiet hours and recovery follow the shared
+incident owner with the latency monitor's configuration; read failures cannot
+clear an existing incident. Each evaluation runs one time-indexed aggregate and,
+only when alerting, a second one for failed scheduled attempts by error code.
+Email and incident details contain only counts per allowlisted managed
+automation slug (other slugs, which members can name, read `member_automation`)
+and per allowlisted error code (`other` otherwise).
+
 ### Bounded event inventories
 
 For an already-authorized aggregate diagnostic that times out over a day, keep
