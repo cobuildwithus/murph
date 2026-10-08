@@ -47,15 +47,21 @@ retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
 ## Request consolidation
 
-Snapshot creation and media PUT, registration, and deletion use the existing
-resource command's locked ownership check without a preceding `authorize_effect`
-HTTP call. Snapshot creation returns no data key before admission, media uploads
-admit before sending bytes, and registration/retirement remain transactional.
-Media registration and deletion do not unwrap a crypto context. Media reads,
-artifacts, and private-media capability publication keep their separate authority
-checks: those paths can expose data or a capability without a resource mutation.
-Existing Web resource commands already enforce this boundary, so Worker rollout
-requires no new protocol or coordinated Web deployment.
+Snapshot creation and media PUT, registration, deletion, and read admission use
+resource commands' locked ownership checks without a preceding `authorize_effect`
+HTTP call. Media GET sends `admit_read` with exact attempt/generation; Web checks
+ownership and media lifetime in the same transaction before Worker crypto/storage
+access. Snapshot abort relies on its final delete transaction; compatibility
+checkpoint publication relies on the checkpoint transaction. Expired-session
+cleanup preserves stale-owner rejections even when transport cleanup is best-effort.
+Artifacts and private-media capability publication retain their separate checks.
+
+Deploy Web with `admit_read` support before the Worker. The legacy `read` command
+remains for older Workers that authorize separately. An older Web rejects the new
+operation; there is no fallback, capability flag, or permission cache. Keep Web at
+this version or newer while the new Worker runs. The media command owner removes
+legacy `read` after older Worker versions are drained and excluded from rollback.
+Warm containers keep their existing media HTTP protocol unchanged.
 
 ## Claim, launch, completion, and recovery
 

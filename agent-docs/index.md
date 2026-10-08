@@ -41,6 +41,11 @@ Retention waiting behind live work in another mode is owned by
 is tracked in
 [`retention conflict recheck`](exec-plans/completed/2026-10-08-retention-conflict-owner-recheck.md).
 
+Runtime media read admission and snapshot request consolidation are owned by
+[Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md);
+implementation and proof are tracked in
+[request consolidation](exec-plans/completed/2026-10-07-runtime-request-consolidation.md).
+
 Native Worker secret retirement is owned by `apps/cloudflare/DEPLOY.md`;
 implementation and focused proof are tracked in
 [`native secret retirement`](exec-plans/completed/2026-10-08-native-worker-secret-retirement.md).
