@@ -20,6 +20,12 @@ import { createRunnerReleaseProvider } from "./runner-release-provider.ts";
 import { runSmokeHostedDeploy } from "./smoke-hosted-deploy.shared.ts";
 import { prepareHostedContainerDeployImage } from "./prepare-container-deploy-image.ts";
 import {
+  assertRecoveryWorkerVersion,
+  assertRetiredInferenceSecretsRemoved,
+  hasRetiredInferenceSecrets,
+  readExpectedWorkerSecrets,
+} from "./deploy-retired-inference-secrets.ts";
+import {
   createCloudflareContainerProvider,
   buildContainerReleaseEntries,
   type WranglerContainerAction,
@@ -60,6 +66,7 @@ export async function runDeployWorkerVersionCli(
     dependencies: {
       async deployDirect(input) {
         const retainServingRunner = input.containerRolloutMode === "worker-only";
+        const recovery = readRecoveryVersion(env, retainServingRunner, input.includeSecrets);
         // Retaining an image does not attest an older protocol requirement.
         // Worker-only deployments must preserve the same Web consumer floor.
         const admitWeb = () => assertHostedWebProtocolAdmission(env);
@@ -80,6 +87,22 @@ export async function runDeployWorkerVersionCli(
         const current = await readCurrentDeployment(input.workerName, input.configPath);
         const currentVersionId = requireSingleLiveVersion(current);
         const currentVersion = await releaseProvider.readWorkerVersion(input.workerName, currentVersionId);
+        const stageSourceVersionId = recovery?.id ?? currentVersionId;
+        const assertUploadSource = async (expectedSourceVersionId: string): Promise<void> => {
+          const before = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+          if (before[0] !== expectedSourceVersionId
+            || (recovery && (before.length !== 2 || before[1] !== currentVersionId))) {
+            throw new Error("Worker inheritance source changed before upload; resolve version drift before retrying.");
+          }
+        };
+        if (recovery) {
+          assertRecoveryWorkerVersion({
+            currentVersion, currentVersionId,
+            recoveryVersion: await releaseProvider.readWorkerVersion(input.workerName, recovery.id),
+            recoveryVersionId: recovery.id, recoveryVersionTag: recovery.tag,
+          });
+          await assertUploadSource(stageSourceVersionId);
+        }
         const { releaseSha } = await readRunnerBundleManifest(runnerBundleDir);
         const preparedConfigPath = await prepareHostedContainerDeployImage({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
@@ -95,13 +118,38 @@ export async function runDeployWorkerVersionCli(
         });
         const renderedContainers = await readRenderedContainerIdentities(staged.configPath);
         await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
-        const uploadVersion = async (configPath: string): Promise<string> => {
+        const uploadVersion = async (configPath: string, expectedSourceVersionId: string): Promise<string> => {
+          const expectedSecrets = await readExpectedWorkerSecrets({
+            configPath, currentVersion, currentVersionId,
+            ...(input.includeSecrets ? { secretsFilePath: input.secretsFilePath } : {}),
+          });
+          await assertUploadSource(expectedSourceVersionId);
           const output = await runWranglerLoggedCaptured([
             "versions", "upload", "--config", configPath, "--name", input.workerName,
             "--message", input.deploymentMessage, "--tag", input.versionTag,
             ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
           ]);
-          return parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
+          let versionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
+          const after = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+          if (after.length !== 2 || after[0] !== versionId || after[1] !== expectedSourceVersionId) {
+            throw new Error("Worker version history changed during upload; uploaded version will not be activated.");
+          }
+          let version = await releaseProvider.readWorkerVersion(input.workerName, versionId);
+          if (hasRetiredInferenceSecrets(version, versionId)) {
+            const beforePatch = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+            if (beforePatch[0] !== versionId) throw new Error("Worker version changed before secret retirement; no patch attempted.");
+            const patchedId = await releaseProvider.removeRetiredInferenceSecrets({
+              workerName: input.workerName, versionMessage: input.deploymentMessage, versionTag: input.versionTag,
+            });
+            const afterPatch = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+            if (patchedId === versionId || afterPatch.length !== 2 || afterPatch[0] !== patchedId || afterPatch[1] !== versionId) {
+              throw new Error("Worker version history changed during secret retirement; patched version will not be activated.");
+            }
+            versionId = patchedId;
+            version = await releaseProvider.readWorkerVersion(input.workerName, versionId);
+          }
+          assertRetiredInferenceSecretsRemoved(version, versionId, expectedSecrets);
+          return versionId;
         };
         const activateVersion = async (configPath: string, versionId: string, expectedLiveVersion: string): Promise<void> => {
           await assertActivationAllowed(expectedLiveVersion);
@@ -111,7 +159,7 @@ export async function runDeployWorkerVersionCli(
           ]);
           await assertLiveVersion(input.workerName, input.configPath, versionId);
         };
-        const stageVersionId = await uploadVersion(staged.configPath);
+        const stageVersionId = await uploadVersion(staged.configPath, stageSourceVersionId);
         await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
         // One-time retirement is drain-proven and happens before increasing the
         // serving ceiling. Never refill the retired application on a retry.
@@ -180,7 +228,7 @@ export async function runDeployWorkerVersionCli(
           },
         });
         await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
-        const workerVersionId = staged.workerOnly ? stageVersionId : await uploadVersion(staged.promotionConfigPath);
+        const workerVersionId = staged.workerOnly ? stageVersionId : await uploadVersion(staged.promotionConfigPath, stageVersionId);
         if (!staged.workerOnly) await activateVersion(staged.promotionConfigPath, workerVersionId, stageVersionId);
         const after = await readCloudflareContainerApplicationIdentities(
           renderedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,
@@ -213,6 +261,20 @@ export async function runDeployWorkerVersionCli(
   }
 
   return result;
+}
+
+function readRecoveryVersion(source: EnvSource, workerOnly: boolean, includeSecrets: boolean): { id: string; tag: string } | null {
+  const id = source.HOSTED_EXECUTION_RECOVERY_VERSION_ID;
+  const tag = source.HOSTED_EXECUTION_RECOVERY_VERSION_TAG;
+  if (!id && !tag) return null;
+  if (!id || !tag || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(id)
+    || !tag.trim() || tag !== tag.trim()) {
+    throw new Error("Worker recovery requires an exact full version UUID and nonempty version tag together.");
+  }
+  if (!workerOnly || !includeSecrets) {
+    throw new Error("Worker recovery requires worker-only rollout with synchronized secrets.");
+  }
+  return { id, tag };
 }
 
 async function applyHostedTransientLifecycleRules(input: {

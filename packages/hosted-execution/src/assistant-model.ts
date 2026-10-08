@@ -290,6 +290,9 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
   assertAllowedObjectKeys(
     record,
     new Set([
+      // Discard old Web response metadata; remove acceptance after those producers drain.
+      "availableProviders",
+      "provider",
       "availableModels",
       "availableReasoningEfforts",
       "configurationAvailable",

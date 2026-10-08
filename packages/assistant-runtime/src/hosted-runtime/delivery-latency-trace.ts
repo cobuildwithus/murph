@@ -5,7 +5,10 @@ import {
 import type { AssistantOutboxIntent } from "@murphai/operator-config/assistant-cli-contracts";
 
 import type { HostedRuntimePlatform } from "./platform.ts";
-import { recordLatencyTraceWithRetries } from "./assistant-latency-trace.ts";
+import {
+  recordLatencyTraceWithRetries,
+  waitForHostedStagedLatencyTraceWrites,
+} from "./assistant-latency-trace.ts";
 import {
   resolveHostedRuntimeCheckpointPublicationExpectedByMs,
   resolveHostedRuntimeIdleCheckpointDelayMs,
@@ -38,6 +41,7 @@ export function recordHostedDeliveryCommittedBestEffort(input: {
   ).toISOString();
   queueMicrotask(() => {
     void (async () => {
+      await waitForHostedStagedLatencyTraceWrites();
       for (let offset = 0; offset < ids.length; offset += HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
         await recordLatencyTraceWithRetries(port, {
           event: {

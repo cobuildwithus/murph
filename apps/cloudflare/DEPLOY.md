@@ -1606,11 +1606,37 @@ The production smoke also runs one real `gpt-6-luna` model turn inside the deplo
 ## OpenAI-only inference cutover
 
 Retiring alternative inference requires a coordinated Web, Worker, and runner
-cutover. Quiesce new runtime admission and drain active runtimes before replacing
-the Web configuration/workspace producer and the Worker/runner consumers. Resume
-admission only after all three serve the OpenAI-only contract and the runner
-fingerprint matches the release. Verify one ordinary OpenAI reply and one
-usage-blocked delivery wake through the existing runtime paths.
+cutover. Use the protected native release flow consumer first; there is no
+supported fleet-wide admission pause. Before starting, confirm no member still
+selects a retired provider or custom connection and no runtime owner carries a
+custom inference envelope. Resolve any such state before this sequence.
+
+1. Hold the exact candidate's Web production admission and automatic contract
+   migration workflow. Keep the current Web serving while the runtime changes.
+   A cancelled admission run must be rerun in full after runtime convergence;
+   never manually publish a successful admission status or promote around it.
+2. Deploy the compatibility Worker and runner through private Murph Cloud, with
+   the full image rollout and live model smoke enabled. During native replacement,
+   the Worker emits the fixed `assistantProvider: "openai"` mailbox field for old
+   runners. New configuration readers accept and discard old Web's `provider`
+   and `availableProviders` response fields; update requests remain OpenAI-only.
+3. Require the final Worker at 100%, matching runner fingerprints, the exact
+   target native image/configuration and completed rollouts, successful serving
+   smoke, and the protected deployment's `release_converged` receipt. A successful
+   upload, an idle owner count, or the `immediate` rollout setting alone does not
+   prove that old runners are gone.
+4. Rerun the exact current-main Web admission workflow in full. Let managed
+   Vercel promotion finish and verify all production aliases serve that SHA.
+5. Restore the contract migration workflow and dispatch it against the verified
+   ready deployment. Its alias checks and timed Web function drain complement
+   the already-proven native convergence; they do not replace it.
+
+Verify ordinary OpenAI replies through the protected live smoke/canary. Preserve
+the usage-blocked delivery regression proving the outbox phase can run while
+metered egress stays denied; do not describe an ordinary live canary as live
+proof of that separate condition. Remove the two legacy-facing wire bridges
+only after old Web and runner readers have drained and their rollback window
+has closed. Neither bridge restores alternative inference support.
 
 Apply destructive database cleanup only after no old Web or runtime readers
 remain. Historical immutable usage rows keep their recorded pricing. Remove
@@ -1618,6 +1644,64 @@ retired provider secrets from deployment environments after the old consumers
 are gone. A rollback to an older contract requires a separately reviewed
 compatible database and complete Web/Worker/runner release; reverting a single
 component after cleanup is unsupported.
+
+Once the OpenAI-only Worker and runner consumers have converged, retire
+`VENICE_API_KEY` and `VERCEL_AI_API_KEY` through the existing protected Murph
+Cloud deployment. The ordinary Wrangler upload uses the canonical generated
+config and existing secret payload. If its binding inventory still contains a
+retired name, the existing deployment owner makes one native merge PATCH with
+`env: { VENICE_API_KEY: null, VERCEL_AI_API_KEY: null }` and the deployment's
+message/tag. This follows the [official Wrangler version-secret owner](https://github.com/cloudflare/workers-sdk/blob/c82d96ba63a3b343b520e781a070889251868d9a/packages/wrangler/src/versions/secrets/index.ts#L74-L112):
+`PATCH /accounts/{accountId}/workers/workers/{name}/versions/latest` with
+`Content-Type: application/merge-patch+json`. Cloudflare preserves the remaining
+version code and configuration; the deploy helper does not reconstruct them or
+write temporary Wrangler configs. A clean uploaded inventory skips the patch.
+
+The [raw versions API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/list/)
+returns newest first, including inactive uploads. Before upload, latest must be
+the original live version for staging or the verified stage for final promotion.
+After upload, the newest pair must be uploaded/source. Immediately before a
+secret patch, latest must still be that upload; afterwards the pair must be
+patched/uploaded. A required patch must return a distinct nonempty version ID.
+The final complete secret name/type inventory must match the original baseline
+plus synchronized rotations, excluding only the retired names. Canonical required
+secrets must remain present in that expected inventory. The verified final ID
+feeds existing native rollout, smoke, activation and release-receipt owners.
+
+This path relies on the protected deployment owner's serialized workflow.
+The metadata checks detect source drift; they are not atomic compare-and-swap
+and do not lock out dashboard or other API writers. An unknown inactive latest
+version stops deployment and requires operational resolution; retries must not
+silently adopt it. A failed upload or patch check can leave an inactive version
+but does not authorize activation. Existing live identity guards remain required.
+Local serialization and mocked API tests do not replace protected external
+acceptance. Run cleanup through this deployment owner without separate local
+secret deletion or promotion.
+
+When an operator has identified a trusted failed upload that cannot be removed,
+the protected deployment may explicitly use it as the secret source for a fresh
+worker-only upload. Set both `HOSTED_EXECUTION_RECOVERY_VERSION_ID` (the complete
+UUID) and `HOSTED_EXECUTION_RECOVERY_VERSION_TAG` (its exact tag), together with
+`HOSTED_EXECUTION_CONTAINER_ROLLOUT=worker-only` and synchronized secret inclusion.
+Both recovery inputs empty means ordinary deployment; partial, padded or malformed
+values fail closed. Forward these inputs only to the protected apply step.
+
+Recovery requires one live version serving 100%, a distinct named inactive version
+with the exact tag and complete live secret name/type inventory, and the raw
+latest pair inactive/live. The pair is checked before image/lifecycle preparation
+and again immediately before upload. The original live metadata still owns all
+runner preparation and final expected-secret calculations. Only the fresh upload's
+inheritance source changes; its history pair must be fresh/inactive, and all native
+PATCH, inventory, live identity, smoke and activation gates remain required.
+Only the newly verified version can appear in the deployment receipt or activation.
+
+The operator must establish that the named upload is their trusted failed attempt.
+Matching names/types cannot prove opaque secret values are equal, and no secret
+values are fetched for this check. The current synchronized payload applies its
+rotations; optional inherited secrets remain subject to that explicit trust.
+This is not automatic discovery, retry or activation of the old candidate.
+Further drift or another failed upload requires a new deliberate selection;
+protected serialization remains necessary, with no atomic CAS guarantee.
 
 ## Required GitHub Environment Secrets
 

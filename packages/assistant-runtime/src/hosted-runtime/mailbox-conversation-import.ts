@@ -94,6 +94,7 @@ import {
 } from "./events/email.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
+  recordHostedStagedLatencyTraceBestEffort,
 } from "./assistant-latency-trace.ts";
 import { startHostedLinqInputTyping } from "./channel-activity.ts";
 
@@ -903,7 +904,7 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
   });
 
   try {
-    void latencyTracePort.record({
+    recordHostedStagedLatencyTraceBestEffort(latencyTracePort, {
       event: {
         assistantInputId: input.inputId,
         at: new Date().toISOString(),
@@ -924,8 +925,6 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
           ? {}
           : { workspaceRestoreDoneAt: latencyMilestones.workspaceRestoreDoneAt }),
       },
-    }).catch(() => {
-      // Latency traces are diagnostic-only and must not affect runtime progress.
     });
   } catch {
     // Latency traces are diagnostic-only and must not affect runtime progress.

@@ -1,3 +1,7 @@
+OpenAI-only mixed-version rollout preparation is tracked in
+[the rollout plan](exec-plans/completed/2026-10-07-openai-rollout.md); the live
+deployment sequence is owned by `../apps/cloudflare/DEPLOY.md`.
+
 OpenAI-only CI fixture corrections and their focused proof are recorded in
 [the fixture correction plan](exec-plans/completed/2026-10-07-openai-only-ci-fixtures.md).
 
@@ -16,6 +20,11 @@ The current GPT-6 picker and concrete-model proof contract is owned by
 Pinned native source review context and provenance proof are recorded in
 [the native review context plan](exec-plans/completed/2026-10-07-frog-native-review-context.md).
 
+Completed projection optimization evidence for public wearable direct copy,
+including parity/privacy proof and measured synthetic CPU reduction, is tracked in
+[the projection copy plan](exec-plans/completed/2026-10-07-public-wearable-projection-copy.md);
+`../packages/query/README.md#ordinary-wearable-reads` owns the contract.
+
 Codex 0.160.0 reconciliation for the current PR is recorded in
 [the PR preparation plan](exec-plans/active/2026-10-01-codex-cli-0160-pr.md).
 
@@ -30,7 +39,27 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 Runtime media read admission and snapshot request consolidation are owned by
 [Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md);
 implementation and proof are tracked in
-[request consolidation](exec-plans/active/2026-10-07-runtime-request-consolidation.md).
+[request consolidation](exec-plans/completed/2026-10-07-runtime-request-consolidation.md).
+
+Native Worker secret retirement is owned by `apps/cloudflare/DEPLOY.md`;
+implementation and focused proof are tracked in
+[`native secret retirement`](exec-plans/completed/2026-10-08-native-worker-secret-retirement.md).
+
+Explicit recovery from a trusted inactive Worker upload is owned by the same
+deployment contract; focused proof is tracked in
+[`inactive upload recovery`](exec-plans/completed/2026-10-08-known-inactive-worker-recovery.md).
+
+Worker secret inheritance source guards are owned by `apps/cloudflare/DEPLOY.md`;
+implementation and focused proof are tracked in
+[`latest secret inheritance`](exec-plans/completed/2026-10-07-latest-secret-inheritance.md).
+
+Required-secret declarations during protected credential retirement are owned by
+`apps/cloudflare/DEPLOY.md`; regression proof is tracked in
+[`inference secret upload`](exec-plans/completed/2026-10-07-fix-inference-secret-upload.md).
+
+Protected retirement of unused inference secrets is owned by
+`apps/cloudflare/DEPLOY.md`; focused proof is tracked in
+[`retired inference secrets`](exec-plans/completed/2026-10-07-retire-inference-secrets.md).
 
 Receipt-capacity device import yield classification is owned by
 `RELIABILITY.md`; focused cancellation and composed runtime proof is recorded in
@@ -1084,6 +1113,8 @@ and the processing-attempt runaway alert are tracked in
 `references/hosted-postgres-runtime.md`, `references/hosted-temporal-orchestration.md`
 and `../docs/hosted-runtime-log-database.md` own the contracts.
 
+Native companion phone linking, session-bound, single-use Telegram SDK login and accepted-welcome/awaiting-inbound protocol are owned by `../docs/hosted-auth-migration.md`; implementation and proof are tracked in `exec-plans/completed/2026-10-06-native-messaging-link.md`.
+
 Claimable standby health observations and race/recovery proof are recorded in
 [`standby rechecks`](exec-plans/completed/2026-10-06-standby-recheck.md).
 The current inventory and telemetry contract remains in `apps/cloudflare/README.md`.
@@ -1117,3 +1148,11 @@ Junction historical/webhook dense imports commit up to eight closed days per can
 
 Final usage-envelope fitting after trusted Worker attribution is tracked in
 [the usage reporting plan](exec-plans/completed/2026-10-07-usage-reporting-envelope.md).
+
+The scheduled automation loss alert (any run lost after all retries) is
+tracked in [the automation loss alert plan](exec-plans/completed/2026-10-07-automation-loss-alert.md);
+`../docs/hosted-runtime-log-database.md` owns the operational contract.
+
+The six-hour freshness window for Flex-retry managed automations is tracked in
+[the Flex retry window plan](exec-plans/completed/2026-10-07-flex-retry-6h-window.md);
+`../ARCHITECTURE.md` owns the runtime contract.

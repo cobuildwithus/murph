@@ -103,6 +103,31 @@ describe("Worker mailbox fetch/decode composition", () => {
     // Canonical Web parsing never accepts the ephemeral plaintext field.
     expect(parseHostedMailboxFetchResponse(fetched).items[0]).not.toHaveProperty("decodedWake");
   });
+  it.each(["previous", "current", "retired-provider"])(
+    "returns fixed OpenAI wire metadata and decoded wakes for a %s Web response",
+    async (webContract) => {
+      const { assistantProvider: _previousProvider, ...mailbox } = await mailboxFixture();
+      mocks.forward.mockImplementation(async () => Response.json({
+        ...mailbox,
+        ...(webContract === "current" ? {} : {
+          assistantProvider: webContract === "previous" ? "openai" : "retired-provider",
+          assistantCustomInferenceRevision: null,
+        }),
+      }));
+      const response = await handle(request());
+      expect(response.status).toBe(200);
+      const bridged = await response.json();
+      expect(bridged).toMatchObject({ assistantProvider: "openai", items: [{ decodedWake: wake }] });
+      expect(bridged).not.toHaveProperty("assistantCustomInferenceRevision");
+
+      const port = createHostedWebMailboxPort({ boundUserId: wake.userId,
+        fetchImpl: vi.fn<typeof fetch>(async () => Response.json(bridged)),
+        timeoutMs: 1000, transport: { mode: "proxy" } });
+      const fetched = await port.fetch(requestBody);
+      expect(fetched).not.toHaveProperty("assistantProvider");
+      expect(fetched.items[0]?.decodedWake).toEqual(wake);
+    },
+  );
   it.each([2, 100])("resolves ingress context once for %i inline items", async (count) => {
     const mailbox = await mailboxFixture();
     for (let index = 2; index <= count; index += 1) {
@@ -178,7 +203,9 @@ describe("Worker mailbox fetch/decode composition", () => {
     mocks.suppliedCrypto.mockRejectedValue(new Error("Invalid envelope signature"));
     const response = await handle(request());
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(parseHostedMailboxFetchResponse(mailbox));
+    await expect(response.json()).resolves.toEqual({
+      ...parseHostedMailboxFetchResponse(mailbox), assistantProvider: "openai",
+    });
     expect(mocks.suppliedCrypto).toHaveBeenCalledTimes(1);
     expect(mocks.crypto).not.toHaveBeenCalled();
   });
