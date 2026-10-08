@@ -325,6 +325,90 @@ require those devices to sign in again. A later import cannot restore the old
 method. These routes remain gated by issuance activation; the settings clients
 and recovery journeys must be qualified before enabling them.
 
+### Native first messaging setup
+
+Authenticated companions use four additive, cookie-rejecting POST endpoints:
+
+- `/api/device-sync/companion/auth/messaging/phone/send`
+- `/api/device-sync/companion/auth/messaging/phone/verify`
+- `/api/device-sync/companion/auth/messaging/telegram/start`
+- `/api/device-sync/companion/auth/messaging/telegram/complete`
+
+Phone requests carry `{ change: { method: "phone", operation: "set",
+expectedIdentity: null, value: "<E164_PHONE>" } }`; verify also carries `code`.
+The existing credential owner owns canonical conflict checks, SMS budgets,
+Twilio Verify proof, current-session revalidation, first-messaging eligibility,
+five-minute primary freshness, atomic contact/login writes and durable channel
+wake. These endpoints cannot replace/remove methods, accept client approval,
+import members, or bypass existing approval state. Protected members use account
+settings; stale primary proof requires signing in again. Additions preserve
+sessions. Existing browser credential routes are unchanged.
+
+Telegram start accepts `{}` and returns `{ ok: true, startId, clientId }`, without
+cookies. The random 256-bit start ID expires after five minutes in the existing
+encrypted auth verification store, bound to the native member and session under
+a purpose distinct from browser login and credential changes. Completion accepts
+`{ startId, idToken }` with the original bearer. The unmodified official SDKs
+request `openid profile telegram:bot_access` and own registered HTTPS App Link /
+Universal Link callbacks and PKCE. No Murph-hosted browser intermediary, backend
+code exchange, SDK fork or client secret is introduced. The SDK may use its own
+platform authentication-session fallback when Telegram is not installed.
+
+The human-approved native exception does not require the nonce the SDKs cannot
+send. It retains the shared verifier's JWKS, algorithms, issuer, audience and
+expiry checks, requires `sub` and `iat`, limits token age to two minutes with at
+most five seconds of future clock skew, and rejects tokens issued before the
+pending start (allowing five seconds for clock skew). A SHA-256 token digest
+becomes a globally unique consumed verification record, retained beyond its
+acceptance window. Pending-start consumption, replay reservation and canonical
+credential mutation commit atomically. Wrong member/session, missing start,
+stale token, replay and conflicts fail closed; member/IP attempt budgets apply.
+The trust rationale is delivery through the registered app callback with SDK
+PKCE, plus current native bearer authority and short-lived one-use proof. This
+is not a cryptographic token-to-start nonce binding. A stolen fresh token remains
+a bearer proof until consumption; never log, persist or expose it in app URLs.
+Browser login and browser credential changes still require the exact signed
+nonce and cookie binding without this exception.
+
+After the committed link, one bounded Bot API send attempts the existing
+`assistant.signup_welcome` content. Telegram documents no bot-access token claim;
+requesting the scope alone is not proof that a message can be delivered. Only a
+successful Bot API message response naming the verified private chat promotes
+`telegramThreadId`, through the existing routing owner and channel-update wake.
+Promotion rechecks the identity under the member lock so removal/replacement
+while the send was in flight cannot restore a stale link. Replay cannot resend.
+Provider rejection, missing access, blocked bots, malformed responses and network
+uncertainty leave the identity linked but awaiting inbound. This narrow native
+link welcome does not enable general proactive Telegram activation welcomes.
+
+Completion also returns `telegramAwaitingInbound` and `telegramUrl` (the bot chat
+with a prefilled greeting, or null if unconfigured). The initial-onboarding
+projection includes the additive `telegramAwaitingInbound` flag for recovery
+across process restarts, only when no other direct messaging route exists. A
+member with a canonical phone must not be held for an unrelated pending Telegram
+thread. Legacy `messagingSetupRequired` semantics are unchanged:
+a verified canonical phone or linked Telegram identity clears that flag. New
+clients show the explicit say-hi step while Telegram awaits inbound and refresh
+on return; they must not infer a direct route from a successful SDK callback.
+The bot-start linking protocol, recipient proof and custom return page are gone.
+
+The native setup default contains the existing phone input and Send code action,
+a quiet divider and secondary Connect Telegram button, with Sign out in the top
+bar. SMS uses the existing six-digit input. Telegram login uses the centered
+confirming state, then either readiness continuation or the say-hi fallback.
+Cancellation and errors stay inline; account settings appears only for changes
+that need its existing approval or conflict controls.
+
+Deploy this backend before distributing either native consumer. Older apps keep
+using browser settings, and the new initial-onboarding field is additive. New
+apps against an older backend fail the native operation without weakening proof.
+Rollback to a backend without these endpoints requires pausing dependent native
+distribution; already installed newer apps retain SMS/browser error recovery.
+Production merge qualification includes an unauthenticated endpoint rejection
+smoke. Native distribution additionally needs registered callback domains and
+real-device Telegram approval. Android distribution also requires its real
+registered redirect host and the official SDK package-fetch credentials.
+
 ## Browser and native continuity
 
 Browser renewal and primary sign-in/logout serialize cookie-writing requests with one origin-wide Web Lock. An older renewal must settle before another login is dispatched, including across tabs; no valid server session is revoked merely to change accounts. Renewal requests have a ten-second deadline and verification/logout have thirty-second deadlines. Browsers without the lock API retain their existing cookie lifetime and can still sign in; native bearer renewal is unchanged. This uses the browser's [Web Locks contract](https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API), with no persistent coordinator.

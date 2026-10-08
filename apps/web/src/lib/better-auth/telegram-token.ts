@@ -1,5 +1,5 @@
 import "server-only";
-import { createRemoteJWKSet, jwtVerify, errors, type JWTVerifyGetKey } from "jose";
+import { createRemoteJWKSet, jwtVerify, errors, type JWTVerifyGetKey, type JWTPayload } from "jose";
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 
 const issuer = "https://oauth.telegram.org";
@@ -12,22 +12,25 @@ export function requireHostedTelegramClientId(): string {
 }
 
 export async function verifyHostedTelegramIdToken(input: {
-  token: string; nonce: string; clientId: string;
-}, keyResolver: JWTVerifyGetKey = keys) {
-  if (input.token.length > 8_192 || !/^[A-Za-z0-9_-]{43}$/u.test(input.nonce)) throw invalidToken("input");
+  token: string; clientId: string;
+} & ({ nonce: string; transport?: "browser" } | { transport: "native"; nonce?: never }), keyResolver: JWTVerifyGetKey = keys) {
+  const native = input.transport === "native";
+  if (input.token.length > 8_192 || (!native && !/^[A-Za-z0-9_-]{43}$/u.test(input.nonce))) throw invalidToken("input");
   try {
     const { payload } = await jwtVerify(input.token, keyResolver, {
       issuer, audience: input.clientId, algorithms: ["RS256", "ES256"],
-      requiredClaims: ["exp", "iat", "nonce"], maxTokenAge: "5m", clockTolerance: 5,
+      requiredClaims: native ? ["exp", "iat", "sub"] : ["exp", "iat", "nonce"],
+      maxTokenAge: native ? "2m" : "5m", clockTolerance: 5,
     });
     // OIDC sub and Telegram's Bot API user ID are different identifiers. Only
     // the verified profile id preserves the canonical messaging/login binding.
-    if (payload.nonce !== input.nonce) throw invalidToken("nonce_mismatch");
+    if (!native && payload.nonce !== input.nonce) throw invalidToken("nonce_mismatch");
     const telegramUserId = readTelegramProfileId(payload.id);
     if (typeof payload.iat !== "number" || typeof payload.exp !== "number") throw invalidToken("timestamp");
     const authenticatedAt = new Date(payload.iat * 1_000);
     const expiresAt = new Date(payload.exp * 1_000);
     if (!Number.isFinite(authenticatedAt.getTime()) || !Number.isFinite(expiresAt.getTime())) throw invalidToken("timestamp");
+    if (native) assertNativeFreshness(payload, authenticatedAt, expiresAt);
     return { telegramUserId, authenticatedAt, expiresAt };
   } catch (error) {
     if (error instanceof errors.JWTClaimValidationFailed) {
@@ -38,6 +41,12 @@ export async function verifyHostedTelegramIdToken(input: {
     if (isHostedOnboardingError(error)) throw error;
     throw invalidToken("verification_unavailable");
   }
+}
+
+function assertNativeFreshness(payload: JWTPayload, authenticatedAt: Date, expiresAt: Date) {
+  const now = Date.now();
+  if (now - authenticatedAt.getTime() > 120_000 || authenticatedAt.getTime() - now > 5_000
+    || expiresAt.getTime() <= now || typeof payload.sub !== "string" || !payload.sub) throw invalidToken("freshness");
 }
 
 function readTelegramProfileId(value: unknown): string {
