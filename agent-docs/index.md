@@ -1,3 +1,7 @@
+OpenAI-only mixed-version rollout preparation is tracked in
+[the rollout plan](exec-plans/completed/2026-10-07-openai-rollout.md); the live
+deployment sequence is owned by `../apps/cloudflare/DEPLOY.md`.
+
 OpenAI-only CI fixture corrections and their focused proof are recorded in
 [the fixture correction plan](exec-plans/completed/2026-10-07-openai-only-ci-fixtures.md).
 
@@ -16,6 +20,11 @@ The current GPT-6 picker and concrete-model proof contract is owned by
 Pinned native source review context and provenance proof are recorded in
 [the native review context plan](exec-plans/completed/2026-10-07-frog-native-review-context.md).
 
+Completed projection optimization evidence for public wearable direct copy,
+including parity/privacy proof and measured synthetic CPU reduction, is tracked in
+[the projection copy plan](exec-plans/completed/2026-10-07-public-wearable-projection-copy.md);
+`../packages/query/README.md#ordinary-wearable-reads` owns the contract.
+
 Codex 0.160.0 reconciliation for the current PR is recorded in
 [the PR preparation plan](exec-plans/active/2026-10-01-codex-cli-0160-pr.md).
 
@@ -26,6 +35,10 @@ Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
 # Murph Agent Docs Index
+
+Protected retirement of unused inference secrets is owned by
+`apps/cloudflare/DEPLOY.md`; focused proof is tracked in
+[`retired inference secrets`](exec-plans/completed/2026-10-07-retire-inference-secrets.md).
 
 Receipt-capacity device import yield classification is owned by
 `RELIABILITY.md`; focused cancellation and composed runtime proof is recorded in
@@ -1112,6 +1125,10 @@ Junction historical/webhook dense imports commit up to eight closed days per can
 
 Final usage-envelope fitting after trusted Worker attribution is tracked in
 [the usage reporting plan](exec-plans/completed/2026-10-07-usage-reporting-envelope.md).
+
+The scheduled automation loss alert (any run lost after all retries) is
+tracked in [the automation loss alert plan](exec-plans/completed/2026-10-07-automation-loss-alert.md);
+`../docs/hosted-runtime-log-database.md` owns the operational contract.
 
 The six-hour freshness window for Flex-retry managed automations is tracked in
 [the Flex retry window plan](exec-plans/completed/2026-10-07-flex-retry-6h-window.md);

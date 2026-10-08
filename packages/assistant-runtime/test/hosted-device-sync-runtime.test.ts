@@ -97,7 +97,12 @@ import {
   HostedRuntimeArtifactWriteError,
   type HostedRuntimeDeviceSyncPort,
 } from "../src/hosted-runtime/platform.ts";
-import { runHostedDeviceSyncPass } from "../src/hosted-runtime/device-sync-maintenance.ts";
+import {
+  buildHostedDeviceSyncFailureJobLineage,
+  buildHostedDeviceSyncPassLineageDiagnostics,
+  runHostedDeviceSyncPass,
+} from "../src/hosted-runtime/device-sync-maintenance.ts";
+import type { HostedMaintenanceMetrics } from "../src/hosted-runtime/models.ts";
 import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
@@ -16140,6 +16145,189 @@ describe("hosted device-sync runtime", () => {
       deviceSyncPort: port, wake: { ...wake, expectedConnectedAt: "2026-03-01T00:00:00.000Z" },
     });
     assert.equal(applied.length, 1);
+  });
+
+  test("job lineage joins one failed logical job to its retry after hosted cold handoff", async () => {
+    const connectionId = "hosted_conn_lineage";
+    const occurredAt = "2026-04-04T10:00:00.000Z";
+    const workspaces = await Promise.all(["failed", "restored"].map((slug) =>
+      createHostedRuntimeWorkspace(`hosted-device-sync-lineage-${slug}-`)
+    ));
+    const [failedRuntime, restoredRuntime] = workspaces;
+    assert.ok(failedRuntime && restoredRuntime);
+    await Promise.all(workspaces.map((workspace) => mkdir(workspace.vaultRoot, { recursive: true })));
+    let failing = true;
+    const provider = createFakeProvider({
+      jobExecutor: {
+        async executeJob() {
+          if (failing) {
+            throw deviceSyncError({
+              code: "SYNTHETIC_PROVIDER_UNAVAILABLE",
+              httpStatus: 503,
+              message: "Synthetic provider outage.",
+              retryable: true,
+            });
+          }
+          return {};
+        },
+      },
+    });
+    const port = createSnapshotOnlyDeviceSyncPort(buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId: "demo-lineage",
+    }));
+    const wake = buildDeviceSyncWake({
+      connectionId,
+      hint: { jobs: [{ dedupeKey: "synthetic-window-a", kind: "resource", payload: {
+        windowEnd: "2026-04-02T00:00:00.000Z", windowStart: "2026-04-01T00:00:00.000Z",
+      } }] },
+      occurredAt,
+      reason: "reconcile_due",
+    });
+    const readLineage = (value: unknown): string[] => {
+      assert.ok(Array.isArray(value));
+      return value.flatMap((chunk) => String(chunk).split(","));
+    };
+    const passMetrics = (
+      postCheckpointRecord: HostedMaintenanceMetrics["postCheckpointRecord"],
+    ): HostedMaintenanceMetrics => ({
+      deviceSyncProcessed: 2,
+      deviceSyncSkipped: false,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord,
+    });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(occurredAt));
+    const first = createDeviceSyncServiceForVault(failedRuntime.vaultRoot, [provider]);
+    const second = createDeviceSyncServiceForVault(restoredRuntime.vaultRoot, [provider]);
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: first, wake,
+      });
+      const localAccountId = firstState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(localAccountId);
+      // A local row without a dedupe key is identified by its handoff key.
+      getStore(first).enqueueJob({
+        accountId: localAccountId, availableAt: occurredAt, kind: "resource", payload: {}, provider: "demo",
+      });
+      assert.equal(await first.drainWorker(10, localAccountId), 2);
+
+      const failures = first.listJobFailureDiagnostics();
+      assert.equal(failures.length, 2);
+      const failedLineage = failures.map((failureDiagnostic) => buildHostedDeviceSyncFailureJobLineage({
+        failureDiagnostic,
+        hostedConnectionIds: firstState.localToHostedAccountIds,
+        userId: wake.userId,
+      }));
+      const failedFingerprints = failedLineage.flatMap((lineage) => {
+        assert.equal(lineage.failureJobLineageTruncated, false);
+        return readLineage(lineage.failureJobLineage);
+      });
+      assert.equal(failedFingerprints.length, 2);
+      assert.ok(failedFingerprints.every((fingerprint) => /^[a-f0-9]{16}$/u.test(fingerprint)));
+      assert.notEqual(failedFingerprints[0], failedFingerprints[1]);
+
+      const recovery = resolveHostedDeviceSyncWakeRecovery({ service: first, state: firstState, wake });
+      assert.ok(recovery);
+      const firstPass = buildHostedDeviceSyncPassLineageDiagnostics({
+        hostedConnectionIds: firstState.localToHostedAccountIds,
+        jobTimingDiagnostics: first.listJobTimingDiagnostics(),
+        processedJobs: 2,
+        result: passMetrics({
+          kind: "device-sync.dirty-processed-batch",
+          records: [],
+          retainMailboxItemUntil: recovery.retryAt,
+          retainedWake: recovery.wake,
+        }),
+        wake,
+      });
+      assert.deepEqual(
+        readLineage(firstPass.deviceSyncJobLineage).sort(),
+        failedFingerprints.map((fingerprint) => `${fingerprint}:f0s`).sort(),
+      );
+      assert.equal(firstPass.deviceSyncJobLineageUnknownCount, 0);
+      assert.equal(firstPass.deviceSyncJobLineageTruncated, false);
+      const [incomingFingerprint] = readLineage(firstPass.incomingRetainedJobLineage);
+      assert.ok(incomingFingerprint && failedFingerprints.includes(incomingFingerprint));
+      assert.deepEqual(readLineage(firstPass.outgoingRetainedJobLineage), [...failedFingerprints].sort());
+
+      // Cold handoff: a fresh runtime hydrates only the retained wake.
+      vi.setSystemTime(new Date("2026-04-04T10:05:00.000Z"));
+      failing = false;
+      const secondState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: second, wake: recovery.wake,
+      });
+      const restoredAccountId = secondState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      assert.equal(await second.drainWorker(10, restoredAccountId), 2);
+      // Restored rows restart their local counter, so attempts cannot prove a retry.
+      assert.deepEqual(second.listJobTimingDiagnostics().map((timing) => timing.attempts), [1, 1]);
+      const secondPass = buildHostedDeviceSyncPassLineageDiagnostics({
+        hostedConnectionIds: secondState.localToHostedAccountIds,
+        jobTimingDiagnostics: second.listJobTimingDiagnostics(),
+        processedJobs: 2,
+        result: passMetrics(null),
+        wake: recovery.wake,
+      });
+      assert.deepEqual(
+        readLineage(secondPass.incomingRetainedJobLineage),
+        readLineage(firstPass.outgoingRetainedJobLineage),
+      );
+      assert.deepEqual(
+        readLineage(secondPass.deviceSyncJobLineage).sort(),
+        failedFingerprints.map((fingerprint) => `${fingerprint}:c0s`).sort(),
+      );
+      assert.deepEqual(secondPass.outgoingRetainedJobLineage, []);
+
+      // The same logical job is unlinkable across members and connections, and
+      // missing connection context is reported as unknown rather than guessed.
+      const [firstFailure] = failures;
+      assert.ok(firstFailure);
+      for (const isolated of [
+        { hostedConnectionIds: firstState.localToHostedAccountIds, userId: "member_other" },
+        { hostedConnectionIds: new Map([[localAccountId, "hosted_conn_other"]]), userId: wake.userId },
+      ]) {
+        const lineage = buildHostedDeviceSyncFailureJobLineage({ failureDiagnostic: firstFailure, ...isolated });
+        assert.equal(readLineage(lineage.failureJobLineage).some((fingerprint) =>
+          failedFingerprints.includes(fingerprint)
+        ), false);
+      }
+      assert.deepEqual(buildHostedDeviceSyncFailureJobLineage({
+        failureDiagnostic: firstFailure, hostedConnectionIds: new Map(), userId: wake.userId,
+      }), { failureJobLineage: null, failureJobLineageTruncated: null });
+      const { jobIdentities: _identities, ...failureWithoutIdentity } = firstFailure;
+      assert.deepEqual(buildHostedDeviceSyncFailureJobLineage({
+        failureDiagnostic: failureWithoutIdentity,
+        hostedConnectionIds: firstState.localToHostedAccountIds,
+        userId: wake.userId,
+      }), { failureJobLineage: null, failureJobLineageTruncated: null });
+
+      const request = parseHostedRuntimeLogRequest({ entries: [
+        {
+          at: occurredAt, component: "device-sync", errorCode: "SYNTHETIC_PROVIDER_UNAVAILABLE",
+          eventCode: "device-sync.job_failed", level: "warn", phase: "invoke",
+          redactedJson: { failureSummary: "Synthetic provider outage.", ...failedLineage[0] },
+        },
+        ...[firstPass, secondPass].map((redactedJson) => ({
+          at: occurredAt, component: "device-sync", eventCode: "device-sync.pass_finished",
+          level: "info", phase: "invoke", redactedJson,
+        })),
+      ] });
+      const serialized = JSON.stringify(request);
+      for (const raw of [
+        "synthetic-window-a", "hosted-device-sync-job:", "2026-04-01", "2026-04-02",
+        connectionId, localAccountId, restoredAccountId, wake.userId,
+        ...failures.flatMap((failure) => failure.jobIdentities?.map((identity) => identity.jobId) ?? []),
+      ]) {
+        assert.equal(serialized.includes(raw), false, `lineage leaked ${raw}`);
+      }
+    } finally {
+      closeHostedRuntimeDeviceSyncService(first);
+      closeHostedRuntimeDeviceSyncService(second);
+      vi.useRealTimers();
+      await Promise.all(workspaces.map((workspace) => workspace.cleanup()));
+    }
   });
 
   test("checkpoints Junction sweep suppression with recoverable jobs across hosted cold restores", async () => {

@@ -6,7 +6,11 @@ import { syntheticHostedWebProtocolAdmission } from "./helpers/hosted-web-protoc
 const webProtocolMocks = vi.hoisted(() => ({ admit: vi.fn() }));
 vi.mock("../scripts/deploy-web-protocol.ts", () => ({ assertHostedWebProtocolAdmission: webProtocolMocks.admit }));
 
-const fileMocks = vi.hoisted(() => ({ readFile: vi.fn(async () => "{}"), writeFile: vi.fn(async () => {}) }));
+const fileMocks = vi.hoisted(() => ({
+  readFile: vi.fn<(filePath: unknown, ...args: unknown[]) => Promise<string>>(async () => "{}"),
+  rm: vi.fn<(filePath: unknown, ...args: unknown[]) => Promise<void>>(async () => {}),
+  writeFile: vi.fn<(filePath: unknown, content: unknown, ...args: unknown[]) => Promise<void>>(async () => {}),
+}));
 vi.mock("node:fs/promises", async () => ({
   ...await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises"),
   ...fileMocks,
@@ -164,6 +168,8 @@ describe("runDeployWorkerVersionCli", () => {
 
   beforeEach(() => {
     fileMocks.readFile.mockReset().mockResolvedValue("{}");
+    fileMocks.writeFile.mockReset().mockResolvedValue(undefined);
+    fileMocks.rm.mockReset().mockResolvedValue(undefined);
     webProtocolMocks.admit.mockReset().mockResolvedValue(undefined);
     releaseMocks.stageHostedRunnerRelease.mockReset();
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
@@ -171,7 +177,7 @@ describe("runDeployWorkerVersionCli", () => {
       activeApplicationName: "hosted-worker-runnercontainer", applications: [], workerOnly: false,
     }));
     releaseMocks.readWorkerVersion.mockReset();
-    releaseMocks.readWorkerVersion.mockResolvedValue({});
+    releaseMocks.readWorkerVersion.mockResolvedValue({ id: "version-direct", resources: { bindings: [] } });
     releaseMocks.admitApplication.mockReset();
     releaseMocks.admitApplication.mockResolvedValue("created");
     releaseMocks.assertApplicationReady.mockReset();
@@ -204,6 +210,60 @@ describe("runDeployWorkerVersionCli", () => {
     receiptMocks.readRenderedContainerIdentities.mockResolvedValue(renderedContainers);
     receiptMocks.waitForCloudflareContainerReleaseEntries.mockReset();
     receiptMocks.waitForCloudflareContainerReleaseEntries.mockResolvedValue(releasedContainers);
+  });
+
+  it.each([false, true])("checks stage and promotion secret inventories before activation with synchronization=%s", async includeSecrets => {
+    const retained = [{ name: "OPENAI_API_KEY", type: "secret_text" }, { name: "OPTIONAL_SECRET", type: "secret_text" }];
+    const trace: string[] = [];
+    let liveVersion = "version-direct";
+    releaseMocks.readWorkerVersion.mockImplementation(async (_worker, versionId) => {
+      trace.push(`inventory:${versionId}`);
+      return { id: versionId, resources: { bindings: versionId === "version-direct"
+        ? [...retained, { name: "VENICE_API_KEY", type: "secret_text" }, { name: "VERCEL_AI_API_KEY", type: "secret_text" }]
+        : [...retained, ...(includeSecrets ? [{ name: "NEW_SECRET", type: "secret_text" }] : [])] } };
+    });
+    fileMocks.readFile.mockImplementation(async filePath => String(filePath).endsWith("secrets.json")
+      ? JSON.stringify({ OPENAI_API_KEY: "synthetic-rotation", NEW_SECRET: "synthetic-new" }) : "{}");
+    receiptMocks.parseWranglerWorkerVersionId.mockReturnValueOnce("stage-version").mockReturnValueOnce("final-version");
+    wranglerMocks.runWranglerJson.mockImplementation(async () => JSON.stringify({ versions: [{ percentage: 100, version_id: liveVersion }] }));
+    wranglerMocks.runWranglerLogged.mockImplementation(async args => {
+      if (args[0] === "versions") {
+        liveVersion = args[2].split("@")[0];
+        trace.push(`activate:${liveVersion}`);
+      }
+    });
+    await syntheticDeployment("immediate", {}, includeSecrets);
+    expect(trace).toEqual(["inventory:version-direct", "inventory:stage-version", "activate:stage-version", "inventory:final-version", "activate:final-version"]);
+    expect(fileMocks.writeFile.mock.calls.filter(([filePath]) => String(filePath).includes(".retired-secrets-"))).toHaveLength(2);
+    for (const [filePath, content] of fileMocks.writeFile.mock.calls) {
+      if (!String(filePath).includes(".retired-secrets-")) continue;
+      expect(JSON.parse(String(content)).unsafe.bindings).toEqual(retained.map(({ name }) => ({ name, type: "inherit", version_id: "version-direct" })));
+      expect(fileMocks.rm).toHaveBeenCalledWith(filePath, { force: true });
+    }
+    for (const [args] of wranglerMocks.runWranglerLoggedCaptured.mock.calls) {
+      expect(args.includes("--secrets-file")).toBe(includeSecrets);
+    }
+  });
+
+  it.each(["stage", "promotion"])("stops before %s activation if the uploaded secret inventory changed", async boundary => {
+    let reads = 0;
+    releaseMocks.readWorkerVersion.mockImplementation(async () => {
+      reads += 1;
+      return { id: "version-direct", resources: { bindings: reads === (boundary === "stage" ? 2 : 3)
+        ? [{ name: "VENICE_API_KEY", type: "secret_text" }] : [] } };
+    });
+    await expect(syntheticDeployment()).rejects.toThrow("secret inventory differs");
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(boundary === "stage" ? 0 : 1);
+    expect(fileMocks.rm).toHaveBeenCalledTimes(boundary === "stage" ? 1 : 2);
+  });
+
+  it("cleans up the exact upload config after upload failure and can retry", async () => {
+    wranglerMocks.runWranglerLoggedCaptured.mockRejectedValueOnce(new Error("upload failed"));
+    await expect(syntheticDeployment()).rejects.toThrow("upload failed");
+    await syntheticDeployment();
+    const uploadPaths = wranglerMocks.runWranglerLoggedCaptured.mock.calls.map(([args]) => args[3]);
+    expect(new Set(uploadPaths).size).toBe(3);
+    expect(fileMocks.rm.mock.calls).toEqual(uploadPaths.map(configPath => [configPath, { force: true }]));
   });
 
   it("does not activate a Worker while its image is still publishing or after publication fails", async () => {
@@ -256,7 +316,7 @@ describe("runDeployWorkerVersionCli", () => {
     const failure = deployment.catch((error: unknown) => error);
     await vi.waitFor(() => expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledOnce());
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(1);
-    expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls[0]![0]).toContain("/tmp/config.jsonc");
+    expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls[0]![0]).toContainEqual(expect.stringMatching(/^\/tmp\/config\.jsonc\.retired-secrets-[\da-f-]+\.jsonc$/u));
     rejectSmoke(new Error(state === "failed" ? "candidate image never became ready" : "synthetic cancelled preparation"));
     expect(await failure).toBeInstanceOf(Error);
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(1);
@@ -509,7 +569,7 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
       "versions", "upload",
       "--config",
-      "/tmp/wrangler.image-prepared.jsonc",
+      expect.stringMatching(/^\/tmp\/wrangler\.image-prepared\.jsonc\.retired-secrets-[\da-f-]+\.jsonc$/u),
       "--name",
       "hosted-worker",
       "--message",
@@ -610,7 +670,7 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
       "versions", "upload",
       "--config",
-      "/tmp/wrangler.generated.jsonc",
+      expect.stringMatching(/^\/tmp\/wrangler\.generated\.jsonc\.retired-secrets-[\da-f-]+\.jsonc$/u),
       "--name",
       "hosted-worker",
       "--message",
@@ -652,7 +712,7 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
       "versions", "upload",
       "--config",
-      "/tmp/wrangler.generated.jsonc",
+      expect.stringMatching(/^\/tmp\/wrangler\.generated\.jsonc\.retired-secrets-[\da-f-]+\.jsonc$/u),
       "--name",
       "hosted-worker",
       "--message",
@@ -718,12 +778,12 @@ const releasedContainers = [
   },
 ] as const;
 
-async function syntheticDeployment(containerRolloutMode: "gradual" | "immediate" | "worker-only" = "immediate", extraEnv: Record<string, string> = {}) {
+async function syntheticDeployment(containerRolloutMode: "gradual" | "immediate" | "worker-only" = "immediate", extraEnv: Record<string, string> = {}, includeSecrets = false) {
   return runDeployWorkerVersionCli([], {
     deployRoot: "/tmp/repo/apps/cloudflare", log: false,
     env: { CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles", CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture", ...extraEnv },
     runHostedWorkerDeployment: async ({ dependencies }) => {
-      await dependencies.deployDirect({ configPath: "/tmp/config.jsonc", containerRolloutMode, deploymentMessage: "synthetic", includeSecrets: false, secretsFilePath: "/tmp/secrets.json", versionTag: "synthetic", workerName: "hosted-worker" });
+      await dependencies.deployDirect({ configPath: "/tmp/config.jsonc", containerRolloutMode, deploymentMessage: "synthetic", includeSecrets, secretsFilePath: "/tmp/secrets.json", versionTag: "synthetic", workerName: "hosted-worker" });
       return createDeploymentResult();
     },
   });

@@ -155,6 +155,8 @@ import {
   runHostedNoopSystemWakeLane,
 } from "../src/hosted-runtime/maintenance.ts";
 import {
+  buildHostedDeviceSyncFailureJobLineage,
+  buildHostedDeviceSyncPassLineageDiagnostics,
   resolveHostedDeviceSyncNextWakeAt,
   runHostedDeviceSyncPass,
   runHostedDeviceSyncWakeLane,
@@ -4453,6 +4455,8 @@ describe("runHostedDeviceSyncPass", () => {
       syncStartedAt: "2026-04-08T00:00:01.000Z",
       wakeKind: "device-sync.wake",
       wakeReason: "webhook_hint",
+      failureJobLineage: null,
+      failureJobLineageTruncated: null,
     });
     assert.ok(entry.redactedJson);
     // Exercise the shared bounded sanitizer with the fully populated diagnostic.
@@ -5100,6 +5104,8 @@ describe("runHostedDeviceSyncPass", () => {
       syncStartedAt: "2026-06-08T02:00:01.000Z",
       wakeKind: "device-sync.wake",
       wakeReason: "webhook_hint",
+      failureJobLineage: null,
+      failureJobLineageTruncated: null,
     });
     const serializedWebhookFailureLogs = JSON.stringify(logRequests);
     expect(serializedWebhookFailureLogs).not.toContain("local_account_sleep_sensitive");
@@ -7385,6 +7391,255 @@ describe("runHostedDeviceSyncWakeLane", () => {
     expect(() => parseHostedRuntimeLogRequest({
       entries: [finishedEntry],
     })).not.toThrow();
+  });
+
+  const lineageAccountId = "local_lineage_account";
+  const lineageConnectionId = "dsc_synthetic_lineage";
+  const lineageIdentity = (index: number, accountId = lineageAccountId) => ({
+    accountId, dedupeKey: `synthetic-lineage-window-${index}`, jobId: `synthetic_job_${index}`,
+  });
+  const lineageTiming = (input: {
+    durableProgressCommitted?: boolean;
+    identities?: ReturnType<typeof lineageIdentity>[];
+    imports?: Partial<{ applied: number; failed: number; noop: number; unknown: number }>;
+    outcome: "cancelled" | "completed" | "deferred" | "failed" | "yielded";
+    scheduledJobCount?: number;
+  }) => ({
+    at: "2026-04-08T00:00:45.000Z", attempts: 1,
+    connectionSourceReadCount: 0, connectionSourceReadElapsedMs: 0,
+    credentialRefreshCount: 0, credentialRefreshElapsedMs: 0,
+    durableProgressCommitted: input.durableProgressCommitted ?? input.outcome === "completed",
+    elapsedMs: 1,
+    ...(input.scheduledJobCount === undefined ? {} : { scheduledJobCount: input.scheduledJobCount }),
+    jobCount: input.identities?.length ?? 1,
+    ...(input.identities ? { jobIdentities: input.identities } : {}),
+    jobKind: "resource", outcome: input.outcome, provider: "demo",
+    providerExecutionElapsedMs: 1, providerInventoryRequestCount: 0, providerInventoryRequestElapsedMs: 0,
+    providerResourceRequestCount: 0, providerResourceRequestElapsedMs: 0, providerUnattributedElapsedMs: 1,
+    snapshotImportCount: 0,
+    snapshotImportOutcomes: { applied: 0, failed: 0, noop: 0, unknown: 0, ...input.imports },
+    completeSourceDayImportOutcomes: { applied: 0, failed: 0, noop: 0, unknown: 0 },
+    snapshotImportElapsedMs: 0, snapshotCanonicalCoreElapsedMs: 0, snapshotCanonicalWriteElapsedMs: 0,
+    snapshotEventIdentityIndexCacheHitCount: 0, snapshotEventIdentityIndexElapsedMs: 0,
+    snapshotNormalizationElapsedMs: 0,
+  });
+  const runLineageLane = async (input: {
+    connectionId?: string;
+    failures?: unknown[];
+    hintJobs: Array<{ dedupeKey?: string; kind: string }>;
+    processedJobs: number;
+    retainedHintJobs: Array<{ dedupeKey?: string; kind: string }>;
+    timings: ReturnType<typeof lineageTiming>[];
+  }) => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const wake = {
+      eventId: "evt_lineage", kind: "device-sync.wake" as const,
+      ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+      hint: { jobs: input.hintJobs }, occurredAt: "2026-04-08T00:00:00.000Z",
+      reason: "reconcile_due" as const, userId: "synthetic-lineage-member",
+    };
+    mocks.resolveHostedDeviceSyncWakeLocalAccountId.mockReturnValue(lineageAccountId);
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValue({
+      hostedToLocalAccountIds: new Map([[lineageConnectionId, lineageAccountId]]),
+      localToHostedAccountIds: new Map([[lineageAccountId, lineageConnectionId]]),
+      observedTokenVersions: new Map(), pendingDirtyAcks: [], pendingDirtyPayloadJobs: [], snapshot: null,
+    });
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue({
+      retryAt: "2026-04-08T00:30:00.000Z",
+      wake: { ...wake, connectionId: lineageConnectionId, hint: { jobs: input.retainedHintJobs } },
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close: vi.fn(), drainWorker: vi.fn(async () => input.processedJobs),
+      getNextJobWakeAt: () => "2026-04-08T00:30:00.000Z", getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
+      listAccounts: vi.fn(() => []), listJobFailureDiagnostics: vi.fn(() => input.failures ?? []),
+      listJobTimingDiagnostics: vi.fn(() => input.timings), runSchedulerOnce: vi.fn(async () => undefined),
+    });
+    await runHostedDeviceSyncWakeLane({
+      deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+      resolvedConfig: { deviceSync: DEVICE_SYNC_CONFIG },
+      retainFollowUpWakeUntilCheckpoint: true,
+      runtimeLogContext: { attemptId: "attempt_lineage", leaseGeneration: "3", workspaceVersion: "4" },
+      runtimeLogPlatform: { logPort: { async write(request) {
+        const parsed = parseHostedRuntimeLogRequest(request);
+        logRequests.push(parsed);
+        return { loggedCount: parsed.entries.length };
+      } } },
+      timeoutMs: 45_000,
+      vaultRoot: "/tmp/vault-root",
+      wake,
+    });
+    await drainHostedRuntimeLogWritesBestEffort();
+    const entries = logRequests.flatMap((request) => request.entries);
+    return {
+      failed: entries.find((entry) => entry.eventCode === "device-sync.job_failed"),
+      finished: entries.find((entry) => entry.eventCode === "device-sync.pass_finished"),
+      serialized: JSON.stringify(logRequests),
+    };
+  };
+  const splitLineage = (value: unknown): string[] => {
+    assert.ok(Array.isArray(value));
+    return value.flatMap((chunk) => String(chunk).split(","));
+  };
+
+  it("emits opaque job lineage that separates attempts, imports, handoff, and unknown coverage", async () => {
+    const { failed, finished, serialized } = await runLineageLane({
+      connectionId: lineageConnectionId,
+      failures: [{
+        accountId: lineageAccountId, accountStatus: null, attempts: 1,
+        code: "SYNTHETIC_PROVIDER_UNAVAILABLE", details: {}, jobDisposition: "queued",
+        jobIdentities: [lineageIdentity(6)], jobKind: "resource", maxAttempts: 5,
+        provider: "demo", remainingAttempts: 4, retryable: true,
+        summary: "Synthetic provider outage.",
+      }],
+      hintJobs: [{ dedupeKey: "synthetic-lineage-window-6", kind: "resource" }, { kind: "resource" }],
+      // The diagnostics below observe 11 rows; a twelfth processed row models
+      // buffer eviction. Unknown = other connection + legacy row + evicted row.
+      processedJobs: 12,
+      retainedHintJobs: [{ dedupeKey: "synthetic-lineage-window-6", kind: "resource" }],
+      timings: [
+        lineageTiming({ identities: [lineageIdentity(1), lineageIdentity(2)], imports: { applied: 1, noop: 1 }, outcome: "completed" }),
+        lineageTiming({ identities: [lineageIdentity(3)], imports: { noop: 2 }, outcome: "completed" }),
+        lineageTiming({ identities: [lineageIdentity(4)], outcome: "completed", scheduledJobCount: 1 }),
+        lineageTiming({ durableProgressCommitted: true, identities: [lineageIdentity(5)], imports: { applied: 1, failed: 1 }, outcome: "failed" }),
+        lineageTiming({ identities: [lineageIdentity(6)], imports: { unknown: 1 }, outcome: "failed" }),
+        lineageTiming({ identities: [lineageIdentity(7)], outcome: "deferred" }),
+        lineageTiming({ identities: [lineageIdentity(8)], outcome: "yielded" }),
+        lineageTiming({ identities: [lineageIdentity(9)], outcome: "cancelled" }),
+        // Another connection's row and a legacy diagnostic without identity.
+        lineageTiming({ identities: [lineageIdentity(10, "local_lineage_other_account")], outcome: "completed" }),
+        lineageTiming({ outcome: "completed" }),
+      ],
+    });
+
+    // Failure, pass, and the attempt's checkpoint share typed invocation context.
+    for (const entry of [failed, finished]) {
+      expect(entry).toMatchObject({ attemptId: "attempt_lineage", leaseGeneration: "3", workspaceVersion: "4" });
+    }
+    const [failedFingerprint, ...otherFailed] = splitLineage(failed?.redactedJson?.failureJobLineage);
+    expect(otherFailed).toEqual([]);
+    expect(failedFingerprint).toMatch(/^[a-f0-9]{16}$/u);
+    expect(failed?.redactedJson?.failureJobLineageTruncated).toBe(false);
+
+    const pass = finished?.redactedJson;
+    const executed = splitLineage(pass?.deviceSyncJobLineage);
+    expect(executed.map((item) => item.slice(17))).toEqual([
+      "cab", "cab", "cns", "h0s", "pes", "fus", "d0s", "y0s", "x0s",
+    ]);
+    expect(executed).toContain(`${failedFingerprint}:fus`);
+    expect(pass).toMatchObject({
+      deviceSyncJobLineageCount: 9,
+      deviceSyncJobLineageTruncated: false,
+      deviceSyncJobLineageUnknownCount: 3,
+      incomingRetainedJobLineageTruncated: false,
+      outgoingRetainedJobLineage: [failedFingerprint],
+      outgoingRetainedJobLineageTruncated: false,
+    });
+    const incoming = splitLineage(pass?.incomingRetainedJobLineage);
+    expect(incoming).toHaveLength(2);
+    expect(incoming).toContain(failedFingerprint);
+    for (const raw of ["synthetic-lineage-window", "synthetic_job_", lineageAccountId,
+      "local_lineage_other_account", lineageConnectionId, "synthetic-lineage-member"]) {
+      expect(serialized).not.toContain(raw);
+    }
+  });
+
+  it("bounds lineage at the pass job limit and reports missing wake context as unknown", async () => {
+    const overLimit = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 5;
+    const { finished } = await runLineageLane({
+      hintJobs: [{ dedupeKey: "synthetic-lineage-window-1", kind: "resource" }],
+      processedJobs: overLimit,
+      retainedHintJobs: Array.from({ length: overLimit }, (_, index) => ({
+        dedupeKey: `synthetic-lineage-window-${index}`, kind: "resource",
+      })),
+      timings: Array.from({ length: overLimit }, (_, index) =>
+        lineageTiming({ identities: [lineageIdentity(index)], outcome: "completed" })),
+    });
+
+    const pass = finished?.redactedJson;
+    expect(pass).toMatchObject({
+      deviceSyncJobLineageCount: overLimit,
+      deviceSyncJobLineageTruncated: true,
+      deviceSyncJobLineageUnknownCount: 0,
+      // A hinted wake without hosted connection identity cannot be digested.
+      incomingRetainedJobLineage: null,
+      incomingRetainedJobLineageTruncated: null,
+      outgoingRetainedJobLineageTruncated: true,
+    });
+    for (const key of ["deviceSyncJobLineage", "outgoingRetainedJobLineage"]) {
+      const chunks = pass?.[key];
+      assert.ok(Array.isArray(chunks));
+      expect(chunks.length).toBeLessThanOrEqual(16);
+      expect(chunks.every((chunk) => String(chunk).length <= 2_048)).toBe(true);
+      expect(splitLineage(chunks)).toHaveLength(HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT);
+    }
+  });
+
+  it("reads and digests only the bounded prefix of large queues, executions, and failed batches", () => {
+    const size = 1_000;
+    const limit = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
+    let keyReads = 0;
+    // Each getter read is one key handed to the digest.
+    const countedHint = (index: number) => ({
+      kind: "resource",
+      get dedupeKey() { keyReads += 1; return `synthetic-retained-${index}`; },
+    });
+    const countedIdentity = (index: number) => ({
+      accountId: lineageAccountId,
+      jobId: `synthetic_job_${index}`,
+      get dedupeKey() { keyReads += 1; return `synthetic-lineage-window-${index}`; },
+    });
+    const hostedConnectionIds = new Map([[lineageAccountId, lineageConnectionId]]);
+    const wake = {
+      connectionId: lineageConnectionId, eventId: "evt_bounded_lineage",
+      hint: { jobs: Array.from({ length: size }, (_, index) => countedHint(index)) },
+      kind: "device-sync.wake" as const, occurredAt: "2026-04-08T00:00:00.000Z",
+      reason: "reconcile_due" as const, userId: "synthetic-lineage-member",
+    };
+    const identities = Array.from({ length: size }, (_, index) => countedIdentity(index));
+
+    const pass = buildHostedDeviceSyncPassLineageDiagnostics({
+      hostedConnectionIds,
+      jobTimingDiagnostics: [lineageTiming({ identities, outcome: "completed" })],
+      processedJobs: size,
+      result: {
+        deviceSyncProcessed: size, deviceSyncSkipped: false, nextWakeAt: null, parserProcessed: 0,
+        postCheckpointRecord: { kind: "device-sync.dirty-processed-batch", records: [], retainedWake: wake },
+      },
+      wake,
+    });
+    // Incoming, outgoing, and executed lists each read only `limit` keys.
+    expect(keyReads).toBe(3 * limit);
+    expect(pass).toMatchObject({
+      deviceSyncJobLineageCount: size,
+      deviceSyncJobLineageTruncated: true,
+      deviceSyncJobLineageUnknownCount: 0,
+      incomingRetainedJobLineageTruncated: true,
+      outgoingRetainedJobLineageTruncated: true,
+    });
+    for (const key of ["deviceSyncJobLineage", "incomingRetainedJobLineage", "outgoingRetainedJobLineage"]) {
+      expect(splitLineage(pass[key])).toHaveLength(limit);
+    }
+    // The deterministic prefix is the first hints in queue order.
+    keyReads = 0;
+    const prefix = buildHostedDeviceSyncPassLineageDiagnostics({
+      hostedConnectionIds, jobTimingDiagnostics: [], processedJobs: 0, result: null,
+      wake: { ...wake, hint: { jobs: wake.hint.jobs.slice(0, limit) } },
+    });
+    expect(prefix.incomingRetainedJobLineage).toEqual(pass.incomingRetainedJobLineage);
+    expect(prefix.incomingRetainedJobLineageTruncated).toBe(false);
+
+    keyReads = 0;
+    const failure = buildHostedDeviceSyncFailureJobLineage({
+      failureDiagnostic: {
+        accountId: lineageAccountId, accountStatus: null, code: "SYNTHETIC_PROVIDER_UNAVAILABLE",
+        details: {}, jobIdentities: identities, retryable: true,
+      },
+      hostedConnectionIds,
+      userId: wake.userId,
+    });
+    expect(keyReads).toBe(limit);
+    expect(failure.failureJobLineageTruncated).toBe(true);
+    expect(splitLineage(failure.failureJobLineage)).toHaveLength(limit);
   });
 
   it.each([

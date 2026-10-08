@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES,
   type HostedRuntimeLatencyTraceAssistantMilestoneEvent,
 } from "@murphai/hosted-execution/runtime-control";
-import { guardHostedRuntimeLatencyTracePort, recordHostedAssistantMilestonesBestEffort, recordHostedRuntimeLatencyMilestoneBestEffort } from "../src/hosted-runtime/assistant-latency-trace.ts";
+import { guardHostedRuntimeLatencyTracePort, recordHostedAssistantMilestonesBestEffort, recordHostedRuntimeLatencyMilestoneBestEffort, recordHostedStagedLatencyTraceBestEffort } from "../src/hosted-runtime/assistant-latency-trace.ts";
+import { recordHostedDeliveryCommittedBestEffort } from "../src/hosted-runtime/delivery-latency-trace.ts";
 
 const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
 const unmatched = { matchedCount: 0, recorded: false, unmatchedCount: 1 };
@@ -140,4 +141,62 @@ it("retains the invocation abort guard for batches and legacy singleton ports", 
   await expect(batch.recordBatch!({ events: milestones.map(milestone => ({ ...context, ...milestone, type: "assistant_milestone" })) })).rejects.toThrow("invocation aborted");
   expect(record).not.toHaveBeenCalled();
   expect(recordBatch).not.toHaveBeenCalled();
+});
+
+describe("staged-write ordering", () => {
+  const stagedEvent = {
+    assistantInputId: "synthetic-input", at: "2026-09-01T12:00:00.000Z", mailboxItemId: "synthetic-mailbox-item",
+    runtimeAttemptId: "synthetic-attempt", source: "telegram", type: "assistant_input_staged",
+  } as const;
+  const sentAt = "2026-09-01T12:00:30.000Z";
+  const recordDependentWrites = (port: { record: (request: { event: { type: string } }) => Promise<typeof ok> }) => {
+    recordHostedAssistantMilestonesBestEffort({
+      context: { ...context, source: "telegram", latencyTracePort: port },
+      milestones: [{ at: "2026-09-01T12:00:04.900Z", milestone: "telegram_typing_accepted" }],
+    });
+    recordHostedDeliveryCommittedBestEffort({
+      context: { latencyTracePort: port, runtimeAttemptId: "synthetic-attempt" },
+      intent: {
+        answeredMailboxItemIds: ["synthetic-mailbox-item"],
+        delivery: {
+          channel: "telegram", idempotencyKey: null, messageLength: 1, providerMessageId: null,
+          providerThreadId: null, sentAt, target: "synthetic-chat", targetKind: "thread",
+        },
+        sentAt,
+        status: "sent",
+      },
+    });
+  };
+
+  it("holds dependent writes until a slow staged write lands so their retries cannot expire first", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let staged = false;
+    let landStaged = () => {};
+    // Web matches milestone and delivery rows only after staging tags the trace.
+    const record = vi.fn(({ event }: { event: { type: string } }) => event.type === "assistant_input_staged"
+      ? new Promise<typeof ok>((resolve) => { landStaged = () => { staged = true; resolve(ok); }; })
+      : Promise.resolve(staged ? ok : unmatched));
+    recordHostedStagedLatencyTraceBestEffort({ record }, { event: stagedEvent });
+    recordDependentWrites({ record });
+    // Longer than the 0/250/1000 ms budget that dropped production typing.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(record).toHaveBeenCalledExactlyOnceWith({ event: stagedEvent });
+    landStaged();
+    await vi.runAllTimersAsync();
+    expect(record.mock.calls.slice(1).map(([request]) => request.event.type).sort()).toEqual([
+      "assistant_milestone", "delivery_committed",
+    ]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("releases dependent writes when the staged write fails", async () => {
+    const record = vi.fn(({ event }: { event: { type: string } }) => event.type === "assistant_input_staged"
+      ? Promise.reject(new Error("Synthetic staged failure"))
+      : Promise.resolve(ok));
+    recordHostedStagedLatencyTraceBestEffort({ record }, { event: stagedEvent });
+    recordDependentWrites({ record });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(record).toHaveBeenCalledTimes(3);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

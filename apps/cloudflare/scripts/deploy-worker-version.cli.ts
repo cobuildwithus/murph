@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +19,10 @@ import { stageHostedRunnerRelease } from "./stage-runner-release.ts";
 import { createRunnerReleaseProvider } from "./runner-release-provider.ts";
 import { runSmokeHostedDeploy } from "./smoke-hosted-deploy.shared.ts";
 import { prepareHostedContainerDeployImage } from "./prepare-container-deploy-image.ts";
+import {
+  assertRetiredInferenceSecretsRemoved,
+  prepareRetiredInferenceSecretsUpload,
+} from "./deploy-retired-inference-secrets.ts";
 import {
   createCloudflareContainerProvider,
   buildContainerReleaseEntries,
@@ -96,12 +100,25 @@ export async function runDeployWorkerVersionCli(
         const renderedContainers = await readRenderedContainerIdentities(staged.configPath);
         await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
         const uploadVersion = async (configPath: string): Promise<string> => {
-          const output = await runWranglerLoggedCaptured([
-            "versions", "upload", "--config", configPath, "--name", input.workerName,
-            "--message", input.deploymentMessage, "--tag", input.versionTag,
-            ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
-          ]);
-          return parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
+          const upload = await prepareRetiredInferenceSecretsUpload({
+            configPath, currentVersion, currentVersionId,
+            ...(input.includeSecrets ? { secretsFilePath: input.secretsFilePath } : {}),
+          });
+          try {
+            const output = await runWranglerLoggedCaptured([
+              "versions", "upload", "--config", upload.configPath, "--name", input.workerName,
+              "--message", input.deploymentMessage, "--tag", input.versionTag,
+              ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
+            ]);
+            const versionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
+            assertRetiredInferenceSecretsRemoved(
+              await releaseProvider.readWorkerVersion(input.workerName, versionId),
+              versionId, upload.expectedSecrets,
+            );
+            return versionId;
+          } finally {
+            await rm(upload.configPath, { force: true });
+          }
         };
         const activateVersion = async (configPath: string, versionId: string, expectedLiveVersion: string): Promise<void> => {
           await assertActivationAllowed(expectedLiveVersion);

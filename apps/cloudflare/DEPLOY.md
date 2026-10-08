@@ -1606,11 +1606,37 @@ The production smoke also runs one real `gpt-6-luna` model turn inside the deplo
 ## OpenAI-only inference cutover
 
 Retiring alternative inference requires a coordinated Web, Worker, and runner
-cutover. Quiesce new runtime admission and drain active runtimes before replacing
-the Web configuration/workspace producer and the Worker/runner consumers. Resume
-admission only after all three serve the OpenAI-only contract and the runner
-fingerprint matches the release. Verify one ordinary OpenAI reply and one
-usage-blocked delivery wake through the existing runtime paths.
+cutover. Use the protected native release flow consumer first; there is no
+supported fleet-wide admission pause. Before starting, confirm no member still
+selects a retired provider or custom connection and no runtime owner carries a
+custom inference envelope. Resolve any such state before this sequence.
+
+1. Hold the exact candidate's Web production admission and automatic contract
+   migration workflow. Keep the current Web serving while the runtime changes.
+   A cancelled admission run must be rerun in full after runtime convergence;
+   never manually publish a successful admission status or promote around it.
+2. Deploy the compatibility Worker and runner through private Murph Cloud, with
+   the full image rollout and live model smoke enabled. During native replacement,
+   the Worker emits the fixed `assistantProvider: "openai"` mailbox field for old
+   runners. New configuration readers accept and discard old Web's `provider`
+   and `availableProviders` response fields; update requests remain OpenAI-only.
+3. Require the final Worker at 100%, matching runner fingerprints, the exact
+   target native image/configuration and completed rollouts, successful serving
+   smoke, and the protected deployment's `release_converged` receipt. A successful
+   upload, an idle owner count, or the `immediate` rollout setting alone does not
+   prove that old runners are gone.
+4. Rerun the exact current-main Web admission workflow in full. Let managed
+   Vercel promotion finish and verify all production aliases serve that SHA.
+5. Restore the contract migration workflow and dispatch it against the verified
+   ready deployment. Its alias checks and timed Web function drain complement
+   the already-proven native convergence; they do not replace it.
+
+Verify ordinary OpenAI replies through the protected live smoke/canary. Preserve
+the usage-blocked delivery regression proving the outbox phase can run while
+metered egress stays denied; do not describe an ordinary live canary as live
+proof of that separate condition. Remove the two legacy-facing wire bridges
+only after old Web and runner readers have drained and their rollback window
+has closed. Neither bridge restores alternative inference support.
 
 Apply destructive database cleanup only after no old Web or runtime readers
 remain. Historical immutable usage rows keep their recorded pricing. Remove
@@ -1618,6 +1644,15 @@ retired provider secrets from deployment environments after the old consumers
 are gone. A rollback to an older contract requires a separately reviewed
 compatible database and complete Web/Worker/runner release; reverting a single
 component after cleanup is unsupported.
+
+Once the OpenAI-only Worker and runner consumers have converged, retire
+`VENICE_API_KEY` and `VERCEL_AI_API_KEY` through the existing protected Murph
+Cloud deployment. Its staged upload removes exactly those two secret bindings
+and inherits every other existing secret by name from an explicit baseline
+Worker version. It validates the staged secret inventory before activation and
+preserves the private workflow's rollout, smoke, and release-receipt checks.
+Run this cleanup through the protected deployment path, without a separate local
+secret deletion.
 
 ## Required GitHub Environment Secrets
 

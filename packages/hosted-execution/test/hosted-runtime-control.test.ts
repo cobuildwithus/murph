@@ -591,7 +591,7 @@ describe("hosted runtime control contracts", () => {
     });
     expect(() => parseHostedRuntimeAssistantConfigurationToolResponse({
       action: "read",
-      result: { ...snapshot, provider: "openai" },
+      result: { ...snapshot, unknownSetting: true },
     })).toThrow(/not allowed/u);
     expect(parseHostedRuntimeAssistantConfigurationToolResponse({
       action: "update",
@@ -617,6 +617,38 @@ describe("hosted runtime control contracts", () => {
         reasoningEffort: "none",
       },
     })).toThrow(/not supported/u);
+  });
+
+  it.each(["read", "update"] as const)("discards retired provider fields from older Web %s responses", (action) => {
+    const snapshot = {
+      availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+      availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
+      reasoningEffort: "low" as const,
+      solAvailable: false,
+    };
+    const result = action === "read" ? snapshot : {
+      ...snapshot,
+      appliesAt: "next_turn",
+      requiredPlan: null,
+      status: "updated",
+    };
+    const legacyResult = {
+      ...result,
+      availableProviders: ["openai", "venice"],
+      provider: "openai",
+    };
+
+    expect(parseHostedRuntimeAssistantConfigurationToolResponse({
+      action,
+      result: legacyResult,
+    })).toEqual({ action, result });
+    expect(() => parseHostedRuntimeAssistantConfigurationToolResponse({
+      action,
+      result: { ...legacyResult, unknownSetting: true },
+    })).toThrow(/unknownSetting is not allowed/u);
   });
 
   it.each(["gpt-image-2", "gpt-image-2.5-flare"])("normalizes %s image usage aliases separately", (model) => {

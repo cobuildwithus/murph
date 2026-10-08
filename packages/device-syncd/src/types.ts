@@ -178,6 +178,16 @@ export interface DeviceSyncJobFailureDiagnosticDetails extends JunctionRequestTi
   providerOAuthResponseShapeKind?: string;
 }
 
+/**
+ * In-memory logical identity of one claimed job row. Hosted telemetry emits
+ * only context-separated digests of it; never log these values directly.
+ */
+export interface DeviceSyncJobIdentity {
+  accountId: string;
+  dedupeKey: string | null;
+  jobId: string;
+}
+
 export interface DeviceSyncJobFailureDiagnostic {
   accountId: string;
   accountStatus: DeviceSyncAccountStatus | null;
@@ -189,6 +199,8 @@ export interface DeviceSyncJobFailureDiagnostic {
   details: DeviceSyncJobFailureDiagnosticDetails;
   /** Actual committed queue transition for this failed attempt, when known. */
   jobDisposition?: DeviceSyncJobFailureDisposition;
+  /** Rows whose failure transition committed in this attempt, when known. */
+  jobIdentities?: DeviceSyncJobIdentity[];
   /** Job kind of the failing job (for example `resource`, `reconcile`), when known. */
   jobKind?: string;
   /** Maximum attempt budget committed on the failing job row, when known. */
@@ -219,9 +231,10 @@ export type DeviceSyncImportOutcomeCounts = {
 };
 
 /**
- * Bounded metadata for one claimed worker attempt. This intentionally omits
- * account/job ids, payloads, cursors, provider responses, and health values so
- * hosted runtimes can persist it as privacy-safe operational telemetry.
+ * Bounded metadata for one claimed worker attempt. Apart from the in-memory
+ * `jobIdentities`, this intentionally omits account/job ids, payloads, cursors,
+ * provider responses, and health values so hosted runtimes can persist it as
+ * privacy-safe operational telemetry.
  */
 export interface DeviceSyncJobTimingDiagnostic {
   at: string;
@@ -239,6 +252,8 @@ export interface DeviceSyncJobTimingDiagnostic {
   scheduledJobCount?: number;
   nextScheduledJobDelayMs?: number | null;
   jobCount: number;
+  /** Rows covered by this claimed attempt; never emit these values directly. */
+  jobIdentities?: DeviceSyncJobIdentity[];
   jobKind: string;
   outcome: DeviceSyncJobTimingOutcome;
   provider: string;

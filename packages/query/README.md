@@ -134,6 +134,19 @@ owners, preserving prior/next canonical evidence. At the
 service boundary an omitted or empty provider array is unrestricted; a nonempty
 array normalized to no providers selects nothing.
 
+Multi-provider composition ends in `projectPublicWearableSummaryBundle()`, which
+copies the composed plain objects directly instead of stringifying and parsing
+each summary. The copy applies the same key policy as
+`stringifyPublicWearableProjectionSummary()` (emptied `candidates`, `paths` and
+`recordIds`; omitted provenance keys) and the same JSON value results, with
+fresh containers. It is not a general serializer: any value outside that plain
+shape, such as a prototype other than `Object`/`null`, `toJSON`, bigint or an
+over-deep graph, takes the unchanged stringify/parse path and its errors. The
+current composer produces only plain objects; it does not define accessors or
+proxies, and the copy makes no promise about them. Stored rows, the stored
+codec and the stringify function itself are unchanged, so persisted and public
+bytes are identical.
+
 The exact ordered path/size/mtime manifest, strict current canonical validation,
 atomic row/dictionary/manifest publication and failure behavior below apply to
 all these readers. Corrections, deletions, unrelated ledger edits and timestamp-

@@ -44,6 +44,30 @@ export function recordHostedRuntimeLatencyMilestoneBestEffort(input: {
 // channel tracing does not add chunks to the runner boot graph.
 const HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 
+// Milestone, provider-start, and delivery writes find their trace row through
+// the assistant input id that only the staged write sets. A staged request
+// that is slow in transit would otherwise outlast their short retry budget, so
+// they wait for staged writes already in flight. The transport timeout bounds
+// each staged write, and every event keeps its own timestamp.
+const inFlightStagedLatencyTraceWrites = new Set<Promise<void>>();
+
+export function recordHostedStagedLatencyTraceBestEffort(
+  port: NonNullable<HostedRuntimePlatform["latencyTracePort"]>,
+  request: HostedRuntimeLatencyTraceRequest,
+): void {
+  const write = port.record(request).then(() => {}, () => {
+    // Latency traces are diagnostic-only and must not affect runtime progress.
+  });
+  inFlightStagedLatencyTraceWrites.add(write);
+  void write.finally(() => inFlightStagedLatencyTraceWrites.delete(write));
+}
+
+export async function waitForHostedStagedLatencyTraceWrites(): Promise<void> {
+  if (inFlightStagedLatencyTraceWrites.size > 0) {
+    await Promise.all(inFlightStagedLatencyTraceWrites);
+  }
+}
+
 export interface HostedAssistantMilestoneTraceContext {
   assistantInputIds: readonly string[];
   latencyTracePort: HostedRuntimePlatform["latencyTracePort"];
@@ -91,6 +115,7 @@ async function recordMilestoneEvents(
   port: NonNullable<HostedRuntimePlatform["latencyTracePort"]>,
   events: HostedRuntimeLatencyTraceAssistantMilestoneEvent[],
 ): Promise<void> {
+  await waitForHostedStagedLatencyTraceWrites();
   if (!port.recordBatch || events.length === 1) {
     await Promise.all(events.map(async event => {
       if (!await recordLatencyTraceWithRetries(port, { event })) warnExhaustedTyping(event);
