@@ -769,6 +769,50 @@ test("HomePage does not offer a messaging success CTA after callback errors", as
   assert.doesNotMatch(markup, /aria-label="Text Murph in Telegram"/);
 });
 
+test("HomePage guides failed Fitbit links toward Google Health setup", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+
+  const markup = renderToStaticMarkup(await HomePage({
+    searchParams: Promise.resolve({
+      connectSource: "fitbit",
+      connectTarget: "fitbit",
+      deviceSyncCompletion: "1",
+      deviceSyncError: "JUNCTION_LINK_FAILED",
+      deviceSyncProvider: "junction",
+      deviceSyncStatus: "error",
+      source: "connect",
+    }),
+  }));
+
+  assert.match(markup, /Fitbit connection did not finish/);
+  assert.match(
+    markup,
+    /Fitbit now connects through Google Health\. Open the Google Health app, sign in with your Google Account, and finish setup\. Then try again and allow every permission\./,
+  );
+  assert.match(markup, /href="\/connect"[^>]*>.*Try again/s);
+  assert.doesNotMatch(markup, /Try again from Murph when you are ready\./);
+});
+
+test("HomePage keeps generic retry copy for other Fitbit callback failures", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+
+  const markup = renderToStaticMarkup(await HomePage({
+    searchParams: Promise.resolve({
+      connectSource: "fitbit",
+      connectTarget: "fitbit",
+      deviceSyncCompletion: "1",
+      deviceSyncError: "CALLBACK_PROOF_INVALID",
+      deviceSyncProvider: "junction",
+      deviceSyncStatus: "error",
+      source: "connect",
+    }),
+  }));
+
+  assert.match(markup, /Fitbit connection did not finish/);
+  assert.match(markup, /Try again from Murph when you are ready\./);
+  assert.doesNotMatch(markup, /Google Health/);
+});
+
 test("HomePage keeps connected-app completion dialogs verified", async () => {
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
 
