@@ -1,6 +1,6 @@
 # Verify Linq idempotency and outage recovery timing
 
-Status: active
+Status: completed
 Created: 2026-10-08
 Updated: 2026-10-08
 
@@ -40,9 +40,12 @@ prove actual elapsed-time behavior under synthetic transient outages.
 1. Verify public provider idempotency contract.
 2. Add elapsed-time Postgres recovery scenarios and clarify the owner contract.
 3. Completed: focused proof (95 tests) and local Web typecheck.
-4. Publish draft PR, finish exact-head ReviewGPT and CI, and remediate findings.
-5. Merge and release through the protected migration/deployment owners, then verify
-   exact deployed revisions and non-destructive production health.
+4. Completed implementation review in PR #4108. Both full-snapshot ReviewGPT
+   rounds passed; no findings required remediation. CI migration admission and
+   inventory failures were corrected with focused regression proof.
+5. Release handoff: final-head CI, merge, protected migration/deployment admission
+   and production convergence verification remain required. This plan closes the
+   implementation/proof work; the owning task continues through those release gates.
 
 ## Verification
 
@@ -55,7 +58,6 @@ prove actual elapsed-time behavior under synthetic transient outages.
 - Web typecheck passed. Production behavior and key derivation are unchanged.
 - Prior full local evidence: 359 tests across nine files, migration, schema,
   typecheck, complexity and Workflow compilation passed.
-- Exact-head CI, ReviewGPT and production release verification pending.
 - PR #4108's first CI run identified the production migration guard's explicit
   admission requirement for defaulted non-null columns. Use its existing
   per-migration compatibility map; do not relax the SQL classifier. Actual SQL
@@ -63,4 +65,29 @@ prove actual elapsed-time behavior under synthetic transient outages.
   inserts receive zero count, empty history and null recovery pointers.
 - Correction proof: 151 focused migration/retry tests, guarded local migration
   deploy, Web typecheck and complexity check passed. The initial review remains
-  bound to its original snapshot; the corrected head needs the next review.
+  bound to its original snapshot; the corrected head received the next review.
+- Migration inventory expectation corrected; its 10 tests and fresh Web typecheck
+  passed. All four PostgreSQL CI shards then passed at `6967609de2d8`.
+
+## Review and final candidate disposition
+
+- Round 1: PASS at `f256242adc66`, full snapshot, 17 changed files. Verified GPT-6
+  Pro sent-request identity and completion marker; elapsed capture exceeded ten
+  minutes. Zero findings received, accepted or rejected. Static review covered
+  the actual dispatch, receipt, authority, privacy and rollout paths.
+- Round 2: PASS at `6967609de2d8`, sensitive full snapshot, 20 changed files.
+  Same verified model/conversation, original first-reviewed baseline and valid
+  ancestry; capture exceeded seven minutes. Zero findings received, accepted or
+  rejected. Independent isolated guard execution retained rejection of other
+  destructive classes and other migration IDs. Project suites remained local/CI
+  evidence rather than an external-review execution claim.
+- Between rounds: six production migration-admission lines, 48 test lines and
+  explanatory plan evidence; retry runtime code and migration SQL were unchanged.
+  One pre-send browser-start failure was a tooling retry, not a review round.
+- Parent final inspection confirmed scoped changes, clean whitespace, the
+  established state owner, preserved ambiguous-send fences and unchanged runtime
+  behavior after round 2. Plan archival is explanatory documentation only and
+  does not create another substantive review; exact final-head CI still applies.
+- Production was not yet promoted when this historical plan was closed. Verify
+  the actual serving revision and protected postdeploy evidence in the task handoff.
+Completed: 2026-10-08
