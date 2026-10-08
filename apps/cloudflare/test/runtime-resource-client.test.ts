@@ -116,7 +116,7 @@ test.each(["POST", "DELETE"])("media %s uses one transactional callback and no c
   });
 });
 
-test.each(["POST", "DELETE"])("media %s preserves stale-owner rejection at the mutation", async method => {
+test.each(["GET", "POST", "DELETE"])("media %s preserves stale-owner rejection at the mutation", async method => {
   vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockResolvedValue(Response.json({
     error: { code: "HOSTED_RUNTIME_OWNER_STALE", message: "PRIVATE_RESPONSE" },
   }, { status: 409 }));
@@ -132,6 +132,25 @@ test.each(["POST", "DELETE"])("media %s preserves stale-owner rejection at the m
   }));
   expect(await response.text()).not.toContain("PRIVATE_");
   expect(fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledOnce();
+});
+
+test.each([
+  [200, { cutover: "postgres", applied: false, reason: "expired", purge: null }, 404],
+  [400, { error: "Runtime media operation is invalid." }, 500],
+] as const)("media GET stops before storage when admission returns HTTP %s", async (status, body, expectedStatus) => {
+  vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockResolvedValue(Response.json(body, { status }));
+  const bucket = new MemoryEncryptedR2Bucket();
+  const get = vi.spyOn(bucket, "get");
+  const response = await handleRunnerOutboundRequest(mediaRequest("GET"),
+    { ...createHostedExecutionTestEnv(), BUNDLES: bucket }, "synthetic-member");
+  expect(response.status).toBe(expectedStatus);
+  expect(get).not.toHaveBeenCalled();
+  expect(fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledOnce();
+  const callback = vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mock.calls[0]![0];
+  expect(callback.path).toBe("/api/internal/hosted-runtime/media");
+  expect(JSON.parse(callback.body!)).toMatchObject({
+    operation: "admit_read", attemptId: "synthetic-attempt", generation: "1",
+  });
 });
 
 function mediaRequest(method: string): Request {
