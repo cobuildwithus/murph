@@ -1,3 +1,4 @@
+import { boundUsageRequestCliTiming } from "../usage-record-body.ts";
 import type { RuntimeProviderCaller } from "../runtime-provider-authorization.ts";
 import { beginHostedRuntimeUsageSettlement } from "../runtime-usage-settlement.ts";
 import { type readHostedExecutionEnvironment } from "../env.ts";
@@ -414,13 +415,15 @@ function augmentHostedRunnerWebControlBody(input: {
     reportingSecret: readRunnerStringEnv(input.env, "HOSTED_AI_USAGE_REPORTING_SECRET"),
   });
 
-  return JSON.stringify({
+  // Trusted attribution can expand the sender's fitted body. Apply the same
+  // optional-timing policy to the final envelope before signing and Web's body read.
+  return JSON.stringify(boundUsageRequestCliTiming({
     ...payload,
     usage: {
       ...payload.usage,
       reportingUserId: reportingUserId ?? null,
     },
-  });
+  }));
 }
 
 function forceHostedRunnerRuntimeSnapshotCredentialMaterial(body: string): string {

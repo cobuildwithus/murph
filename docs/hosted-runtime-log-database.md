@@ -1221,10 +1221,13 @@ activated-window report is not proof every CLI invocation was observed.
 The complete usage-request ceiling is separately **16,384 UTF-8 bytes**, owned by
 `HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES` in `hosted-execution/runtime-control` and
 shared by the sender and Web route. Individually bounded datagrams can merge into
-an oversized HTTP payload. `runtime-platform/usage-record-port.ts` therefore
+an oversized HTTP payload. The shared Cloudflare `usage-record-body.ts` helper
 normalizes/copies only `cliTiming` and measures the entire JSON body, including
-`usage`, the legacy profile and any notice target, before transport serialization
-and signing. It removes whole summaries from the end until the request fits,
+`usage`, the legacy profile and any notice target. The usage port applies it
+before transport serialization; the Worker proxy applies it again after replacing
+`reportingUserId` with trusted attribution, before signing the final body. This
+keeps attribution growth inside the same byte budget for existing senders too.
+It removes whole summaries from the end until the request fits,
 adding their calls to the existing saturating `droppedCalls`. Other counters and
 retained phases are unchanged; HTTP trimming does **not** set `transportTruncated`
 (which describes the packet budget). A counters-only timing object can remain.
@@ -1236,8 +1239,9 @@ can only quantify omissions where the timing object survives. All legacy usage,
 provider-request, token, tool and notice-target fields are preserved; the queued
 record is not mutated. An already-oversized legacy request remains oversized and
 follows its existing rejection path rather than sacrificing accounting to fit.
-No request/packet cap, retry or flush behavior changes. The corrected sender works
-with the existing Web ceiling; this fix does not require coordinated deployment.
+No request/packet cap, retry or flush behavior changes. The sender and Worker use
+the existing Web ceiling; Worker rollout can correct existing senders without a
+coordinated Web or runner-container deployment.
 
 The exact histogram intervals in milliseconds are `[0,250)`, `[250,1000)`,
 `[1000,2500)`, `[2500,5000)`, `[5000,10000)`, `[10000,30000)`,
