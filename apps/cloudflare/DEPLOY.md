@@ -1647,33 +1647,36 @@ component after cleanup is unsupported.
 
 Once the OpenAI-only Worker and runner consumers have converged, retire
 `VENICE_API_KEY` and `VERCEL_AI_API_KEY` through the existing protected Murph
-Cloud deployment. Its staged upload removes exactly those two secret bindings
-and inherits every other existing secret by name from the latest uploaded
-Worker version. The upload config omits `version_id`, matching
-[Wrangler 4.93's inherit serializer](https://github.com/cloudflare/workers-sdk/blob/wrangler%404.93.0/packages/wrangler/src/deployment-bundle/create-worker-upload-form.ts).
+Cloud deployment. The ordinary Wrangler upload uses the canonical generated
+config and existing secret payload. If its binding inventory still contains a
+retired name, the existing deployment owner makes one native merge PATCH with
+`env: { VENICE_API_KEY: null, VERCEL_AI_API_KEY: null }` and the deployment's
+message/tag. This follows the [official Wrangler version-secret owner](https://github.com/cloudflare/workers-sdk/blob/c82d96ba63a3b343b520e781a070889251868d9a/packages/wrangler/src/versions/secrets/index.ts#L74-L112):
+`PATCH /accounts/{accountId}/workers/workers/{name}/versions/latest` with
+`Content-Type: application/merge-patch+json`. Cloudflare preserves the remaining
+version code and configuration; the deploy helper does not reconstruct them or
+write temporary Wrangler configs. A clean uploaded inventory skips the patch.
+
 The [raw versions API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/list/)
-returns newest first, including inactive uploads. The deploy owner reads its
-first two entries without a deployable filter before and after each upload.
-The latest must equal the original live version before stage upload, or the
-verified stage version before final upload. Afterwards the newest pair must
-be the uploaded version followed immediately by that expected source. Secret
-inventory validation and live activation guards remain separate requirements.
+returns newest first, including inactive uploads. Before upload, latest must be
+the original live version for staging or the verified stage for final promotion.
+After upload, the newest pair must be uploaded/source. Immediately before a
+secret patch, latest must still be that upload; afterwards the pair must be
+patched/uploaded. A required patch must return a distinct nonempty version ID.
+The final complete secret name/type inventory must match the original baseline
+plus synchronized rotations, excluding only the retired names. Canonical required
+secrets must remain present in that expected inventory. The verified final ID
+feeds existing native rollout, smoke, activation and release-receipt owners.
 
 This path relies on the protected deployment owner's serialized workflow.
 The metadata checks detect source drift; they are not atomic compare-and-swap
 and do not lock out dashboard or other API writers. An unknown inactive latest
 version stops deployment and requires operational resolution; retries must not
-silently adopt it. A failed post-upload check can leave an inactive version but
-does not authorize its activation. The workflow's rollout, smoke, and release
-receipt checks remain in force.
-
-The temporary upload config declares each name once: synchronized keys use the
-secret payload, and retained keys use inheritance. Required-secret declarations
-are removed only for inherited names, after proving every required key exists
-in the baseline or payload. The canonical generated config is unchanged. Local
-Wrangler dry-run verifies serialization, not server acceptance or source
-concurrency. Run cleanup through the protected deployment path, without a
-separate local secret deletion.
+silently adopt it. A failed upload or patch check can leave an inactive version
+but does not authorize activation. Existing live identity guards remain required.
+Local serialization and mocked API tests do not replace protected external
+acceptance. Run cleanup through this deployment owner without separate local
+secret deletion or promotion.
 
 ## Required GitHub Environment Secrets
 

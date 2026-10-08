@@ -36,6 +36,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Native Worker secret retirement is owned by `apps/cloudflare/DEPLOY.md`;
+implementation and focused proof are tracked in
+[`native secret retirement`](exec-plans/completed/2026-10-08-native-worker-secret-retirement.md).
+
 Worker secret inheritance source guards are owned by `apps/cloudflare/DEPLOY.md`;
 implementation and focused proof are tracked in
 [`latest secret inheritance`](exec-plans/completed/2026-10-07-latest-secret-inheritance.md).
