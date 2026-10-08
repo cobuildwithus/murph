@@ -36,6 +36,25 @@ export function hasRetiredInferenceSecrets(version: unknown, versionId: string):
   return [...retiredSecrets].some(name => inventory.has(name));
 }
 
+export function assertRecoveryWorkerVersion(input: {
+  currentVersion: unknown;
+  currentVersionId: string;
+  recoveryVersion: unknown;
+  recoveryVersionId: string;
+  recoveryVersionTag: string;
+}): void {
+  const current = readSecretInventory(input.currentVersion, input.currentVersionId);
+  const recovery = readSecretInventory(input.recoveryVersion, input.recoveryVersionId);
+  if (input.currentVersionId === input.recoveryVersionId || !input.recoveryVersionTag.trim()
+    || !isObjectRecord(input.recoveryVersion) || !isObjectRecord(input.recoveryVersion.annotations)
+    || input.recoveryVersion.annotations["workers/tag"] !== input.recoveryVersionTag) {
+    throw new Error("Cannot safely recover Worker version: version identity or tag differs.");
+  }
+  if (current.size !== recovery.size || [...current].some(([name, type]) => recovery.get(name) !== type)) {
+    throw new Error("Recovery Worker secret inventory differs from the current Worker secrets.");
+  }
+}
+
 export function assertRetiredInferenceSecretsRemoved(
   version: unknown,
   versionId: string,

@@ -59,6 +59,13 @@ vi.mock("../scripts/container-release-receipt.js", () => ({
 }));
 
 import { runDeployWorkerVersionCli } from "../scripts/deploy-worker-version.cli.js";
+import { runHostedWorkerDeployment } from "../scripts/deploy-worker-version.shared.js";
+
+const recoveryVersionId = "11111111-1111-4111-8111-111111111111";
+const recoveryEnv = {
+  HOSTED_EXECUTION_RECOVERY_VERSION_ID: recoveryVersionId,
+  HOSTED_EXECUTION_RECOVERY_VERSION_TAG: "trusted-upload",
+};
 
 describe("runDeployWorkerVersionCli", () => {
   it.each(["old-reader", "old-audience", "unavailable", "denied", "malformed", "unknown-version"])("rejects %s before image work or native mutation", async shape => {
@@ -267,6 +274,111 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(boundary === "stage" ? 0 : 1);
     expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
     expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { HOSTED_EXECUTION_RECOVERY_VERSION_ID: recoveryVersionId },
+    { HOSTED_EXECUTION_RECOVERY_VERSION_TAG: "trusted-upload" },
+    { ...recoveryEnv, HOSTED_EXECUTION_RECOVERY_VERSION_ID: "11111111" },
+    { ...recoveryEnv, HOSTED_EXECUTION_RECOVERY_VERSION_ID: ` ${recoveryVersionId}` },
+    { ...recoveryEnv, HOSTED_EXECUTION_RECOVERY_VERSION_TAG: " " },
+    { ...recoveryEnv, HOSTED_EXECUTION_RECOVERY_VERSION_TAG: " trusted-upload" },
+    { HOSTED_EXECUTION_RECOVERY_VERSION_ID: " ", HOSTED_EXECUTION_RECOVERY_VERSION_TAG: " " },
+  ])("rejects partial or malformed recovery identity before any deployment work: %j", async env => {
+    await expect(syntheticDeployment("worker-only", env, true)).rejects.toThrow("exact full version UUID");
+    expect(webProtocolMocks.admit).not.toHaveBeenCalled();
+    expect(releaseMocks.readWorkerVersion).not.toHaveBeenCalled();
+    expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["immediate", true], ["gradual", true], ["worker-only", false],
+  ] as const)("rejects recovery with mode=%s and synchronized secrets=%s", async (mode, includeSecrets) => {
+    await expect(syntheticDeployment(mode, recoveryEnv, includeSecrets)).rejects.toThrow("worker-only rollout with synchronized secrets");
+    expect(releaseMocks.readWorkerVersion).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLogged).not.toHaveBeenCalled();
+  });
+
+  it("treats both empty recovery inputs as an ordinary deployment", async () => {
+    await syntheticDeployment("immediate", {
+      HOSTED_EXECUTION_RECOVERY_VERSION_ID: "", HOSTED_EXECUTION_RECOVERY_VERSION_TAG: "",
+    });
+    expect(releaseMocks.readWorkerVersion.mock.calls.map(([, id]) => id))
+      .toEqual(["version-direct", "uploaded-version-1", "uploaded-version-2"]);
+  });
+
+  it("refuses recovery without a sole authoritative live version at 100%", async () => {
+    configureRecoveryUpload();
+    wranglerMocks.runWranglerJson.mockResolvedValueOnce(JSON.stringify({ versions: [
+      { version_id: "version-direct", percentage: 90 }, { version_id: recoveryVersionId, percentage: 10 },
+    ] }));
+    await expect(syntheticDeployment("worker-only", recoveryEnv, true)).rejects.toThrow("one authoritative live Worker version");
+    expect(releaseMocks.readWorkerVersion).not.toHaveBeenCalled();
+    expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
+  });
+
+  it("rejects an untrusted recovery tag before image or lifecycle work", async () => {
+    configureRecoveryUpload();
+    await expect(syntheticDeployment("worker-only", { ...recoveryEnv, HOSTED_EXECUTION_RECOVERY_VERSION_TAG: "other-upload" }, true))
+      .rejects.toThrow("version identity or tag differs");
+    expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLogged).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+  });
+
+  it.each(["initial", "pre-upload", "post-upload", "pre-patch", "post-patch", "live"])("rejects recovery source drift at %s without activation", async boundary => {
+    configureRecoveryUpload();
+    const readHistory = releaseMocks.readRecentWorkerVersionIds.getMockImplementation()!;
+    releaseMocks.readRecentWorkerVersionIds.mockImplementation(async () => {
+      const ids = await readHistory();
+      const calls = releaseMocks.readRecentWorkerVersionIds.mock.calls.length;
+      if (calls === ["initial", "pre-upload", "post-upload", "pre-patch", "post-patch"].indexOf(boundary) + 1) {
+        return boundary === "initial" || boundary === "pre-upload" || boundary === "post-upload"
+          ? [ids[0], "foreign-version"] : ["foreign-version", ids[0]];
+      }
+      return ids;
+    });
+    if (boundary === "live") wranglerMocks.runWranglerJson.mockResolvedValueOnce(JSON.stringify({ versions: [{ percentage: 100, version_id: "version-direct" }] }))
+      .mockResolvedValue(JSON.stringify({ versions: [{ percentage: 100, version_id: "different-live-version" }] }));
+    await expect(syntheticDeployment("worker-only", recoveryEnv, true)).rejects.toThrow(/changed|history/);
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(["initial", "pre-upload", "live"].includes(boundary) ? 0 : 1);
+    expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args[0] === "versions")).toBe(false);
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
+    if (boundary === "initial") expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
+  });
+
+  it("uploads fresh code from the explicitly verified secret source and returns only the patched version", async () => {
+    const currentVersion = configureRecoveryUpload();
+    const result = await runDeployWorkerVersionCli([], {
+      deployRoot: "/tmp/repo/apps/cloudflare", log: false,
+      env: { ...recoveryEnv, CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles",
+        CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture",
+        HOSTED_EXECUTION_CONTAINER_ROLLOUT: "worker-only", HOSTED_EXECUTION_INCLUDE_SECRETS: "true",
+        HOSTED_EXECUTION_DEPLOY_TAG: "fresh-release" },
+      runHostedWorkerDeployment: input => runHostedWorkerDeployment({ ...input, dependencies: {
+        ...input.dependencies, mkdir: async () => undefined,
+        validateDeployEnvironment: async () => undefined, validatePreparedArtifacts: async () => undefined,
+      } }),
+    });
+    expect(releaseMocks.stageHostedRunnerRelease).toHaveBeenCalledWith(expect.objectContaining({
+      currentVersion, currentVersionId: "version-direct", retainServingRunner: true,
+    }));
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledExactlyOnceWith(expect.arrayContaining([
+      "versions", "upload", "--secrets-file", "/tmp/repo/apps/cloudflare/.deploy/worker-secrets.json", "--tag", "fresh-release",
+    ]));
+    expect(releaseMocks.readRecentWorkerVersionIds.mock.settledResults.map(result => result.value)).toEqual([
+      [recoveryVersionId, "version-direct"], [recoveryVersionId, "version-direct"],
+      ["uploaded-version-1", recoveryVersionId], ["uploaded-version-1", recoveryVersionId],
+      ["patched-version-1", "uploaded-version-1"],
+    ]);
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions").map(([args]) => args[2]))
+      .toEqual(["patched-version-1@100%"]);
+    expect(result).toMatchObject({ smokeVersionId: "patched-version-1",
+      containerReleaseReceipt: { workerVersionId: "patched-version-1", versionTag: "fresh-release" },
+      finalDeploymentVersions: [{ percentage: 100, versionId: "patched-version-1" }],
+    });
   });
 
   it.each([
@@ -902,7 +1014,7 @@ const releasedContainers = [
   },
 ] as const;
 
-async function syntheticDeployment(containerRolloutMode: "gradual" | "immediate" | "worker-only" = "immediate", extraEnv: Record<string, string> = {}, includeSecrets = false) {
+async function syntheticDeployment(containerRolloutMode: "gradual" | "immediate" | "worker-only" = "immediate", extraEnv: Record<string, string | undefined> = {}, includeSecrets = false) {
   return runDeployWorkerVersionCli([], {
     deployRoot: "/tmp/repo/apps/cloudflare", log: false,
     env: { CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles", CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture", ...extraEnv },
@@ -911,6 +1023,32 @@ async function syntheticDeployment(containerRolloutMode: "gradual" | "immediate"
       return createDeploymentResult();
     },
   });
+}
+
+function configureRecoveryUpload() {
+  const retained = [{ name: "OPENAI_API_KEY", type: "secret_text" }, { name: "OPTIONAL_SECRET", type: "secret_text" },
+    { name: "CRYPTO_KEY", type: "secret_key" }];
+  const retired = [{ name: "VENICE_API_KEY", type: "secret_text" }, { name: "VERCEL_AI_API_KEY", type: "secret_text" }];
+  const currentVersion = { id: "version-direct", resources: { bindings: [...retained, ...retired] } };
+  releaseMocks.readWorkerVersion.mockImplementation(async (_worker, id) => id === "version-direct" ? currentVersion : {
+    id, annotations: { "workers/tag": "trusted-upload" }, resources: { bindings: [
+      ...retained, ...(id === "patched-version-1" ? [] : retired),
+      ...(id === recoveryVersionId ? [] : [{ name: "NEW_SECRET", type: "secret_text" }]),
+    ] },
+  });
+  const readHistory = releaseMocks.readRecentWorkerVersionIds.getMockImplementation()!;
+  releaseMocks.readRecentWorkerVersionIds.mockImplementation(async () => {
+    const ids: string[] = await readHistory();
+    return ids[0] === "version-direct" ? [recoveryVersionId, "version-direct"]
+      : ids.map(id => id === "version-direct" ? recoveryVersionId : id);
+  });
+  releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+    configPath, promotionConfigPath: configPath, activeApplicationName: "serving", workerOnly: true, applications: [], retirements: [],
+  }));
+  fileMocks.readFile.mockImplementation(async filePath => String(filePath).endsWith("secrets.json")
+    ? JSON.stringify({ OPENAI_API_KEY: "synthetic-rotation", NEW_SECRET: "synthetic-new" })
+    : JSON.stringify({ secrets: { required: ["OPENAI_API_KEY", "CRYPTO_KEY"] } }));
+  return currentVersion;
 }
 
 async function useRealWebAdmission(shape: string | ((check: number) => string), onCheck?: () => void) {

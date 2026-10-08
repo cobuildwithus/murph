@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  assertRecoveryWorkerVersion,
   assertRetiredInferenceSecretsRemoved,
   hasRetiredInferenceSecrets,
   readExpectedWorkerSecrets,
@@ -24,6 +25,83 @@ const retired = ["VENICE_API_KEY", "VERCEL_AI_API_KEY"].map(name => ({ name, typ
 const baseline = { id: "baseline-version", resources: { bindings: [...retained, ...retired] } };
 
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))); });
+
+describe("known inactive Worker recovery", () => {
+  const recovery = { ...baseline, id: "recovery-version", annotations: { "workers/tag": "known-inactive-tag" } };
+  const input = {
+    currentVersion: baseline, currentVersionId: baseline.id,
+    recoveryVersion: recovery, recoveryVersionId: recovery.id, recoveryVersionTag: "known-inactive-tag",
+  };
+
+  it("matches all optional, crypto, and retired secret names and types without reading values or unrelated config", () => {
+    const bindings = [...retained, ...retired].reverse().map(binding => ({
+      ...binding,
+      get text(): never { throw new Error("Secret values must not be read."); },
+      get key(): never { throw new Error("Secret values must not be read."); },
+    }));
+    expect(() => assertRecoveryWorkerVersion({
+      ...input,
+      currentVersion: { ...baseline, resources: { bindings: [{ name: "SOURCE_RECEIPT", type: "plain_text", text: "current-source" }, ...[...bindings].reverse()] } },
+      recoveryVersion: { ...recovery, resources: { bindings: [...bindings, { name: "DIFFERENT_CONFIG", type: "plain_text", text: "recovery-source" }] } },
+    })).not.toThrow();
+  });
+
+  it("rejects the current version even when its tag and complete inventory match", () => {
+    expect(() => assertRecoveryWorkerVersion({ ...input, recoveryVersionId: baseline.id,
+      recoveryVersion: { ...recovery, id: baseline.id } })).toThrow("version identity or tag differs");
+  });
+
+  it.each(["", " \t", "different-tag"])("rejects an empty or changed requested tag %#", recoveryVersionTag => {
+    expect(() => assertRecoveryWorkerVersion({ ...input, recoveryVersionTag })).toThrow("version identity or tag differs");
+  });
+
+  it.each([
+    undefined, null, [], {}, { "workers/tag": null }, { "workers/tag": 7 },
+    { "workers/tag": "different-tag" }, { "workers/tag": "known-inactive-tag " },
+  ])("requires the exact top-level recovery annotation %#", annotations => {
+    expect(() => assertRecoveryWorkerVersion({ ...input,
+      recoveryVersion: { ...recovery, annotations, metadata: { annotations: recovery.annotations } },
+    })).toThrow("version identity or tag differs");
+  });
+
+  it.each(["current", "recovery"] as const)("rejects malformed %s version inventories", side => {
+    for (const version of [
+      undefined, null, [], {}, { id: "different-version", resources: baseline.resources },
+      { resources: {} }, { resources: { bindings: [null] } },
+      { resources: { bindings: [{ name: " ", type: "secret_text" }] } },
+      { resources: { bindings: [{ name: "KEY", type: "secret_text " }] } },
+      { resources: { bindings: [retained[0], retained[0]] } },
+      { resources: { bindings: [{ name: "VENICE_API_KEY", type: "plain_text" }] } },
+    ]) {
+      const invalidVersion = version && !Array.isArray(version)
+        ? { id: side === "current" ? baseline.id : recovery.id, annotations: recovery.annotations, ...version }
+        : version;
+      expect(() => assertRecoveryWorkerVersion({ ...input,
+        ...(side === "current" ? { currentVersion: invalidVersion } : { recoveryVersion: invalidVersion }),
+      })).toThrow("Cannot safely retire");
+    }
+  });
+
+  it.each(["", " padded-version", "padded-version "])("rejects invalid expected version IDs %#", versionId => {
+    expect(() => assertRecoveryWorkerVersion({ ...input, currentVersionId: versionId,
+      currentVersion: { ...baseline, id: versionId } })).toThrow("Cannot safely retire");
+    expect(() => assertRecoveryWorkerVersion({ ...input, recoveryVersionId: versionId,
+      recoveryVersion: { ...recovery, id: versionId } })).toThrow("Cannot safely retire");
+  });
+
+  it.each([
+    [...retained, ...retired, { name: "EXTRA_SECRET", type: "secret_text" }],
+    [...retained.slice(1), ...retired],
+    [...retained, retired[0]],
+    [...retained.slice(1), ...retired, { name: "REPLACEMENT_SECRET", type: "secret_text" }],
+    [...retained.map(binding => ({ ...binding, type: "secret_key" })), ...retired],
+    [...retained, ...retired.map(binding => ({ ...binding, type: "secret_key" }))],
+  ].map(bindings => ({ bindings })))("rejects extra, missing, replaced, or changed secret types including retired names %#", ({ bindings }) => {
+    expect(() => assertRecoveryWorkerVersion({ ...input,
+      recoveryVersion: { ...recovery, resources: { bindings } },
+    })).toThrow("secret inventory differs");
+  });
+});
 
 describe("retired inference secret upload", () => {
   it.each([false, true])("preserves canonical config and every retained secret with synchronization=%s", async synchronize => {
