@@ -231,7 +231,7 @@ class RunnerContainerCleanupUnsettledError extends Error {
 
 export interface HostedExecutionContainerInvokeRequest {
   launch?: Pick<Extract<HostedRuntimeOwnerCommand, { operation: "prepare_launch" }>,
-    "providerEgressTokenHash" | "customInferenceEnvelope" | "platformAiUsageAllowed">;
+    "providerEgressTokenHash" | "platformAiUsageAllowed">;
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   timeoutMs?: number | null;
@@ -1049,7 +1049,6 @@ export class RunnerContainer extends Container {
     // Reserve durably before launch. Retrying after eviction never reexecutes
     // an ambiguous invocation; reconciliation inspects this exact target.
     if (receipts.register(identity, { workspaceVersion: request.workspaceVersion,
-      customInferenceEnvelope: authority.owner.customInferenceEnvelope,
       platformAiUsageAllowed: authority.owner.platformAiUsageAllowed }) === "existing") return { accepted: true };
     const result = this.invoke(payload);
     this.ctx.waitUntil(result.then(async (completed) => {
@@ -1124,7 +1123,7 @@ export class RunnerContainer extends Container {
         || owner.runnerContainerName !== binding.slotName || owner.workspaceVersion === null
         || !["starting", "active", "retiring"].includes(owner.phase)) return null;
       receipts.restoreProviderContext(invocation, { workspaceVersion: owner.workspaceVersion,
-        customInferenceEnvelope: owner.customInferenceEnvelope, platformAiUsageAllowed: owner.platformAiUsageAllowed });
+        platformAiUsageAllowed: owner.platformAiUsageAllowed });
       invocation = receipts.readProviderInvocation();
     }
     const state = this.readRunnerSlotBindingOptional()?.state;

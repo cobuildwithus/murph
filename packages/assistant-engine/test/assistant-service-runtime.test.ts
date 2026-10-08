@@ -575,7 +575,6 @@ describe("assistant usage recording seam", () => {
       seamMocks.resolveAssistantUsageCredentialSource
     ).toHaveBeenCalledWith({
       apiKeyEnv: "RUNTIME_KEY",
-      credentialSourceHint: null,
       effectiveEnv: undefined,
       headers: null,
       provider: "codex-cli",
@@ -789,7 +788,6 @@ describe("assistant usage recording seam", () => {
       seamMocks.resolveAssistantUsageCredentialSource
     ).toHaveBeenCalledWith({
       apiKeyEnv: null,
-      credentialSourceHint: null,
       effectiveEnv: undefined,
       headers: null,
       provider: "codex-cli",
@@ -804,56 +802,6 @@ describe("assistant usage recording seam", () => {
     );
   });
 
-  it("records custom core inference as member-funded without trusting upstream routing metadata", async () => {
-    const recordUsage = vi.fn(async () => undefined);
-    seamMocks.resolveAssistantUsageCredentialSource
-      .mockReset()
-      .mockReturnValue("member");
-
-    await recordAssistantUsageEvent({
-      executionContext: {
-        hosted: {
-          memberId: "member-42",
-          usageRecorder: { recordUsage },
-          userEnvKeys: [],
-        },
-      },
-      providerResult: createProviderResult({
-        providerOptions: createProviderOptions({
-          model: "murph-custom-r7-ab12cd34",
-          modelProvider: "hosted-custom-inference",
-        }),
-        usage: {
-          apiKeyEnv: null,
-          baseUrl: "https://untrusted-upstream.example/v1",
-          inputTokens: 7,
-          outputTokens: 11,
-          providerName: "Untrusted upstream name",
-          requestedModel: "murph-custom-r7-ab12cd34",
-          servedModel: "untrusted-upstream-model",
-          totalTokens: 18,
-        },
-      }),
-      turnId: "turn-custom-inference",
-    });
-
-    expect(
-      seamMocks.resolveAssistantUsageCredentialSource,
-    ).toHaveBeenCalledWith(expect.objectContaining({
-      apiKeyEnv: null,
-      credentialSourceHint: "member",
-      provider: "codex-cli",
-    }));
-    expect(recordUsage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        baseUrl: null,
-        credentialSource: "member",
-        providerName: "hosted-custom-inference",
-        requestedModel: "murph-custom-r7-ab12cd34",
-        servedModel: null,
-      }),
-    );
-  });
 
   it("records failure usage with the provider request outcome", async () => {
     vi.useFakeTimers();
@@ -3795,7 +3743,7 @@ describe("assistant execution context normalization", () => {
     const resolveScheduledLinqRoute = vi.fn();
     const defaultTarget = createAssistantModelTarget({
       model: "gpt-5.6-terra",
-      modelProvider: "vercel-ai-gateway",
+      modelProvider: "hosted-openai",
       provider: "codex-cli",
     });
 
@@ -3896,7 +3844,7 @@ describe("assistant execution context normalization", () => {
   it("falls back to the provided target when no hosted default target exists", () => {
     const fallbackTarget = createAssistantModelTarget({
       model: "gpt-5.6-terra-mini",
-      modelProvider: "vercel-ai-gateway",
+      modelProvider: "hosted-openai",
       provider: "codex-cli",
     });
     if (!fallbackTarget) {
@@ -3919,7 +3867,7 @@ describe("assistant execution context normalization", () => {
   it("overlays the hosted default target onto operator defaults without dropping other defaults", () => {
     const hostedDefaultTarget = createAssistantModelTarget({
       model: "gpt-5.6-terra-mini",
-      modelProvider: "vercel-ai-gateway",
+      modelProvider: "hosted-openai",
       provider: "codex-cli",
     });
     if (!hostedDefaultTarget) {
@@ -3935,7 +3883,7 @@ describe("assistant execution context normalization", () => {
             codexCommand: null,
             codexHome: null,
             model: "gpt-5.6-terra",
-            modelProvider: "vercel-ai-gateway",
+            modelProvider: "hosted-openai",
             oss: false,
             profile: null,
             reasoningEffort: "medium",
@@ -4549,7 +4497,7 @@ describe("assistant turn finalizer seam", () => {
     const session = createAssistantSession({
       providerOptions: createProviderOptions({
         model: "gpt-5.6-terra",
-        modelProvider: "vercel-ai-gateway",
+        modelProvider: "hosted-openai",
         reasoningEffort: "medium",
       }),
       resumeState: {
@@ -4851,7 +4799,7 @@ describe("assistant turn finalizer seam", () => {
     const session = createAssistantSession({
       providerOptions: createProviderOptions({
         model: "gpt-5.6-terra",
-        modelProvider: "vercel-ai-gateway",
+        modelProvider: "hosted-openai",
         reasoningEffort: "low",
       }),
       resumeState: {
@@ -4875,7 +4823,7 @@ describe("assistant turn finalizer seam", () => {
         route: createRoute({
           providerOptions: createProviderOptions({
             model: "gpt-5.6-terra",
-            modelProvider: "vercel-ai-gateway",
+            modelProvider: "hosted-openai",
             reasoningEffort: "high",
           }),
           routeId: "route-high",
@@ -4937,7 +4885,7 @@ function createProviderOptions(
     approvalPolicy: "never",
     provider: "codex-cli",
     model: "gpt-5.6-terra",
-    modelProvider: "vercel-ai-gateway",
+    modelProvider: "hosted-openai",
     reasoningEffort: "medium",
     sandbox: "danger-full-access",
     ...overrides,

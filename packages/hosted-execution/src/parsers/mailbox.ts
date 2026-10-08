@@ -1,10 +1,4 @@
 import {
-  isHostedAssistantProvider,
-} from "../assistant-model.ts";
-import {
-  requireHostedInferenceRevision,
-} from "../assistant-inference.ts";
-import {
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
@@ -148,17 +142,7 @@ export function parseHostedMailboxFetchResponse(
   value: unknown,
 ): HostedMailboxFetchResponse {
   const record = requireObject(value, "Hosted mailbox fetch response");
-  if (!isHostedAssistantProvider(record.assistantProvider)) {
-    throw new TypeError("Hosted mailbox fetch response assistantProvider is invalid.");
-  }
-
   return {
-    assistantProvider: record.assistantProvider,
-    ...(record.assistantCustomInferenceRevision === undefined ? {} : {
-      assistantCustomInferenceRevision: record.assistantCustomInferenceRevision === null
-        ? null
-        : requireHostedInferenceRevision(record.assistantCustomInferenceRevision),
-    }),
     ...(record.conversationUsageStatus === undefined
       ? {}
       : {

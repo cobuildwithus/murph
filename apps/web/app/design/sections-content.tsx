@@ -27,7 +27,6 @@ import {
   ReferralRewardCards,
   ReferralRewardReceiptPreview,
 } from "@/src/components/referrals/referral-page-content";
-import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
 import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
@@ -84,7 +83,6 @@ import {
   PersonaSettingsStudy,
 } from "./persona-onboarding-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
-import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import { TrainingDashboardStudy } from "./training-dashboard-study";
@@ -205,32 +203,14 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Homepage technical runtime · inference choice">
+          <StudySection title="Homepage technical runtime">
             <div
               id="homepage-technical-runtime"
               data-design-section="homepage-technical-runtime"
               className="-mx-5 sm:-mx-8 lg:-mx-12"
               inert
             >
-              <TechnicalCapabilitiesSection
-                customInferenceAvailable
-                veniceAvailable
-              />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Homepage technical runtime · provider flags off">
-            <div
-              data-design-section="homepage-technical-runtime-minimal"
-              className="-mx-5 sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <TechnicalCapabilitiesSection
-                customInferenceAvailable={false}
-                veniceAvailable={false}
-              />
+              <TechnicalCapabilitiesSection />
             </div>
           </StudySection>
 
@@ -242,25 +222,13 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Homepage model provider FAQ">
+          <StudySection title="Homepage FAQ">
             <div
-              data-design-section="homepage-model-provider-faq"
+              data-design-section="homepage-faq"
               className="-mx-5 sm:-mx-8 lg:-mx-12"
               inert
             >
-              <FaqSection veniceAvailable />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Security model provider choice">
-            <div
-              data-design-section="security-model-provider-choice"
-              className="-mx-5 sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <ModelProviderSecuritySection />
+              <FaqSection />
             </div>
           </StudySection>
         </>
@@ -272,8 +240,8 @@ export function SectionsContent({
 
           <StudySection title="Settings model choice for Edge and Max">
             <div
-              id="settings-model-provider-save-controls"
-              data-design-section="settings-compact-provider-control"
+              id="settings-model-save-controls"
+              data-design-section="settings-model-control"
               className="max-w-5xl"
             >
               <ModelSettingsHoverPreview>
@@ -281,12 +249,9 @@ export function SectionsContent({
                   availableModels={["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-astra"]}
                   canUpgradeToEdge={false}
                   configurationAvailable
-                  customInferenceAvailable
                   initialDormantSolPreference={false}
                   initialModel="gpt-6.1-sol"
-                  initialProvider="openai"
                   solAvailable
-                  veniceAvailable
                 />
               </ModelSettingsHoverPreview>
             </div>
@@ -294,10 +259,18 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Settings inference routing, locked models, and endpoint">
-            <ModelSettingsHoverPreview>
-              <SettingsCustomInferenceStudy />
-            </ModelSettingsHoverPreview>
+          <StudySection title="Settings model choice for Pulse">
+            <div data-design-variant="pulse-models-locked" className="max-w-5xl">
+              <ModelSettingsHoverPreview>
+                <HostedAssistantModelSettings
+                  canUpgradeToEdge
+                  configurationAvailable
+                  initialDormantSolPreference={false}
+                  initialModel="gpt-6.1-sol"
+                  solAvailable={false}
+                />
+              </ModelSettingsHoverPreview>
+            </div>
           </StudySection>
 
           <Separator />

@@ -234,7 +234,7 @@ describe('assistant Codex seam helpers', () => {
     ).toBe(true)
   })
 
-  it('keeps managed model switches continuous but resets custom revisions', () => {
+  it('keeps OpenAI model switches continuous', () => {
     const managedFirst = buildCodexThreadIdentity(
       normalizeAssistantProviderConfig({
         model: 'gpt-5.6-terra',
@@ -247,25 +247,10 @@ describe('assistant Codex seam helpers', () => {
         modelProvider: 'hosted-openai',
       }),
     )
-    const customFirst = buildCodexThreadIdentity(
-      normalizeAssistantProviderConfig({
-        model: 'murph-custom-r1',
-        modelProvider: 'hosted-custom-inference',
-      }),
-    )
-    const customSecond = buildCodexThreadIdentity(
-      normalizeAssistantProviderConfig({
-        model: 'murph-custom-r2',
-        modelProvider: 'hosted-custom-inference',
-      }),
-    )
-
     expect(readCodexThreadCompatibilityFingerprint(managedSecond)).toBe(
       readCodexThreadCompatibilityFingerprint(managedFirst),
     )
-    expect(readCodexThreadCompatibilityFingerprint(customSecond)).not.toBe(
-      readCodexThreadCompatibilityFingerprint(customFirst),
-    )
+
   })
 
   it('keeps execution-boundary changes incompatible and does not enrich an unproved legacy binding', () => {
@@ -287,12 +272,11 @@ describe('assistant Codex seam helpers', () => {
       threadId: 'provider_session_alpha',
     }
     const incompatibleRoutes = [
-      ['model provider', { modelProvider: 'vercel-ai-gateway' }],
+      ['model provider', { modelProvider: 'hosted-openai' }],
       ['Codex home', { codexHome: '/tmp/codex-home-secondary' }],
       ['Codex command', { codexCommand: 'codex-next' }],
       ['sandbox', { sandbox: 'workspace-write' as const }],
       ['profile', { profile: 'secondary' }],
-      ['OSS mode', { oss: true }],
     ] as const
 
     for (const [label, overrides] of incompatibleRoutes) {

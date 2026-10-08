@@ -56,7 +56,7 @@ function setup() {
     onStateMutation: vi.fn(),
     onExtractionStarted: vi.fn(),
     onWorkUpdated: vi.fn().mockResolvedValue(undefined),
-    resolveProviderAuthority: vi.fn().mockResolvedValue("current"),
+    resolveRuntimeAuthority: vi.fn().mockResolvedValue("current"),
     state,
     prepareDocument,
     executeExtraction,
@@ -138,11 +138,11 @@ describe("clinical document background runner", () => {
     expect(input.onWorkUpdated).toHaveBeenCalledWith(work.jobId, "2026-09-11T12:01:00.000Z");
   });
 
-  it("checks current provider authority before entry and leaves work resumable on handoff", async () => {
+  it("checks current runtime authority before entry and leaves work resumable on handoff", async () => {
     const { input, state } = setup();
-    input.resolveProviderAuthority = vi.fn().mockResolvedValue("handoff");
+    input.resolveRuntimeAuthority = vi.fn().mockResolvedValue("handoff");
     expect(await runOneHostedClinicalEnrichment(input)).toBe("idle");
-    expect(input.resolveProviderAuthority).toHaveBeenCalled();
+    expect(input.resolveRuntimeAuthority).toHaveBeenCalled();
     expect(state.persistClinicalEnrichmentProposals).not.toHaveBeenCalled();
     expect(state.deferClinicalEnrichment).not.toHaveBeenCalled();
   });

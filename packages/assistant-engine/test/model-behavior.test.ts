@@ -46,13 +46,9 @@ describe('resolveAssistantModelBehaviorProfile', () => {
     ).toBe('gpt5-agentic')
   })
 
-  it('keeps OSS Codex routes on the default profile', () => {
-    expect(
-      resolveAssistantModelBehaviorProfile({
-        oss: true,
-        provider: 'codex-cli',
-      }),
-    ).toBe('default')
+  it('rejects unsupported local model routes before building behavior', () => {
+    expect(() => resolveAssistantModelBehaviorProfile({ oss: true, provider: 'codex-cli' }))
+      .toThrow(/must use OpenAI/u)
   })
 })
 

@@ -21,7 +21,6 @@ export interface HostedRuntimeOwnerSnapshot {
   allocationId: string | null;
   runnerContainerName: string | null;
   workspaceVersion: string | null;
-  customInferenceEnvelope: string | null;
   platformAiUsageAllowed: boolean;
   startedAt: string | null;
   acceptedAt: string | null;
@@ -39,7 +38,7 @@ export type HostedRuntimeOwnerCommand =
   | { operation: "claim"; processingMode: HostedWorkspaceInvocationProcessingMode }
   | ({ operation: "select_target"; runnerContainerName: string } & HostedRuntimeOwnerIdentity)
   | ({ operation: "prepare_launch"; runnerContainerName: string; workspaceVersion: string;
-      providerEgressTokenHash: string | null; customInferenceEnvelope: string | null;
+      providerEgressTokenHash: string | null;
       platformAiUsageAllowed: boolean; processingMode: HostedWorkspaceInvocationProcessingMode } & HostedRuntimeOwnerIdentity)
   | ({ operation: "accepted" | "revoke_ai_usage" } & HostedRuntimeOwnerIdentity)
   | ({ operation: "record_failure"; errorCode: string } & HostedRuntimeOwnerIdentity)
@@ -92,7 +91,6 @@ function parseInvocationCommand(r: Record<string, unknown>, operation: string): 
       runnerContainerName: requireString(r.runnerContainerName, "Runtime target"),
       workspaceVersion: requireNonNegativeBigIntString(r.workspaceVersion, "Workspace version"),
       providerEgressTokenHash: readNullableString(r.providerEgressTokenHash, "Provider token hash"),
-      customInferenceEnvelope: readNullableString(r.customInferenceEnvelope, "Inference envelope"),
       platformAiUsageAllowed: requireBoolean(r.platformAiUsageAllowed, "Managed AI admission"),
       processingMode: parseAllowedString(r.processingMode, "Runtime processing mode", HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES),
     };
@@ -155,7 +153,6 @@ function parseOwner(value: unknown): HostedRuntimeOwnerSnapshot {
     allocationId: readNullableString(r.allocationId, "Runtime allocation"),
     runnerContainerName: readNullableString(r.runnerContainerName, "Runtime target"),
     workspaceVersion: r.workspaceVersion === null ? null : requireNonNegativeBigIntString(r.workspaceVersion, "Workspace version"),
-    customInferenceEnvelope: readNullableString(r.customInferenceEnvelope, "Inference envelope"),
     platformAiUsageAllowed: requireBoolean(r.platformAiUsageAllowed, "Managed AI admission"),
     startedAt: readNullableString(r.startedAt, "Runtime start"),
     acceptedAt: readNullableString(r.acceptedAt, "Runtime acceptance"),

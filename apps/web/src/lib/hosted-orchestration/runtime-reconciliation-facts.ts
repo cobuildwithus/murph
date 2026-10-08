@@ -60,9 +60,6 @@ import {
   type HostedRuntimeUsageGateCheck,
 } from "./runtime-usage-decision";
 import type { HostedRuntimeUsageGateObservation } from "../hosted-runtime-log/usage-gate";
-import {
-  readSelectedHostedInferenceConnectionOverride,
-} from "../hosted-inference/connection-store";
 
 type HostedRuntimeReconciliationUsageGateStatus =
   | HostedRuntimeUsageGateCheck["status"]
@@ -281,13 +278,7 @@ export async function readHostedRuntimeReconciliationFacts(
       return facts;
     }
 
-    if (
-      gate.status === "denied"
-      && !(await readSelectedHostedInferenceConnectionOverride({
-        memberId: input.userId,
-        prisma,
-      }))
-    ) {
+    if (gate.status === "denied") {
       let noticeRetryAt: Date | null = null;
       if ((input.usageGateMode ?? "mutating") === "mutating") {
         if (freshConversationMailboxLag) {

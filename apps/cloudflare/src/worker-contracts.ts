@@ -174,7 +174,6 @@ export interface WorkerEnvironmentContract extends Readonly<Record<string, unkno
   ELEVENLABS_API_KEY?: string;
   OPENAI_API_KEY?: string;
   OPENAI_AUTHORIZATION_ALERT_MONITOR?: WorkerOpenAiAuthorizationAlertNamespaceLike;
-  VENICE_API_KEY?: string;
   HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET?: string;
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;

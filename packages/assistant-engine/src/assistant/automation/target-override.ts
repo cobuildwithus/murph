@@ -9,7 +9,6 @@ import {
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
   isHostedAssistantProductModel,
   type HostedAssistantProductModel,
   type HostedAssistantReasoningEffort,
@@ -19,12 +18,9 @@ import {
   type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
-  compactAssistantProviderConfigInput,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
-  assistantCodexModelProviderRequiresModelThreadCompatibility,
-  VENICE_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
@@ -34,7 +30,7 @@ import {
 import { normalizeNullableString } from '../shared.js'
 
 // Reviewed replacements apply at execution, after the provider is resolved.
-// Keep stored pins intact so a provider switch or rollback can resolve them again.
+// Keep stored pins intact so their original preference remains inspectable.
 const AUTOMATION_OPENAI_MODEL_REPLACEMENTS = new Map<string, HostedAssistantProductModel>([
   [HOSTED_ASSISTANT_LUNA_MODEL, HOSTED_ASSISTANT_GPT_6_LUNA_MODEL],
   [HOSTED_ASSISTANT_SOL_MODEL, HOSTED_ASSISTANT_GPT_61_SOL_MODEL],
@@ -121,13 +117,6 @@ export function automationAssistantTargetOverrideToProviderConfigInput(
   }
 }
 
-/**
- * Resolve a persisted turn override against the model provider that will
- * actually execute it. Hosted product model names are managed-inference
- * preferences, not portable model ids for endpoints whose thread identity
- * depends on the exact model. Explicit provider transitions and arbitrary
- * custom model ids remain available to canonical CLI/internal authors.
- */
 export function resolveAutomationAssistantTargetOverrideForTarget(
   input: AutomationAssistantTargetOverride | null | undefined,
   baseTarget: AssistantModelTarget | null | undefined,
@@ -148,36 +137,7 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
     storedOverride,
     effectiveModelProvider,
   )
-  if (!override) {
-    return override
-  }
-
-  const supportsReasoningEffort =
-    !assistantCodexModelProviderRequiresModelThreadCompatibility(
-      effectiveModelProvider,
-    )
-  const suppressProductModel =
-    explicitModelProvider === null &&
-    (isHostedAssistantProductModel(override.model) ||
-      override.model === 'gpt-5.6-terra') &&
-    (!supportsReasoningEffort ||
-      (effectiveModelProvider === VENICE_CODEX_MODEL_PROVIDER_ID &&
-        (!isHostedAssistantProductModel(override.model) ||
-          !HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[override.model])))
-  if (!suppressProductModel && supportsReasoningEffort) {
-    return { ...inheritedOverride, ...override }
-  }
-
-  const model = suppressProductModel ? null : override.model ?? null
-  const reasoningEffort = supportsReasoningEffort
-    ? override.reasoningEffort ?? null
-    : null
-
-  return compactAssistantProviderConfigInput({
-    model,
-    modelProvider: explicitModelProvider,
-    reasoningEffort,
-  })
+  return override ? { ...inheritedOverride, ...override } : inheritedOverride
 }
 
 function resolveInheritedScheduledSolOverride(

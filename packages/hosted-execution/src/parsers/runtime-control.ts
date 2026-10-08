@@ -22,11 +22,7 @@ import { parseHostedExecutionGroupJournalFactPayload } from "../group-journal-fa
 import { parseHostedExecutionDeviceSyncExpectedConnectedAt } from "./device-sync.ts";
 import { parseAssistantUsageRecord } from "../assistant-usage.ts";
 import {
-  parseHostedAssistantCustomInferenceOverride,
-} from "../assistant-inference.ts";
-import {
   parseHostedAssistantModelOverride,
-  parseHostedAssistantProviderOverride,
   parseHostedAssistantReasoningEffortOverride,
 } from "../assistant-model.ts";
 import { parseAssistantRuntimeIssueRecord } from "@murphai/runtime-state/node/assistant-runtime-issues";
@@ -8050,18 +8046,8 @@ export function parseHostedWorkspaceReadResponse(
   value: unknown,
 ): HostedWorkspaceReadResponse {
   const record = requireObject(value, "Hosted workspace read response");
-  const hostedAssistantCustomInferenceOverride =
-    record.hostedAssistantCustomInferenceOverride === undefined ||
-    record.hostedAssistantCustomInferenceOverride === null
-      ? null
-      : parseHostedAssistantCustomInferenceOverride(
-          record.hostedAssistantCustomInferenceOverride,
-        );
   const hostedAssistantModelOverride = parseHostedAssistantModelOverride(
     record.hostedAssistantModelOverride,
-  );
-  const hostedAssistantProviderOverride = parseHostedAssistantProviderOverride(
-    record.hostedAssistantProviderOverride,
   );
   const hostedAssistantReasoningEffortOverride =
     parseHostedAssistantReasoningEffortOverride(
@@ -8090,13 +8076,7 @@ export function parseHostedWorkspaceReadResponse(
       record.fetchedAt,
       "Hosted workspace read response fetchedAt",
     ),
-    ...(hostedAssistantCustomInferenceOverride
-      ? { hostedAssistantCustomInferenceOverride }
-      : {}),
     ...(hostedAssistantModelOverride ? { hostedAssistantModelOverride } : {}),
-    ...(hostedAssistantProviderOverride
-      ? { hostedAssistantProviderOverride }
-      : {}),
     ...(hostedAssistantReasoningEffortOverride
       ? { hostedAssistantReasoningEffortOverride }
       : {}),

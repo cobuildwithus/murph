@@ -1984,7 +1984,7 @@ function createProviderOptions(
     approvalPolicy: 'never',
     provider: 'codex-cli',
     model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    modelProvider: 'hosted-openai',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
     ...overrides,

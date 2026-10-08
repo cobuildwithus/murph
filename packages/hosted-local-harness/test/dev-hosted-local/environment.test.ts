@@ -1503,7 +1503,7 @@ describe("buildWranglerEnvFileText", () => {
       buildWranglerEnvFileText({
         VENICE_API_KEY: "local-venice-key",
       }),
-    ).toContain('VENICE_API_KEY="local-venice-key"');
+    ).not.toContain('VENICE_API_KEY');
     expect(
       buildWranglerEnvFileText({
         MURPH_DATA_API_KEY: "local-data-api-key",
@@ -2009,7 +2009,6 @@ describe("buildWranglerLocalDevConfig", () => {
       required: expect.arrayContaining([
         "MURPH_DATA_API_KEY",
         "OPENAI_API_KEY",
-        "VENICE_API_KEY",
       ]),
     });
     expect(config.vars).toMatchObject({

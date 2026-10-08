@@ -5,11 +5,9 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import {
-  HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES,
-  type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
-import { incrementCliTimingDrop, normalizeCliTiming } from "@murphai/runtime-state/cli-timing";
+import { boundUsageRequestCliTiming } from "../usage-record-body.ts";
 import {
   fetchHostedWebControlPlaneJson,
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
@@ -66,32 +64,4 @@ export async function recordHostedRuntimeUsageRecord(input: {
       cause: error,
     });
   }
-}
-
-// Datagram/cardinality caps do not bound the merged HTTP request. Trim only
-// optional timing, on a copy, before the shared transport serializes/signs it.
-function boundUsageRequestCliTiming(
-  input: HostedRuntimeUsageRecordRequest,
-): HostedRuntimeUsageRecordRequest {
-  const sourceProfile = input.usage.turnProfileJson;
-  if (!sourceProfile || !("cliTiming" in sourceProfile)) return input;
-
-  const profile = { ...sourceProfile };
-  const timing = normalizeCliTiming(profile.cliTiming);
-  delete profile.cliTiming;
-  const body = { ...input, usage: { ...input.usage, turnProfileJson: profile } };
-  if (!timing) return body;
-
-  profile.cliTiming = timing;
-  while (new TextEncoder().encode(JSON.stringify(body)).byteLength > HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES) {
-    const dropped = timing.commands.pop();
-    if (!dropped) {
-      // Even the coverage counters do not fit. Absence means unavailable, not
-      // zero calls. Never shrink legacy accounting, even if it is oversized.
-      delete profile.cliTiming;
-      break;
-    }
-    timing.droppedCalls = incrementCliTimingDrop(timing.droppedCalls, dropped.calls);
-  }
-  return body;
 }

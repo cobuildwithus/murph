@@ -3,9 +3,6 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  buildHostedCustomInferenceModelAlias,
-} from "@murphai/hosted-execution/assistant-inference";
-import {
   ensureHostedAssistantOperatorDefaults,
   type HostedAssistantBootstrapResult,
 } from "@murphai/operator-config/hosted-assistant-config";
@@ -18,7 +15,6 @@ import {
   type HostedRuntimeLatencyTraceStagedMilestones,
   type HostedRuntimeOrchestrationLatencyDiagnostics,
   type HostedRuntimeRedactedJson,
-  type HostedMailboxFetchResponse,
   type HostedMailboxLane,
   type HostedWorkspaceCheckpointResponse,
   type HostedWorkspaceInvocationProcessingMode,
@@ -73,9 +69,6 @@ import {
   AssistantActiveTurnInputUnavailableError,
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
-import type {
-  HostedAssistantProvider,
-} from "@murphai/hosted-execution/assistant-model";
 import {
   createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
@@ -93,9 +86,6 @@ import {
 import {
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
-import {
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-} from "@murphai/operator-config/assistant/target-runtime";
 import type {
   AssistantModelTarget,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -574,7 +564,6 @@ async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<nu
 async function importHostedInitialMailboxForWorkspaceRunner(input: {
   pendingWake?: RuntimeWakeNotification | null;
   prefetch?: HostedMailboxPrefixPrefetch | null;
-  observePrefetchResponse?: (response: HostedMailboxFetchResponse) => HostedMailboxFetchResponse;
   plan: HostedInitialMailboxImportPlan;
   importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   lanes: readonly HostedMailboxLane[];
@@ -588,7 +577,6 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
     : await createHostedForegroundMailboxPrefetch({
         prefetch: input.prefetch,
         pendingWake: input.pendingWake,
-        observePrefetchResponse: input.observePrefetchResponse,
         lanes: input.prefetchLanes,
         limitPerLane: input.runnerInput.limitPerLane,
         requestId: input.requestId,
@@ -625,7 +613,6 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
 async function createHostedForegroundMailboxPrefetch(input: {
   pendingWake?: RuntimeWakeNotification | null;
   prefetch?: HostedMailboxPrefixPrefetch | null;
-  observePrefetchResponse?: (response: HostedMailboxFetchResponse) => HostedMailboxFetchResponse;
   lanes: readonly HostedMailboxLane[];
   limitPerLane: number;
   requestId: string;
@@ -643,9 +630,7 @@ async function createHostedForegroundMailboxPrefetch(input: {
   }) && (!input.pendingWake || await hostedMailboxPrefixPrefetchCoversWake(
     input.prefetch, input.pendingWake.mailboxWakeHighWater,
   ))) {
-    const response = input.observePrefetchResponse
-      ? input.prefetch.response.then(input.observePrefetchResponse)
-      : input.prefetch.response;
+    const response = input.prefetch.response;
     void response.catch(() => undefined);
     return { ...input.prefetch, response };
   }
@@ -2086,37 +2071,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     let invocationRuntimeEnv = projectHostedRuntimeProcessEnvironment({
       runtimeEnv: baseRuntimeEnv,
     });
-    const observeInvocationAssistantProvider = (
-      provider: HostedAssistantProvider | typeof HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-    ): void => {
-      const invocationProvider = invocationRuntimeEnv.HOSTED_ASSISTANT_PROVIDER;
-      if (invocationProvider && provider !== invocationProvider) {
-        runtimeOwnerHandoffRequested = true;
-      }
-    };
-    const observeMailboxResponse = (response: HostedMailboxFetchResponse): HostedMailboxFetchResponse => {
-      const customRevision = response.assistantCustomInferenceRevision;
-      observeInvocationAssistantProvider(customRevision == null
-        ? response.assistantProvider
-        : HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID);
-      if (customRevision != null && invocationRuntimeEnv.HOSTED_ASSISTANT_MODEL
-          !== buildHostedCustomInferenceModelAlias(customRevision)) {
-        runtimeOwnerHandoffRequested = true;
-      }
-      return response;
-    };
-    const runnerMailboxPort: NonNullable<HostedRuntimePlatform["mailboxPort"]> = {
-      async fetch(request, context) {
-        return observeMailboxResponse(await guardedMailboxPort.fetch(request, context));
-      },
-      fetchPayload: guardedMailboxPort.fetchPayload.bind(guardedMailboxPort),
-      ...(guardedMailboxPort.recordMemberActionOutcome
-        ? {
-            recordMemberActionOutcome:
-              guardedMailboxPort.recordMemberActionOutcome.bind(guardedMailboxPort),
-          }
-        : {}),
-    };
+    const runnerMailboxPort = guardedMailboxPort;
     let acceptedCanonicalSystemProgressCheckpointOrdinal = 0;
     let systemMailboxProgressedSinceCheckpoint = false;
     const foregroundWorkspacePort = guardedWorkspacePort;
@@ -2350,7 +2305,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               && (response.result.status === "updated"
                 || response.result.status === "unchanged")
             ) {
-              observeInvocationAssistantProvider(response.result.provider);
               confirmedAssistantTarget = {
                 model: response.result.model,
                 reasoningEffort: response.result.reasoningEffort,
@@ -2462,9 +2416,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           details: {
             codexEffectiveModelProviderId:
               preparedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
-            ...hostedCodexProviderTransportDiagnostics(
-              preparedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? "",
-            ),
+            ...hostedCodexProviderTransportDiagnostics(),
             runtimeEnvKeyCount: Object.keys(preparedCodexRuntime.runtimeEnv).length,
             voiceMemoElevenLabsApiKeyConfigured:
               hasHostedRuntimeEnvValue(preparedCodexRuntime.runtimeEnv, "ELEVENLABS_API_KEY"),
@@ -2602,7 +2554,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
       pendingWake: initialPendingRuntimeWake,
       prefetch: initialMailboxPrefetch,
-      observePrefetchResponse: observeMailboxResponse,
       plan: initialMailboxImportPlan,
       importItemContext: initialMailboxImportContext,
       lanes: initialMailboxImportLanes,
@@ -4482,7 +4433,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 }) => {
                   if (runtimeOwnerHandoffRequested) {
                     throw new AssistantActiveTurnInputUnavailableError(
-                      "Assistant provider changed; retrying the turn with the saved provider.",
+                      "Runtime ownership changed; retrying the turn in a fresh invocation.",
                     );
                   }
                   const acceptedInputsOnlyAssistant = acceptedInputs.every(
@@ -4766,7 +4717,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         ensureIdleCheckpointTimerAfterDirtyWork();
         options.runtimeWakeSignal?.notify();
       },
-      resolveProviderAuthority: async () => runtimeOwnerHandoffRequested ? "handoff" : "current",
+      resolveRuntimeAuthority: async () => runtimeOwnerHandoffRequested ? "handoff" : "current",
       ...(ordinaryConsentedAssistantAskSelected
         ? {
             selectNextExactItemId:
@@ -4793,7 +4744,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         deferUsageUntilAfterDurableCheckpoint(effect) {
           pendingDurableCheckpointEffects.push(effect);
         },
-        resolveProviderAuthority: async () => runtimeOwnerHandoffRequested ? "handoff" : "current",
+        resolveRuntimeAuthority: async () => runtimeOwnerHandoffRequested ? "handoff" : "current",
         async onWorkUpdated(jobId, nextAttemptAt) {
           const job = { vaultRoot: restored.vaultRoot, jobId };
           if (nextAttemptAt) await setHostedClinicalEnrichmentWakeNextAttempt({ ...job, nextAttemptAt });
@@ -6005,7 +5956,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         signal?: AbortSignal;
         systemMailboxAdmission: "all" | "pre_checkpoint_safe";
       }): Promise<boolean> => {
-        // Shutdown or provider handoff preserves staged work for the durable
+        // Shutdown or runtime handoff preserves staged work for the durable
         // checkpoint before this invocation starts another assistant turn.
         const shouldContinue = () =>
           !runtimeOwnerHandoffRequested
@@ -6936,11 +6887,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   // must not have platform allowance debited for it.
                   credentialSource: resolveAssistantUsageCredentialSource({
                     apiKeyEnv: null,
-                    credentialSourceHint:
-                      runtimeEnv.HOSTED_ASSISTANT_PROVIDER
-                        === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
-                        ? "member"
-                        : null,
+                    credentialSourceHint: null,
                     effectiveEnv: runtimeEnv,
                     provider: "codex-cli",
                     userEnvKeys: Object.keys(guardedRuntime.userEnv),

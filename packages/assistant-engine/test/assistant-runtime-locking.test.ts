@@ -502,7 +502,7 @@ function createLockTestSession(sessionId: string): AssistantSession {
       codexCommand: null,
       codexHome: null,
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       oss: false,
       profile: null,
       reasoningEffort: 'medium',

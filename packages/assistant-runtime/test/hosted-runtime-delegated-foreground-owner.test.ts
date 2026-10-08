@@ -361,7 +361,6 @@ function createMailboxPort(): HostedRuntimeMailboxPort {
   return {
     async fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse> {
       return {
-        assistantProvider: "openai",
         fetchedAt: TEST_NOW,
         items: [],
         maxSeqByLane: request.lanes.map((lane) => ({

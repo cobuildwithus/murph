@@ -120,7 +120,7 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env[HOSTED_RUNTIME_PROCESS_ENV_MARKER]).toBe("1");
     expect(env.CODEX_HOME).toBe("/tmp/murph-home/.codex-hosted");
     expect(env.HOME).toBe("/tmp/murph-home");
-    expect(env.HOSTED_ASSISTANT_PROVIDER).toBe("venice");
+    expect(env.HOSTED_ASSISTANT_PROVIDER).toBeUndefined();
     expect(env.VAULT).toBe("/tmp/murph-vault");
     expect(env.MURPH_ASSISTANT_ACTIVE_SESSION_ID).toBeUndefined();
     expect(env.MURPH_ASSISTANT_ACTIVE_TURN_ID).toBeUndefined();
@@ -135,8 +135,8 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT).toBe(
       "/app/node_modules/@murphai/health-commons",
     );
-    expect(env.OPENAI_API_KEY).toBeUndefined();
-    expect(env.VENICE_API_KEY).toBe("venice-secret");
+    expect(env.OPENAI_API_KEY).toBe("openai-secret");
+    expect(env.VENICE_API_KEY).toBeUndefined();
     expect(env.ALL_PROXY).toBe("http://platform-all-proxy.example.test:8080");
     expect(env.CODEX_CA_CERTIFICATE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
     expect(env.CURL_CA_BUNDLE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
@@ -173,7 +173,7 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.TELEGRAM_BOT_TOKEN).toBeUndefined();
   });
 
-  it("forwards only the selected hosted model provider credential", () => {
+  it("forwards only the OpenAI credential", () => {
     const env = prepareAssistantDirectCliEnv({
       [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
       HOME: "/tmp/murph-home",

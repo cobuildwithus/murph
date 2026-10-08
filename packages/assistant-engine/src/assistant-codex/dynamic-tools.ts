@@ -80,7 +80,6 @@ import {
 } from '@murphai/hosted-execution/runtime-control'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
 import type {
@@ -1045,12 +1044,6 @@ const assistantConfigurationArgumentsSchema = z
     z.object({
       action: z.literal('update'),
       model: z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS),
-      provider: z.enum(HOSTED_ASSISTANT_PROVIDERS).optional(),
-      reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS).optional(),
-    }).strict(),
-    z.object({
-      action: z.literal('update'),
-      provider: z.enum(HOSTED_ASSISTANT_PROVIDERS),
       reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS).optional(),
     }).strict(),
     z.object({
@@ -4516,10 +4509,7 @@ async function executeAssistantConfigurationTool(input: {
   if (
     input.request.action === 'update' &&
     conversationScope === 'group' &&
-    (
-      input.request.provider !== undefined ||
-      input.request.reasoningEffort !== undefined
-    )
+    input.request.reasoningEffort !== undefined
   ) {
     return toolTextResult(
       false,
@@ -4532,7 +4522,6 @@ async function executeAssistantConfigurationTool(input: {
   try {
     const currentTurn = input.hostedToolContext?.currentAssistantTarget?.() ?? {
       model: null,
-      provider: null,
       reasoningEffort: null,
     }
     if (input.request.action === 'read') {

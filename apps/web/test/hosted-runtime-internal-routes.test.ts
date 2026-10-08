@@ -107,8 +107,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/assistant-model-preference")>()),
-  isHostedVeniceAssistantEnabled: () =>
-    process.env.HOSTED_VENICE_ENABLED === "1",
   readHostedMemberAssistantModelPreference:
     mocks.readHostedMemberAssistantModelPreference,
 }));
@@ -320,8 +318,6 @@ describe("hosted runtime internal web routes", () => {
     });
     mocks.hasHostedPersonalPatternsRunAlert.mockReturnValue(false);
     delete process.env.HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED;
-    delete process.env.HOSTED_CUSTOM_INFERENCE_ENABLED;
-    delete process.env.HOSTED_VENICE_ENABLED;
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
       buildRuntimeMailboxAccessRecord(),
     );
@@ -386,6 +382,7 @@ describe("hosted runtime internal web routes", () => {
     });
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      availableModels: [],
       model: "gpt-5.6-terra",
       solAvailable: false,
     });
@@ -657,33 +654,6 @@ describe("hosted runtime internal web routes", () => {
     } finally { clock.mockRestore(); }
   });
 
-  it.each([
-    { selected: true, revision: 3, expected: 3 },
-    { selected: true, revision: 4, expected: 4 },
-    { selected: false, revision: 4, expected: null },
-  ])("projects the saved custom revision on an empty mailbox: $expected", async ({ selected, revision, expected }) => {
-    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce({
-      ...buildRuntimeMailboxAccessRecord(),
-      inferenceConnection: { selected, revision },
-    });
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValueOnce({ items: [] });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValueOnce([]);
-    const response = await mailboxFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/fetch",
-      {
-        lanes: [{ importedSeq: "0", lane: "conversation" }],
-        limitPerLane: 10,
-        requestId: "request_custom_route_identity",
-      },
-    ));
-    expect(response.status).toBe(200);
-    const payload = parseHostedMailboxFetchResponse(await response.json());
-    expect(payload.assistantCustomInferenceRevision).toBe(expected);
-    expect(payload.items).toEqual([]);
-    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledOnce();
-    expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
-  });
-
   it.each(["fresh", "old-worker", "no-inline-decode", "empty", "consumed", "floor", "sidecar", "system", "denied", "inactive", "no-workspace", "crypto-failure"])(
     "includes ingress context only for authorized fresh inline work: %s", async (scenario) => {
       const item = { createdAt: FIXED_NOW, updatedAt: FIXED_NOW, occurredAt: FIXED_NOW,
@@ -724,9 +694,8 @@ describe("hosted runtime internal web routes", () => {
   );
 
   it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
-      buildRuntimeMailboxAccessRecord({ assistantProviderPreference: "venice" }),
+      buildRuntimeMailboxAccessRecord(),
     );
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
@@ -809,13 +778,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
-    expect(payload.assistantProvider).toBe("venice");
-    expect(payload.assistantCustomInferenceRevision).toBeNull();
     expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
-    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledWith({
-      select: expect.objectContaining({ assistantProviderPreference: true }),
-      where: { id: "member_routes_1" },
-    });
     expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledWith({
       prisma: expect.objectContaining({ kind: "prisma" }),
@@ -989,44 +952,9 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it.each(["conversation", "system"] as const)("returns changed provider preferences with empty %s fetches", async (lane) => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
-    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValue({
-      consumedSeqByLane: [{ lane, consumedSeq: "3" }],
-      items: [],
-      maxSeqByLane: [{ lane, maxSeq: "3" }],
-    });
-
-    for (const provider of ["venice", "openai"] as const) {
-      mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
-        buildRuntimeMailboxAccessRecord({ assistantProviderPreference: provider }),
-      );
-      const response = await mailboxFetchRoute.POST(jsonRequest(
-        "/api/internal/hosted-mailbox/fetch",
-        {
-          lanes: [{ importedSeq: "3", lane }],
-          limitPerLane: 10,
-          requestId: `request_empty_provider_${provider}`,
-        },
-      ));
-      expect(response.status).toBe(200);
-      expect(parseHostedMailboxFetchResponse(await response.json())).toMatchObject({
-        assistantProvider: provider,
-        items: [],
-      });
-    }
-
-    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(2);
-    expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
-  });
-
-  it("keeps participant-backed group access while using the group provider", async () => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
+  it("keeps participant-backed group access", async () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
       buildRuntimeMailboxAccessRecord({
-        assistantProviderPreference: "venice",
         threadContainer: {
           owner: buildRuntimeMailboxAccessRecord({ billingStatus: "paused" }),
         },
@@ -1051,8 +979,6 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(response.status).toBe(200);
-    expect(parseHostedMailboxFetchResponse(await response.json()).assistantProvider)
-      .toBe("openai");
     expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
     expect(mocks.hostedThreadContainerParticipantFindFirst).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
@@ -1651,10 +1577,9 @@ describe("hosted runtime internal web routes", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("returns the current provider and unchanged cursor when AI usage denies mailbox consumption", async () => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
+  it("returns the unchanged cursor when AI usage denies mailbox consumption", async () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
-      buildRuntimeMailboxAccessRecord({ assistantProviderPreference: "venice" }),
+      buildRuntimeMailboxAccessRecord(),
     );
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
@@ -1708,7 +1633,6 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(parseHostedMailboxFetchResponse(await response.json())).toMatchObject({
-      assistantProvider: "venice",
       consumedSeqByLane: [{ lane: "conversation", consumedSeq: "11" }],
       items: [],
       maxSeqByLane: [{ lane: "conversation", maxSeq: "11" }],
@@ -1906,7 +1830,6 @@ describe("hosted runtime internal web routes", () => {
     // work, without advancing either cursor.
     expect(response.status).toBe(200);
     expect(parseHostedMailboxFetchResponse(await response.json())).toMatchObject({
-      assistantProvider: "openai",
       consumedSeqByLane: [
         { lane: "system", consumedSeq: "11" },
         { lane: "conversation", consumedSeq: "11" },
@@ -2200,25 +2123,6 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("omits a stored Venice override while the rollout gate is disabled", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
-      hostedAssistantProviderOverride: "venice",
-      model: "gpt-5.6-terra",
-      reasoningEffort: "low",
-      solAvailable: false,
-    });
-
-    const response = await workspaceRoute.GET(new Request(
-      "https://join.example.test/api/internal/hosted-workspace",
-      { method: "GET" },
-    ));
-    const payload = parseHostedWorkspaceReadResponse(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(payload.hostedAssistantProviderOverride).toBeUndefined();
-  });
-
   it("starts the usage read while workspace and preference reads are still pending", async () => {
     let releaseReads!: () => void;
     const pending = new Promise<void>(resolve => { releaseReads = resolve; });
@@ -2255,7 +2159,6 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(payload.hostedAssistantSubagentModelOverridesAllowed).toBe(false);
     expect(payload.platformAiUsageAllowed).toBe(false);
-    expect(payload.hostedAssistantCustomInferenceOverride).toBeUndefined();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "read_only",
       prisma: expect.any(Object),
@@ -2263,132 +2166,17 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("projects a selected custom route without managed inference facts", async () => {
-    process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
-    mocks.readHostedWorkspace.mockResolvedValue(
-      buildWorkspaceRecord({ version: "4" }),
-    );
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
-      customInferenceReverificationRequired: false,
-      customInferenceSelected: true,
-      hostedAssistantCustomInferenceOverride: {
-        contextWindowTokens: 131_072,
-        modelAlias: "murph-custom-r3",
-        protocol: "responses",
-        revision: 3,
-        supportsImages: false,
-        verificationProfile:
-          "murph-codex-0.151.0-portable-responses-v1",
-      },
-      hostedAssistantModelOverride: "gpt-5.6-sol",
-      hostedAssistantProviderOverride: "venice",
-      hostedAssistantReasoningEffortOverride: "high",
-      model: "gpt-5.6-sol",
-      reasoningEffort: "high",
-      solAvailable: true,
-    });
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
-      status: "denied",
-    });
-
-    const response = await workspaceRoute.GET(new Request(
-      "https://join.example.test/api/internal/hosted-workspace"
-        + "?customInferenceVersion=1",
-    ));
-    const payload = parseHostedWorkspaceReadResponse(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(payload).toMatchObject({
-      hostedAssistantCustomInferenceOverride: {
-        modelAlias: "murph-custom-r3",
-        protocol: "responses",
-        revision: 3,
-      },
-      hostedAssistantSubagentModelOverridesAllowed: false,
-      platformAiUsageAllowed: false,
-    });
-    expect(payload.hostedAssistantModelOverride).toBeUndefined();
-    expect(payload.hostedAssistantProviderOverride).toBeUndefined();
-    expect(payload.hostedAssistantReasoningEffortOverride).toBeUndefined();
-  });
-
-  it("fails closed when the runtime cannot consume a selected custom route", async () => {
-    process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
-      customInferenceReverificationRequired: false,
-      customInferenceSelected: true,
-      hostedAssistantCustomInferenceOverride: {
-        contextWindowTokens: 131_072,
-        modelAlias: "murph-custom-r3",
-        protocol: "responses",
-        revision: 3,
-        supportsImages: false,
-        verificationProfile:
-          "murph-codex-0.151.0-portable-responses-v1",
-      },
-      model: "gpt-5.6-terra",
-      solAvailable: false,
-    });
-
-    const response = await workspaceRoute.GET(new Request(
-      "https://join.example.test/api/internal/hosted-workspace",
-    ));
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "HOSTED_CUSTOM_INFERENCE_CONSUMER_UNSUPPORTED",
-      },
-    });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledOnce();
-  });
-
-  it("fails closed when a selected Chat route is not enabled", async () => {
-    process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
-      customInferenceReverificationRequired: false,
-      customInferenceSelected: true,
-      hostedAssistantCustomInferenceOverride: {
-        contextWindowTokens: 131_072,
-        modelAlias: "murph-custom-r3",
-        protocol: "chat_completions",
-        revision: 3,
-        supportsImages: false,
-        verificationProfile:
-          "murph-codex-0.151.0-portable-responses-v1",
-      },
-      model: "gpt-5.6-terra",
-      solAvailable: false,
-    });
-
-    const response = await workspaceRoute.GET(new Request(
-      "https://join.example.test/api/internal/hosted-workspace"
-        + "?customInferenceVersion=1",
-    ));
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "HOSTED_CUSTOM_CHAT_COMPLETIONS_UNAVAILABLE",
-      },
-    });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledOnce();
-  });
-
   it.each([
-    ["individual Edge", "launch_edge_monthly", null, false, "openai", true],
-    ["Family Edge", null, "edge", false, "openai", true],
-    ["individual Pulse", "launch_monthly", null, false, "openai", false],
-    ["Family Pulse", null, "pulse", false, "openai", false],
-    ["Edge on Venice", "launch_edge_monthly", null, false, "venice", false],
-    ["group", "launch_max_monthly", null, true, "openai", false],
-    ["individual Max", "launch_max_monthly", null, false, "openai", true],
-    ["Family Max", null, "max", false, "openai", true],
-    ["Max on Venice", "launch_max_monthly", null, false, "venice", false],
+    ["individual Edge", "launch_edge_monthly", null, false, true],
+    ["Family Edge", null, "edge", false, true],
+    ["individual Pulse", "launch_monthly", null, false, false],
+    ["Family Pulse", null, "pulse", false, false],
+    ["group", "launch_max_monthly", null, true, false],
+    ["individual Max", "launch_max_monthly", null, false, true],
+    ["Family Max", null, "max", false, true],
   ] as const)("projects native Astra authority from canonical %s eligibility", async (
-    _name, plan, familyPlan, group, provider, astraAllowed,
+    _name, plan, familyPlan, group, astraAllowed,
   ) => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
     const { readHostedMemberAssistantModelPreference } = await vi.importActual<
       typeof import("@/src/lib/hosted-onboarding/assistant-model-preference")
     >("@/src/lib/hosted-onboarding/assistant-model-preference");
@@ -2399,12 +2187,10 @@ describe("hosted runtime internal web routes", () => {
         status: "active",
       }] : [],
       assistantModelPreference: null,
-      assistantProviderPreference: provider,
       assistantReasoningEffortPreference: null,
       billingRef: plan ? { currentBillingPhase: "paid", currentBillingPlanCode: plan } : null,
       createdAt: new Date("2026-09-23T12:00:00Z"),
       billingStatus: familyPlan ? "not_started" : "active",
-      inferenceConnection: null,
       suspendedAt: null,
       threadContainer: group ? { memberId: "synthetic_group_member" } : null,
     };
@@ -2419,7 +2205,7 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     const workspace = parseHostedWorkspaceReadResponse(await response.json());
     expect(workspace.hostedAssistantAstraAllowed).toBe(astraAllowed);
-    expect(workspace.hostedAssistantPriorityUntil).toBe(!group && provider === "openai"
+    expect(workspace.hostedAssistantPriorityUntil).toBe(!group
       ? "2026-09-24T12:00:00.000Z" : undefined);
     expect(workspace.hostedAssistantSubagentModelOverridesAllowed).toBe(!["individual Pulse", "Family Pulse"].includes(_name));
   });
@@ -2707,7 +2493,6 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextDefaultProcessingWakeAt: "2026-04-26T00:08:00.000Z",
       nextDefaultProcessingWakeReason: "assistant_due",
@@ -2717,8 +2502,8 @@ describe("hosted runtime internal web routes", () => {
       version: "4",
     }));
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
+      availableModels: ["gpt-5.6-sol"],
       hostedAssistantModelOverride: "gpt-5.6-sol",
-      hostedAssistantProviderOverride: "venice",
       hostedAssistantReasoningEffortOverride: "high",
       model: "gpt-5.6-sol",
       reasoningEffort: "high",
@@ -2757,7 +2542,6 @@ describe("hosted runtime internal web routes", () => {
       .toMatchObject({
         hostedAssistantSubagentModelOverridesAllowed: true,
         hostedAssistantModelOverride: "gpt-5.6-sol",
-        hostedAssistantProviderOverride: "venice",
         hostedAssistantReasoningEffortOverride: "high",
         workspace: {
           nextDefaultProcessingWakeAt: "2026-04-26T00:08:00.000Z",
@@ -4820,7 +4604,6 @@ function createPrismaClientStub() {
 
 function buildRuntimeMailboxAccessRecord(overrides: Partial<{
   id: string;
-  assistantProviderPreference: string | null;
   accountGroupMemberships: Array<{
     group: { billingStatus: string; suspendedAt: Date | null };
     status: string;
@@ -4840,7 +4623,6 @@ function buildRuntimeMailboxAccessRecord(overrides: Partial<{
 }> = {}) {
   return {
     id: "member_routes_1",
-    assistantProviderPreference: null,
     accountGroupMemberships: [],
     billingStatus: "active",
     suspendedAt: null,

@@ -246,23 +246,6 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("forwards the managed Venice credential for per-member provider overrides", () => {
-    expect(buildHostedRunnerContainerEnv({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      OPENAI_API_KEY: "openai-worker-secret",
-      VENICE_API_KEY: "venice-worker-secret",
-    })).toEqual({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
-      NODE_ENV: "production",
-      OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-      VENICE_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-    });
-  });
-
   it("forwards explicit hosted checkpoint debug env into runner containers", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
@@ -457,7 +440,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-user",
       TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
-      VENICE_API_KEY: "venice-user",
       WHATSAPP_API_BASE_URL: "https://removed-whatsapp.example.test",
       WHATSAPP_ACCESS_TOKEN: "removed-whatsapp-user",
       WHATSAPP_APP_SECRET: "removed-whatsapp-app-secret",
@@ -724,7 +706,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       runnerSecrets: {
         CUSTOM_API_KEY: "custom-user",
         OPENAI_API_KEY: "fixture-user-key",
-        VENICE_API_KEY: "venice-user",
       },
     })).toMatchObject({
       commitTimeoutMs: 45_000,
@@ -1208,16 +1189,6 @@ describe("hosted deploy automation device-sync surface", () => {
         "WHOOP_SCOPES",
       ]),
     );
-    for (const retiredVeniceModelVar of [
-      "HOSTED_VENICE_LUNA_MODEL",
-      "HOSTED_VENICE_SOL_MODEL",
-      "HOSTED_VENICE_TERRA_MODEL",
-    ]) {
-      expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
-        retiredVeniceModelVar,
-      );
-    }
-    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toContain("VENICE_API_KEY");
     for (const retiredWhatsAppVar of [
       "WHATSAPP_API_BASE_URL",
       "WHATSAPP_GRAPH_VERSION",

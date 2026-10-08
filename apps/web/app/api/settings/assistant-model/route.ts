@@ -1,8 +1,6 @@
 import {
   isHostedAssistantProductModel,
-  isHostedAssistantProvider,
   type HostedAssistantProductModel,
-  type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
 
 import { getPrisma } from "@/src/lib/prisma";
@@ -35,12 +33,7 @@ export const POST = withJsonError(async (request: Request) => {
     async (tx) => updateHostedMemberAssistantConfigurationTx({
       memberId: auth.member.id,
       prisma: tx,
-      ...(configuration.model === undefined
-        ? {}
-        : { model: configuration.model }),
-      ...(configuration.provider === undefined
-        ? {}
-        : { provider: configuration.provider }),
+      model: configuration.model,
     }),
     HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   );
@@ -50,7 +43,6 @@ export const POST = withJsonError(async (request: Request) => {
     dormantSolPreference: result.dormantSolPreference,
     model: result.model,
     ok: true,
-    provider: result.provider,
     solAvailable: result.solAvailable,
     updated: result.updated,
   });
@@ -59,41 +51,29 @@ export const POST = withJsonError(async (request: Request) => {
 function parseAssistantModelRequestBody(
   body: Record<string, unknown>,
 ): {
-  model?: HostedAssistantProductModel;
-  provider?: HostedAssistantProvider;
+  model: HostedAssistantProductModel;
 } {
   const keys = Object.keys(body);
   if (
-    keys.length === 0
-    || keys.some((key) => key !== "model" && key !== "provider")
+    keys.length !== 1
+    || keys[0] !== "model"
   ) {
     throw hostedOnboardingError({
       code: "ASSISTANT_MODEL_INVALID_REQUEST",
       httpStatus: 400,
-      message: "Assistant model request must contain a model, a provider, or both.",
+      message: "Assistant model request must contain a model.",
     });
   }
 
-  if (
-    body.model !== undefined
-    && !isHostedAssistantProductModel(body.model)
-  ) {
+  if (!isHostedAssistantProductModel(body.model)) {
     throw hostedOnboardingError({
       code: "ASSISTANT_MODEL_INVALID_MODEL",
       httpStatus: 400,
       message: "Choose a valid assistant model.",
     });
   }
-  if (body.provider !== undefined && !isHostedAssistantProvider(body.provider)) {
-    throw hostedOnboardingError({
-      code: "ASSISTANT_MODEL_INVALID_PROVIDER",
-      httpStatus: 400,
-      message: "Choose a valid assistant provider.",
-    });
-  }
 
   return {
-    ...(body.model === undefined ? {} : { model: body.model }),
-    ...(body.provider === undefined ? {} : { provider: body.provider }),
+    model: body.model,
   };
 }

@@ -35,7 +35,7 @@ function job(attemptId = "attempt-a", generation = "1"): HostedExecutionWorkspac
 describe.each([false, true])("native supervised invocation with launch preparation %s", (prepareAtLaunch) => {
   function payload(attemptId = "attempt-a", generation = "1") {
     return { userId, job: job(attemptId, generation), ...(prepareAtLaunch ? {
-      launch: { providerEgressTokenHash: "a".repeat(64), customInferenceEnvelope: null, platformAiUsageAllowed: true },
+      launch: { providerEgressTokenHash: "a".repeat(64), platformAiUsageAllowed: true },
     } : {}) };
   }
   beforeEach(() => {
@@ -43,7 +43,7 @@ describe.each([false, true])("native supervised invocation with launch preparati
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: prepareAtLaunch ? "updated" : "authorized", owner: {
       userId, attemptId: "attempt-a", generation: "1", phase: "active", workspaceVersion: "0", processingMode: "default",
       allocationId: "standby-claim-11111111-1111-4111-8111-111111111111", runnerContainerName: target,
-      customInferenceEnvelope: null, platformAiUsageAllowed: true, startedAt: null, acceptedAt: null, completedAt: null,
+      platformAiUsageAllowed: true, startedAt: null, acceptedAt: null, completedAt: null,
       failureCount: 0, lastErrorCode: null,
     } });
     vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValue(false);
@@ -83,7 +83,7 @@ describe.each([false, true])("native supervised invocation with launch preparati
     new RunnerInvocationReceiptStore(sql).register({ attemptId: "attempt-a", generation: "1" });
     const owner = { userId, attemptId: "attempt-a", generation: "1", workspaceVersion: "0",
       runnerContainerName: target, phase: "active" as const, processingMode: "default" as const,
-      allocationId: null, customInferenceEnvelope: null, platformAiUsageAllowed: true,
+      allocationId: null, platformAiUsageAllowed: true,
       startedAt: null, acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null };
     vi.mocked(commandHostedRuntimeOwner).mockImplementationOnce(async () => {
       binding.beginRetirement({ claimId: "standby-claim-11111111-1111-4111-8111-111111111111" });

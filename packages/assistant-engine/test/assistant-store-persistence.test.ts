@@ -131,7 +131,7 @@ describe('assistant store persistence seams', () => {
       },
       codexTarget: {
         adapter: 'codex-cli',
-        modelProvider: 'vercel-ai-gateway',
+        modelProvider: 'hosted-openai',
       },
     })
     await expect(readFile(secretsPath, 'utf8')).rejects.toMatchObject({
@@ -161,7 +161,7 @@ describe('assistant store persistence seams', () => {
     expect(roundTrippedSession.providerOptions).toMatchObject({
       executionDriver: 'codex-app-server',
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       provider: 'codex-cli',
       reasoningEffort: 'medium',
       resumeKind: 'codex-thread',
@@ -219,6 +219,51 @@ describe('assistant store persistence seams', () => {
       }),
     )
   })
+
+  it.each(['venice', 'hosted-custom-inference'])(
+    'restores a retired %s session with OpenAI and preserves its conversation history',
+    async (modelProvider) => {
+      const paths = await createAssistantPaths('assistant-store-openai-restoration-')
+      const session = createSession()
+      await ensureAssistantState(paths)
+      await writeAssistantSession(paths, session)
+      const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
+      const persisted = JSON.parse(await readFile(sessionPath, 'utf8'))
+      persisted.codexTarget.modelProvider = modelProvider
+      persisted.codexTarget.model = 'retired-endpoint-model'
+      persisted.codexResume = {
+        routeFingerprint: 'retired-provider-route',
+        threadId: 'retired-provider-thread',
+      }
+      await writeFile(sessionPath, JSON.stringify(persisted), 'utf8')
+      const entries = [
+        createTranscriptEntry('user', 'Please keep my walking goal.', '2026-04-08T00:01:00.000Z'),
+        createTranscriptEntry('assistant', 'Your walking goal is saved.', '2026-04-08T00:02:00.000Z'),
+      ]
+      await appendTranscriptEntries(paths, session.sessionId, entries)
+
+      const restored = await readAssistantSession({ paths, sessionId: session.sessionId })
+      expect(restored).toMatchObject({
+        sessionId: session.sessionId,
+        conversationId: session.conversationId,
+        alias: session.alias,
+        binding: session.binding,
+        turnCount: session.turnCount,
+        resumeState: null,
+        codexResume: null,
+        target: { modelProvider: 'openai', oss: false },
+      })
+      expect(restored?.target.model).toBeNull()
+      await expect(readAssistantTranscriptEntries(paths, session.sessionId)).resolves.toEqual(entries)
+      await expect(listAssistantQuarantineEntriesAtPaths(paths)).resolves.toEqual([])
+      if (!restored) throw new Error('Expected the restored conversation.')
+      await writeAssistantSession(paths, restored)
+      const saved = JSON.parse(await readFile(sessionPath, 'utf8'))
+      expect(saved.codexTarget.modelProvider).toBe('openai')
+      expect(saved.codexResume).toBeNull()
+      expect(JSON.stringify(saved)).not.toContain(modelProvider)
+    },
+  )
 
   it('prepares only the transcript directory and keeps its reads and appends private', async () => {
     const paths = await createAssistantPaths('assistant-store-transcript-directory-')
@@ -1940,7 +1985,7 @@ function createCodexSession(input?: {
       codexCommand: null,
       codexHome: null,
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       oss: false,
       profile: null,
       reasoningEffort: 'medium',
@@ -1989,7 +2034,7 @@ function createSession(input?: {
       codexCommand: null,
       codexHome: null,
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       oss: false,
       profile: null,
       reasoningEffort: 'medium',

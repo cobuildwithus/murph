@@ -279,7 +279,7 @@ test.sequential(
       identityId: 'assistant:primary',
       participantId: 'contact:bob',
       threadId: 'thread-42',
-      model: 'gpt-oss:20b',
+      model: 'gpt-6-sol',
     })
     const statePaths = resolveAssistantStatePaths(vaultRoot)
 
@@ -850,45 +850,6 @@ test('model --show returns the saved assistant backend', async () => {
   assert.equal(result.envelope.data?.summary, 'gpt-5.4 via Codex app-server (Pro account)')
 })
 
-test('model --show summarizes a saved Codex OSS backend', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-oss-'))
-  cleanupPaths.push(homeRoot)
-
-  await saveAssistantOperatorDefaultsPatch(
-    {
-      backend: {
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: null,
-        model: 'qwen3-coder',
-        oss: true,
-        profile: null,
-        reasoningEffort: null,
-        sandbox: 'danger-full-access',
-      },
-      account: null,
-    },
-    homeRoot,
-  )
-
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: false,
-      stderrIsTTY: false,
-    },
-  })
-
-  const result = await runRegisteredCliJson<{
-    summary: string | null
-  }>(cli, ['model', '--show'])
-
-  assert.equal(result.exitCode, null)
-  assert.equal(result.envelope.ok, true)
-  assert.equal(result.envelope.data?.summary, 'qwen3-coder via Codex OSS app-server')
-})
-
 test('model --show fails closed for an unsupported persisted backend', async () => {
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-unsupported-backend-'))
   cleanupPaths.push(homeRoot)
@@ -926,14 +887,14 @@ test('model --preset codex replaces an unsupported persisted backend', async () 
       enabled: true,
       provider: 'codex-cli',
       model: options.assistantModel ?? null,
-      modelProvider: options.assistantModelProvider ?? null,
+      modelProvider: null,
       codexCommand: options.assistantCodexCommand ?? null,
       codexHome: options.assistantCodexHome ?? null,
       profile: options.assistantProfile ?? null,
       reasoningEffort: options.assistantReasoningEffort ?? null,
       sandbox: 'danger-full-access',
       approvalPolicy: 'never',
-      oss: options.assistantOss ?? false,
+      oss: false,
       account: null,
       detail: 'saved codex backend',
     }),
@@ -963,15 +924,13 @@ test('model --preset codex replaces an unsupported persisted backend', async () 
     'codex',
     '--model',
     'gpt-5.6-terra',
-    '--modelProvider',
-    'vercel-ai-gateway',
   ])
 
   assert.equal(result.exitCode, null)
   assert.equal(result.envelope.ok, true)
   assert.equal(result.envelope.data?.backend?.adapter, 'codex-cli')
   assert.equal(result.envelope.data?.backend?.model, 'gpt-5.6-terra')
-  assert.equal(result.envelope.data?.backend?.modelProvider, 'vercel-ai-gateway')
+  assert.equal(result.envelope.data?.backend?.modelProvider, null)
 
   const config = await readOperatorConfig(homeRoot)
   assert.equal(config?.defaultVault, '~/vault')
@@ -980,8 +939,23 @@ test('model --preset codex replaces an unsupported persisted backend', async () 
     config?.assistant?.backend?.adapter === 'codex-cli'
       ? config.assistant.backend.modelProvider
       : null,
-    'vercel-ai-gateway',
+    null,
   )
+})
+
+test('model rejects removed provider and local inference options', async () => {
+  const resolve = vi.fn()
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    assistantSetup: { resolve },
+    terminal: { stdinIsTTY: false, stderrIsTTY: false },
+  })
+
+  for (const option of [['--modelProvider', 'unsupported-provider'], ['--oss']]) {
+    const result = await runRegisteredCliJson(cli, ['model', '--preset', 'codex', ...option])
+    assert.equal(result.envelope.ok, false)
+  }
+  assert.equal(resolve.mock.calls.length, 0)
 })
 
 test('model rejects unsupported legacy presets', async () => {
@@ -1066,7 +1040,6 @@ test('interactive bare model uses the Codex wizard selection before resolving de
 
   const assistantWizard = vi.fn(async (_input: SetupAssistantWizardInput) => ({
     assistantPreset: 'codex' as const,
-    assistantOss: false,
   }))
   const resolveAssistant = vi.fn(
     async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
@@ -1074,7 +1047,7 @@ test('interactive bare model uses the Codex wizard selection before resolving de
       enabled: true,
       provider: 'codex-cli',
       model: 'gpt-5.6-terra',
-      modelProvider: options.assistantModelProvider ?? null,
+      modelProvider: null,
       codexCommand: null,
       codexHome: options.assistantCodexHome ?? null,
       profile: null,
@@ -1109,7 +1082,6 @@ test('interactive bare model uses the Codex wizard selection before resolving de
   assert.equal(result.envelope.ok, true)
   assert.equal(assistantWizard.mock.calls.length, 1)
   assert.deepEqual(assistantWizard.mock.calls[0]?.[0], {
-    enableApiKeyProviderOnboarding: false,
   })
   assert.equal(resolveAssistant.mock.calls.length, 1)
   assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
@@ -1120,7 +1092,6 @@ test('interactive bare model uses the Codex wizard selection before resolving de
       strict: true,
       whisperModel: 'base.en',
       assistantPreset: 'codex',
-      assistantOss: false,
     },
     preset: 'codex',
   })
@@ -1128,210 +1099,6 @@ test('interactive bare model uses the Codex wizard selection before resolving de
     result.envelope.data?.summary,
     'gpt-5.6-terra via Codex app-server',
   )
-})
-
-test('interactive bare model saves Venice from the wizard selection', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-wizard-venice-'))
-  cleanupPaths.push(homeRoot)
-
-  const assistantWizard = vi.fn(async (_input: SetupAssistantWizardInput) => ({
-    assistantPreset: 'codex' as const,
-    assistantModelProvider: 'venice',
-    assistantOss: false,
-  }))
-  const resolveAssistant = vi.fn(
-    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
-      preset,
-      enabled: true,
-      provider: 'codex-cli',
-      model: 'venice-model',
-      modelProvider: options.assistantModelProvider ?? null,
-      codexCommand: null,
-      codexHome: options.assistantCodexHome ?? null,
-      profile: null,
-      reasoningEffort: options.assistantReasoningEffort ?? null,
-      sandbox: 'danger-full-access',
-      approvalPolicy: 'never',
-      oss: options.assistantOss ?? false,
-      account: null,
-      detail: 'resolved Venice after wizard selection',
-    }),
-  )
-
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    assistantSetup: {
-      resolve: resolveAssistant,
-    },
-    assistantWizard,
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: true,
-      stderrIsTTY: true,
-    },
-  })
-
-  const result = await runRegisteredCliJson<{
-    backend: {
-      modelProvider: string | null
-    } | null
-  }>(cli, ['model'])
-
-  assert.equal(result.exitCode, null)
-  assert.equal(result.envelope.ok, true)
-  assert.deepEqual(assistantWizard.mock.calls[0]?.[0], {
-    enableApiKeyProviderOnboarding: false,
-  })
-  assert.equal(resolveAssistant.mock.calls[0]?.[0].options.assistantModelProvider, 'venice')
-  assert.equal(result.envelope.data?.backend?.modelProvider, 'venice')
-})
-
-test('interactive bare model clears a saved provider when wizard selects ChatGPT', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-wizard-clear-provider-'))
-  cleanupPaths.push(homeRoot)
-
-  await saveAssistantOperatorDefaultsPatch(
-    {
-      backend: {
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: null,
-        codexHome: null,
-        model: 'venice-model',
-        modelProvider: 'venice',
-        oss: false,
-        profile: null,
-        reasoningEffort: 'medium',
-        sandbox: 'danger-full-access',
-      },
-      account: null,
-    },
-    homeRoot,
-  )
-
-  const assistantWizard = vi.fn(async (_input: SetupAssistantWizardInput) => ({
-    assistantPreset: 'codex' as const,
-    assistantModelProvider: null,
-    assistantOss: false,
-  }))
-  const resolveAssistant = vi.fn(
-    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
-      preset,
-      enabled: true,
-      provider: 'codex-cli',
-      model: 'gpt-5.6-terra',
-      modelProvider: options.assistantModelProvider ?? null,
-      codexCommand: null,
-      codexHome: null,
-      profile: null,
-      reasoningEffort: options.assistantReasoningEffort ?? null,
-      sandbox: 'danger-full-access',
-      approvalPolicy: 'never',
-      oss: options.assistantOss ?? false,
-      account: null,
-      detail: 'resolved ChatGPT after wizard selection',
-    }),
-  )
-
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    assistantSetup: {
-      resolve: resolveAssistant,
-    },
-    assistantWizard,
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: true,
-      stderrIsTTY: true,
-    },
-  })
-
-  const result = await runRegisteredCliJson<{
-    backend: {
-      modelProvider: string | null
-      oss: boolean
-    } | null
-  }>(cli, ['model'])
-
-  assert.equal(result.exitCode, null)
-  assert.equal(result.envelope.ok, true)
-  assert.equal(resolveAssistant.mock.calls[0]?.[0].options.assistantModelProvider, undefined)
-  assert.equal(result.envelope.data?.backend?.modelProvider, null)
-  assert.equal(result.envelope.data?.backend?.oss, false)
-})
-
-test('interactive bare model clears a saved provider when wizard selects local OSS', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-wizard-local-clear-provider-'))
-  cleanupPaths.push(homeRoot)
-
-  await saveAssistantOperatorDefaultsPatch(
-    {
-      backend: {
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: null,
-        codexHome: null,
-        model: 'venice-model',
-        modelProvider: 'venice',
-        oss: false,
-        profile: null,
-        reasoningEffort: 'medium',
-        sandbox: 'danger-full-access',
-      },
-      account: null,
-    },
-    homeRoot,
-  )
-
-  const assistantWizard = vi.fn(async (_input: SetupAssistantWizardInput) => ({
-    assistantPreset: 'codex' as const,
-    assistantModelProvider: null,
-    assistantOss: true,
-  }))
-  const resolveAssistant = vi.fn(
-    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
-      preset,
-      enabled: true,
-      provider: 'codex-cli',
-      model: 'gpt-oss:20b',
-      modelProvider: options.assistantModelProvider ?? null,
-      codexCommand: null,
-      codexHome: null,
-      profile: null,
-      reasoningEffort: options.assistantReasoningEffort ?? null,
-      sandbox: 'danger-full-access',
-      approvalPolicy: 'never',
-      oss: options.assistantOss ?? false,
-      account: null,
-      detail: 'resolved local Codex after wizard selection',
-    }),
-  )
-
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    assistantSetup: {
-      resolve: resolveAssistant,
-    },
-    assistantWizard,
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: true,
-      stderrIsTTY: true,
-    },
-  })
-
-  const result = await runRegisteredCliJson<{
-    backend: {
-      modelProvider: string | null
-      oss: boolean
-    } | null
-  }>(cli, ['model'])
-
-  assert.equal(result.exitCode, null)
-  assert.equal(result.envelope.ok, true)
-  assert.equal(resolveAssistant.mock.calls[0]?.[0].options.assistantModelProvider, undefined)
-  assert.equal(result.envelope.data?.backend?.modelProvider, null)
-  assert.equal(result.envelope.data?.backend?.oss, true)
 })
 
 test('model reuses existing Codex defaults when only the model changes', async () => {
@@ -1346,7 +1113,7 @@ test('model reuses existing Codex defaults when only the model changes', async (
         codexCommand: null,
         codexHome: '/tmp/codex-1',
         model: 'gpt-5.4',
-        modelProvider: 'vercel-ai-gateway',
+        modelProvider: null,
         oss: false,
         profile: 'ops',
         reasoningEffort: 'medium',
@@ -1363,14 +1130,14 @@ test('model reuses existing Codex defaults when only the model changes', async (
       enabled: true,
       provider: 'codex-cli',
       model: options.assistantModel ?? null,
-      modelProvider: options.assistantModelProvider ?? null,
+      modelProvider: null,
       codexCommand: options.assistantCodexCommand ?? null,
       codexHome: options.assistantCodexHome ?? null,
       profile: options.assistantProfile ?? null,
       reasoningEffort: options.assistantReasoningEffort ?? null,
       sandbox: 'danger-full-access',
       approvalPolicy: 'never',
-      oss: options.assistantOss ?? false,
+      oss: false,
       account: null,
       detail: 'saved codex backend',
     }),
@@ -1397,7 +1164,7 @@ test('model reuses existing Codex defaults when only the model changes', async (
     } | null
     notes: string[]
     summary: string | null
-  }>(cli, ['model', '--model', 'gpt-oss:20b'])
+  }>(cli, ['model', '--model', 'gpt-6-sol'])
 
   assert.equal(result.exitCode, null)
   assert.equal(result.envelope.ok, true)
@@ -1410,11 +1177,9 @@ test('model reuses existing Codex defaults when only the model changes', async (
       strict: true,
       whisperModel: 'base.en',
       assistantPreset: 'codex',
-      assistantModel: 'gpt-oss:20b',
+      assistantModel: 'gpt-6-sol',
       assistantCodexCommand: undefined,
       assistantCodexHome: '/tmp/codex-1',
-      assistantModelProvider: 'vercel-ai-gateway',
-      assistantOss: undefined,
       assistantProfile: 'ops',
       assistantReasoningEffort: 'medium',
     },
@@ -1425,8 +1190,8 @@ test('model reuses existing Codex defaults when only the model changes', async (
     approvalPolicy: 'never',
     codexCommand: null,
     codexHome: '[path]',
-    model: 'gpt-oss:20b',
-    modelProvider: 'vercel-ai-gateway',
+    model: 'gpt-6-sol',
+    modelProvider: null,
     oss: false,
     profile: 'ops',
     reasoningEffort: 'medium',
@@ -1437,140 +1202,18 @@ test('model reuses existing Codex defaults when only the model changes', async (
   ])
   assert.equal(
     result.envelope.data?.summary,
-    'gpt-oss:20b via Codex app-server',
+    'gpt-6-sol via Codex app-server',
   )
 
   const savedConfig = await readOperatorConfig(homeRoot)
   assert.equal(savedConfig?.assistant?.backend?.adapter, 'codex-cli')
-  assert.equal(savedConfig?.assistant?.backend?.model, 'gpt-oss:20b')
+  assert.equal(savedConfig?.assistant?.backend?.model, 'gpt-6-sol')
   assert.equal(
     savedConfig?.assistant?.backend?.adapter === 'codex-cli'
       ? savedConfig.assistant.backend.modelProvider
       : null,
-    'vercel-ai-gateway',
+    null,
   )
-})
-
-test('model forwards an explicit Codex model provider to setup resolution', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-provider-'))
-  cleanupPaths.push(homeRoot)
-
-  const resolveAssistant = vi.fn(
-    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
-      preset,
-      enabled: true,
-      provider: 'codex-cli',
-      model: options.assistantModel ?? null,
-      modelProvider: options.assistantModelProvider ?? null,
-      codexCommand: null,
-      profile: null,
-      reasoningEffort: options.assistantReasoningEffort ?? null,
-      sandbox: 'danger-full-access',
-      approvalPolicy: 'never',
-      oss: false,
-      account: null,
-      detail: 'saved codex backend',
-    }),
-  )
-
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    assistantSetup: {
-      resolve: resolveAssistant,
-    },
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: false,
-      stderrIsTTY: false,
-    },
-  })
-
-  const result = await runRegisteredCliJson(cli, [
-    'model',
-    '--preset',
-    'codex',
-    '--model',
-    'gpt-5.6-terra',
-    '--modelProvider',
-    'vercel-ai-gateway',
-  ])
-
-  assert.equal(result.exitCode, null)
-  assert.equal(result.envelope.ok, true)
-  assert.equal(resolveAssistant.mock.calls.length, 1)
-  assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
-    allowPrompt: false,
-    commandName: 'model',
-    options: {
-      vault: './vault',
-      strict: true,
-      whisperModel: 'base.en',
-      assistantPreset: 'codex',
-      assistantModel: 'gpt-5.6-terra',
-      assistantModelProvider: 'vercel-ai-gateway',
-    },
-    preset: 'codex',
-  })
-})
-
-test('model treats an explicit false OSS flag as a codex option when inferring the preset', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-oss-false-'))
-  cleanupPaths.push(homeRoot)
-
-  const resolveAssistant = vi.fn(
-    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
-      preset,
-      enabled: true,
-      provider: 'codex-cli',
-      model: options.assistantModel ?? null,
-      modelProvider: options.assistantModelProvider ?? null,
-      codexCommand: options.assistantCodexCommand ?? null,
-      profile: options.assistantProfile ?? null,
-      reasoningEffort: options.assistantReasoningEffort ?? null,
-      sandbox: 'danger-full-access',
-      approvalPolicy: 'never',
-      oss: options.assistantOss ?? false,
-      account: null,
-      detail: 'saved codex backend',
-    }),
-  )
-  const assistantSetup: SetupAssistantResolver = {
-    resolve: resolveAssistant,
-  }
-
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    assistantSetup,
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: false,
-      stderrIsTTY: false,
-    },
-  })
-
-  const result = await runRegisteredCliJson(cli, [
-    'model',
-    '--model',
-    'gpt-5.4',
-    '--no-oss',
-  ])
-
-  assert.equal(result.exitCode, null)
-  assert.equal(result.envelope.ok, true)
-  assert.equal(resolveAssistant.mock.calls.length, 1)
-  assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
-    allowPrompt: false,
-    commandName: 'model',
-    options: {
-      vault: './vault',
-      strict: true,
-      whisperModel: 'base.en',
-      assistantPreset: 'codex',
-      assistantModel: 'gpt-5.4',
-      assistantOss: false,
-    },
-    preset: 'codex',
-  })
 })
 
 test('root status, doctor, and stop aliases reuse the assistant command schemas', () => {

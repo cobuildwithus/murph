@@ -436,7 +436,6 @@ describe("hosted account settings snapshot", () => {
           humor: null,
           push: null,
         },
-        provider: "openai",
         solAvailable: false,
         tone: "casual",
         voice: "warm",
@@ -850,7 +849,7 @@ function makeSettingsMemberRecord(
     assistantHumor: null,
     assistantModelPreference: null,
     assistantPersona: null,
-    assistantProviderPreference: null,
+
     assistantPush: null,
     assistantUnhinged: null,
     assistantReasoningEffortPreference: null,

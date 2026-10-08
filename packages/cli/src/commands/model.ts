@@ -77,12 +77,6 @@ const modelCommandOptionsSchema = z.object({
   model: optionalNonEmptyStringOption(
     'Model id to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.',
   ),
-  modelProvider: optionalNonEmptyStringOption(
-    describePresetScopedOption(
-      'Optional Codex model provider id to save.',
-      'codex',
-    ),
-  ),
   codexCommand: optionalNonEmptyStringOption(
     `${describePresetScopedOption(
       'Optional Codex CLI executable path.',
@@ -106,15 +100,6 @@ const modelCommandOptionsSchema = z.object({
     .optional()
     .describe(
       'Optional assistant reasoning effort default to save for the selected backend. Use the matching `--preset` when Murph cannot infer the backend non-interactively.',
-    ),
-  oss: z
-    .boolean()
-    .optional()
-    .describe(
-      describePresetScopedOption(
-        'Save a local Codex OSS model target instead of the signed-in Codex cloud path.',
-        'codex',
-      ),
     ),
 })
 
@@ -244,7 +229,6 @@ export function registerModelCommands(
       const wizardSelection =
         allowPrompt && shouldRunModelAssistantWizard(options)
           ? await assistantWizard({
-              enableApiKeyProviderOnboarding: false,
               ...buildSetupAssistantWizardInputFromDefaults(existingDefaults),
             })
           : null
@@ -324,9 +308,7 @@ function hasCodexModelOptions(options: ModelCommandOptions): boolean {
   return (
     options.codexCommand !== undefined ||
     options.codexHome !== undefined ||
-    options.modelProvider !== undefined ||
-    options.profile !== undefined ||
-    options.oss !== undefined
+    options.profile !== undefined
   )
 }
 
@@ -360,18 +342,6 @@ function mergeModelCommandOptionsWithWizardSelection(
   return {
     ...options,
     preset: wizardSelection.assistantPreset,
-    ...(wizardSelection.assistantPreset === 'codex' &&
-    wizardSelection.assistantOss !== undefined
-      ? {
-          oss: wizardSelection.assistantOss ?? undefined,
-        }
-      : {}),
-    ...(wizardSelection.assistantPreset === 'codex' &&
-    'assistantModelProvider' in wizardSelection
-      ? {
-          modelProvider: wizardSelection.assistantModelProvider ?? undefined,
-        }
-      : {}),
   }
 }
 
@@ -414,15 +384,7 @@ function createModelSetupOptions(input: {
   )
   if (input.wizardSelection) {
     delete savedAssistantOptions.assistantModel
-    delete savedAssistantOptions.assistantOss
-    if ('assistantModelProvider' in input.wizardSelection) {
-      delete savedAssistantOptions.assistantModelProvider
-    }
   }
-  const wizardAssistantModelProvider =
-    input.wizardSelection && 'assistantModelProvider' in input.wizardSelection
-      ? input.wizardSelection.assistantModelProvider
-      : undefined
 
   return setupCommandOptionsSchema.parse({
     vault: './vault',
@@ -433,11 +395,6 @@ function createModelSetupOptions(input: {
           assistantModel: input.options.model,
         }
       : {}),
-    ...(input.options.modelProvider !== undefined
-      ? { assistantModelProvider: input.options.modelProvider }
-      : wizardAssistantModelProvider
-        ? { assistantModelProvider: wizardAssistantModelProvider }
-        : {}),
     ...(input.options.codexCommand !== undefined
       ? {
           assistantCodexCommand: input.options.codexCommand,
@@ -456,11 +413,6 @@ function createModelSetupOptions(input: {
     ...(input.options.reasoningEffort !== undefined
       ? {
           assistantReasoningEffort: input.options.reasoningEffort,
-        }
-      : {}),
-    ...(input.options.oss !== undefined
-      ? {
-          assistantOss: input.options.oss,
         }
       : {}),
   })
@@ -558,7 +510,5 @@ function buildSetupAssistantWizardInputFromDefaults(
 
   return {
     initialAssistantPreset: 'codex',
-    initialAssistantModelProvider: backend.modelProvider ?? null,
-    initialAssistantOss: backend.oss === true ? true : undefined,
   }
 }

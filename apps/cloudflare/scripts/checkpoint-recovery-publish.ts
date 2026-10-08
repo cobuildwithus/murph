@@ -5,7 +5,6 @@ import { parseHostedWorkspaceReadResponse, isHostedWorkspaceSnapshotV2Ref } from
 import { buildHostedWorkspaceSnapshotV2FingerprintSha256 as fingerprint, HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import { fingerprintRecoveryReplica, HOSTED_CHECKPOINT_RECOVERY_PATH, type HostedCheckpointRecoveryRequest } from "@murphai/hosted-execution/runtime-resources";
 import { HOSTED_RUNTIME_WORKSPACE_PATH } from "@murphai/hosted-execution/routes";
-import { HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION, HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY } from "@murphai/hosted-execution/assistant-inference";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../src/web-control-plane.ts";
 import { readHostedWebCallbackSigningEnvironment } from "../src/web-callback-auth.ts";
 import { createHostedR2PresignedGetUrl, createHostedR2PresignedPutUrl } from "../src/r2-presigned-url.ts";
@@ -36,8 +35,7 @@ export async function publishPartialCheckpointRecovery(env: Env, fetchImpl: type
   const base = { baseUrl: "https://www.withmurph.ai", boundUserId: request.userId,
     callbackSigning, timeoutMs: 30_000, fetchImpl: boundedFetch };
   async function readWorkspace() {
-    const response = await fetchHostedExecutionWebControlPlaneResponse({ ...base, method: "GET", path: HOSTED_RUNTIME_WORKSPACE_PATH,
-      search: new URLSearchParams({ [HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY]: String(HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION) }).toString() });
+    const response = await fetchHostedExecutionWebControlPlaneResponse({ ...base, method: "GET", path: HOSTED_RUNTIME_WORKSPACE_PATH });
     const value = parseHostedWorkspaceReadResponse(JSON.parse(Buffer.from(await readRecoveryResponse(response, 1024 * 1024)).toString("utf8")));
     if (!value.workspace || value.workspace.userId !== request.userId) throw new Error("recovery_workspace_unavailable");
     return value.workspace;

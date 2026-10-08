@@ -3629,7 +3629,9 @@ text(result.output);
   it('composes a reviewed group continuation through the real provider and queues one reply', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
-    const scenario = await prepareScriptedTurnScenario()
+    const scenario = await prepareScriptedTurnScenario({
+      modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+    })
     scenario.stub.captureProviderRequestDiagnostics()
     scenario.stub.queue({
       text: 'First reviewed fact.\n---\nSecond reviewed fact.',
@@ -3639,7 +3641,7 @@ text(result.output);
       codexCommand: scenario.turnInput.codexCommand,
       codexHome: scenario.turnInput.codexHome,
       model: scenario.turnInput.model,
-      modelProvider: null,
+      modelProvider: scenario.turnInput.modelProvider,
       reasoningEffort: 'low' as const,
       sandbox: 'read-only' as const,
     }
@@ -8547,12 +8549,10 @@ text(JSON.stringify(result));
         'gpt-6-sol',
         'gpt-5.6-sol',
       ],
-      availableProviders: ['openai'],
       availableReasoningEfforts: ['low'],
       configurationAvailable: true,
       dormantSolPreference: false,
       model,
-      provider: 'openai' as const,
       reasoningEffort: 'low' as const,
       solAvailable: true,
     })

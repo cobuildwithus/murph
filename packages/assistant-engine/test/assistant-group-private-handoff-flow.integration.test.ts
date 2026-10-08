@@ -35,7 +35,7 @@ const cleanupPaths: string[] = []
 const target = createAssistantModelTarget({
   approvalPolicy: 'never',
   model: 'gpt-5.6-terra',
-  modelProvider: 'vercel-ai-gateway',
+  modelProvider: 'hosted-openai',
   provider: 'codex-cli',
   reasoningEffort: 'medium',
   sandbox: 'danger-full-access',

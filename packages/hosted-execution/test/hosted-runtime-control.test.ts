@@ -16,7 +16,6 @@ import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_MODEL_OVERRIDES,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORT_OVERRIDES,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
@@ -467,12 +466,10 @@ describe("hosted runtime control contracts", () => {
         reasoningEffort,
       })).toEqual({ action: "update", reasoningEffort });
     }
-    for (const provider of HOSTED_ASSISTANT_PROVIDERS) {
-      expect(parseHostedRuntimeAssistantConfigurationToolRequest({
-        action: "update",
-        provider,
-      })).toEqual({ action: "update", provider });
-    }
+    expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
+      action: "update",
+      provider: "openai",
+    })).toThrow(/not allowed/u);
     expect(parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "update",
       model: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -485,7 +482,7 @@ describe("hosted runtime control contracts", () => {
 
     expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "update",
-    })).toThrow(/requires a model, provider, or reasoning effort/u);
+    })).toThrow(/requires a model or reasoning effort/u);
     expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "read",
       model: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -496,15 +493,11 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/not supported/u);
 
     const assistantInputId = `ain_${"c".repeat(32)}`;
-    expect(parseHostedRuntimeAssistantConfigurationControlRequest({
+    expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",
       assistantInputId,
-      provider: "venice",
-    })).toEqual({
-      action: "update",
-      assistantInputId,
-      provider: "venice",
-    });
+      provider: "openai",
+    })).toThrow(/not allowed/u);
     expect(parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",
       assistantInputId,
@@ -582,12 +575,10 @@ describe("hosted runtime control contracts", () => {
 
     const snapshot = {
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-      availableProviders: ["openai", "venice"] as const,
       availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
       configurationAvailable: true,
       dormantSolPreference: false,
       model: HOSTED_ASSISTANT_DEFAULT_MODEL,
-      provider: "openai" as const,
       reasoningEffort: "low" as const,
       solAvailable: false,
     };
@@ -598,29 +589,10 @@ describe("hosted runtime control contracts", () => {
       action: "read",
       result: snapshot,
     });
-    const {
-      availableProviders: _legacyAvailableProviders,
-      provider: _legacyProvider,
-      ...legacySnapshot
-    } = snapshot;
-    expect(parseHostedRuntimeAssistantConfigurationToolResponse({
-      action: "read",
-      result: legacySnapshot,
-    })).toEqual({
-      action: "read",
-      result: {
-        ...legacySnapshot,
-        availableProviders: ["openai"],
-        provider: "openai",
-      },
-    });
     expect(() => parseHostedRuntimeAssistantConfigurationToolResponse({
       action: "read",
-      result: {
-        ...snapshot,
-        provider: undefined,
-      },
-    })).toThrow(/provider is not supported/u);
+      result: { ...snapshot, provider: "openai" },
+    })).toThrow(/not allowed/u);
     expect(parseHostedRuntimeAssistantConfigurationToolResponse({
       action: "update",
       result: {
@@ -972,7 +944,6 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedMailboxFetchResponse({
       conversationUsageStatus: "low",
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
@@ -982,7 +953,6 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     })).toEqual({
       conversationUsageStatus: "low",
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
@@ -991,49 +961,14 @@ describe("hosted runtime control contracts", () => {
       ],
       userId: "member_123",
     });
-    for (const revision of [null, 1, 3]) {
-      expect(parseHostedMailboxFetchResponse({
-        assistantProvider: "openai",
-        assistantCustomInferenceRevision: revision,
-        fetchedAt: "2026-04-26T00:00:02.000Z",
-        items: [],
-        maxSeqByLane: [],
-        userId: "member_123",
-      }).assistantCustomInferenceRevision).toBe(revision);
-    }
-    for (const revision of [0, -1, 1.5, "3"]) {
-      expect(() => parseHostedMailboxFetchResponse({
-        assistantProvider: "openai",
-        assistantCustomInferenceRevision: revision,
-        fetchedAt: "2026-04-26T00:00:02.000Z",
-        items: [],
-        maxSeqByLane: [],
-        userId: "member_123",
-      })).toThrow();
-    }
-    expect(parseHostedMailboxFetchResponse({
-      assistantProvider: "venice",
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      items: [],
-      maxSeqByLane: [],
-      userId: "member_123",
-    })).toEqual({
-      assistantProvider: "venice",
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      items: [],
-      maxSeqByLane: [],
-      userId: "member_123",
-    });
     expect(parseHostedMailboxFetchResponse({
       conversationUsageStatus: null,
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
       userId: "member_123",
     })).toEqual({
       conversationUsageStatus: null,
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
@@ -1073,14 +1008,12 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/Hosted mailbox fetch request cursorMode/u);
     expect(() => parseHostedMailboxFetchResponse({
       conversationUsageStatus: "healthy",
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
       userId: "member_123",
     })).toThrow(/conversationUsageStatus/u);
     expect(() => parseHostedMailboxFetchResponse({
-      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [
@@ -1089,21 +1022,6 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     })).toThrow(/non-negative base-10 integer string/u);
   });
-
-  it.each([undefined, null, "", "invalid", "OPENAI", 0, {}, ["openai"]].map(
-    (assistantProvider) => ({ assistantProvider }),
-  ))(
-    "rejects a mailbox fetch response with a missing or invalid provider: %j",
-    ({ assistantProvider }) => {
-      expect(() => parseHostedMailboxFetchResponse({
-        ...(assistantProvider === undefined ? {} : { assistantProvider }),
-        fetchedAt: "2026-04-26T00:00:02.000Z",
-        items: [],
-        maxSeqByLane: [],
-        userId: "member_123",
-      })).toThrow(/provider/iu);
-    },
-  );
 
   it("parses minimal mailbox records and payload sidecars", () => {
     const minimalItem = {

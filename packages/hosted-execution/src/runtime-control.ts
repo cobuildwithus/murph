@@ -32,13 +32,8 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
-  HostedAssistantCustomInferenceOverride,
-} from "./assistant-inference.ts";
-import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
-  HostedAssistantProvider,
-  HostedAssistantProviderOverride,
   HostedAssistantReasoningEffort,
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
@@ -907,11 +902,6 @@ export interface HostedGroupRunningBitProjection {
 }
 
 export interface HostedMailboxFetchResponse {
-  // Web supplies this invocation-lifecycle fact on every fetch, including empty
-  // batches. Deploy Web before a runner that consumes it.
-  assistantProvider: HostedAssistantProvider;
-  // Selected custom route identity; null means managed. Older Web omits it.
-  assistantCustomInferenceRevision?: number | null;
   // Optional for deploy-window compatibility. Web emits this only for an
   // allowed conversation batch whose current effective capacity is low.
   conversationUsageStatus?: "low" | null;
@@ -2290,17 +2280,10 @@ export type HostedRuntimeAssistantConfigurationToolRequest =
 export type HostedRuntimeAssistantConfigurationChanges =
   | {
       model: HostedAssistantProductModel;
-      provider?: HostedAssistantProvider;
       reasoningEffort?: HostedAssistantReasoningEffort;
     }
   | {
       model?: never;
-      provider: HostedAssistantProvider;
-      reasoningEffort?: HostedAssistantReasoningEffort;
-    }
-  | {
-      model?: never;
-      provider?: never;
       reasoningEffort: HostedAssistantReasoningEffort;
     };
 
@@ -2315,12 +2298,10 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
 
 export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];
-  availableProviders: HostedAssistantProvider[];
   availableReasoningEfforts: HostedAssistantReasoningEffort[];
   configurationAvailable: boolean;
   dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
-  provider: HostedAssistantProvider;
   reasoningEffort: HostedAssistantReasoningEffort;
   solAvailable: boolean;
 }
@@ -3667,9 +3648,7 @@ export interface HostedWorkspaceReadResponse {
   /** Derived from personal member signup; rechecked at each provider attempt. */
   hostedAssistantPriorityUntil?: string;
   hostedAssistantAstraAllowed?: boolean;
-  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
-  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   hostedAssistantSubagentModelOverridesAllowed?: boolean;
   platformAiUsageAllowed?: boolean;

@@ -23,7 +23,6 @@ import {
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
   HOSTED_ASSISTANT_CODEX_COMMAND_ENV,
-  HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_PROFILE_ENV,
   HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
@@ -32,11 +31,8 @@ import {
   type AssistantCodexModelProviderConfig,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
-  VENICE_CODEX_MODEL_PROVIDER_ID,
   resolveAssistantCodexModelProviderConfig,
 } from "@murphai/operator-config/assistant/target-runtime";
 import {
@@ -125,10 +121,9 @@ const HOSTED_CODEX_NATIVE_MEMORY_CONFIG = {
   generateMemories: false,
   useMemories: false,
 } as const;
-export function hostedCodexProviderTransportDiagnostics(providerId: string) {
+export function hostedCodexProviderTransportDiagnostics() {
   return {
-    codexProviderRequestMaxRetries: providerId === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
-      ? 1 : HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
+    codexProviderRequestMaxRetries: HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
     codexProviderStreamIdleTimeoutMs: HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
     codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
   } as const;
@@ -137,7 +132,6 @@ const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
   HOSTED_ASSISTANT_CODEX_COMMAND_ENV,
-  HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_PROFILE_ENV,
   HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
@@ -200,13 +194,6 @@ export async function prepareHostedCodexRuntimeEnvironment(
     provider: normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER),
     runtimeEnv: input.runtimeEnv,
   });
-  const customInferenceProvider =
-    providerConfig.id === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
-  const contextWindowTokens = customInferenceProvider
-    ? requireHostedCustomInferenceContextWindowTokens(
-        input.runtimeEnv.HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS,
-      )
-    : null;
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
@@ -278,15 +265,11 @@ export async function prepareHostedCodexRuntimeEnvironment(
     buildHostedCodexConfigToml({
       chatGptAuth,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
-      contextWindowTokens,
       exposeSpawnAgentModelOverrides:
-        !customInferenceProvider
-        && input.runtimeEnv[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV]
+        input.runtimeEnv[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV]
           === "1",
       provider: providerConfig,
-      reasoningEffort: customInferenceProvider
-        ? null
-        : runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
+      reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
     }),
     {
       encoding: "utf8",
@@ -506,11 +489,7 @@ function resolveHostedCodexModelProviderConfig(input: {
   return {
     ...providerConfig,
     baseUrl: url.toString(),
-    id: providerConfig.id === VENICE_CODEX_MODEL_PROVIDER_ID
-      ? HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
-      : providerConfig.id === HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
-        ? HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
-        : providerConfig.id,
+    id: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
     supportsWebSockets: false,
   };
 }
@@ -564,24 +543,6 @@ function normalizeHostedCodexUrlHostname(hostname: string): string {
   return hostname.replace(/^\[/u, "").replace(/\]$/u, "");
 }
 
-function requireHostedCustomInferenceContextWindowTokens(value: unknown): number {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  if (!/^[0-9]+$/u.test(normalized)) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      "Custom inference requires HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS.",
-    );
-  }
-  const parsed = Number(normalized);
-  if (!Number.isSafeInteger(parsed) || parsed < 8_192 || parsed > 2_000_000) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      "HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS is outside the supported range.",
-    );
-  }
-  return parsed;
-}
-
 function buildHostedCodexProviderTomlLines(input: {
   provider: AssistantCodexModelProviderConfig;
   chatGptAuth?: boolean;
@@ -589,7 +550,7 @@ function buildHostedCodexProviderTomlLines(input: {
   const modelProviderId = input.chatGptAuth
     ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
     : input.provider.id;
-  const transport = hostedCodexProviderTransportDiagnostics(modelProviderId);
+  const transport = hostedCodexProviderTransportDiagnostics();
   return [
     `[model_providers.${tomlQuotedKey(modelProviderId)}]`,
     `name = ${tomlString(input.provider.name)}`,
@@ -613,7 +574,6 @@ function buildHostedCodexProviderTomlLines(input: {
 
 export function buildHostedCodexConfigToml(input: {
   chatGptAuth?: boolean;
-  contextWindowTokens?: number | null;
   exposeSpawnAgentModelOverrides: boolean;
   model: string | null;
   provider: AssistantCodexModelProviderConfig;
@@ -622,13 +582,6 @@ export function buildHostedCodexConfigToml(input: {
   const modelProviderId = input.chatGptAuth
     ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
     : input.provider.id;
-  const autoCompactTokenLimit = input.contextWindowTokens === null
-      || input.contextWindowTokens === undefined
-    ? DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT
-    : Math.min(
-        DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT,
-        Math.max(4_096, Math.floor(input.contextWindowTokens * 0.75)),
-      );
   const operatorModelProvider = resolveHostedOperatorModelProvider(modelProviderId);
   const providerConfigLines = [
     ...buildHostedCodexProviderTomlLines(input),
@@ -653,10 +606,7 @@ export function buildHostedCodexConfigToml(input: {
     ...(input.reasoningEffort
       ? [`model_reasoning_effort = ${tomlString(input.reasoningEffort)}`]
       : []),
-    ...(input.contextWindowTokens
-      ? [`model_context_window = ${input.contextWindowTokens}`]
-      : []),
-    `model_auto_compact_token_limit = ${autoCompactTokenLimit}`,
+    `model_auto_compact_token_limit = ${DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT}`,
     `log_dir = ${tomlString(DEFAULT_HOSTED_CODEX_LOG_DIR)}`,
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
     `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,

@@ -189,11 +189,6 @@ export const setupCommandOptionsSchema = z.object({
   assistantPreset: setupAssistantPresetSchema
     .optional()
     .describe('Optional onboarding assistant preset: Codex or skip.'),
-  assistantModelProvider: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional Codex model provider id to save during setup, such as venice or vercel-ai-gateway.'),
   assistantModel: z
     .string()
     .min(1)
@@ -219,10 +214,6 @@ export const setupCommandOptionsSchema = z.object({
     .min(1)
     .optional()
     .describe('Optional assistant reasoning effort default to save during setup.'),
-  assistantOss: z
-    .boolean()
-    .optional()
-    .describe('Optional Codex backend flag to save a local model target instead of the signed-in Codex cloud path.'),
 })
 
 export const setupResultSchema = z.object({

@@ -14,7 +14,6 @@ import {
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
@@ -787,14 +786,6 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
     workingDirectory,
   })
 }
-
-
-
-
-
-
-
-
 
 class MockChildProcess extends EventEmitter {
   exitCode: number | null = null

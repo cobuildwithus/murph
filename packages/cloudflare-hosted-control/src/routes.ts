@@ -32,10 +32,6 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "environment-realtime/call",
   },
-  inferenceVerification: {
-    method: "POST",
-    suffix: "inference/verify",
-  },
   mealPhotoStage: {
     method: "POST",
     suffix: "meal-photos/stage",
@@ -85,15 +81,6 @@ export function buildCloudflareHostedControlRuntimeResourcePurgePath(userId: str
 
 export function buildCloudflareHostedControlUserStatusPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("status", userId);
-}
-
-export function buildCloudflareHostedControlInferenceVerificationPath(
-  userId: string,
-): string {
-  return buildCloudflareHostedControlUserRoutePath(
-    "inferenceVerification",
-    userId,
-  );
 }
 
 export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: string): string {
