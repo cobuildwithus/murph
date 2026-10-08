@@ -56,3 +56,11 @@ prove actual elapsed-time behavior under synthetic transient outages.
 - Prior full local evidence: 359 tests across nine files, migration, schema,
   typecheck, complexity and Workflow compilation passed.
 - Exact-head CI, ReviewGPT and production release verification pending.
+- PR #4108's first CI run identified the production migration guard's explicit
+  admission requirement for defaulted non-null columns. Use its existing
+  per-migration compatibility map; do not relax the SQL classifier. Actual SQL
+  against connection-local PostgreSQL tables proves preexisting rows and old
+  inserts receive zero count, empty history and null recovery pointers.
+- Correction proof: 151 focused migration/retry tests, guarded local migration
+  deploy, Web typecheck and complexity check passed. The initial review remains
+  bound to its original snapshot; the corrected head needs the next review.

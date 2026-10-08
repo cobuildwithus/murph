@@ -1,4 +1,5 @@
 import { randomInt, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { Prisma } from "@prisma/client";
 import type { Message } from "@linqapp/sdk/resources/messages";
@@ -1129,6 +1130,34 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
 
 
 describe.skipIf(!enabled)("durable bounded terminal recovery", () => {
+  it("migrates existing rows and accepts old writers with empty recovery defaults", async () => {
+    const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+    try {
+      const sql = await readFile(new URL("../prisma/migrations/20261008210000_linq_bounded_terminal_recovery/migration.sql", import.meta.url), "utf8");
+      await prisma.$transaction(async (tx) => {
+        // Connection-local tables shadow only these synthetic names for this transaction.
+        await tx.$executeRawUnsafe('CREATE TEMP TABLE hosted_linq_delivery_message (id TEXT PRIMARY KEY) ON COMMIT DROP');
+        await tx.$executeRawUnsafe('CREATE TEMP TABLE hosted_linq_delivery (linq_chat_lookup_key TEXT, accepted_at TIMESTAMP(3)) ON COMMIT DROP');
+        await tx.$executeRaw`INSERT INTO hosted_linq_delivery_message (id) VALUES ('before-migration')`;
+        for (const statement of sql.split(";").filter((part) => part.trim())) {
+          await tx.$executeRawUnsafe(statement);
+        }
+        await tx.$executeRaw`INSERT INTO hosted_linq_delivery_message (id) VALUES ('old-writer-after-migration')`;
+        expect(await tx.$queryRaw`
+          SELECT id FROM hosted_linq_delivery_message
+          WHERE terminal_retry_count = 0
+            AND terminal_retry_previous_message_lookup_keys = ARRAY[]::TEXT[]
+            AND terminal_retry_next_at IS NULL AND terminal_retry_expires_at IS NULL
+            AND terminal_retry_claimed_message_lookup_key IS NULL
+            AND terminal_retry_context_ciphertext IS NULL AND terminal_retry_owner_member_id IS NULL
+          ORDER BY id
+        `).toEqual([{ id: "before-migration" }, { id: "old-writer-after-migration" }]);
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
   it.each([null, undefined, "iMessage"] as const)("preserves original preferred service %s with no actual transport", async (preferred) => {
     await withFixture(async (f) => {
       await f.receipt(f.messageId, "failed", "Message send failed", null);

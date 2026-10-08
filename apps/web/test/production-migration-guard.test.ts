@@ -603,6 +603,24 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("limits Linq recovery compatibility to its additive defaulted fields", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261008210000_linq_bounded_terminal_recovery";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, migrationId, `${sql}\nDROP TABLE "hosted_member";`);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))
+          .map(({ migrationId: id, reason }) => ({ migrationId: id, reason })),
+        [{ migrationId, reason: "DROP TABLE" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits the detached direct-proof predeploy exception to its proved DDL", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
