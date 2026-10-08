@@ -3092,7 +3092,6 @@ describe("hosted local dev stack", () => {
         HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: "/tmp/spoofed-catalog.json",
         OPENAI_API_KEY: "local-openai-key",
-        VENICE_API_KEY: "local-venice-key",
       },
     });
     await stack.ready;
@@ -3103,7 +3102,6 @@ describe("hosted local dev stack", () => {
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.CODEX_HOME).toBeUndefined();
     expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
-    expect(cloudflareEnv.VENICE_API_KEY).toBe("local-venice-key");
     expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     // The image owns the Codex model catalog; inherited values are stripped.
     expect(cloudflareEnv.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBeUndefined();
@@ -3126,7 +3124,6 @@ describe("hosted local dev stack", () => {
       .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
     expect(envFileSource.CODEX_HOME).toBeUndefined();
     expect(envFileSource.OPENAI_API_KEY).toBe("local-openai-key");
-    expect(envFileSource.VENICE_API_KEY).toBe("local-venice-key");
     expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(envFileSource.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBeUndefined();
   });
@@ -3772,7 +3769,7 @@ describe("hosted local dev stack", () => {
 
     vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
       HOSTED_ASSISTANT_MODEL: "stale-pulled-model",
-      HOSTED_ASSISTANT_PROVIDER: "venice",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
     });
 
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");

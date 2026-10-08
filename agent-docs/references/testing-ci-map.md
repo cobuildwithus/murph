@@ -448,18 +448,13 @@ process-owned temp root. Teardown removes the whole root after success or
 failure; a later run recovers only old marked roots whose owner is gone and
 which no current-user process uses as its working directory.
 
-Hosted assistant-provider choice coverage is split across existing owners.
-Hosted-execution locks the closed OpenAI/Venice contract and additive workspace
-field; operator-config and assistant-runtime prove Venice Codex configuration
-without forwarding raw Worker credentials. Hosted Web tests cover the nullable
-preference, rollout flag, Settings route/component, workspace projection, and
-expand-only migration. Cloudflare tests cover signed credential minting,
-all-or-none deploy preflight, exact Responses path/method allowlisting, bounded
-body parsing, the exact Codex-native managed OpenAI standalone-search
-method/path plus wrong-method rejection and header stripping, canonical
-product-model validation, fixed model rewriting, and real-key injection only
-at Worker egress. Routine tests use synthetic keys and do not call OpenAI or
-Venice.
+Hosted assistant model coverage follows the existing owners. Shared contracts
+admit supported OpenAI model and reasoning choices. Web tests cover Settings,
+accepted-input configuration, and workspace projection. Runtime tests cover
+Codex configuration and automation model resolution. Cloudflare tests cover
+signed credentials, Responses transport, standalone search, authority header
+stripping, and real-key injection only at Worker egress. Routine proof uses
+synthetic keys and does not call a provider.
 
 Clinical-record execution coverage is split at its owners: hosted-execution
 tests lock the pointer/run/page/outcome codecs, vault-usecases tests prove
@@ -788,8 +783,6 @@ still shorten deep automation native parameters and code-mode types, so the full
 JSON supplement remains required. The mixed-mode condition-reminder journeys check
 the complete discovered supplement and exact saved reference, not shortened native
 reference-item fields.
-The custom-inference adapter suite checks complete long descriptions for function,
-namespace, and custom tools through both top-level and additional-tool transport.
 
 Focused live personalization proof uses
 `-- --test 'saves sentence-case preference'`: one sparse saved tone update, no

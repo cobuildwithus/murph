@@ -68,7 +68,7 @@ describe.skipIf(!enabled)("protected checkpoint recovery PostgreSQL publication"
   it("stages without retiring, then atomically replaces and fences old writes without claiming native stop", async () => {
     const f = await fixture();
     await prepareHostedRuntimeLaunch({ prisma: db, identity: f.identity, runnerContainerName: "synthetic-native-target",
-      workspaceVersion: "7", providerEgressTokenHash: null, customInferenceEnvelope: null, platformAiUsageAllowed: true });
+      workspaceVersion: "7", providerEgressTokenHash: null, platformAiUsageAllowed: true });
     expect(await recordHostedRuntimeAccepted({ prisma: db, identity: f.identity })).toBe(true);
     await db.hostedMailboxLaneCounter.create({ data: { userId: f.userId, lane: "system", nextSeq: 10n, consumedSeq: 8n } });
     const pendingId = `synthetic-pending-${randomUUID()}`;

@@ -12,12 +12,8 @@ import {
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   type HostedAssistantModelOverride,
-  type HostedAssistantProviderOverride,
   type HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
-import type {
-  HostedAssistantCustomInferenceOverride,
-} from "@murphai/hosted-execution/assistant-inference";
 import {
   HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
 } from "@murphai/hosted-execution/env";
@@ -55,9 +51,7 @@ import {
   RuntimeInvocationPreparation,
 } from "../src/runtime-invocation-preparation.js";
 
-import {
-  openHostedInferenceRuntimeTarget,
-} from "../src/hosted-inference-target-envelope.js";
+import { HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL } from "../src/runner-injected-credential.ts";
 import {
   RunnerStoreCache,
   type RunnerUserStores,
@@ -116,7 +110,6 @@ describe("hosted runner container identity", () => {
       invokedContainerNames: [],
       runnerRuntimeEnvSource: {
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
@@ -301,8 +294,6 @@ describe("hosted runner container identity", () => {
         },
         HOSTED_ASSISTANT_MODEL: fleetModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
@@ -341,8 +332,6 @@ describe("hosted runner container identity", () => {
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "version_1" },
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
@@ -367,14 +356,12 @@ describe("hosted runner container identity", () => {
     ).toBe(expected);
   });
 
-  it("applies Venice per member while retaining a scoped OpenAI tool credential", async () => {
+  it("forwards an OpenAI sentinel while keeping the Worker credential private", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const stateStore = createPreparationOwnerFixture();
     const sourceOpenAiKey = "test-openai-key";
-    const sourceVeniceKey = "test-venice-key";
     const service = createRuntimeInvocationPreparation({
-      hostedAssistantProviderOverride: "venice",
       invokedContainerNames: [],
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: {
@@ -382,10 +369,7 @@ describe("hosted runner container identity", () => {
         },
         HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: sourceOpenAiKey,
-        VENICE_API_KEY: sourceVeniceKey,
       },
       stateStore,
     });
@@ -396,18 +380,16 @@ describe("hosted runner container identity", () => {
 
     const prepared = await service.prepareWithFence({
       input: {
-        orchestrationAttemptId: "orchestration_attempt_provider_override",
+        orchestrationAttemptId: "orchestration_attempt_openai",
         userId: TEST_USER_ID,
       },
       token,
     });
     const forwardedEnv = prepared.job.runtime?.forwardedEnv;
 
-    expect(forwardedEnv?.HOSTED_ASSISTANT_PROVIDER).toBe("venice");
-    expect(forwardedEnv?.OPENAI_API_KEY).toEqual(expect.any(String));
+    expect(forwardedEnv?.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
+    expect(forwardedEnv?.OPENAI_API_KEY).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
     expect(forwardedEnv?.OPENAI_API_KEY).not.toBe(sourceOpenAiKey);
-    expect(forwardedEnv?.VENICE_API_KEY).toEqual(expect.any(String));
-    expect(forwardedEnv?.VENICE_API_KEY).not.toBe(sourceVeniceKey);
   });
 
   it.each([false, true])("preserves first-day priority through invocation parsing (existing workspace: %s)", async (existing) => {
@@ -427,7 +409,6 @@ describe("hosted runner container identity", () => {
         invokedContainerNames: [],
         runnerRuntimeEnvSource: {
           HOSTED_ASSISTANT_PROVIDER: "openai",
-          HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-secret",
           OPENAI_API_KEY: "test-openai-key",
         },
         stateStore,
@@ -465,8 +446,6 @@ describe("hosted runner container identity", () => {
         HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_ASSISTANT_REASONING_EFFORT: "low",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
@@ -489,133 +468,17 @@ describe("hosted runner container identity", () => {
     ).toBe("xhigh");
   });
 
-  it("resolves a selected custom target once, pins it to the fence, and gives Codex only a sentinel", async () => {
+  it("preserves an orchestration-owned assistant block with OpenAI", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const stateStore = createPreparationOwnerFixture();
-    const override: HostedAssistantCustomInferenceOverride = {
-      contextWindowTokens: 131_072,
-      modelAlias: "murph-custom-r7",
-      protocol: "responses",
-      revision: 7,
-      supportsImages: false,
-      verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
-    };
-    const runtimeTarget = {
-      auth: {
-        kind: "bearer",
-        secret: "synthetic-upstream-secret",
-      },
-      contextWindowTokens: override.contextWindowTokens,
-      endpointUrl: "https://inference.example.com/v1/responses",
-      model: "synthetic-upstream-model",
-      protocol: override.protocol,
-      revision: override.revision,
-      schema: "murph.hosted-inference-runtime-target.v1",
-      supportsImages: override.supportsImages,
-      verificationProfile: override.verificationProfile,
-    };
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json(runtimeTarget)
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const runnerRuntimeEnvSource = {
-      CF_VERSION_METADATA: { id: "version_1" },
-      HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-        "provider-egress-signing-secret",
-      OPENAI_API_KEY: "test-openai-key",
-    };
     const service = createRuntimeInvocationPreparation({
-      hostedAssistantCustomInferenceOverride: override,
-      hostedAssistantSubagentModelOverridesAllowed: true,
-      invokedContainerNames: [],
-      platformAiUsageAllowed: false,
-      runnerRuntimeEnvSource,
-      stateStore,
-    });
-    const token = await stateStore.beginWriteFence({
-      runnerContainerName: "member_123--v-version_1",
-      userId: TEST_USER_ID,
-    });
-
-    const prepared = await service.prepareWithFence({
-      input: {
-        orchestrationAttemptId: "orchestration_attempt_custom_inference",
-        userId: TEST_USER_ID,
-      },
-      token,
-    });
-    const forwardedEnv = prepared.job.runtime?.forwardedEnv;
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(prepared.job.request.processingMode).toBeUndefined();
-    expect(forwardedEnv).toMatchObject({
-      HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
-      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
-      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
-      MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
-    });
-    expect(forwardedEnv).not.toHaveProperty("HOSTED_ASSISTANT_REASONING_EFFORT");
-    expect(
-      forwardedEnv?.[HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV],
-    ).toBe("0");
-    expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.endpointUrl);
-    expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.auth.secret);
-
-    const validation = await stateStore.readBoundInvocation({
-      userId: TEST_USER_ID,
-    });
-    expect(validation).not.toBeNull();
-    if (!validation?.customInferenceEnvelope) {
-      throw new Error("Expected the selected custom target on the active fence.");
-    }
-    await expect(openHostedInferenceRuntimeTarget({
-      envelope: validation.customInferenceEnvelope,
-      source: runnerRuntimeEnvSource,
-    })).resolves.toEqual(runtimeTarget);
-  });
-
-  it("preserves an orchestration-owned assistant block with custom inference", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const stateStore = createPreparationOwnerFixture();
-    const override: HostedAssistantCustomInferenceOverride = {
-      contextWindowTokens: 131_072,
-      modelAlias: "murph-custom-r7",
-      protocol: "responses",
-      revision: 7,
-      supportsImages: false,
-      verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
-    };
-    const runtimeTarget = {
-      auth: {
-        kind: "bearer" as const,
-        secret: "synthetic-upstream-secret",
-      },
-      contextWindowTokens: override.contextWindowTokens,
-      endpointUrl: "https://inference.example.com/v1/responses",
-      model: "synthetic-upstream-model",
-      protocol: override.protocol,
-      revision: override.revision,
-      schema: "murph.hosted-inference-runtime-target.v1" as const,
-      supportsImages: override.supportsImages,
-      verificationProfile: override.verificationProfile,
-    };
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () =>
-      Response.json(runtimeTarget)
-    ));
-    const service = createRuntimeInvocationPreparation({
-      hostedAssistantCustomInferenceOverride: override,
       invokedContainerNames: [],
       platformAiUsageAllowed: true,
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "version_1" },
         HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
@@ -628,7 +491,7 @@ describe("hosted runner container identity", () => {
     const prepared = await service.prepareWithFence({
       input: {
         assistantExecutionBlocked: true,
-        orchestrationAttemptId: "orchestration_attempt_blocked_custom_inference",
+        orchestrationAttemptId: "orchestration_attempt_blocked_openai",
         processingMode: "system_mailbox",
         userId: TEST_USER_ID,
       },
@@ -640,8 +503,8 @@ describe("hosted runner container identity", () => {
       processingMode: "system_mailbox",
     });
     expect(prepared.job.runtime?.forwardedEnv).toMatchObject({
-      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
-      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
+      HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
+      HOSTED_ASSISTANT_PROVIDER: "openai",
     });
   });
 
@@ -657,8 +520,6 @@ describe("hosted runner container identity", () => {
         CF_VERSION_METADATA: { id: "version_1" },
         HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
@@ -695,8 +556,6 @@ describe("hosted runner container identity", () => {
         CF_VERSION_METADATA: { id: "version_1" },
         HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
@@ -743,8 +602,6 @@ describe("hosted runner container identity", () => {
         CF_VERSION_METADATA: { id: "version_1" },
         HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
@@ -798,8 +655,6 @@ describe("hosted runner container identity", () => {
           id: "version_1",
         },
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       stateStore,
@@ -845,8 +700,6 @@ describe("hosted runner container identity", () => {
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "release_1" },
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       standbyContainerNamespace: createStandbyNamespace({
@@ -879,8 +732,6 @@ describe("hosted runner container identity", () => {
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "release_1" },
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "provider-egress-signing-secret",
         OPENAI_API_KEY: "test-openai-key",
       },
       standbyContainerNamespace: createStandbyNamespace({
@@ -968,10 +819,8 @@ class EmptyRunnerSecretsService extends RunnerSecretsService {
 function createRuntimeInvocationPreparation(input: {
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
   beforeWorkspaceRead?: () => Promise<void>;
-  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantPriorityUntil?: string;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
-  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   hostedAssistantSubagentModelOverridesAllowed?: boolean;
   invokedContainerNames: string[];
@@ -988,7 +837,6 @@ function createRuntimeInvocationPreparation(input: {
       }
     },
     env: createHostedExecutionEnvironment(),
-    readHostedWebControlBaseUrl: () => "https://web.example.test",
     readHostedWorkspaceFromWeb: async () => {
       await input.beforeWorkspaceRead?.();
       return ({
@@ -999,20 +847,8 @@ function createRuntimeInvocationPreparation(input: {
       ...(input.platformAiUsageAllowed === undefined
         ? {}
         : { platformAiUsageAllowed: input.platformAiUsageAllowed }),
-      ...(input.hostedAssistantCustomInferenceOverride
-        ? {
-            hostedAssistantCustomInferenceOverride:
-              input.hostedAssistantCustomInferenceOverride,
-            ...(input.platformAiUsageAllowed === undefined
-              ? { platformAiUsageAllowed: false }
-              : {}),
-          }
-        : {}),
       ...(input.hostedAssistantModelOverride
         ? { hostedAssistantModelOverride: input.hostedAssistantModelOverride }
-        : {}),
-      ...(input.hostedAssistantProviderOverride
-        ? { hostedAssistantProviderOverride: input.hostedAssistantProviderOverride }
         : {}),
       ...(input.hostedAssistantReasoningEffortOverride
         ? {
@@ -1225,7 +1061,7 @@ function createVoidGate(): { promise: Promise<void>; resolve(): void } {
 
 function createPreparationOwnerFixture() {
   let token: RunnerWriteFenceToken | null = null;
-  let bound: { platformAiUsageAllowed: boolean | null; customInferenceEnvelope: string | null } | null = null;
+  let bound: { platformAiUsageAllowed: boolean | null } | null = null;
   return {
     reserveRunnerContainerStopTarget: async (_input: { runnerContainerName: string; userId: string }) => true,
     async beginWriteFence(input: { runnerContainerName?: string; userId: string; processingMode?: RunnerWriteFenceToken["processingMode"] }): Promise<RunnerWriteFenceToken> {

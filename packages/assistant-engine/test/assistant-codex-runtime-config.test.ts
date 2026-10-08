@@ -42,7 +42,6 @@ import {
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
-  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
@@ -131,7 +130,7 @@ describe('assistant codex runtime', () => {
       buildCodexAppServerArgs({
         approvalPolicy: 'never',
         configOverrides: ['model="gpt-5"', 'theme="clean"'],
-        oss: true,
+        oss: false,
         profile: 'daily',
         sandbox: 'workspace-write',
       }),
@@ -142,11 +141,11 @@ describe('assistant codex runtime', () => {
       'theme="clean"',
       '--profile',
       'daily',
-      '--oss',
       'app-server',
     ])
 
     expect(buildCodexAppServerArgs({})).toEqual(['app-server'])
+    expect(() => buildCodexAppServerArgs({ oss: true })).toThrow(/must use OpenAI/u)
   })
 
   it('builds typed Codex app-server turn steer requests for live turns', () => {
@@ -191,7 +190,7 @@ describe('assistant codex runtime', () => {
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       prompt: 'User message:\nWhat changed?',
       reasoningEffort: 'high',
       sandbox: 'workspace-write' as const,
@@ -206,7 +205,7 @@ describe('assistant codex runtime', () => {
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
       experimentalRawEvents: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       sandbox: 'workspace-write',
       serviceName: 'murph',
     })
@@ -221,11 +220,11 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
-        modelProvider: 'venice',
+        modelProvider: 'hosted-openai',
       }),
     ).toMatchObject({
       model: 'gpt-5',
-      modelProvider: 'venice',
+      modelProvider: 'hosted-openai',
     })
     expect(
       buildCodexThreadStartParams({
@@ -293,7 +292,7 @@ describe('assistant codex runtime', () => {
       cwd: '/workspace',
       excludeTurns: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       sandbox: 'workspace-write',
       threadId: 'thread-1',
     })
@@ -315,7 +314,7 @@ describe('assistant codex runtime', () => {
       cwd: '/workspace',
       excludeTurns: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       sandbox: 'workspace-write',
       threadId: 'thread-restricted-resume',
     })
@@ -337,7 +336,7 @@ describe('assistant codex runtime', () => {
       cwd: '/workspace',
       excludeTurns: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       sandbox: 'workspace-write',
       threadId: 'thread-1',
     })
@@ -356,7 +355,7 @@ describe('assistant codex runtime', () => {
       cwd: '/workspace',
       excludeTurns: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
       runtimeWorkspaceRoots: ['/workspace'],
       threadId: 'thread-member-workspace',
@@ -452,7 +451,7 @@ describe('assistant codex runtime', () => {
       ephemeral: true,
       experimentalRawEvents: true,
       model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       permissions: 'murph-group-read',
       runtimeWorkspaceRoots: ['/group-vault'],
       serviceName: 'murph',
@@ -551,12 +550,6 @@ describe('assistant codex runtime', () => {
       model: 'gpt-5.2',
       modelProvider: 'openai',
       providerRequestOrdinal: 3,
-    },
-    {
-      expectedImageDetail: 'high',
-      model: 'member-model',
-      modelProvider: 'hosted-custom-inference',
-      providerRequestOrdinal: 4,
     },
   ] as const)(
     'executes Codex app-server turns for $modelProvider at provider ordinal $providerRequestOrdinal',
@@ -1529,12 +1522,10 @@ describe('assistant codex runtime', () => {
 
     const configurationSnapshot = () => ({
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-      availableProviders: [...HOSTED_ASSISTANT_PROVIDERS],
       availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
       configurationAvailable: true,
       dormantSolPreference: false,
       model: savedModel,
-      provider: "openai" as const,
       reasoningEffort: savedReasoningEffort,
       solAvailable: true,
     })
@@ -1575,7 +1566,6 @@ describe('assistant codex runtime', () => {
       currentAssistantInputId: () => `ain_${'a'.repeat(32)}`,
       currentAssistantTarget: () => ({
         model: HOSTED_ASSISTANT_DEFAULT_MODEL,
-        provider: "openai",
         reasoningEffort: 'low',
       }),
     }

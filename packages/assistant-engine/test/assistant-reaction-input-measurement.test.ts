@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 import { buildMurphMemberReadPermissionProfileTomlLines } from '@murphai/hosted-execution/assistant-permissions'
 import { HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV } from '@murphai/hosted-execution/env'
+import { HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID } from '@murphai/operator-config/assistant/target-runtime'
 import { afterAll, describe, expect, it } from 'vitest'
 
 import { stopWarmCodexAppServer } from '../src/assistant-codex.ts'
@@ -44,6 +45,7 @@ describe.skipIf(process.env.MURPH_MEASURE_REACTION_INPUT !== '1')('reaction gate
       for (const phase of ['base', 'head'] as const) {
         const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, {
           model: 'gpt-6-luna', additionalTomlLines: buildMurphMemberReadPermissionProfileTomlLines(),
+          modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
         })
         const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
           codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,

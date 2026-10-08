@@ -38,10 +38,7 @@ beforeEach(() => {
 describe("hosted operator task notification", () => {
   it.each([
     ["hosted-openai", "hosted-openai"],
-    ["venice", "hosted-openai"],
-    ["hosted-custom-inference", "hosted-openai"],
     ["hosted-chatgpt-openai", "hosted-chatgpt-openai"],
-    ["venice-local-test", "openai-local-test"],
   ])("revalidates before provider and outbox, then completes one queued intent using %s authentication", async (memberProvider, operatorProvider) => {
     const recordUsage = vi.fn().mockResolvedValue(undefined);
     const usageRecord = parseAssistantUsageRecord({ schema: "murph.assistant-usage.v1", usageId: "turn_synthetic.attempt-1", turnId: "turn_synthetic", sessionId: "session_synthetic", provider: "codex-cli", credentialSource: "platform", attemptCount: 1, occurredAt: "2036-08-25T18:01:00.000Z", usageExtractionVersion: "test" });

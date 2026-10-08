@@ -27,6 +27,7 @@ import {
   assistantExecutionDriverValues,
   assistantResumeKindValues,
   buildCodexAssistantContinuityFingerprint,
+  isCodexReservedModelProviderId,
   normalizeAssistantCodexModelProvider,
 } from './assistant/target-runtime.js'
 import {
@@ -261,6 +262,15 @@ export const assistantCodexModelProviderConfigSchema = z
   })
   .strict()
 
+const assistantOpenAiModelProviderSchema = z.string().min(1).refine(
+  isCodexReservedModelProviderId,
+  'Assistant models must use OpenAI.',
+)
+const assistantOpenAiOssSchema = z.boolean().refine(
+  (value) => !value,
+  'Assistant models must use OpenAI.',
+)
+
 export const assistantCodexModelTargetSchema = z
   .object({
     adapter: z.literal('codex-cli'),
@@ -268,8 +278,8 @@ export const assistantCodexModelTargetSchema = z
     codexCommand: z.string().min(1).nullable().default(null),
     codexHome: z.string().min(1).nullable().optional(),
     model: z.string().min(1).nullable().default(null),
-    modelProvider: z.string().min(1).nullable().optional(),
-    oss: z.boolean().default(false),
+    modelProvider: assistantOpenAiModelProviderSchema.nullable().optional(),
+    oss: assistantOpenAiOssSchema.default(false),
     profile: z.string().min(1).nullable().default(null),
     reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().default(null),
     sandbox: z.enum(assistantSandboxValues).nullable().default(null),
@@ -310,9 +320,9 @@ export const assistantProviderSessionOptionsSchema = z.object({
   sandbox: z.enum(assistantSandboxValues).nullable(),
   approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
   profile: z.string().min(1).nullable(),
-  oss: z.boolean(),
+  oss: assistantOpenAiOssSchema,
   codexHome: z.string().min(1).nullable().optional(),
-  modelProvider: z.string().min(1).nullable().optional(),
+  modelProvider: assistantOpenAiModelProviderSchema.nullable().optional(),
   executionDriver: z.enum(assistantExecutionDriverValues),
   resumeKind: z.enum(assistantResumeKindValues).nullable(),
   headers: assistantHeadersSchema.nullable().optional(),
@@ -388,11 +398,18 @@ export const assistantOutboxMessageReactionOperationSchema = z
 export const assistantOutboxOperationSchema =
   assistantOutboxMessageReactionOperationSchema
 
+// Saved conversations can predate the OpenAI-only target contract. Keep this
+// read boundary separate from strict targets accepted for configuration/writes.
+const assistantPersistedModelTargetInputSchema = assistantModelTargetSchema.extend({
+  modelProvider: z.string().min(1).nullable().optional(),
+  oss: z.boolean().default(false),
+})
+
 const assistantPersistedSessionV1Schema = z
   .object({
     schema: z.literal('murph.assistant-session.v1'),
     sessionId: assistantSessionIdSchema,
-    target: assistantModelTargetSchema,
+    target: assistantPersistedModelTargetInputSchema,
     resumeState: z
       .union([assistantSessionResumeStateSchema, legacyAssistantSessionResumeStateSchema])
       .nullable()
@@ -423,6 +440,7 @@ export const assistantPersistedSessionSchema = z
 
 const assistantPersistedSessionInputSchema = assistantPersistedSessionSchema
   .extend({
+    codexTarget: assistantPersistedModelTargetInputSchema,
     codexResume: z.unknown().nullable().default(null),
   })
   .strict()
@@ -463,12 +481,12 @@ export const assistantSessionSummarySchema = z
     turnCount: z.number().int().nonnegative(),
     provider: z.enum(assistantChatProviderValues),
     model: z.string().min(1).nullable(),
-    modelProvider: z.string().min(1).nullable(),
+    modelProvider: assistantOpenAiModelProviderSchema.nullable(),
     reasoningEffort: z.string().min(1).nullable(),
     sandbox: z.enum(assistantSandboxValues).nullable(),
     approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
     profile: z.string().min(1).nullable(),
-    oss: z.boolean(),
+    oss: assistantOpenAiOssSchema,
     executionDriver: z.enum(assistantExecutionDriverValues),
     resumeKind: z.enum(assistantResumeKindValues).nullable(),
     resumeThreadId: z.string().min(1).nullable(),
@@ -526,10 +544,35 @@ function buildAssistantRuntimeSession(
 function normalizeAssistantPersistedConversation(
   value: z.infer<typeof assistantPersistedSessionRecordSchema>,
 ): AssistantPersistedSessionRecord {
+  const target = value.schema === 'murph.assistant-conversation.v2'
+    ? value.codexTarget
+    : value.target
+  const resetProvider = target.oss || (
+    target.modelProvider != null &&
+    !isCodexReservedModelProviderId(target.modelProvider)
+  )
+  const codexTarget = resetProvider
+    ? {
+        ...target,
+        model: null,
+        modelProvider: 'openai',
+        oss: false,
+        profile: null,
+      }
+    : target
+  const codexResume = resetProvider
+    ? null
+    : normalizeCodexResumeState(
+        value.schema === 'murph.assistant-conversation.v2'
+          ? value.codexResume
+          : value.resumeState,
+      )
+
   if (value.schema === 'murph.assistant-conversation.v2') {
     return assistantPersistedSessionSchema.parse({
       ...value,
-      codexResume: normalizeCodexResumeState(value.codexResume),
+      codexTarget,
+      codexResume,
     })
   }
 
@@ -538,19 +581,13 @@ function normalizeAssistantPersistedConversation(
     conversationId: value.sessionId,
     alias: value.alias,
     binding: value.binding,
-    codexTarget: value.target,
-    codexResume: normalizeAssistantSessionResumeState(value.resumeState),
+    codexTarget,
+    codexResume,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     lastTurnAt: value.lastTurnAt,
     turnCount: value.turnCount,
   })
-}
-
-function normalizeAssistantSessionResumeState(
-  value: unknown,
-): AssistantSessionResumeState | null {
-  return normalizeCodexResumeState(value)
 }
 
 export const assistantTranscriptEntrySchema = z.object({

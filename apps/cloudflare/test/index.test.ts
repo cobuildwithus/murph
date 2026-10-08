@@ -356,7 +356,6 @@ describe("cloudflare worker routes", () => {
       "voice-control",
       "runtime-ensure-processing",
       "runtime-health-data-consent",
-      "inference-verification",
       "user-data-delete",
       "runtime-resource-purge",
       "telegram-usage-limit-notice",
@@ -392,7 +391,6 @@ describe("cloudflare worker routes", () => {
       "voice-control",
       "runtime-ensure-processing",
       "runtime-health-data-consent",
-      "inference-verification",
       "user-data-delete",
       "runtime-resource-purge",
       "telegram-usage-limit-notice",
@@ -3398,7 +3396,7 @@ describe("cloudflare worker routes", () => {
       installOidcJwksFetch(undefined, { cutover: "postgres", status: "existing", owner: {
         userId: "test-user", attemptId: "attempt-native", generation: "7", phase: "active", processingMode: "default",
         allocationId: "standby-claim-11111111-1111-4111-8111-111111111111", runnerContainerName: `runner--v-release_1--${"1".repeat(32)}`,
-        workspaceVersion: "4", customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        workspaceVersion: "4", platformAiUsageAllowed: true,
         startedAt: new Date().toISOString(), acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null,
       } });
       const response = await worker.fetch(request, env);
@@ -3574,7 +3572,7 @@ describe("cloudflare worker routes", () => {
         userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
         processingMode: "default" as const, allocationId: "allocation-test",
         runnerContainerName: "runner-test", workspaceVersion: "0",
-        customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        platformAiUsageAllowed: true,
         startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
         failureCount: 0, lastErrorCode: null,
       },

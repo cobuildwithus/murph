@@ -12,9 +12,7 @@ import {
 } from '@murphai/hosted-execution/assistant-usage'
 import {
   resolveAssistantCodexUsageProviderName,
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
@@ -437,11 +435,6 @@ function createAssistantProviderUsageAttribution(input: {
 
   const credentialSource = resolveAssistantUsageCredentialSource({
     apiKeyEnv: null,
-    credentialSourceHint:
-      input.attemptPlan.route.providerOptions.modelProvider
-        === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
-        ? 'member'
-        : null,
     effectiveEnv: input.env,
     headers: null,
     provider: input.attemptPlan.route.provider,
@@ -785,9 +778,7 @@ function resolveCodexAttemptCapabilities(
     !groupEmailTurn
   const hostedLocalTestProviderTurn =
     attemptPlan.route.providerOptions.modelProvider ===
-      HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID ||
-    attemptPlan.route.providerOptions.modelProvider ===
-      HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
+      HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
   return {
     outputOnlyTurn,
     readOnlyAutomationTurn,

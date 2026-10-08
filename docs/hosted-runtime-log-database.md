@@ -381,15 +381,11 @@ for cache lifetime and write pricing. Current GPT-5.6+ TTL supports `30m`; it do
 not promise that an infrequent scheduled job retains a warm prefix indefinitely.
 
 The row is observability only and remains failure-isolated from provider egress.
-Venice foreground and untagged calls do not create these rows. Container egress
-schedules tagged memory rows with Cloudflare `waitUntil` when available and
+Container egress schedules diagnostics with Cloudflare `waitUntil` when available and
 otherwise starts a best-effort detached callback, which can be lost if the
 invocation ends. Diagnostic persistence never delays a provider response or
 transport error. Non-OK and transport-error diagnostics use warning retention,
-while accepted and request-only diagnostics use debug retention. Venice response
-status and response-header latency are recorded only after upstream dispatch;
-Murph-local platform-usage denials do not produce Venice response rows, and
-transport failures omit response-header latency.
+while accepted and request-only diagnostics use debug retention.
 
 The separate assistant `provider.prompt_size` trace may record
 `conversationHistoryPresent`, `conversationHistoryCount`, and
@@ -511,8 +507,7 @@ verifies successful compaction and preserved task state with the current window.
 requests and streaming compaction inherit the same provider configuration.
 Native Codex also uses this knob for WebSocket sends; it does not replace the
 separate connection and HTTP request budgets.
-Venice and custom inference also use 90 seconds. `codex.prepare` reports the
-selected provider's idle timeout and request/stream retry limits. Native Codex
+`codex.prepare` reports OpenAI's idle timeout and request/stream retry limits. Native Codex
 still owns the single WebSocket attempt and HTTPS fallback; request retries,
 Murph cancellation, accepted work, and delivery ownership are unchanged.
 
@@ -1226,10 +1221,13 @@ activated-window report is not proof every CLI invocation was observed.
 The complete usage-request ceiling is separately **16,384 UTF-8 bytes**, owned by
 `HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES` in `hosted-execution/runtime-control` and
 shared by the sender and Web route. Individually bounded datagrams can merge into
-an oversized HTTP payload. `runtime-platform/usage-record-port.ts` therefore
+an oversized HTTP payload. The shared Cloudflare `usage-record-body.ts` helper
 normalizes/copies only `cliTiming` and measures the entire JSON body, including
-`usage`, the legacy profile and any notice target, before transport serialization
-and signing. It removes whole summaries from the end until the request fits,
+`usage`, the legacy profile and any notice target. The usage port applies it
+before transport serialization; the Worker proxy applies it again after replacing
+`reportingUserId` with trusted attribution, before signing the final body. This
+keeps attribution growth inside the same byte budget for existing senders too.
+It removes whole summaries from the end until the request fits,
 adding their calls to the existing saturating `droppedCalls`. Other counters and
 retained phases are unchanged; HTTP trimming does **not** set `transportTruncated`
 (which describes the packet budget). A counters-only timing object can remain.
@@ -1241,8 +1239,9 @@ can only quantify omissions where the timing object survives. All legacy usage,
 provider-request, token, tool and notice-target fields are preserved; the queued
 record is not mutated. An already-oversized legacy request remains oversized and
 follows its existing rejection path rather than sacrificing accounting to fit.
-No request/packet cap, retry or flush behavior changes. The corrected sender works
-with the existing Web ceiling; this fix does not require coordinated deployment.
+No request/packet cap, retry or flush behavior changes. The sender and Worker use
+the existing Web ceiling; Worker rollout can correct existing senders without a
+coordinated Web or runner-container deployment.
 
 The exact histogram intervals in milliseconds are `[0,250)`, `[250,1000)`,
 `[1000,2500)`, `[2500,5000)`, `[5000,10000)`, `[10000,30000)`,

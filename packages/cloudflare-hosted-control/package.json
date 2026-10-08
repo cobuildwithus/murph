@@ -17,10 +17,6 @@
       "types": "./dist/device-webhook-queue.d.ts",
       "default": "./dist/device-webhook-queue.js"
     },
-    "./inference-verification": {
-      "types": "./dist/inference-verification.d.ts",
-      "default": "./dist/inference-verification.js"
-    },
     "./routes": {
       "types": "./dist/routes.d.ts",
       "default": "./dist/routes.js"

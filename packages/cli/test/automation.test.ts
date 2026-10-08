@@ -959,7 +959,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
       "--assistant-target-override-model",
       "gpt-5.6-terra",
       "--assistant-target-override-model-provider",
-      "vercel-ai-gateway",
+      "openai",
       "--assistant-target-override-reasoning-effort",
       "high",
       "--vault",
@@ -987,7 +987,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
     assert.equal(shown.envelope.ok, true);
     assert.deepEqual(shown.envelope.data?.automation?.assistantTargetOverride, {
       model: "gpt-5.6-terra",
-      modelProvider: "vercel-ai-gateway",
+      modelProvider: "openai",
       reasoningEffort: "high",
     });
 
@@ -1027,7 +1027,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
     assert.equal(editedShown.envelope.ok, true);
     assert.deepEqual(editedShown.envelope.data?.automation?.assistantTargetOverride, {
       model: "gpt-5.6-terra",
-      modelProvider: "vercel-ai-gateway",
+      modelProvider: "openai",
       reasoningEffort: "medium",
     });
 
@@ -1709,7 +1709,7 @@ test("automation compact list retains enumeration state and materially reduces a
       activeUntil: "2026-12-31T23:59:59.000Z",
       assistantTargetOverride: {
         model: "gpt-5.6-terra",
-        modelProvider: "vercel-ai-gateway",
+        modelProvider: "openai",
         reasoningEffort: "low",
       },
       automationId: `automation_01ARZ3NDEKTSV4RRFFQ69G5FA${suffix}`,

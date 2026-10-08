@@ -56,7 +56,7 @@ export async function startStuckPostgresRuntimeForTest(environment: NodeJS.Proce
       ON CONFLICT (user_id) DO UPDATE SET generation = hosted_runtime_owner.generation + 1,
         attempt_id = EXCLUDED.attempt_id, phase = 'starting', processing_mode = 'default',
         allocation_id = COALESCE(hosted_runtime_owner.allocation_id, EXCLUDED.allocation_id), workspace_version = NULL,
-        provider_egress_token_hash = NULL, custom_inference_envelope = NULL, platform_ai_usage_allowed = false,
+        provider_egress_token_hash = NULL, platform_ai_usage_allowed = false,
         started_at = EXCLUDED.started_at, accepted_at = NULL, completed_at = NULL, updated_at = now()
       WHERE hosted_runtime_owner.phase = 'idle'
       RETURNING attempt_id`, [userId, attemptId, `standby-claim-${randomUUID()}`, new Date(Date.now() - startedAgoMs)]);

@@ -366,7 +366,7 @@ function createRoutedCompletion(nativeIdentity?: RunnerInvocationIdentity | null
   const owner: HostedRuntimeOwnerSnapshot = {
     userId, ...identity, phase: "active", processingMode: "default", workspaceVersion: "12",
     allocationId: "standby-claim-11111111-1111-4111-8111-111111111111", runnerContainerName: target,
-    customInferenceEnvelope: null, platformAiUsageAllowed: true,
+    platformAiUsageAllowed: true,
     startedAt: null, acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null,
   };
   const state: HostedRuntimeOwnerResponse = { cutover: "postgres", status: "observed", owner };

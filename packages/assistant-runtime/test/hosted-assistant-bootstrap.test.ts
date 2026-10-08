@@ -17,7 +17,7 @@ import {
 
 const temporaryPaths: string[] = [];
 
-const CODEX_VERCEL_GATEWAY_TARGET = {
+const CODEX_OPENAI_TARGET = {
   adapter: "codex-cli",
   approvalPolicy: "never",
   codexCommand: null,
@@ -29,7 +29,7 @@ const CODEX_VERCEL_GATEWAY_TARGET = {
   sandbox: "danger-full-access",
 } as const;
 
-const CODEX_VERCEL_GATEWAY_ENV = {
+const CODEX_OPENAI_ENV = {
   HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
   HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
   HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -54,7 +54,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
           id: "platform-default",
           label: "OpenAI",
           managedBy: "platform",
-          target: CODEX_VERCEL_GATEWAY_TARGET,
+          target: CODEX_OPENAI_TARGET,
         },
       ],
       schema: "murph.hosted-assistant-config.v1",
@@ -125,7 +125,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
 
     const result = await ensureHostedAssistantOperatorDefaults({
       allowMissing: false,
-      env: CODEX_VERCEL_GATEWAY_ENV,
+      env: CODEX_OPENAI_ENV,
       homeDirectory,
     });
 
@@ -143,7 +143,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
           id: "platform-default",
           label: "OpenAI",
           managedBy: "platform",
-          target: CODEX_VERCEL_GATEWAY_TARGET,
+          target: CODEX_OPENAI_TARGET,
         },
       ],
       schema: "murph.hosted-assistant-config.v1",
@@ -215,14 +215,14 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
 
     await ensureHostedAssistantOperatorDefaults({
       allowMissing: false,
-      env: CODEX_VERCEL_GATEWAY_ENV,
+      env: CODEX_OPENAI_ENV,
       homeDirectory,
     });
 
     const secondResult = await ensureHostedAssistantOperatorDefaults({
       allowMissing: false,
       env: {
-        ...CODEX_VERCEL_GATEWAY_ENV,
+        ...CODEX_OPENAI_ENV,
         HOSTED_ASSISTANT_MODEL: "gpt-5.6",
       },
       homeDirectory,
@@ -242,7 +242,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
           id: "platform-default",
           managedBy: "platform",
           target: {
-            ...CODEX_VERCEL_GATEWAY_TARGET,
+            ...CODEX_OPENAI_TARGET,
             model: "gpt-5.6",
           },
         },
@@ -280,7 +280,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     await expect(
       ensureHostedAssistantOperatorDefaults({
         allowMissing: true,
-        env: CODEX_VERCEL_GATEWAY_ENV,
+        env: CODEX_OPENAI_ENV,
         homeDirectory,
       }),
     ).resolves.toMatchObject({
@@ -296,7 +296,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
         {
           id: "platform-default",
           managedBy: "platform",
-          target: CODEX_VERCEL_GATEWAY_TARGET,
+          target: CODEX_OPENAI_TARGET,
         },
       ],
     });

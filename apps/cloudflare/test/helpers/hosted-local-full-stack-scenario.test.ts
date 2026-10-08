@@ -560,14 +560,14 @@ it("forwards explicitly supplied provider credentials to the worker harness", as
 
   const scenario = await startScenario({
     additionalEnv: {
-      VENICE_API_KEY: "synthetic-local-venice-key",
+      OPENAI_API_KEY: "synthetic-local-openai-key",
     },
   });
   try {
     expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledWith(
       expect.objectContaining({
         env: expect.objectContaining({
-          VENICE_API_KEY: "synthetic-local-venice-key",
+          OPENAI_API_KEY: "synthetic-local-openai-key",
         }),
       }),
     );

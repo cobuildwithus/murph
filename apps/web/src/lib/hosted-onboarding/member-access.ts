@@ -343,18 +343,13 @@ export async function readActiveHostedMemberAccess(input: {
 
 export async function readActiveHostedMemberAccessState(input: {
   memberId: string;
-  memberState?: (HostedMemberAccessState & { assistantProviderPreference: string | null }) | null;
+  memberState?: HostedMemberAccessState | null;
   now?: Date;
   prisma?: HostedOnboardingReadClient;
-}): Promise<(HostedMemberAccessState & {
-  assistantProviderPreference: string | null;
-}) | null> {
+}): Promise<HostedMemberAccessState | null> {
   const prisma = input.prisma ?? getPrisma();
   const member = input.memberState !== undefined ? input.memberState : await prisma.hostedMember.findUnique({
-    select: {
-      ...hostedMemberAccessSelect,
-      assistantProviderPreference: true,
-    },
+    select: hostedMemberAccessSelect,
     where: {
       id: input.memberId,
     },

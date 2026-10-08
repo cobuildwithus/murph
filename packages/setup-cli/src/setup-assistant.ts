@@ -2,11 +2,6 @@ import readline from 'node:readline/promises'
 import { stderr as defaultOutput, stdin as defaultInput } from 'node:process'
 import { normalizeNullableString } from '@murphai/operator-config/assistant/shared'
 import {
-  normalizeAssistantCodexModelProvider,
-  resolveAssistantCodexLocalOnboardingProviderConfig,
-  resolveAssistantCodexModelProviderConfig,
-} from '@murphai/operator-config/assistant/target-runtime'
-import {
   createSetupAssistantAccountResolver,
   formatSetupAssistantAccountLabel,
   type SetupAssistantAccountResolver,
@@ -25,7 +20,6 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export const DEFAULT_SETUP_ASSISTANT_PRESET: SetupAssistantPreset = 'codex'
 export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-6.1-sol'
-export const DEFAULT_SETUP_CODEX_OSS_MODEL = 'gpt-oss:20b'
 export const DEFAULT_SETUP_CODEX_REASONING_EFFORT = 'low'
 const DEFAULT_SETUP_SANDBOX = 'danger-full-access' as const
 const DEFAULT_SETUP_APPROVAL_POLICY = 'never' as const
@@ -35,8 +29,6 @@ type SetupAssistantOptionSubset = Pick<
   | 'assistantCodexCommand'
   | 'assistantCodexHome'
   | 'assistantModel'
-  | 'assistantModelProvider'
-  | 'assistantOss'
   | 'assistantPreset'
   | 'assistantProfile'
   | 'assistantReasoningEffort'
@@ -76,12 +68,10 @@ export function hasExplicitSetupAssistantOptions(
   return Boolean(
     options.assistantPreset ||
       options.assistantModel ||
-      options.assistantModelProvider ||
       options.assistantCodexCommand ||
       options.assistantCodexHome ||
       options.assistantProfile ||
-      options.assistantReasoningEffort ||
-      options.assistantOss !== undefined,
+      options.assistantReasoningEffort,
   )
 }
 
@@ -94,12 +84,10 @@ export function inferSetupAssistantPresetFromOptions(
 
   if (
     options.assistantModel ||
-    options.assistantModelProvider ||
     options.assistantCodexCommand ||
     options.assistantCodexHome ||
     options.assistantProfile ||
-    options.assistantReasoningEffort ||
-    options.assistantOss !== undefined
+    options.assistantReasoningEffort
   ) {
     return 'codex'
   }
@@ -143,32 +131,6 @@ export function createSetupAssistantResolver(
           break
 
         case 'codex': {
-          const useLocalModel = resolutionInput.options.assistantOss === true
-          const modelProvider = resolveSetupAssistantModelProvider(
-            resolutionInput.options.assistantModelProvider,
-          )
-          const localProviderConfig =
-            resolveAssistantCodexLocalOnboardingProviderConfig(modelProvider)
-
-          if (useLocalModel && modelProvider) {
-            throw new VaultCliError(
-              'invalid_option',
-              '--assistant-model-provider cannot be used with --assistant-oss.',
-            )
-          }
-
-          if (
-            !resolutionInput.allowPrompt &&
-            modelProvider &&
-            localProviderConfig?.defaultModel === null &&
-            !normalizeNullableString(resolutionInput.options.assistantModel)
-          ) {
-            throw new VaultCliError(
-              'invalid_option',
-              `--assistant-model is required when --assistant-model-provider ${modelProvider} is selected.`,
-            )
-          }
-
           const selectedCodexHome = await resolveCodexHome({
             allowPrompt: resolutionInput.allowPrompt,
             currentCodexHome:
@@ -186,18 +148,10 @@ export function createSetupAssistantResolver(
             allowPrompt: resolutionInput.allowPrompt,
             defaultValue:
               normalizeNullableString(resolutionInput.options.assistantModel) ??
-              (localProviderConfig
-                ? localProviderConfig.defaultModel
-                : useLocalModel
-                  ? DEFAULT_SETUP_CODEX_OSS_MODEL
-                  : DEFAULT_SETUP_CODEX_MODEL),
+              DEFAULT_SETUP_CODEX_MODEL,
             input,
             output,
-            prompt:
-              localProviderConfig?.modelPrompt ??
-              (useLocalModel
-                ? 'Local model id to use with Codex'
-                : 'Model id to use with Codex'),
+            prompt: 'OpenAI model id to use with Codex',
           })
           const normalizedModel = normalizeSetupAssistantModelId(model)
 
@@ -206,7 +160,7 @@ export function createSetupAssistantResolver(
             enabled: true,
             provider: 'codex-cli',
             model: normalizedModel,
-            modelProvider,
+            modelProvider: null,
             codexCommand:
               normalizeNullableString(
                 resolutionInput.options.assistantCodexCommand,
@@ -221,13 +175,11 @@ export function createSetupAssistantResolver(
               ) ?? DEFAULT_SETUP_CODEX_REASONING_EFFORT,
             sandbox: DEFAULT_SETUP_SANDBOX,
             approvalPolicy: DEFAULT_SETUP_APPROVAL_POLICY,
-            oss: useLocalModel,
+            oss: false,
             account: null,
             detail: buildCodexAssistantDetail({
               codexHome: selectedCodexHome.codexHome,
               model: normalizedModel,
-              modelProvider,
-              oss: useLocalModel,
             }),
           }
           break
@@ -256,9 +208,7 @@ export function createSetupAssistantResolver(
 
 function assertNoAssistantSkipOptionConflict(options: SetupCommandOptions): void {
   const conflicts = ([
-    ['--assistant-model-provider', options.assistantModelProvider],
     ['--assistant-model', options.assistantModel],
-    ['--assistant-oss', options.assistantOss],
     ['--assistant-codex-command', options.assistantCodexCommand],
     ['--assistant-codex-home', options.assistantCodexHome],
     ['--assistant-profile', options.assistantProfile],
@@ -286,29 +236,6 @@ function shouldDetectSetupAssistantAccount(
     assistant.modelProvider === null &&
     assistant.oss !== true
   )
-}
-
-function resolveSetupAssistantModelProvider(
-  value: string | null | undefined,
-): string | null {
-  const raw = normalizeNullableString(value)
-  if (!raw) {
-    return null
-  }
-
-  const normalized = normalizeAssistantCodexModelProvider(raw)
-  if (
-    !normalized ||
-    !resolveAssistantCodexModelProviderConfig(normalized) ||
-    !resolveAssistantCodexLocalOnboardingProviderConfig(normalized)
-  ) {
-    throw new VaultCliError(
-      'invalid_option',
-      `Unknown Codex model provider: ${raw}.`,
-    )
-  }
-
-  return normalized
 }
 
 function normalizeSetupAssistantModelId(value: string): string {
@@ -376,19 +303,11 @@ async function promptWithDefault(input: {
 function buildCodexAssistantDetail(input: {
   codexHome?: string | null
   model: string
-  modelProvider?: string | null
-  oss: boolean
 }): string {
-  const detail = input.oss
-    ? `Use Codex with the local model ${input.model}.`
-    : `Use Codex with ${input.model}.`
-  const providerDetail = input.modelProvider
-    ? ` Use Codex model provider ${input.modelProvider}.`
-    : ''
-
+  const detail = `Use Codex with ${input.model}.`
   return input.codexHome
-    ? `${detail}${providerDetail} An explicit Codex home is configured; path redacted in CLI output.`
-    : `${detail}${providerDetail}`
+    ? `${detail} An explicit Codex home is configured; path redacted in CLI output.`
+    : detail
 }
 
 function appendDetectedAssistantAccountDetail(

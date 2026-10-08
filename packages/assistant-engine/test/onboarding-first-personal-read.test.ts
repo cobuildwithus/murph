@@ -106,7 +106,6 @@ describe('onboarding first personal read', () => {
       }).assistantTargetOverride,
     )
     for (const selected of [
-      { model: 'murph-custom-r7', modelProvider: 'hosted-custom-inference' },
       { model: 'gpt-5.6-luna', modelProvider: 'openai' },
       { model: 'gpt-5.6-terra', modelProvider: 'openai' },
       { model: 'gpt-5.6-sol', modelProvider: 'openai' },

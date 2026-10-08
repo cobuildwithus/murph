@@ -588,7 +588,7 @@ describe('assistant service-result seam', () => {
           codexCommand: null,
           codexHome: null,
           model: 'gpt-5.6-terra',
-          modelProvider: 'vercel-ai-gateway',
+          modelProvider: 'hosted-openai',
           oss: false,
           profile: null,
           reasoningEffort: 'medium',
@@ -623,12 +623,12 @@ describe('assistant service-result seam', () => {
     expect(result.session.target).toMatchObject({
       adapter: 'codex-cli',
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
     })
     expect(result.session.providerOptions).toMatchObject({
       executionDriver: 'codex-app-server',
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       provider: 'codex-cli',
       resumeKind: 'codex-thread',
     })

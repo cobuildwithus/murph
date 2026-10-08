@@ -22,8 +22,8 @@ function harness() {
   const identity = { attemptId: "synthetic-usage-attempt", generation: "1" };
   const sql = createTestSqlStorage();
   const receipt = () => new RunnerInvocationReceiptStore(sql);
-  receipt().register(identity, { workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true });
-  const owner: HostedRuntimeOwnerSnapshot = { ...identity, userId, phase: "active", processingMode: "default", allocationId: "standby-claim-11111111-1111-4111-8111-111111111111", runnerContainerName: `runner--v-release_1--${"1".repeat(32)}`, workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true, startedAt: new Date().toISOString(), acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null };
+  receipt().register(identity, { workspaceVersion: "0", platformAiUsageAllowed: true });
+  const owner: HostedRuntimeOwnerSnapshot = { ...identity, userId, phase: "active", processingMode: "default", allocationId: "standby-claim-11111111-1111-4111-8111-111111111111", runnerContainerName: `runner--v-release_1--${"1".repeat(32)}`, workspaceVersion: "0", platformAiUsageAllowed: true, startedAt: new Date().toISOString(), acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null };
   const container = {
     beginRuntimeUsageSettlement: vi.fn(async (input: typeof identity & { reportId: string }) => receipt().beginUsageSettlement(input, input.reportId)),
     finishRuntimeUsageSettlement: vi.fn(async (input: typeof identity & { reportId: string; allowed: boolean }) => receipt().finishUsageSettlement(input, input.reportId, input.allowed)),

@@ -425,30 +425,9 @@ to apply after cutover.
   scheduled selection and wake admission both exclude explicit revocation; and
   queued model work rechecks authority before usage is consumed. Renewal is a
   new durable grant, not an implicit cleanup rollback.
-- Venice core inference requires one optional Worker secret. The regular
-  Venice GPT-5.6 Luna/Terra/Sol mapping is code-owned and derived at egress;
-  there are no duplicate model vars that can become partial or mismatched.
-  Web keeps Venice hidden and projects OpenAI until the Worker/runner
-  deployment has been verified. Unsupported paths/models, malformed JSON, and
-  request bodies above 20 MiB
-  fail closed before provider egress. Rollback removes Web exposure first; it
-  does not add a queue, repair pass, provider fallback, or second preference
-  owner. Codex Responses Lite `/responses` requests also receive one explicit
-  prompt-cache breakpoint at the end of their stable leading developer prefix,
-  while retaining Codex's stable cache key and Venice's implicit-cache fallback.
-  Activation requires two sequential, capped requests from one resumed thread
-  through the exact candidate's pinned Codex App Server, not hand-authored
-  ordinary Responses payloads. Candidate proof must join that real Responses
-  Lite envelope to the production Worker transform and show the stable key,
-  restored tools, removed `additional_tools`, and one correctly placed marker.
-  The live second request must report a nonzero cache read and materially fewer
-  cache-write tokens. Otherwise Venice remains hidden and rollback begins at
-  Web exposure.
-- Web selects immutable allowance rates from both the canonical product model
-  and recorded provider. Venice standard usage uses Venice's documented
-  input, cache-read, cache-write, and output rates and records the provider
-  model and pricing source in the snapshot; unknown non-Venice standard
-  provider evidence retains the existing OpenAI-compatible behavior.
+- Hosted core assistant inference uses the existing OpenAI Responses transport.
+  Web prices new usage from the supported OpenAI model rate table and stores an
+  immutable pricing snapshot. Previously settled usage is not repriced.
 - Member usage diagnostics read one authenticated member and at most 31 days
   from `hosted_ai_usage`, returning bounded model/source groups and expensive
   turns. Recorded allowance costs remain authoritative; unpriced rows and absent

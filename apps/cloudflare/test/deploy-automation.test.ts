@@ -1079,7 +1079,6 @@ describe("hosted deploy automation helpers", () => {
       WHATSAPP_PHONE_NUMBER_ID: "removed-whatsapp-phone-number-id",
       WHATSAPP_VERIFY_TOKEN: "removed-whatsapp-verify-token",
       OPENAI_API_KEY: "openai-key",
-      VENICE_API_KEY: "venice-key",
     })).toEqual({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
@@ -1100,7 +1099,6 @@ describe("hosted deploy automation helpers", () => {
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       OPENAI_API_KEY: "openai-key",
-      VENICE_API_KEY: "venice-key",
     });
   });
 

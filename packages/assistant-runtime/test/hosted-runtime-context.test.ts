@@ -71,7 +71,7 @@ const HOSTED_ASSISTANT_SEED_ENV = {
   HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
 } as const;
-const HOSTED_CODEX_VERCEL_GATEWAY_TARGET = {
+const HOSTED_CODEX_OPENAI_TARGET = {
   adapter: "codex-cli",
   approvalPolicy: "never",
   codexCommand: null,
@@ -556,7 +556,7 @@ test("initial hosted bootstrap is reused while later configuration reads observe
       vaultRoot, wake, HOSTED_ASSISTANT_SEED_ENV, HOSTED_RUNTIME_RESOLVED_CONFIG,
       { assistantBootstrap: bootstrap, operatorHomeRoot },
     );
-    assert.deepEqual(target, HOSTED_CODEX_VERCEL_GATEWAY_TARGET);
+    assert.deepEqual(target, HOSTED_CODEX_OPENAI_TARGET);
     assert.equal(readiness.assistantConfigured, true);
     assert.equal(readConfig.mock.calls.length, 0);
 
@@ -599,7 +599,7 @@ test("hosted assistant bootstrap exposes an execution default target for later m
 
       const defaultTarget = await readHostedAssistantExecutionDefaultTarget();
 
-      assert.deepEqual(defaultTarget, HOSTED_CODEX_VERCEL_GATEWAY_TARGET);
+      assert.deepEqual(defaultTarget, HOSTED_CODEX_OPENAI_TARGET);
     });
   } finally {
     restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);

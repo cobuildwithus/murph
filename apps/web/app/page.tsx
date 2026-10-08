@@ -34,8 +34,6 @@ import { resolveHomepageGoalPersonas } from "@/src/lib/goals/homepage-goal-perso
 import { resolvePublicMurphLinePhoneNumber } from "@/src/lib/goals/public-murph-line";
 import { listHealthCommonsGoalEntries } from "@/src/lib/health-commons/goal-projections";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
-import { isHostedCustomInferenceEnabled } from "@/src/lib/hosted-inference/feature";
-import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
@@ -189,12 +187,9 @@ export default async function HomePage() {
         <IntegrationsSection authenticated={authenticated} />
         <AssistantSection murphHeadshotSrc={murphHeadshotSrc} />
         <HowItWorksSection />
-        <TechnicalCapabilitiesSection
-          customInferenceAvailable={isHostedCustomInferenceEnabled()}
-          veniceAvailable={isHostedVeniceAssistantEnabled()}
-        />
+        <TechnicalCapabilitiesSection />
         <SecurityTeaserSection />
-        <FaqSection veniceAvailable={isHostedVeniceAssistantEnabled()} />
+        <FaqSection />
         {referralRewards.length > 0
           ? <ReferralSection rewards={referralRewards} />
           : null}

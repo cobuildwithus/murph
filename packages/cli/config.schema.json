@@ -4386,11 +4386,6 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "modelProvider": {
-                  "description": "Optional Codex model provider id to save. Only applies with `--preset codex`.",
-                  "type": "string",
-                  "minLength": 1
-                },
                 "codexCommand": {
                   "description": "Optional Codex CLI executable path. Only applies with `--preset codex`. Defaults to `codex`.",
                   "type": "string",
@@ -4415,10 +4410,6 @@
                     "high",
                     "xhigh"
                   ]
-                },
-                "oss": {
-                  "description": "Save a local Codex OSS model target instead of the signed-in Codex cloud path. Only applies with `--preset codex`.",
-                  "type": "boolean"
                 }
               }
             }

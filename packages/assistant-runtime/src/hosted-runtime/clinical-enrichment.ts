@@ -12,8 +12,7 @@ import {
   parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
-import { HOSTED_ASSISTANT_LUNA_MODEL, HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS } from "@murphai/hosted-execution/assistant-model";
-import { VENICE_CODEX_MODEL_PROVIDER_ID, HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID } from "@murphai/operator-config/assistant/target-runtime";
+import { HOSTED_ASSISTANT_LUNA_MODEL } from "@murphai/hosted-execution/assistant-model";
 import * as clinicalEnrichmentState from "@murphai/vault-usecases/clinical-enrichment";
 
 import {
@@ -41,7 +40,7 @@ export interface HostedClinicalEnrichmentInput {
   vaultRoot: string;
   userEnvKeys?: readonly string[];
   now?: () => string;
-  resolveProviderAuthority?(): Promise<"current" | "handoff">;
+  resolveRuntimeAuthority?(): Promise<"current" | "handoff">;
   onStateMutation(): void;
   onExtractionStarted?(): void;
   onWorkUpdated?(jobId: string, nextAttemptAt: string | null): Promise<void>;
@@ -158,14 +157,14 @@ async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal
         abortSignal: signal,
         async beforeProviderEntry() {
           signal.throwIfAborted();
-          if (await input.resolveProviderAuthority?.() === "handoff") {
+          if (await input.resolveRuntimeAuthority?.() === "handoff") {
             onHandoff();
             peers.abort();
           }
           signal.throwIfAborted();
         },
         codexHome: input.codexHome, env: { ...input.env },
-        model: work.source.resource ? clinicalResourceModel(input.modelProvider) : input.model, modelProvider: input.modelProvider,
+        model: work.source.resource ? HOSTED_ASSISTANT_LUNA_MODEL : input.model, modelProvider: input.modelProvider,
         ...(work.source.resource ? { reasoningEffort: "medium" as const } : {}),
         workspaceRoot: input.vaultRoot, source: work.source, documentPath: work.documentPath,
         timeZone: work.timeZone,
@@ -277,10 +276,4 @@ function splitClinicalResourceOutput(output: ClinicalDocumentExtractionOutput) {
   const byKind = (kinds: readonly string[]): ClinicalDocumentExtractionOutput => ({ status: "complete", records: output.records.filter((record) => kinds.includes(record.payload.kind)) });
   return { labs: byKind(["test"]), measurements: byKind(["measurement"]),
     history: { ...output, records: output.records.filter((record) => record.payload.kind === "note" || record.payload.kind === "clinical_assertion") } };
-}
-
-function clinicalResourceModel(provider: string | null | undefined): string {
-  return provider === VENICE_CODEX_MODEL_PROVIDER_ID || provider === HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
-    ? HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[HOSTED_ASSISTANT_LUNA_MODEL]!
-    : HOSTED_ASSISTANT_LUNA_MODEL;
 }

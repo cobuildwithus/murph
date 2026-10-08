@@ -19,7 +19,6 @@ import {
 
 const WEB_SEAL_LANES = new Set<HostedCryptoLane>([
   "hosted-member-private-field",
-  "hosted-inference-connection",
   "clinical-records-oauth",
   "clinical-records-page-cursor",
   "clinical-records-patient-id",

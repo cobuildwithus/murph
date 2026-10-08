@@ -417,7 +417,7 @@ test("shared CLI timing fixture requires completed children and exact per-stream
 });
 
 test("hosted Codex provider transport diagnostics expose only safe config metadata", () => {
-  assert.deepEqual(hostedCodexProviderTransportDiagnostics("hosted-openai"), {
+  assert.deepEqual(hostedCodexProviderTransportDiagnostics(), {
     codexProviderRequestMaxRetries: 4,
     codexProviderStreamIdleTimeoutMs: 90_000,
     codexProviderStreamMaxRetries: 0,
@@ -472,92 +472,6 @@ afterEach(async () => {
     temporaryPaths.splice(0).map((target) =>
       removeTemporaryPath(target)
     ),
-  );
-});
-
-test("hosted Codex runtime config writes Venice Responses config without secret values", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-  const result = await prepareHostedCodexRuntimeEnvironment({
-    operatorHomeRoot,
-    runtimeEnv: {
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
-      HOSTED_ASSISTANT_PROVIDER: "venice",
-      VENICE_API_KEY: "signed-venice-egress-credential",
-    },
-  });
-
-  assert.equal(
-    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    "venice",
-  );
-  const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /^model = "gpt-5\.6-terra"$/mu);
-  assert.match(config, /^model_provider = "venice"$/mu);
-  assert.match(config, /\[model_providers\."venice"\]/u);
-  assert.match(config, /base_url = "https:\/\/api\.venice\.ai\/api\/v1"/u);
-  assert.match(config, /env_key = "VENICE_API_KEY"/u);
-  assert.match(config, /wire_api = "responses"/u);
-  assert.doesNotMatch(
-    readProviderConfigSection(config, "venice"),
-    /^supports_websockets = true$/mu,
-  );
-  assert.doesNotMatch(config, /signed-venice-egress-credential/u);
-  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
-  assert.match(config, /^expose_spawn_agent_model_overrides = false$/mu);
-  assert.match(
-    config,
-    /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
-  );
-  assert.doesNotMatch(config, /^(?:extract|consolidation)_model = /mu);
-});
-
-test("hosted Codex runtime config preserves capabilities with custom inference", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-  const result = await prepareHostedCodexRuntimeEnvironment({
-    operatorHomeRoot,
-    runtimeEnv: {
-      HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
-      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
-      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
-      MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
-    },
-  });
-
-  assert.equal(
-    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    "hosted-custom-inference",
-  );
-  const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /^model = "murph-custom-r7"$/mu);
-  assert.match(config, /^model_provider = "hosted-custom-inference"$/mu);
-  assert.match(config, /\[model_providers\."hosted-custom-inference"\]/u);
-  assert.match(
-    config,
-    /base_url = "http:\/\/murph-custom-inference\.worker\/v1"/u,
-  );
-  assert.match(config, /env_key = "MURPH_CUSTOM_INFERENCE_API_KEY"/u);
-  assert.match(config, /^model_context_window = 131072$/mu);
-  assert.match(config, /^model_auto_compact_token_limit = 98304$/mu);
-  assert.match(config, /^request_max_retries = 1$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
-  assert.doesNotMatch(
-    readProviderConfigSection(config, "hosted-custom-inference"),
-    /^supports_websockets = true$/mu,
-  );
-  assert.doesNotMatch(config, /^model_reasoning_effort = /mu);
-  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
-  assert.match(config, /\[features\.multi_agent_v2\]\nenabled = true/u);
-  assert.match(config, /^expose_spawn_agent_model_overrides = false$/mu);
-  assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
-  assert.match(
-    config,
-    /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
-  );
-  assert.doesNotMatch(config, /^(?:extract|consolidation)_model = /mu);
-  assert.equal(
-    new Set<string>(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)
-      .has("MURPH_CUSTOM_INFERENCE_API_KEY"),
-    false,
   );
 });
 
@@ -826,7 +740,6 @@ test("hosted Codex runtime config strips legacy hosted assistant seed env before
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_CODEX_COMMAND: "codex-dev",
-      HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS: "openai",
       HOSTED_ASSISTANT_OSS: "true",
       HOSTED_ASSISTANT_PROFILE: "legacy-profile",
       HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -844,7 +757,6 @@ test("hosted Codex runtime config strips legacy hosted assistant seed env before
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_BASE_URL, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_CODEX_COMMAND, undefined);
-  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_OSS, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROFILE, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME, undefined);
@@ -918,32 +830,6 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /request_max_retries = 4/u);
   assert.match(config, /stream_max_retries = 0/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
-});
-
-test("hosted Codex runtime config applies the local provider override to Venice", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-  const result = await prepareHostedCodexRuntimeEnvironment({
-    operatorHomeRoot,
-    runtimeEnv: {
-      HOSTED_ASSISTANT_PROVIDER: "venice",
-      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
-        "http://host.docker.internal:4567/v1",
-      NODE_ENV: "test",
-      VENICE_API_KEY: "signed-venice-egress-credential",
-    },
-  });
-
-  assert.equal(
-    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    "venice-local-test",
-  );
-
-  const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /model_provider = "venice-local-test"/u);
-  assert.match(config, /\[model_providers\."venice-local-test"\]/u);
-  assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
-  assert.match(config, /env_key = "VENICE_API_KEY"/u);
-  assert.doesNotMatch(config, /https:\/\/api\.venice\.ai\/api\/v1/u);
 });
 
 test("hosted Codex runtime config accepts a Linux Docker bridge model provider override", async () => {
@@ -1343,18 +1229,15 @@ test("hosted Codex current-time proof ignores non-authoritative request content"
   );
 });
 
-test.each(["openai", "venice", "custom-inference"])(
-  "hosted %s config registers credential-based OpenAI for operator tasks",
-  async (provider) => {
+test(
+  "hosted config registers credential-based OpenAI for operator tasks",
+  async () => {
     const operatorHomeRoot = await createTemporaryDirectory();
     const prepared = await prepareHostedCodexRuntimeEnvironment({
       operatorHomeRoot,
       runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: provider === "custom-inference" ? "hosted-custom-inference" : provider,
-        HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "32000",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
         OPENAI_API_KEY: "synthetic-openai-credential",
-        VENICE_API_KEY: "synthetic-venice-credential",
-        MURPH_CUSTOM_INFERENCE_API_KEY: "synthetic-custom-credential",
       },
     });
     const config = await readFile(prepared.codexConfigPath, "utf8");
@@ -1368,9 +1251,9 @@ test.each(["openai", "venice", "custom-inference"])(
     assert.match(section, /^stream_max_retries = 0$/mu);
     const selectedProviderId = prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]!;
     const selectedSection = readProviderConfigSection(config, selectedProviderId);
-    const diagnostics = hostedCodexProviderTransportDiagnostics(selectedProviderId);
+    const diagnostics = hostedCodexProviderTransportDiagnostics();
     assert.equal(diagnostics.codexProviderStreamIdleTimeoutMs, 90_000);
-    assert.equal(diagnostics.codexProviderRequestMaxRetries, provider === "custom-inference" ? 1 : 4);
+    assert.equal(diagnostics.codexProviderRequestMaxRetries, 4);
     assert.match(selectedSection, new RegExp(`^stream_idle_timeout_ms = ${diagnostics.codexProviderStreamIdleTimeoutMs}$`, "mu"));
     assert.match(selectedSection, new RegExp(`^request_max_retries = ${diagnostics.codexProviderRequestMaxRetries}$`, "mu"));
     assert.match(section, /^env_key = "OPENAI_API_KEY"$/mu);
@@ -1379,53 +1262,50 @@ test.each(["openai", "venice", "custom-inference"])(
   },
 );
 
-for (const memberProvider of ["openai", "venice"]) {
-  testHostedCodexAuthE2e(`operator diagnostic authenticates through hosted config with ${memberProvider} member provider`, async () => {
-    const operatorHomeRoot = await createTemporaryDirectory();
-    const requests: string[] = [];
-    const authorizationHeaders: string[] = [];
-    const answer = { outcome: "answered", answer: "Synthetic retained error is unavailable." };
-    const server = await startResponsesStubServer({
-      requests, authorizationHeaders,
-      requiredAuthorization: "Bearer synthetic-operator-credential",
-      responseText: JSON.stringify(answer),
+testHostedCodexAuthE2e("operator diagnostic authenticates through hosted OpenAI config", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const requests: string[] = [];
+  const authorizationHeaders: string[] = [];
+  const answer = { outcome: "answered", answer: "Synthetic retained error is unavailable." };
+  const server = await startResponsesStubServer({
+    requests, authorizationHeaders,
+    requiredAuthorization: "Bearer synthetic-operator-credential",
+    responseText: JSON.stringify(answer),
+  });
+  try {
+    const prepared = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv: {
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: `${readServerBaseUrl(server)}/v1`,
+        NODE_ENV: "test",
+        OPENAI_API_KEY: "synthetic-operator-credential",
+        PATH: process.env.PATH ?? "",
+      },
     });
-    try {
-      const prepared = await prepareHostedCodexRuntimeEnvironment({
-        operatorHomeRoot,
-        runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: memberProvider,
-          [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: `${readServerBaseUrl(server)}/v1`,
-          NODE_ENV: "test",
-          OPENAI_API_KEY: "synthetic-operator-credential",
-          VENICE_API_KEY: "synthetic-member-credential",
-          PATH: process.env.PATH ?? "",
-        },
-      });
-      const result = await executeOperatorDiagnostic({
-        codexHome: prepared.codexHome,
-        env: prepared.runtimeEnv,
-        model: "gpt-5.6-sol",
-        modelProvider: resolveHostedOperatorModelProvider(
-          prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-        ),
-        question: "Report whether the synthetic retained error is available.",
-        workspaceRoot: operatorHomeRoot,
-        abortSignal: AbortSignal.timeout(60_000),
-      });
-      assert.deepEqual(result, answer);
-      // Native Codex may probe WebSockets before falling back to this HTTP stub.
-      // Every transport attempt must authenticate, with one actual model request.
-      assert.ok(authorizationHeaders.length > 0);
-      assert.ok(authorizationHeaders.every((header) => header === "Bearer synthetic-operator-credential"));
-      const modelRequests = requests.filter((body) => body.length > 0);
-      assert.equal(modelRequests.length, 1);
-      assert.equal(JSON.parse(modelRequests[0]!).model, "gpt-5.6-sol");
-    } finally {
-      await closeHttpServer(server);
-    }
-  }, 90_000);
-}
+    const result = await executeOperatorDiagnostic({
+      codexHome: prepared.codexHome,
+      env: prepared.runtimeEnv,
+      model: "gpt-5.6-sol",
+      modelProvider: resolveHostedOperatorModelProvider(
+        prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+      ),
+      question: "Report whether the synthetic retained error is available.",
+      workspaceRoot: operatorHomeRoot,
+      abortSignal: AbortSignal.timeout(60_000),
+    });
+    assert.deepEqual(result, answer);
+    // Native Codex may probe WebSockets before falling back to this HTTP stub.
+    // Every transport attempt must authenticate, with one actual model request.
+    assert.ok(authorizationHeaders.length > 0);
+    assert.ok(authorizationHeaders.every((header) => header === "Bearer synthetic-operator-credential"));
+    const modelRequests = requests.filter((body) => body.length > 0);
+    assert.equal(modelRequests.length, 1);
+    assert.equal(JSON.parse(modelRequests[0]!).model, "gpt-5.6-sol");
+  } finally {
+    await closeHttpServer(server);
+  }
+}, 90_000);
 
 testHostedCodexAuthE2e(
   "hosted Codex runtime authenticates, excludes native memory, and rejects legacy OpenAI config",
@@ -1768,13 +1648,7 @@ testHostedCodexAuthE2e(
 
 testHostedCodexAutocompactionE2e(
   "hosted Codex app-server auto-compacts managed inference at the configured default",
-  () => runHostedCodexAutocompactionE2e("managed"),
-  150_000,
-);
-
-testHostedCodexAutocompactionE2e(
-  "hosted Codex app-server auto-compacts custom inference at its derived limit",
-  () => runHostedCodexAutocompactionE2e("custom"),
+  () => runHostedCodexAutocompactionE2e(),
   150_000,
 );
 
@@ -1782,26 +1656,25 @@ testHostedCodexAutocompactionE2e(
   "hosted compaction survives a quiet response beyond the former thirty-second window",
   async () => {
     await assert.rejects(
-      runHostedCodexAutocompactionE2e("managed", { idleTimeoutMs: 30_000, firstCompactionDelayMs: 35_000 }),
+      runHostedCodexAutocompactionE2e({ idleTimeoutMs: 30_000, firstCompactionDelayMs: 35_000 }),
       /idle timeout waiting for SSE/u,
     );
-    await runHostedCodexAutocompactionE2e("managed", { firstCompactionDelayMs: 35_000 });
+    await runHostedCodexAutocompactionE2e({ firstCompactionDelayMs: 35_000 });
   },
   180_000,
 );
 
 async function runHostedCodexAutocompactionE2e(
-  providerKind: "custom" | "managed",
   options: { idleTimeoutMs?: number; firstCompactionDelayMs?: number } = {},
 ): Promise<void> {
   const workspaceRoot = await createTemporaryDirectory();
   const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
   const vaultRoot = path.join(workspaceRoot, "vault");
   const rawContextMarker =
-    `HOSTED_CODEX_AUTOCOMPACTION_RAW_${providerKind}_${Date.now()}`;
-  const goalSentinel = `AUTOCOMPACTION_GOAL_${providerKind}`;
-  const constraintSentinel = `AUTOCOMPACTION_CONSTRAINT_${providerKind}`;
-  const toolResultSentinel = `AUTOCOMPACTION_TOOL_RESULT_${providerKind}`;
+    `HOSTED_CODEX_AUTOCOMPACTION_RAW_OPENAI_${Date.now()}`;
+  const goalSentinel = "AUTOCOMPACTION_GOAL_OPENAI";
+  const constraintSentinel = "AUTOCOMPACTION_CONSTRAINT_OPENAI";
+  const toolResultSentinel = "AUTOCOMPACTION_TOOL_RESULT_OPENAI";
   const finalReply = [
     "second assistant reply after auto-compaction",
     goalSentinel,
@@ -1818,7 +1691,7 @@ async function runHostedCodexAutocompactionE2e(
   const compactionRequestIndexes = new Set<number>();
   let expectingManualCompaction = false;
   const server = await startResponsesStubServer({
-    compactionOutputKind: providerKind === "managed" ? "compaction" : "message",
+    compactionOutputKind: "compaction",
     delayBeforeStreamMs: (_body, requestIndex) =>
       requestIndex === Math.min(...compactionRequestIndexes)
         ? options.firstCompactionDelayMs ?? 0 : 0,
@@ -1882,19 +1755,11 @@ async function runHostedCodexAutocompactionE2e(
 
   try {
     await mkdir(vaultRoot, { recursive: true });
-    const providerRuntimeEnv: Readonly<Record<string, string>> =
-      providerKind === "custom"
-      ? {
-          HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
-          HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
-          HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
-          MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
-        }
-      : {
-          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
-          HOSTED_ASSISTANT_PROVIDER: "openai",
-          OPENAI_API_KEY: "hosted-autocompaction-e2e-key",
-        };
+    const providerRuntimeEnv = {
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "hosted-autocompaction-e2e-key",
+    };
     const prepared = await prepareHostedCodexRuntimeEnvironment({
       operatorHomeRoot,
       runtimeEnv: {
@@ -1916,9 +1781,7 @@ async function runHostedCodexAutocompactionE2e(
       preparedConfig,
       new RegExp(
         `^model_auto_compact_token_limit = ${
-          providerKind === "managed"
-            ? HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT
-            : 98_304
+          HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT
         }$`,
         "mu",
       ),
@@ -1926,14 +1789,7 @@ async function runHostedCodexAutocompactionE2e(
     const codexEnv = {
       CODEX_HOME: prepared.runtimeEnv.CODEX_HOME,
       HOME: operatorHomeRoot,
-      ...(providerKind === "custom"
-        ? {
-            MURPH_CUSTOM_INFERENCE_API_KEY:
-              prepared.runtimeEnv.MURPH_CUSTOM_INFERENCE_API_KEY,
-          }
-        : {
-            OPENAI_API_KEY: prepared.runtimeEnv.OPENAI_API_KEY,
-          }),
+      OPENAI_API_KEY: prepared.runtimeEnv.OPENAI_API_KEY,
       PATH: prepared.runtimeEnv.PATH ?? process.env.PATH ?? "",
     };
     const firstResult = await executeCodexAppServerTurn({
@@ -1994,13 +1850,6 @@ async function runHostedCodexAutocompactionE2e(
       true,
       "Expected auto-compaction to complete before the resumed hosted Codex model request.",
     );
-    if (providerKind === "custom") {
-      assert.equal(
-        requestUrls.includes("/v1/responses/compact"),
-        false,
-        "Custom inference must compact locally through the configured Responses endpoint.",
-      );
-    }
     const firstTurnInput = readResponsesRequestInput(
       requests[firstModelRequestIndex - 1]!,
     );
@@ -2036,55 +1885,53 @@ async function runHostedCodexAutocompactionE2e(
       true,
       "Expected the resumed turn to issue new provider requests.",
     );
-    if (providerKind === "managed") {
-      expectingManualCompaction = true;
-      const manual = await compactWarmCodexThread({ minThreadTokens: 1, timeoutMs: 30_000 });
-      assert.equal(manual.kind, "compacted");
-      if (manual.kind !== "compacted") throw new Error("Expected native manual compaction.");
-      assert.equal(manual.usage.source, "measured");
-      assert.equal(manual.usage.responses?.length, 1);
-      assert.deepEqual(manual.usage.responses?.map(({ responseId: _id, ...usage }) => usage), [{
-        inputTokens: 1700, cachedInputTokens: 700, cacheWriteInputTokens: 50,
-        outputTokens: 987, reasoningOutputTokens: 123, totalTokens: 2687,
-      }]);
-      const afterIdle = await executeCodexAppServerTurn({
-        abortSignal: AbortSignal.timeout(60_000), approvalPolicy: "never",
-        codexCommand: fileURLToPath(new URL("../../assistant-engine/node_modules/.bin/codex", import.meta.url)),
-        processLifetime: "warm", codexHome: prepared.runtimeEnv.CODEX_HOME, env: codexEnv,
-        prompt: "Continue the preserved task.", resumeSessionId: firstResult.threadId,
-        sandbox: "danger-full-access", workingDirectory: vaultRoot,
-      });
-      // The billing extractor consumes only the current turn's native usage
-      // events. Neither the measured idle response nor its buckets may leak
-      // into this next foreground turn.
-      const afterIdleUsage = afterIdle.jsonEvents.flatMap((event) => {
-        const notification = parseJsonObject(JSON.stringify(event));
-        if (notification?.method !== "thread/tokenUsage/updated") return [];
-        const params = notification.params as Record<string, unknown>;
-        assert.equal(params.turnId, afterIdle.turnId);
-        return [(params.tokenUsage as Record<string, unknown>).last];
-      });
-      assert.deepEqual(afterIdleUsage, [{
-        inputTokens: 300, cachedInputTokens: 0, cacheWriteInputTokens: 0,
-        outputTokens: 80, reasoningOutputTokens: 0, totalTokens: 380,
-      }]);
-      assert.equal(afterIdle.stdout.includes('"method":"rawResponse'), false);
-      // Cold resume has no raw-event opt-in in pinned Codex. Preserve the
-      // explicitly estimated path instead of treating missing evidence as zero.
-      await stopWarmCodexAppServer("native-compaction-cold-resume");
-      await executeCodexAppServerTurn({
-        abortSignal: AbortSignal.timeout(60_000), approvalPolicy: "never",
-        codexCommand: fileURLToPath(new URL("../../assistant-engine/node_modules/.bin/codex", import.meta.url)),
-        processLifetime: "warm", codexHome: prepared.runtimeEnv.CODEX_HOME, env: codexEnv,
-        prompt: "Continue the preserved task.", resumeSessionId: firstResult.threadId,
-        sandbox: "danger-full-access", workingDirectory: vaultRoot,
-      });
-      expectingManualCompaction = true;
-      const cold = await compactWarmCodexThread({ minThreadTokens: 1, timeoutMs: 30_000 });
-      assert.equal(cold.kind, "compacted");
-      if (cold.kind !== "compacted") throw new Error("Expected cold resumed manual compaction.");
-      assert.equal(cold.usage.source, "estimated");
-    }
+    expectingManualCompaction = true;
+    const manual = await compactWarmCodexThread({ minThreadTokens: 1, timeoutMs: 30_000 });
+    assert.equal(manual.kind, "compacted");
+    if (manual.kind !== "compacted") throw new Error("Expected native manual compaction.");
+    assert.equal(manual.usage.source, "measured");
+    assert.equal(manual.usage.responses?.length, 1);
+    assert.deepEqual(manual.usage.responses?.map(({ responseId: _id, ...usage }) => usage), [{
+      inputTokens: 1700, cachedInputTokens: 700, cacheWriteInputTokens: 50,
+      outputTokens: 987, reasoningOutputTokens: 123, totalTokens: 2687,
+    }]);
+    const afterIdle = await executeCodexAppServerTurn({
+      abortSignal: AbortSignal.timeout(60_000), approvalPolicy: "never",
+      codexCommand: fileURLToPath(new URL("../../assistant-engine/node_modules/.bin/codex", import.meta.url)),
+      processLifetime: "warm", codexHome: prepared.runtimeEnv.CODEX_HOME, env: codexEnv,
+      prompt: "Continue the preserved task.", resumeSessionId: firstResult.threadId,
+      sandbox: "danger-full-access", workingDirectory: vaultRoot,
+    });
+    // The billing extractor consumes only the current turn's native usage
+    // events. Neither the measured idle response nor its buckets may leak
+    // into this next foreground turn.
+    const afterIdleUsage = afterIdle.jsonEvents.flatMap((event) => {
+      const notification = parseJsonObject(JSON.stringify(event));
+      if (notification?.method !== "thread/tokenUsage/updated") return [];
+      const params = notification.params as Record<string, unknown>;
+      assert.equal(params.turnId, afterIdle.turnId);
+      return [(params.tokenUsage as Record<string, unknown>).last];
+    });
+    assert.deepEqual(afterIdleUsage, [{
+      inputTokens: 300, cachedInputTokens: 0, cacheWriteInputTokens: 0,
+      outputTokens: 80, reasoningOutputTokens: 0, totalTokens: 380,
+    }]);
+    assert.equal(afterIdle.stdout.includes('"method":"rawResponse'), false);
+    // Cold resume has no raw-event opt-in in pinned Codex. Preserve the
+    // explicitly estimated path instead of treating missing evidence as zero.
+    await stopWarmCodexAppServer("native-compaction-cold-resume");
+    await executeCodexAppServerTurn({
+      abortSignal: AbortSignal.timeout(60_000), approvalPolicy: "never",
+      codexCommand: fileURLToPath(new URL("../../assistant-engine/node_modules/.bin/codex", import.meta.url)),
+      processLifetime: "warm", codexHome: prepared.runtimeEnv.CODEX_HOME, env: codexEnv,
+      prompt: "Continue the preserved task.", resumeSessionId: firstResult.threadId,
+      sandbox: "danger-full-access", workingDirectory: vaultRoot,
+    });
+    expectingManualCompaction = true;
+    const cold = await compactWarmCodexThread({ minThreadTokens: 1, timeoutMs: 30_000 });
+    assert.equal(cold.kind, "compacted");
+    if (cold.kind !== "compacted") throw new Error("Expected cold resumed manual compaction.");
+    assert.equal(cold.usage.source, "estimated");
   } finally {
     await stopWarmCodexAppServer();
     await closeHttpServer(server);

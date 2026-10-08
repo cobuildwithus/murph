@@ -318,19 +318,6 @@ for (const width of [390, 1280]) {
     await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toHaveCSS("height", "56px");
     await capture(page, dialog, `consent-actions-${width}`);
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-    const inference = page.locator("#settings-custom-inference");
-    await inference.evaluate((element) => {
-      for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) ancestor.removeAttribute("inert");
-    });
-    await expect(inference.getByRole("button", { name: "Verify and save", exact: true })).toHaveCSS("height", "44px");
-    const endpoint = inference.locator('[data-design-variant="custom-venice-enabled"]');
-    await endpoint.hover();
-    await endpoint.getByRole("button", { name: /Change inference routing/ }).click();
-    dialog = page.getByRole("dialog");
-    await dialog.getByRole("button", { name: "Manage", exact: true }).click();
-    await expect(dialog.getByRole("button", { name: "Back to providers", exact: true })).toHaveCSS("height", "44px");
-    await capture(page, dialog, `endpoint-actions-${width}`);
-    await page.keyboard.press("Escape");
     await page.goto("/screenshots/health", { waitUntil: "load", timeout: 60_000 });
     const records = page.locator("#clinical-records");
     await expect(records).toHaveAttribute("data-preview-ready", "true");

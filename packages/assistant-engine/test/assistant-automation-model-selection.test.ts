@@ -1,14 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-} from '@murphai/operator-config/assistant/target-runtime'
-import {
   readAutomationDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools/automation.ts'
-import {
-  resolveAutomationAssistantTargetOverrideForTarget,
-} from '../src/assistant/automation/target-override.ts'
 
 const AUTOMATION_SCHEDULE = {
   kind: 'dailyLocal',
@@ -173,22 +167,6 @@ describe('hosted automation model selection', () => {
         assistantTargetOverride: null,
         lookup: 'burpee-reminder',
       },
-    })
-  })
-
-  it('filters unsupported explicit-provider policy without a base target', () => {
-    expect(
-      resolveAutomationAssistantTargetOverrideForTarget(
-        {
-          model: 'glm-5.3',
-          modelProvider: HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-          reasoningEffort: 'high',
-        },
-        null,
-      ),
-    ).toEqual({
-      model: 'glm-5.3',
-      modelProvider: HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
     })
   })
 

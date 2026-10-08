@@ -948,12 +948,10 @@ function createPlatform(input: {
     async request(request) {
       const snapshot: HostedRuntimeAssistantConfigurationSnapshot = {
         availableModels: ["gpt-5.6-luna", "gpt-6-sol"],
-        availableProviders: ["openai", "venice"],
         availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
         configurationAvailable: true,
         dormantSolPreference: false,
         model: "gpt-6-sol",
-        provider: "openai",
         reasoningEffort: "low",
         solAvailable: false,
       };
@@ -1278,8 +1276,6 @@ async function writeMailboxImportStateFile(
 }
 
 function createMailboxPort(input: {
-  assistantProvider?: HostedMailboxFetchResponse["assistantProvider"];
-  assistantCustomInferenceRevision?: number | null;
   consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   events: string[];
   fetchRequests?: HostedMailboxFetchRequest[];
@@ -1292,10 +1288,6 @@ function createMailboxPort(input: {
         input.events.push("mailbox.fetch");
         input.fetchRequests?.push(request);
         return {
-          assistantProvider: input.assistantProvider ?? "openai",
-          ...(input.assistantCustomInferenceRevision === undefined ? {} : {
-            assistantCustomInferenceRevision: input.assistantCustomInferenceRevision,
-          }),
           ...(input.consumedSeqByLane === undefined
             ? {}
             : { consumedSeqByLane: input.consumedSeqByLane }),

@@ -213,7 +213,7 @@ describe('hosted assistant context diagnostics', () => {
     const providerOptions = serializeAssistantProviderSessionOptions({
       approvalPolicy: 'never',
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       provider: 'codex-cli',
       reasoningEffort: 'medium',
       sandbox: 'danger-full-access',

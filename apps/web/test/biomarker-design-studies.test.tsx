@@ -139,10 +139,10 @@ test("screenshot categories keep the production studies available without one gi
     "Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status",
   );
   expect(sectionsMarkup).toContain(
-    'data-design-variant="venice-terra-sol-locked"',
+    'data-design-variant="pulse-models-locked"',
   );
   expect(sectionsMarkup).toContain(
-    "Settings inference routing, locked models, and endpoint",
+    "Settings model choice for Pulse",
   );
   expect(sectionsMarkup).toContain("Highest usage · Edge required");
   expect(sectionsMarkup).toContain(">Upgrade to Edge</button>");
@@ -294,7 +294,6 @@ test("screenshot categories keep the production studies available without one gi
     "environment-progress-study.tsx",
     "experiment-results-share-study.tsx",
     "homepage-auth-warm-runtime-study.tsx",
-    "settings-custom-inference-study.tsx",
   ]) {
     const clientStudySource = readFileSync(
       new URL(`../app/design/${clientStudy}`, import.meta.url),

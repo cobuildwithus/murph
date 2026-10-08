@@ -13,7 +13,6 @@ import {
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 
 const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
@@ -550,7 +549,7 @@ describe('Codex model catalog', () => {
   it('emits only the final provider reasoning effort after routing overrides resolve', async () => {
     const baseAutomationTarget = createAssistantModelTarget({
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       provider: 'codex-cli',
       reasoningEffort: 'low',
     })
@@ -1151,7 +1150,6 @@ describe('Codex model catalog', () => {
 
     for (const modelProvider of [
       HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-      HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
     ]) {
       route.providerOptions.modelProvider = modelProvider
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mockClear()
@@ -1453,7 +1451,7 @@ describe('Codex model catalog', () => {
   it('keeps memory maintenance one-shot and isolated from reminder tools', async () => {
     const route = createRoute({
       providerOptions: {
-        modelProvider: HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
+        modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
       },
     })
     const session = createAssistantSession({
@@ -1936,8 +1934,6 @@ describe('Codex model catalog', () => {
     { name: 'old Web without expiry', ageMs: null, expected: null },
     { name: 'malformed expiry', ageMs: NaN, expected: null },
     { name: 'unsupported catalog', ageMs: 1, catalogPriority: false, expected: null },
-    { name: 'custom inference', ageMs: 1, provider: 'murph_custom', expected: null },
-    { name: 'Venice', ageMs: 1, provider: 'venice', expected: null },
     { name: 'local subscription', ageMs: 1, hosted: false, expected: null },
     { name: 'scheduled standard retry', ageMs: 1, scheduled: true, expected: null },
   ] as const)('selects the tier for $name and preserves rich input filtering', async (scenario) => {
@@ -1948,7 +1944,7 @@ describe('Codex model catalog', () => {
     const route = createRoute({
       providerOptions: {
         model: 'gpt-5.6-terra',
-        modelProvider: 'provider' in scenario ? scenario.provider : HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+        modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
       },
     })
     const session = createAssistantSession({
@@ -2853,7 +2849,7 @@ describe('Codex model catalog', () => {
     const route = createRoute({
       providerOptions: {
         model: 'gpt-5.6-terra',
-        modelProvider: 'vercel-ai-gateway',
+        modelProvider: 'hosted-openai',
       },
     })
     const session = createAssistantSession({

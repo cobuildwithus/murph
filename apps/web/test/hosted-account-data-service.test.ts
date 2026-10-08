@@ -265,7 +265,6 @@ import {
 
 const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member",
-  "prisma.hosted_inference_connection",
   "prisma.hosted_web_session",
   "prisma.hosted_sensitive_action_challenge",
   "prisma.hosted_member_identity",
@@ -403,7 +402,6 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
   "prisma.hosted_ai_usage_period",
   "prisma.hosted_product_feedback",
   "prisma.hosted_codex_auth_connection",
-  "prisma.hosted_inference_connection",
   "prisma.hosted_linq_daily_state",
   "prisma.hosted_invite",
   "prisma.hosted_consent_event",

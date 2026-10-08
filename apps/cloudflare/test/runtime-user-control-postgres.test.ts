@@ -24,7 +24,7 @@ function harness() {
   const target = `runner--v-release_1--${"1".repeat(32)}`;
   const owner: HostedRuntimeOwnerSnapshot = { userId, attemptId: "synthetic-control-attempt", generation: "1",
     phase: "active", processingMode: "default", allocationId: "standby-claim-11111111-1111-4111-8111-111111111111",
-    runnerContainerName: target, workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true,
+    runnerContainerName: target, workspaceVersion: "0", platformAiUsageAllowed: true,
     startedAt: "2026-09-15T00:00:00.000Z", acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null };
   const slot = { invoke: vi.fn(), smokeHealth: vi.fn(), destroyInstance: vi.fn(),
     controlVoice: vi.fn(async () => ({ kind: "closed" as const, providerConfirmed: true, seconds: 12 })),
