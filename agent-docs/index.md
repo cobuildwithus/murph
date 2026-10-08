@@ -20,6 +20,11 @@ The current GPT-6 picker and concrete-model proof contract is owned by
 Pinned native source review context and provenance proof are recorded in
 [the native review context plan](exec-plans/completed/2026-10-07-frog-native-review-context.md).
 
+Completed projection optimization evidence for public wearable direct copy,
+including parity/privacy proof and measured synthetic CPU reduction, is tracked in
+[the projection copy plan](exec-plans/completed/2026-10-07-public-wearable-projection-copy.md);
+`../packages/query/README.md#ordinary-wearable-reads` owns the contract.
+
 Codex 0.160.0 reconciliation for the current PR is recorded in
 [the PR preparation plan](exec-plans/active/2026-10-01-codex-cli-0160-pr.md).
 

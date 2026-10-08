@@ -104,6 +104,9 @@ observations, and 365 days of unique history. Each case warms once and records
 five wall/CPU samples; every sample must equal its complete initial result. Metric
 evidence must also equal the ordinary source-health-enabled bundle. Compare hashes
 across revisions, and run both revision orders to expose warmup/host noise.
+The final case projects the 365-day bundle to public summaries and pairs it with
+the text round-trip control in one process: two warm pairs, then seven measured
+pairs in alternating order. Each result must equal the control.
 
 ```sh
 node scripts/run-typescript.mjs package --project packages/query/bench/tsconfig.json --pretty false
