@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,7 +21,8 @@ import { runSmokeHostedDeploy } from "./smoke-hosted-deploy.shared.ts";
 import { prepareHostedContainerDeployImage } from "./prepare-container-deploy-image.ts";
 import {
   assertRetiredInferenceSecretsRemoved,
-  prepareRetiredInferenceSecretsUpload,
+  hasRetiredInferenceSecrets,
+  readExpectedWorkerSecrets,
 } from "./deploy-retired-inference-secrets.ts";
 import {
   createCloudflareContainerProvider,
@@ -100,33 +101,40 @@ export async function runDeployWorkerVersionCli(
         const renderedContainers = await readRenderedContainerIdentities(staged.configPath);
         await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
         const uploadVersion = async (configPath: string, expectedSourceVersionId: string): Promise<string> => {
-          const upload = await prepareRetiredInferenceSecretsUpload({
+          const expectedSecrets = await readExpectedWorkerSecrets({
             configPath, currentVersion, currentVersionId,
             ...(input.includeSecrets ? { secretsFilePath: input.secretsFilePath } : {}),
           });
-          try {
-            const before = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
-            if (before[0] !== expectedSourceVersionId) {
-              throw new Error("Worker inheritance source changed before upload; resolve version drift before retrying.");
-            }
-            const output = await runWranglerLoggedCaptured([
-              "versions", "upload", "--config", upload.configPath, "--name", input.workerName,
-              "--message", input.deploymentMessage, "--tag", input.versionTag,
-              ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
-            ]);
-            const versionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
-            const after = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
-            if (after.length !== 2 || after[0] !== versionId || after[1] !== expectedSourceVersionId) {
-              throw new Error("Worker version history changed during upload; uploaded version will not be activated.");
-            }
-            assertRetiredInferenceSecretsRemoved(
-              await releaseProvider.readWorkerVersion(input.workerName, versionId),
-              versionId, upload.expectedSecrets,
-            );
-            return versionId;
-          } finally {
-            await rm(upload.configPath, { force: true });
+          const before = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+          if (before[0] !== expectedSourceVersionId) {
+            throw new Error("Worker inheritance source changed before upload; resolve version drift before retrying.");
           }
+          const output = await runWranglerLoggedCaptured([
+            "versions", "upload", "--config", configPath, "--name", input.workerName,
+            "--message", input.deploymentMessage, "--tag", input.versionTag,
+            ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
+          ]);
+          let versionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
+          const after = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+          if (after.length !== 2 || after[0] !== versionId || after[1] !== expectedSourceVersionId) {
+            throw new Error("Worker version history changed during upload; uploaded version will not be activated.");
+          }
+          let version = await releaseProvider.readWorkerVersion(input.workerName, versionId);
+          if (hasRetiredInferenceSecrets(version, versionId)) {
+            const beforePatch = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+            if (beforePatch[0] !== versionId) throw new Error("Worker version changed before secret retirement; no patch attempted.");
+            const patchedId = await releaseProvider.removeRetiredInferenceSecrets({
+              workerName: input.workerName, versionMessage: input.deploymentMessage, versionTag: input.versionTag,
+            });
+            const afterPatch = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+            if (patchedId === versionId || afterPatch.length !== 2 || afterPatch[0] !== patchedId || afterPatch[1] !== versionId) {
+              throw new Error("Worker version history changed during secret retirement; patched version will not be activated.");
+            }
+            versionId = patchedId;
+            version = await releaseProvider.readWorkerVersion(input.workerName, versionId);
+          }
+          assertRetiredInferenceSecretsRemoved(version, versionId, expectedSecrets);
+          return versionId;
         };
         const activateVersion = async (configPath: string, versionId: string, expectedLiveVersion: string): Promise<void> => {
           await assertActivationAllowed(expectedLiveVersion);

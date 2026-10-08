@@ -13,11 +13,11 @@ The pinned Wrangler dry-run emits arbitrary unsafe binding metadata, including a
 
 ## Possible Solution
 
-Use the supported default latest inheritance shape, validate the unfiltered newest version history around upload, and label dry-run evidence as serialization-only. Preserve the protected deployment as the external acceptance gate.
+Use ordinary upload followed by the official native version-secret merge PATCH for the exact retired names. Delete custom inheritance/config reconstruction; preserve complete inventory and version-history guards. Label dry-run evidence as serialization-only and keep the protected deployment as the external acceptance gate.
 
 ## Minimal Reproducible Example
 
-Configure a synthetic unsafe binding with name OPTIONAL_SECRET, type inherit, and version_id 11111111-1111-4111-8111-111111111111. Run pinned Wrangler versions upload --dry-run --outfile against a synthetic Worker. The multipart metadata retains the identifier without testing server acceptance or the latest-version relationship.
+Configure a synthetic unsafe binding with name OPTIONAL_SECRET, type inherit, and version_id 11111111-1111-4111-8111-111111111111. Run pinned Wrangler versions upload --dry-run --outfile against a synthetic Worker. The multipart metadata retains the identifier without testing server acceptance or the latest-version relationship. Likewise, inspecting an empty keep_bindings array proves its serialization but not server-side deletion of omitted secrets. Synthetic provider-shaped tests must exercise the native two-null PATCH contract separately.
 
 ## Context
 

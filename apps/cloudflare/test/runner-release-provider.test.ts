@@ -53,6 +53,74 @@ describe("recent Worker version metadata", () => {
   });
 });
 
+describe("native Worker secret retirement", () => {
+  const input = { workerName: "worker/name?", versionMessage: "fixture retirement message", versionTag: "fixture-retirement-tag" };
+
+  it("removes exactly the retired secrets in one merge patch and returns only the new version ID", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      success: true, result: { id: "retired-version", privateFixture: "discarded" },
+    }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture/account", apiToken: "fixture-token", fetchImpl })
+      .removeRetiredInferenceSecrets(input)).resolves.toBe("retired-version");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe(
+      "https://api.cloudflare.com/client/v4/accounts/fixture%2Faccount/workers/workers/worker%2Fname%3F/versions/latest",
+    );
+    const request = fetchImpl.mock.calls[0]?.[1];
+    expect(request).toMatchObject({ method: "PATCH", cache: "no-store", signal: expect.any(AbortSignal) });
+    expect(request?.headers).toEqual({
+      Authorization: "Bearer fixture-token", "Content-Type": "application/merge-patch+json",
+    });
+    expect(JSON.parse(String(request?.body))).toEqual({
+      env: { VENICE_API_KEY: null, VERCEL_AI_API_KEY: null },
+      annotations: { "workers/message": input.versionMessage, "workers/tag": input.versionTag },
+    });
+  });
+
+  it.each([
+    undefined, null, [], {}, "private-fixture", { id: null }, { id: 7 }, { id: {} },
+    { id: "" }, { id: " \t" }, { id: " padded-fixture" }, { id: "padded-fixture " },
+  ])("rejects absent or malformed version IDs without exposing the response (%#)", async result => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ success: true, result }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
+      .removeRetiredInferenceSecrets(input)).rejects.toMatchObject({
+        message: "Authoritative runner release state is unavailable; deployment stopped. Worker secret retirement returned invalid version metadata.",
+      });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it.each([200, 400])("rejects failed provider envelopes with redacted request context at HTTP %s", async status => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      success: false, result: { id: "ignored-version" },
+      errors: [{ code: 10001, message: ["fixture-account", "fixture-token", input.workerName,
+        input.versionMessage, input.versionTag].join(" | "), details: { privateFixture: "discarded" } }],
+    }, { status }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture-account", apiToken: "fixture-token", fetchImpl })
+      .removeRetiredInferenceSecrets(input)).rejects.toMatchObject({
+        message: `Authoritative runner release state is unavailable; deployment stopped. Retire inference secrets: HTTP ${status}; errors=[{"code":10001,"message":"<redacted> | <redacted> | <redacted> | <redacted> | <redacted>"}].`,
+      });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("stops on a transport failure without forwarding the raw exception or retrying the mutation", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => { throw new Error("private transport fixture"); });
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
+      .removeRetiredInferenceSecrets(input)).rejects.toMatchObject({
+        message: "Authoritative runner release state is unavailable; deployment stopped. Retire inference secrets: request failed before a response.",
+      });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("stops on invalid JSON without reflecting the provider body", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("private response fixture", { status: 502 }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
+      .removeRetiredInferenceSecrets(input)).rejects.toMatchObject({
+        message: "Authoritative runner release state is unavailable; deployment stopped. Retire inference secrets: HTTP 502; invalid JSON response.",
+      });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+});
+
 describe("native account capacity evidence", () => {
   it("reads the account's actual quota and excludes unrelated private fields", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
@@ -356,6 +424,7 @@ describe("single-fleet rollout recovery", () => {
       ? { ...live, configuration: { ...configuration, image: "old-image" } } : {}));
     await createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, specification, rolloutStepPercentage: [10, 25, 50, 100] });
     expect(fetchImpl.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "PATCH", "POST"]);
+    expect(fetchImpl.mock.calls[1]?.[1]?.headers).toEqual({ Authorization: "Bearer fixture", "Content-Type": "application/json" });
     expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body))).toEqual(specification);
     expect(JSON.parse(String(fetchImpl.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ strategy: "rolling", kind: "full_auto", steps: [10, 25, 50, 100].map(percentage => ({ step_size: { percentage }, description: expect.any(String) })) });
   });

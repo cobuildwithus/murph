@@ -10,14 +10,14 @@ export function createRunnerReleaseProvider(input: {
   fetchImpl?: typeof fetch;
 }) {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const request = async (operation: string, pathname: string, method = "GET", body?: unknown, privateRequestValues: readonly string[] = []): Promise<Record<string, unknown>> => {
+  const request = async (operation: string, pathname: string, method = "GET", body?: unknown, privateRequestValues: readonly string[] = [], contentType = "application/json"): Promise<Record<string, unknown>> => {
     let response: Response;
     try {
       response = await fetchImpl(
         `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(input.accountId)}${pathname}`,
         {
           method,
-          headers: { Authorization: `Bearer ${input.apiToken}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+          headers: { Authorization: `Bearer ${input.apiToken}`, ...(body === undefined ? {} : { "Content-Type": contentType }) },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
           cache: "no-store",
           signal: AbortSignal.timeout(30_000),
@@ -147,6 +147,17 @@ export function createRunnerReleaseProvider(input: {
         ids.add(item.id);
       }
       return [...ids];
+    },
+    async removeRetiredInferenceSecrets(input: { workerName: string; versionMessage: string; versionTag: string }): Promise<string> {
+      const response = await request("Retire inference secrets",
+        `/workers/workers/${encodeURIComponent(input.workerName)}/versions/latest`, "PATCH", {
+          env: { VENICE_API_KEY: null, VERCEL_AI_API_KEY: null },
+          annotations: { "workers/message": input.versionMessage, "workers/tag": input.versionTag },
+        }, [input.workerName, input.versionMessage, input.versionTag], "application/merge-patch+json");
+      const version = response.result;
+      if (!isObjectRecord(version) || typeof version.id !== "string" || !version.id.trim()
+        || version.id !== version.id.trim()) throw unavailable("Worker secret retirement returned invalid version metadata.");
+      return version.id;
     },
     async retireApplication(input: { applicationId: string; name: string; namespaceId: string }): Promise<void> {
       const pathname = `/containers/applications/${encodeURIComponent(input.applicationId)}`;

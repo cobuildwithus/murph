@@ -8,7 +8,6 @@ vi.mock("../scripts/deploy-web-protocol.ts", () => ({ assertHostedWebProtocolAdm
 
 const fileMocks = vi.hoisted(() => ({
   readFile: vi.fn<(filePath: unknown, ...args: unknown[]) => Promise<string>>(async () => "{}"),
-  rm: vi.fn<(filePath: unknown, ...args: unknown[]) => Promise<void>>(async () => {}),
   writeFile: vi.fn<(filePath: unknown, content: unknown, ...args: unknown[]) => Promise<void>>(async () => {}),
 }));
 vi.mock("node:fs/promises", async () => ({
@@ -27,7 +26,7 @@ vi.mock("../scripts/deploy-artifacts.js", async () => ({
 const imageMocks = vi.hoisted(() => ({ prepareHostedContainerDeployImage: vi.fn() }));
 vi.mock("../scripts/prepare-container-deploy-image.ts", () => imageMocks);
 const releaseMocks = vi.hoisted(() => ({
-  stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), readRecentWorkerVersionIds: vi.fn(), assertDrained: vi.fn(), retireApplication: vi.fn(), assertCapacity: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
+  stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), readRecentWorkerVersionIds: vi.fn(), removeRetiredInferenceSecrets: vi.fn(), assertDrained: vi.fn(), retireApplication: vi.fn(), assertCapacity: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
 }));
 vi.mock("../scripts/stage-runner-release.ts", () => ({
   stageHostedRunnerRelease: releaseMocks.stageHostedRunnerRelease,
@@ -169,7 +168,6 @@ describe("runDeployWorkerVersionCli", () => {
   beforeEach(() => {
     fileMocks.readFile.mockReset().mockResolvedValue("{}");
     fileMocks.writeFile.mockReset().mockResolvedValue(undefined);
-    fileMocks.rm.mockReset().mockResolvedValue(undefined);
     webProtocolMocks.admit.mockReset().mockResolvedValue(undefined);
     releaseMocks.stageHostedRunnerRelease.mockReset();
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
@@ -179,9 +177,12 @@ describe("runDeployWorkerVersionCli", () => {
     releaseMocks.readWorkerVersion.mockReset();
     releaseMocks.readWorkerVersion.mockImplementation(async (_worker, id) => ({ id, resources: { bindings: [] } }));
     releaseMocks.readRecentWorkerVersionIds.mockReset().mockImplementation(async () => [
-      ...receiptMocks.parseWranglerWorkerVersionId.mock.results.filter(result => result.type === "return").map(result => result.value).reverse(),
+      ...[receiptMocks.parseWranglerWorkerVersionId, releaseMocks.removeRetiredInferenceSecrets].flatMap(mock =>
+        mock.mock.results.filter(result => result.type === "return").map((result, index) => ({ id: result.value, order: mock.mock.invocationCallOrder[index]! }))
+      ).sort((a, b) => b.order - a.order).map(result => result.id),
       "version-direct",
     ].slice(0, 2));
+    releaseMocks.removeRetiredInferenceSecrets.mockReset().mockImplementation(() => `patched-version-${releaseMocks.removeRetiredInferenceSecrets.mock.calls.length}`);
     releaseMocks.admitApplication.mockReset();
     releaseMocks.admitApplication.mockResolvedValue("created");
     releaseMocks.assertApplicationReady.mockReset();
@@ -249,13 +250,7 @@ describe("runDeployWorkerVersionCli", () => {
       "history:stage-version,version-direct", "history:final-version,stage-version",
       "inventory:final-version", "activate:final-version",
     ]);
-    expect(fileMocks.writeFile.mock.calls.filter(([filePath]) => String(filePath).includes(".retired-secrets-"))).toHaveLength(2);
-    for (const [filePath, content] of fileMocks.writeFile.mock.calls) {
-      if (!String(filePath).includes(".retired-secrets-")) continue;
-      expect(JSON.parse(String(content)).unsafe.bindings).toEqual(retained.filter(({ name }) => !includeSecrets || name !== "OPENAI_API_KEY")
-        .map(({ name }) => ({ name, type: "inherit" })));
-      expect(fileMocks.rm).toHaveBeenCalledWith(filePath, { force: true });
-    }
+    expect(releaseMocks.removeRetiredInferenceSecrets).not.toHaveBeenCalled();
     for (const [args] of wranglerMocks.runWranglerLoggedCaptured.mock.calls) {
       expect(args.includes("--secrets-file")).toBe(includeSecrets);
     }
@@ -272,7 +267,6 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(boundary === "stage" ? 0 : 1);
     expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
     expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
-    expect(fileMocks.rm).toHaveBeenCalledTimes(boundary === "stage" ? 1 : 2);
   });
 
   it.each([
@@ -290,7 +284,6 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(boundary === "stage" ? 0 : 1);
     expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
     expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
-    expect(fileMocks.rm).toHaveBeenCalledTimes(boundary === "stage" ? 1 : 2);
     // The upload may have persisted. A retry must not silently adopt that inactive version.
     const uploads = wranglerMocks.runWranglerLoggedCaptured.mock.calls.length;
     await expect(syntheticDeployment()).rejects.toThrow("inheritance source changed before upload");
@@ -308,7 +301,78 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args[0] === "versions")).toBe(false);
     expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
     expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
-    expect(fileMocks.rm).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])("patches retired secrets once and promotes the verified version with synchronization=%s", async includeSecrets => {
+    const retained = [
+      { name: "OPENAI_API_KEY", type: "secret_text" }, { name: "OPTIONAL_SECRET", type: "secret_text" },
+      { name: "SHARED_SIGNING_SECRET", type: "secret_text" }, { name: "CRYPTO_KEY", type: "secret_key" },
+    ];
+    fileMocks.readFile.mockImplementation(async filePath => String(filePath).endsWith("secrets.json")
+      ? JSON.stringify({ OPENAI_API_KEY: "synthetic-rotation", NEW_SECRET: "synthetic-new" }) : "{}");
+    releaseMocks.readWorkerVersion.mockImplementation(async (_worker, id) => ({ id, resources: { bindings: [
+      ...retained,
+      ...(id === "version-direct" || id === "uploaded-version-1" ? [{ name: "VENICE_API_KEY", type: "secret_text" }, { name: "VERCEL_AI_API_KEY", type: "secret_text" }] : []),
+      ...(includeSecrets && id !== "version-direct" ? [{ name: "NEW_SECRET", type: "secret_text" }] : []),
+    ] } }));
+    await syntheticDeployment("immediate", {}, includeSecrets);
+    expect(releaseMocks.removeRetiredInferenceSecrets).toHaveBeenCalledExactlyOnceWith({
+      workerName: "hosted-worker", versionMessage: "synthetic", versionTag: "synthetic",
+    });
+    expect(releaseMocks.readRecentWorkerVersionIds.mock.settledResults.map(result => result.value)).toEqual([
+      ["version-direct"], ["uploaded-version-1", "version-direct"],
+      ["uploaded-version-1", "version-direct"], ["patched-version-1", "uploaded-version-1"],
+      ["patched-version-1", "uploaded-version-1"], ["uploaded-version-2", "patched-version-1"],
+    ]);
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions").map(([args]) => args[2]))
+      .toEqual(["patched-version-1@100%", "uploaded-version-2@100%"]);
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledWith(expect.objectContaining({
+      source: expect.objectContaining({ HOSTED_EXECUTION_SMOKE_VERSION_ID: "patched-version-1" }),
+    }));
+    expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls.map(([args]) => args[3]))
+      .toEqual(["/tmp/config.jsonc", "/tmp/config.jsonc.promote"]);
+  });
+
+  it.each(["before-patch", "intervening", "newer", "same-id", "patch-error", "inventory"])("stops %s secret retirement before pending native mutation or activation", async failure => {
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
+      applications: [{ name: "serving", className: "RunnerContainer", applicationId: "serving-app", namespaceId: "serving-namespace", specification: {} }],
+      retirements: [{ name: "retired", applicationId: "retired-app", namespaceId: "retired-namespace" }],
+    }));
+    releaseMocks.readWorkerVersion.mockImplementation(async (_worker, id) => ({ id, resources: { bindings:
+      id === "patched-version-1" && failure !== "inventory" ? [] : [{ name: "VENICE_API_KEY", type: "secret_text" }],
+    } }));
+    const readHistory = releaseMocks.readRecentWorkerVersionIds.getMockImplementation()!;
+    releaseMocks.readRecentWorkerVersionIds.mockImplementation(async () => {
+      const ids = await readHistory();
+      const call = releaseMocks.readRecentWorkerVersionIds.mock.calls.length;
+      if (failure === "before-patch" && call === 3) return ["foreign-version", ids[0]];
+      if (failure === "intervening" && call === 4) return [ids[0], "foreign-version"];
+      if (failure === "newer" && call === 4) return ["foreign-version", ids[0]];
+      return ids;
+    });
+    if (failure === "same-id") releaseMocks.removeRetiredInferenceSecrets.mockReturnValue("uploaded-version-1");
+    if (failure === "patch-error") releaseMocks.removeRetiredInferenceSecrets.mockRejectedValue(new Error("patch unavailable"));
+    await expect(syntheticDeployment()).rejects.toThrow(failure === "before-patch" ? "changed before secret retirement"
+      : failure === "patch-error" ? "patch unavailable" : failure === "inventory" ? "secret inventory differs" : "history changed during secret retirement");
+    expect(releaseMocks.removeRetiredInferenceSecrets).toHaveBeenCalledTimes(failure === "before-patch" ? 0 : 1);
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args[0] === "versions")).toBe(false);
+  });
+
+  it("returns the patched version for a worker-only release", async () => {
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: configPath, activeApplicationName: "serving", workerOnly: true, applications: [], retirements: [],
+    }));
+    releaseMocks.readWorkerVersion.mockImplementation(async (_worker, id) => ({ id, resources: { bindings:
+      id === "patched-version-1" ? [] : [{ name: "VERCEL_AI_API_KEY", type: "secret_text" }],
+    } }));
+    await syntheticDeployment("worker-only");
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+    expect(releaseMocks.removeRetiredInferenceSecrets).toHaveBeenCalledOnce();
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions").map(([args]) => args[2]))
+      .toEqual(["patched-version-1@100%"]);
   });
 
   it.each(["stage", "promotion"])("stops before %s activation if the uploaded secret inventory changed", async boundary => {
@@ -316,21 +380,12 @@ describe("runDeployWorkerVersionCli", () => {
     releaseMocks.readWorkerVersion.mockImplementation(async (_worker, id) => {
       reads += 1;
       return { id, resources: { bindings: reads === (boundary === "stage" ? 2 : 3)
-        ? [{ name: "VENICE_API_KEY", type: "secret_text" }] : [] } };
+        ? [{ name: "UNEXPECTED_SECRET", type: "secret_text" }] : [] } };
     });
     await expect(syntheticDeployment()).rejects.toThrow("secret inventory differs");
     expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(boundary === "stage" ? 0 : 1);
-    expect(fileMocks.rm).toHaveBeenCalledTimes(boundary === "stage" ? 1 : 2);
   });
 
-  it("cleans up the exact upload config after upload failure and can retry", async () => {
-    wranglerMocks.runWranglerLoggedCaptured.mockRejectedValueOnce(new Error("upload failed"));
-    await expect(syntheticDeployment()).rejects.toThrow("upload failed");
-    await syntheticDeployment();
-    const uploadPaths = wranglerMocks.runWranglerLoggedCaptured.mock.calls.map(([args]) => args[3]);
-    expect(new Set(uploadPaths).size).toBe(3);
-    expect(fileMocks.rm.mock.calls).toEqual(uploadPaths.map(configPath => [configPath, { force: true }]));
-  });
 
   it("does not activate a Worker while its image is still publishing or after publication fails", async () => {
     let rejectPublication!: (error: Error) => void;
@@ -382,7 +437,7 @@ describe("runDeployWorkerVersionCli", () => {
     const failure = deployment.catch((error: unknown) => error);
     await vi.waitFor(() => expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledOnce());
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(1);
-    expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls[0]![0]).toContainEqual(expect.stringMatching(/^\/tmp\/config\.jsonc\.retired-secrets-[\da-f-]+\.jsonc$/u));
+    expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls[0]![0]).toContainEqual("/tmp/config.jsonc");
     rejectSmoke(new Error(state === "failed" ? "candidate image never became ready" : "synthetic cancelled preparation"));
     expect(await failure).toBeInstanceOf(Error);
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(1);
@@ -638,7 +693,7 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
       "versions", "upload",
       "--config",
-      expect.stringMatching(/^\/tmp\/wrangler\.image-prepared\.jsonc\.retired-secrets-[\da-f-]+\.jsonc$/u),
+      "/tmp/wrangler.image-prepared.jsonc",
       "--name",
       "hosted-worker",
       "--message",
@@ -739,7 +794,7 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
       "versions", "upload",
       "--config",
-      expect.stringMatching(/^\/tmp\/wrangler\.generated\.jsonc\.retired-secrets-[\da-f-]+\.jsonc$/u),
+      "/tmp/wrangler.generated.jsonc",
       "--name",
       "hosted-worker",
       "--message",
@@ -781,7 +836,7 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
       "versions", "upload",
       "--config",
-      expect.stringMatching(/^\/tmp\/wrangler\.generated\.jsonc\.retired-secrets-[\da-f-]+\.jsonc$/u),
+      "/tmp/wrangler.generated.jsonc",
       "--name",
       "hosted-worker",
       "--message",
