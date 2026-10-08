@@ -15,7 +15,7 @@ const original: Message = {
   parts: [{ type: "text", value: "The document is ready.", reactions: null }],
 };
 
-describe("one terminal Linq retry request", () => {
+describe("terminal Linq retry request", () => {
   it("bounds receipt serialization and gives reversed message batches the same lock order", async () => {
     const prisma = { $queryRaw: vi.fn().mockResolvedValue([]) };
     const messageIds = Array.from({ length: 10 }, (_, index) => `synthetic-message-${index}`);
@@ -49,7 +49,7 @@ describe("one terminal Linq retry request", () => {
       effect: { type: "bubble" as const, name: "gentle" },
     };
     expect(buildHostedLinqTerminalRetryMessage(message, "retry-key")).toEqual({
-      idempotency_key: "retry-key", preferred_service: "iMessage",
+      idempotency_key: "retry-key",
       parts: [{ type: "text", value: "The document is ready." }],
       reply_to: message.reply_to, effect: message.effect,
     });

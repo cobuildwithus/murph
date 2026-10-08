@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-08",
+  "order": 100,
+  "item": {
+    "id": "recover-unsent-replies",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More chances for an unsent reply",
+    "summary": "Murph can retry a recent reply when the messaging provider confirms it never sent.",
+    "details": "Recovery pauses between attempts and stops after three minutes. Uncertain sends stay closed to avoid duplicate replies, and a later reply does not count as delivery of the original.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": []
+  }
+}

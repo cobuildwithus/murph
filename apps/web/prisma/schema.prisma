@@ -2473,6 +2473,7 @@ model HostedLinqDelivery {
   @@index([phoneNumberLookupKey, attemptedAt])
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])
+  @@index([linqChatLookupKey, acceptedAt], map: "hosted_linq_delivery_chat_accepted_at_idx")
   @@index([lastReceiptAt])
   @@index([payloadOwnerMemberId])
   @@index([acceptedAt, id], map: "hosted_linq_delivery_accepted_at_id_idx")
@@ -2485,6 +2486,13 @@ model HostedLinqDeliveryMessage {
   ordinal             Int
   messageLookupKey    String   @unique @map("message_lookup_key")
   terminalRetryAttemptedAt DateTime? @map("terminal_retry_attempted_at")
+  terminalRetryCount Int @default(0) @map("terminal_retry_count")
+  terminalRetryNextAt DateTime? @map("terminal_retry_next_at")
+  terminalRetryExpiresAt DateTime? @map("terminal_retry_expires_at")
+  terminalRetryClaimedMessageLookupKey String? @map("terminal_retry_claimed_message_lookup_key")
+  terminalRetryPreviousMessageLookupKeys String[] @default([]) @map("terminal_retry_previous_message_lookup_keys")
+  terminalRetryContextCiphertext String? @map("terminal_retry_context_ciphertext")
+  terminalRetryOwnerMemberId String? @map("terminal_retry_owner_member_id")
   terminalRetryOriginalMessageLookupKey String? @unique(map: "hosted_linq_delivery_message_terminal_retry_key") @map("terminal_retry_original_message_lookup_key")
   messageIdSuffix     String?  @map("message_id_suffix")
   status              String   @default("accepted")
@@ -2503,6 +2511,7 @@ model HostedLinqDeliveryMessage {
   @@unique([deliveryId, ordinal])
   @@index([deliveryId, status])
   @@index([lastReceiptAt])
+  @@index([terminalRetryPreviousMessageLookupKeys], type: Gin, map: "hosted_linq_delivery_message_terminal_retry_history_idx")
   @@map("hosted_linq_delivery_message")
 }
 
