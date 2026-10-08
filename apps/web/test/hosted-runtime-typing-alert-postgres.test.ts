@@ -68,6 +68,39 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     });
   });
 
+  it("ends a Telegram wait at its delivered reply without suppressing slow replies", async () => {
+    await withTables(async (tx) => {
+      const assistant = (typingMs: number | null, replyMs: number | string) => ({ assistant: {
+        ...(typingMs === null ? {} : { telegramTypingAcceptedAtEpochMs: received.getTime() + typingMs }),
+        terminalReplyCommittedAtEpochMs: typeof replyMs === "number" ? received.getTime() + replyMs : replyMs,
+      } });
+      const telegram = { source: "telegram" as const, cold: true, elapsed: null };
+      await insertTrace(tx, "reply-within-threshold", { ...telegram, extra: assistant(null, 8_000) });
+      await insertTrace(tx, "reply-slow", { ...telegram, extra: assistant(null, 35_900) });
+      await insertTrace(tx, "reply-before-receipt", { ...telegram, extra: assistant(null, -1) });
+      await insertTrace(tx, "reply-after-now", { ...telegram, extra: assistant(null, 60_001) });
+      await insertTrace(tx, "reply-malformed", { ...telegram, extra: assistant(null, "8000") });
+      await insertTrace(tx, "typing-before-reply", { ...telegram, extra: assistant(8_001, 9_000) });
+      await insertTrace(tx, "reply-before-typing", { ...telegram, extra: assistant(9_000, 8_000) });
+      // Linq answers keep their own delivery suppression and reply-latency monitor.
+      await insertTrace(tx, "linq-reply-leaf", { cold: true, elapsed: null, extra: { assistant: {
+        terminalReplyCommittedAtEpochMs: received.getTime() + 5_000,
+      } } });
+      const rows = await tx.$queryRaw<Array<{ id: string; elapsedMs: bigint }>>(
+        buildHostedRuntimeTypingAlertQuery({ now }),
+      );
+      expect(Object.fromEntries(rows.map((row) => [row.id.replace("runtime-typing/", ""), row.elapsedMs])))
+        .toEqual({
+          "linq-reply-leaf": 60_000n,
+          "reply-after-now": 60_000n,
+          "reply-before-receipt": 60_000n,
+          "reply-malformed": 60_000n,
+          "reply-slow": 35_900n,
+          "typing-before-reply": 8_001n,
+        });
+    });
+  });
+
   it("links instant replies to original and echo traces and leaves failed sends alertable", async () => {
     await withTables(async (tx) => {
       for (const id of ["instant-original", "instant-echo", "instant-failed", "instant-ordinary"]) {

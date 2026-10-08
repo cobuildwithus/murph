@@ -139,7 +139,13 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
           WHEN typing.value ~ '^[0-9]{1,15}$'
             THEN typing.value::bigint
           ELSE NULL
-        END) AS typing_ms
+        END) AS typing_ms,
+        CASE
+          WHEN trace.source = 'telegram'
+            AND jsonb_typeof(reply.value) = 'number'
+            AND reply.value #>> '{}' ~ '^[0-9]{1,15}$'
+            THEN (reply.value #>> '{}')::bigint
+        END AS telegram_reply_ms
       FROM hosted_ingress_latency_trace AS trace
       CROSS JOIN LATERAL (SELECT CASE trace.source
         WHEN 'linq' THEN trace.phase_breakdown_json #>> '{assistant,linqTypingAcceptedAtEpochMs}'
@@ -147,6 +153,8 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
       END AS value) AS typing
       CROSS JOIN LATERAL (SELECT trace.phase_breakdown_json
         #> '{assistant,terminalNonReplyCommittedAtEpochMs}' AS value) AS terminal
+      CROSS JOIN LATERAL (SELECT trace.phase_breakdown_json
+        #> '{assistant,terminalReplyCommittedAtEpochMs}' AS value) AS reply
       -- The member waits from the provider's event, so time before our route
       -- runs (such as a fresh Web instance) counts. The latest event for this
       -- exact message is its own creation or a later edit/reaction, so an edit
@@ -186,8 +194,19 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
           THEN ${HOSTED_WARM_TYPING_ALERT_THRESHOLD_MS}::integer
           ELSE ${HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS}::integer
         END AS threshold_ms,
-        COALESCE(typing_ms, ${input.now.getTime()}::bigint) - origin_ms AS elapsed_ms
+        silence_ended_ms - origin_ms AS elapsed_ms
       FROM observations
+      -- A delivered Telegram reply ends the wait. Linq answers suppress the alert
+      -- below because Linq reply latency has its own monitor; Telegram has none,
+      -- so its reply only caps the measured wait. The stored reply is the latest
+      -- delivered one, so the cap can overstate silence but never hide it.
+      CROSS JOIN LATERAL (SELECT LEAST(
+        COALESCE(typing_ms, ${input.now.getTime()}::bigint),
+        CASE WHEN telegram_reply_ms >= received_ms
+          AND telegram_reply_ms <= ${input.now.getTime()}::bigint
+          THEN telegram_reply_ms
+        END
+      ) AS silence_ended_ms) AS silence
       WHERE (typing_ms <= ${input.now.getTime()}::bigint
         OR (typing_ms IS NULL
           AND received_ms < ${input.now.getTime() - MISSING_TYPING_OBSERVATION_GRACE_MS}::bigint))
@@ -217,10 +236,10 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
       provider_event_created_ms::bigint AS "providerEventCreatedAtEpochMs",
       silence_started_ms::bigint AS "silenceStartedAtEpochMs",
       typing_ms AS "typingAcceptedAtEpochMs", workspace_state AS "workspaceState",
-      (COALESCE(typing_ms, ${input.now.getTime()}::bigint) - silence_started_ms)::bigint AS "elapsedMs",
+      (silence_ended_ms - silence_started_ms)::bigint AS "elapsedMs",
       threshold_ms AS "thresholdMs"
     FROM measured
-    WHERE COALESCE(typing_ms, ${input.now.getTime()}::bigint) - silence_started_ms > threshold_ms
+    WHERE silence_ended_ms - silence_started_ms > threshold_ms
       AND (typing_ms IS NOT NULL
         OR silence_started_ms < ${input.now.getTime() - MISSING_TYPING_OBSERVATION_GRACE_MS}::bigint)
     ORDER BY webhook_received_at, id
