@@ -645,7 +645,7 @@ describe("handleRunnerOutboundRequest", () => {
       const session = "session" in command ? command.session : "expectedSession" in command ? command.expectedSession : null;
       const attemptId = session?.attemptId ?? ("attemptId" in command ? command.attemptId : "");
       const generation = session?.leaseGeneration ?? ("generation" in command ? command.generation : "");
-      if (!await stub.validateRuntimeWriteFence?.({ userId, attemptId, generation })) return { cutover: "postgres", applied: false, session: null };
+      if (!await stub.validateRuntimeWriteFence?.({ userId, attemptId, generation })) throw new HostedRuntimeResourceRejectedError("HOSTED_RUNTIME_OWNER_STALE");
       const identity = { userId, attemptId, leaseGeneration: generation, snapshotId: "snapshotId" in command ? command.snapshotId : session?.snapshotId ?? "" };
       switch (command.operation) {
         case "snapshot_create": {
@@ -8479,6 +8479,9 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    expect(vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(["snapshot_read", "snapshot_delete"]);
     await expect(response.json()).resolves.toEqual({
       aborted: true,
       ok: true,
@@ -8555,9 +8558,11 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted workspace snapshot upload session is stale.",
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      error: "Hosted runtime resource rejected: HOSTED_RUNTIME_OWNER_STALE.",
     });
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(runner.workspaceSnapshotUploadSessions.get(activeSnapshotId)).toEqual(activeSession);
@@ -8615,7 +8620,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
-  it("ignores a stale abort without touching the current session or object", async () => {
+  it("rejects a stale abort without touching the current session or object", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       leaseGeneration: "10",
     });
@@ -8654,9 +8659,10 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      aborted: false, ok: true,
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      error: "Hosted runtime resource rejected: HOSTED_RUNTIME_OWNER_STALE.",
     });
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
@@ -9139,7 +9145,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
-  it("defers replaced snapshot retirement to Web even on an expired completion retry", async () => {
+  it.each([false, true])("defers expired snapshot retirement to Web and preserves deletion rejection (stale: %s)", async stale => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const progressProjection: HostedSystemProgressProjection = {
       nextDefaultProcessingWakeAt: "2026-05-02T00:05:00.000Z",
@@ -9203,6 +9209,12 @@ describe("handleRunnerOutboundRequest", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    if (stale) {
+      vi.mocked(runtimeResourceClient.recordHostedRuntimeOrphan).mockImplementationOnce(async () => {
+        runner.setActiveWriteFence({ attemptId: "replacement-attempt", leaseGeneration: "10" });
+      });
+    }
+
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotCompleteRequest({
         progressProjection,
@@ -9215,6 +9227,14 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     const responseBody = requireTestObject(await response.json(), "expired current retry response");
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).toHaveBeenCalledOnce();
+    if (stale) {
+      expect(response.status).toBe(409);
+      expect(responseBody).toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+      expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
+      expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+      return;
+    }
     expect(response.status).toBe(200);
     expect(responseBody.checkpoint).toEqual(expect.objectContaining({
       checkpointed: true,
@@ -9375,9 +9395,10 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "Not found",
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      error: "Hosted runtime resource rejected: HOSTED_RUNTIME_OWNER_STALE.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
@@ -9592,9 +9613,10 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "Not found",
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      error: "Hosted runtime resource rejected: HOSTED_RUNTIME_OWNER_STALE.",
     });
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",

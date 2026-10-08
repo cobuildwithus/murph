@@ -1261,6 +1261,34 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(retired?.retiredAt).not.toBeNull();
   });
 
+  it("admits media reads with current ownership and rejects stale reads before expiration changes", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const descriptor = { mediaId: "c".repeat(64), mediaKind: "image" as const,
+      byteSize: 12, sha256: "d".repeat(64), expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    const run = (command: Parameters<typeof executeHostedRuntimeMediaCommand>[0]["command"], now?: Date) =>
+      executeHostedRuntimeMediaCommand({ prisma: first, userId, command, now });
+    expect(await run({ operation: "admit_read", ...runtime, descriptor }))
+      .toMatchObject({ applied: true, reason: "unregistered" });
+    await run({ operation: "register", ...runtime, descriptor });
+    expect(await run({ operation: "admit_read", ...runtime, descriptor }))
+      .toMatchObject({ applied: true, reason: "active" });
+    // Old Worker versions still authorize independently before their legacy read.
+    expect(await run({ operation: "read", descriptor })).toMatchObject({ applied: true, reason: "active" });
+    expect(await run({ operation: "admit_read", ...runtime, descriptor: { ...descriptor, byteSize: 13 } }))
+      .toMatchObject({ applied: false, reason: "descriptor_mismatch" });
+    const expiredAt = new Date(Date.parse(descriptor.expiresAt) + 1);
+    await expect(run({ operation: "admit_read", ...runtime, generation: String(BigInt(runtime.generation) + 1n), descriptor }, expiredAt))
+      .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+    expect(await observer.hostedRuntimeMedia.findUniqueOrThrow({ where: { userId_mediaId: { userId, mediaId: descriptor.mediaId } } }))
+      .toMatchObject({ retiredAt: null });
+    expect(await run({ operation: "admit_read", ...runtime, descriptor }, expiredAt))
+      .toMatchObject({ applied: false, reason: "expired" });
+    await retireHostedRuntime({ prisma: first, identity: runtime });
+    await expect(run({ operation: "admit_read", ...runtime, descriptor }))
+      .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+  });
+
   it.each([14, 30, 90])("registers successful media with its %i-day retention instead of the orphan deadline", async days => {
     const userId = await member();
     const runtime = identity((await claim(userId)).owner);
@@ -1324,7 +1352,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await run({ operation: "acknowledge_purge", purge: lateUpload.purge })).toMatchObject({ applied: true });
   });
 
-  it("serializes expired-media retirement with a racing preservation registration", async () => {
+  it.each(["read", "admit_read"] as const)("serializes expired-media %s with a racing preservation registration", async operation => {
     const userId = await member();
     const runtime = identity((await claim(userId)).owner);
     const descriptor = { mediaId: "c".repeat(64), mediaKind: "video" as const, byteSize: 21, sha256: "d".repeat(64), expiresAt: "2026-01-01T00:00:00.000Z" };
@@ -1338,7 +1366,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       await release.promise;
     });
     await locked.promise;
-    const retirement = executeHostedRuntimeMediaCommand({ prisma: first, userId, command: { operation: "read", descriptor } });
+    const retirement = executeHostedRuntimeMediaCommand({ prisma: first, userId, command: { operation, ...runtime, descriptor } });
     const settling = Promise.allSettled([retirement, blocker]);
     let registration: ReturnType<typeof executeHostedRuntimeMediaCommand> | undefined;
     let registered: Promise<unknown> | undefined;

@@ -1,5 +1,6 @@
 import { createOutboundMultipartTestBucket } from "./multipart-bucket-fixtures.ts";
 import { mockPostgresOwnerCommand, createPostgresTestOwner } from "./postgres-owner-fixtures.ts";
+import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
 import * as runtimeResourceClient from "../src/runtime-resource-client.ts";
 import * as runtimeUserControl from "../src/runtime-user-control.ts";
 import * as runtimeProcessing from "../src/runtime-processing.ts";
@@ -4322,6 +4323,8 @@ describe("cloudflare worker routes", () => {
         descriptor: { byteSize: mediaBytes.byteLength, expiresAt, mediaId, mediaKind: "image", sha256: mediaSha256 } },
     }));
 
+    vi.mocked(runtimeResourceClient.commandHostedRuntimeMedia).mockClear();
+    vi.mocked(runtimeOwnerClient.commandHostedRuntimeOwner).mockClear();
     const readResponse = await callRunnerOutbound(
       new Request(`http://media.worker/media/${mediaId}`, {
         headers: {
@@ -4335,9 +4338,13 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(readResponse.status).toBe(200);
+    expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledOnce();
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
     expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(mediaBytes);
     expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "member_123", command: { operation: "read", descriptor: { byteSize: mediaBytes.byteLength, mediaId, mediaKind: "image", sha256: mediaSha256, expiresAt: null } },
+      userId: "member_123", command: { operation: "admit_read",
+        attemptId: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-attempt-id"], generation: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-lease-generation"],
+        descriptor: { byteSize: mediaBytes.byteLength, mediaId, mediaKind: "image", sha256: mediaSha256, expiresAt: null } },
     }));
     const mediaObjectKey = await hostedMediaObjectKeyForTest(env, "member_123", mediaId);
     expect(env.__bucketStore.keys()).toContain(mediaObjectKey);
@@ -4358,6 +4365,25 @@ describe("cloudflare worker routes", () => {
     }));
     expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledWith(expect.objectContaining({ command: { operation: "acknowledge_purge", purge: { objectKey: mediaObjectKey, mediaId, revision: "1" } } }));
     expect(env.__bucketStore.keys()).not.toContain(mediaObjectKey);
+  });
+
+  it("rejects stale media read admission before reading ciphertext", async () => {
+    mockCanonicalOutboundStorage();
+    installOidcJwksFetch();
+    const env = createWorkerEnv();
+    const get = vi.spyOn(env.BUNDLES, "get");
+    vi.mocked(runtimeResourceClient.commandHostedRuntimeMedia).mockRejectedValueOnce(
+      new runtimeResourceClient.HostedRuntimeResourceRejectedError("HOSTED_RUNTIME_OWNER_STALE"),
+    );
+    const response = await callRunnerOutbound(new Request(`http://media.worker/media/${"a".repeat(64)}`, {
+      headers: { ...ACTIVE_INVOCATION_LEASE_HEADERS,
+        "x-hosted-runtime-media-byte-size": "4", "x-hosted-runtime-media-kind": "image",
+        "x-hosted-runtime-media-sha256": "b".repeat(64) },
+    }), env);
+    expect(response.status).toBe(401);
+    expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledOnce();
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
   });
 
   it("keeps hosted media objects isolated per user", async () => {
