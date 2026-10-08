@@ -107,7 +107,7 @@ export async function runDeployWorkerVersionCli(
           try {
             const before = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
             if (before[0] !== expectedSourceVersionId) {
-              throw new Error("Worker inheritance source changed before upload; resolve the inactive version before retrying.");
+              throw new Error("Worker inheritance source changed before upload; resolve version drift before retrying.");
             }
             const output = await runWranglerLoggedCaptured([
               "versions", "upload", "--config", upload.configPath, "--name", input.workerName,
