@@ -36,6 +36,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Member-then-root lock order for Telegram direct ingress and Telegram Family
+invite acceptance is proven by the Telegram PostgreSQL rows in
+[`testing-ci-map.md`](references/testing-ci-map.md); evidence is tracked in
+[`Telegram member-first lock order`](exec-plans/completed/2026-10-08-telegram-member-first-lock-order.md).
+
 Removal of the unused runtime retry telemetry is recorded in
 [`dead retry analytics`](exec-plans/completed/2026-10-08-remove-dead-retry-analytics.md);
 retry diagnostics remain in `docs/hosted-runtime-log-database.md`.
