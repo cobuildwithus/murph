@@ -9,6 +9,6 @@
     "summary": "When you connect more than one wearable, Murph combines their readings faster for activity, sleep, recovery and body lookups.",
     "details": "Lookups use the same sources and readings as before, and Murph picks the same source for each day.",
     "relevanceTags": ["wearables"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [4084]
   }
 }

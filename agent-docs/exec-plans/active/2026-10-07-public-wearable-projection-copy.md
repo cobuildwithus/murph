@@ -2,7 +2,12 @@
 
 Status: active
 Created: 2026-10-07
-Updated: 2026-10-07
+Updated: 2026-10-08
+Pull request: #4084
+
+Remaining gates: exact-head CI and the mandatory final ReviewGPT review. An
+earlier ReviewGPT authoring attempt failed before submission (model selector
+option not found); the qualified fallback authored the tracked changes.
 
 ## Goal
 
@@ -71,27 +76,75 @@ Updated: 2026-10-07
    Oura 6200; Oura 8800 is absent. Exactly one native activity read, no dynamic
    tools, writes, outbox intents or global publication. Done; determined from
    the service output.
-5. Parent: exact-base measurement, getter/fallback reachability review,
-   real-Codex run, CI and final review. Pending.
+5. Parent: exact-base measurement, getter/fallback reachability review and
+   real-Codex run. Done. Exact-head CI and final review. Pending.
 
 ## Decisions
 
-- Changelog: updated with `2026-10-07 · multi-device-wearable-reads`, a sober
-  faster cross-provider wearable lookup note with the same sources and
-  readings. No numeric, production latency or broad privacy claim.
-  `sourcePullRequests` stays empty until the PR number is known.
+- Changelog: `2026-10-07 · multi-device-wearable-reads`, a sober faster
+  cross-provider wearable lookup note with the same sources and readings,
+  sourced from PR #4084. No numeric, production latency or broad privacy
+  claim.
+- Producer review: the parent inspected the composer and fallback. The
+  composer produces plain objects with no getters or proxies; fallback
+  semantics are as documented under Constraints.
+
+## Measurement
+
+Synthetic only; no precise production speedup is claimed.
+
+- Clean exact baseline `138cf8303d` against candidate source `e034d30dcf`.
+- Seven alternating baseline/head process pairs, each 2 warmups and 4 measured
+  reads through the actual public Patterns runtime, on a synthetic bundle of
+  365 days, 3 providers, 8760 observations and 1095 sleep records plus factors.
+- Warm per-process median across the 7 pairs: 510.277 ms to 456.604 ms (base
+  range 506.908–518.191 ms, head 451.228–462.991 ms). Paired delta median
+  -55.312 ms (range -65.265 to -46.775 ms).
+- Composition: 394.305 ms to 341.386 ms.
+- Three baseline/baseline control pairs: ratio median 1.0037 (range 0.9898 to
+  1.0266).
+- Full output hashes and size (31738 bytes, 18 factors, 4 outcomes) were
+  identical in every run.
+- Synthetic result: about 10.5% lower whole-read elapsed time and 13.4% lower
+  composition elapsed time. This does not explain the full production tail.
+
+## Residual investigation
+
+Issue #3997 stays open for the remaining latency tail.
+
+- Existing phase telemetry from PR #4017 is deployed (source `ec9ede5a5e`
+  includes it; protected release succeeded). No deployment was made by this
+  task and no new telemetry patch is needed while those phases gain traffic.
+- First new-phase arrival was 2026-10-06 08:30 UTC, so the full 72-hour window
+  closes 2026-10-09 08:30 UTC.
+- Early data: 28 new-phase calls show compose 31.789 s, hydrate 10.729 s and
+  report 4.879 s. Two single calls over 5 s total 13.734 s, including
+  freshness 3.763 s (one rebuild 3.626 s), metric 4.284 s and compose 2.861 s.
+  The multi-call profile's 24.490 s tail cannot be paired with aggregate phase
+  maxima.
+- Follow-up: a bounded metadata review after the 72-hour window for residual
+  startup, rebuild, hydration and contention. This optimization is not claimed
+  to explain the prior 49 s observation.
 
 ## Verification
 
 - `pnpm complexity:diff`: passed after extracting the record copy loop into
   `copyPublicPlainRecord()` (file max 18, debt 0); no suppression or ratchet
   change.
-- Run locally by the task agent:
-  - `pnpm exec vitest run --config vitest.config.ts --no-coverage test/wearable-summary-public-json.test.ts`
-    in `packages/query`: 5 passed.
-  - `pnpm typecheck` in `packages/query` and `packages/assistant-engine`: passed.
-  - `pnpm exec vitest run --config vitest.config.ts test/assistant-codex-real-e2e.test.ts -t 'accepts only the single native activity read/help command' --no-coverage`
-    in `packages/assistant-engine`: 1 passed.
-- Pending parent: the native JSON/TOON contract case (needs built CLI dist),
-  the live `real Codex focused wearable activity projection e2e` journeys,
-  exact-base bench comparison, exact-head CI and final review.
+- Implementer: full query suite 967 passed, 1 skipped.
+- Parent, independently:
+  - Focused query tests: 99 passed, 1 skipped. Public copy tests: 5 passed.
+  - Native production JSON/TOON contract cases: 2 passed.
+  - Query, bench and assistant-engine typechecks: passed.
+  - Actual public CLI dependency build: passed.
+  - Complexity: file max 18, debt 0, passed.
+  - Changelog tests (10) and docs drift: passed.
+- Live journeys, each passed once on `gpt-6.1-sol` with local subscription
+  auth, synthetic fixture only:
+  - `answers composed multi-provider step days from one native read without other lookups or effects`
+  - `answers one Oura step day from one native read without other lookups or effects`
+
+  Actual replies were reviewed Ready, with exact selected source, day and step
+  counts, one native read each and no other lookups, writes, outbox intents or
+  dynamic tools.
+- Pending: exact-head CI and the mandatory final ReviewGPT review.
