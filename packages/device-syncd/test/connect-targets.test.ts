@@ -123,6 +123,8 @@ test("disabled offers remain configured for status and ingestion while fresh sta
   assert.ok(configs.strava);
   assert.equal(isDeviceConnectSourceAvailableForConnection("strava"), false);
   assert.equal(isDeviceConnectSourceAvailableForConnection("dexcom"), false);
+  assert.equal(isDeviceConnectSourceAvailableForConnection("google-fit"), false);
+  assert.equal(isDeviceConnectSourceAvailableForConnection("fitbit"), true);
   assert.equal(
     isDeviceConnectSourceAvailableForConnection("dexcom-g6-and-older"),
     true,

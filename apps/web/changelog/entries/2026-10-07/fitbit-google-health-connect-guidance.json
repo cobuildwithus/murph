@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-10-07",
+  "order": 200,
+  "item": {
+    "id": "fitbit-google-health-connect-guidance",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer help when a Fitbit connection doesn't finish",
+    "summary": "If Google Health stops a Fitbit connection, Murph now explains the setup step that usually fixes it.",
+    "details": "Fitbit connects through Google Health, so your Google Account needs a Google Health profile before Murph can link it. Google Fit is no longer offered for new connections because Google is retiring it.",
+    "relevanceTags": [
+      "wearables",
+      "fitbit"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Open Connect",
+      "href": "/connect"
+    }
+  }
+}
