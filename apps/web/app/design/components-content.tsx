@@ -121,7 +121,10 @@ import {
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
-import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
+import {
+  FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL,
+  type DeviceSyncCompletionDialogModel,
+} from "@/src/lib/device-sync/connect-completion-types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import {
@@ -342,6 +345,16 @@ const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
   retryHref: null,
   setupGuide: WHOOP_COMPLETION_SETUP_GUIDE,
   title: "WHOOP is connected",
+  unverified: false,
+};
+
+const FITBIT_LINK_FAILED_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
+  contactAction: null,
+  detail: FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL,
+  failed: true,
+  kind: "device-sync",
+  retryHref: "/connect",
+  title: "Fitbit connection did not finish",
   unverified: false,
 };
 
@@ -654,6 +667,7 @@ export function ComponentsContent() {
   const [phoneTransferSupportDialogOpen, setPhoneTransferSupportDialogOpen] =
     useState(false);
   const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
+  const [fitbitLinkFailedPreviewKey, setFitbitLinkFailedPreviewKey] = useState(0);
   const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
   const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
     useState(false);
@@ -1686,6 +1700,31 @@ export function ComponentsContent() {
               open={whoopCapacityNoContactPreviewOpen}
               onOpenChange={setWhoopCapacityNoContactPreviewOpen}
             />
+          </Section>
+        </div>
+
+        <Separator />
+
+        <div id="fitbit-link-failed-dialog" className="scroll-mt-24">
+          <Section title="Fitbit Link Failure Dialog">
+            <p className="max-w-2xl text-sm text-muted-foreground">
+              Production failure state when Google Health stops a Fitbit link,
+              usually a missing Google Health profile or a declined permission.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setFitbitLinkFailedPreviewKey((key) => key + 1)}
+              >
+                Preview Fitbit link failure
+              </Button>
+            </div>
+            {fitbitLinkFailedPreviewKey > 0 ? (
+              <DeviceSyncCompletionDialog
+                key={fitbitLinkFailedPreviewKey}
+                model={FITBIT_LINK_FAILED_DIALOG_MODEL}
+              />
+            ) : null}
           </Section>
         </div>
 

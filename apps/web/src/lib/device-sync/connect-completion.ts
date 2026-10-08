@@ -10,9 +10,10 @@ import {
   resolveHostedDeviceSyncProviderLabel,
   type HostedDeviceSyncCallbackStatus,
 } from "@/src/lib/device-sync/messaging-return-destination";
-import type {
-  DeviceSyncCompletionContactAction,
-  DeviceSyncCompletionDialogModel,
+import {
+  FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL,
+  type DeviceSyncCompletionContactAction,
+  type DeviceSyncCompletionDialogModel,
 } from "@/src/lib/device-sync/connect-completion-types";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import { resolveWhoopSyncVoiceMemoSrc } from "@/src/lib/device-sync/device-sync-voice-memos";
@@ -373,7 +374,7 @@ function resolveCompletionDetail(input: {
   needsWhoopAppleHealthRelay: boolean;
 }): string {
   if (input.fitbitGoogleHealthLinkFailed) {
-    return "Fitbit now connects through Google Health. Open the Google Health app, sign in with your Google Account, and finish setup. Then try again and allow every permission.";
+    return FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL;
   }
 
   if (input.failed) {
