@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-08",
+  "order": 100,
+  "item": {
+    "id": "back-to-back-texts-picked-up",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Quicker pickup for back-to-back texts",
+    "summary": "When you text Murph while it is still working on your last message, the new one is picked up right away instead of waiting several seconds to be resent.",
+    "details": "This applies to private chats. Account and conversation checks still run before a message is accepted.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4106
+    ]
+  }
+}

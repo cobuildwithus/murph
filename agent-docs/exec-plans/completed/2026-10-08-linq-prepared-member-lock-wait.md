@@ -1,6 +1,6 @@
 # Lock the member before the root in prepared direct Linq admission
 
-Status: active
+Status: completed
 Created: 2026-10-08
 Updated: 2026-10-08
 
@@ -85,3 +85,13 @@ Updated: 2026-10-08
   the foreign-key case passes.
 - Linq dispatch and usage-reset suites: 224 pass. Web typecheck, focused lint,
   and `pnpm complexity:diff` (no planner debt change) pass.
+- Lock-order audit of every domain-root caller: activation, sign-in, passkey,
+  device-sync, operator-task, voice, and runtime-migration owners lock the
+  member first. Telegram Family invite acceptance is the one existing
+  root-then-member owner; it already conflicts with activation and sign-in,
+  and now also with this admission for the same member at the same moment.
+  Postgres aborts one side and both webhooks are redelivered. Aligning that
+  owner is a separate follow-up.
+- Changelog item `back-to-back-texts-picked-up` passes generation and the
+  archive render test.
+Completed: 2026-10-08
