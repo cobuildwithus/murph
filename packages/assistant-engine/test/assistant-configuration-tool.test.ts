@@ -28,8 +28,12 @@ describe("assistant configuration tool", () => {
     );
   });
 
-  it("describes the OpenAI models available on paid Edge or Max", () => {
-    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Sol and Astra require an active paid Edge or Max plan");
+  it("describes the default and the OpenAI models available on paid Edge or Max", () => {
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("GPT-6.1 Sol is the default");
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Astra and GPT-5.6 Sol require an active paid Edge or Max plan");
+    for (const tool of [MURPH_ASSISTANT_CONFIGURATION_TOOL, MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL]) {
+      expect(tool.description).not.toContain("Terra");
+    }
     expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("OpenAI model");
     expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).not.toContain("Astra requires an active paid Max");
   });

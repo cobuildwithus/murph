@@ -658,7 +658,7 @@ export function ComponentsContent() {
     useState<SegmentedControlDemoValue>("phone");
   const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
     useState<SegmentedControlDemoValue>("email");
-  const [choiceCardValue, setChoiceCardValue] = useState("terra");
+  const [choiceCardValue, setChoiceCardValue] = useState("sol");
   const [addedContactAvatar, setAddedContactAvatar] =
     useState<MurphContactAvatarOption | null>(null);
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
@@ -1356,24 +1356,24 @@ export function ComponentsContent() {
               value="luna"
             />
             <ChoiceCard
-              artwork={<AssistantModelArtwork variant="terra" />}
-              badge={<Badge variant="outline">Recommended</Badge>}
-              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.terra}
-              description="Advanced health intelligence"
-              id="design-choice-terra"
-              meta="Balanced usage"
-              title="Terra"
-              value="terra"
-            />
-            <ChoiceCard
               artwork={<AssistantModelArtwork variant="sol" />}
-              badge={<Badge variant="outline">Edge</Badge>}
+              badge={<Badge variant="outline">Recommended</Badge>}
               className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.sol}
-              description="Highest health intelligence"
+              description="Deep health intelligence"
               id="design-choice-sol"
-              meta="High usage · Edge plan"
+              meta="Balanced usage"
               title="Sol"
               value="sol"
+            />
+            <ChoiceCard
+              artwork={<AssistantModelArtwork variant="astra" />}
+              badge={<Badge variant="outline">Edge</Badge>}
+              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.astra}
+              description="Frontier health intelligence"
+              id="design-choice-astra"
+              meta="Highest usage · Edge plan"
+              title="Astra"
+              value="astra"
             />
           </RadioGroup>
         </Section>
