@@ -22,3 +22,9 @@ Configure a synthetic unsafe binding with name OPTIONAL_SECRET, type inherit, an
 ## Context
 
 This is a repository verification gap at the Worker upload boundary. Synthetic fixtures and metadata-only guards can cover source drift without reading secret values or attempting an external mutation.
+
+Provider-shaped recovery fixtures must also distinguish an unknown inactive
+latest version from an explicitly selected trusted upload. Use synthetic UUIDs
+and tags to prove paired inputs, worker-only/synchronized-payload requirements,
+complete secret name/type equality and fresh-upload history. Keep the live
+version authoritative; metadata equality is not proof of opaque value equality.

@@ -40,6 +40,10 @@ Native Worker secret retirement is owned by `apps/cloudflare/DEPLOY.md`;
 implementation and focused proof are tracked in
 [`native secret retirement`](exec-plans/completed/2026-10-08-native-worker-secret-retirement.md).
 
+Explicit recovery from a trusted inactive Worker upload is owned by the same
+deployment contract; focused proof is tracked in
+[`inactive upload recovery`](exec-plans/completed/2026-10-08-known-inactive-worker-recovery.md).
+
 Worker secret inheritance source guards are owned by `apps/cloudflare/DEPLOY.md`;
 implementation and focused proof are tracked in
 [`latest secret inheritance`](exec-plans/completed/2026-10-07-latest-secret-inheritance.md).

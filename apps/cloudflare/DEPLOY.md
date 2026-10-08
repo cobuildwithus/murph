@@ -1678,6 +1678,31 @@ Local serialization and mocked API tests do not replace protected external
 acceptance. Run cleanup through this deployment owner without separate local
 secret deletion or promotion.
 
+When an operator has identified a trusted failed upload that cannot be removed,
+the protected deployment may explicitly use it as the secret source for a fresh
+worker-only upload. Set both `HOSTED_EXECUTION_RECOVERY_VERSION_ID` (the complete
+UUID) and `HOSTED_EXECUTION_RECOVERY_VERSION_TAG` (its exact tag), together with
+`HOSTED_EXECUTION_CONTAINER_ROLLOUT=worker-only` and synchronized secret inclusion.
+Both recovery inputs empty means ordinary deployment; partial, padded or malformed
+values fail closed. Forward these inputs only to the protected apply step.
+
+Recovery requires one live version serving 100%, a distinct named inactive version
+with the exact tag and complete live secret name/type inventory, and the raw
+latest pair inactive/live. The pair is checked before image/lifecycle preparation
+and again immediately before upload. The original live metadata still owns all
+runner preparation and final expected-secret calculations. Only the fresh upload's
+inheritance source changes; its history pair must be fresh/inactive, and all native
+PATCH, inventory, live identity, smoke and activation gates remain required.
+Only the newly verified version can appear in the deployment receipt or activation.
+
+The operator must establish that the named upload is their trusted failed attempt.
+Matching names/types cannot prove opaque secret values are equal, and no secret
+values are fetched for this check. The current synchronized payload applies its
+rotations; optional inherited secrets remain subject to that explicit trust.
+This is not automatic discovery, retry or activation of the old candidate.
+Further drift or another failed upload requires a new deliberate selection;
+protected serialization remains necessary, with no atomic CAS guarantee.
+
 ## Required GitHub Environment Secrets
 
 Set these in the selected GitHub environment as secrets:
