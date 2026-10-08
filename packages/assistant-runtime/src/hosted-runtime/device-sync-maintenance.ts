@@ -60,6 +60,10 @@ import {
 import {
   HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
 } from "../hosted-device-sync-limits.ts";
+import {
+  resolveHostedDeviceSyncRetainedJobDedupeKey,
+  resolveHostedDeviceSyncWakeJobDedupeKey,
+} from "../hosted-device-sync-job-identity.ts";
 import type {
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
@@ -109,6 +113,9 @@ const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
 const HOSTED_DEVICE_SYNC_QUEUE_READ_LIMIT = HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT + 1;
 const HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT = 16;
+const HOSTED_DEVICE_SYNC_JOB_LINEAGE_LIMIT = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
+// The shared runtime-log parser bounds each redacted string at 2,048 characters.
+const HOSTED_DEVICE_SYNC_JOB_LINEAGE_CHUNK_LENGTH = 2_048;
 type HostedDeviceSyncPassStage =
   | "completed"
   | "control_plane_reconcile"
@@ -191,11 +198,13 @@ export async function runHostedDeviceSyncPass(
   timeoutMs: number | null,
   options: {
     onJobTimingDiagnostics?: (
-      diagnostics: readonly DeviceSyncJobTimingDiagnostic[]
+      diagnostics: readonly DeviceSyncJobTimingDiagnostic[],
+      hostedConnectionIdsByLocalAccountId: ReadonlyMap<string, string>,
     ) => void;
     onProcessedJobs?: ((processedJobs: number) => void) | null;
     onQueueSnapshots?: ((snapshots: HostedDeviceSyncPassQueueSnapshots) => void) | null;
     platformEnv?: Readonly<Record<string, string>>;
+    runtimeLogContext?: HostedRuntimeLogContext | null;
     runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
     onStage?: ((stage: HostedDeviceSyncPassStage) => void) | null;
     retainFollowUpWakeUntilCheckpoint?: boolean;
@@ -404,7 +413,10 @@ export async function runHostedDeviceSyncPass(
         shouldYield,
       });
     } finally {
-      options.onJobTimingDiagnostics?.(service.listJobTimingDiagnostics?.() ?? []);
+      options.onJobTimingDiagnostics?.(
+        service.listJobTimingDiagnostics?.() ?? [],
+        new Map(syncState.localToHostedAccountIds),
+      );
       const queueSnapshotAfter = options.onQueueSnapshots
         ? readHostedDeviceSyncQueueSnapshot({
             accountId: wakeLocalAccountId,
@@ -429,6 +441,7 @@ export async function runHostedDeviceSyncPass(
     await writeHostedDeviceSyncJobFailureRuntimeLogs({
       platform: options.runtimeLogPlatform ?? null,
       processedJobs,
+      runtimeLogContext: options.runtimeLogContext,
       service,
       shouldYield,
       state: syncState,
@@ -1358,6 +1371,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
   let passStage: HostedDeviceSyncPassStage = "starting";
   let processedJobs = 0;
   let jobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[] = [];
+  let hostedConnectionIds: ReadonlyMap<string, string> = new Map();
   let queueSnapshots: HostedDeviceSyncPassQueueSnapshots | null = null;
   let cooperativeYieldObserved = false;
   const shouldYieldDeviceSync = input.shouldYieldDeviceSync
@@ -1381,6 +1395,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
       outcome: null,
       passStage,
       processedJobs: 0,
+      hostedConnectionIds,
       jobTimingDiagnostics,
       queueSnapshots,
       result: null,
@@ -1402,8 +1417,10 @@ export async function runHostedDeviceSyncWakeLane(input: {
           },
           onJobTimingDiagnostics: (
             observedJobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[],
+            observedHostedConnectionIds: ReadonlyMap<string, string>,
           ) => {
             jobTimingDiagnostics = observedJobTimingDiagnostics;
+            hostedConnectionIds = observedHostedConnectionIds;
           },
           ...(input.runtimeLogPlatform?.logPort
             ? {
@@ -1418,6 +1435,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
           platformEnv: input.platformEnv ?? {},
           retainFollowUpWakeUntilCheckpoint:
             input.retainFollowUpWakeUntilCheckpoint ?? false,
+          runtimeLogContext: input.runtimeLogContext ?? null,
           runtimeLogPlatform: input.runtimeLogPlatform ?? null,
           shouldYield: shouldYieldDeviceSync,
           signal: cancellation.signal,
@@ -1432,6 +1450,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
         outcome: "failed",
         passStage,
         processedJobs,
+        hostedConnectionIds,
         jobTimingDiagnostics,
         queueSnapshots,
         result: null,
@@ -1486,6 +1505,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
       outcome,
       passStage,
       processedJobs: deviceSyncResult.processedJobs,
+      hostedConnectionIds,
       jobTimingDiagnostics,
       queueSnapshots,
       result: metrics,
@@ -1543,6 +1563,7 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
   outcome: HostedDeviceSyncPassOutcome | null;
   passStage: HostedDeviceSyncPassStage;
   processedJobs: number;
+  hostedConnectionIds: ReadonlyMap<string, string>;
   jobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[];
   queueSnapshots: HostedDeviceSyncPassQueueSnapshots | null;
   result: HostedMaintenanceMetrics | null;
@@ -1630,6 +1651,13 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
               deviceSyncJobTimingTruncated: jobTimingSummary.truncated,
               workerJobLimitReached:
                 input.processedJobs >= HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+              ...buildHostedDeviceSyncPassLineageDiagnostics({
+                hostedConnectionIds: input.hostedConnectionIds,
+                jobTimingDiagnostics: input.jobTimingDiagnostics,
+                processedJobs: input.processedJobs,
+                result: input.result,
+                wake: input.input.wake,
+              }),
             }
           : {}),
         retainFollowUpWakeUntilCheckpoint:
@@ -1644,6 +1672,212 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
     },
     platform: input.input.runtimeLogPlatform,
   });
+}
+
+export type HostedDeviceSyncLineageJson = Record<string, boolean | number | string[] | null>;
+
+/**
+ * Opaque logical-job lineage for joining a failed job to later execution and
+ * handoff. Each digest binds the cold-handoff dedupe key to its member and
+ * hosted connection; raw keys, ids, windows, and payloads never leave memory.
+ * Executed rows carry `<digest>:<outcome><import><claim>` codes. Missing
+ * context is null or counted as unknown, never guessed.
+ */
+export function buildHostedDeviceSyncPassLineageDiagnostics(input: {
+  hostedConnectionIds: ReadonlyMap<string, string>;
+  jobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[];
+  processedJobs: number;
+  result: HostedMaintenanceMetrics | null;
+  wake: HostedRuntimeEvent;
+}): HostedDeviceSyncLineageJson {
+  try {
+    const record = input.result?.postCheckpointRecord;
+    const incoming = readHostedDeviceSyncHintLineage(input.wake);
+    // A thrown pass returns no handoff; its checkpoint keeps the incoming wake.
+    const outgoing = input.result
+      ? readHostedDeviceSyncHintLineage(
+          record?.kind === "device-sync.dirty-processed-batch" ? record.retainedWake ?? null : null,
+        )
+      : { packed: null, truncated: null };
+    const executed: string[] = [];
+    let mappedRows = 0;
+    let observedRows = 0;
+    let unknownRows = 0;
+    for (const diagnostic of input.jobTimingDiagnostics) {
+      const identities = diagnostic.jobIdentities ?? [];
+      const code = toHostedDeviceSyncJobLineageCode(diagnostic, identities.length);
+      observedRows += Math.max(diagnostic.jobCount, identities.length);
+      unknownRows += Math.max(0, diagnostic.jobCount - identities.length);
+      for (const identity of identities) {
+        const connectionId = input.hostedConnectionIds.get(identity.accountId);
+        if (!connectionId) {
+          unknownRows += 1;
+          continue;
+        }
+        mappedRows += 1;
+        // Rows past the bounded prefix are counted, never digested.
+        if (executed.length < HOSTED_DEVICE_SYNC_JOB_LINEAGE_LIMIT) {
+          executed.push(`${fingerprintHostedDeviceSyncJobLineage({
+            connectionId,
+            logicalKey: resolveHostedDeviceSyncRetainedJobDedupeKey({
+              dedupeKey: identity.dedupeKey,
+              id: identity.jobId,
+            }),
+            userId: input.wake.userId,
+          })}:${code}`);
+        }
+      }
+    }
+    // Rows evicted from the bounded service buffer have no observed identity.
+    unknownRows += Math.max(0, input.processedJobs - observedRows);
+    return {
+      deviceSyncJobLineage: packHostedDeviceSyncJobLineage(executed),
+      deviceSyncJobLineageCount: mappedRows,
+      deviceSyncJobLineageTruncated: mappedRows > executed.length,
+      deviceSyncJobLineageUnknownCount: unknownRows,
+      incomingRetainedJobLineage: incoming.packed,
+      incomingRetainedJobLineageTruncated: incoming.truncated,
+      outgoingRetainedJobLineage: outgoing.packed,
+      outgoingRetainedJobLineageTruncated: outgoing.truncated,
+    };
+  } catch {
+    // Lineage is observability only; it must never change the pass result.
+    return {
+      deviceSyncJobLineage: null,
+      incomingRetainedJobLineage: null,
+      outgoingRetainedJobLineage: null,
+    };
+  }
+}
+
+function readHostedDeviceSyncHintLineage(
+  event: HostedRuntimeEvent | null,
+): { packed: string[] | null; truncated: boolean | null } {
+  const wake = event?.kind === "device-sync.wake" ? event : null;
+  const jobs = wake?.hint?.jobs ?? [];
+  if (!wake || jobs.length === 0) {
+    return { packed: [], truncated: false };
+  }
+  const connectionId = wake.connectionId;
+  if (!connectionId) {
+    return { packed: null, truncated: null };
+  }
+  // Retained queues are intentionally unbounded; digest only the first hints.
+  const bounded = jobs.slice(0, HOSTED_DEVICE_SYNC_JOB_LINEAGE_LIMIT);
+  return {
+    packed: packHostedDeviceSyncJobLineage([...new Set(bounded.map((hint, index) =>
+      fingerprintHostedDeviceSyncJobLineage({
+        connectionId,
+        logicalKey: resolveHostedDeviceSyncWakeJobDedupeKey({ hint, index, wake }),
+        userId: wake.userId,
+      })
+    ))].sort()),
+    truncated: jobs.length > bounded.length,
+  };
+}
+
+export function buildHostedDeviceSyncFailureJobLineage(input: {
+  failureDiagnostic: DeviceSyncJobFailureDiagnostic;
+  hostedConnectionIds: ReadonlyMap<string, string>;
+  userId: string;
+}): HostedDeviceSyncLineageJson {
+  const unknownLineage = { failureJobLineage: null, failureJobLineageTruncated: null };
+  try {
+    const identities = input.failureDiagnostic.jobIdentities ?? [];
+    if (
+      identities.length === 0
+      || identities.some((identity) => !input.hostedConnectionIds.has(identity.accountId))
+    ) {
+      return unknownLineage;
+    }
+    // Digest only the bounded prefix of a large failed batch.
+    const fingerprints: string[] = [];
+    for (const identity of identities.slice(0, HOSTED_DEVICE_SYNC_JOB_LINEAGE_LIMIT)) {
+      const connectionId = input.hostedConnectionIds.get(identity.accountId);
+      if (!connectionId) {
+        return unknownLineage;
+      }
+      fingerprints.push(fingerprintHostedDeviceSyncJobLineage({
+        connectionId,
+        logicalKey: resolveHostedDeviceSyncRetainedJobDedupeKey({
+          dedupeKey: identity.dedupeKey,
+          id: identity.jobId,
+        }),
+        userId: input.userId,
+      }));
+    }
+    return {
+      failureJobLineage: packHostedDeviceSyncJobLineage(fingerprints),
+      failureJobLineageTruncated: identities.length > fingerprints.length,
+    };
+  } catch {
+    return unknownLineage;
+  }
+}
+
+// Sixteen hex characters keep a full pass within the existing string bounds.
+function fingerprintHostedDeviceSyncJobLineage(input: {
+  connectionId: string;
+  logicalKey: string;
+  userId: string;
+}): string {
+  return createHash("sha256")
+    .update(JSON.stringify([
+      "device-sync-job-lineage-v1",
+      input.userId,
+      input.connectionId,
+      input.logicalKey,
+    ]))
+    .digest("hex")
+    .slice(0, 16);
+}
+
+// Callers bound items to the lineage limit before digesting them.
+function packHostedDeviceSyncJobLineage(items: readonly string[]): string[] {
+  const packed: string[] = [];
+  for (const item of items) {
+    const last = packed.at(-1);
+    if (
+      last !== undefined
+      && last.length + 1 + item.length <= HOSTED_DEVICE_SYNC_JOB_LINEAGE_CHUNK_LENGTH
+    ) {
+      packed[packed.length - 1] = `${last},${item}`;
+    } else {
+      packed.push(item);
+    }
+  }
+  return packed;
+}
+
+// Outcome: c completed, h completed with scheduled follow-up rows, p failed
+// after committing partial progress, f failed, d deferred, y yielded,
+// x cancelled or superseded. Import (claim-scoped): e failed, u unknown,
+// a applied, n no-op only, 0 none. Claim: s single row, b batch.
+function toHostedDeviceSyncJobLineageCode(
+  diagnostic: DeviceSyncJobTimingDiagnostic,
+  identityCount: number,
+): string {
+  const outcome = diagnostic.outcome === "completed"
+    ? (diagnostic.scheduledJobCount ?? 0) > 0 ? "h" : "c"
+    : diagnostic.outcome === "failed"
+    ? diagnostic.durableProgressCommitted ? "p" : "f"
+    : diagnostic.outcome === "deferred"
+    ? "d"
+    : diagnostic.outcome === "yielded"
+    ? "y"
+    : "x";
+  const imports = diagnostic.snapshotImportOutcomes;
+  const importCode = imports.failed > 0
+    ? "e"
+    : imports.unknown > 0
+    ? "u"
+    : imports.applied > 0
+    ? "a"
+    : imports.noop > 0
+    ? "n"
+    : "0";
+  const claim = Math.max(diagnostic.jobCount, identityCount) > 1 ? "b" : "s";
+  return `${outcome}${importCode}${claim}`;
 }
 
 function summarizeJunctionMeasurementResourceOutcomes(
@@ -1924,6 +2158,7 @@ function reportHostedDeviceSyncConfigMissing(wake: HostedRuntimeEvent): void {
 async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
   platform: Pick<HostedRuntimePlatform, "logPort"> | null;
   processedJobs: number;
+  runtimeLogContext: HostedRuntimeLogContext | null | undefined;
   service: HostedDeviceSyncRuntimeService;
   shouldYield: (() => boolean) | null;
   state: HostedDeviceSyncRuntimeSyncState;
@@ -1959,20 +2194,30 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
       : null;
 
     return {
+      // The same invocation context as the pass markers joins this failure to
+      // its pass and to that attempt's checkpoint outcome.
+      ...buildHostedRuntimeLogContextFields(input.runtimeLogContext),
       ...(failureDiagnostic.at ? { at: failureDiagnostic.at } : {}),
       component: "device-sync" as const,
       errorCode: toHostedRuntimeLogCode(failureDiagnostic.code),
       eventCode: "device-sync.job_failed" as const,
       level: "warn" as const,
       phase: "invoke" as const,
-      redactedJson: buildHostedDeviceSyncFailureLogRedactedJson({
-        account,
-        baseline,
-        failureDiagnostic,
-        hostedConnectionKnown: Boolean(hostedConnectionId),
-        processedJobs: input.processedJobs,
-        wake: input.wake,
-      }),
+      redactedJson: {
+        ...buildHostedDeviceSyncFailureLogRedactedJson({
+          account,
+          baseline,
+          failureDiagnostic,
+          hostedConnectionKnown: Boolean(hostedConnectionId),
+          processedJobs: input.processedJobs,
+          wake: input.wake,
+        }),
+        ...buildHostedDeviceSyncFailureJobLineage({
+          failureDiagnostic,
+          hostedConnectionIds: input.state.localToHostedAccountIds,
+          userId: input.wake.userId,
+        }),
+      },
     };
   });
   await writeHostedRuntimeLogEntriesBestEffort({

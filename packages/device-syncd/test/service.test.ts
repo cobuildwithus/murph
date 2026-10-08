@@ -710,7 +710,7 @@ test("device sync service records privacy-safe job phase timings", async () => {
       },
       connectedAt: now.toISOString(),
     });
-    store.enqueueJob({
+    const job = store.enqueueJob({
       accountId: account.id,
       provider: "demo",
       kind: "resource",
@@ -734,6 +734,7 @@ test("device sync service records privacy-safe job phase timings", async () => {
       scheduledJobCount: 1,
       nextScheduledJobDelayMs: 86_400_000,
       jobCount: 1,
+      jobIdentities: [{ accountId: account.id, dedupeKey: null, jobId: job.id }],
       jobKind: "resource",
       outcome: "completed",
       provider: "demo",
@@ -6965,6 +6966,82 @@ test("device sync service lets providers execute compatible due jobs as one boun
   assert.equal(store.getAccountById(account.id)?.nextReconcileAt, "2026-03-18T12:00:00.000Z");
 
   close();
+});
+
+test("device sync job diagnostics carry in-memory identity for every row of a failed batch", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-batch-identity");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: { warn() {} },
+    },
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          return job.kind === "resource" && job.payload.group === "activity"
+            ? { key: "resource:activity", estimatedBytes: 1 }
+            : null;
+        },
+        maxJobBatchSize: 3,
+        async executeJobBatch() {
+          throw new Error("Synthetic batch failure");
+        },
+      }),
+    ],
+  });
+  try {
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-batch-identity",
+      scopes: ["read:data"],
+      tokens: {
+        accessToken: "synthetic-access",
+        accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-batch-identity", "synthetic-access"),
+      },
+      connectedAt: "2026-03-17T10:00:00.000Z",
+    });
+    const keyed = store.enqueueJob({
+      accountId: account.id,
+      provider: "demo",
+      kind: "resource",
+      dedupeKey: "synthetic-window-a",
+      payload: { group: "activity" },
+      availableAt: "2026-03-17T10:00:00.000Z",
+    });
+    const unkeyed = store.enqueueJob({
+      accountId: account.id,
+      provider: "demo",
+      kind: "resource",
+      payload: { group: "activity" },
+      availableAt: "2026-03-17T10:00:01.000Z",
+    });
+
+    assert.equal(await service.drainWorker(5), 2);
+
+    const expected = [
+      { accountId: account.id, dedupeKey: "synthetic-window-a", jobId: keyed.id },
+      { accountId: account.id, dedupeKey: null, jobId: unkeyed.id },
+    ];
+    const [failure] = service.listJobFailureDiagnostics();
+    assert.deepEqual(failure?.jobIdentities, expected);
+    const [timing] = service.listJobTimingDiagnostics();
+    assert.equal(timing?.outcome, "failed");
+    assert.equal(timing?.jobCount, 2);
+    assert.deepEqual(timing?.jobIdentities, expected);
+    // Returned identities cannot mutate the service's retained diagnostics.
+    const [failureIdentity] = failure?.jobIdentities ?? [];
+    const [timingIdentity] = timing?.jobIdentities ?? [];
+    assert.ok(failureIdentity && timingIdentity);
+    failureIdentity.dedupeKey = "mutated";
+    timingIdentity.dedupeKey = "mutated";
+    assert.equal(service.listJobFailureDiagnostics()[0]?.jobIdentities?.[0]?.dedupeKey, "synthetic-window-a");
+    assert.equal(service.listJobTimingDiagnostics()[0]?.jobIdentities?.[0]?.dedupeKey, "synthetic-window-a");
+  } finally {
+    close();
+  }
 });
 
 test("device sync service counts provider batch rows against drainWorker limits", async () => {

@@ -86,6 +86,10 @@ import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
   HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
 } from "./hosted-device-sync-limits.ts";
+import {
+  resolveHostedDeviceSyncRetainedJobDedupeKey,
+  resolveHostedDeviceSyncWakeJobDedupeKey,
+} from "./hosted-device-sync-job-identity.ts";
 import { hostedSourceStateUnavailable } from "./hosted-device-sync-source-state.ts";
 import {
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
@@ -1108,8 +1112,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
   let retryAt: string | null = null;
   const retryHints: HostedExecutionDeviceSyncJobHint[] = [];
   for (const job of store.iteratePendingJobsForAccount(localAccountId)) {
-    const dedupeKey = job.dedupeKey
-      ?? `hosted-device-sync-job:${createHash("sha256").update(job.id).digest("hex")}`;
+    const dedupeKey = resolveHostedDeviceSyncRetainedJobDedupeKey(job);
     const payload = shapeHostedDeviceSyncJobHintPayload(account.provider, job);
     const jobRetryAt = job.status === "running"
       ? job.leaseExpiresAt ?? job.availableAt
@@ -1255,17 +1258,6 @@ function resolveHostedHistoryWakeSchedule(
   // Keep the existing metadata envelope. An unrepresentable proof falls open.
   if (!readJunctionReconcileProof(encoded)) return fallback;
   return { hint: { junctionReconcileProof: encoded }, retryAt: new Date(historyDeferredUntil).toISOString() };
-}
-
-function resolveHostedDeviceSyncWakeJobDedupeKey(input: {
-  hint: HostedExecutionDeviceSyncJobHint;
-  index: number;
-  wake: HostedExecutionDeviceSyncWake;
-}): string {
-  return input.hint.dedupeKey
-    ?? `hosted-device-sync-wake:${createHash("sha256")
-      .update(JSON.stringify([input.wake.eventId, input.index]))
-      .digest("hex")}`;
 }
 
 async function applyHostedPendingDirtyDeviceSyncState(input: {
