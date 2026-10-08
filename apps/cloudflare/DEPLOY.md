@@ -1651,6 +1651,10 @@ Cloud deployment. Its staged upload removes exactly those two secret bindings
 and inherits every other existing secret by name from an explicit baseline
 Worker version. It validates the staged secret inventory before activation and
 preserves the private workflow's rollout, smoke, and release-receipt checks.
+The temporary upload config declares each name once: synchronized keys use the
+secret payload, and retained keys use pinned inheritance. Required-secret
+declarations are removed only for inherited names, after proving every required
+key exists in the baseline or payload. The canonical generated config is unchanged.
 Run this cleanup through the protected deployment path, without a separate local
 secret deletion.
 

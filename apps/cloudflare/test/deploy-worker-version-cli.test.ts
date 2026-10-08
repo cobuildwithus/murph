@@ -237,7 +237,8 @@ describe("runDeployWorkerVersionCli", () => {
     expect(fileMocks.writeFile.mock.calls.filter(([filePath]) => String(filePath).includes(".retired-secrets-"))).toHaveLength(2);
     for (const [filePath, content] of fileMocks.writeFile.mock.calls) {
       if (!String(filePath).includes(".retired-secrets-")) continue;
-      expect(JSON.parse(String(content)).unsafe.bindings).toEqual(retained.map(({ name }) => ({ name, type: "inherit", version_id: "version-direct" })));
+      expect(JSON.parse(String(content)).unsafe.bindings).toEqual(retained.filter(({ name }) => !includeSecrets || name !== "OPENAI_API_KEY")
+        .map(({ name }) => ({ name, type: "inherit", version_id: "version-direct" })));
       expect(fileMocks.rm).toHaveBeenCalledWith(filePath, { force: true });
     }
     for (const [args] of wranglerMocks.runWranglerLoggedCaptured.mock.calls) {

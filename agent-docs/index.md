@@ -36,6 +36,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Required-secret declarations during protected credential retirement are owned by
+`apps/cloudflare/DEPLOY.md`; regression proof is tracked in
+[`inference secret upload`](exec-plans/completed/2026-10-07-fix-inference-secret-upload.md).
+
 Protected retirement of unused inference secrets is owned by
 `apps/cloudflare/DEPLOY.md`; focused proof is tracked in
 [`retired inference secrets`](exec-plans/completed/2026-10-07-retire-inference-secrets.md).
