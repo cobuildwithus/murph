@@ -1,6 +1,6 @@
 # Native phone and Telegram messaging setup
 
-Status: active
+Status: completed
 Created: 2026-10-06
 Updated: 2026-10-07
 
@@ -12,8 +12,7 @@ Murph is the source of truth; downstream changes belong to Android PR 52 and
 iOS PR 177. Android remains stacked on the unchanged PR 51.
 
 After required CI and ReviewGPT pass, merge order is backend, production Ready
-and unauthenticated endpoint smoke, Android 51 then 52, then iOS. Android 52 also
-waits for its registered native redirect host. App publication, native canary
+and unauthenticated endpoint smoke, Android 51 then 52, then iOS. Android 52 uses registered redirects selected by its installed signing certificate. App publication, native canary
 pins, secret changes and real-member mutations are excluded.
 
 ## Current protocol
@@ -60,8 +59,8 @@ The human approved using both official SDKs unmodified, with the native proof
 controls above instead of a nonce. iOS SDK revision is
 215851df7e3cd32787a0054e5d1a97d7aa62796e. Android uses official Maven
 org.telegram:login-sdk:1.0.0. Both registered iOS domains serve their app
-associations. Android's redirect host and GitHub Packages read credentials remain
-human setup. Native work, exact-head evidence and final review are ongoing.
+associations. Both Android certificate-specific hosts publish the expected app links.
+Local and hosted SDK dependency resolution and full Android verification pass.
 
 The human authorized manual ReviewGPT submission using normal packaged prompts
 and normal result validation while another engineer repairs the launcher. Do not
@@ -82,3 +81,20 @@ The first manual round-three attempt at 91c27002ab8ae2020c7d707622d9e0559a794cfe
 returned no findings after 6m27s, but named PR UNKNOWN. Its identity is invalid;
 no valid round or PASS is recorded. Preserve its local response as diagnostics
 and retry round three with the canonical target invocation after this fix.
+
+## Completion proof
+
+The final substantive round 3 passed at
+caa497ee8dc89d8fbc966aa57124901d7d35dcd5 with zero qualifying findings.
+Manual capture verified the sent normal archive and complete target prompt,
+GPT-6 Pro attribution, a 6m03s completed response, exact head and final marker.
+The earlier missing-attachment retry was invalid and did not advance the ledger.
+All backend hosted product checks passed. The parent confirmed scoped source,
+privacy, reused owners, product journeys and the projection regression.
+This plan closure is explanatory documentation only; no runtime behavior changes.
+
+Backend implementation is complete. Merge/deployment qualification remains a
+separate authorized operation, followed by native review and merge gates.
+Real SMS, native Telegram approval, bot delivery and physical devices remain
+unverified and are explicitly deferred to the separate device session.
+Completed: 2026-10-07
