@@ -9,6 +9,6 @@
     "summary": "Murph can retry a recent reply when the messaging provider confirms it never sent.",
     "details": "Recovery pauses between attempts and stops after three minutes. Uncertain sends stay closed to avoid duplicate replies, and a later reply does not count as delivery of the original.",
     "relevanceTags": ["messaging", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [4108]
   }
 }
