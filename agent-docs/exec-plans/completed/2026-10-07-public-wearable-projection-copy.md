@@ -1,11 +1,12 @@
 # Public wearable projection direct copy
 
-Status: active
+Status: completed
 Created: 2026-10-07
-Updated: 2026-10-08
+Updated: 2026-10-07
 Pull request: #4084
 
-Remaining gates: exact-head CI and the mandatory final ReviewGPT review. An
+Reviewed-head CI and the mandatory final ReviewGPT review passed. Merge is
+user-authorized, subject to fresh exact-head CI after this docs-only closeout. An
 earlier ReviewGPT authoring attempt failed before submission (model selector
 option not found); the qualified fallback authored the tracked changes.
 
@@ -77,7 +78,7 @@ option not found); the qualified fallback authored the tracked changes.
    tools, writes, outbox intents or global publication. Done; determined from
    the service output.
 5. Parent: exact-base measurement, getter/fallback reachability review and
-   real-Codex run. Done. Exact-head CI and final review. Pending.
+   real-Codex run. Done. Reviewed-head CI and final review. Passed.
 
 ## Decisions
 
@@ -147,4 +148,23 @@ Issue #3997 stays open for the remaining latency tail.
   Actual replies were reviewed Ready, with exact selected source, day and step
   counts, one native read each and no other lookups, writes, outbox intents or
   dynamic tools.
-- Pending: exact-head CI and the mandatory final ReviewGPT review.
+- Reviewed-head CI on `1d23715112f290bc5f84c302c6a90f92376a2c29`: all four
+  required contexts passed. CLI macOS/Linux and Release checks: run
+  `37708081598`; billing: run `37708081634`.
+- Final ReviewGPT 0.5.153 round 1: PASS on the same reviewed head; no accepted
+  findings. [Review](https://chatgpt.com/c/6ac6f1c2-80d8-83ea-a5c3-ea453b06b4d6).
+  User-authorized ephemeral registry invocation on Hercules, with existing
+  config/preflight preserved and repository dependency pin unchanged.
+  Selected GPT-6 Pro; sent request verified `gpt-6-pro`.
+  Request sent 2026-10-08 01:28:30 UTC; capture completed after
+  2026-10-08 01:35:39 UTC (>7 minutes; exceeds 180 seconds).
+  Exact-turn response signature confirmed; all nine changed files passed
+  full-snapshot hash/hunk verification. Reviewer reported 5,000 differential
+  comparisons and isolated projection/edge-case checks, not full workspace
+  or live reruns. Existing parent evidence remains authoritative.
+- Merge readiness: reviewed head is merge-tree clean against main
+  `236b2778161d37a715f84abf1098e28527cf3158`; user authorized merge after
+  review. Fresh exact-head CI is required after this docs-only closeout and
+  before merge. Those checks and merge are not complete. No manual deployment
+  was requested or performed.
+Completed: 2026-10-07

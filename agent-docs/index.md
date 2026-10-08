@@ -11,9 +11,9 @@ are tracked in [the consumer repair plan](exec-plans/completed/2026-10-05-frog-r
 Pinned native source review context and provenance proof are recorded in
 [the native review context plan](exec-plans/completed/2026-10-07-frog-native-review-context.md).
 
-Public wearable projection direct copy, parity/privacy proof, measured
-synthetic CPU reduction and pending completion gates are tracked in
-[the projection copy plan](exec-plans/active/2026-10-07-public-wearable-projection-copy.md);
+Completed projection optimization evidence for public wearable direct copy,
+including parity/privacy proof and measured synthetic CPU reduction, is tracked in
+[the projection copy plan](exec-plans/completed/2026-10-07-public-wearable-projection-copy.md);
 `../packages/query/README.md#ordinary-wearable-reads` owns the contract.
 
 Codex 0.160.0 reconciliation for the current PR is recorded in
