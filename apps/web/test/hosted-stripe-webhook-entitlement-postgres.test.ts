@@ -1489,7 +1489,6 @@ describe.skipIf(!runPostgresProof)(
           data: {
             billingRef: {
               create: {
-                billedSeatCount: 2,
                 currentBillingPhase: "paid",
                 currentBillingPlanCode: "launch_family_monthly",
                 currentPeriodEnd: periodEnd,
@@ -2569,7 +2568,6 @@ async function seedFamilySponsoredDirectCleanupFixture(
   });
   await prisma.$transaction((tx) =>
     writeHostedAccountGroupStripeBillingTx({
-      billedSeatCount: 2,
       billingStatus: HostedBillingStatus.active,
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_family_monthly",

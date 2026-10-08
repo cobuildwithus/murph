@@ -86,7 +86,7 @@ function phoneBoundPrisma() {
       ]),
     },
     hostedAccountGroupBillingRef: {
-      findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
+      findUnique: vi.fn(),
     },
   };
 }
