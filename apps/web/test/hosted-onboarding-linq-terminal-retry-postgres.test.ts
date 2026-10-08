@@ -1209,6 +1209,100 @@ describe.skipIf(!enabled)("durable bounded terminal recovery", () => {
     });
   });
 
+  it.each([0, 30_000])("recovers across a 45-second outage with %i ms terminal-failure latency", async (failureLatencyMs) => {
+    await withFixture(async (f) => {
+      const originalAcceptedAt = (await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).acceptedAt!.getTime();
+      const sends: number[] = [];
+      let activeId = f.messageId;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const failAt = async (time: number) => {
+          vi.setSystemTime(time);
+          const event = timingReceipt(f, { eventAt: new Date(time), messageId: activeId, status: "failed" });
+          await f.ingest(event);
+          provider.read.mockResolvedValue({ ...f.original, id: activeId, service: null, preferred_service: null });
+          await retryHostedLinqTerminalSendForEvent({ event, prisma: f.prisma });
+        };
+        provider.send.mockImplementation(async () => {
+          sends.push(Date.now() - originalAcceptedAt);
+          activeId = `synthetic-outage-${sends.length}-${f.messageId}`;
+          return { chatId: f.chatId, messageId: activeId };
+        });
+        await failAt(originalAcceptedAt + failureLatencyMs);
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const row = await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } });
+          expect(row.terminalRetryNextAt).not.toBeNull();
+          // Advance the clock to the real persisted due time, never modify it.
+          vi.setSystemTime(row.terminalRetryNextAt!.getTime() - 1);
+          await processHostedLinqTerminalRetry({ messageRowId: row.id, prisma: f.prisma });
+          expect(sends).toHaveLength(attempt);
+          vi.setSystemTime(row.terminalRetryNextAt!);
+          await processHostedLinqTerminalRetry({ messageRowId: row.id, prisma: f.prisma });
+          expect(sends).toHaveLength(attempt + 1);
+          if (sends.at(-1)! >= 45_000) break;
+          await failAt(Date.now() + failureLatencyMs);
+        }
+        const bounds = failureLatencyMs === 0
+          ? [[8_000, 10_000], [24_000, 30_000], [56_000, 70_000]]
+          : [[38_000, 40_000], [84_000, 90_000]];
+        expect(sends).toHaveLength(bounds.length);
+        sends.forEach((time, index) => {
+          expect(time).toBeGreaterThanOrEqual(bounds[index]![0]!);
+          expect(time).toBeLessThanOrEqual(bounds[index]![1]!);
+        });
+        expect(sends.at(-1)).toBeLessThan(180_000);
+        await f.ingest(timingReceipt(f, { eventAt: new Date(Date.now() + 100), messageId: activeId, status: "delivered" }));
+        expect((await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).status).toBe("delivered");
+        const keys = provider.send.mock.calls.map(([request]) => request.message.idempotency_key);
+        expect(new Set(keys).size).toBe(sends.length);
+        for (const [request] of provider.send.mock.calls) expect(request.message.parts).toEqual([
+          { type: "text", value: "Here is the requested document." },
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it("lets the fixed dispatch deadline win over five sends when each failure takes 30 seconds", async () => {
+    await withFixture(async (f) => {
+      const originalAcceptedAt = (await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).acceptedAt!.getTime();
+      let activeId = f.messageId;
+      let sends = 0;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        provider.send.mockImplementation(async () => {
+          sends += 1;
+          activeId = `synthetic-delayed-failure-${sends}-${f.messageId}`;
+          return { chatId: f.chatId, messageId: activeId };
+        });
+        vi.setSystemTime(originalAcceptedAt);
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          vi.setSystemTime(Date.now() + 30_000);
+          const event = timingReceipt(f, { eventAt: new Date(), messageId: activeId, status: "failed" });
+          await f.ingest(event);
+          provider.read.mockResolvedValue({ ...f.original, id: activeId });
+          await retryHostedLinqTerminalSendForEvent({ event, prisma: f.prisma });
+          const row = await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } });
+          expect(row.terminalRetryExpiresAt!.getTime()).toBe(originalAcceptedAt + 180_000);
+          if (attempt === 3) {
+            expect(row.terminalRetryNextAt).toBeNull();
+            expect(sends).toBe(3);
+            await processHostedLinqTerminalRetry({ messageRowId: row.id, prisma: f.prisma });
+            expect(sends).toBe(3);
+            break;
+          }
+          vi.setSystemTime(row.terminalRetryNextAt!);
+          await processHostedLinqTerminalRetry({ messageRowId: row.id, prisma: f.prisma });
+          expect(sends).toBe(attempt + 1);
+        }
+        expect((await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).status).toBe("failed");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it("does not transfer a pending recovery to another member after route reassignment", async () => {
     await withFixture(async (f) => {
       await f.receipt();

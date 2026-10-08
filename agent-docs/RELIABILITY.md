@@ -36,7 +36,11 @@ to apply after cutover.
   time, exact claimed message key, encrypted recovery context, and up to four
   blinded previous-message keys. Delays are 10/20/40/80 seconds with 80–100%
   jitter, measured after the failure is observed. A remaining-time check reserves
-  the bounded GET/send budget. Expiry may prevent the full attempt count.
+  the bounded GET/send budget. Expiry may prevent the full attempt count. This
+  is a new-dispatch deadline anchored to the original recorded acceptance, not
+  a guarantee of final delivery by that instant. A provider may still finish an
+  already-accepted attempt afterward. Provider terminal-failure latency consumes
+  the same window; five total sends is a maximum, never a target that extends it.
   A pointer-only Web Workflow wakes the row; it does not own send authority.
   Duplicate starts cannot move the due time or pass the parent-locked count/key
   claim twice. A durable step retry rechecks the permanent claim, so a crash or
@@ -63,7 +67,16 @@ to apply after cutover.
   chat suppresses stale recovery; this is not a provider-level FIFO guarantee
   against another send already in flight. Provider GET has a three-second limit;
   POST has a five-second limit and SDK retries disabled. Each claimed attempt
-  uses a deterministic new idempotency key. GET must match message, chat, sender,
+  uses a deterministic new idempotency key after definitive terminal failure.
+  Linq's send guide says a processed key returns the original response; its
+  [4006 documentation](https://docs.linqapp.com/channel/imessage/error/codes/4xxx/4006/)
+  explicitly says reusing the original key returns the stored failed message
+  without sending. A transport replay of one attempt and a replacement after
+  terminal failure are different operations. Do not change this rule based only
+  on an ambiguous instruction to retry idempotently. The provider's suggestion
+  to retry timeouts after a brief wait does not establish no-delivery certainty;
+  this owner still excludes `4006` and all ambiguous POST outcomes.
+  GET must match message, chat, sender,
   outbound direction and failed status without delivery/read evidence.
   Missing actual transport is valid for a definitive no-send. Preserve the
   retrieved original preference: explicit `iMessage` stays explicit; null or
