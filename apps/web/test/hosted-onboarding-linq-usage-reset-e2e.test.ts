@@ -723,7 +723,7 @@ function createUsageResetPrismaFixture(input: {
       const strings = taggedTemplate
         ? query as readonly string[]
         : (query as { strings?: readonly string[] }).strings ?? [];
-      return strings.join(" ").toLowerCase().includes("for no key update skip locked")
+      return /select "id"\s+from "hosted_member"[\s\S]*for no key update/i.test(strings.join(" "))
         ? [{ id: values[0] }]
         : [];
     }),
