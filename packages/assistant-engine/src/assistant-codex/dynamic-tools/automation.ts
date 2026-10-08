@@ -42,6 +42,7 @@ import {
 import {
   buildSafeToolCallValidationDigest,
   collectSafeJsonSchemaValidationPaths,
+  type SafeToolCallSemanticRejection,
   type SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
@@ -438,6 +439,39 @@ const automationArgumentsSchema = z.discriminatedUnion('action', [
   reconcileAutomationArgumentsSchema,
 ])
 
+function readAutomationActionSemanticRejection(
+  value: unknown,
+): SafeToolCallSemanticRejection | null {
+  try {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return null
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, 'action')
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')
+      || typeof descriptor.value !== 'string') {
+      return null
+    }
+    const action = descriptor.value
+    // The existing union owns acceptance, including reserved actions. A valid
+    // discriminant with malformed fields must not receive an action label.
+    if (automationArgumentsSchema.options.some((option) =>
+      option.shape.action.value === action,
+    )) {
+      return null
+    }
+    switch (action) {
+      case 'list': return 'automation_action_list'
+      case 'show': return 'automation_action_show'
+      case 'edit': return 'automation_action_edit'
+      case 'update': return 'automation_action_update'
+      default: return 'automation_action_unrecognized_string'
+    }
+  } catch {
+    // Optional telemetry must never replace the original schema rejection.
+    return null
+  }
+}
+
 const AUTOMATION_ARGUMENT_ROOT_KEYS = [
   'action',
   'view',
@@ -543,6 +577,7 @@ export function readAutomationDynamicToolRequest(input: {
     schema: automationArgumentsSchema,
     schemaPaths: AUTOMATION_VALIDATION_PATHS,
     schemaRootKeys: AUTOMATION_ARGUMENT_ROOT_KEYS,
+    readSemanticRejection: readAutomationActionSemanticRejection,
     toolName: 'murph.automation',
     value: input.arguments,
   })
