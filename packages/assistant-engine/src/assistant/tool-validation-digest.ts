@@ -8,6 +8,11 @@ export const SAFE_TOOL_CALL_VALIDATION_DIGEST_SCHEMA =
 // Closed private vocabulary for semantic refinements whose Zod issue alone
 // cannot locate the cause. Only trusted parser code supplies a value.
 export const SAFE_TOOL_CALL_SEMANTIC_REJECTIONS = [
+  'automation_action_list',
+  'automation_action_show',
+  'automation_action_edit',
+  'automation_action_update',
+  'automation_action_unrecognized_string',
   'shared_read_options',
   'shared_freshness_count',
   'shared_freshness_entry_shape',

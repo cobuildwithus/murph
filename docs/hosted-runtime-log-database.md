@@ -1861,6 +1861,63 @@ sanitizer and record parser are unchanged, and this detail stays below the 24-ke
 cap. No schema bump, event, prompt, tool schema or behavior change is needed.
 Existing readers ignore or retain the optional string, so no reader-first release is needed.
 
+### Unsupported dynamic automation action attribution
+
+Rejected `murph.automation` discriminants may add one private `semanticRejection`
+to the existing `TOOL_INPUT_SCHEMA_REJECTION` intake classification:
+`automation_action_list`, `automation_action_show`, `automation_action_edit`, or
+`automation_action_update` for those exact unsupported strings; every other
+unsupported string uses `automation_action_unrecognized_string`. Matching is
+case-sensitive and does not trim or coerce. No raw action or unknown key is
+retained. The parser callback derives supported actions from the existing Zod
+union; it never validates a second schema. A supported action with malformed
+fields gets no label. Missing, non-string, inherited or accessor-backed actions,
+non-object/array roots, and classifier faults also omit the field.
+
+The detail is excluded from both validation and runtime-issue fingerprints. It
+changes neither Zod issues and recovery/RPC bytes nor tool schemas/descriptions.
+There is no additional event, dispatch, write, retry, or awaited work. The
+existing generic-details reporter and record parser retain these finite strings
+under the current schema and key limit; readers with that contract need no
+consumer-first rollout. The focused automation action telemetry test exercises
+that persistence boundary as well as real parser/dispatch byte parity.
+
+Use one fixed UTC `$1` end timestamp for both consecutive, half-open 12-hour
+windows; do not slide it while comparing releases. Count only the intake row,
+not its overlapping completion classification. Group by `release_sha` and the
+allowlisted reason; missing detail is missing evidence, not an unknown action:
+
+```sql
+SELECT CASE WHEN occurred_at < $1::timestamptz - interval '12 hours'
+            THEN 'prior_12h' ELSE 'latest_12h' END AS window_name,
+       release_sha,
+       CASE WHEN NOT (details_json ? 'semanticRejection') THEN 'missing_evidence'
+            WHEN details_json->>'semanticRejection' IN (
+              'automation_action_list', 'automation_action_show',
+              'automation_action_edit', 'automation_action_update',
+              'automation_action_unrecognized_string')
+            THEN details_json->>'semanticRejection'
+            ELSE 'unrecognized_evidence' END AS semantic_rejection,
+       count(*) AS rejected_calls
+FROM hosted_assistant_runtime_issue
+WHERE occurred_at >= $1::timestamptz - interval '24 hours'
+  AND occurred_at < $1::timestamptz
+  AND component = 'assistant.tool-validation'
+  AND error_code = 'TOOL_INPUT_SCHEMA_REJECTION'
+  AND operation = 'murph.automation'
+  AND details_json->>'diagnosticRole' = 'classification'
+  AND details_json->'pathIssues' @> '[{"path":"action","code":"invalid_union"}]'
+GROUP BY 1, 2, 3
+ORDER BY 1, 2, 3;
+```
+
+A singleton post-release row with one of the four exact-action labels suffices
+to attribute that rejected literal and choose a targeted synthetic investigation.
+It does not prove why the model selected it, a behavior defect, or a failure-rate
+regression; it does not authorize a prompt or behavior change without separate
+causal proof. The unrecognized-string bucket cannot recover the concrete action.
+Do not backfill, infer labels for older rows, or reinterpret prior fingerprints.
+
 ### Finite CLI failure counts (optional, same timing identity)
 
 Each non-successful invocation from a new producer contributes at most one
