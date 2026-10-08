@@ -503,6 +503,8 @@ describe("Postgres runtime orchestration", () => {
   });
 
   it.each(["active", "mismatch", "unavailable", "starting"] as const)("preserves the owner during conflicting retention admission (%s)", async scenario => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
     const { source, container } = harness();
     const current = owner({ processingMode: "system_mailbox", ...(scenario === "starting" ? { phase: "starting" } : {}) });
     if (scenario === "active" || scenario === "mismatch") {
@@ -513,14 +515,21 @@ describe("Postgres runtime orchestration", () => {
     }
     const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
 
-    expect(await ensurePostgresRuntimeProcessing(source, { ...request, processingMode: "inbox_media_retention", admission: response(current) }, diagnostics))
-      .toMatchObject({ kind: "retry_later" });
+    const retry = await ensurePostgresRuntimeProcessing(source, { ...request, processingMode: "inbox_media_retention", admission: response(current) }, diagnostics);
+    expect(retry).toMatchObject({ kind: "retry_later" });
     expect(container.readActiveRuntimeUserFence).toHaveBeenCalledOnce();
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe(scenario === "starting" ? "starting_fence_preserved" : "processing_mode_conflict");
     expect(commandHostedRuntimeOwner).not.toHaveBeenCalled();
     expect(container.ensureProcessing).not.toHaveBeenCalled();
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    if (scenario === "starting") {
+      expect(retry).toEqual({ kind: "retry_later", retryAt: new Date(Date.now() + 30_000).toISOString() });
+    } else {
+      // Retention waits as long as an accepted wake of the protected owner would.
+      expect(await ensurePostgresRuntimeProcessing(source, { ...request, processingMode: "system_mailbox", admission: response(current) }))
+        .toMatchObject({ kind: "runtime_processing_accepted", recommendedRecheckAt: retry.kind === "retry_later" ? retry.retryAt : null });
+    }
   });
 
   it("does not discard authority when a wake acknowledgement is unknown", async () => {

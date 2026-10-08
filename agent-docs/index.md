@@ -36,6 +36,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Retention waiting behind live work in another mode is owned by
+[`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md); evidence
+is tracked in
+[`retention conflict recheck`](exec-plans/completed/2026-10-08-retention-conflict-owner-recheck.md).
+
 Runtime media read admission and snapshot request consolidation are owned by
 [Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md);
 implementation and proof are tracked in

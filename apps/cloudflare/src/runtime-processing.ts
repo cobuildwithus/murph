@@ -223,7 +223,9 @@ async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeO
     const live = await readRuntimeFenceLivenessBestEffort({ commandBudget: ctx.budget,
       identity: { ...identity, leaseGeneration: identity.generation, userId: ctx.input.userId },
       runnerContainerName: owner.runnerContainerName, runnerContainerNamespace: ctx.namespace, stepTimeoutMs: 1_000 });
-    return live.outcome === "inactive" ? null : retryProcessing(ctx, "processing_mode_conflict");
+    // Protected work keeps its own recheck horizon; its completion signal admits retention sooner.
+    return live.outcome === "inactive" ? null : retryProcessing(ctx, "processing_mode_conflict",
+      Date.parse(computeRuntimeProcessingOwnerRecheckAt({ env: ctx.env })));
   }
   ctx.diagnostics.stage = "active_wake";
   const wake = await ensureActiveRuntimeProcessing({ activeRuntime: {

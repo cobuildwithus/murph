@@ -997,6 +997,11 @@ foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts
 foreground work. Retention remains recoverable through the workspace's projected
 retention wake instead of becoming a second scheduler concern.
+Retention does not preempt live work. When due retention meets a live or
+unconfirmed owner in another mode, Cloudflare returns `retry_later` at that
+owner's recheck horizon, the same horizon an accepted wake reports. The owner's
+completion signal interrupts that Temporal wait, so retention starts once the
+fence is free without polling it.
 The same wake owns all receipt-anchored inbound message-content work: pending
 input suppression and redaction, transcript redaction, media expiration, legacy
 envelope migration, capture/parser/projection redaction, and their earliest
