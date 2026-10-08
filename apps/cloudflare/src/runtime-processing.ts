@@ -15,7 +15,7 @@ import type { HostedRuntimeEnsureProcessingRequest } from "@murphai/hosted-execu
 import type { HostedRuntimeLatencyPhaseBreakdown } from "@murphai/hosted-execution/runtime-control";
 
 import { createRuntimeProcessingCommandBudget, isRuntimeProcessingCommandBudgetTimeout, readRuntimeProcessingCommandStepTimeoutMs, runRuntimeProcessingCommandStep } from "./user-runner/runtime-command-budget.ts";
-import { computeRuntimeProcessingOwnerRecheckAt } from "./user-runner/runtime-processing-responses.ts";
+import { computeHostedRuntimeProcessingRecheckDelayMs } from "./runtime-processing-timing.ts";
 import { ensureActiveRuntimeProcessing } from "./user-runner/runtime-container-wake.ts";
 import { readRuntimeFenceLivenessBestEffort } from "./user-runner/runtime-fence-liveness.ts";
 import type { RunnerWriteFenceToken } from "./runtime-invocation-token.ts";
@@ -150,7 +150,10 @@ function retryProcessing(ctx: { diagnostics: RuntimeProcessingDiagnostics }, rea
 }
 function acceptedProcessing(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, action: "started" | "woken" | "already_running"): HostedRuntimeEnsureProcessingResponse {
   return { kind: "runtime_processing_accepted", action, runtimeAttemptId: requireIdentity(owner).attemptId,
-    recommendedRecheckAt: computeRuntimeProcessingOwnerRecheckAt({ env: ctx.env }) };
+    recommendedRecheckAt: new Date(ownerRecheckAtEpochMs(ctx)).toISOString() };
+}
+function ownerRecheckAtEpochMs(ctx: ProcessingContext): number {
+  return Date.now() + computeHostedRuntimeProcessingRecheckDelayMs(ctx.env);
 }
 
 async function retireRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
@@ -224,8 +227,7 @@ async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeO
       identity: { ...identity, leaseGeneration: identity.generation, userId: ctx.input.userId },
       runnerContainerName: owner.runnerContainerName, runnerContainerNamespace: ctx.namespace, stepTimeoutMs: 1_000 });
     // Protected work keeps its own recheck horizon; its completion signal admits retention sooner.
-    return live.outcome === "inactive" ? null : retryProcessing(ctx, "processing_mode_conflict",
-      Date.parse(computeRuntimeProcessingOwnerRecheckAt({ env: ctx.env })));
+    return live.outcome === "inactive" ? null : retryProcessing(ctx, "processing_mode_conflict", ownerRecheckAtEpochMs(ctx));
   }
   ctx.diagnostics.stage = "active_wake";
   const wake = await ensureActiveRuntimeProcessing({ activeRuntime: {
