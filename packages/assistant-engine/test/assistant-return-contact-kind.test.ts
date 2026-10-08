@@ -50,7 +50,7 @@ describe('assistant return contact kind', () => {
       session: createAssistantSession('hosted-openai'),
     })
     expect(hostedToolContext.currentAssistantTarget?.()).toEqual({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       reasoningEffort: 'medium',
     })
   })
@@ -261,7 +261,7 @@ function createAssistantSession(modelProvider: string | null = null): AssistantS
   const providerOptions = serializeAssistantProviderSessionOptions({
     approvalPolicy: 'never',
     codexHome: null,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider,
     oss: false,
     profile: 'default',

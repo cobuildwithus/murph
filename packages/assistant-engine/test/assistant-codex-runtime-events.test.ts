@@ -110,7 +110,7 @@ describe('assistant codex event shaping', () => {
     })
     const result = await executeCodexAppServerTurn({
       codexHome, workingDirectory, prompt: 'Reply once.',
-      model: 'gpt-5.6-terra', reasoningEffort: 'low', sandbox: 'workspace-write',
+      model: 'gpt-6.1-sol', reasoningEffort: 'low', sandbox: 'workspace-write',
       onTraceEvent: (event) => { traces.push(event) },
     })
     expect(result.finalMessage).toBe('Done.')
@@ -1011,7 +1011,7 @@ describe('assistant codex event shaping', () => {
             child.stdout.write(jsonLine({
               id: metadataResume.id,
               result: {
-                model: 'gpt-5.6-terra',
+                model: 'gpt-6.1-sol',
                 modelProvider: 'openai',
                 reasoningEffort: 'high',
                 serviceTier: childServiceTier,
@@ -1074,8 +1074,8 @@ describe('assistant codex event shaping', () => {
           providerName: 'openai',
           providerRequestId: null,
           reasoningTokens: 7,
-          requestedModel: 'gpt-5.6-terra',
-          servedModel: 'gpt-5.6-terra',
+          requestedModel: 'gpt-6.1-sol',
+          servedModel: 'gpt-6.1-sol',
           tokenPricingBasis: childServiceTier === 'flex' ? 'openai-flex' : 'standard',
           totalTokens: 150,
           usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
@@ -1194,7 +1194,7 @@ describe('assistant codex event shaping', () => {
               result: {
                 // Missing modelProvider: the parent identity is deliberately
                 // not used as a billing fallback.
-                model: 'gpt-5.6-terra',
+                model: 'gpt-6.1-sol',
                 reasoningEffort: 'high',
                 serviceTier: null,
                 thread: { id: 'thread-subagent-metadata-child' },
@@ -1292,7 +1292,7 @@ describe('assistant codex event shaping', () => {
                   status: 'completed',
                   senderThreadId: 'thread-subagent-cold-parent',
                   receiverThreadIds: ['thread-subagent-cold-child'],
-                  model: 'gpt-5.6-terra-mini',
+                  model: 'gpt-6.1-sol-mini',
                 },
                 threadId: 'thread-subagent-cold-parent',
                 turnId: 'turn-subagent-cold-parent',
@@ -1632,7 +1632,7 @@ describe('assistant codex event shaping', () => {
                       status: 'completed',
                       senderThreadId: 'thread-subagent-reset-parent',
                       receiverThreadIds: ['thread-subagent-reset-child'],
-                      model: 'gpt-5.6-terra-mini',
+                      model: 'gpt-6.1-sol-mini',
                     },
                     threadId: 'thread-subagent-reset-parent',
                     turnId: 'turn-subagent-reset-parent',
@@ -1969,7 +1969,7 @@ describe('assistant codex event shaping', () => {
                   status: 'completed',
                   senderThreadId: 'thread-subagent-fail-parent',
                   receiverThreadIds: ['thread-subagent-fail-child'],
-                  model: 'gpt-5.6-terra-mini',
+                  model: 'gpt-6.1-sol-mini',
                 },
                 threadId: 'thread-subagent-fail-parent',
                 turnId: 'turn-subagent-fail-parent',
@@ -2488,7 +2488,7 @@ describe('assistant codex event shaping', () => {
                     { length: trackedThreadCount + 1 },
                     (_, index) => `thread-subagent-cap-${index + 1}`,
                   ),
-                  model: 'gpt-5.6-terra-mini',
+                  model: 'gpt-6.1-sol-mini',
                 },
                 threadId: 'thread-subagent-cap-parent',
                 turnId: 'turn-subagent-cap-parent',
@@ -2673,7 +2673,7 @@ describe('assistant codex event shaping', () => {
                   status: 'completed',
                   senderThreadId: 'thread-subagent-ordinal-parent',
                   receiverThreadIds: ['thread-subagent-ordinal-child'],
-                  model: 'gpt-5.6-terra-mini',
+                  model: 'gpt-6.1-sol-mini',
                 },
                 threadId: 'thread-subagent-ordinal-parent',
                 turnId: 'turn-subagent-ordinal-parent',

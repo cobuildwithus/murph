@@ -42,7 +42,7 @@ not a hosted foreground deadline.
 A focused real-Codex journey uses the production context refresh and system-prompt
 builder after a weight observation is corrected to an unrelated metric. It
 confirms blood-test presence without claiming an unlisted body measurement exists
-or proving its absence. The `gpt-5.6-terra` local-subscription run passed with one
+or proving its absence. The `gpt-6.1-sol` local-subscription run passed with one
 provider request, no tool/command actions, and no canonical writes. Three prior
 subscription attempts failed before provider action; no auth material was copied.
 Thirteen focused tests pass. Fourteen baseline/candidate differential cases,

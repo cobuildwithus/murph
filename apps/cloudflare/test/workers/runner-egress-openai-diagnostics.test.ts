@@ -38,7 +38,7 @@ test("returns the OpenAI Responses body and emits its diagnostic as a Worker log
     RUNNER_CONTAINER: nativeProviderTestNamespace(() => createPostgresTestOwner()),
   };
 
-  const requestBody = JSON.stringify({ input: "synthetic", model: "gpt-5.6-terra", stream: true });
+  const requestBody = JSON.stringify({ input: "synthetic", model: "gpt-6.1-sol", stream: true });
   // Production container interception supplies no ctx.waitUntil.
   const response = await hostedRunnerIntercept(new Request("https://api.openai.com/v1/responses", {
     body: requestBody,
@@ -64,7 +64,7 @@ test("returns the OpenAI Responses body and emits its diagnostic as a Worker log
   // The admitted bytes remain readable after the upstream request takes its body.
   expect(diagnostic?.details).toMatchObject({
     jsonValid: true,
-    modelKind: "gpt-5.6-terra",
+    modelKind: "gpt-6.1-sol",
     requestBytes: new TextEncoder().encode(requestBody).byteLength,
   });
   expect(upstreamPaths).not.toContain(HOSTED_RUNTIME_LOG_PATH);

@@ -21,7 +21,7 @@ const CODEX_OPENAI_TARGET = {
   adapter: "codex-cli",
   approvalPolicy: "never",
   codexCommand: null,
-  model: "gpt-5.6-terra",
+  model: "gpt-6.1-sol",
   modelProvider: "openai",
   oss: false,
   profile: null,
@@ -31,7 +31,7 @@ const CODEX_OPENAI_TARGET = {
 
 const CODEX_OPENAI_ENV = {
   HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-  HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+  HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
   HOSTED_ASSISTANT_PROVIDER: "openai",
   HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
@@ -197,7 +197,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
         allowMissing: false,
         env: {
           HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+          HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
           HOSTED_ASSISTANT_PROVIDER: "legacy",
           HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
           HOSTED_ASSISTANT_SANDBOX: "danger-full-access",

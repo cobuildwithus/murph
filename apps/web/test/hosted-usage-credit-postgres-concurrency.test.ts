@@ -4378,7 +4378,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           data: [
             { billingStatus: "active", id: referrerMemberId },
             {
-              assistantModelPreference: "gpt-5.6-terra",
+              assistantModelPreference: "gpt-6.1-sol",
               billingStatus: "active",
               id: sourceContainerMemberId,
             },

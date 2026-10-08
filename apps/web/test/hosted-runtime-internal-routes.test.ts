@@ -383,7 +383,7 @@ describe("hosted runtime internal web routes", () => {
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
       availableModels: [],
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       solAvailable: false,
     });
     mocks.readHostedActiveGroupRunningBit.mockResolvedValue(null);

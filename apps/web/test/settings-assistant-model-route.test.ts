@@ -164,7 +164,7 @@ describe("assistant model settings route", () => {
 
   it("rejects invalid, missing, and extra request fields before persistence", async () => {
     const invalidModelResponse = await route.POST(jsonRequest({
-      model: "gpt-5.6-terra",
+      model: "not-a-product-model",
     }));
     expect(invalidModelResponse.status).toBe(400);
     await expect(invalidModelResponse.json()).resolves.toMatchObject({

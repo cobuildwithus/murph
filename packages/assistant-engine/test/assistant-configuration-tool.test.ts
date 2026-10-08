@@ -522,7 +522,7 @@ describe("assistant configuration tool", () => {
     });
   });
 
-  it("clears dormant Sol intent when the member explicitly chooses Terra", async () => {
+  it("clears dormant Sol intent when the member explicitly chooses the default model", async () => {
     const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {

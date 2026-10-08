@@ -3741,7 +3741,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
       });
       await upsertAutomation({
         assistantTargetOverride: {
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           reasoningEffort: "medium",
         },
         continuityPolicy: "preserve",
@@ -3829,7 +3829,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({
         assistantTargetOverride: {
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           reasoningEffort: "medium",
         },
         route: expect.objectContaining({

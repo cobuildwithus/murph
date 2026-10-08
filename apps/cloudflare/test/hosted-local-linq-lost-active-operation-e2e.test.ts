@@ -30,7 +30,7 @@ import {
 const userId = `member_local_linq_lost_active_operation_${Date.now()}`;
 const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-lost-active-operation-secret";
-const assistantModel = "gpt-5.6-terra";
+const assistantModel = "gpt-6.1-sol";
 const chatId = `chat_local_linq_lost_active_operation_${Date.now()}`;
 const unsteeredFirstReplyText = "I got the first note.";
 const secondInboundText = "Second message that used to be stranded behind idle checkpoint.";

@@ -600,13 +600,6 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
   outputUsdMicrosPerMillionTokens: 20_000_000n,
 } as const;
 
-const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE = {
-  cachedInputUsdMicrosPerMillionTokens: 200_000n,
-  cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
-  inputUsdMicrosPerMillionTokens: 2_000_000n,
-  outputUsdMicrosPerMillionTokens: 12_000_000n,
-} as const;
-
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 20_000n,
   cacheWriteUsdMicrosPerMillionTokens: 250_000n,
@@ -643,7 +636,6 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
     outputUsdMicrosPerMillionTokens: 50_000_000n,
   },
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE,
-  "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
 };
 
@@ -721,7 +713,6 @@ const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
     },
   },
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
-  "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
 } as const satisfies HostedAiUsageAllowanceTokenPricingBasesByModel;
 

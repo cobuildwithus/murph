@@ -496,7 +496,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "platform-funded request",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -609,7 +609,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "automatic retry",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -1299,7 +1299,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
+        body: JSON.stringify({ model: "gpt-6.1-sol", input: "Synthetic text turn." }),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           cookie: "session=user-supplied-cookie",
@@ -1374,7 +1374,7 @@ describe("hostedRunnerIntercept", () => {
         type: "message",
       }],
       max_output_tokens: 2_500,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       settings: {
         allowed_callers: ["direct"],
         external_web_access: false,
@@ -1440,7 +1440,7 @@ describe("hostedRunnerIntercept", () => {
       method: "POST",
       headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" },
       body: JSON.stringify({
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         input: "Draw a synthetic geometric pattern.",
         tools: image ? [{ type: "image_generation" }] : [],
       }),
@@ -3154,7 +3154,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
+        body: JSON.stringify({ model: "gpt-6.1-sol", input: "Synthetic text turn." }),
         headers: {
           authorization: `Bearer ${credential}`,
         },
@@ -3386,7 +3386,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
+        body: JSON.stringify({ model: "gpt-6.1-sol", input: "Synthetic text turn." }),
         headers: {
           authorization: `Bearer ${credential}`,
         },
@@ -4015,7 +4015,7 @@ describe("hostedRunnerIntercept", () => {
         role: "user",
       }],
       instructions: `synthetic instructions ${syntheticStablePrefix}`,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       previous_response_id: syntheticPreviousResponse,
       prompt_cache_key: syntheticCacheNamespace,
       prompt_cache_retention: "24h",
@@ -4098,7 +4098,7 @@ describe("hostedRunnerIntercept", () => {
       jsonType: "object",
       jsonValid: true,
       methodKind: "POST",
-      modelKind: "gpt-5.6-terra",
+      modelKind: "gpt-6.1-sol",
       previousResponsePresent: true,
       providerKind: "openai",
       requestFingerprintPresent: true,
@@ -4172,7 +4172,7 @@ describe("hostedRunnerIntercept", () => {
     const sensitiveTurnId = "turn-sensitive-diagnostic-id";
     const requestBody = {
       input: [],
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
     };
     const codexTurnMetadata = JSON.stringify({
       compaction: {
@@ -4267,7 +4267,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "hello",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           prompt_cache_retention: "24h",
         }),
         headers: {
@@ -4324,7 +4324,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "hello",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           prompt_cache_retention: "24h",
           stream: true,
         }),
@@ -4376,7 +4376,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-5.6-terra", stream: true }),
+        body: JSON.stringify({ model: "gpt-6.1-sol", stream: true }),
         headers: {
           ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
           "content-type": "application/json",
@@ -6915,7 +6915,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "automatic retry",
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {

@@ -1663,7 +1663,7 @@ describe('assistant codex runtime', () => {
     await expect(executeCodexAppServerTurn({
       env: { OPENAI_API_KEY: 'openai-test-key' },
       hostedToolContext,
-      prompt: 'switch to Sol, then back to Terra',
+      prompt: 'switch to Sol, then back to the default model',
       workingDirectory,
     })).resolves.toMatchObject({
       finalMessage: 'Configuration updates complete',

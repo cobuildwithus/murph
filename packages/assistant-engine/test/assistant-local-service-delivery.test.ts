@@ -2854,7 +2854,7 @@ test('sendAssistantMessageLocal keeps automation cron turns on the session Codex
 
 test('sendAssistantMessageLocal prefers the hosted execution default target when resolving the session', async () => {
   const hostedDefaultTarget = createCodexTarget({
-    model: 'gpt-5.6-terra-mini',
+    model: 'gpt-6.1-sol-mini',
   })
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 

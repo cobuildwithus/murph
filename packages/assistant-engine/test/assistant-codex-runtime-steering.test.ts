@@ -2173,7 +2173,7 @@ describe('steered final segments', () => {
           return releaseLiveTurn
         },
         prompt: 'Initial question',
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: 'openai',
         workingDirectory,
       })

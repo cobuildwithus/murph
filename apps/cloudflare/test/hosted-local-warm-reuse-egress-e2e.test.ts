@@ -5,7 +5,7 @@ import {
   type HostedLocalEgressScenario,
 } from "./helpers/hosted-local-egress-scenario.js";
 
-const terraProductModel = "gpt-5.6-terra";
+const defaultProductModel = "gpt-6.1-sol";
 
 let egress: HostedLocalEgressScenario | null = null;
 
@@ -54,7 +54,7 @@ describe("hosted local resident-container egress e2e", () => {
     expect(providerRequests.length).toBeGreaterThanOrEqual(3);
     for (const request of providerRequests) {
       const providerRequestBody = request.body ?? "";
-      expect(readProviderRequestModel(providerRequestBody)).toBe(terraProductModel);
+      expect(readProviderRequestModel(providerRequestBody)).toBe(defaultProductModel);
       expectCurrentResponsesLiteToolEnvelope(providerRequestBody);
     }
     await harness.assertHealthy({ expectAssistantProviderRequest: true });

@@ -643,7 +643,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   }))
 
   const hostedDefaultTarget = createCodexTarget({
-    model: 'gpt-5.6-terra-mini',
+    model: 'gpt-6.1-sol-mini',
   })
   const { sendAssistantNotificationLocal } = await import(
     '../src/assistant/notification-turn.ts'
@@ -1152,7 +1152,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
         notificationMode: 'deterministic-exact-text',
       },
       provider: 'codex-cli',
-      providerModel: 'gpt-5.6-terra',
+      providerModel: 'gpt-6.1-sol',
       sessionId: initialSession.sessionId,
       turnId: 'turn-exact',
     }),
@@ -4922,7 +4922,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   const sharedPlan = createSharedPlan()
   const primaryRoute = createRoute({
     providerOptions: {
-      model: 'gpt-5.6-terra-primary',
+      model: 'gpt-6.1-sol-primary',
     },
     routeId: 'route-primary',
   })
@@ -5050,7 +5050,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   expect(mocks.createAssistantRuntimeStateService.mock.results[0]?.value.turns.createReceipt)
     .toHaveBeenCalledWith(expect.objectContaining({
       provider: 'codex-cli',
-      providerModel: 'gpt-5.6-terra-primary',
+      providerModel: 'gpt-6.1-sol-primary',
     }))
   expect((deliveryError as Error & {
     details?: Record<string, unknown>
@@ -5062,7 +5062,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     assistantNotificationProvider: 'codex-cli',
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
-    assistantNotificationProviderModel: 'gpt-5.6-terra-primary',
+    assistantNotificationProviderModel: 'gpt-6.1-sol-primary',
     assistantNotificationRouteId: 'route-primary',
     assistantNotificationStage: 'delivery',
   })
@@ -5086,7 +5086,7 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
   const sharedPlan = createSharedPlan()
   const primaryRoute = createRoute({
     providerOptions: {
-      model: 'gpt-5.6-terra-primary',
+      model: 'gpt-6.1-sol-primary',
     },
     routeId: 'route-primary',
   })
@@ -5238,13 +5238,13 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
   const primaryRoute = createRoute({
     routeId: 'route-primary',
     providerOptions: {
-      model: 'gpt-5.6-terra-primary',
+      model: 'gpt-6.1-sol-primary',
     },
   })
   const route = createRoute({
     routeId: 'route-provider-failure',
     providerOptions: {
-      model: 'gpt-5.6-terra-mini',
+      model: 'gpt-6.1-sol-mini',
     },
   })
   const mocks = {
@@ -5341,7 +5341,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     assistantNotificationProvider: 'codex-cli',
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
-    assistantNotificationProviderModel: 'gpt-5.6-terra-mini',
+    assistantNotificationProviderModel: 'gpt-6.1-sol-mini',
     assistantNotificationProviderNonReplayableWork: false,
     assistantNotificationRouteId: 'route-provider-failure',
     assistantNotificationStage: 'provider',
@@ -5711,7 +5711,7 @@ function createProviderOptions(
   return serializeAssistantProviderSessionOptions({
     approvalPolicy: 'never',
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'hosted-openai',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
@@ -6115,7 +6115,7 @@ function createCodexTarget(
     approvalPolicy: 'never',
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'hosted-openai',
     oss: false,
     profile: null,

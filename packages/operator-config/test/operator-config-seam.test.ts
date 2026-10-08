@@ -81,7 +81,7 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
     providerConfig: {
       approvalPolicy: 'never',
       codexHome: ' /tmp/codex-home ',
-      model: ' gpt-5.6-terra ',
+      model: ' gpt-6.1-sol ',
       modelProvider: ' openai ',
       reasoningEffort: 'medium',
       sandbox: 'danger-full-access',
@@ -110,7 +110,7 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
       approvalPolicy: 'never',
       codexCommand: null,
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       oss: false,
       profile: null,
@@ -126,7 +126,7 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
         id: 'platform-default',
         managedBy: 'platform',
         providerConfig: {
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           provider: 'codex-cli',
         },

@@ -34,7 +34,7 @@ vi.mock('../src/assistant/codex-turn-runner.js', async (importOriginal) => {
 const cleanupPaths: string[] = []
 const target = createAssistantModelTarget({
   approvalPolicy: 'never',
-  model: 'gpt-5.6-terra',
+  model: 'gpt-6.1-sol',
   modelProvider: 'hosted-openai',
   provider: 'codex-cli',
   reasoningEffort: 'medium',

@@ -193,7 +193,7 @@ describe('assistant Codex seam helpers', () => {
   it('migrates an exact legacy binding so model changes keep the same thread', () => {
     const initialRoute = buildCodexThreadIdentity(
       normalizeAssistantProviderConfig({
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: 'openai',
         reasoningEffort: 'low',
       }),
@@ -237,7 +237,7 @@ describe('assistant Codex seam helpers', () => {
   it('keeps OpenAI model switches continuous', () => {
     const managedFirst = buildCodexThreadIdentity(
       normalizeAssistantProviderConfig({
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: 'hosted-openai',
       }),
     )
@@ -259,7 +259,7 @@ describe('assistant Codex seam helpers', () => {
         approvalPolicy: 'never',
         codexCommand: 'codex',
         codexHome: '/tmp/codex-home-primary',
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: 'openai',
         oss: false,
         profile: 'primary',
@@ -285,7 +285,7 @@ describe('assistant Codex seam helpers', () => {
           approvalPolicy: 'never',
           codexCommand: 'codex',
           codexHome: '/tmp/codex-home-primary',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
           profile: 'primary',
@@ -319,7 +319,7 @@ describe('assistant Codex seam helpers', () => {
           approvalPolicy: 'never',
           codexCommand: 'codex-next',
           codexHome: '/tmp/codex-home-primary',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
           profile: 'primary',
@@ -656,7 +656,7 @@ function createProviderOptions(
     provider: 'codex-cli',
     continuityFingerprint: 'fingerprint-default',
     executionDriver: 'codex-app-server',
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',
@@ -684,7 +684,7 @@ function createAssistantSession(input?: {
     approvalPolicy: 'never' as const,
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: null,
     oss: false,
     profile: null,

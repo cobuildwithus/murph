@@ -107,7 +107,7 @@ describe('onboarding first personal read', () => {
     )
     for (const selected of [
       { model: 'gpt-5.6-luna', modelProvider: 'openai' },
-      { model: 'gpt-5.6-terra', modelProvider: 'openai' },
+      { model: 'gpt-6.1-sol', modelProvider: 'openai' },
       { model: 'gpt-5.6-sol', modelProvider: 'openai' },
     ]) {
       const sessionTarget = createAssistantModelTarget({

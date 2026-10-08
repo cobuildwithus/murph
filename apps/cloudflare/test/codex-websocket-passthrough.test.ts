@@ -25,7 +25,7 @@ it("keeps native Codex on one workerd pass-through across idle turns and recover
     const workingDirectory = path.join(directory, "workspace");
     await Promise.all([mkdir(codexHome), mkdir(workingDirectory)]);
     await writeFile(path.join(codexHome, "config.toml"), [
-      'model = "gpt-5.6-terra"', 'model_provider = "passthrough"',
+      'model = "gpt-6.1-sol"', 'model_provider = "passthrough"',
       'approval_policy = "never"', 'sandbox_mode = "workspace-write"', 'check_for_update_on_startup = false',
       '[history]', 'persistence = "none"',
       '[model_providers.passthrough]', 'name = "Synthetic pass-through"', `base_url = "${baseUrl}"`,
@@ -34,7 +34,7 @@ it("keeps native Codex on one workerd pass-through across idle turns and recover
     ].join("\n"));
     const turn = {
       codexCommand: fileURLToPath(new URL("../../../packages/assistant-engine/node_modules/.bin/codex", import.meta.url)),
-      codexHome, workingDirectory, model: "gpt-5.6-terra", modelProvider: "passthrough", reasoningEffort: "low",
+      codexHome, workingDirectory, model: "gpt-6.1-sol", modelProvider: "passthrough", reasoningEffort: "low",
       processLifetime: "warm" as const, sandbox: "workspace-write" as const, dynamicTools: [],
       env: { HOME: directory, PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, SYNTHETIC_CODEX_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL },
       prompt: "Answer the synthetic turn.",

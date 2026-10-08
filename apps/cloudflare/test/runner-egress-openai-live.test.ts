@@ -233,7 +233,7 @@ it.skipIf(!process.env.MURPH_TEST_CODEX_COMMAND).each([false, true])(
           'model_providers.live-test.wire_api="responses"', 'model_providers.live-test.requires_openai_auth=false',
           `experimental_realtime_ws_base_url="${baseUrl}"`, `experimental_realtime_webrtc_call_base_url="${baseUrl}"`,
         ],
-        model: "gpt-5.6-terra", modelProvider: "live-test", sessionId: "call-synthetic",
+        model: "gpt-6.1-sol", modelProvider: "live-test", sessionId: "call-synthetic",
         sdp: "v=0\r\nsynthetic-offer", prompt: "Delegate requests to the backing assistant.",
         signal: abort.signal, onInput: () => {}, onUsage: (seconds) => usage.push(seconds),
       });

@@ -106,7 +106,7 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     },
     {
       codexHome: ' /tmp/home ',
-      model: ' gpt-5.6-terra ',
+      model: ' gpt-6.1-sol ',
       oss: false,
       profile: ' default ',
       sandbox: 'danger-full-access',
@@ -122,7 +122,7 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     target: {
       codexCommand: 'codex',
       codexHome: '/tmp/home',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       oss: false,
       profile: 'default',
@@ -152,7 +152,7 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     continuityFingerprint:
       'sha256:a499b928a045b4adc6198efcfa2ece8541fcf224eaba84b7164509c480da26ac',
     executionDriver: 'codex-app-server',
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'openai',
     oss: false,
     profile: 'default',
@@ -165,7 +165,7 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     approvalPolicy: 'never',
     codexCommand: 'codex',
     codexHome: '/tmp/home',
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'openai',
     oss: false,
     profile: 'default',
@@ -186,7 +186,7 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
     id: ' member-codex ',
     providerConfig: {
       provider: 'codex-cli',
-      model: ' gpt-5.6-terra ',
+      model: ' gpt-6.1-sol ',
       modelProvider: ' openai ',
       reasoningEffort: ' medium ',
       sandbox: 'danger-full-access',
@@ -199,7 +199,7 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
     managedBy: 'platform',
     providerConfig: {
       provider: 'codex-cli',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       reasoningEffort: 'medium',
     },
@@ -210,7 +210,7 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
     approvalPolicy: null,
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'openai',
     oss: false,
     profile: null,
@@ -243,7 +243,7 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
         managedBy: 'platform',
         providerConfig: {
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           reasoningEffort: 'medium',
         },

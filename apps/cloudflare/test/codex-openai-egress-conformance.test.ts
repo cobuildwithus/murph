@@ -37,7 +37,7 @@ const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET =
   "codex-route-conformance-signing-secret";
 const RUNNER_CONTAINER_NAME = "member_123--v-version_1";
 const TEST_USER_ID = "member_123";
-const SCRIPTED_MODEL = "gpt-5.6-terra";
+const SCRIPTED_MODEL = "gpt-6.1-sol";
 const SCRIPTED_PROVIDER_ENV = "MURPH_CODEX_ROUTE_CONFORMANCE_KEY";
 const TEST_TIMEOUT_MS = 90_000;
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));

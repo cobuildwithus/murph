@@ -396,7 +396,7 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
         /^(?:HOSTED_)?TEMPORAL_/u.test(name)
       ),
     ),
-    HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-5.6-terra",
+    HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-6.1-sol",
     HOSTED_ASSISTANT_PROVIDER:
       input.overrides?.HOSTED_ASSISTANT_PROVIDER ?? "openai",
     OPENAI_API_KEY: input.overrides?.OPENAI_API_KEY,
@@ -774,7 +774,7 @@ describe("hosted local dev stack", () => {
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
           expect.stringContaining("automation-d"),
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
         NODE_ENV: "development",
@@ -927,7 +927,7 @@ describe("hosted local dev stack", () => {
     );
     expect(vi.mocked(environmentModule.buildWranglerLocalDevConfig)).toHaveBeenCalledWith(
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
       }),
       {
@@ -3763,7 +3763,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 302 }));
 
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
-    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.6-terra");
+    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-6.1-sol");
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
 
@@ -3785,7 +3785,7 @@ describe("hosted local dev stack", () => {
       "pnpm",
       expect.any(Array),
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         HOSTED_ASSISTANT_PROVIDER: "openai",
       }),
       expect.any(Object),

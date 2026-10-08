@@ -1714,7 +1714,7 @@ test('createSetupServices dry-run on macOS plans toolchain and assistant default
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: null,
     codexCommand: 'codex',
     codexHome: null,
@@ -1724,7 +1724,7 @@ test('createSetupServices dry-run on macOS plans toolchain and assistant default
     approvalPolicy: 'never',
     oss: false,
     account: null,
-    detail: 'Configured Codex gpt-5.6-terra.',
+    detail: 'Configured Codex gpt-6.1-sol.',
   }
 
   try {
@@ -1807,7 +1807,7 @@ test('createSetupServices on linux records apt provisioning failures and saves a
     codexHome: null,
     detail: 'Configured Codex.',
     enabled: true,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: null,
     oss: false,
     preset: 'codex',

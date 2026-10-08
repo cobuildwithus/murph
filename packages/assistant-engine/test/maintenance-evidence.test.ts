@@ -45,7 +45,7 @@ function createEvidenceTestSession(input: {
       approvalPolicy: 'never',
       codexCommand: null,
       codexHome: null,
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       oss: false,
       profile: null,
