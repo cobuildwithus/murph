@@ -1715,6 +1715,10 @@ describe("hosted Family plan", () => {
       .filter(({ args }) => Array.isArray(args[0]) && args[0].join("").includes('from "hosted_member"'));
     const acceptedMemberId = memberLocks[1]?.args[1];
     expect(memberLocks.map(({ args }) => args[1])).toEqual(["member_owner", acceptedMemberId, acceptedMemberId]);
+    // Member before root, like activation.
+    expect(memberLocks[1]?.order).toBeLessThan(
+      cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(memberLocks[2]?.order).toBeLessThan(
       tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
