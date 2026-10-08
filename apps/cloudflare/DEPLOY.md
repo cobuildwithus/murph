@@ -1619,6 +1619,15 @@ are gone. A rollback to an older contract requires a separately reviewed
 compatible database and complete Web/Worker/runner release; reverting a single
 component after cleanup is unsupported.
 
+Once the OpenAI-only Worker and runner consumers have converged, retire
+`VENICE_API_KEY` and `VERCEL_AI_API_KEY` through the existing protected Murph
+Cloud deployment. Its staged upload removes exactly those two secret bindings
+and inherits every other existing secret by name from an explicit baseline
+Worker version. It validates the staged secret inventory before activation and
+preserves the private workflow's rollout, smoke, and release-receipt checks.
+Run this cleanup through the protected deployment path, without a separate local
+secret deletion.
+
 ## Required GitHub Environment Secrets
 
 Set these in the selected GitHub environment as secrets:
