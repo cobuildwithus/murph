@@ -34,26 +34,36 @@ describe("retired inference secret upload", () => {
       secretsFilePath: synchronize ? input.secretsFilePath : undefined,
     });
     const { unsafe, ...config } = JSON.parse(await readFile(result.configPath, "utf8"));
-    expect(config).toEqual(input.config);
+    expect(config).toEqual({ ...input.config, secrets: { required: synchronize ? ["OPENAI_API_KEY"] : [] } });
     expect(JSON.parse(await readFile(input.configPath, "utf8"))).toEqual(input.config);
     expect(path.dirname(result.configPath)).toBe(path.dirname(input.configPath));
     expect(unsafe).toEqual({
-      bindings: retained.map(({ name }) => ({ name, type: "inherit", version_id: baseline.id })),
+      bindings: retained.filter(({ name }) => !synchronize || name !== "OPENAI_API_KEY")
+        .map(({ name }) => ({ name, type: "inherit", version_id: baseline.id })),
       metadata: { keep_bindings: [] },
     });
     const bindings = synchronize ? [...retained, { name: "NEW_SECRET", type: "secret_text" }] : retained;
     expect(() => assertRetiredInferenceSecretsRemoved({ id: "uploaded-version", resources: { bindings } }, "uploaded-version", result.expectedSecrets)).not.toThrow();
   });
 
-  it("uses pinned Wrangler's actual upload serializer for inheritance and rotations", async () => {
+  it.each(["disabled", "empty", "partial", "full"] as const)("uses pinned Wrangler's actual upload serializer with required secrets and %s synchronization", async mode => {
     const input = await fixture();
-    await writeFile(input.secretsFilePath, JSON.stringify({ OPENAI_API_KEY: "synthetic-rotation", NEW_SECRET: "synthetic-new" }));
-    const result = await prepareRetiredInferenceSecretsUpload({ ...input, currentVersion: baseline, currentVersionId: baseline.id });
+    const payload: Record<string, string> = mode === "disabled" || mode === "empty" ? {} : {
+      OPENAI_API_KEY: "synthetic-rotation", NEW_SECRET: "synthetic-new",
+      ...(mode === "full" ? { HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-rotation" } : {}),
+    };
+    if (mode === "full") input.config.secrets.required.push("NEW_SECRET");
+    await writeFile(input.configPath, JSON.stringify(input.config));
+    await writeFile(input.secretsFilePath, JSON.stringify(payload));
+    const secretsFilePath = mode === "disabled" ? undefined : input.secretsFilePath;
+    const result = await prepareRetiredInferenceSecretsUpload({ ...input, secretsFilePath, currentVersion: baseline, currentVersionId: baseline.id });
+    const temporary = JSON.parse(await readFile(result.configPath, "utf8"));
+    expect(temporary.secrets.required).toEqual(input.config.secrets.required.filter(name => name in payload));
     const outfile = path.join(path.dirname(input.configPath), "upload.multipart");
     await promisify(execFile)(process.execPath, [
       createRequire(import.meta.url).resolve("wrangler/bin/wrangler.js"),
       "versions", "upload", "--dry-run", "--config", result.configPath,
-      "--secrets-file", input.secretsFilePath, "--outfile", outfile,
+      ...(secretsFilePath ? ["--secrets-file", secretsFilePath] : []), "--outfile", outfile,
     ], {
       cwd: path.dirname(input.configPath),
       env: { PATH: process.env.PATH, WRANGLER_WRITE_LOGS: "false", WRANGLER_SEND_METRICS: "false", CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV: "false" },
@@ -64,14 +74,14 @@ describe("retired inference secret upload", () => {
     const metadata = JSON.parse(String(form.get("metadata")));
     expect(metadata.keep_bindings).toEqual([]);
     expect(metadata.bindings).toEqual(expect.arrayContaining([
-      { name: "OPENAI_API_KEY", type: "secret_text", text: "synthetic-rotation" },
-      { name: "NEW_SECRET", type: "secret_text", text: "synthetic-new" },
-      ...retained.filter(binding => binding.name !== "OPENAI_API_KEY").map(({ name }) => ({ name, type: "inherit", version_id: baseline.id })),
+      ...Object.entries(payload).map(([name, text]) => ({ name, type: "secret_text", text })),
+      ...retained.filter(binding => !(binding.name in payload)).map(({ name }) => ({ name, type: "inherit", version_id: baseline.id })),
       { name: "SOURCE_RECEIPT", type: "plain_text", text: "synthetic-source" },
     ]));
     expect(metadata.bindings.some((binding: { name: string }) => retired.some(entry => entry.name === binding.name))).toBe(false);
     expect(metadata.containers).toEqual([{ class_name: "RunnerContainer" }]);
     expect(metadata.main_module).toBe("worker.js");
+    expect(JSON.parse(await readFile(input.configPath, "utf8"))).toEqual(input.config);
   });
 
   it.each([
@@ -109,6 +119,14 @@ describe("retired inference secret upload", () => {
     await expect(prepareRetiredInferenceSecretsUpload({ ...input, currentVersion: baseline, currentVersionId: baseline.id })).rejects.toThrow("Cannot safely retire");
   });
 
+  it.each(["MISSING_REQUIRED_SECRET", "VENICE_API_KEY", "VERCEL_AI_API_KEY"])("rejects required %s instead of inheriting it from an unpinned latest version", async name => {
+    const input = await fixture();
+    input.config.secrets.required.push(name);
+    await writeFile(input.configPath, JSON.stringify(input.config));
+    await expect(prepareRetiredInferenceSecretsUpload({ ...input, currentVersion: baseline, currentVersionId: baseline.id })).rejects.toThrow("Cannot safely retire");
+    expect((await readdir(path.dirname(input.configPath))).some(name => name.includes(".retired-secrets-"))).toBe(false);
+  });
+
   it.each([
     [...retained, ...retired],
     retained.slice(1),
@@ -143,6 +161,7 @@ async function fixture() {
     containers: [{ class_name: "RunnerContainer", image: "docker.io/library/alpine:3.23", max_instances: 1 }],
     durable_objects: { bindings: [{ name: "RUNNER", class_name: "RunnerContainer" }] },
     vars: { SOURCE_RECEIPT: "synthetic-source" },
+    secrets: { required: ["OPENAI_API_KEY", "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET"] },
     send_email: [{ name: "EMAIL", allowed_sender_addresses: ["sender@example.com"] }],
   };
   await writeFile(configPath, JSON.stringify(config));
