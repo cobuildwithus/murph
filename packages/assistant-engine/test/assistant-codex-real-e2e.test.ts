@@ -1259,22 +1259,39 @@ function readFocusedActivityProjectionCommand(command: string): string {
   return unwrapped
 }
 
-function expectFocusedActivityProjectionOutput(output: string): void {
+const FOCUSED_ACTIVITY_STEP_VALUES = [8800, 6200, 12300] as const
+type FocusedActivityDay = { date: string; provider: string; value: (typeof FOCUSED_ACTIVITY_STEP_VALUES)[number] }
+const FOCUSED_OURA_ACTIVITY: readonly FocusedActivityDay[] = [{ date: '2026-01-03', provider: 'oura', value: 8800 }]
+// Without a provider filter both providers compose: Garmin outranks Oura on the
+// shared day, and the losing Oura value stays private.
+const FOCUSED_COMPOSED_ACTIVITY: readonly FocusedActivityDay[] = [
+  { date: '2026-01-03', provider: 'garmin', value: 12300 },
+  { date: '2026-01-02', provider: 'oura', value: 6200 },
+]
+
+function expectFocusedActivityProjectionOutput(
+  output: string, expected: readonly FocusedActivityDay[] = FOCUSED_OURA_ACTIVITY,
+): void {
   if (output.trimStart().startsWith('{')) {
     const document = readRecord(JSON.parse(output))
-    expect(document?.ok === true ? document.data : document).toMatchObject({ count: 1, items: [{
-      date: '2026-01-03', steps: { value: 8800, unit: 'count', provider: 'oura' },
-    }] })
+    expect(document?.ok === true ? document.data : document).toMatchObject({
+      count: expected.length,
+      items: expected.map(({ date, provider, value }) => ({ date, steps: { value, unit: 'count', provider } })),
+    })
   } else {
-    expect(output).toMatch(/^\s*count: 1$/mu)
-    expect(output).toMatch(/^\s*items\[1\]:$/mu)
-    expect(output).toMatch(/^\s*(?:- )?date: 2026-01-03$/mu)
-    const steps = output.match(/^([ \t]+)steps:\r?\n((?:\1[ \t]+[^\r\n]*(?:\r?\n|$))+)/mu)?.[2] ?? ''
-    expect(steps).toMatch(/^\s*provider: oura$/mu)
-    expect(steps).toMatch(/^\s*unit: count$/mu)
-    expect(steps).toMatch(/^\s*value: 8800$/mu)
+    expect(output).toMatch(new RegExp(`^\\s*count: ${expected.length}$`, 'mu'))
+    expect(output).toMatch(new RegExp(`^\\s*items\\[${expected.length}\\]:$`, 'mu'))
+    for (const { date } of expected) expect(output).toMatch(new RegExp(`^\\s*(?:- )?date: ${date}$`, 'mu'))
+    const steps = [...output.matchAll(/^([ \t]+)steps:\r?\n((?:\1[ \t]+[^\r\n]*(?:\r?\n|$))+)/gmu)].map(match => match[2]!)
+    expect(steps).toHaveLength(expected.length)
+    expected.forEach(({ provider, value }, index) => {
+      expect(steps[index]).toMatch(new RegExp(`^\\s*provider: ${provider}$`, 'mu'))
+      expect(steps[index]).toMatch(/^\s*unit: count$/mu)
+      expect(steps[index]).toMatch(new RegExp(`^\\s*value: ${value}$`, 'mu'))
+    })
   }
-  expect(output).not.toMatch(/12300|6200/u)
+  const absent = FOCUSED_ACTIVITY_STEP_VALUES.filter(value => !expected.some(day => day.value === value))
+  expect(output).not.toMatch(new RegExp(absent.join('|'), 'u'))
 }
 
 async function expectOnlyFocusedActivityProjection(vaultRoot: string): Promise<void> {
@@ -1286,7 +1303,8 @@ async function expectOnlyFocusedActivityProjection(vaultRoot: string): Promise<v
 describe('focused activity projection production contract', () => {
   it('accepts only the single native activity read/help command', () => {
     for (const direct of ['vault-cli wearables activity list --help',
-      'vault-cli wearables activity list --date=2026-01-03 --provider oura --limit 1']) {
+      'vault-cli wearables activity list --date=2026-01-03 --provider oura --limit 1',
+      'vault-cli wearables activity list --from 2026-01-02 --to=2026-01-03 --limit 2']) {
       expect(readFocusedActivityProjectionCommand(direct)).toBe(direct)
       expect(readFocusedActivityProjectionCommand(`/bin/zsh -c '${direct}'`)).toBe(direct)
     }
@@ -1313,6 +1331,13 @@ describe('focused activity projection production contract', () => {
       const toon = (await execFileAsync(path.join(binDirectory, 'vault-cli'), args)).stdout
       expect(toon.trim()).not.toMatch(/^\{/u)
       expectFocusedActivityProjectionOutput(toon)
+      // No provider filter: the multi-provider composer selects each day's source.
+      const composedArgs = ['wearables', 'activity', 'list', '--from', '2026-01-02', '--to', '2026-01-03', '--limit', '2']
+      expectFocusedActivityProjectionOutput(
+        (await execFileAsync(path.join(binDirectory, 'vault-cli'), [...composedArgs, '--format', 'json'])).stdout,
+        FOCUSED_COMPOSED_ACTIVITY,
+      )
+      expectFocusedActivityProjectionOutput((await execFileAsync(path.join(binDirectory, 'vault-cli'), composedArgs)).stdout, FOCUSED_COMPOSED_ACTIVITY)
       expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
       expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
       expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
@@ -1365,67 +1390,88 @@ describe('focused blood-test projection production contract', () => {
   }, 120_000)
 })
 
+async function runFocusedActivityProjectionJourney(input: {
+  expected: readonly FocusedActivityDay[]; label: string; options: Readonly<Record<string, string>>
+  prompt: string; reply: readonly RegExp[]; rejectedReply: RegExp
+}): Promise<void> {
+  const config = await resolveRealCodexE2eConfig()
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-activity-projection-e2e-'))
+  const vaultRoot = path.join(root, 'vault'); const binDirectory = path.join(root, 'bin')
+  const commandLogPath = path.join(root, 'commands.log')
+  try {
+    await seedFocusedActivityProjectionVault(vaultRoot)
+    const developerInstructions = await buildFocusedActivityProjectionInstructions()
+    await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+    const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+    const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never', allowFinishWithoutReply: false,
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: config.codexHome, developerInstructions,
+      // Retain the production dynamic-tool surface; no fabricated tool results.
+      env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+      model: config.model, modelProvider: config.modelProvider,
+      prompt: input.prompt,
+      reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
+    })
+    const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+    const reads = commands.filter(command => !isRecordedVaultHelpCommand(command))
+    expect(commands.filter(isRecordedVaultHelpCommand).length).toBeLessThanOrEqual(1)
+    expect(commands.every(command => /^wearables activity list(?:\s|$)/u.test(command))).toBe(true)
+    expect(reads).toHaveLength(1)
+    const tokens = reads[0]!.split(/\s+/u).slice(3)
+    const options = new Map<string, string>()
+    while (tokens.length) {
+      const [flag, inline] = tokens.shift()!.split('=')
+      expect([...Object.keys(input.options), '--format']).toContain(flag)
+      expect(options.has(flag!)).toBe(false)
+      const value = inline ?? tokens.shift()
+      expect(value).toBeDefined(); options.set(flag!, value!)
+    }
+    for (const [flag, value] of Object.entries(input.options)) expect(options.get(flag)).toBe(value)
+    if (options.has('--format')) expect(['json', 'toon']).toContain(options.get('--format'))
+    const actions = readCapabilityRoutingActions(result.jsonEvents)
+    expect(actions).toHaveLength(commands.length)
+    for (const action of actions) {
+      if (action.kind !== 'command') throw new Error('Only the focused activity read/help is permitted.')
+      expect(action.ok).toBe(true)
+      const command = readFocusedActivityProjectionCommand(action.command)
+      if (!isRecordedVaultHelpCommand(command)) expectFocusedActivityProjectionOutput(action.output, input.expected)
+    }
+    expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+    expect(result.runtimeIssueInputs).toEqual([])
+    expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+    expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+    expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+    await expectOnlyFocusedActivityProjection(vaultRoot)
+    const reply = result.finalMessage.trim()
+    process.stdout.write(`[focused-activity-projection-e2e] ${JSON.stringify({ scenario: input.label, reads: reads.length, reply })}\n`)
+    for (const pattern of input.reply) expect(reply).toMatch(pattern)
+    expect(reply).not.toMatch(input.rejectedReply)
+    expect(reply.length).toBeLessThanOrEqual(400)
+  } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+}
+
 describeRealCodex('real Codex focused wearable activity projection e2e', () => {
   it('answers one Oura step day from one native read without other lookups or effects', async () => {
-    const config = await resolveRealCodexE2eConfig()
-    const root = await mkdtemp(path.join(tmpdir(), 'murph-activity-projection-e2e-'))
-    const vaultRoot = path.join(root, 'vault'); const binDirectory = path.join(root, 'bin')
-    const commandLogPath = path.join(root, 'commands.log')
-    try {
-      await seedFocusedActivityProjectionVault(vaultRoot)
-      const developerInstructions = await buildFocusedActivityProjectionInstructions()
-      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
-      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
-      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
-      const result = await executeRealCodexAppServerTurn({
-        approvalPolicy: 'never', allowFinishWithoutReply: false,
-        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
-        codexHome: config.codexHome, developerInstructions,
-        // Retain the production dynamic-tool surface; no fabricated tool results.
-        env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
-        model: config.model, modelProvider: config.modelProvider,
-        prompt: 'How many steps did Oura report on January 3, 2026? Read my wearable activity for that date, provider oura, limit one. Give me just the source and step count. No advice, other lookups, messages to anyone, or changes.',
-        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
-      })
-      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
-      const reads = commands.filter(command => !isRecordedVaultHelpCommand(command))
-      expect(commands.filter(isRecordedVaultHelpCommand).length).toBeLessThanOrEqual(1)
-      expect(commands.every(command => /^wearables activity list(?:\s|$)/u.test(command))).toBe(true)
-      expect(reads).toHaveLength(1)
-      const tokens = reads[0]!.split(/\s+/u).slice(3)
-      const options = new Map<string, string>()
-      while (tokens.length) {
-        const [flag, inline] = tokens.shift()!.split('=')
-        expect(['--date', '--provider', '--limit', '--format']).toContain(flag)
-        expect(options.has(flag!)).toBe(false)
-        const value = inline ?? tokens.shift()
-        expect(value).toBeDefined(); options.set(flag!, value!)
-      }
-      expect(options.get('--date')).toBe('2026-01-03')
-      expect(options.get('--provider')).toBe('oura')
-      expect(options.get('--limit')).toBe('1')
-      if (options.has('--format')) expect(['json', 'toon']).toContain(options.get('--format'))
-      const actions = readCapabilityRoutingActions(result.jsonEvents)
-      expect(actions).toHaveLength(commands.length)
-      for (const action of actions) {
-        if (action.kind !== 'command') throw new Error('Only the focused activity read/help is permitted.')
-        expect(action.ok).toBe(true)
-        const command = readFocusedActivityProjectionCommand(action.command)
-        if (!isRecordedVaultHelpCommand(command)) expectFocusedActivityProjectionOutput(action.output)
-      }
-      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
-      expect(result.runtimeIssueInputs).toEqual([])
-      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
-      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
-      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
-      await expectOnlyFocusedActivityProjection(vaultRoot)
-      const reply = result.finalMessage.trim()
-      process.stdout.write(`[focused-activity-projection-e2e] ${JSON.stringify({ reads: reads.length, reply })}\n`)
-      expect(reply).toMatch(/8,?800/u); expect(reply).toMatch(/steps/iu); expect(reply).toMatch(/oura/iu)
-      expect(reply).not.toMatch(/12,?300|6,?200|\b(?:updated|changed|deleted|sent|scheduled)\b|\?/iu)
-      expect(reply.length).toBeLessThanOrEqual(400)
-    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+    await runFocusedActivityProjectionJourney({
+      expected: FOCUSED_OURA_ACTIVITY, label: 'oura-one-day',
+      options: { '--date': '2026-01-03', '--provider': 'oura', '--limit': '1' },
+      prompt: 'How many steps did Oura report on January 3, 2026? Read my wearable activity for that date, provider oura, limit one. Give me just the source and step count. No advice, other lookups, messages to anyone, or changes.',
+      reply: [/8,?800/u, /steps/iu, /oura/iu],
+      rejectedReply: /12,?300|6,?200|\b(?:updated|changed|deleted|sent|scheduled)\b|\?/iu,
+    })
+  }, 360_000)
+
+  it('answers composed multi-provider step days from one native read without other lookups or effects', async () => {
+    await runFocusedActivityProjectionJourney({
+      expected: FOCUSED_COMPOSED_ACTIVITY, label: 'composed-two-days',
+      options: { '--from': '2026-01-02', '--to': '2026-01-03', '--limit': '2' },
+      prompt: 'How many steps did my wearables record each day from January 2 to January 3, 2026? Read my wearable activity from 2026-01-02 to 2026-01-03 across all providers, limit two. Give me just each date with its selected source and step count. No advice, other lookups, messages to anyone, or changes.',
+      reply: [/12,?300/u, /6,?200/u, /garmin/iu, /oura/iu, /steps/iu],
+      rejectedReply: /8,?800|\b(?:updated|changed|deleted|sent|scheduled)\b|\?/iu,
+    })
   }, 360_000)
 })
 
