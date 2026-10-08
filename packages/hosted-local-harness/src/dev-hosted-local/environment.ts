@@ -1233,10 +1233,6 @@ export function buildWranglerLocalDevConfig(
     ],
     analytics_engine_datasets: [
       {
-        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
-        dataset: "murph_hosted_runtime_retries",
-      },
-      {
         binding: "HOSTED_STANDBY_ANALYTICS",
         dataset: "murph_hosted_standby_inventory",
       },

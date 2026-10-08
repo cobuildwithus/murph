@@ -36,6 +36,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Removal of the unused runtime retry telemetry is recorded in
+[`dead retry analytics`](exec-plans/completed/2026-10-08-remove-dead-retry-analytics.md);
+retry diagnostics remain in `docs/hosted-runtime-log-database.md`.
+
 Retention waiting behind live work in another mode is owned by
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md); evidence
 is tracked in

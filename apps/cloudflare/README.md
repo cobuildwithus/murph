@@ -836,46 +836,6 @@ point with target two and one ready slot shows overlapping demand, and
 inventory is read after the result. Query daily claims and preparation latency
 with [`scripts/standby-inventory.sql`](scripts/standby-inventory.sql).
 
-The `HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding records one
-identifier-free data point only after the runtime owner has decided to return
-`retry_later`. `index1` is the sole index and `blob2` repeats the bounded retry
-reason, `blob1` is the schema `murph.hosted-runtime-retry.v1`, `double1` is the
-event count, and `double2` is the selected retry delay in milliseconds. For
-`container_busy` only, optional `blob3` records one of these closed control-path
-stages:
-
-- `active_runtime_contention`: an active runtime fence remains contended after
-  the liveness check.
-- `background_preemption_unavailable`: the active container exposes no
-  background-abort capability.
-- `background_preemption_not_accepted`: background abort returned a bounded
-  non-accepted, non-failure status.
-- `stopped_container_record_pending`: a destroyed pending stop target could not
-  yet be cleared from the runner record.
-
-Historical reports still recognize `non_runtime_write_fence` and
-`cooperative_handoff_pending`; current code no longer emits them. An exact
-system-mailbox child that accepts a foreground wake is acknowledged without
-requiring a new owner. The child retains its existing authority checks.
-
-The stage is a finite mechanism label, not a processing mode, scenario name,
-identifier, free-text value, or private-state projection. Other retry reasons
-must omit it. This is an optional-field evolution of the existing v1 point:
-historical points have no `blob3`, and the report groups them explicitly as
-`unattributed`. The write remains exactly one immediate, unawaited,
-best-effort point per existing retry and is absent from successful processing.
-Run
-[`scripts/runtime-retry-reasons.sql`](./scripts/runtime-retry-reasons.sql)
-through the private Cloudflare Analytics Engine SQL API or dashboard to get a
-sampling-corrected reason-plus-stage breakdown. It defaults to the trailing 24
-hours; for later two-hour comparisons, replace its first timestamp predicate
-with the commented half-open fixed UTC bounds and run once for each adjacent
-window. The corresponding Workers structured log includes the bounded retry
-reason, `runtimeProcessingRetryStage` for `container_busy`, and the existing
-`orchestrationAttemptId` for request-level joins. No identifier or user,
-workspace, message, command, provider, health, path, content, credential, or
-raw-error value is copied into Analytics Engine blobs, indexes, or doubles.
-
 For the primary production control database, run the identifier-free cold-start
 report through the read-only helper:
 
