@@ -43400,7 +43400,7 @@ describeRealCodex('wearable haptic reminder journey', () => {
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 360_000)
 
-  it.each(['whoop-delay', 'short-wait', 'garmin-unknown', 'whoop-useful', 'app-unreachable', 'device-disconnected', 'health-active', 'health-stale', 'offer-whoop', 'offer-garmin', 'offer-none', 'offer-declined'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
+  it.each(['whoop-delay', 'whoop-locked', 'short-wait', 'garmin-unknown', 'whoop-useful', 'app-unreachable', 'device-disconnected', 'health-active', 'health-stale', 'offer-whoop', 'offer-garmin', 'offer-none', 'offer-declined'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wrist-reminder-'))
     const binDirectory = path.join(workingDirectory, 'bin')
@@ -43411,6 +43411,8 @@ describeRealCodex('wearable haptic reminder journey', () => {
     const now = new Date()
     now.setUTCSeconds(0, 0) // Match the existing scheduler’s minute-resolution contract.
     const targetAt = new Date(now.getTime() + 600_000).toISOString()
+    // Older apps still need Murph open; only a keep-open demand on a current app is wrong.
+    const withoutOlderAppCaveat = (reply: string) => reply.replace(/[^.\n]*\bolder\b[^.\n]*[.\n]?/giu, '')
     try {
       await initializeVault({ vaultRoot: workingDirectory })
       let assistantCliContract: string | null = null
@@ -43516,6 +43518,8 @@ describeRealCodex('wearable haptic reminder journey', () => {
         ? 'I am testing whether your buzzes reach my bands. Both are connected in Murph and the app is open. Wait 5 seconds, then buzz my WHOOP and my Garmin once each.'
         : scenario === 'whoop-delay'
         ? `Please buzz my WHOOP once when my ten-minute meditation ends at ${targetAt}. No buzz now. The band is connected in Murph and I will keep the app open until then.`
+        : scenario === 'whoop-locked'
+        ? `Please buzz my WHOOP once when my ten-minute meditation ends at ${targetAt}. No buzz now. The band is connected in Murph, but my phone will be locked in my pocket. Will the buzz still reach me?`
         : scenario === 'whoop-useful'
           ? 'My WHOOP is connected in Murph. Give it one test buzz and tell me when wrist reminders would be useful for me.'
           : 'Please buzz my Garmin once now. I know its find-device alert may also sound. Do not retry if the result is unclear.'), false)
@@ -43544,7 +43548,8 @@ describeRealCodex('wearable haptic reminder journey', () => {
         if (scenario === 'offer-whoop' || scenario === 'offer-garmin') {
           expect(result.finalMessage).toMatch(/buzz|wrist|vibrat/iu)
           expect(result.finalMessage).toMatch(/if you|want|would you|can also|could also/iu)
-          expect(result.finalMessage).toMatch(/open/iu)
+          expect(result.finalMessage).toMatch(/Connect device|connected in Murph|Settings|notification/iu)
+          expect(withoutOlderAppCaveat(result.finalMessage)).not.toMatch(/(?:keep|leave) (?:the )?(?:Murph )?(?:app )?open|needs? (?:the )?(?:Murph )?(?:app )?(?:to (?:be|stay) )?open/iu)
           expect(result.finalMessage).not.toMatch(/I(?:['’]ll| will| have) (?:also )?(?:buzz|vibrate|connect)|(?:buzz|wrist cue) (?:is|has been) (?:set|scheduled)/iu)
           if (scenario === 'offer-garmin') expect(result.finalMessage).toMatch(/sound|not (?:always )?silent/iu)
           else expect(result.finalMessage).toMatch(/start|begin/iu)
@@ -43610,7 +43615,16 @@ describeRealCodex('wearable haptic reminder journey', () => {
       expect(calls.every(call => call.action === 'haptic' && call.operation === 'status')).toBe(true)
       expect(saves).toHaveLength(1)
       expect(saves[0]).toMatchObject({ action: 'save', schedule: { kind: 'at', at: targetAt } })
-      expect(result.finalMessage).toMatch(/10|ten|meditation|timer/iu)
+      // Confirming the scheduled clock time also ties the buzz to the meditation end.
+      const targetClock = `${Number(targetAt.slice(11, 13))}:${targetAt.slice(14, 16)}`
+      expect(result.finalMessage).toMatch(scenario === 'whoop-locked' ? new RegExp(`10|ten|meditation|timer|${targetClock}`, 'iu') : /10|ten|meditation|timer/iu)
+      if (scenario === 'whoop-locked') {
+        // A recent app delivers in the background, best effort: no keep-open demand, no guarantee.
+        expect(result.finalMessage).toMatch(/background|locked|lock/iu)
+        expect(result.finalMessage).toMatch(/best[- ]effort|usually|should|not guaranteed|can.t guarantee|cannot guarantee|notification/iu)
+        expect(withoutOlderAppCaveat(result.finalMessage)).not.toMatch(/(?:keep|leave) (?:the )?(?:Murph )?(?:app )?open|needs? (?:the )?(?:Murph )?(?:app )?(?:to (?:be|stay) )?open|won.t (?:reach|work|arrive)/iu)
+        expect(result.finalMessage).not.toMatch(/(?<!not |n[’']t be |never )guaranteed to|will definitely|(?<!not )always (?:reach|arrive|work)/iu)
+      }
       const saved = (await listCanonicalAssistantCronRecords(workingDirectory))[0]
       if (!saved || saved.kind !== 'automation') throw new Error('Expected saved meditation timer.')
       const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(saved), now: targetAt })
