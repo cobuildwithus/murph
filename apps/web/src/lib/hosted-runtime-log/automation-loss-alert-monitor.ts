@@ -137,6 +137,8 @@ export async function runHostedAutomationLossAlertMonitor(input: {
     idempotencyScope: "murph/automation-loss",
     subject: "Scheduled automation runs lost",
     reminderIntervalMs: HOSTED_AUTOMATION_LOSS_REMINDER_INTERVAL_MS,
+    // Quiet hours outlast the 6-hour window; a deferred night loss would age out unreported.
+    sendDuringQuietHours: true,
     status: { healthy: "automation_loss_healthy", alerting: "automation_loss_alerting",
       alertSending: "automation_loss_sending", alertFailed: "automation_loss_failed" },
     error: {

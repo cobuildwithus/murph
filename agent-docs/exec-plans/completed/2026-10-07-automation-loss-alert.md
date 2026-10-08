@@ -69,8 +69,9 @@ Updated: 2026-10-07
 - Alert on any outright loss (threshold 1): the owner wants every run a
   member never receives, not delays. An earlier 3-runtime threshold was
   replaced before merge.
-- Respect quiet hours: lost scheduled runs are not urgent overnight, and the
-  6-hour window keeps a daytime incident visible past quiet hours.
+- Send during quiet hours like the runaway monitor (ReviewGPT round 1,
+  accepted): the 23:00–07:00 quiet period outlasts the 6-hour window, so a
+  deferred loss early in the night would age out unreported.
 - Changelog: internal-only operator alerting; no member-visible change.
 
 ## Verification

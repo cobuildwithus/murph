@@ -921,9 +921,11 @@ with zero prior failures by design. `personal-patterns-update` is excluded
 because its own per-occurrence alert owns it. Cron rows are capped per pass, so
 counts are lower bounds.
 
-Recipients, timezone, reminders, quiet hours and recovery follow the shared
-incident owner with the latency monitor's configuration; read failures cannot
-clear an existing incident. Each evaluation runs one time-indexed aggregate and,
+Recipients, timezone, reminders and recovery follow the shared incident owner
+with the latency monitor's configuration. Like the runaway monitor it sends
+during quiet hours: the 23:00–07:00 quiet period outlasts the 6-hour window, so
+a deferred loss early in the night would age out unreported. Read failures
+cannot clear an existing incident. Each evaluation runs one time-indexed aggregate and,
 only when alerting, a second one for failed scheduled attempts by error code.
 Email and incident details contain only counts per allowlisted managed
 automation slug (other slugs, which members can name, read `member_automation`)

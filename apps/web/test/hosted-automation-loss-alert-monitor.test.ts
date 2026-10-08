@@ -117,11 +117,14 @@ describe("scheduled automation loss incident monitor", () => {
     expect(sendAlert).toHaveBeenCalledTimes(2);
   });
 
-  it("defers a new incident during quiet hours", async () => {
+  it("reports a loss at the start of quiet hours before it can age out of the window", async () => {
     alerting();
-    expect((await runHostedAutomationLossAlertMonitor({ now: new Date("2026-10-07T02:00:00Z"), env, sendAlert })).outcome)
-      .toBe("deferred_quiet_hours");
-    expect(sendAlert).not.toHaveBeenCalled();
+    expect((await runHostedAutomationLossAlertMonitor({ now: new Date("2026-10-07T23:30:00Z"), env, sendAlert })).outcome)
+      .toBe("alert_sent");
+    mocks.query.mockResolvedValue({ rows: [] });
+    expect((await runHostedAutomationLossAlertMonitor({ now: new Date("2026-10-08T05:35:00Z"), env, sendAlert })).outcome)
+      .toBe("healthy");
+    expect(sendAlert).toHaveBeenCalledOnce();
   });
 
   it("does not send when the pre-send recheck recovers", async () => {
