@@ -1129,3 +1129,7 @@ Final usage-envelope fitting after trusted Worker attribution is tracked in
 The scheduled automation loss alert (any run lost after all retries) is
 tracked in [the automation loss alert plan](exec-plans/completed/2026-10-07-automation-loss-alert.md);
 `../docs/hosted-runtime-log-database.md` owns the operational contract.
+
+The six-hour freshness window for Flex-retry managed automations is tracked in
+[the Flex retry window plan](exec-plans/completed/2026-10-07-flex-retry-6h-window.md);
+`../ARCHITECTURE.md` owns the runtime contract.

@@ -56,10 +56,7 @@ import {
   isRetiredMurphManagedAutomationId,
   isRecognizedMurphOnboardingFollowupAutomation,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
-  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
-  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedMaintenancePolicy,
@@ -135,6 +132,7 @@ import { readAssistantDeviceActivityParentAutomation } from '../device-activity-
 import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
+  ASSISTANT_CRON_FLEX_RETRY_AUTOMATION_IDS,
   isAssistantCronNotificationOccurrenceFresh,
   isCanonicalAssistantCronNotificationOccurrenceDeliverable,
   isCanonicalAssistantCronSourceEnabled,
@@ -2141,21 +2139,10 @@ async function runAssistantCronAutomationPreconditions(input: {
   return lifecycleSkipReason
 }
 
-// These managed jobs have no user-promised delivery minute. Timed reminders,
-// meal closeouts and independent follow-ups retain standard-tier recovery.
-const FLEX_RETRY_AUTOMATION_IDS = new Set([
-  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
-  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
-  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
-  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
-])
-
 function assistantCronJobPrefersFlexRetries(job: ResolvedAssistantCronJob): boolean {
   return assistantCronJobIsPreemptibleBackgroundMaintenance(job)
     || (job.kind === 'canonical' && job.source.kind === 'automation'
-      && FLEX_RETRY_AUTOMATION_IDS.has(job.source.automationId))
+      && ASSISTANT_CRON_FLEX_RETRY_AUTOMATION_IDS.has(job.source.automationId))
 }
 
 function resolveAssistantCronTurnServiceTier(input: {
