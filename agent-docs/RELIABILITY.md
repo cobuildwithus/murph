@@ -25,73 +25,81 @@ to apply after cutover.
   write per message (at most ten, sequentially), within the existing database-only
   transaction. No historical repair or provider request is added.
 
-- Runtime-owned Linq iMessages with code `4001` and the exact terminal
-  reason `Message send failed` may resend each failed provider message once.
-  The existing delivery-message row owns the permanent attempt timestamp and
-  original lookup key; a parent delivery lock serializes competing claims.
-  Terminal receipt ingestion and runtime acceptance first serialize their
-  transactions by a stable hashed provider-message identity. Replacement
-  acceptance uses the same lock before the parent lock. Acceptance takes at
-  most ten message locks in sorted order; signup-welcome callbacks take them
-  before route/member materialization. This prevents concurrent transactions
-  from each missing the other's uncommitted receipt or accepted identity.
-  Legacy parent-only receipt writes take the parent lock, recheck promoted
-  message ownership and fence the active key before mutating the parent.
-  Acceptance replaces the existing active message key (and matching parent
-  scalar key), preserving the established receipt-reader contract. Receipt
-  updates recheck that active key after acquiring the parent lock.
-  Duplicate webhooks, callback replay, and a failed or transport-ambiguous
-  replacement never create another attempt. The original failure remains
-  observable, while replacement receipts advance the same logical delivery;
-  receipts for a replaced original cannot regress it. Group multi-message
-  delivery retries only the failed part and preserves no-receipt status.
-  Recovery runs after failure ingestion and after runtime acceptance to cover
-  both receipt/acceptance arrival orders. It is limited to deliveries accepted
-  within 24 hours and current configured sender, route, account access, and
-  line/chat egress policy. Read the exact failed outbound through the official
-  SDK (three-second limit). When retrieved actual service is null or omitted,
-  only the matching terminal failed receipt's exact `iMessage` service may
-  supply transport evidence: the matching child, or the legacy scalar only
-  when there are no children. Never borrow a sibling or multipart parent
-  projection. Recheck this evidence under the existing parent claim lock.
-  Explicit non-iMessage/unknown retrieved service and contradictory/unknown
-  preferred service stay closed. Then claim in a short database-only transaction
-  and resend once (five-second limit, SDK retries disabled) into that same
-  chat with explicit `preferred_service: iMessage` and a stable retry idempotency
-  key. Retrieved content stays in memory.
-  Text, native links, and non-audio attachments preserve their send shape;
-  voice memos, app cards, absent/expired content, and other non-reconstructible
-  formats retain the original failure instead of changing their semantics.
-  Web-owned onboarding sends and manual/provider-only sends retain their
-  existing recovery owners. Other `4001` reasons and `4006` remain excluded
-  because they can still deliver late. Scheduling failure cannot invalidate an
-  accepted runtime handoff. An unavailable provider response or interrupted
-  post-dispatch recording may leave failure evidence unresolved; the consumed
-  claim deliberately prevents a further resend.
-  Web structured logs use `hosted-onboarding.linq.terminal-retry` for every
-  failed-event evaluation and exceptional acceptance reconciliation. They
-  report the trigger, stage, finite outcome/reason, elapsed time, event suffix,
-  message correlation digest and whether this evaluation consumed the permanent
-  claim. When available, `providerServiceClass`, `providerPreferredServiceClass`,
-  and `receiptServiceClass` report only `omitted`, `null`, `imessage`, `sms`,
-  `rcs`, or `unknown`; receipt classification uses the candidate evaluated at
-  the latest checkpoint. These distinguish absent actual transport from an
-  explicit provider value without retaining raw strings or adding log events.
-  Provider failures expose only bounded HTTP status and a closed error class;
-  bodies, attachment URLs, sender/chat identities and provider prose stay out.
-  Normal successful acceptance checks stay quiet. An accepted replacement is
-  explicitly delivery-unconfirmed; canonical delivery/message receipts prove
-  recovery. Logging failure cannot change the send or release its claim.
-  The post-response acceptance check performs one exact delivery lookup
-  per provider ID (at most ten, sequentially), with no provider work on normal
-  success. Recovery reads at most eleven child rows to reject an oversized
-  delivery, reuses bounded canonical access reads, and opens at most one
-  transaction/connection per invocation at a time. Network calls occur between
-  the claim and acceptance transactions; there is no collection worker,
-  scheduler, or new retry queue.
-  Apply the additive delivery-message migration before deploying the new Web
-  reader/writer. Existing Web readers continue using the active message key;
-  the new nullable fields do not require a Cloudflare runtime deployment.
+- Runtime-owned Linq replies with code `4001` and the exact reason
+  `Message send failed` can make at most four replacement sends within three
+  minutes of original acceptance (five total sends). Each replacement needs its
+  own definitive failed receipt; acceptance alone never proves delivery.
+  Other `4001` reasons, `4006`, missing receipts, and ambiguous dispatch remain
+  closed because they may deliver late. Existing first-delivery evidence also
+  denies a resend, even if a newer receipt reports failure.
+  The existing delivery-message row owns count, immutable expiry, persisted due
+  time, exact claimed message key, encrypted recovery context, and up to four
+  blinded previous-message keys. Delays are 10/20/40/80 seconds with 80–100%
+  jitter, measured after the failure is observed. A remaining-time check reserves
+  the bounded GET/send budget. Expiry may prevent the full attempt count. This
+  is a new-dispatch deadline anchored to the original recorded acceptance, not
+  a guarantee of final delivery by that instant. A provider may still finish an
+  already-accepted attempt afterward. Provider terminal-failure latency consumes
+  the same window; five total sends is a maximum, never a target that extends it.
+  A pointer-only Web Workflow wakes the row; it does not own send authority.
+  Duplicate starts cannot move the due time or pass the parent-locked count/key
+  claim twice. A durable step retry rechecks the permanent claim, so a crash or
+  timeout after claiming never creates a fresh-key send. There is intentionally
+  no automatic ambiguous-send recovery.
+  Failure webhooks await durable admission before acknowledgement. Runtime
+  acceptance also awaits admission to cover receipt-before-acceptance; normal
+  successful callbacks do bounded database reads without provider work. A
+  failed admission leaves the accepted identity intact and returns retryable
+  failure; runtime accepted-delivery confirmation preserves its existing
+  may-have-succeeded fence. The first admission atomically sets the legacy
+  attempt timestamp, closing old one-shot writers during rollout. Previously
+  consumed legacy attempts without new recovery state remain permanently closed.
+  Existing hashed message receipt locks precede the delivery parent lock when
+  recording acceptance. Exact attempt/key compare-and-set replaces the active
+  child and matching scalar key, appends blinded history, and catches up any
+  receipt that arrived before replacement acceptance. Old receipts map to the
+  same logical delivery but cannot regress the current attempt. Replayed original
+  callbacks cannot reset its active key. Multipart recovery replaces only the
+  failed child and preserves the existing group receipt policy.
+  Every dispatch checks current configured sender, exact route, consent-aware
+  account access, line/chat egress and expiry, before retrieval and again under
+  the parent claim lock. A newer runtime delivery already accepted in the same
+  chat suppresses stale recovery; this is not a provider-level FIFO guarantee
+  against another send already in flight. Provider GET has a three-second limit;
+  POST has a five-second limit and SDK retries disabled. Each claimed attempt
+  uses a deterministic new idempotency key after definitive terminal failure.
+  Linq's send guide says a processed key returns the original response; its
+  [4006 documentation](https://docs.linqapp.com/channel/imessage/error/codes/4xxx/4006/)
+  explicitly says reusing the original key returns the stored failed message
+  without sending. A transport replay of one attempt and a replacement after
+  terminal failure are different operations. Do not change this rule based only
+  on an ambiguous instruction to retry idempotently. The provider's suggestion
+  to retry timeouts after a brief wait does not establish no-delivery certainty;
+  this owner still excludes `4006` and all ambiguous POST outcomes.
+  GET must match message, chat, sender,
+  outbound direction and failed status without delivery/read evidence.
+  Missing actual transport is valid for a definitive no-send. Preserve the
+  retrieved original preference: explicit `iMessage` stays explicit; null or
+  omitted preference remains omitted (the provider's automatic fallback policy).
+  Explicit non-iMessage/unknown actual, receipt or preferred service stays closed.
+  Service evidence belongs to the exact failed child, or the scalar only when
+  no children exist; sibling and parent projections never grant authority.
+  Text, native links and non-audio attachments preserve send semantics. Voice
+  memos, app cards, missing content and unsupported shapes stay failed. Provider
+  content is transient. Only chat/message identities are sealed with the member
+  secure-box codec, bound to the delivery-message row, for pointer wake recovery;
+  they follow delivery-row retention and are unusable past the retry expiry.
+  Workflow errors are sanitized before journaling. Structured diagnostics retain
+  finite classification, hashed correlation, attempt count and outcome, never
+  provider bodies, attachment URLs or raw chat/sender/message identities.
+  Retrieval and sealing are outside short database-only transactions. Reads are
+  exact or chat-indexed and bounded to eleven children (oversize fails closed).
+  No historical sweep or runtime queue is introduced. Apply the additive Web
+  migration before deployment; no runtime deployment or historical resend is
+  required. Workflow/CI validation and rollout remain separate release gates.
+  Provider references: [4001 classification](https://docs.linqapp.com/channel/imessage/error/codes/4xxx/4001/),
+  [protocol selection](https://docs.linqapp.com/channel/imessage/guides/messaging/protocol-selection/),
+  [idempotency](https://docs.linqapp.com/channel/imessage/guides/messaging/sending-messages/#idempotency).
 
 - Keep behavior deterministic and documented as the first modules are added.
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.

@@ -12,23 +12,25 @@ to apply after cutover.
 
 
 - Terminal Linq retry authority comes only from an existing runtime-owned
-  failed delivery, current exact chat/sender routing, consent-aware runtime
-  access, and current line/chat egress policy. The existing runtime access owner
-  must allow recovery both before content retrieval and at attempt claiming;
-  explicit health-data consent withdrawal denies it at either checkpoint.
-  Provider retrieval must match the original message, chat, outbound direction,
-  failed status, and sender. Retrieved service must be exactly `iMessage`, or
-  null/omitted with exact `iMessage` evidence on the matching failed-message
-  receipt. Use the matching child when children exist; only a parent-only
-  candidate may use its scalar receipt. Recheck that same authority under the
-  existing parent lock before consuming the attempt. Explicit non-iMessage or
-  unknown retrieved service and any non-null/non-omitted `preferred_service`
-  other than `iMessage` deny recovery; preferred service alone is not evidence.
-  The resend explicitly requests `iMessage`, never transport fallback. Never
-  use provider content to select a recipient or line. The retry
-  stores only its timestamp and blinded original-message correlation on
-  the existing delivery-message row. Retrieved bodies and attachment URLs stay
-  request-local and never enter logs, mailbox input, or another content store.
+  failed delivery with exact code `4001` / `Message send failed`, current exact
+  chat/sender routing, consent-aware access, line/chat egress policy and a bounded
+  three-minute recovery window. Every replacement needs its own terminal failure;
+  uncertain acceptance never grants another send. Check authority before provider
+  retrieval and under the parent claim lock. Provider retrieval must match the
+  message, chat, outbound direction, failed status and sender, without positive
+  delivery/read evidence. Explicit non-iMessage or unknown actual, exact-receipt
+  or preferred service denies recovery. Missing service is not evidence of any
+  transport: preserve the original policy by keeping a missing preference omitted
+  and an explicit `iMessage` preference explicit. Never derive a recipient or line
+  from content, siblings or aggregate parent service. The existing child row owns
+  the bounded attempt count and blinded exact-message lineage. Only provider
+  chat/message identities are encrypted with the member secure-box codec and
+  row-bound AAD for durable wakes; Workflow input contains only its opaque row ID.
+  These encrypted identities follow delivery-row retention; expiry disables their
+  recovery use. Retrieved bodies and attachment URLs stay request-local and never
+  enter logs, workflow state, mailbox input or another content store. Workflow
+  errors are sanitized before journaling. The reliability owner documents rolling
+  writer fences, expiry, idempotency and receipt-ordering rules.
 
 - Treat `.env` and `.env.*` files as secret inputs. Murph's CLI may load local `.env.local` and `.env` files at runtime for operator credentials, but agents and runtime logs must never print, fixture, package, or commit their contents.
 - Do not share raw filesystem archives of a repo clone for review or support. Ignored local `.env` files and build output such as `.next/` can leak through a clone/archive even when git has no tracked secret diff; use the guarded `scripts/package-audit-context.sh` / `pnpm zip:src` path instead, because it stages git-visible files and filters blocked local residue from the bundle.

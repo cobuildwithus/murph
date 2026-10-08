@@ -1,4 +1,5 @@
 import { randomInt, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { Prisma } from "@prisma/client";
 import type { Message } from "@linqapp/sdk/resources/messages";
@@ -25,6 +26,7 @@ import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-p
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq-webhook";
 import {
   retryHostedLinqTerminalSend,
+  processHostedLinqTerminalRetry,
   retryHostedLinqTerminalSendForEvent,
 } from "@/src/lib/hosted-onboarding/linq-terminal-retry";
 import {
@@ -36,8 +38,9 @@ import { createPrismaClient } from "@/src/lib/prisma";
 const provider = vi.hoisted(() => ({
   firstTurnSend: vi.fn<typeof import("@/src/lib/hosted-onboarding/linq-client").sendHostedLinqChatMessage>(),
   log: vi.fn(),
+  start: vi.fn(async (_input: Record<string, unknown>) => ({ runId: "synthetic-retry-workflow" })),
   read: vi.fn<() => Promise<Message>>(),
-  send: vi.fn<() => Promise<{ chatId: string; messageId: string }>>(),
+  send: vi.fn<(input: { chatId: string; message: import("@linqapp/sdk/resources").MessageContent }) => Promise<{ chatId: string; messageId: string }>>(),
 }));
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/linq-client")>(),
@@ -45,6 +48,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async (importOriginal) => ({
   resendHostedLinqMessage: provider.send,
   sendHostedLinqChatMessage: provider.firstTurnSend,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/workflow-start", () => ({ startHostedPointerWorkflow: provider.start }));
 
 vi.mock("@/src/lib/hosted-execution/usage", () => ({
   recordHostedAiUsageRecords: vi.fn(async () => ({ recordedIds: [] })),
@@ -85,6 +90,7 @@ async function withFixture(run: (fixture: Awaited<ReturnType<typeof seed>>) => P
 }
 
 async function seed() {
+  provider.start.mockClear();
   provider.firstTurnSend.mockReset();
   provider.log.mockReset();
   provider.read.mockReset();
@@ -162,7 +168,16 @@ async function seed() {
     await ingest(event);
     return event;
   };
-  const retry = (id = messageId) => retryHostedLinqTerminalSend({ chatId, messageId: id, prisma });
+  const retry = async (id = messageId) => {
+    await retryHostedLinqTerminalSend({ chatId, messageId: id, prisma });
+    // Advance only this synthetic row's durable timer; production never bypasses it.
+    await prisma.hostedLinqDeliveryMessage.updateMany({
+      where: { deliveryId, messageLookupKey: { in: createHostedLinqMessageLookupKeyReadCandidates(id) },
+        terminalRetryNextAt: { not: null } },
+      data: { terminalRetryNextAt: new Date(Date.now() - 1) },
+    });
+    await retryHostedLinqTerminalSend({ chatId, messageId: id, prisma, execute: true });
+  };
   const grantConsent = () => prisma.hostedConsentGrant.create({
     data: {
       memberId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE, status: "granted",
@@ -573,14 +588,14 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
     });
   });
 
-  it("preserves first delivery during legacy promotion when replacement acceptance is ambiguous", async () => {
+  it("never resends a message with first-delivery evidence despite a later failure", async () => {
     await withFixture(async (f) => {
       await f.ingest(timingReceipt(f, { eventAt: f.at(2_000), deliveredAt: f.at(1_000) }));
       await f.receipt();
       provider.send.mockRejectedValue(new Error("synthetic ambiguous send"));
-      await expect(f.retry()).rejects.toThrow("synthetic ambiguous send");
-      expect(await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } }))
-        .toMatchObject({ deliveredAt: f.at(1_000), terminalRetryOriginalMessageLookupKey: null });
+      await f.retry();
+      expect(provider.send).not.toHaveBeenCalled();
+      expect(await f.prisma.hostedLinqDeliveryMessage.count({ where: { deliveryId: f.deliveryId } })).toBe(0);
       await f.ingest(timingReceipt(f, { eventAt: f.at(20_000), deliveredAt: f.at(19_000) }));
       expect(await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } }))
         .toMatchObject({ status: "delivered", deliveredAt: f.at(1_000) });
@@ -594,8 +609,9 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       const event = await f.receipt();
       provider.read.mockResolvedValue({ ...f.original, delivery_status: "pending" });
       await retryHostedLinqTerminalSendForEvent({ event, prisma: f.prisma });
+      await f.retry();
       expect(provider.log).toHaveBeenLastCalledWith("hosted-onboarding.linq.terminal-retry", expect.objectContaining({
-        trigger: "failure_webhook", stage: "retrieve", outcome: "skipped",
+        trigger: "acceptance_callback", stage: "retrieve", outcome: "skipped",
         reason: "provider_status_not_failed", attemptClaimed: false,
       }));
       provider.read.mockResolvedValue(f.original);
@@ -654,6 +670,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
         size_bytes: 100, reactions: null, url: "https://example.test/private-audio",
       }] });
       await retryHostedLinqTerminalSendForEvent({ event, prisma: f.prisma });
+      await f.retry();
       expect(provider.log).toHaveBeenLastCalledWith("hosted-onboarding.linq.terminal-retry", expect.objectContaining({
         outcome: "skipped", attemptClaimed: false,
         reason: { empty: "content_missing", app: "app_card_not_reconstructible", audio: "audio_not_reconstructible",
@@ -700,6 +717,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       })).toEqual({ status: kind === "original" ? "failed" : "delivered" });
       if (kind === "original") {
         await retryHostedLinqTerminalSendForEvent({ event, prisma: f.prisma });
+      await f.retry();
         expect(provider.send).toHaveBeenCalledTimes(1);
       }
     });
@@ -729,6 +747,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       if (consent === "granted") await f.grantConsent();
       const event = await f.receipt();
       await retryHostedLinqTerminalSendForEvent({ event, prisma: f.prisma });
+      await f.retry();
       expect(provider.read).toHaveBeenCalledTimes(1);
       expect(provider.send).toHaveBeenCalledTimes(1);
     });
@@ -748,10 +767,11 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
         }
         const event = await f.receipt();
         await retryHostedLinqTerminalSendForEvent({ event, prisma: f.prisma });
+      await f.retry();
         expect(provider.read).toHaveBeenCalledTimes(withdrawal === "before-receipt" ? 0 : 1);
         expect(provider.send).not.toHaveBeenCalled();
         expect(await f.prisma.hostedLinqDeliveryMessage.count({
-          where: { deliveryId: f.deliveryId, terminalRetryAttemptedAt: { not: null } },
+          where: { deliveryId: f.deliveryId, terminalRetryCount: { gt: 0 } },
         })).toBe(0);
       });
     },
@@ -774,7 +794,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       ]);
       expect(provider.send).toHaveBeenCalledTimes(1);
       expect(await f.prisma.hostedLinqDeliveryMessage.count({
-        where: { deliveryId: f.deliveryId, terminalRetryAttemptedAt: { not: null } },
+        where: { deliveryId: f.deliveryId, terminalRetryCount: { gt: 0 } },
       })).toBe(1);
       expect(provider.log).toHaveBeenCalledWith("hosted-onboarding.linq.terminal-retry", expect.objectContaining({
         outcome: "accepted", attemptClaimed: true, providerServiceClass: serviceClass,
@@ -784,7 +804,6 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
         chatId: f.chatId,
         message: {
           idempotency_key: expect.stringContaining("terminal-retry:"),
-          preferred_service: "iMessage",
           parts: [{ type: "text", value: "Here is the requested document." }],
         },
       });
@@ -806,9 +825,9 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
   });
 
   it.each([
-    ["scalar", null, "null"], ["scalar", "SMS", "sms"],
+    ["scalar", "SMS", "sms"],
     ["scalar", "RCS", "rcs"], ["scalar", "synthetic-private-service", "unknown"],
-    ["multipart", null, "null"], ["multipart", "SMS", "sms"],
+    ["multipart", "SMS", "sms"],
     ["multipart", "RCS", "rcs"], ["multipart", "synthetic-private-service", "unknown"],
   ] as const)("leaves %s receipt service %s unclaimed without borrowing transport", async (owner, receiptService, receiptClass) => {
     await withFixture(async (f) => {
@@ -839,7 +858,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       expect(provider.read).toHaveBeenCalledTimes(2);
       expect(provider.send).not.toHaveBeenCalled();
       expect(await f.prisma.hostedLinqDeliveryMessage.count({
-        where: { deliveryId: f.deliveryId, terminalRetryAttemptedAt: { not: null } },
+        where: { deliveryId: f.deliveryId, terminalRetryCount: { gt: 0 } },
       })).toBe(0);
       expect(JSON.stringify(provider.log.mock.calls)).not.toContain("synthetic-private-service");
     });
@@ -869,7 +888,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       }
       expect(provider.send).not.toHaveBeenCalled();
       expect(await f.prisma.hostedLinqDeliveryMessage.count({
-        where: { deliveryId: f.deliveryId, terminalRetryAttemptedAt: { not: null } },
+        where: { deliveryId: f.deliveryId, terminalRetryCount: { gt: 0 } },
       })).toBe(0);
       const logged = JSON.stringify(provider.log.mock.calls);
       for (const privateValue of ["synthetic-private-service", f.chatId, f.messageId, f.original.from!, "Here is the requested document."]) {
@@ -879,8 +898,8 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
   });
 
   it.each([
-    ["scalar", null, "null"], ["scalar", "SMS", "sms"],
-    ["multipart", null, "null"], ["multipart", "SMS", "sms"],
+    ["scalar", "SMS", "sms"],
+    ["multipart", "SMS", "sms"],
   ] as const)("rechecks %s receipt changing to service %s at claim without consuming the attempt", async (owner, service, serviceClass) => {
     await withFixture(async (f) => {
       const siblingId = `sibling-${f.messageId}`;
@@ -906,7 +925,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       expect(provider.read).toHaveBeenCalledTimes(1);
       expect(provider.send).not.toHaveBeenCalled();
       expect(await f.prisma.hostedLinqDeliveryMessage.count({
-        where: { deliveryId: f.deliveryId, terminalRetryAttemptedAt: { not: null } },
+        where: { deliveryId: f.deliveryId, terminalRetryCount: { gt: 0 } },
       })).toBe(0);
       // A later exact iMessage receipt can still use the unconsumed attempt.
       await f.receipt();
@@ -914,12 +933,12 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       await f.retry();
       expect(provider.send).toHaveBeenCalledTimes(1);
       expect(await f.prisma.hostedLinqDeliveryMessage.count({
-        where: { deliveryId: f.deliveryId, terminalRetryAttemptedAt: { not: null } },
+        where: { deliveryId: f.deliveryId, terminalRetryCount: { gt: 0 } },
       })).toBe(1);
     });
   });
 
-  it("stops after the replacement fails and after an ambiguous send response", async () => {
+  it("rejects mismatched replacement retrieval and never reopens an ambiguous send", async () => {
     await withFixture(async (f) => {
       await f.receipt();
       await f.retry();
@@ -993,7 +1012,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       expect(provider.read).toHaveBeenCalledWith(f.messageId);
       expect(provider.send).toHaveBeenCalledTimes(1);
       expect(provider.send).toHaveBeenCalledWith(expect.objectContaining({
-        message: expect.objectContaining({ preferred_service: "iMessage" }),
+        message: expect.objectContaining(service === null ? {} : { preferred_service: "iMessage" }),
       }));
       expect(provider.log).toHaveBeenLastCalledWith("hosted-onboarding.linq.terminal-retry", expect.objectContaining({
         outcome: "accepted", receiptServiceClass: "imessage",
@@ -1080,7 +1099,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       await f.retry();
       expect(provider.send).not.toHaveBeenCalled();
       expect(await f.prisma.hostedLinqDeliveryMessage.count({
-        where: { deliveryId: f.deliveryId },
+        where: { deliveryId: f.deliveryId, terminalRetryCount: { gt: 0 } },
       })).toBe(0);
     });
   });
@@ -1105,6 +1124,276 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       expect(await f.prisma.hostedLinqDelivery.findUnique({
         where: { id: f.deliveryId }, select: { status: true },
       })).toEqual({ status: "failed" });
+    });
+  });
+});
+
+
+describe.skipIf(!enabled)("durable bounded terminal recovery", () => {
+  it("migrates existing rows and accepts old writers with empty recovery defaults", async () => {
+    const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+    try {
+      const sql = await readFile(new URL("../prisma/migrations/20261008210000_linq_bounded_terminal_recovery/migration.sql", import.meta.url), "utf8");
+      await prisma.$transaction(async (tx) => {
+        // Connection-local tables shadow only these synthetic names for this transaction.
+        await tx.$executeRawUnsafe('CREATE TEMP TABLE hosted_linq_delivery_message (id TEXT PRIMARY KEY) ON COMMIT DROP');
+        await tx.$executeRawUnsafe('CREATE TEMP TABLE hosted_linq_delivery (linq_chat_lookup_key TEXT, accepted_at TIMESTAMP(3)) ON COMMIT DROP');
+        await tx.$executeRaw`INSERT INTO hosted_linq_delivery_message (id) VALUES ('before-migration')`;
+        for (const statement of sql.split(";").filter((part) => part.trim())) {
+          await tx.$executeRawUnsafe(statement);
+        }
+        await tx.$executeRaw`INSERT INTO hosted_linq_delivery_message (id) VALUES ('old-writer-after-migration')`;
+        expect(await tx.$queryRaw`
+          SELECT id FROM hosted_linq_delivery_message
+          WHERE terminal_retry_count = 0
+            AND terminal_retry_previous_message_lookup_keys = ARRAY[]::TEXT[]
+            AND terminal_retry_next_at IS NULL AND terminal_retry_expires_at IS NULL
+            AND terminal_retry_claimed_message_lookup_key IS NULL
+            AND terminal_retry_context_ciphertext IS NULL AND terminal_retry_owner_member_id IS NULL
+          ORDER BY id
+        `).toEqual([{ id: "before-migration" }, { id: "old-writer-after-migration" }]);
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it.each([null, undefined, "iMessage"] as const)("preserves original preferred service %s with no actual transport", async (preferred) => {
+    await withFixture(async (f) => {
+      await f.receipt(f.messageId, "failed", "Message send failed", null);
+      provider.read.mockResolvedValue({ ...f.original, service: null, preferred_service: preferred });
+      await f.retry();
+      expect(provider.send).toHaveBeenCalledTimes(1);
+      const request = provider.send.mock.calls[0]![0];
+      if (preferred == null) expect(request.message).not.toHaveProperty("preferred_service");
+      else expect(request.message.preferred_service).toBe("iMessage");
+    });
+  });
+
+  it("persists jittered exponential timers, caps four replacements, and ignores every earlier receipt", async () => {
+    await withFixture(async (f) => {
+      let activeId = f.messageId;
+      const priorIds: string[] = [];
+      const keys: string[] = [];
+      const originalAcceptedAt = (await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).acceptedAt!;
+      for (const [index, delayMs] of [10_000, 20_000, 40_000, 80_000].entries()) {
+        await f.receipt(activeId);
+        provider.read.mockResolvedValue({ ...f.original, id: activeId });
+        const nextId = `synthetic-replacement-${index}-${f.messageId}`;
+        provider.send.mockResolvedValue({ chatId: f.chatId, messageId: nextId });
+        const start = Date.now();
+        await Promise.all([1, 2, 3].map(() => retryHostedLinqTerminalSend({ chatId: f.chatId, messageId: activeId, prisma: f.prisma })));
+        let row = await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } });
+        expect(row.terminalRetryNextAt!.getTime()).toBeGreaterThanOrEqual(start + delayMs * 0.8);
+        expect(row.terminalRetryNextAt!.getTime()).toBeLessThanOrEqual(Date.now() + delayMs);
+        expect(row.terminalRetryExpiresAt!.getTime()).toBe(originalAcceptedAt.getTime() + 180_000);
+        expect(row.terminalRetryContextCiphertext).not.toContain(activeId);
+        await processHostedLinqTerminalRetry({ messageRowId: row.id, prisma: f.prisma });
+        expect(provider.send).toHaveBeenCalledTimes(index);
+        await f.prisma.hostedLinqDeliveryMessage.update({ where: { id: row.id }, data: { terminalRetryNextAt: new Date(Date.now() - 1) } });
+        await Promise.all([1, 2, 3].map(() => processHostedLinqTerminalRetry({ messageRowId: row.id, prisma: f.prisma })));
+        expect(provider.send).toHaveBeenCalledTimes(index + 1);
+        row = await f.prisma.hostedLinqDeliveryMessage.findUniqueOrThrow({ where: { id: row.id } });
+        expect(row.terminalRetryCount).toBe(index + 1);
+        expect(row.terminalRetryPreviousMessageLookupKeys).toHaveLength(index + 1);
+        expect(row.status).toBe("accepted");
+        const request = provider.send.mock.calls[index]![0] as { message: { idempotency_key: string } };
+        keys.push(request.message.idempotency_key);
+        if (index === 0) await f.accepted(); // Callback replay cannot extend the recovery deadline.
+        priorIds.push(activeId);
+        activeId = nextId;
+        for (const oldId of priorIds) await f.receipt(oldId, "delivered");
+        expect((await f.prisma.hostedLinqDeliveryMessage.findUniqueOrThrow({ where: { id: row.id } })).status).toBe("accepted");
+      }
+      expect(new Set(keys).size).toBe(4);
+      await f.receipt(activeId);
+      provider.read.mockResolvedValue({ ...f.original, id: activeId });
+      await f.retry(activeId);
+      expect(provider.send).toHaveBeenCalledTimes(4);
+      expect((await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).status).toBe("failed");
+      const started = JSON.stringify(provider.start.mock.calls.map((call) => call[0]));
+      expect(started).not.toContain(f.chatId);
+      expect(started).not.toContain(f.messageId);
+    });
+  });
+
+  it.each(["expired", "revoked", "superseded", "legacy", "delivered"])("fences delayed work after %s", async (reason) => {
+    await withFixture(async (f) => {
+      await f.receipt();
+      await retryHostedLinqTerminalSend({ chatId: f.chatId, messageId: f.messageId, prisma: f.prisma });
+      const row = await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } });
+      await f.prisma.hostedLinqDeliveryMessage.update({ where: { id: row.id }, data: { terminalRetryNextAt: new Date(Date.now() - 1) } });
+      if (reason === "expired") await f.prisma.hostedLinqDeliveryMessage.update({ where: { id: row.id }, data: { terminalRetryExpiresAt: new Date(Date.now() - 1) } });
+      if (reason === "revoked") { await f.grantConsent(); await f.withdrawConsent(); }
+      if (reason === "legacy") await f.prisma.hostedLinqDeliveryMessage.update({ where: { id: row.id }, data: { terminalRetryAttemptedAt: new Date(), terminalRetryExpiresAt: null } });
+      if (reason === "delivered") await f.receipt(f.messageId, "delivered");
+      if (reason === "superseded") await recordHostedLinqRuntimeDeliveryOutcomeTx({
+        acceptedAt: new Date(), attemptedAt: new Date(), idempotencyKey: `newer-${f.deliveryId}`,
+        linqChatId: f.chatId, messageId: `newer-${f.messageId}`, phoneNumberLookupKey: f.lineKey,
+        sourceRef: `newer-${f.deliveryId}`, targetKind: "thread", threadIsDirect: true,
+        userId: f.memberId, prisma: f.prisma,
+      });
+      await processHostedLinqTerminalRetry({ messageRowId: row.id, prisma: f.prisma });
+      expect(provider.send).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([0, 30_000])("recovers across a 45-second outage with %i ms terminal-failure latency", async (failureLatencyMs) => {
+    await withFixture(async (f) => {
+      const originalAcceptedAt = (await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).acceptedAt!.getTime();
+      const sends: number[] = [];
+      let activeId = f.messageId;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const failAt = async (time: number) => {
+          vi.setSystemTime(time);
+          const event = timingReceipt(f, { eventAt: new Date(time), messageId: activeId, status: "failed" });
+          await f.ingest(event);
+          provider.read.mockResolvedValue({ ...f.original, id: activeId, service: null, preferred_service: null });
+          await retryHostedLinqTerminalSendForEvent({ event, prisma: f.prisma });
+        };
+        provider.send.mockImplementation(async () => {
+          sends.push(Date.now() - originalAcceptedAt);
+          activeId = `synthetic-outage-${sends.length}-${f.messageId}`;
+          return { chatId: f.chatId, messageId: activeId };
+        });
+        await failAt(originalAcceptedAt + failureLatencyMs);
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const row = await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } });
+          expect(row.terminalRetryNextAt).not.toBeNull();
+          // Advance the clock to the real persisted due time, never modify it.
+          vi.setSystemTime(row.terminalRetryNextAt!.getTime() - 1);
+          await processHostedLinqTerminalRetry({ messageRowId: row.id, prisma: f.prisma });
+          expect(sends).toHaveLength(attempt);
+          vi.setSystemTime(row.terminalRetryNextAt!);
+          await processHostedLinqTerminalRetry({ messageRowId: row.id, prisma: f.prisma });
+          expect(sends).toHaveLength(attempt + 1);
+          if (sends.at(-1)! >= 45_000) break;
+          await failAt(Date.now() + failureLatencyMs);
+        }
+        const bounds = failureLatencyMs === 0
+          ? [[8_000, 10_000], [24_000, 30_000], [56_000, 70_000]]
+          : [[38_000, 40_000], [84_000, 90_000]];
+        expect(sends).toHaveLength(bounds.length);
+        sends.forEach((time, index) => {
+          expect(time).toBeGreaterThanOrEqual(bounds[index]![0]!);
+          expect(time).toBeLessThanOrEqual(bounds[index]![1]!);
+        });
+        expect(sends.at(-1)).toBeLessThan(180_000);
+        await f.ingest(timingReceipt(f, { eventAt: new Date(Date.now() + 100), messageId: activeId, status: "delivered" }));
+        expect((await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).status).toBe("delivered");
+        const keys = provider.send.mock.calls.map(([request]) => request.message.idempotency_key);
+        expect(new Set(keys).size).toBe(sends.length);
+        for (const [request] of provider.send.mock.calls) expect(request.message.parts).toEqual([
+          { type: "text", value: "Here is the requested document." },
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it("lets the fixed dispatch deadline win over five sends when each failure takes 30 seconds", async () => {
+    await withFixture(async (f) => {
+      const originalAcceptedAt = (await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).acceptedAt!.getTime();
+      let activeId = f.messageId;
+      let sends = 0;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        provider.send.mockImplementation(async () => {
+          sends += 1;
+          activeId = `synthetic-delayed-failure-${sends}-${f.messageId}`;
+          return { chatId: f.chatId, messageId: activeId };
+        });
+        vi.setSystemTime(originalAcceptedAt);
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          vi.setSystemTime(Date.now() + 30_000);
+          const event = timingReceipt(f, { eventAt: new Date(), messageId: activeId, status: "failed" });
+          await f.ingest(event);
+          provider.read.mockResolvedValue({ ...f.original, id: activeId });
+          await retryHostedLinqTerminalSendForEvent({ event, prisma: f.prisma });
+          const row = await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } });
+          expect(row.terminalRetryExpiresAt!.getTime()).toBe(originalAcceptedAt + 180_000);
+          if (attempt === 3) {
+            expect(row.terminalRetryNextAt).toBeNull();
+            expect(sends).toBe(3);
+            await processHostedLinqTerminalRetry({ messageRowId: row.id, prisma: f.prisma });
+            expect(sends).toBe(3);
+            break;
+          }
+          vi.setSystemTime(row.terminalRetryNextAt!);
+          await processHostedLinqTerminalRetry({ messageRowId: row.id, prisma: f.prisma });
+          expect(sends).toBe(attempt + 1);
+        }
+        expect((await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).status).toBe("failed");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it("does not transfer a pending recovery to another member after route reassignment", async () => {
+    await withFixture(async (f) => {
+      await f.receipt();
+      await f.retry();
+      await f.prisma.hostedMember.create({ data: { id: f.containerId, billingStatus: "active" } });
+      await f.prisma.hostedMemberRouting.update({ where: { memberId: f.memberId }, data: { memberId: f.containerId } });
+      await f.receipt(f.retryId);
+      provider.read.mockResolvedValue({ ...f.original, id: f.retryId });
+      provider.send.mockResolvedValue({ chatId: f.chatId, messageId: `next-${f.retryId}` });
+      await f.retry(f.retryId);
+      expect(provider.send).toHaveBeenCalledTimes(1);
+      const row = await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } });
+      expect(row.terminalRetryOwnerMemberId).toBe(f.memberId);
+    });
+  });
+
+  it("keeps a committed dispatch closed when acceptance recording is interrupted", async () => {
+    await withFixture(async (f) => {
+      await f.receipt();
+      provider.send.mockImplementation(async () => {
+        vi.spyOn(f.prisma, "$transaction").mockRejectedValueOnce(new Error("synthetic recording interruption"));
+        return { chatId: f.chatId, messageId: f.retryId };
+      });
+      await expect(f.retry()).rejects.toThrow("synthetic recording interruption");
+      vi.restoreAllMocks();
+      await f.receipt();
+      await f.retry();
+      await f.receipt(f.retryId);
+      await f.retry(f.retryId);
+      expect(provider.send).toHaveBeenCalledTimes(1);
+      const row = await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } });
+      expect(row.terminalRetryClaimedMessageLookupKey).toBe(row.messageLookupKey);
+      expect(row.terminalRetryCount).toBe(1);
+      expect(row.status).toBe("failed");
+    });
+  });
+
+  it("closes the rolling legacy sender before the durable timer is due", async () => {
+    await withFixture(async (f) => {
+      await f.receipt();
+      await retryHostedLinqTerminalSend({ chatId: f.chatId, messageId: f.messageId, prisma: f.prisma });
+      const row = await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } });
+      const legacyClaim = await f.prisma.hostedLinqDeliveryMessage.updateMany({
+        where: { id: row.id, terminalRetryAttemptedAt: null }, data: { terminalRetryAttemptedAt: new Date() },
+      });
+      expect(legacyClaim.count).toBe(0);
+      expect(row.terminalRetryCount).toBe(0);
+      expect(provider.send).not.toHaveBeenCalled();
+    });
+  });
+
+  it("retries workflow admission after a lost start acknowledgement without changing due time or sending", async () => {
+    await withFixture(async (f) => {
+      await f.receipt();
+      provider.start.mockRejectedValueOnce(new Error("synthetic workflow start loss"));
+      await expect(retryHostedLinqTerminalSend({ chatId: f.chatId, messageId: f.messageId, prisma: f.prisma })).rejects.toThrow("synthetic workflow start loss");
+      const before = await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } });
+      await retryHostedLinqTerminalSend({ chatId: f.chatId, messageId: f.messageId, prisma: f.prisma });
+      const after = await f.prisma.hostedLinqDeliveryMessage.findUniqueOrThrow({ where: { id: before.id } });
+      expect(after.terminalRetryNextAt).toEqual(before.terminalRetryNextAt);
+      expect(after.terminalRetryCount).toBe(0);
+      expect(provider.send).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { buildHostedMemberChannelWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
 
 import {
@@ -365,6 +366,24 @@ describe("hosted runtime Linq delivery route", () => {
       prisma,
       replyRuntimeAttemptId: "runtime_attempt_123",
     });
+  });
+
+  it("requires durable retry admission before acknowledging an accepted callback", async () => {
+    mocks.retryHostedLinqTerminalSend.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_LINQ_RETRY_START_FAILED", message: "Recovery unavailable.", httpStatus: 503, retryable: true,
+    }));
+    const body = {
+      acceptedAt: "2026-04-26T00:00:04.000Z", attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123", providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123", target: "linq_chat_123", targetKind: "thread",
+    };
+    const failed = await route.POST(buildDeliveryRequest(body));
+    expect(failed.status).toBe(503);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.after).not.toHaveBeenCalled();
+    const replay = await route.POST(buildDeliveryRequest(body));
+    expect(replay.status).toBe(200);
+    expect(mocks.retryHostedLinqTerminalSend).toHaveBeenCalledTimes(2);
   });
 
   it("keeps old-runner delivery callbacks working without latency-link headers", async () => {

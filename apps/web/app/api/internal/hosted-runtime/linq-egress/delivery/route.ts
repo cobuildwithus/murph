@@ -191,6 +191,9 @@ export const POST = withJsonError(async (request: Request) => {
         prisma,
       });
 
+  await admitHostedLinqTerminalRecovery({ acceptedAt, recorded: result.recorded,
+    chatId: linqChatId, messageIds: providerMessageIds, prisma });
+
   scheduleHostedLinqDeliveryFollowupsAfterResponse({
     acceptedAt,
     memberId: userId,
@@ -222,6 +225,18 @@ export const POST = withJsonError(async (request: Request) => {
   });
 });
 
+async function admitHostedLinqTerminalRecovery(input: {
+  acceptedAt: Date | null; recorded: boolean; chatId: string | null;
+  messageIds: readonly string[]; prisma: ReturnType<typeof getPrisma>;
+}): Promise<void> {
+  // Receipts can precede acceptance. Durable admission must finish before the
+  // callback is acknowledged; replay records the same accepted identity.
+  if (!input.acceptedAt || !input.recorded || !input.chatId) return;
+  for (const messageId of input.messageIds) {
+    await retryHostedLinqTerminalSend({ chatId: input.chatId, messageId, prisma: input.prisma });
+  }
+}
+
 function scheduleHostedLinqDeliveryFollowupsAfterResponse(input: {
   acceptedAt: Date | null;
   memberId: string;
@@ -232,19 +247,9 @@ function scheduleHostedLinqDeliveryFollowupsAfterResponse(input: {
 }): void {
   const { chatId, messageIds, prisma } = input;
   if (!input.acceptedAt || !input.recorded || !chatId || messageIds.length === 0) return;
-  // Delivery or failure receipts can beat acceptance. Reconcile retries and
-  // contact sharing after the normal handoff and home-route commit.
+  // Contact sharing remains independent post-response follow-up work.
   try {
     after(async () => {
-      for (const messageId of messageIds) {
-        try {
-          await retryHostedLinqTerminalSend({ chatId, messageId, prisma });
-        } catch {
-          console.warn("Hosted Linq terminal retry did not complete.", {
-            code: "HOSTED_LINQ_TERMINAL_RETRY_INCOMPLETE",
-          });
-        }
-      }
       await queueHostedLinqHomeContactCardAfterDelivery({
         chatId,
         expectedMemberId: input.memberId,
@@ -254,8 +259,8 @@ function scheduleHostedLinqDeliveryFollowupsAfterResponse(input: {
     });
   } catch {
     // Scheduling failure must not invalidate an accepted runtime handoff.
-    console.warn("Hosted Linq terminal retry could not be scheduled.", {
-      code: "HOSTED_LINQ_TERMINAL_RETRY_NOT_SCHEDULED",
+    console.warn("Hosted Linq contact sharing could not be scheduled.", {
+      code: "HOSTED_LINQ_CONTACT_SHARING_NOT_SCHEDULED",
     });
   }
 }

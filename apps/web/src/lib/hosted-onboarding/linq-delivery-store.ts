@@ -2147,6 +2147,7 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
       OR: [
         { messageLookupKey: { in: messageLookupKeys } },
         { terminalRetryOriginalMessageLookupKey: { in: messageLookupKeys } },
+        { terminalRetryPreviousMessageLookupKeys: { hasSome: messageLookupKeys } },
       ],
     },
     select: {
@@ -2274,6 +2275,7 @@ export async function readHostedLinqDeliveryForProviderMessageTx(input: {
           OR: [
             { messageLookupKey: { in: messageLookupKeys } },
             { terminalRetryOriginalMessageLookupKey: { in: messageLookupKeys } },
+            { terminalRetryPreviousMessageLookupKeys: { hasSome: messageLookupKeys } },
           ],
         },
         select: {
@@ -2590,6 +2592,9 @@ export async function recordHostedLinqTerminalRetryAcceptedTx(input: {
   messageRowId: string;
   messageId: string;
   phoneNumberLookupKey: string;
+  expectedMessageLookupKey: string;
+  attempt: number;
+  contextCiphertext: string;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
   await lockHostedLinqMessageReceiptsTx({ messageIds: [input.messageId], prisma: input.prisma });
@@ -2599,7 +2604,7 @@ export async function recordHostedLinqTerminalRetryAcceptedTx(input: {
     createHostedLinqMessageLookupKeyReadCandidates(input.messageId);
   const original = await input.prisma.hostedLinqDeliveryMessage.findUnique({
     where: { id: input.messageRowId },
-    select: { messageLookupKey: true },
+    select: { messageLookupKey: true, terminalRetryOriginalMessageLookupKey: true },
   });
   if (!original) return;
   const updated = await input.prisma.hostedLinqDeliveryMessage.updateMany({
@@ -2607,11 +2612,16 @@ export async function recordHostedLinqTerminalRetryAcceptedTx(input: {
       id: input.messageRowId,
       deliveryId: input.deliveryId,
       terminalRetryAttemptedAt: { not: null },
-      terminalRetryOriginalMessageLookupKey: null,
+      messageLookupKey: input.expectedMessageLookupKey,
+      terminalRetryClaimedMessageLookupKey: input.expectedMessageLookupKey,
+      terminalRetryCount: input.attempt,
     },
     data: {
       acceptedAt: input.acceptedAt,
-      terminalRetryOriginalMessageLookupKey: original.messageLookupKey,
+      terminalRetryOriginalMessageLookupKey: original.terminalRetryOriginalMessageLookupKey ?? original.messageLookupKey,
+      terminalRetryPreviousMessageLookupKeys: { push: original.messageLookupKey },
+      terminalRetryContextCiphertext: input.contextCiphertext,
+      terminalRetryNextAt: null,
       messageLookupKey,
       messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
       deliveredAt: null,
