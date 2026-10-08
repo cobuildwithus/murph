@@ -6488,8 +6488,7 @@ describe('assistant cron runtime orchestration', () => {
     },
     {
       automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
-      name: 'Personal Patterns after a prolonged capacity shortage',
-      retryDelayMs: 150 * 60_000,
+      name: 'Personal Patterns',
       occurrenceAt: '2026-04-08T13:00:00.000Z',
     },
     ...[
@@ -6498,11 +6497,12 @@ describe('assistant cron runtime orchestration', () => {
       [MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID, 'Weekly research'],
       [MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID, 'Monthly coach'],
     ].map(([automationId, name]) => ({ automationId: automationId!, name, occurrenceAt: '2026-04-08T13:00:00.000Z' })),
-  ])('keeps Flex after a failed managed $name occurrence', async ({
+  ])('keeps Flex and recovers a managed $name occurrence after a prolonged capacity shortage', async ({
     automationId,
     occurrenceAt,
-    retryDelayMs = 30_000,
   }) => {
+    // Past the default hour and the former four-hour window, inside six hours.
+    const retryDelayMs = 5 * 60 * 60_000
     vi.useFakeTimers()
     vi.setSystemTime(new Date(occurrenceAt))
     const { vaultRoot } = await createRuntimeContext(

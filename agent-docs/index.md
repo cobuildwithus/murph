@@ -1112,3 +1112,7 @@ Junction historical/webhook dense imports commit up to eight closed days per can
 
 Final usage-envelope fitting after trusted Worker attribution is tracked in
 [the usage reporting plan](exec-plans/completed/2026-10-07-usage-reporting-envelope.md).
+
+The six-hour freshness window for Flex-retry managed automations is tracked in
+[the Flex retry window plan](exec-plans/completed/2026-10-07-flex-retry-6h-window.md);
+`../ARCHITECTURE.md` owns the runtime contract.
