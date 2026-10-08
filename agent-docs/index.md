@@ -36,6 +36,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Protected retirement of unused inference secrets is owned by
+`apps/cloudflare/DEPLOY.md`; focused proof is tracked in
+[`retired inference secrets`](exec-plans/completed/2026-10-07-retire-inference-secrets.md).
+
 Receipt-capacity device import yield classification is owned by
 `RELIABILITY.md`; focused cancellation and composed runtime proof is recorded in
 [`device import yield diagnostics`](exec-plans/completed/2026-10-07-device-sync-backfill-slicing.md).
