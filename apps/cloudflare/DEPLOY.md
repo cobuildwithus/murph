@@ -1648,15 +1648,32 @@ component after cleanup is unsupported.
 Once the OpenAI-only Worker and runner consumers have converged, retire
 `VENICE_API_KEY` and `VERCEL_AI_API_KEY` through the existing protected Murph
 Cloud deployment. Its staged upload removes exactly those two secret bindings
-and inherits every other existing secret by name from an explicit baseline
-Worker version. It validates the staged secret inventory before activation and
-preserves the private workflow's rollout, smoke, and release-receipt checks.
+and inherits every other existing secret by name from the latest uploaded
+Worker version. The upload config omits `version_id`, matching
+[Wrangler 4.93's inherit serializer](https://github.com/cloudflare/workers-sdk/blob/wrangler%404.93.0/packages/wrangler/src/deployment-bundle/create-worker-upload-form.ts).
+The [raw versions API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/list/)
+returns newest first, including inactive uploads. The deploy owner reads its
+first two entries without a deployable filter before and after each upload.
+The latest must equal the original live version before stage upload, or the
+verified stage version before final upload. Afterwards the newest pair must
+be the uploaded version followed immediately by that expected source. Secret
+inventory validation and live activation guards remain separate requirements.
+
+This path relies on the protected deployment owner's serialized workflow.
+The metadata checks detect source drift; they are not atomic compare-and-swap
+and do not lock out dashboard or other API writers. An unknown inactive latest
+version stops deployment and requires operational resolution; retries must not
+silently adopt it. A failed post-upload check can leave an inactive version but
+does not authorize its activation. The workflow's rollout, smoke, and release
+receipt checks remain in force.
+
 The temporary upload config declares each name once: synchronized keys use the
-secret payload, and retained keys use pinned inheritance. Required-secret
-declarations are removed only for inherited names, after proving every required
-key exists in the baseline or payload. The canonical generated config is unchanged.
-Run this cleanup through the protected deployment path, without a separate local
-secret deletion.
+secret payload, and retained keys use inheritance. Required-secret declarations
+are removed only for inherited names, after proving every required key exists
+in the baseline or payload. The canonical generated config is unchanged. Local
+Wrangler dry-run verifies serialization, not server acceptance or source
+concurrency. Run cleanup through the protected deployment path, without a
+separate local secret deletion.
 
 ## Required GitHub Environment Secrets
 

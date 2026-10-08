@@ -27,7 +27,7 @@ vi.mock("../scripts/deploy-artifacts.js", async () => ({
 const imageMocks = vi.hoisted(() => ({ prepareHostedContainerDeployImage: vi.fn() }));
 vi.mock("../scripts/prepare-container-deploy-image.ts", () => imageMocks);
 const releaseMocks = vi.hoisted(() => ({
-  stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), assertDrained: vi.fn(), retireApplication: vi.fn(), assertCapacity: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
+  stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), readRecentWorkerVersionIds: vi.fn(), assertDrained: vi.fn(), retireApplication: vi.fn(), assertCapacity: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
 }));
 vi.mock("../scripts/stage-runner-release.ts", () => ({
   stageHostedRunnerRelease: releaseMocks.stageHostedRunnerRelease,
@@ -105,7 +105,7 @@ describe("runDeployWorkerVersionCli", () => {
     await useRealWebAdmission(check => check === failAt ? "old-reader" : "current", () => trace.push("web"));
     wranglerMocks.runWranglerJson.mockImplementation(async () => {
       trace.push("identity");
-      return JSON.stringify({ versions: [{ percentage: 100, version_id: "version-direct" }] });
+      return JSON.stringify({ versions: [{ percentage: 100, version_id: syntheticLiveVersion() }] });
     });
     wranglerMocks.runWranglerLogged.mockImplementation(async args => { if (args[0] === "versions") trace.push("activation"); });
     await expect(syntheticDeployment()).rejects.toThrow("runtime_log_event:runner.processing_finished");
@@ -177,7 +177,11 @@ describe("runDeployWorkerVersionCli", () => {
       activeApplicationName: "hosted-worker-runnercontainer", applications: [], workerOnly: false,
     }));
     releaseMocks.readWorkerVersion.mockReset();
-    releaseMocks.readWorkerVersion.mockResolvedValue({ id: "version-direct", resources: { bindings: [] } });
+    releaseMocks.readWorkerVersion.mockImplementation(async (_worker, id) => ({ id, resources: { bindings: [] } }));
+    releaseMocks.readRecentWorkerVersionIds.mockReset().mockImplementation(async () => [
+      ...receiptMocks.parseWranglerWorkerVersionId.mock.results.filter(result => result.type === "return").map(result => result.value).reverse(),
+      "version-direct",
+    ].slice(0, 2));
     releaseMocks.admitApplication.mockReset();
     releaseMocks.admitApplication.mockResolvedValue("created");
     releaseMocks.assertApplicationReady.mockReset();
@@ -191,7 +195,7 @@ describe("runDeployWorkerVersionCli", () => {
     imageMocks.prepareHostedContainerDeployImage.mockReset();
     imageMocks.prepareHostedContainerDeployImage.mockImplementation(async ({ configPath }) => configPath);
     wranglerMocks.runWranglerJson.mockReset();
-    wranglerMocks.runWranglerJson.mockResolvedValue(JSON.stringify({ versions: [{ percentage: 100, version_id: "version-direct" }] }));
+    wranglerMocks.runWranglerJson.mockImplementation(async () => JSON.stringify({ versions: [{ percentage: 100, version_id: syntheticLiveVersion() }] }));
     wranglerMocks.runWranglerLogged.mockReset();
     wranglerMocks.runWranglerLoggedCaptured.mockReset();
     wranglerMocks.runWranglerLoggedCaptured.mockResolvedValue({ stderr: "", stdout: "deploy" });
@@ -203,7 +207,7 @@ describe("runDeployWorkerVersionCli", () => {
     receiptMocks.buildContainerReleaseEntries.mockReset();
     receiptMocks.buildContainerReleaseEntries.mockReturnValue(releasedContainers);
     receiptMocks.parseWranglerWorkerVersionId.mockReset();
-    receiptMocks.parseWranglerWorkerVersionId.mockReturnValue("version-direct");
+    receiptMocks.parseWranglerWorkerVersionId.mockImplementation(() => `uploaded-version-${receiptMocks.parseWranglerWorkerVersionId.mock.calls.length}`);
     receiptMocks.readCloudflareContainerApplicationIdentities.mockReset();
     receiptMocks.readCloudflareContainerApplicationIdentities.mockImplementation(async (containers) => containers.map((entry: { applicationName: string }) => ({ applicationName: entry.applicationName, applicationId: "provider-app-id", image: "image-before", version: 6 })));
     receiptMocks.readRenderedContainerIdentities.mockReset();
@@ -215,6 +219,12 @@ describe("runDeployWorkerVersionCli", () => {
   it.each([false, true])("checks stage and promotion secret inventories before activation with synchronization=%s", async includeSecrets => {
     const retained = [{ name: "OPENAI_API_KEY", type: "secret_text" }, { name: "OPTIONAL_SECRET", type: "secret_text" }];
     const trace: string[] = [];
+    const readHistory = releaseMocks.readRecentWorkerVersionIds.getMockImplementation()!;
+    releaseMocks.readRecentWorkerVersionIds.mockImplementation(async () => {
+      const ids = await readHistory();
+      trace.push(`history:${ids.join(",")}`);
+      return ids;
+    });
     let liveVersion = "version-direct";
     releaseMocks.readWorkerVersion.mockImplementation(async (_worker, versionId) => {
       trace.push(`inventory:${versionId}`);
@@ -233,12 +243,17 @@ describe("runDeployWorkerVersionCli", () => {
       }
     });
     await syntheticDeployment("immediate", {}, includeSecrets);
-    expect(trace).toEqual(["inventory:version-direct", "inventory:stage-version", "activate:stage-version", "inventory:final-version", "activate:final-version"]);
+    expect(trace).toEqual([
+      "inventory:version-direct", "history:version-direct",
+      "history:stage-version,version-direct", "inventory:stage-version", "activate:stage-version",
+      "history:stage-version,version-direct", "history:final-version,stage-version",
+      "inventory:final-version", "activate:final-version",
+    ]);
     expect(fileMocks.writeFile.mock.calls.filter(([filePath]) => String(filePath).includes(".retired-secrets-"))).toHaveLength(2);
     for (const [filePath, content] of fileMocks.writeFile.mock.calls) {
       if (!String(filePath).includes(".retired-secrets-")) continue;
       expect(JSON.parse(String(content)).unsafe.bindings).toEqual(retained.filter(({ name }) => !includeSecrets || name !== "OPENAI_API_KEY")
-        .map(({ name }) => ({ name, type: "inherit", version_id: "version-direct" })));
+        .map(({ name }) => ({ name, type: "inherit" })));
       expect(fileMocks.rm).toHaveBeenCalledWith(filePath, { force: true });
     }
     for (const [args] of wranglerMocks.runWranglerLoggedCaptured.mock.calls) {
@@ -246,11 +261,61 @@ describe("runDeployWorkerVersionCli", () => {
     }
   });
 
+  it.each(["stage", "promotion"])("rejects an unrelated inactive latest version before the %s upload", async boundary => {
+    const readHistory = releaseMocks.readRecentWorkerVersionIds.getMockImplementation()!;
+    releaseMocks.readRecentWorkerVersionIds.mockImplementation(async () => (
+      releaseMocks.readRecentWorkerVersionIds.mock.calls.length === (boundary === "stage" ? 1 : 3)
+        ? ["unrelated-inactive-version", "version-direct"] : readHistory()
+    ));
+    await expect(syntheticDeployment()).rejects.toThrow("inheritance source changed before upload");
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(boundary === "stage" ? 0 : 1);
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(boundary === "stage" ? 0 : 1);
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
+    expect(fileMocks.rm).toHaveBeenCalledTimes(boundary === "stage" ? 1 : 2);
+  });
+
+  it.each([
+    ["stage", "intervening"], ["stage", "newer"],
+    ["promotion", "intervening"], ["promotion", "newer"],
+  ])("rejects an %s upload with an %s unrelated version before activation", async (boundary, drift) => {
+    const readHistory = releaseMocks.readRecentWorkerVersionIds.getMockImplementation()!;
+    releaseMocks.readRecentWorkerVersionIds.mockImplementation(async () => {
+      const ids = await readHistory();
+      if (releaseMocks.readRecentWorkerVersionIds.mock.calls.length !== (boundary === "stage" ? 2 : 4)) return ids;
+      return drift === "intervening" ? [ids[0], "unrelated-inactive-version"] : ["unrelated-inactive-version", ids[0]];
+    });
+    await expect(syntheticDeployment()).rejects.toThrow("version history changed during upload");
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(boundary === "stage" ? 1 : 2);
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(boundary === "stage" ? 0 : 1);
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
+    expect(fileMocks.rm).toHaveBeenCalledTimes(boundary === "stage" ? 1 : 2);
+    // The upload may have persisted. A retry must not silently adopt that inactive version.
+    const uploads = wranglerMocks.runWranglerLoggedCaptured.mock.calls.length;
+    await expect(syntheticDeployment()).rejects.toThrow("inheritance source changed before upload");
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(uploads);
+  });
+
+  it.each([1, 2])("fails closed when version history read %s is unavailable", async failedRead => {
+    const readHistory = releaseMocks.readRecentWorkerVersionIds.getMockImplementation()!;
+    releaseMocks.readRecentWorkerVersionIds.mockImplementation(async () => {
+      if (releaseMocks.readRecentWorkerVersionIds.mock.calls.length === failedRead) throw new Error("history unavailable");
+      return readHistory();
+    });
+    await expect(syntheticDeployment()).rejects.toThrow("history unavailable");
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(failedRead - 1);
+    expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args[0] === "versions")).toBe(false);
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
+    expect(fileMocks.rm).toHaveBeenCalledOnce();
+  });
+
   it.each(["stage", "promotion"])("stops before %s activation if the uploaded secret inventory changed", async boundary => {
     let reads = 0;
-    releaseMocks.readWorkerVersion.mockImplementation(async () => {
+    releaseMocks.readWorkerVersion.mockImplementation(async (_worker, id) => {
       reads += 1;
-      return { id: "version-direct", resources: { bindings: reads === (boundary === "stage" ? 2 : 3)
+      return { id, resources: { bindings: reads === (boundary === "stage" ? 2 : 3)
         ? [{ name: "VENICE_API_KEY", type: "secret_text" }] : [] } };
     });
     await expect(syntheticDeployment()).rejects.toThrow("secret inventory differs");
@@ -412,6 +477,9 @@ describe("runDeployWorkerVersionCli", () => {
     await syntheticDeployment();
     expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+    expect(releaseMocks.readRecentWorkerVersionIds.mock.settledResults.map(result => result.value)).toEqual([
+      ["version-direct"], ["uploaded-version-1", "version-direct"],
+    ]);
     expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls[0]![0].slice(0, 2)).toEqual(["versions", "upload"]);
     expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(1);
     expect(receiptMocks.buildContainerReleaseEntries).toHaveBeenCalledTimes(2);
@@ -811,4 +879,9 @@ async function useRealWebAdmission(shape: string | ((check: number) => string), 
       return Response.json(responseShape === "unknown-version" ? { ...evidence, schemaVersion: 2 } : evidence, { headers: { "cache-control": "no-store" } });
     } });
   });
+}
+
+function syntheticLiveVersion(): string {
+  const activation = wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions").at(-1);
+  return activation ? activation[0][2].split("@")[0] : "version-direct";
 }

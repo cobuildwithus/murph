@@ -39,7 +39,7 @@ describe("retired inference secret upload", () => {
     expect(path.dirname(result.configPath)).toBe(path.dirname(input.configPath));
     expect(unsafe).toEqual({
       bindings: retained.filter(({ name }) => !synchronize || name !== "OPENAI_API_KEY")
-        .map(({ name }) => ({ name, type: "inherit", version_id: baseline.id })),
+        .map(({ name }) => ({ name, type: "inherit" })),
       metadata: { keep_bindings: [] },
     });
     const bindings = synchronize ? [...retained, { name: "NEW_SECRET", type: "secret_text" }] : retained;
@@ -73,9 +73,10 @@ describe("retired inference secret upload", () => {
     const form = await new Response(multipart, { headers: { "content-type": `multipart/form-data; boundary=${boundary}` } }).formData();
     const metadata = JSON.parse(String(form.get("metadata")));
     expect(metadata.keep_bindings).toEqual([]);
+    expect(metadata.bindings.every((binding: object) => !("version_id" in binding))).toBe(true);
     expect(metadata.bindings).toEqual(expect.arrayContaining([
       ...Object.entries(payload).map(([name, text]) => ({ name, type: "secret_text", text })),
-      ...retained.filter(binding => !(binding.name in payload)).map(({ name }) => ({ name, type: "inherit", version_id: baseline.id })),
+      ...retained.filter(binding => !(binding.name in payload)).map(({ name }) => ({ name, type: "inherit" })),
       { name: "SOURCE_RECEIPT", type: "plain_text", text: "synthetic-source" },
     ]));
     expect(metadata.bindings.some((binding: { name: string }) => retired.some(entry => entry.name === binding.name))).toBe(false);
@@ -119,7 +120,7 @@ describe("retired inference secret upload", () => {
     await expect(prepareRetiredInferenceSecretsUpload({ ...input, currentVersion: baseline, currentVersionId: baseline.id })).rejects.toThrow("Cannot safely retire");
   });
 
-  it.each(["MISSING_REQUIRED_SECRET", "VENICE_API_KEY", "VERCEL_AI_API_KEY"])("rejects required %s instead of inheriting it from an unpinned latest version", async name => {
+  it.each(["MISSING_REQUIRED_SECRET", "VENICE_API_KEY", "VERCEL_AI_API_KEY"])("rejects required %s before declaring an unproven inheritance binding", async name => {
     const input = await fixture();
     input.config.secrets.required.push(name);
     await writeFile(input.configPath, JSON.stringify(input.config));

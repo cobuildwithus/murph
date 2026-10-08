@@ -38,9 +38,9 @@ export async function prepareRetiredInferenceSecretsUpload(input: {
   const configPath = `${input.configPath}.retired-secrets-${randomUUID()}.jsonc`;
   await writeFile(configPath, `${JSON.stringify({
     ...config,
-    // Wrangler's ordinary inherit serializer drops version_id; unsafe preserves it.
+    // Cloudflare inherits from the latest upload; the deploy owner guards its identity.
     unsafe: { bindings: [...inherited].map(name => ({
-      name, type: "inherit", version_id: input.currentVersionId,
+      name, type: "inherit",
     })), metadata: { keep_bindings: [] } },
   }, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
   return { configPath, expectedSecrets };

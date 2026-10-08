@@ -99,18 +99,26 @@ export async function runDeployWorkerVersionCli(
         });
         const renderedContainers = await readRenderedContainerIdentities(staged.configPath);
         await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
-        const uploadVersion = async (configPath: string): Promise<string> => {
+        const uploadVersion = async (configPath: string, expectedSourceVersionId: string): Promise<string> => {
           const upload = await prepareRetiredInferenceSecretsUpload({
             configPath, currentVersion, currentVersionId,
             ...(input.includeSecrets ? { secretsFilePath: input.secretsFilePath } : {}),
           });
           try {
+            const before = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+            if (before[0] !== expectedSourceVersionId) {
+              throw new Error("Worker inheritance source changed before upload; resolve version drift before retrying.");
+            }
             const output = await runWranglerLoggedCaptured([
               "versions", "upload", "--config", upload.configPath, "--name", input.workerName,
               "--message", input.deploymentMessage, "--tag", input.versionTag,
               ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
             ]);
             const versionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
+            const after = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+            if (after.length !== 2 || after[0] !== versionId || after[1] !== expectedSourceVersionId) {
+              throw new Error("Worker version history changed during upload; uploaded version will not be activated.");
+            }
             assertRetiredInferenceSecretsRemoved(
               await releaseProvider.readWorkerVersion(input.workerName, versionId),
               versionId, upload.expectedSecrets,
@@ -128,7 +136,7 @@ export async function runDeployWorkerVersionCli(
           ]);
           await assertLiveVersion(input.workerName, input.configPath, versionId);
         };
-        const stageVersionId = await uploadVersion(staged.configPath);
+        const stageVersionId = await uploadVersion(staged.configPath, currentVersionId);
         await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
         // One-time retirement is drain-proven and happens before increasing the
         // serving ceiling. Never refill the retired application on a retry.
@@ -197,7 +205,7 @@ export async function runDeployWorkerVersionCli(
           },
         });
         await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
-        const workerVersionId = staged.workerOnly ? stageVersionId : await uploadVersion(staged.promotionConfigPath);
+        const workerVersionId = staged.workerOnly ? stageVersionId : await uploadVersion(staged.promotionConfigPath, stageVersionId);
         if (!staged.workerOnly) await activateVersion(staged.promotionConfigPath, workerVersionId, stageVersionId);
         const after = await readCloudflareContainerApplicationIdentities(
           renderedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,
