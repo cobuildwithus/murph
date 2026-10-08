@@ -65,6 +65,7 @@ import { emitHostedAssistantTurnTimingTraceLog } from "./turn-timing-diagnostics
 import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
+  waitForHostedStagedLatencyTraceWrites,
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
 import {
@@ -958,6 +959,7 @@ async function recordHostedAssistantProviderStartLatencyTraceWithRetry(
   latencyTracePort: NonNullable<HostedRuntimePlatform["latencyTracePort"]>,
   request: Parameters<NonNullable<HostedRuntimePlatform["latencyTracePort"]>["record"]>[0],
 ): Promise<void> {
+  await waitForHostedStagedLatencyTraceWrites();
   let response = await latencyTracePort.record(request);
 
   for (const delayMs of HOSTED_ASSISTANT_PROVIDER_START_TRACE_RETRY_DELAYS_MS) {
