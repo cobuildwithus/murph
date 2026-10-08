@@ -707,6 +707,17 @@ async function lockPreparedHostedLinqDirectMemberTx(input: {
   if (!preparedControlRoot && !input.prepared.unchangedHomeRoute) {
     throw hostedLinqDirectMailboxPreparationRequired("control-root");
   }
+  // Member before root, like activation and every other owner, so this waits
+  // for short runtime callbacks instead of bouncing the delivery to Linq.
+  const lockedRows = await input.prisma.$queryRaw<Array<{ id: string }>>`
+    select "id"
+    from "hosted_member"
+    where "id" = ${memberId}
+    for no key update
+  `;
+  if (lockedRows.length !== 1) {
+    throw hostedLinqDirectMailboxPreparationRequired("member");
+  }
   try {
     if (preparedControlRoot) await revalidatePreparedHostedDomainRootForWebTx({
       prepared: preparedControlRoot,
@@ -717,15 +728,6 @@ async function lockPreparedHostedLinqDirectMemberTx(input: {
       throw hostedLinqDirectMailboxPreparationRequired("control-root");
     }
     throw error;
-  }
-  const lockedRows = await input.prisma.$queryRaw<Array<{ id: string }>>`
-    select "id"
-    from "hosted_member"
-    where "id" = ${memberId}
-    for no key update skip locked
-  `;
-  if (lockedRows.length !== 1) {
-    throw hostedLinqDirectMailboxPreparationRequired("member");
   }
   await lockHostedMemberIdentityStateTx({
     memberId,
