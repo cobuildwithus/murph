@@ -215,7 +215,9 @@ export async function decodeRunnerMailboxFetchResponse(input: {
     }
   }
   const serializeStartedAt = performance.now();
-  const response = json(mailbox);
+  // Remove this fixed wire field once pre-OpenAI-only runners have drained.
+  // They require it even though provider selection is no longer supported.
+  const response = json({ ...mailbox, assistantProvider: "openai" });
   response.headers.set("cache-control", "no-store");
   Object.assign(timings, {
     mailboxWorkerCryptoContextMs: Math.max(0, Math.round(cryptoElapsedMs)),

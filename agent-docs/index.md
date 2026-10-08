@@ -1,3 +1,7 @@
+OpenAI-only mixed-version rollout preparation is tracked in
+[the rollout plan](exec-plans/completed/2026-10-07-openai-rollout.md); the live
+deployment sequence is owned by `../apps/cloudflare/DEPLOY.md`.
+
 OpenAI-only CI fixture corrections and their focused proof are recorded in
 [the fixture correction plan](exec-plans/completed/2026-10-07-openai-only-ci-fixtures.md).
 
