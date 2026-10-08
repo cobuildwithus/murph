@@ -3,6 +3,56 @@ import { createRunnerReleaseProvider } from "../scripts/runner-release-provider.
 
 vi.mock("node:timers/promises", () => ({ setTimeout: async () => {} }));
 
+describe("recent Worker version metadata", () => {
+  it("requests the latest two uploads without filtering inactive versions and preserves provider order", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      success: true,
+      result: { items: [
+        { id: "latest-inactive", deployable: false, metadata: { privateFixture: true } },
+        { id: "previous-live", deployable: true },
+      ] },
+    }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture/account", apiToken: "fixture-token", fetchImpl })
+      .readRecentWorkerVersionIds("worker/name?")).resolves.toEqual(["latest-inactive", "previous-live"]);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe(
+      "https://api.cloudflare.com/client/v4/accounts/fixture%2Faccount/workers/scripts/worker%2Fname%3F/versions?per_page=2",
+    );
+    expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({ method: "GET", cache: "no-store" });
+  });
+
+  it("accepts a Worker with only one uploaded version", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      success: true, result: { items: [{ id: "first-upload" }] },
+    }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
+      .readRecentWorkerVersionIds("worker")).resolves.toEqual(["first-upload"]);
+  });
+
+  it.each([
+    undefined, null, {}, [], { items: null }, { items: {} }, { items: [] },
+    { items: [{ id: "one" }, { id: "two" }, { id: "three" }] },
+    { items: [null] }, { items: ["private-fixture"] }, { items: [[]] }, { items: [{}] },
+    { items: [{ id: 7 }] }, { items: [{ id: "" }] }, { items: [{ id: " \t" }] },
+    { items: [{ id: " padded-fixture" }] }, { items: [{ id: "padded-fixture " }] },
+    { items: [{ id: "duplicate-fixture" }, { id: "duplicate-fixture" }] },
+  ])("rejects malformed inventories without exposing response content (%#)", async (result) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ success: true, result }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
+      .readRecentWorkerVersionIds("worker")).rejects.toMatchObject({
+        message: "Authoritative runner release state is unavailable; deployment stopped. Recent Worker version metadata is invalid.",
+      });
+  });
+
+  it("stops when the metadata request fails without forwarding the transport error", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => { throw new Error("private transport fixture"); });
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
+      .readRecentWorkerVersionIds("worker")).rejects.toMatchObject({
+        message: "Authoritative runner release state is unavailable; deployment stopped. Read recent Worker versions: request failed before a response.",
+      });
+  });
+});
+
 describe("native account capacity evidence", () => {
   it("reads the account's actual quota and excludes unrelated private fields", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
