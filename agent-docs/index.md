@@ -1113,6 +1113,6 @@ Junction historical/webhook dense imports commit up to eight closed days per can
 Final usage-envelope fitting after trusted Worker attribution is tracked in
 [the usage reporting plan](exec-plans/completed/2026-10-07-usage-reporting-envelope.md).
 
-The scheduled automation loss alert (3 subjects losing a run in 6 hours) is
+The scheduled automation loss alert (any run lost after all retries) is
 tracked in [the automation loss alert plan](exec-plans/completed/2026-10-07-automation-loss-alert.md);
 `../docs/hosted-runtime-log-database.md` owns the operational contract.

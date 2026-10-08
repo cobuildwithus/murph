@@ -905,21 +905,21 @@ migration, or runtime control action is required.
 
 ### Scheduled automation loss alert
 
-The same five-minute cron runs the scheduled automation loss monitor. A lost run
-is an `assistant.automation_detail` row of type `cron.occurrence.expired` with a
-numeric `failurePriorFailureCount` above zero, or `cron.job.completed` with
+The same five-minute cron runs the scheduled automation loss monitor. It alerts
+only on runs a member never receives. A lost run is an
+`assistant.automation_detail` row of type `cron.occurrence.expired` with a
+numeric `failurePriorFailureCount` above zero (every retry inside the
+occurrence's freshness window failed), or `cron.job.completed` with
 `failureRunOutcome: "failed"` and `failureRetryScheduled: false` other than a
-usage-limit error. When at least 3 distinct subjects lost a run in the trailing
-6 hours, the monitor opens the shared operational email incident.
+usage-limit error. A run that is still retrying, including a delayed Flex
+retry, is not lost. Any lost run in the trailing 6 hours opens the shared
+operational email incident.
 
 Requiring a prior failure excludes expiries that never reached the model:
 onboarding-gated research automations are evaluated on a later wake and expire
 with zero prior failures by design. `personal-patterns-update` is excluded
-because its own per-occurrence alert owns it. From 2026-09-30 to 2026-10-07 the
-rule would have opened an incident on each of 10-05, 10-06 and 10-07, when flex
-capacity rejections exhausted weekly digest and morning journal retries, and
-stayed quiet for two isolated single-subject onboarding follow-ups. Cron rows
-are capped per pass, so counts are lower bounds.
+because its own per-occurrence alert owns it. Cron rows are capped per pass, so
+counts are lower bounds.
 
 Recipients, timezone, reminders, quiet hours and recovery follow the shared
 incident owner with the latency monitor's configuration; read failures cannot

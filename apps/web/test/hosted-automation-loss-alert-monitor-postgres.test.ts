@@ -54,8 +54,6 @@ describe.skipIf(!enabled)("scheduled automation loss PostgreSQL aggregate", () =
   });
 
   it("counts terminal failures and excludes retries, usage limits, gated expiry and Personal Patterns", async () => {
-    await insert(0, failed(false));
-    await insert(1, failed(false, "ASSISTANT_CODEX_CONNECTION_LOST"));
     await insert(2, failed(true));
     await insert(3, failed(false, "ASSISTANT_CODEX_USAGE_LIMIT"));
     await insert(4, expired("weekly-health-insight", 0));
@@ -65,11 +63,13 @@ describe.skipIf(!enabled)("scheduled automation loss PostgreSQL aggregate", () =
       failureRunOutcome: "failed", failureRetryScheduled: "false" });
     await insert(8, { ...failed(false), failureErrorCode: undefined }, { errorCode: "ASSISTANT_CODEX_USAGE_LIMIT" });
     expect(await readHostedAutomationLossHealth({ now, database })).toMatchObject({
-      anomalous: false, runtimeCount: 2, lostRunCount: 2,
+      anomalous: false, runtimeCount: 0, lostRunCount: 0,
     });
+    await insert(0, failed(false));
+    await insert(1, failed(false, "ASSISTANT_CODEX_CONNECTION_LOST"));
     await insert(9, expired("journal-connected-context-morning", 1));
     const health = await readHostedAutomationLossHealth({ now, database });
-    expect(health).toMatchObject({ anomalous: true, runtimeCount: 3 });
+    expect(health).toMatchObject({ anomalous: true, runtimeCount: 3, lostRunCount: 3 });
     // Every failed attempt explains the incident, including retried ones.
     expect(health.failedAttempts).toEqual([
       { errorCode: "ASSISTANT_CODEX_FAILED", failedAttemptCount: 2 },
@@ -95,7 +95,7 @@ describe.skipIf(!enabled)("scheduled automation loss PostgreSQL aggregate", () =
     await insert(0, expired("journal-connected-context-morning"));
     await insert(1, expired());
     expect(await readHostedAutomationLossHealth({ now, database })).toEqual({
-      anomalous: false, runtimeCount: 2, lostRunCount: 3, failedAttempts: [],
+      anomalous: true, runtimeCount: 2, lostRunCount: 3, failedAttempts: [],
       automations: [
         { automation: "weekly-health-digest", lostRunCount: 2, runtimeCount: 2 },
         { automation: "journal-connected-context-morning", lostRunCount: 1, runtimeCount: 1 },

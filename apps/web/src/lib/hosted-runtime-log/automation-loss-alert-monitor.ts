@@ -11,12 +11,11 @@ import { getPrisma } from "../prisma";
 import { getHostedRuntimeLogPool, isHostedRuntimeLogDatabaseConfigured } from "./database";
 import type { HostedRuntimeLogSqlDatabase } from "./store";
 
-// A lost run is a scheduled occurrence that expired after a failed attempt, or
-// failed with no retry left. Onboarding-gated research automations expire with
-// zero prior failures by design and are excluded. From 2026-09-30 to 2026-10-07
-// lost runs reached 3 runtimes in 6 hours only during the 10-05 to 10-07 flex
-// capacity rejections; isolated single-runtime losses stay below the threshold.
-export const HOSTED_AUTOMATION_LOSS_RUNTIME_THRESHOLD = 3;
+// A lost run never reaches the member: it expired after failed attempts used
+// its whole retry window, or failed with no retry left. A run still retrying,
+// including delayed Flex retries, is not lost. Onboarding-gated research
+// automations expire with zero prior failures by design and are excluded.
+export const HOSTED_AUTOMATION_LOSS_RUNTIME_THRESHOLD = 1;
 export const HOSTED_AUTOMATION_LOSS_WINDOW_MS = 6 * 60 * 60_000;
 export const HOSTED_AUTOMATION_LOSS_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
 
@@ -153,8 +152,8 @@ export async function runHostedAutomationLossAlertMonitor(input: {
       incidentId, phase, lastEvaluatedAt: now.toISOString(), message: message ?? null,
     }),
     buildMessage: ({ health, now }) => [
-      `Lost scheduled runs: ${health.lostRunCount} across ${health.runtimeCount} runtimes in the trailing ${HOSTED_AUTOMATION_LOSS_WINDOW_MS / 3_600_000} hours.`,
-      `Threshold: at least ${HOSTED_AUTOMATION_LOSS_RUNTIME_THRESHOLD} runtimes with a run that expired after a failed attempt or failed with no retry left. Personal Patterns has its own alert.`,
+      `Scheduled runs lost outright: ${health.lostRunCount} across ${health.runtimeCount} runtimes in the trailing ${HOSTED_AUTOMATION_LOSS_WINDOW_MS / 3_600_000} hours.`,
+      "Each run failed and expired after its retry window, or failed with no retry left, so the member never received it. Delayed runs that are still retrying are not counted. Personal Patterns has its own alert.",
       "By automation:",
       ...health.automations.map(row => `${row.automation}: ${row.lostRunCount} lost runs across ${row.runtimeCount} runtimes.`),
       "Failed scheduled attempts in the window by error code:",

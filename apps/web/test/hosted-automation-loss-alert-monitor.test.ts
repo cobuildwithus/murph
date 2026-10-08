@@ -62,10 +62,9 @@ function alerting() {
 }
 
 describe("scheduled automation loss incident monitor", () => {
-  it("stays healthy below the runtime threshold without reading failure codes", async () => {
-    mocks.query.mockResolvedValue(lostRows(2));
+  it("stays healthy when no run was lost outright, without reading failure codes", async () => {
     expect(await runHostedAutomationLossAlertMonitor({ now, env, sendAlert }))
-      .toMatchObject({ configured: true, outcome: "healthy", health: { anomalous: false, runtimeCount: 2 } });
+      .toMatchObject({ configured: true, outcome: "healthy", health: { anomalous: false, runtimeCount: 0 } });
     expect(sendAlert).not.toHaveBeenCalled();
     expect(mocks.query).toHaveBeenCalledOnce();
     expect(mocks.query.mock.calls[0]?.[1]).toEqual([
@@ -74,13 +73,20 @@ describe("scheduled automation loss incident monitor", () => {
     ]);
   });
 
-  it("sends allowlisted counts at the threshold", async () => {
+  it("alerts on a single runtime's outright loss", async () => {
+    mocks.query.mockImplementation(async (sql: string) => sql.includes("WITH lost") ? { rows: [
+      { automation: "weekly-health-digest", lostRunCount: "1", runtimeCount: "1", totalRuntimeCount: "1" },
+    ] } : failedRows);
+    expect((await runHostedAutomationLossAlertMonitor({ now, env, sendAlert })).outcome).toBe("alert_sent");
+  });
+
+  it("sends allowlisted counts", async () => {
     alerting();
     const result = await runHostedAutomationLossAlertMonitor({ now, env, sendAlert });
     expect(result.outcome).toBe("alert_sent");
     expect(mocks.query).toHaveBeenCalledTimes(4); // Shared pre-send recheck.
     expect(sendAlert).toHaveBeenCalledWith(expect.objectContaining({
-      text: expect.stringContaining("Lost scheduled runs: 5 across 5 runtimes in the trailing 6 hours."),
+      text: expect.stringContaining("Scheduled runs lost outright: 5 across 5 runtimes in the trailing 6 hours."),
       idempotencyKey: expect.stringMatching(/^murph\/automation-loss\/.+\/alert$/u),
     }));
     const details = state?.detailsJson as Prisma.JsonObject;
