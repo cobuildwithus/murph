@@ -6,9 +6,6 @@ import {
   deploySmokeRoutes,
 } from "./route-handlers/deploy-smoke.ts";
 import {
-  inferenceVerificationRoutes,
-} from "./route-handlers/inference-verification.ts";
-import {
   runtimeProcessingRoutes,
   userStatusRoutes,
 } from "./route-handlers/runtime-control.ts";
@@ -33,7 +30,6 @@ export const workerInternalRoutes = [
   ...deviceWebhookEnqueueRoutes,
   ...deploySmokeRoutes,
   ...runtimeProcessingRoutes,
-  ...inferenceVerificationRoutes,
   ...userDataDeleteRoutes,
   ...runtimeResourcePurgeRoutes,
   ...telegramUsageLimitNoticeRoutes,

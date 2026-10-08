@@ -207,7 +207,7 @@ describe('assistant session resolution', () => {
         identityId: 'message-identity',
         maxSessionAgeMs: 90_000,
         model: 'gpt-5.6-terra',
-        modelProvider: 'vercel-ai-gateway',
+        modelProvider: 'hosted-openai',
         provider: 'codex-cli',
         reasoningEffort: 'high',
         sandbox: 'workspace-write',
@@ -231,13 +231,13 @@ describe('assistant session resolution', () => {
       target: createCodexTarget({
         approvalPolicy: 'never',
         model: 'gpt-5.6-terra',
-        modelProvider: 'vercel-ai-gateway',
+        modelProvider: 'hosted-openai',
         reasoningEffort: 'high',
         sandbox: 'workspace-write',
       }),
       provider: 'codex-cli',
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       sandbox: 'workspace-write',
       approvalPolicy: 'never',
       oss: false,
@@ -344,7 +344,7 @@ describe('assistant session resolution', () => {
   it('resolves targets from boundary defaults, operator defaults, and explicit overrides in order', () => {
     const boundaryDefaultTarget = createDefaultLocalAssistantModelTarget()
     const defaultsBackend = createCodexTarget({
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       model: 'gpt-5-default',
       reasoningEffort: 'low',
       sandbox: 'read-only',
@@ -376,7 +376,7 @@ describe('assistant session resolution', () => {
       }),
     ).toMatchObject({
       adapter: 'codex-cli',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       model: 'gpt-5-default',
       reasoningEffort: 'low',
       sandbox: 'read-only',
@@ -396,7 +396,7 @@ describe('assistant session resolution', () => {
       }),
     ).toEqual(createCodexTarget({
       model: 'gpt-5-codex-override',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
     }))
@@ -405,7 +405,7 @@ describe('assistant session resolution', () => {
   it('keeps provider-only overrides off durable state while using the session target', () => {
     const sessionTarget = createCodexTarget({
       model: 'gpt-5-session',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       reasoningEffort: 'low',
     })
 
@@ -420,13 +420,13 @@ describe('assistant session resolution', () => {
     expect(plan.primaryTarget).toMatchObject({
       adapter: 'codex-cli',
       model: 'gpt-5-session',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       reasoningEffort: 'low',
     })
     expect(plan.codexRoute.providerOptions).toMatchObject({
       provider: 'codex-cli',
       model: 'gpt-5-session',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       reasoningEffort: 'low',
     })
 
@@ -678,12 +678,12 @@ describe('assistant session resolution', () => {
   it('projects a hosted model change while preserving native thread continuity', async () => {
     const previousTarget = createCodexTarget({
       model: 'gpt-5.4',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       reasoningEffort: 'medium',
     })
     const hostedDefaultTarget = createCodexTarget({
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       reasoningEffort: 'high',
     })
     const resolvedSession = createResolvedAssistantSessionForTest({
@@ -714,7 +714,7 @@ describe('assistant session resolution', () => {
     expect(result.session.sessionId).toBe(resolvedSession.session.sessionId)
     expect(result.session.target).toEqual(hostedDefaultTarget)
     expect(result.session.providerOptions.model).toBe('gpt-5.6-terra')
-    expect(result.session.providerOptions.modelProvider).toBe('vercel-ai-gateway')
+    expect(result.session.providerOptions.modelProvider).toBe('hosted-openai')
     expect(result.session.providerOptions.reasoningEffort).toBe('high')
     expect(result.session.resumeState).toMatchObject({
       routeFingerprint: readCodexThreadRouteFingerprint(
@@ -738,7 +738,7 @@ describe('assistant session resolution', () => {
   it('clears native resume when the model provider changes', async () => {
     const previousTarget = createCodexTarget({
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       reasoningEffort: 'low',
     })
     const nextTarget = createCodexTarget({
@@ -775,7 +775,7 @@ describe('assistant session resolution', () => {
   it('projects explicit message target overrides into hosted sessions before turn routing', async () => {
     const hostedDefaultTarget = createCodexTarget({
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       reasoningEffort: 'low',
     })
     const resolvedSession = createResolvedAssistantSessionForTest({
@@ -803,7 +803,7 @@ describe('assistant session resolution', () => {
 
     expect(result.session.target).toEqual(createCodexTarget({
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       reasoningEffort: 'high',
     }))
     expect(result.session.providerOptions.reasoningEffort).toBe('high')
@@ -823,7 +823,7 @@ describe('assistant session resolution', () => {
     const sessionTarget = createCodexTarget({
       codexHome: '/tmp/murph-session-resolution-codex-home',
       model: 'gpt-5-session',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       profile: 'session-profile',
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
@@ -844,7 +844,7 @@ describe('assistant session resolution', () => {
     expect(result.session.target).toEqual(createCodexTarget({
       codexHome: '/tmp/murph-session-resolution-codex-home',
       model: 'gpt-5-session',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       profile: 'session-profile',
       reasoningEffort: 'high',
       sandbox: 'workspace-write',
@@ -852,7 +852,7 @@ describe('assistant session resolution', () => {
     expect(result.session.providerOptions).toMatchObject({
       codexHome: '/tmp/murph-session-resolution-codex-home',
       model: 'gpt-5-session',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       profile: 'session-profile',
       reasoningEffort: 'high',
       sandbox: 'workspace-write',
@@ -865,7 +865,7 @@ describe('assistant session resolution', () => {
   it('keeps hosted resume state when the hosted default continuity has not changed', async () => {
     const hostedDefaultTarget = createCodexTarget({
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       reasoningEffort: 'high',
     })
     const resumeState = {

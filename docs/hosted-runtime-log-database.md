@@ -381,15 +381,11 @@ for cache lifetime and write pricing. Current GPT-5.6+ TTL supports `30m`; it do
 not promise that an infrequent scheduled job retains a warm prefix indefinitely.
 
 The row is observability only and remains failure-isolated from provider egress.
-Venice foreground and untagged calls do not create these rows. Container egress
-schedules tagged memory rows with Cloudflare `waitUntil` when available and
+Container egress schedules diagnostics with Cloudflare `waitUntil` when available and
 otherwise starts a best-effort detached callback, which can be lost if the
 invocation ends. Diagnostic persistence never delays a provider response or
 transport error. Non-OK and transport-error diagnostics use warning retention,
-while accepted and request-only diagnostics use debug retention. Venice response
-status and response-header latency are recorded only after upstream dispatch;
-Murph-local platform-usage denials do not produce Venice response rows, and
-transport failures omit response-header latency.
+while accepted and request-only diagnostics use debug retention.
 
 The separate assistant `provider.prompt_size` trace may record
 `conversationHistoryPresent`, `conversationHistoryCount`, and
@@ -511,8 +507,7 @@ verifies successful compaction and preserved task state with the current window.
 requests and streaming compaction inherit the same provider configuration.
 Native Codex also uses this knob for WebSocket sends; it does not replace the
 separate connection and HTTP request budgets.
-Venice and custom inference also use 90 seconds. `codex.prepare` reports the
-selected provider's idle timeout and request/stream retry limits. Native Codex
+`codex.prepare` reports OpenAI's idle timeout and request/stream retry limits. Native Codex
 still owns the single WebSocket attempt and HTTPS fallback; request retries,
 Murph cancellation, accepted work, and delivery ownership are unchanged.
 

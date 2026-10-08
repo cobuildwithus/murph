@@ -90,10 +90,10 @@ type NotificationTurnDeliverMessageResult =
   }
 
 const CODEX_MODEL_PROVIDER_CONFIG = {
-  id: 'vercel-ai-gateway',
-  name: 'Vercel AI Gateway',
-  baseUrl: 'https://ai-gateway.vercel.sh/v1',
-  envKey: 'VERCEL_AI_API_KEY',
+  id: 'hosted-openai',
+  name: 'OpenAI',
+  baseUrl: 'https://api.openai.com/v1',
+  envKey: 'OPENAI_API_KEY',
   wireApi: 'responses' as const,
 }
 
@@ -5712,7 +5712,7 @@ function createProviderOptions(
     approvalPolicy: 'never',
     provider: 'codex-cli',
     model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    modelProvider: 'hosted-openai',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
     ...overrides,
@@ -6116,7 +6116,7 @@ function createCodexTarget(
     codexCommand: null,
     codexHome: null,
     model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    modelProvider: 'hosted-openai',
     oss: false,
     profile: null,
     reasoningEffort: 'medium',

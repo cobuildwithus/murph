@@ -273,7 +273,7 @@ export async function executeCodexAssistantTurnAttempt(
     hostedToolContext: input.hostedToolContext ?? null,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,
-    modelProvider: providerConfig.target.modelProvider ?? undefined,
+    modelProvider: providerConfig.target.modelProvider ?? 'openai',
     onAdditionalUsage: input.onAdditionalUsage ?? null,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
@@ -1397,7 +1397,7 @@ function asDiagnosticRecord(value: unknown): Record<string, unknown> | null {
 }
 
 export function resolveCodexAssistantLabel(
-  config: AssistantProviderTurnExecutionInput['providerConfig'],
+  _config: AssistantProviderTurnExecutionInput['providerConfig'],
 ): string {
-  return config.target.oss ? 'Codex OSS app-server' : 'Codex app-server'
+  return 'Codex app-server'
 }

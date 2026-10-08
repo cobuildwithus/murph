@@ -258,7 +258,6 @@ async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedR
   if (ready.kind !== "ready") return retryProcessing(ctx, "container_not_ready");
   const launch = {
     providerEgressTokenHash: null,
-    customInferenceEnvelope: prepared.customInferenceEnvelope,
     platformAiUsageAllowed: prepared.platformAiUsageAllowed,
   };
   // Readiness already crosses this boundary. Its capability keeps rolling
@@ -316,7 +315,6 @@ function createInvocationPreparation(ctx: ProcessingContext) {
   return new RuntimeInvocationPreparation({
     env, runnerContainerNamespace: namespace, runnerRuntimeEnvSource: source,
     runnerStoreCache: new RunnerStoreCache({ bucket: source.BUNDLES, env, runnerRuntimeEnvSource: source }),
-    readHostedWebControlBaseUrl: () => env.hostedWebBaseUrl,
     assertWorkspaceBelongsToRunnerUser(workspace, userId) {
       if (workspace && workspace.userId !== userId) throw new Error("Hosted workspace member mismatch.");
     },

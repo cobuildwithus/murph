@@ -77,6 +77,7 @@ mention the deleted generic state.
   contract and parser modules to be removed from consumer bundles. Keep process
   registration and I/O out of module initialization. Shared display constants
   belong with dependency-free runtime values, not schema construction.
+- assistant configuration accepts supported OpenAI models and reasoning effort
 - signed callback canonicalization stays timestamped and request-bound across app-local signers and verifiers
 - the shared control/status path layout stays stable between callers and the worker
 - non-direct route-authorized Linq and Telegram conversation wakes may carry an

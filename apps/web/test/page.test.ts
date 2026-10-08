@@ -129,7 +129,6 @@ afterEach(() => {
 
 test("HomePage renders the canonical landing page at the root route", async () => {
   vi.clearAllMocks();
-  vi.stubEnv("HOSTED_VENICE_ENABLED", "");
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
   });
@@ -300,80 +299,22 @@ test("HomePage renders the canonical landing page at the root route", async () =
   );
 });
 
-test("HomePage keeps the technical runtime section in order and honors both provider flags", async () => {
-  const combos = [
-    { custom: "", expectEndpoint: false, expectVenice: false, venice: "" },
-    { custom: "", expectEndpoint: false, expectVenice: true, venice: "1" },
-    { custom: "1", expectEndpoint: true, expectVenice: false, venice: "" },
-    { custom: "1", expectEndpoint: true, expectVenice: true, venice: "1" },
-  ] as const;
-
-  for (const combo of combos) {
-    vi.clearAllMocks();
-    vi.stubEnv("HOSTED_VENICE_ENABLED", combo.venice);
-    vi.stubEnv("HOSTED_CUSTOM_INFERENCE_ENABLED", combo.custom);
-    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-      authenticated: false,
-    });
-    mocks.getMurphGithubStarCount.mockResolvedValue(null);
-    mocks.headers.mockResolvedValue(new Headers({
-      "x-vercel-ip-country": "US",
-    }));
-
-    const { default: HomePage } = await import("../app/page");
-    const markup = renderToStaticMarkup(await HomePage());
-
-    // Present, and ordered between "How it works" and the security teaser.
-    // Anchors on "Built on Codex," because the rest of the headline is glued
-    // with non-breaking spaces, whose encoding differs across transforms.
-    assert.match(
-      markup,
-      /Improve your health, one experiment at a time\.[\s\S]*Built on Codex,[\s\S]*Your health data/,
-    );
-    // "Privacy choice" and "privacy model fits you better" are unique to the
-    // section's provider matrix and inference card, unlike bare "Venice",
-    // which the FAQ also mentions when the flag is on.
-    if (combo.expectVenice) {
-      assert.match(markup, /Privacy choice/);
-      assert.match(markup, /privacy model fits you better/);
-    } else {
-      assert.doesNotMatch(markup, /Privacy choice/);
-      assert.doesNotMatch(markup, /privacy model fits you better/);
-    }
-    if (combo.expectEndpoint) {
-      assert.match(markup, /Endpoint \+ key/);
-      assert.match(markup, /compatible model endpoint and key/);
-    } else {
-      assert.doesNotMatch(markup, /Endpoint \+ key/);
-      assert.doesNotMatch(markup, /compatible model endpoint and key/);
-    }
-    // The managed and self-hosted paths are never gated.
-    assert.match(markup, /Managed[\s\S]{0,200}OpenAI/);
-    assert.match(markup, /Run it yourself[\s\S]{0,200}Local OSS/);
-  }
-});
-
-test("HomePage shows the provider FAQ only when Venice is available", async () => {
+test("HomePage keeps the OpenAI runtime section before security", async () => {
   vi.clearAllMocks();
-  vi.stubEnv("HOSTED_VENICE_ENABLED", "1");
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: false,
-  });
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({ authenticated: false });
   mocks.getMurphGithubStarCount.mockResolvedValue(null);
-  mocks.headers.mockResolvedValue(new Headers({
-    "x-vercel-ip-country": "US",
-  }));
+  mocks.headers.mockResolvedValue(new Headers({ "x-vercel-ip-country": "US" }));
 
   const { default: HomePage } = await import("../app/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /Can I choose which AI provider Murph uses\?/);
-  assert.match(markup, /choose OpenAI or Venice/);
+  assert.match(markup, /Improve your health, one experiment at a time\.[\s\S]*Built on Codex,[\s\S]*Your health data/);
+  assert.match(markup, /Powered by OpenAI/);
+  assert.doesNotMatch(markup, /Venice|Endpoint \+ key|Local OSS|Can I choose which AI provider/);
 });
 
 test("SecurityPage splits the shared sticky nav into Log in + Signup when logged out", async () => {
   vi.clearAllMocks();
-  vi.stubEnv("HOSTED_VENICE_ENABLED", "");
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
   });
@@ -401,21 +342,6 @@ test("SecurityPage splits the shared sticky nav into Log in + Signup when logged
   );
   assert.doesNotMatch(markup, /curl -sSL withmurph\.ai\/install\.sh \| bash/);
   assert.doesNotMatch(markup, /security-model-provider-title/);
-});
-
-test("SecurityPage shows provider security guidance only when Venice is available", async () => {
-  vi.clearAllMocks();
-  vi.stubEnv("HOSTED_VENICE_ENABLED", "true");
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: false,
-  });
-  mocks.getMurphGithubStarCount.mockResolvedValue(null);
-
-  const { default: SecurityPage } = await import("../app/security/page");
-  const markup = renderToStaticMarkup(await SecurityPage());
-
-  assert.match(markup, /security-model-provider-title/);
-  assert.match(markup, /OpenAI remains the default/);
 });
 
 test("HomePage metadata keeps the root route as the canonical landing URL", async () => {

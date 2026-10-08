@@ -141,10 +141,10 @@ it("holds a changed raw page before any model call", async () => {
   expect(await readClinicalEnrichmentStatus(f)).toMatchObject({ counts: { held: 1 } });
 });
 
-it("keeps the configured Venice provider and selects its Luna model identifier", async () => {
+it("keeps the configured OpenAI transport and selects Luna", async () => {
   const f = await fixture();
-  await runOneHostedClinicalEnrichment({ ...f.runtime, modelProvider: "venice" });
-  expect(f.executeExtraction).toHaveBeenCalledWith(expect.objectContaining({ modelProvider: "venice", model: "openai-gpt-56-luna", reasoningEffort: "medium" }));
+  await runOneHostedClinicalEnrichment({ ...f.runtime, modelProvider: "hosted-openai" });
+  expect(f.executeExtraction).toHaveBeenCalledWith(expect.objectContaining({ modelProvider: "hosted-openai", model: "gpt-5.6-luna", reasoningEffort: "medium" }));
 });
 
 it("clears a failed record's retry state when attestation holds it and continues to the next record", async () => {

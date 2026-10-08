@@ -2708,11 +2708,8 @@ test('model schema explains preset-gated non-interactive updates', async () => {
   assert.equal('baseUrl' in schema.options.properties, false)
   assert.equal('apiKeyEnv' in schema.options.properties, false)
   assert.equal('headersJson' in schema.options.properties, false)
-  assert.equal('modelProvider' in schema.options.properties, true)
-  assert.match(
-    String(schema.options.properties.modelProvider?.description ?? ''),
-    /Codex model provider/u,
-  )
+  assert.equal('modelProvider' in schema.options.properties, false)
+  assert.equal('oss' in schema.options.properties, false)
   assert.match(
     String(schema.options.properties.profile?.description ?? ''),
     /Only applies with `--preset codex`/u,

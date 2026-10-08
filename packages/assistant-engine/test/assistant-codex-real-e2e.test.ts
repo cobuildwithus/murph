@@ -102,7 +102,10 @@ import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
-import { OPENAI_CODEX_MODEL_PROVIDER_CONFIG } from '@murphai/operator-config/assistant/target-runtime'
+import {
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
+} from '@murphai/operator-config/assistant/target-runtime'
 import { DAILY_NUTRITION_OPTIONAL_GOALS_INTRO, renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
 import { NUTRITION_GOAL_INVITATION_SENT_MEMORY } from '../src/assistant/nutrition-card-introduction.js'
 import { renderMarkdownMessageText } from '@murphai/operator-config/message-formatting'
@@ -1580,13 +1583,10 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
 } as const
 type RealCodexOnboardingScenario =
   keyof typeof REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS
-const OPENAI_ENV_MODEL_PROVIDER = 'openai-env'
+const OPENAI_ENV_MODEL_PROVIDER = HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
 const OPENAI_SUBSCRIPTION_MODEL_PROVIDER = 'openai'
 const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 const OPENAI_API_KEY_ENV = 'OPENAI_API_KEY'
-const VERCEL_AI_GATEWAY_MODEL_PROVIDER = 'vercel-ai-gateway'
-const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1'
-const VERCEL_AI_GATEWAY_API_KEY_ENV = 'VERCEL_AI_API_KEY'
 const REAL_CODEX_E2E_TSX_TSCONFIG_PATH = fileURLToPath(
   new URL('../../../tsconfig.base.json', import.meta.url),
 )
@@ -2262,12 +2262,10 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
       availableModels: ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-6-astra'],
-      availableProviders: ['openai'] as const,
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
       model: 'gpt-5.6-luna' as const,
-      provider: 'openai' as const,
       reasoningEffort: 'low' as const,
       solAvailable: true,
     }
@@ -2292,7 +2290,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
           },
           computerToolsAvailable: false,
           currentAssistantInputId: () => 'ain_00000000000000000000000000000061',
-          currentAssistantTarget: () => ({ model: 'gpt-6-sol', provider: 'openai', reasoningEffort: 'low' }),
+          currentAssistantTarget: () => ({ model: 'gpt-6-sol', reasoningEffort: 'low' }),
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
@@ -2300,7 +2298,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
         },
         model: config.model,
         modelProvider: config.modelProvider,
-        prompt: `I am on the paid Edge plan. Can you use GPT-6 ${variant} for my future queries? Keep my provider and reasoning settings as they are.`,
+        prompt: `I am on the paid Edge plan. Can you use GPT-6 ${variant} for my future queries? Keep my reasoning setting as it is.`,
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
         vaultRoot: workingDirectory,
@@ -2314,6 +2312,69 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
       expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command')).toEqual([])
     } finally {
       await stopWarmCodexAppServer('astra-selection-e2e-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 180_000)
+
+  it('saves OpenAI model and reasoning exactly once for the next query', async () => {
+    const selectedModel = 'gpt-6-luna' as const
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-openai-selection-'))
+    const updates: unknown[] = []
+    const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
+      availableModels: ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-6-astra'],
+      availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model: 'gpt-5.6-luna' as const,
+      reasoningEffort: 'low' as const,
+      solAvailable: true,
+    }
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_ASSISTANT_CONFIGURATION_TOOL],
+        env: config.env,
+        hostedToolContext: {
+          assistantConfigurationTool: {
+            async request(request) {
+              if (request.action === 'read') return { action: 'read', result: snapshot }
+              updates.push(request)
+              snapshot.model = request.model ?? snapshot.model
+              snapshot.reasoningEffort = request.reasoningEffort ?? snapshot.reasoningEffort
+              return { action: 'update', result: { ...snapshot, appliesAt: 'next_turn', requiredPlan: null, status: 'updated' } }
+            },
+          },
+          computerToolsAvailable: false,
+          currentAssistantInputId: () => 'ain_00000000000000000000000000000061',
+          currentAssistantTarget: () => ({ model: 'gpt-6-sol', reasoningEffort: 'low' }),
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: 'I am on the paid Edge plan. Please use GPT-6 Luna with high reasoning for my future queries.',
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        vaultRoot: workingDirectory,
+        workingDirectory,
+      })
+      process.stdout.write(`[openai-configuration-e2e] ${JSON.stringify({ model: selectedModel, reply: result.finalMessage, updates: updates.length })}\n`)
+      expect(updates).toEqual([{ action: 'update', assistantInputId: 'ain_00000000000000000000000000000061', model: selectedModel, reasoningEffort: 'high' }])
+      expect(result.finalMessage).toMatch(/luna/iu)
+      expect(result.finalMessage).toMatch(/high/iu)
+      expect(result.finalMessage).not.toMatch(/venice|custom (?:inference|endpoint)|already using/iu)
+      expect(result.finalMessage).toMatch(/next|future|going forward/iu)
+      expect(result.finalMessage).not.toMatch(/upgrade|payment|cannot|unable/iu)
+    } finally {
+      await stopWarmCodexAppServer('openai-configuration-e2e-complete')
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
   }, 180_000)
@@ -3487,7 +3548,7 @@ describe('real Codex live fixture contracts', () => {
   }, 120_000)
 
   it('uses production Responses websocket configuration for canonical provider journeys', () => {
-    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-6-sol', modelProvider: 'openai-env', productionTransport: true })
+    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-6-sol', modelProvider: OPENAI_ENV_MODEL_PROVIDER, productionTransport: true })
     expect(toml).toContain('wire_api = "responses"')
     expect(toml).toContain('supports_websockets = true')
     expect(toml).toContain(`base_url = "${OPENAI_CODEX_MODEL_PROVIDER_CONFIG.baseUrl}"`)
@@ -3495,7 +3556,7 @@ describe('real Codex live fixture contracts', () => {
     expect(toml.split('[model_providers.')[0]).not.toContain('OPENAI_API_KEY')
   })
   it('executes canonical gate CLI commands and rejects an unknown command without a model', async () => {
-    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6-sol', modelProvider: 'openai-env' })
+    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6-sol', modelProvider: OPENAI_ENV_MODEL_PROVIDER })
     try {
       const codex = await execFileAsync(fixture.codexCommand, ['-c', 'default_permissions="murph-member-read"', 'features', 'list'], { env: fixture.env, timeout: 60_000 })
       expect(codex.stdout.trim()).not.toBe('')
@@ -30841,7 +30902,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(configToml).toContain('[shell_environment_policy]')
     expect(configToml).toContain('sandbox_mode = "workspace-write"')
     expect(configToml).toContain('include_only = [')
-    expect(configToml).toContain('[model_providers.openai-env]')
+    expect(configToml).toContain(`[model_providers.${OPENAI_ENV_MODEL_PROVIDER}]`)
     expect(configToml).toContain('env_key = "PROVIDER_AUTH"')
     expect(configToml).not.toContain('provider-value')
     expect(hostedPermissionConfigToml).toContain('env_key = "PROVIDER_AUTH"')
@@ -42159,11 +42220,7 @@ async function resolveRealCodexE2eConfig(
 
   const modelProvider =
     explicitModelProvider
-    ?? (
-      normalizeEnvString(sourceEnv[VERCEL_AI_GATEWAY_API_KEY_ENV])
-        ? VERCEL_AI_GATEWAY_MODEL_PROVIDER
-        : OPENAI_ENV_MODEL_PROVIDER
-    )
+    ?? OPENAI_ENV_MODEL_PROVIDER
   if (modelProvider === OPENAI_SUBSCRIPTION_MODEL_PROVIDER) {
     throw new Error(
       `Use ${OPENAI_ENV_MODEL_PROVIDER} for provider-key real Codex e2e.`,
@@ -42171,10 +42228,9 @@ async function resolveRealCodexE2eConfig(
   }
   if (
     modelProvider !== OPENAI_ENV_MODEL_PROVIDER
-    && modelProvider !== VERCEL_AI_GATEWAY_MODEL_PROVIDER
   ) {
     throw new Error(
-      `${modelProvider} is not supported by this e2e harness; use ${OPENAI_ENV_MODEL_PROVIDER} or ${VERCEL_AI_GATEWAY_MODEL_PROVIDER}.`,
+      `${modelProvider} is not supported by this e2e harness; use ${OPENAI_ENV_MODEL_PROVIDER}.`,
     )
   }
 
@@ -42240,10 +42296,6 @@ function buildRealCodexSubscriptionE2eEnv(
 }
 
 function resolveRealCodexProviderApiKeyEnv(modelProvider: string): string | null {
-  if (modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER) {
-    return VERCEL_AI_GATEWAY_API_KEY_ENV
-  }
-
   if (modelProvider === OPENAI_ENV_MODEL_PROVIDER) {
     return OPENAI_API_KEY_ENV
   }
@@ -42259,14 +42311,8 @@ function buildRealCodexConfigToml(input: {
   productionTransport?: boolean
   sandboxMode?: 'workspace-write' | null
 }): string {
-  const baseUrl =
-    input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
-      ? VERCEL_AI_GATEWAY_BASE_URL
-      : OPENAI_BASE_URL
-  const providerName =
-    input.modelProvider === VERCEL_AI_GATEWAY_MODEL_PROVIDER
-      ? 'Vercel AI Gateway'
-      : 'OpenAI'
+  const baseUrl = OPENAI_BASE_URL
+  const providerName = 'OpenAI'
 
   return [
     `model = ${tomlString(input.model)}`,

@@ -78,7 +78,7 @@ describe("internal connected-apps route", () => {
     expect(prisma.hostedMember.findUnique).toHaveBeenCalledWith({
       select: {
         ...hostedMemberAccessSelect,
-        assistantProviderPreference: true,
+
       },
       where: { id: "member_family" },
     });

@@ -25,31 +25,16 @@ const CAPABILITIES = [
   },
   {
     detail:
-      "Choose Luna, Terra, or Sol and scale reasoning from low to xhigh instead of spending the same compute on every task.",
+      "Choose an OpenAI model and scale reasoning from low to xhigh instead of spending the same compute on every task.",
     label: "Compute",
     title: "Reasoning on demand",
   },
   {
-    detail:
-      "Use managed models, choose Venice when its privacy model fits you better, connect your own compatible model endpoint and key, or run an open-source model locally.",
+    detail: "Murph uses OpenAI models for its core assistant replies.",
     label: "Inference",
-    title: "No model lock-in",
+    title: "Powered by OpenAI",
   },
 ] as const;
-
-function inferenceDetail(
-  veniceAvailable: boolean,
-  customInferenceAvailable: boolean,
-): string {
-  const clauses = ["Use managed models"];
-  if (veniceAvailable) {
-    clauses.push("choose Venice when its privacy model fits you better");
-  }
-  if (customInferenceAvailable) {
-    clauses.push("connect your own compatible model endpoint and key");
-  }
-  return `${clauses.join(", ")}, or run an open-source model locally.`;
-}
 
 const RUNTIME_FACTS = [
   ["runtime", "Codex CLI + App Server"],
@@ -58,49 +43,7 @@ const RUNTIME_FACTS = [
   ["reasoning", "low · medium · high · xhigh"],
 ] as const;
 
-const INFERENCE_OPTIONS = [
-  {
-    detail: "OpenAI",
-    label: "Managed",
-  },
-  {
-    detail: "Venice",
-    label: "Privacy choice",
-  },
-  {
-    detail: "Endpoint + key",
-    label: "Bring your own",
-  },
-  {
-    detail: "Local OSS",
-    label: "Run it yourself",
-  },
-] as const;
-
-export function TechnicalCapabilitiesSection({
-  customInferenceAvailable,
-  veniceAvailable,
-}: {
-  customInferenceAvailable: boolean;
-  veniceAvailable: boolean;
-}) {
-  // Venice and the custom-endpoint path render behind the same flags that gate
-  // the FAQ, the /security#model-provider section, and the Settings inference
-  // surfaces, so the homepage never claims a provider path this deployment
-  // hides.
-  const capabilities = CAPABILITIES.map((capability) =>
-    capability.label === "Inference"
-      ? {
-          ...capability,
-          detail: inferenceDetail(veniceAvailable, customInferenceAvailable),
-        }
-      : capability,
-  );
-  const inferenceOptions = INFERENCE_OPTIONS.filter(
-    (option) =>
-      (veniceAvailable || option.detail !== "Venice")
-      && (customInferenceAvailable || option.label !== "Bring your own"),
-  );
+export function TechnicalCapabilitiesSection() {
   return (
     <section
       aria-labelledby="technical-capabilities-title"
@@ -117,8 +60,8 @@ export function TechnicalCapabilitiesSection({
             </h2>
             <p className="mt-6 max-w-[46ch] text-pretty text-base leading-[1.75] text-[#f5f0e8]/70 sm:text-[1.0625rem]">
               Murph can use a browser, place phone calls, operate tools, and
-              delegate bounded work. You choose the model, the reasoning
-              effort, and who supplies the inference.
+              delegate bounded work. You choose the OpenAI model and reasoning
+              effort.
             </p>
           </div>
 
@@ -126,7 +69,7 @@ export function TechnicalCapabilitiesSection({
         </div>
 
         <div className="mt-14 grid gap-px overflow-hidden rounded-[1.25rem] border border-[#c4a882]/20 bg-[#c4a882]/20 sm:grid-cols-2 lg:mt-20 lg:grid-cols-3">
-          {capabilities.map((capability) => (
+          {CAPABILITIES.map((capability) => (
             <article
               className="bg-[#2a2520] p-6 sm:p-7 lg:p-8"
               key={capability.title}
@@ -139,32 +82,6 @@ export function TechnicalCapabilitiesSection({
               </p>
             </article>
           ))}
-        </div>
-
-        <div className="mt-14 border-t border-[#c4a882]/20 pt-12 lg:mt-20 lg:pt-14">
-          <div className="grid gap-x-16 gap-y-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
-            <div>
-              <h3 className="max-w-[22ch] text-balance font-serif text-[clamp(1.625rem,3vw,2.25rem)] font-semibold leading-[1.1] tracking-[-0.02em]">
-                The inference path is yours.
-              </h3>
-            </div>
-
-            <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-[#c4a882]/20 bg-[#c4a882]/20">
-              {inferenceOptions.map((option) => (
-                <div
-                  className="bg-[#1f1a16] px-4 py-4 odd:last:col-span-2 sm:px-5 sm:py-5"
-                  key={option.label}
-                >
-                  <dt className="font-mono text-[9px] font-medium uppercase tracking-[0.16em] text-[#c4a882]/85">
-                    {option.label}
-                  </dt>
-                  <dd className="mt-2 font-serif text-base font-semibold tracking-[-0.01em] text-[#f5f0e8] sm:text-[1.125rem]">
-                    {option.detail}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </div>
         </div>
       </div>
     </section>

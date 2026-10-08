@@ -1,3 +1,6 @@
+OpenAI-only CI fixture corrections and their focused proof are recorded in
+[the fixture correction plan](exec-plans/completed/2026-10-07-openai-only-ci-fixtures.md).
+
 Native Codex patch inclusion in full review snapshots is owned by
 
 Callback preflight snapshots and shared mailbox progress reads are owned by
@@ -7,6 +10,8 @@ is recorded in `exec-plans/completed/2026-10-02-db-pool-pressure.md`.
 
 ReviewGPT registry 0.5.152 consumer installation and retained compatibility proof
 are tracked in [the consumer repair plan](exec-plans/completed/2026-10-05-frog-reviewgpt-consumer-3937.md).
+The current GPT-6 picker and concrete-model proof contract is owned by
+[the ReviewGPT loop](operations/pr-reviewgpt-loop.md).
 
 Pinned native source review context and provenance proof are recorded in
 [the native review context plan](exec-plans/completed/2026-10-07-frog-native-review-context.md).
@@ -428,8 +433,6 @@ Automation edit schema discovery and attended progress guidance are owned by
 declaration preservation, independent schema/runtime structural admission parity,
 versioned edits, finite weekday cron authoring, nutrition/personalization inputs,
 and quick-versus-long progress proof is indexed in `agent-docs/references/testing-ci-map.md`.
-`agent-docs/product-specs/bring-your-own-inference.md` owns complete custom-provider
-tool-description transport and its existing byte/count bounds.
 
 This is a directory, not a second copy of the system contracts. Start with
 `AGENTS.md` and `agent-docs/operations/agent-workflow-routing.md`; open the
@@ -579,7 +582,6 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/exec-plans/completed/2026-09-11-nutrition-totals-card.md` | Completed implementation, assistant proof and review for optional-goal daily cards. | Completed execution plan | High | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-12-channel-welcome-reader-rollout.md` | Consumer-first release extraction for channel welcomes; production rollout remains with the deployment owners. | Historical implementation evidence | Low | 2026-09-12 |
 | `agent-docs/product-specs/imessage-workout-tracking.md` | iMessage workout product spec, verified editor attachment, and installed-client-compatible message/result transport. | iMessage workout product spec | High | 2026-09-08 |
-| `agent-docs/product-specs/bring-your-own-inference.md` | Personal custom inference contract covering verified member-owned endpoints, settings without runner wakes, mailbox revision handoff, explicit selection, no silent fallback, privacy, metering, and recovery. | Hosted assistant/custom inference product spec | High | 2026-07-31 |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated measured-biomarker navigation over preserved private lab history. | Biomarkers product spec | High | 2026-07-20 |
 | `agent-docs/product-specs/journal.md` | Private timelines, connected plans, and morning reminder reconciliation using normal vault tools, with or without connected accounts. | Journal product spec | High | 2026-09-23 |
 | `agent-docs/product-specs/personal-patterns.md` | Private context-to-outcome findings, desktop comparisons, and mobile cards with changed results, compact neutral states, tappable recorded-day counts, and inline comparison sample sizes. | Personal Patterns product spec | High | 2026-09-10 |

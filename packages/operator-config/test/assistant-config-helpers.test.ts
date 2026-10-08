@@ -86,10 +86,10 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
   assert.deepEqual(
     compactAssistantProviderConfigInput({
       provider: 'codex-cli',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
     }),
     {
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
     },
   )
   assert.equal(
@@ -100,14 +100,14 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     {
       approvalPolicy: 'never',
       codexCommand: ' codex ',
-      modelProvider: ' Vercel-AI-Gateway ',
+      modelProvider: ' OpenAI ',
       oss: false,
       reasoningEffort: ' low ',
     },
     {
       codexHome: ' /tmp/home ',
       model: ' gpt-5.6-terra ',
-      oss: true,
+      oss: false,
       profile: ' default ',
       sandbox: 'danger-full-access',
     },
@@ -123,8 +123,8 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
       codexCommand: 'codex',
       codexHome: '/tmp/home',
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
-      oss: true,
+      modelProvider: 'openai',
+      oss: false,
       profile: 'default',
     },
   })
@@ -137,10 +137,10 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     assistantProviderConfigsEqual(
       {
         provider: 'codex-cli',
-        modelProvider: ' Vercel-AI-Gateway ',
+        modelProvider: ' OpenAI ',
       },
       {
-        modelProvider: 'vercel-ai-gateway',
+        modelProvider: 'openai',
       },
     ),
     true,
@@ -150,11 +150,11 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     approvalPolicy: 'never',
     codexHome: '/tmp/home',
     continuityFingerprint:
-      'sha256:2659438fad64495ab8f5401b4378500461339eba8faddc9c47ebc440aa7bbf15',
+      'sha256:a499b928a045b4adc6198efcfa2ece8541fcf224eaba84b7164509c480da26ac',
     executionDriver: 'codex-app-server',
     model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
-    oss: true,
+    modelProvider: 'openai',
+    oss: false,
     profile: 'default',
     provider: 'codex-cli',
     reasoningEffort: 'low',
@@ -166,8 +166,8 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     codexCommand: 'codex',
     codexHome: '/tmp/home',
     model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
-    oss: true,
+    modelProvider: 'openai',
+    oss: false,
     profile: 'default',
     reasoningEffort: 'low',
     sandbox: 'danger-full-access',
@@ -187,7 +187,7 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
     providerConfig: {
       provider: 'codex-cli',
       model: ' gpt-5.6-terra ',
-      modelProvider: ' vercel-ai-gateway ',
+      modelProvider: ' openai ',
       reasoningEffort: ' medium ',
       sandbox: 'danger-full-access',
       approvalPolicy: 'never',
@@ -200,7 +200,7 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
     providerConfig: {
       provider: 'codex-cli',
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
       reasoningEffort: 'medium',
     },
   })
@@ -211,7 +211,7 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
     codexCommand: null,
     codexHome: null,
     model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    modelProvider: 'openai',
     oss: false,
     profile: null,
     provider: 'codex-cli',
@@ -244,7 +244,7 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
         providerConfig: {
           provider: 'codex-cli',
           model: 'gpt-5.6-terra',
-          modelProvider: 'vercel-ai-gateway',
+          modelProvider: 'openai',
           reasoningEffort: 'medium',
         },
       }),

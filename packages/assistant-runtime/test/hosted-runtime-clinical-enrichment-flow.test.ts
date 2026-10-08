@@ -130,7 +130,7 @@ describe("clinical enrichment import-to-query flow", () => {
         } }] };
       });
       const input: HostedClinicalEnrichmentInput = { abortSignal: new AbortController().signal, codexHome: null, env: {}, vaultRoot,
-        memberId: "synthetic-member", resolveProviderAuthority: async () => "current", onStateMutation() {}, executeExtraction };
+        memberId: "synthetic-member", resolveRuntimeAuthority: async () => "current", onStateMutation() {}, executeExtraction };
       expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
       // Retained image tags still leave visual coverage unresolved; supported text survives.
       expect(await applyClinicalEnrichmentProposals({ vaultRoot, jobId: job.jobId })).toMatchObject({ counts: { created: 1, held: 1 } });
@@ -210,7 +210,7 @@ describe("clinical enrichment import-to-query flow", () => {
       });
       const input: HostedClinicalEnrichmentInput = {
         abortSignal: new AbortController().signal, codexHome: null, env: {}, vaultRoot,
-        memberId: "synthetic-member", resolveProviderAuthority: async () => "current",
+        memberId: "synthetic-member", resolveRuntimeAuthority: async () => "current",
         onStateMutation() {}, async onWorkUpdated() {}, executeExtraction,
       };
       expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
@@ -302,7 +302,7 @@ describe("clinical enrichment import-to-query flow", () => {
       const executeExtraction = vi.fn<NonNullable<HostedClinicalEnrichmentInput["executeExtraction"]>>(async () => empty);
       const input: HostedClinicalEnrichmentInput = {
         abortSignal: new AbortController().signal, codexHome: null, env: {}, vaultRoot,
-        memberId: "synthetic-member", resolveProviderAuthority: async () => "current",
+        memberId: "synthetic-member", resolveRuntimeAuthority: async () => "current",
         onStateMutation() {}, async onWorkUpdated() {}, executeExtraction,
       };
       await runOneHostedClinicalEnrichment(input);
@@ -341,7 +341,7 @@ describe("clinical enrichment import-to-query flow", () => {
       });
       const runnerInput: HostedClinicalEnrichmentInput = {
         abortSignal: new AbortController().signal, codexHome: null, env: {}, vaultRoot,
-        memberId: "synthetic-member", resolveProviderAuthority: async () => "current",
+        memberId: "synthetic-member", resolveRuntimeAuthority: async () => "current",
         onStateMutation() {},
         async onWorkUpdated(jobId) { await makeHostedClinicalEnrichmentWakeDue({ vaultRoot, jobId }); },
         executeExtraction,

@@ -3417,7 +3417,7 @@ It binds that effective processing mode into the same fence so controller
 priority, preemption, and the container job
 cannot diverge; the fence also rejects all metered provider egress if the runtime
 reaches one unexpectedly. Explicit media
-retention remains model-free, and custom inference keeps its selected route.
+retention remains model-free.
 This keeps a racing payloadless direct wake from manufacturing `runtime_error`
 state or mutating restored assistant recovery while Web and Temporal remain the
 usage-policy and durable-reconciliation owners.
@@ -3948,8 +3948,7 @@ readiness. Older producers and containers omit the hint and keep the fresh-fetch
 behavior. Ship the consumer before the optional producer. Roll back or disable
 the producer before restoring a Worker with the old strict ensure parser.
 Coverage is intentionally unavailable when reconciliation has due or unknown
-control work; measured savings apply only to eligible mailbox-only wakes. Provider/custom-inference observation runs only on a
-selected response. Fetch failures retain the importer's ordinary retry, while
+control work; measured savings apply only to eligible mailbox-only wakes. Fetch failures retain the importer's ordinary retry, while
 cancellation propagates through the existing invocation signal. A match uses the
 same request count with overlapping waits; a discarded or failed speculative
 request can add one bounded fetch. Existing Web policy, Worker inline decoding,
@@ -4845,7 +4844,7 @@ scalars for the active wake and exact fence clear. Fresh-start traces carry
 elapsed scalars for the parallel workspace read and runtime-store ensure, and
 total invocation preparation. The two read durations overlap and must not be
 added. Invocation preparation also records four adjacent elapsed subdivisions:
-remaining input-read wait, admission/custom-inference preparation, write-fence
+remaining input-read wait, admission preparation, write-fence
 binding, and runner-job preparation. These local durations retain their own
 values when merged with an older wake's orchestration evidence. Foreground wake
 telemetry separates local mailbox-prefetch preparation from the explicit

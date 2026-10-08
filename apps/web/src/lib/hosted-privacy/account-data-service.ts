@@ -168,12 +168,6 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes the member row after child stores are explicitly deleted; Prisma cascade remains a safety net.",
   },
   {
-    slug: "prisma.hosted_inference_connection",
-    label: "Encrypted custom inference connection",
-    deletion: "live-delete",
-    note: "Deletes the selected state, encrypted endpoint and credential, model, protocol, capabilities, and verification metadata before the member row. Browser-facing projections expose only sanitized connection metadata and never the credential or ciphertext.",
-  },
-  {
     slug: "prisma.hosted_web_session",
     label: "Hosted web app sessions",
     deletion: "live-delete",
@@ -3450,11 +3444,6 @@ async function deleteHostedAccountPrismaRows(input: {
           WHERE connection.member_id IN (SELECT id FROM target_members)
           RETURNING 1
         ),
-        deleted_inference_connections AS (
-          DELETE FROM hosted_inference_connection AS connection
-          WHERE connection.member_id IN (SELECT id FROM target_members)
-          RETURNING 1
-        ),
         deleted_linq_daily_states AS (
           DELETE FROM hosted_linq_daily_state AS daily_state
           WHERE daily_state.member_id IN (SELECT id FROM target_members)
@@ -3628,8 +3617,6 @@ async function deleteHostedAccountPrismaRows(input: {
             AS "prisma.hosted_product_feedback",
           (SELECT count(*) FROM deleted_codex_connections)
             AS "prisma.hosted_codex_auth_connection",
-          (SELECT count(*) FROM deleted_inference_connections)
-            AS "prisma.hosted_inference_connection",
           (SELECT count(*) FROM deleted_linq_daily_states)
             AS "prisma.hosted_linq_daily_state",
           (SELECT count(*) FROM deleted_invites)

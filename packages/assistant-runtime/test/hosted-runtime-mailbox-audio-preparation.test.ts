@@ -483,7 +483,7 @@ async function createFixture(count: number, options: { typing?: boolean } = {}) 
         mailboxPort: {
           async fetch() {
             return {
-              assistantProvider: "openai", fetchedAt: occurredAt, items, userId: "member_audio_fixture",
+              fetchedAt: occurredAt, items, userId: "member_audio_fixture",
               maxSeqByLane: [{ lane: "conversation", maxSeq: String(count) }],
             };
           },

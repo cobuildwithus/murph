@@ -33,10 +33,6 @@ import {
   type HostedAiUsageAllowancePricedModel,
   type HostedAiUsageOpenAiFlexTokenPricingModel,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  HOSTED_ASSISTANT_VENICE_PROVIDER,
-  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
-} from "@murphai/hosted-execution/assistant-model";
 
 import {
   HOSTED_FAMILY_BILLING_PLAN_CODE,
@@ -222,7 +218,7 @@ interface HostedAiUsageAllowanceTokenPricingBasisConfig {
   multiplierNumerator: bigint;
   pricingSource: string;
   pricingVersion: string;
-  requiredProviderKind: "openai" | "venice" | null;
+  requiredProviderKind: "openai" | null;
 }
 
 type HostedAiUsageAllowanceTokenPricingBasesByModel = Record<
@@ -473,14 +469,10 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_PRIORITY_PRICING_VERSION =
   "openai-api-pricing-2026-08-27-gpt-5.6-openai-priority";
-const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_VERSION =
-  "venice-api-pricing-2026-08-30-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE =
   "https://developers.openai.com/api/docs/pricing";
-const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_SOURCE =
-  "https://docs.venice.ai/overview/pricing";
 const HOSTED_AI_USAGE_RECOVERY_URL =
   "https://withmurph.ai/settings?usageRecovery=true#subscription";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
@@ -654,39 +646,6 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
 };
-
-const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Partial<Record<
-  HostedAiUsageAllowancePricedModel,
-  HostedAiUsageAllowanceModelPrice
->> = {
-  "gpt-5.6-sol": {
-    cachedInputUsdMicrosPerMillionTokens: 630_000n,
-    cacheWriteUsdMicrosPerMillionTokens: 7_810_000n,
-    inputUsdMicrosPerMillionTokens: 6_250_000n,
-    outputUsdMicrosPerMillionTokens: 37_500_000n,
-  },
-  "gpt-5.6-terra": {
-    cachedInputUsdMicrosPerMillionTokens: 310_000n,
-    cacheWriteUsdMicrosPerMillionTokens: 3_910_000n,
-    inputUsdMicrosPerMillionTokens: 3_130_000n,
-    outputUsdMicrosPerMillionTokens: 18_750_000n,
-  },
-  // The hosted provider maps Luna to regular openai-gpt-56-luna, not Luna Pro.
-  "gpt-5.6-luna": {
-    cachedInputUsdMicrosPerMillionTokens: 30_000n,
-    cacheWriteUsdMicrosPerMillionTokens: 330_000n,
-    inputUsdMicrosPerMillionTokens: 270_000n,
-    outputUsdMicrosPerMillionTokens: 1_600_000n,
-  },
-};
-
-const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_TOKEN_PRICING_BASIS = {
-  multiplierDenominator: 1n,
-  multiplierNumerator: 1n,
-  pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_SOURCE,
-  pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_VERSION,
-  requiredProviderKind: "venice",
-} as const satisfies HostedAiUsageAllowanceTokenPricingBasisConfig;
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
   "openai-flex": {
@@ -940,7 +899,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
         counted: false,
         pricingSnapshot: {
           credentialSource,
-          ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution, record),
+          ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
           pricingSource: tokenPricing?.pricingSource ?? HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
           schema: "murph.hosted-ai-usage-allowance-pricing.v1",
           tokenPricingBasis,
@@ -1001,7 +960,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
       counted: true,
       pricingSnapshot: {
         credentialSource,
-        ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution, record),
+        ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
         pricingSource: resolvedTokenPricing.pricingSource,
         ratesUsdMicrosPerMillionTokens: {
           cachedInput: prices.cachedInputUsdMicrosPerMillionTokens.toString(),
@@ -2746,10 +2705,7 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
     AssistantUsageTokenPricingBasis,
     HostedAiUsageAllowanceTokenPricingBasisConfig
   >> = HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES[input.model];
-  const config = basis === "standard"
-      && isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
-    ? HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_TOKEN_PRICING_BASIS
-    : modelPricingBases[basis];
+  const config = modelPricingBases[basis];
 
   if (!config) {
     throw new TypeError(
@@ -2763,14 +2719,6 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
         "OpenAI token pricing adjustments require OpenAI provider evidence.",
       );
     }
-  }
-  if (
-    config.requiredProviderKind === "venice"
-    && !isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
-  ) {
-    throw new TypeError(
-      "Venice token pricing requires Venice provider evidence.",
-    );
   }
 
   return {
@@ -3811,18 +3759,10 @@ function resolveHostedAiUsageAllowancePricingModel(
 
 function buildHostedAiUsageAllowanceModelSnapshot(
   resolution: HostedAiUsageAllowancePricingModelResolution,
-  record: AssistantUsageRecord,
 ): Prisma.InputJsonObject {
   return {
     model: resolution.model,
     modelSource: resolution.source,
-    ...(resolution.model
-        && isHostedAiUsageVeniceTokenPricingProviderName(record.providerName)
-      ? {
-        providerModel:
-          HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[resolution.model] ?? null,
-      }
-      : {}),
     requestedModel: resolution.requestedModel,
     servedModel: resolution.servedModel,
   };
@@ -3832,9 +3772,7 @@ function resolveHostedAiUsageAllowanceModelPrices(input: {
   model: HostedAiUsageAllowancePricedModel;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowanceModelPrice {
-  const prices = isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
-    ? HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES[input.model]
-    : HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[input.model];
+  const prices = HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[input.model];
   if (!prices) {
     throw new TypeError("Hosted AI usage allowance pricing is missing for the provider model.");
   }
@@ -3853,13 +3791,6 @@ function resolveHostedAiUsageAllowanceModelPrices(input: {
     };
   }
   return prices;
-}
-
-function isHostedAiUsageVeniceTokenPricingProviderName(
-  value: unknown,
-): boolean {
-  return typeof value === "string"
-    && value.trim().toLowerCase() === HOSTED_ASSISTANT_VENICE_PROVIDER;
 }
 
 function buildHostedAiUsageGateLimitNotice(input: {

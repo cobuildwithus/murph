@@ -20,8 +20,8 @@ vi.mock("../src/runtime-invocation-preparation.ts", () => ({
     constructor(private readonly input: ConstructorParameters<typeof RuntimeInvocationPreparation>[0]) {}
     prepareForFreshStart() {
       return async (token: RunnerWriteFenceToken) => {
-        const bound = await this.input.bindInvocation({ token, workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true });
-        return { customInferenceEnvelope: null, platformAiUsageAllowed: true, job: { request: {} }, token: bound, input: {}, workspaceVersion: "0", workspaceCheckpointedAt: null };
+        const bound = await this.input.bindInvocation({ token, workspaceVersion: "0", platformAiUsageAllowed: true });
+        return { platformAiUsageAllowed: true, job: { request: {} }, token: bound, input: {}, workspaceVersion: "0", workspaceCheckpointedAt: null };
       };
     }
   },
@@ -33,7 +33,7 @@ const request = { userId: "member-a", orchestrationAttemptId: "orchestration-a" 
 function owner(patch: Partial<HostedRuntimeOwnerSnapshot> = {}): HostedRuntimeOwnerSnapshot {
   return { userId: request.userId, attemptId: "attempt-a", generation: "1", phase: "active",
     processingMode: "default", allocationId, runnerContainerName: target, workspaceVersion: "0",
-    customInferenceEnvelope: null, platformAiUsageAllowed: true, startedAt: new Date().toISOString(),
+    platformAiUsageAllowed: true, startedAt: new Date().toISOString(),
     acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null, ...patch };
 }
 function response(current: HostedRuntimeOwnerSnapshot | null, status: HostedRuntimeOwnerResponse["status"] = "existing"): HostedRuntimeOwnerResponse {

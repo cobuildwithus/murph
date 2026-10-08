@@ -1327,39 +1327,6 @@ FHIR facts through a model decision.
 
 Member-scoped hosted runner operations validate the existing active runtime write fence at the Cloudflare route that owns the read or effect. The fence binds the claimed member, attempt, and lease generation before private-content decryption, artifact access, signed web callbacks, or durable mutation. Runtime clients attach the current lease through their existing transport boundary; member-scoped identity and authority are never derived from Cloudflare container ids. The pre-binding container-fatal sink is the sole log-only exception.
 
-## Hosted Custom Inference
-
-`apps/web` owns one optional encrypted `HostedInferenceConnection` per personal
-member. Its selection bit is independent of the member's dormant managed
-provider, model, and reasoning preferences. Web verifies a candidate before
-replacing the row, projects only revision and bounded capability facts into the
-signed workspace response, and resolves the decrypted target exactly once
-during invocation preparation. Group thread-container members cannot own or
-select this connection.
-
-`apps/cloudflare` revalidates the resolved target, seals it under a
-context-separated Worker key, and binds the encrypted envelope to the existing
-UserRunner invocation fence. The runner receives only one fixed
-`hosted-custom-inference` Codex provider, a revision-derived model alias, and a
-non-secret sentinel. Each Responses request must present the existing
-provider-egress authority for the same active fence before Cloudflare can open
-the envelope, inject the member credential, and call the exact public HTTPS
-operation URL. Native Responses streams directly; Chat Completions uses one
-stateless request-local TypeScript adapter. There is no second agent runtime,
-provider registry, gateway database, inference Durable Object, or managed-model
-fallback. Member-funded core usage and Murph-funded tool usage remain separate
-authorities on the same invocation fence. The full contract lives in
-`agent-docs/product-specs/bring-your-own-inference.md`.
-
-Inference settings writes do not notify or start runners. Each normal mailbox
-fetch carries the saved managed provider plus the selected custom connection
-revision, derived from the same member read. The runtime compares that revision
-with its existing model alias and hands pending work to a fresh invocation when
-the route differs. No separate configuration cache, invalidation signal, or
-settings retry is required. Web must emit the optional revision field before a
-new runtime serves custom inference; absent custom identity cannot confirm a
-custom invocation. Older readers ignore the additive field.
-
 ## Hosted Computer Authentication
 
 `apps/web` owns both Kernel login transports behind the existing durable
@@ -1677,7 +1644,7 @@ named only for one bounded delegated task stays invocation-local on Codex's
 native `spawn_agent.model` field and never mutates that saved configuration.
 Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
-full product-model catalog; missing authority and custom inference fail closed.
+full product-model catalog; missing authority fails closed.
 The production image defaults to a catalog containing GPT-6.1 Sol and GPT-6 Luna plus
 GPT-5.6 Luna and Sol, retaining GPT-6 Sol for saved conversation preferences. CLI 0.160.0 supplies every entry from its native catalog;
 there is no separate launch-catalog supplement. All GPT-6 and GPT-6.1 entries retain
@@ -1950,15 +1917,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Scheduled turns that inherit an explicitly saved GPT-6 Sol conversation target
   also use GPT-6.1 Sol, preserving inherited reasoning and the conversation target.
   Explicit reasoning survives; an omitted pinned value uses the replacement model's
-  default. Venice retains its supported GPT-5.6 targets; retired Terra inherits
-  the supported Venice conversation target. Explicit custom-provider model IDs
-  stay literal, and unsupported inherited managed preferences remain
-  dormant across provider changes. This adds no deploy-time scan or state write;
+  default. This adds no deploy-time scan or state write;
   new runtime code activates replacements on the next execution. Future versions
   require a reviewed map update, and rollback restores prior resolution.
-  Venice uses GPT-5.6 Sol as its fallback and supports only its
-  existing mapped models; GPT-6.1 Sol and GPT-6 Luna selection requires OpenAI. The
-  common reasoning set remains `low`/`medium`/`high`/`xhigh`, with low represented
+  The common reasoning set remains `low`/`medium`/`high`/`xhigh`, with low represented
   by an absent reasoning override. Web always projects the resolved model
   explicitly so a runner environment cannot restore an older default.
   Synthetic thread-container members may store an explicit room model override
@@ -2787,44 +2749,15 @@ application code.
 - General assistant/session state belongs under `vault/.runtime/operations/assistant/**`, including local transcript files, per-turn decision receipts, replay-safe outbound intent journals, pending anonymized assistant-runtime issue records, bounded local diagnostics/runtime event logs, diagnostics snapshot counters and recent warnings, persisted assistant status snapshots, and runtime automation execution state plus run history. Hosted assistant provider usage, including the requested and served model reported by Codex App Server, is recorded directly through the hosted runtime platform into the web-owned usage ledger instead of becoming assistant runtime state. Durable user-facing memory belongs canonically in `bank/memory.md`, typed preferences such as workout unit defaults and desired wearable providers belong canonically in `bank/preferences.json`, and durable scheduled prompt configuration belongs canonically in `bank/automations/*.md`; capture-scoped rebuildable audit artifacts stay under `derived/inbox/**`, while durable compiled knowledge dossiers live under `derived/knowledge/**`.
 - Corrections intended to change future behavior update the existing canonical owner consumed by that behavior before confirmation. Shared assistant guidance distinguishes one-off revisions, task-scoped changes, and broader preferences; conversation history or a note in another surface cannot substitute for that owner. It preserves unrelated state and saves reusable intent without copying incidental example facts. Existing consent, audience, tool availability, and failure rules remain authoritative.
 - Assistant tone, voice, and personality values remain canonical in the active runtime's `bank/preferences.json`: a person vault configures that private Murph, while a synthetic thread-container vault configures the room Murph. Nullable `HostedMember` assistant-style columns are the authenticated web mutation projection; only person-member rows feed personal Settings. Web emits strict sparse `member.preferences.updated` deltas, and the hosted system mailbox applies every delta in mailbox order; preference events are never latest-wins snapshots, and an older retry blocks newer deltas so sibling settings cannot be lost. The scheduled preference-handoff backstop selects active people and active synthetic rooms through the same owner-or-current-participant access derivation before its bounded limit, then rechecks canonical runtime access before signaling.
-- Hosted core-assistant provider intent is a separate Web-owned nullable
-  `HostedMember.assistantProviderPreference`. OpenAI is derived when it is null
-  or when the Venice rollout flag is disabled; Venice is projected only through
-  the signed workspace read for eligible personal members. Settings and the
-  input-bound assistant-configuration tool write through the same Web
-  transaction. After an effective Settings change commits, Web sends one
-  payload-free `runtime_wake_requested` signal. Temporal coalesces duplicate
-  wakes as a boolean and uses the existing Cloudflare processing adapter even
-  when reconciliation facts are idle; it stores no provider value. Immediately
-  before core provider entry, the runtime re-reads the Web owner; an unavailable
-  read defers the accepted turn without provider egress, while a changed
-  provider stops servicing further wakes, checkpoints, and hands the pending
-  turn to a fresh invocation. The
-  vault, workspace snapshot, assistant runtime, Temporal workflow, and
-  Cloudflare Durable Object do not keep another provider preference.
-- Cloudflare remains the credential and translation boundary for both core
-  providers. The runner holds a signed provider/user/runner credential rather
-  than either real API key, and the direct Codex child receives only the
-  credential selected by `HOSTED_ASSISTANT_PROVIDER`. Provider selection is
-  part of the child launch identity so a warm OpenAI process cannot survive a
-  Venice handoff. The hosted runtime keeps Murph's Luna/Terra/Sol ids canonical;
-  Venice model translation happens only at Worker egress.
-  OpenAI uses its existing Responses intercept; Venice accepts only the two
-  Responses POST paths and rewrites a canonical
-  Luna/Terra/Sol model to the matching regular Venice GPT-5.6 provider id at
-  egress. For Codex Responses Lite requests to `/responses`, that same boundary
-  restores the standard top-level tool field and marks the end of Codex's
-  contiguous leading developer prefix as the explicit prompt-cache boundary;
-  it preserves Codex's session-stable cache key and any caller-owned cache
-  controls. Compact requests and ordinary non-Codex Responses payloads do not
-  receive the compatibility marker. This creates no Murph-owned cache or cache
-  state. The shared mapping is code-owned and exposes no duplicate operator
-  model variables, so inference and pricing cannot drift independently. Web
-  prices immutable usage rows by canonical model plus recorded provider, using
-  Venice's distinct input, cache-read, cache-write, and output rates when
-  `provider_name=venice`; each pricing snapshot records the matching provider
-  model id and provider pricing source. Specialized
-  tools retain their existing provider owners independently of the core choice.
+- Hosted core assistant inference uses OpenAI. Web owns model and reasoning
+  preferences; Settings and the input-bound assistant-configuration tool share
+  that owner. Cloudflare keeps the real OpenAI credential and gives the runner
+  a signed provider/user/runner credential for the existing Responses intercept.
+  Web records model usage and its immutable pricing snapshot. Specialized tools
+  retain their existing provider owners. When reading a saved conversation from
+  a retired inference target, the existing session parser preserves conversation
+  identity and history while clearing its incompatible native resume, model, and
+  profile. New configuration and writes accept only OpenAI targets.
 - Assistant input follows one spine for local and hosted execution: source adapter -> `AssistantInputEvent` -> `AssistantInputSource` -> scanner/active turn -> accepted-input journal -> Codex. Source adapters may project accepted input into inbox for search, attachments, UI, and diagnostics, but inbox projection success is not the gate that decides whether Codex can see a decoded conversation message. `AssistantInputEvent` may carry bounded prompt-readiness facts such as attachment descriptors and minimized channel source metadata; prompt construction must read those first and use inbox capture/envelope data only as projection enrichment.
 - Cross-session auto-reply context consumption is portable private assistant operational state under `vault/.runtime/operations/assistant/auto-reply/**`, not an outbox mutation or a second delivery owner. One schema-versioned atomic record per exact route stores only `settledThrough` delivery order (`sentAt`, then `intentId`) and at most one pending `{ acceptedThrough, order, turnId }` claim. `acceptedThrough` preserves the one earlier same-turn claim whose receipt evidence exists when a newer steer is attempted; it is not committed until that turn becomes terminal. Linq partitions by the exact normalized provider thread target; stable email partitions by concrete identity, actor, and stable thread while excluding rotating serialized targets; every other route requires concrete channel, actor, thread, and exact delivery target. Legacy wildcard matches that cannot resolve to one digest are ineligible for optional unanchored context, while an exact provider-message-id anchor remains authoritative. The provider boundary writes or verifies the claim only after the consuming running receipt and accepted-input journal exist and before provider egress; exact anchors persist that bounded claim even while legacy migration is incomplete, while optional unanchored context waits for the marker. That same generic receipt is the sole terminal commit witness: completed or deferred folds the matching current order or its previously accepted fallback monotonically into `settledThrough`, failed or blocked discards both, and running, missing, or corrupt blocks optional context during foreground work. Route maintenance never runs before provider start or response delivery. Local and one-shot owners reconcile only after the current pass's direct delivery or queue drain completes and before the next pass or one-shot return; hosted foreground work performs no full-history maintenance; hosted background passes reconcile after their delivery boundary. Unmigrated workspaces wait for background or idle maintenance before optional unanchored context becomes eligible; exact provider-message anchors remain available. A maintenance-only hosted mutation promotes that pass to a durable checkpoint, while idle snapshot residue remains the fallback owner. The one-time migration reads trusted outbox and receipt inventories cooperatively under the runtime lock. Fresh foreground discovery raises the yield signal before lock-bound input staging and re-arms it after durable staging, so traversal can release the lock between entries; process or lease aborts also stop per-entry work. Migration folds every legacy terminal consumption and running consumer into the greatest per-route suppression watermark and writes the marker last; a partial fold reports its mutation for checkpointing and remains safe to repeat. Later maintenance reads outbox authority plus only the exact receipt named by each pending route. At that quiescent boundary an unresolved pending claim is retired into the same suppression watermark without asserting successful provider consumption, while an exact provider-message anchor may still bypass the watermark. A route record is removed immediately when no remaining outbox delivery can select that route, even if it contains an obsolete pending claim, so file cardinality follows live authority rather than historical routes. Folding on a bounded foreground read or post-delivery reconciliation is compaction rather than a post-finalization correctness write. Outbox state remains the content and delivery-attestation authority. In private direct replies, the bounded route-matched delivery reader can retain the latest consumed singleton workout relationship for interpretation; it strips consumed text and automation occurrence annotations, does not reclaim the delivery, and honors newer context decisions. The workout tracking product spec owns that continuity contract.
 
@@ -2882,8 +2815,8 @@ attachment under the existing five-second deadline, including cancellation durin
 the failed initial join. Cleanup never replays speech or admits delegations. The complete
 hosted journey remains a release gate for the website entry.
 The hosted voice entrypoint derives the identical process launch configuration
-used by ordinary turns. Its media thread may select the configured OpenAI provider
-without replacing a Venice or custom-inference backing target or process.
+used by ordinary turns. Its media thread uses the configured OpenAI provider
+without replacing the ordinary assistant process.
 Local subscription-backed turns also register that credential-based OpenAI
 provider for media; voice cannot silently use the member's ChatGPT authentication.
 

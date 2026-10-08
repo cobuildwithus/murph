@@ -105,12 +105,12 @@ describe("workspace source resolution", () => {
     expect(
       resolveAliasReplacement(
         aliases,
-        "@murphai/cloudflare-hosted-control/inference-verification",
+        "@murphai/cloudflare-hosted-control/device-webhook-queue",
       ),
     ).toBe(
       path.join(
         repoRoot,
-        "packages/cloudflare-hosted-control/src/inference-verification.ts",
+        "packages/cloudflare-hosted-control/src/device-webhook-queue.ts",
       ),
     );
     expect(resolveAliasReplacement(aliases, "@murphai/cloudflare-hosted-control/routes")).toBe(
@@ -133,6 +133,9 @@ describe("workspace source resolution", () => {
     );
 
     expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution/parsers/assertions")).toBeNull();
+    expect(
+      resolveAliasReplacement(aliases, "@murphai/cloudflare-hosted-control/inference-verification"),
+    ).toBeNull();
     expect(
       aliases.some((alias) => alias.find.test("@murphai/hosted-execution/private-internal")),
     ).toBe(false);

@@ -37,10 +37,8 @@ Active personal members and authenticated group-room runtimes can inspect and
 explicitly choose the assistant target that Murph should use on the next hosted
 turn:
 
-- OpenAI is the default core assistant provider. When the operator-controlled
-  Venice rollout flag is enabled, an active personal member may choose Venice
-  instead. The choice changes core assistant inference only; specialized tools
-  can continue to use their own managed providers.
+- OpenAI is the sole core assistant provider. Specialized tools retain their
+  existing managed providers.
 - Settings may state that Murph disables OpenAI response storage because the
   direct Responses path sends `store: false`, which [disables Responses API
   storage](https://developers.openai.com/api/docs/guides/migrate-to-responses#4-decide-when-to-use-statefulness).
@@ -48,57 +46,28 @@ turn:
   [abuse-monitoring, prompt-cache, and endpoint retention
   controls](https://developers.openai.com/api/docs/guides/your-data#v1responses),
   and third-party tools remain subject to their own retention policies.
-- Settings may call Venice privacy-first and state that Venice stores no prompts
-  or replies, consistent with [Venice's API privacy
-  documentation](https://docs.venice.ai/welcome/privacy). This is a
-  Venice-layer disclosure, not a Murph-enforced privacy mode: Murph does not
-  inspect or lock the operator-mapped model's privacy badge, and the setting
-  must not imply E2EE, TEE, or a broader upstream retention or training
-  guarantee.
-- Luna and Terra are available to every active personal member. Terra remains
-  the default when no personal model override is stored.
-- Synthetic thread-container runtimes use Sol by default from the existing
-  thread-container relation. An explicit current-room request may choose Luna,
-  Terra, or Sol for that room through `murph.assistant_configuration`. Group
-  provider and reasoning remain fixed to OpenAI and `low`; the tool never reads
-  or changes a participant's private configuration.
-- Settings keeps Luna and Terra editable for non-Edge personal members and
-  explains that Sol requires paid Edge access. A paid Pulse member who is
-  eligible for the direct upgrade sees the existing Edge upgrade action; other
-  ineligible members see the Edge requirement without a billing action.
-- Only an active, unsuspended personal member with direct paid Edge access or an
-  active paid Family Edge assignment can choose Sol for their personal runtime.
-  Family Pulse assignments, direct Pulse, and trials do not qualify. Synthetic
-  thread-container runtimes keep their existing relation-derived Sol default and
-  may choose any supported room model without reading personal plan state.
+- Personal and synthetic thread-container runtimes default to GPT-6 Sol.
+  The shared product catalog includes GPT-6 Sol and Luna, GPT-5.6 Luna and Sol,
+  and GPT-6 Astra. Web derives availability through the existing personal-plan
+  and room authority checks; GPT-5.6 Sol and Astra retain their premium gates.
+- Settings shows eligible choices and the existing upgrade action where the
+  member can upgrade. An explicit accepted group request may choose a supported
+  room model through `murph.assistant_configuration`; group reasoning remains
+  fixed to `low`, and the tool never reads a participant's private settings.
 - The common personal reasoning choices are `low`, `medium`, `high`, and
   `xhigh`. `low` is both the personal default and the fixed group-room value.
-- Postgres stores nullable provider, model, and reasoning intent on the existing
+- Postgres stores nullable model and reasoning intent on the existing
   `HostedMember` row. It remains the only durable owner; the vault, hosted
   workspace snapshot, and assistant runtime do not keep a second preference.
-  For a personal member, a null model means Terra. For a synthetic
-  thread-container member, null means the relation-derived Sol default, while an
-  explicit Luna or Terra room choice uses the same existing model field. No
-  group-settings table, migration, or second state machine is added.
-- A scheduled switch to Pulse keeps Sol available until Stripe applies the
-  Pulse phase and reconciliation changes the current billing state. After that
-  boundary, Terra is effective while the stored Sol intent remains available
-  for a later Edge reactivation.
-- The signed workspace read projects an eligible personal member's provider,
-  model, and reasoning effort or a synthetic thread-container's resolved room
-  model to the runner at the next hosted invocation boundary. If Venice is
-  disabled, a stored personal Venice preference resolves to OpenAI without
-  deleting member intent. This remains the activation boundary for changes made
-  through Settings. After an effective provider change commits, Settings sends
-  a bounded payloadless Temporal runtime-wake signal. Temporal coalesces
-  duplicate provider wakes and asks the existing Cloudflare adapter to process
-  one even when reconciliation facts are idle. A warm invocation compares its
-  provider snapshot with the live Web-owned preference, checkpoints immediately
-  when they differ, and returns the existing immediate-recheck edge so a fresh
-  invocation adopts the saved provider before the next message. Signal failure
-  does not undo the durable save: the next invocation and the provider-entry
-  revalidation remain correctness backstops. Model-only and reasoning-only
-  changes keep the existing warm-invocation behavior.
+  A null model follows the GPT-6 Sol default, and retired Terra preferences
+  resolve to that default. Existing explicit supported choices remain saved.
+- A scheduled plan change preserves current premium eligibility until billing
+  reconciliation applies the new plan. If a saved premium model becomes
+  unavailable, execution uses the default while retaining that preference for
+  a later eligible plan.
+- The signed workspace read projects the resolved model and reasoning effort
+  to the runner at the next hosted invocation boundary. A running turn retains
+  its admitted target.
 - A confirmed `murph.assistant_configuration` update is different: its
   authoritative full web response becomes an ephemeral target for the next
   separately accepted provider turn, including a follow-up serviced by the
@@ -124,10 +93,9 @@ turn:
   ambiguous input authority fails closed.
   Murph may suggest Luna or an Edge upgrade, but it must not switch model or
   reasoning effort automatically because usage is low or exhausted.
-- Changing a preference does not create a mailbox item, queue, or second runtime
-  state machine. An effective provider change from authenticated Settings sends
-  only `runtime_wake_requested`; unchanged, model-only, and reasoning-only saves
-  do not. Existing `runtime_recheck_requested` callers remain facts-only.
+- Model and reasoning saves do not create a mailbox item, queue, or runtime
+  wake. They remain preferences applied by the existing invocation and turn
+  owners.
 
 Conversation style remains independently available through
 `murph.personalization`, which atomically reads or updates the private member's
@@ -174,88 +142,16 @@ resulting orchestration state.
 
 ### Deployment And Compatibility
 
-Venice activation is an operator-gated addition to the established
-configuration rollout below:
+The OpenAI-only retirement changes Web, Worker, runner, and database contracts
+together. Quiesce admission and drain old runtimes before deploying the matching
+code and applying the removal migration. Old Web or Worker code must not run
+against the dropped columns. Resume admission only after the matching Web,
+Worker, and runner are ready. The migration removes saved alternative-provider
+credentials and preferences; it leaves model and reasoning intent intact.
+Rollback after migration requires a compatible forward fix or schema restoration.
 
-1. Apply the nullable `assistantProviderPreference` Postgres migration.
-2. Deploy Web with `HOSTED_VENICE_ENABLED` unset or disabled. This version can
-   store and parse the preference while continuing to project OpenAI.
-3. Configure the selected GitHub environment with `VENICE_API_KEY` and all
-   three fixed `HOSTED_VENICE_{LUNA,TERRA,SOL}_MODEL` variables, then deploy
-   Cloudflare and the runner with `container_rollout=immediate`. Deploy
-   preflight rejects a partial Venice group.
-4. Verify the exact runner fingerprint and a controlled Venice turn, then
-   enable `HOSTED_VENICE_ENABLED` in Web and redeploy Web to expose the choice.
-
-Rollback hides the choice first by disabling `HOSTED_VENICE_ENABLED` and
-redeploying Web. New invocations then project OpenAI even when a nullable
-Venice preference remains stored. Only after that Web state is serving may the
-Venice Worker secret or model mappings be removed or the Cloudflare bundle be
-rolled back. No backfill, second preference owner, or compatibility queue is
-required.
-
-Deploy this additive path in the following order:
-
-1. Apply the nullable Postgres migration.
-2. Deploy web first and wait until every serving web instance is on the new
-   version. This establishes the configuration and personalization callbacks
-   plus the compatibility consumer that accepts and honors an originating
-   usage-notice target before Cloudflare can produce one. Do not continue while
-   an old web instance can still accept usage records.
-3. Deploy Cloudflare. The new runtime consumes the optional workspace model
-   and reasoning fields, advertises the conversational configuration and style
-   tools, and begins producing originating usage-notice targets.
-An old Cloudflare consumer already accepts the optional model override and
-ignores an unknown optional reasoning override, so the web-first compatibility
-phase preserves saved intent without breaking invocation. A reasoning change
-saved during that short phase may keep the old runtime default until
-Cloudflare is current; the durable preference is not lost and then applies on
-the next new invocation. Cloudflare must not deploy first: the old web usage
-parser silently discards an originating notice target and could complete the
-period claim against the wrong fallback route. Web-first rollout makes the
-producer/consumer boundary additive without a second feature flag or durable
-capability state.
-
-The feature selects initial per-invocation overrides through the existing
-forwarded `HOSTED_ASSISTANT_MODEL` and
-`HOSTED_ASSISTANT_REASONING_EFFORT` environment keys. After a confirmed
-conversational update, current runner bundles project the returned full target
-through those same keys for later assistant phases and let the existing session
-resolution start the next Codex turn with it. This adds no second runner command
-or model-config parser. Current runner bundles already accept Luna, Terra, Sol,
-and the common reasoning values. Old runner bundles safely retain the prior
-next-invocation activation behavior until rollout replaces them.
-The group-chat default is a web-side derivation over the same optional model
-override: it requires no persisted preference or separate consumer behavior,
-and a web rollback returns thread-container runtimes to the fleet model on their
-next invocation.
-The feature is safe under gradual container rollout and adds no requirement for
-`container_rollout=immediate`. Production deploys must still honor the existing
-global rollout preflight in `apps/cloudflare/DEPLOY.md`, which currently requires
-immediate rollout for the GPT-5.6 fleet and selector-scope compatibility.
-
-Feature rollback may restore the pre-feature Cloudflare consumer while the new
-web version remains; the additive nullable columns may remain. To restore the
-pre-feature web version, roll Cloudflare back first and wait until the old
-runtime producer is current, then roll web back. That order prevents a new
-Cloudflare usage target from reaching an old web parser. A rollback that no
-longer projects the saved values returns execution to the platform-configured
-model and reasoning defaults without deleting member intent. This feature has
-no model-specific fallback or rollback path.
-
-Focused contract coverage proves old/no-field compatibility, gated
-OpenAI/Venice resolution, personal-member Luna/Terra/Sol eligibility, the
-common reasoning values, same-invocation next-turn projection and default
-reset, the relation-derived thread-container Sol default plus explicit
-room-scoped Luna/Terra/Sol switching, fixed Venice model translation at the
-Worker boundary, and private-member tone/voice reads and writes. The normal
-deploy keeps its managed-container fingerprint and live OpenAI Terra smoke.
-Before the Web flag is enabled, a post-deploy canary must exercise one
-controlled Venice turn through the exact Worker/runner path. A later
-configuration canary may save one non-default target for an eligible personal
-member, confirm a same-invocation follow-up reports it, update style through
-personalization, and verify usage retains both requested-model and served-model
-attribution.
+Focused proof covers model and reasoning eligibility, private versus room
+configuration, accepted-input authority, workspace projection, and OpenAI egress.
 
 ## Current Scope
 

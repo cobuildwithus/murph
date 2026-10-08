@@ -132,10 +132,10 @@ type LoadedLocalServiceModule =
 
 export const tempRoots: string[] = []
 export const CODEX_MODEL_PROVIDER_CONFIG = {
-  id: 'vercel-ai-gateway',
-  name: 'Vercel AI Gateway',
-  baseUrl: 'https://ai-gateway.vercel.sh/v1',
-  envKey: 'VERCEL_AI_API_KEY',
+  id: 'hosted-openai',
+  name: 'OpenAI',
+  baseUrl: 'https://api.openai.com/v1',
+  envKey: 'OPENAI_API_KEY',
   wireApi: 'responses' as const,
 }
 export const TRACKED_COMPACT_TABLE_RESPONSE_CARD: AssistantResponseCard = {
@@ -1100,7 +1100,7 @@ export function createAssistantSession(input?: {
       continuityFingerprint: 'fingerprint-codex',
       executionDriver: 'codex-app-server',
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'hosted-openai',
       oss: false,
       profile: null,
       reasoningEffort: 'medium',
@@ -1128,7 +1128,7 @@ export function createCodexTarget(
     codexCommand: null,
     codexHome: null,
     model: 'gpt-5.6-terra',
-    modelProvider: 'vercel-ai-gateway',
+    modelProvider: 'hosted-openai',
     oss: false,
     profile: null,
     reasoningEffort: 'medium',

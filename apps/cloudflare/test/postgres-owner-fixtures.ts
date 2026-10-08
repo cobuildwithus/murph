@@ -6,7 +6,7 @@ export function createPostgresTestOwner(overrides: Partial<HostedRuntimeOwnerSna
   return {
     userId: "member_123", attemptId: "attempt_1", generation: "7", workspaceVersion: "4",
     phase: "active", processingMode: "default", allocationId: "synthetic-allocation",
-    runnerContainerName: "member_123--v-test", customInferenceEnvelope: null,
+    runnerContainerName: "member_123--v-test",
     platformAiUsageAllowed: true, startedAt: null, acceptedAt: null, completedAt: null,
     failureCount: 0, lastErrorCode: null, ...overrides,
   };
@@ -36,7 +36,7 @@ export function nativeProviderTestNamespace(readOwner: () => HostedRuntimeOwnerS
     const owner = await readOwner();
     return owner?.attemptId && owner.workspaceVersion !== null && owner.phase !== "idle"
       ? { userId: owner.userId, attemptId: owner.attemptId, generation: owner.generation,
-          workspaceVersion: owner.workspaceVersion, customInferenceEnvelope: owner.customInferenceEnvelope,
+          workspaceVersion: owner.workspaceVersion,
           platformAiUsageAllowed: owner.platformAiUsageAllowed, settlementPending: false,
           retiring: owner.phase === "retiring" } : null;
   } };
@@ -45,5 +45,5 @@ export function nativeProviderTestNamespace(readOwner: () => HostedRuntimeOwnerS
 
 export type TestProviderContext = { owns: false; reason?: string } | {
   owns: true; userId: string; attemptId: string; leaseGeneration: string;
-  workspaceVersion: string | null; customInferenceEnvelope?: string; platformAiUsageAllowed?: boolean;
+  workspaceVersion: string | null; platformAiUsageAllowed?: boolean;
 };

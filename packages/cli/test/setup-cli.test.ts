@@ -1665,7 +1665,6 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
   }> = []
   const assistantCalls: Array<{
     options: {
-      assistantModelProvider: string | null | undefined
     }
     preset: string
   }> = []
@@ -1675,7 +1674,6 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
       async resolve(input: any) {
         assistantCalls.push({
           options: {
-            assistantModelProvider: input.options.assistantModelProvider,
           },
           preset: input.preset,
         })
@@ -1687,7 +1685,7 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
           detail: 'configured',
           enabled: true,
           model: 'gpt-5.4',
-          modelProvider: input.options.assistantModelProvider ?? null,
+          modelProvider: null,
           oss: false,
           preset: input.preset,
           profile: null,
@@ -1751,7 +1749,6 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
     assert.deepEqual(assistantCalls, [
       {
         options: {
-          assistantModelProvider: undefined,
         },
         preset: 'codex',
       },
@@ -1865,20 +1862,9 @@ test('interactive onboarding keeps Codex selections clear of endpoint defaults',
 test('wizard infers Codex cloud for signed-in Codex defaults', () => {
   assert.equal(
     inferSetupWizardAssistantProvider({
-      oss: false,
       preset: 'codex',
     }),
     'codex-cloud',
-  )
-})
-
-test('wizard infers Codex local for OSS defaults', () => {
-  assert.equal(
-    inferSetupWizardAssistantProvider({
-      oss: true,
-      preset: 'codex',
-    }),
-    'codex-local',
   )
 })
 
@@ -1946,7 +1932,6 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
         resolvedAssistants.push({
           allowPrompt: input.allowPrompt,
           assistantModel: input.options.assistantModel,
-          assistantModelProvider: input.options.assistantModelProvider,
           preset: input.preset,
         })
 
@@ -1955,22 +1940,20 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
           enabled: true,
           provider: 'codex-cli',
           model: input.options.assistantModel ?? 'gpt-5.4',
-          modelProvider: input.options.assistantModelProvider ?? null,
+          modelProvider: null,
           codexCommand: null,
           profile: null,
           reasoningEffort: null,
           sandbox: 'danger-full-access',
           approvalPolicy: 'never',
           oss: false,
-          detail: 'Use Codex with the selected model provider.',
+          detail: 'Use Codex with the selected OpenAI model.',
         }
       },
     },
     runtimeEnv: {
       getCurrentEnv() {
-        return {
-          VERCEL_AI_API_KEY: 'vercel-test-key',
-        }
+        return {}
       },
       async promptForMissing() {
         throw new Error('noninteractive setup must not prompt for provider keys')
@@ -1991,8 +1974,6 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
       'codex',
       '--assistantModel',
       'gpt-5.6-terra',
-      '--assistantModelProvider',
-      'vercel-ai-gateway',
       '--format',
       'json',
       '--full-output',
@@ -2008,7 +1989,6 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
     {
       allowPrompt: false,
       assistantModel: 'gpt-5.6-terra',
-      assistantModelProvider: 'vercel-ai-gateway',
       preset: 'codex',
     },
   ])
@@ -2018,14 +1998,14 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
       enabled: true,
       provider: 'codex-cli',
       model: 'gpt-5.6-terra',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: null,
       codexCommand: null,
       profile: null,
       reasoningEffort: null,
       sandbox: 'danger-full-access',
       approvalPolicy: 'never',
       oss: false,
-      detail: 'Use Codex with the selected model provider.',
+      detail: 'Use Codex with the selected OpenAI model.',
     },
   ])
 })
@@ -2864,7 +2844,7 @@ test.sequential('setup persistence can replace unsupported assistant defaults', 
         defaults: null,
         providerConfig: {
           model: 'gpt-5.6-terra',
-          modelProvider: 'vercel-ai-gateway',
+          modelProvider: null,
           sandbox: 'danger-full-access',
           approvalPolicy: 'never',
           oss: false,
@@ -2886,7 +2866,7 @@ test.sequential('setup persistence can replace unsupported assistant defaults', 
       config?.assistant?.backend?.adapter === 'codex-cli'
         ? config.assistant.backend.modelProvider
         : null,
-      'vercel-ai-gateway',
+      null,
     )
   } finally {
     await rm(tempRoot, { recursive: true, force: true })

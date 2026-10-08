@@ -403,7 +403,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
       executeCodexAppServerTurn({
         env: hostedEnv,
         model: 'gpt-thread-second',
-        modelProvider: 'venice',
+        modelProvider: 'hosted-openai',
         prompt: 'second thread launch',
         workingDirectory,
       }),
@@ -426,7 +426,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     })
     expect(asRecord(threadStarts[1]?.params)).toMatchObject({
       model: 'gpt-thread-second',
-      modelProvider: 'venice',
+      modelProvider: 'hosted-openai',
     })
   })
 
@@ -2587,7 +2587,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
                 approvalPolicy: 'never',
                 cwd: staleWorkingDirectory,
                 model: 'gpt-5',
-                modelProvider: 'vercel-ai-gateway',
+                modelProvider: 'hosted-openai',
                 sandbox: codexSandboxPolicyForMode('read-only'),
                 thread: {
                   id: 'resume-thread',
@@ -2771,7 +2771,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
         cwd: path.resolve(workingDirectory),
         developerInstructions: 'Stable Murph instructions.',
         model: 'gpt-5',
-        modelProvider: 'vercel-ai-gateway',
+        modelProvider: 'hosted-openai',
         sandbox: freshSandbox,
       }
       const expectedResumeThreadContext = {
@@ -2889,7 +2889,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
         executeCodexAppServerTurn({
           approvalPolicy: 'never',
           model: 'gpt-5',
-          modelProvider: 'vercel-ai-gateway',
+          modelProvider: 'hosted-openai',
           developerInstructions: 'Stable Murph instructions.',
           prompt: 'fresh prompt',
           reasoningEffort: 'high',

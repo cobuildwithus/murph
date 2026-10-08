@@ -63,6 +63,11 @@ existing Work conversation or an unconfirmed new-chat surface fails closed.
 Deep Research remains on its dedicated surface. Keep this browser-DOM policy in
 ReviewGPT rather than duplicating it in Murph's lane wrapper or prompts.
 
+The GPT-6 picker can expose a `GPT-6` family row and a separate `Power` control.
+The pinned ReviewGPT package combines that picker state with the sent request's
+model evidence to verify GPT-6 Pro. A generic `Pro` label alone is insufficient;
+keep the concrete model requirement when recovering from picker changes.
+
 This ownership rule is required because the managed browser lanes keep
 background response-polling timers reliable and ReviewGPT pins only the owned
 capture page lifecycle active, then releases emulated focus before retaining or

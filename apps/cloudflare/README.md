@@ -275,21 +275,6 @@ target captured from the accepted mailbox input. The target includes the
 existing thread-route authority and is advisory to web-owned accounting; the
 Worker does not resolve, persist, or authorize an alternate recipient.
 The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription real credentials stay in Worker env. Native provider clients receive SDK placeholders. The Worker resolves platform-supplied `ctx.containerId` and `ctx.className` to the exact controller and reads its immutable member binding, registered invocation context, and usage-settlement state before injecting the real upstream credential. The ordinary path needs one native RPC and no Web authorization callback. Completion and native retirement deny new effects; already admitted effects may finish. Legacy credentials and caller-supplied headers do not grant access. Recipient binding, journaling, and idempotency remain runtime responsibilities. The Worker constrains Codex-native managed OpenAI search to exact `POST /v1/alpha/search`, constrains Exa to `POST /search`, constrains Linq to the runtime route matrix (`GET /phone_numbers`, `GET /attachments/:id`, `POST /attachments`, `POST /chats`, `POST /chats/:id/messages`, `POST /chats/:id/voicememo`, `POST /chats/:id/typing`, `DELETE /chats/:id/typing`, `POST /chats/:id/read`, `POST /messages/:id/reactions`, `DELETE /messages/:id`), constrains Telegram to its explicit operation allowlist, including `sendRichMessage`, constrains Mapbox to read-only GET allowlisted path families, and strips runtime authority headers before upstream provider egress leaves Cloudflare. Runtime code does not call Linq's contact-card provider endpoint directly; first-contact native contact-card sharing stays web-owned. Hosted generated-image turns call OpenAI through native container authorization, persist the validated bytes as a canonical vault capture, and return private `vault_image` media. Final message delivery reloads and hash-verifies those bytes, then uses Linq's attachment upload or Telegram multipart `sendPhoto`. Linq group-avatar mutation is the narrow URL-only exception: after preflight, the write-fenced Worker route stores one deterministic application-encrypted R2 object and returns an opaque at-most-one-day capability on Murph's fixed Worker origin directly to the runtime provider boundary. The capability reveals no member id, R2 key, storage namespace, or image hash; the public Worker route decrypts and verifies the object and returns `private, no-store`. Retries reuse the deterministic object only while its original 24-hour lifecycle window remains, and each capability expiry is capped at that object's lifecycle boundary. At or after the boundary, the Worker replaces the same deterministic key before returning a newly bounded capability; the R2 lifecycle and account deletion still own cleanup without relying on Linq fetch acceptance. The URL is not response media or model-visible state. The platform container coordinates select the existing native authority; neither request headers nor caller-supplied container names can select another member. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata. Adding a new hosted provider API, method, or runtime tool that calls an intercepted provider is not complete until this egress boundary and its regression tests allow the exact upstream operation. Updating the Codex pin additionally requires a source-manifest review: required CI resolves `rust-v<version>` from OpenAI, verifies its exact commit, which pins the `codex-rs/codex-api/src` tree, and then uses native binary scanning only as cross-platform corroboration. The test-only inventory cannot generate or widen the Worker policy.
-Venice joins that same Worker-owned credential boundary for core inference.
-The Worker permits only `POST /api/v1/responses`, accepts only canonical Luna/Terra/Sol request
-models, and replaces the model with the matching regular Venice provider id
-(`openai-gpt-56-luna`, `openai-gpt-56-terra`, or `openai-gpt-56-sol`) while disabling
-Venice's added system prompt, web search, and web scraping at the final egress
-boundary. Runtime egress derives the provider id from the same shared map that
-Web records in its pricing snapshot, so the allowance rate remains bound to
-the actual upstream model. Codex Responses Lite `/responses` requests also have
-their standard top-level tools restored and receive an explicit GPT-5.6 prompt
-cache breakpoint on the final block of the contiguous leading developer prefix.
-The Worker preserves the stable cache key and caller-owned cache controls, does
-not modify compact or ordinary Responses cache behavior, and never logs prompt
-content or cache keys. Specialized
-tools such as generated images continue to use their own managed providers even
-when Venice owns the core assistant turn.
 Hosted Linq container requests use the canonical HTTPS API base even when the
 Worker has a custom `LINQ_API_BASE_URL`. The existing outbound handler maps that
 canonical request to the Worker-owned upstream and injects the provider token.
@@ -648,14 +633,7 @@ Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
-- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY` plus `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`; hosted Codex receives only an SDK placeholder, never the real OpenAI key. The existing signing secret remains required for encrypted inference settings and Live resource references; provider credential minting is removed. Host Codex bridge/proxy env is not accepted
-- Optional Venice core inference uses the Worker-owned `VENICE_API_KEY` secret.
-  The regular provider ids `openai-gpt-56-luna`, `openai-gpt-56-terra`, and
-  `openai-gpt-56-sol` are code-owned and derived from Murph's canonical model;
-  there are no separate operator model vars. The fleet default remains
-  `HOSTED_ASSISTANT_PROVIDER=openai`; Web projects the per-member
-  Venice override for an invocation only after its separate rollout flag is
-  enabled. The runner receives only a signed Venice credential.
+- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY` plus `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`; hosted Codex receives only an SDK placeholder, never the real OpenAI key. The existing signing secret remains required for Live resource references; provider credential minting is removed. Host Codex bridge/proxy env is not accepted
 - `HOSTED_R2_PRESIGN_ENDPOINT` can override the default account-scoped R2 S3 endpoint for direct snapshot URL generation. Production deploys must leave it as the account-scoped R2 HTTPS origin. Hosted-local dev, worker-only, and E2E profiles start a MinIO sidecar and inject local S3-compatible endpoints behind the local-only `HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT=1` guard; those local endpoint flags are not deploy vars.
 - `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
   secret. It must not be forwarded into the hosted runtime env; usage
@@ -1111,9 +1089,9 @@ Foreground progress recovery is write-fenced instead of container-destroy
 driven. A write fence is commit authority, not liveness proof; the exact wake,
 replacement, ambiguous-wake, and fresh-startup retry contract is documented in
 `agent-docs/references/hosted-runtime-protocol.md`. Live runner side effects validate the runtime-kind write fence by attempt,
-generation, and user identity. Hosted OpenAI and Venice provider egress paths
-validate the signed Murph provider credential's user and runner against
-the Postgres owner's current active runtime state.
+generation, and user identity. Hosted OpenAI provider egress resolves the
+platform's native container identity and validates its bound member, registered
+invocation, and usage-settlement state before sending the request upstream.
 Workspace version remains a checkpoint/restore freshness guard, not generic
 side-effect authority.
 Active, unsupported, error, and timeout liveness outcomes preserve the write
@@ -1205,7 +1183,7 @@ image recipe; no manual binary installation or separate release service is neede
 The native runner image has a default GPT-6.1 Sol, GPT-6 Sol/Luna, and GPT-5.6 Sol/Luna catalog and an expanded
 `.astra` catalog with `gpt-6-astra` and OpenAI Flex support. The runtime chooses
 the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
-authority, Edge, group, and Venice runtimes retain the default catalog and its
+authority, Edge, and group runtimes retain the default catalog and its
 existing delegation choices. The
 pinned Codex 0.160.0 release supplies every entry natively; the image validates
 its bundled catalog without a separate launch supplement. Murph supplies its own base
@@ -1214,8 +1192,7 @@ The Astra context window remains at most 272,000 tokens, verified while building
 image. This bound lets allowance accounting price cumulative Codex turn and
 subagent usage without mistaking multiple requests for one long-context request.
 Changing this bound requires request-level long-context metering first. Astra
-selection remains owned by the Web Max-plan eligibility check. Venice mappings
-remain limited to Luna, Terra, and Sol.
+selection remains owned by the Web Max-plan eligibility check.
 
 ## Workspace restore benchmark
 

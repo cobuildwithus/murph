@@ -138,7 +138,7 @@ describe("hosted runner secrets payload decoding", () => {
   it("rejects legacy schemas", () => {
     const payload = encodeRunnerSecretsPayload(
       {
-        VENICE_API_KEY: "venice-user",
+        CUSTOM_API_KEY: "custom-user",
       },
       "healthybob.hosted-user-env.v1",
     );

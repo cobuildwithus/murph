@@ -7126,7 +7126,7 @@ function createResolvedNotificationItem(overrides: Partial<{
     createdAt: occurredAt,
     dedupeKey:
       overrides.dedupeKey
-      ?? "assistant.notification.requested:gateway-billing",
+      ?? "assistant.notification.requested:openai-billing",
     expiresAt: null,
     id: overrides.id ?? "mailbox_item_system_notification",
     kind: "assistant.notification.requested",

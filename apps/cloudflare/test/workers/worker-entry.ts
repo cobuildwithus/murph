@@ -244,7 +244,7 @@ async function runOpenAiAuthorizationAlertTest(): Promise<Response> {
     { ...readWorkerEnvironmentSource(), RUNNER_CONTAINER: {
       idFromString: (id: string) => id,
       get: () => ({ readProviderAuthority: async () => ({
-        ...lease, userId, customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        ...lease, userId, platformAiUsageAllowed: true,
         settlementPending: false, retiring: false,
       }) }),
       getByName: () => ({}),
