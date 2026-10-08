@@ -52,7 +52,7 @@ const telegramLocator = {
 type ContinuityLocator = typeof locator | typeof telegramLocator
 const ordinaryTarget = createAssistantModelTarget({
   approvalPolicy: 'never',
-  model: 'gpt-5.6-terra',
+  model: 'gpt-6.1-sol',
   modelProvider: 'hosted-openai',
   oss: false,
   profile: null,
@@ -62,7 +62,7 @@ const ordinaryTarget = createAssistantModelTarget({
 })
 const detachedTarget = createAssistantModelTarget({
   approvalPolicy: 'never',
-  model: 'gpt-5.6-terra',
+  model: 'gpt-6.1-sol',
   modelProvider: 'hosted-openai',
   oss: false,
   profile: null,

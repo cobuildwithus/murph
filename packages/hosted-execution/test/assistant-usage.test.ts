@@ -30,7 +30,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
     credentialSource: "platform",
     featureKey: "assistant_idle_compact",
     memberId: "member_123",
-    model: "gpt-5.6-terra",
+    model: "gpt-6.1-sol",
     occurredAt: PROVIDER_REQUEST_STARTED_AT,
     providerName: "hosted-openai",
     tokenPricingBasis: "openai-flex",
@@ -58,7 +58,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   // providerRequestId so the two identities can never be conflated.
   assert.equal(record.sessionId, "asst_123");
   assert.equal(record.providerRequestId, "thread_abc");
-  assert.equal(record.requestedModel, "gpt-5.6-terra");
+  assert.equal(record.requestedModel, "gpt-6.1-sol");
   assert.equal(record.triggerKind, "automation_idle_compact");
   assert.equal(record.inputTokens, 104_000);
   assert.equal(
@@ -78,7 +78,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
       credentialSource: "member",
       featureKey: "assistant_idle_compact",
       memberId: "member_123",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       occurredAt: PROVIDER_REQUEST_STARTED_AT,
       triggerKind: "automation_idle_compact",
       usage: {
@@ -95,7 +95,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
 test("measured maintenance identities isolate members, providers, and response operations", () => {
   const input = {
     assistantSessionId: "asst_123", codexThreadId: "thread_abc", credentialSource: "platform" as const,
-    featureKey: "assistant_idle_compact", memberId: "member_123", model: "gpt-5.6-terra",
+    featureKey: "assistant_idle_compact", memberId: "member_123", model: "gpt-6.1-sol",
     occurredAt: PROVIDER_REQUEST_STARTED_AT, providerName: "hosted-openai",
     providerRequestId: "response_compact_fixture", triggerKind: "automation_idle_compact",
     usage: { inputTokens: 100, cachedInputTokens: 50, cacheWriteTokens: 10,
@@ -119,7 +119,7 @@ test("usage records default and validate token pricing basis", () => {
     credentialSource: "platform",
     featureKey: "assistant_turn",
     memberId: "member_123",
-    model: "gpt-5.6-terra",
+    model: "gpt-6.1-sol",
     occurredAt: PROVIDER_REQUEST_STARTED_AT,
     triggerKind: "automation_cron",
     usage: {

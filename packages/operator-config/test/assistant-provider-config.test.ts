@@ -33,7 +33,7 @@ describe('assistant provider config', () => {
   it('keeps Codex continuity stable across ordinary model and reasoning changes', () => {
     const first = continuityFingerprint({
       approvalPolicy: 'never',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       provider: 'codex-cli',
       reasoningEffort: 'low',
@@ -66,7 +66,7 @@ describe('assistant provider config', () => {
       provider: 'codex-cli',
       approvalPolicy: 'never',
       codexHome: ' /tmp/codex-home ',
-      model: ' gpt-5.6-terra ',
+      model: ' gpt-6.1-sol ',
       modelProvider: ' OpenAI ',
       oss: false,
       profile: ' hosted ',
@@ -83,7 +83,7 @@ describe('assistant provider config', () => {
       target: {
         codexCommand: null,
         codexHome: '/tmp/codex-home',
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: 'openai',
         oss: false,
         profile: 'hosted',
@@ -93,7 +93,7 @@ describe('assistant provider config', () => {
     expect(serializeAssistantProviderSessionOptions(input)).toMatchObject({
       approvalPolicy: 'never',
       executionDriver: 'codex-app-server',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       provider: 'codex-cli',
       reasoningEffort: 'medium',
@@ -101,7 +101,7 @@ describe('assistant provider config', () => {
       sandbox: 'danger-full-access',
     })
     expect(serializeAssistantProviderOperatorDefaults(input)).toMatchObject({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
     })
   })

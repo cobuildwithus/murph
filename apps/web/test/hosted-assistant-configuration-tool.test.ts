@@ -129,7 +129,7 @@ describe("hosted runtime assistant configuration tool", () => {
   it("updates reasoning without rewriting a dormant model preference", async () => {
     mocks.updateConfiguration.mockResolvedValue({
       ...buildSnapshot({
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         reasoningEffort: "high",
       }),
       hostedAssistantReasoningEffortOverride: "high",
@@ -147,7 +147,7 @@ describe("hosted runtime assistant configuration tool", () => {
     })).resolves.toMatchObject({
       action: "update",
       result: {
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         reasoningEffort: "high",
         status: "updated",
       },
@@ -191,15 +191,15 @@ describe("hosted runtime assistant configuration tool", () => {
 
 function buildSnapshot(overrides: {
   dormantSolPreference?: boolean;
-  model?: "gpt-5.6-luna" | "gpt-5.6-terra" | "gpt-5.6-sol";
+  model?: "gpt-5.6-luna" | "gpt-6.1-sol" | "gpt-5.6-sol";
   reasoningEffort?: "low" | "medium" | "high" | "xhigh";
 } = {}) {
   return {
-    availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"] as const,
+    availableModels: ["gpt-5.6-luna", "gpt-6.1-sol"] as const,
     availableReasoningEfforts: ["low", "medium", "high", "xhigh"] as const,
     configurationAvailable: true,
     dormantSolPreference: overrides.dormantSolPreference ?? false,
-    model: overrides.model ?? "gpt-5.6-terra",
+    model: overrides.model ?? "gpt-6.1-sol",
     reasoningEffort: overrides.reasoningEffort ?? "low",
     solAvailable: false,
   };

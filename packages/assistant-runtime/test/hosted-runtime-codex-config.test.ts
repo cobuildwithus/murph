@@ -176,7 +176,7 @@ testHostedCliTimingE2e("shared CLI timing: built entry uses hosted permissions a
   try {
     const config = buildHostedCodexConfigToml({
       exposeSpawnAgentModelOverrides: false,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       reasoningEffort: "low",
       provider: {
         id: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
@@ -1330,7 +1330,7 @@ testHostedCodexAuthE2e(
       const result = await prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+          HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
           HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             `${readServerBaseUrl(server)}/v1`,
@@ -1554,7 +1554,7 @@ testHostedCodexAuthE2e(
       const result = await prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+          HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
           HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             `${readServerBaseUrl(server)}/v1`,
@@ -1756,7 +1756,7 @@ async function runHostedCodexAutocompactionE2e(
   try {
     await mkdir(vaultRoot, { recursive: true });
     const providerRuntimeEnv = {
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_API_KEY: "hosted-autocompaction-e2e-key",
     };
@@ -2430,7 +2430,7 @@ test("hosted Codex shell policy includes the image-pinned Health Commons package
 test("hosted Codex config keeps skill instructions and native memory disabled", () => {
   const config = buildHostedCodexConfigToml({
     exposeSpawnAgentModelOverrides: true,
-    model: "gpt-5.6-terra",
+    model: "gpt-6.1-sol",
     provider: {
       id: "openai",
       name: "OpenAI",
@@ -2480,7 +2480,7 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
 test("hosted Codex config promotes permitted leaf delegation with native per-spawn model selection", () => {
   const config = buildHostedCodexConfigToml({
     exposeSpawnAgentModelOverrides: true,
-    model: "gpt-5.6-terra",
+    model: "gpt-6.1-sol",
     provider: {
       id: "openai",
       name: "OpenAI",
@@ -2772,7 +2772,7 @@ async function startResponsesStubServer(input: {
       response.end(JSON.stringify({
         created_at: Math.floor(Date.now() / 1000),
         id: `resp_hosted_codex_config_${requestIndex}`,
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         output: [
           {
             content: [
@@ -2838,7 +2838,7 @@ async function prepareLegacyBuiltInOpenAiCodexHome(input: {
   await writeFile(
     path.join(codexHome, "config.toml"),
     [
-      'model = "gpt-5.6-terra"',
+      'model = "gpt-6.1-sol"',
       'model_provider = "openai"',
       `openai_base_url = ${JSON.stringify(input.baseUrl)}`,
       'model_reasoning_effort = "medium"',
@@ -2970,7 +2970,7 @@ function enableCodexNativeMemoryForRegression(
       "use_memories = true",
       "generate_memories = true",
       'extract_model = "gpt-5.6-luna"',
-      'consolidation_model = "gpt-5.6-terra"',
+      'consolidation_model = "gpt-6.1-sol"',
       "disable_on_external_context = false",
       `min_rollout_idle_hours = ${options.minRolloutIdleHours ?? 1}`,
       "max_rollouts_per_startup = 1",
@@ -3023,7 +3023,7 @@ function writeResponsesStubStream(input: {
   const completedResponse = {
     created_at: Math.floor(Date.now() / 1000),
     id: input.responseId,
-    model: "gpt-5.6-terra",
+    model: "gpt-6.1-sol",
     output: [outputItem],
     status: "completed",
     usage: input.usage,

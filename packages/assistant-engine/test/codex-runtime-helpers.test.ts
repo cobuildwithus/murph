@@ -609,7 +609,7 @@ describe('Codex assistant registry helpers', () => {
       method: 'thread/settings/updated',
       params: {
         threadSettings: {
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           serviceTier: 'flex',
         },
@@ -619,7 +619,7 @@ describe('Codex assistant registry helpers', () => {
       method: 'thread.settings.updated',
       params: {
         thread_settings: {
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           model_provider: 'hosted-openai',
           service_tier: 'flex',
         },
@@ -627,27 +627,27 @@ describe('Codex assistant registry helpers', () => {
     }
 
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       serviceTier: null,
     })).toBe('standard')
@@ -661,7 +661,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
           oss: false,
         }),
@@ -676,7 +676,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -691,7 +691,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -706,7 +706,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -721,7 +721,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -742,15 +742,15 @@ describe('Codex assistant registry helpers', () => {
       }),
     ).toMatchObject({
       providerName: 'openai',
-      requestedModel: 'gpt-5.6-terra',
-      servedModel: 'gpt-5.6-terra',
+      requestedModel: 'gpt-6.1-sol',
+      servedModel: 'gpt-6.1-sol',
       tokenPricingBasis: 'openai-flex',
     })
     expect(
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'hosted-openai',
           oss: false,
         }),
@@ -795,7 +795,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -804,7 +804,7 @@ describe('Codex assistant registry helpers', () => {
             method: 'thread/settings/updated',
             params: {
               threadSettings: {
-                model: 'gpt-5.6-terra',
+                model: 'gpt-6.1-sol',
                 modelProvider: 'openai',
                 serviceTier: null,
               },
@@ -823,7 +823,7 @@ describe('Codex assistant registry helpers', () => {
     const usage = extractCodexAssistantProviderUsage({
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         oss: false,
       }),
       rawEvents: [

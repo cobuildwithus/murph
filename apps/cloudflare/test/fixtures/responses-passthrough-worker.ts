@@ -94,7 +94,7 @@ function responseEvents(prewarm: boolean) {
     content: [{ type: "output_text", text: "PASSTHROUGH_OK", annotations: [] }],
   };
   const response = {
-    id, model: "gpt-5.6-terra", status: "completed", output: prewarm ? [] : [item],
+    id, model: "gpt-6.1-sol", status: "completed", output: prewarm ? [] : [item],
     usage: { input_tokens: 12, output_tokens: 7, total_tokens: 19, input_tokens_details: { cached_tokens: 0 } },
   };
   return [

@@ -656,7 +656,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
           }))
           child.stdout.write(jsonLine({
             method: 'model/rerouted',
-            params: { toModel: 'gpt-5.6-terra' },
+            params: { toModel: 'gpt-6.1-sol' },
           }))
           child.stdout.write(jsonLine({
             method: 'turn/started',
@@ -756,7 +756,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     expect(onTraceEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       rawEvent: {
         method: 'model/rerouted',
-        params: { toModel: 'gpt-5.6-terra' },
+        params: { toModel: 'gpt-6.1-sol' },
       },
     }))
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)

@@ -94,7 +94,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       voice: "warm",
     });
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       solAvailable: false,
     });
     mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx.mockResolvedValue({
@@ -125,7 +125,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       action: "read",
       result: {
         mainPersona: "classic",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         solAvailable: false,
         supportingPersona: null,
         tone: "formal",
@@ -169,7 +169,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       action: "read",
       result: {
         mainPersona: "classic",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         solAvailable: false,
         supportingPersona: null,
         tone: "formal",
@@ -334,7 +334,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       action: "update",
       result: {
         mainPersona: "scientist",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
@@ -1005,7 +1005,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       action: "update",
       result: {
         mainPersona: "classic",
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
@@ -1064,7 +1064,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       scheduleMailboxWake: mocks.scheduleMailboxWake,
     })).resolves.toMatchObject({
       result: {
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,

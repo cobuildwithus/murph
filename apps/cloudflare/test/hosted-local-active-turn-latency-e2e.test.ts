@@ -59,7 +59,7 @@ const lateInputDelayAfterWakeMs = readPositiveIntegerEnv(
   "MURPH_E2E_ACTIVE_TURN_LATENCY_LATE_INPUT_DELAY_MS",
   10_000,
 );
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6.1-sol";
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const configuredDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;

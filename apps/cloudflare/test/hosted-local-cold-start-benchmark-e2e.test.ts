@@ -81,7 +81,7 @@ const trialUserIds = Array.from(
 );
 const linqApiToken = "linq-local-cold-start-benchmark-token";
 const linqWebhookSecret = "linq-local-cold-start-benchmark-secret";
-const assistantModel = "gpt-5.6-terra";
+const assistantModel = "gpt-6.1-sol";
 const replyText = "Cold-start benchmark reply.";
 const setupReplyText = "Cold-start benchmark setup complete.";
 const productionMedianPayloadBytes = 14_000_000;

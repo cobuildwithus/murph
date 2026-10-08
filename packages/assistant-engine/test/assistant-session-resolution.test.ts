@@ -206,7 +206,7 @@ describe('assistant session resolution', () => {
         },
         identityId: 'message-identity',
         maxSessionAgeMs: 90_000,
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: 'hosted-openai',
         provider: 'codex-cli',
         reasoningEffort: 'high',
@@ -230,13 +230,13 @@ describe('assistant session resolution', () => {
       threadIsDirect: true,
       target: createCodexTarget({
         approvalPolicy: 'never',
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: 'hosted-openai',
         reasoningEffort: 'high',
         sandbox: 'workspace-write',
       }),
       provider: 'codex-cli',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       sandbox: 'workspace-write',
       approvalPolicy: 'never',
@@ -682,7 +682,7 @@ describe('assistant session resolution', () => {
       reasoningEffort: 'medium',
     })
     const hostedDefaultTarget = createCodexTarget({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       reasoningEffort: 'high',
     })
@@ -713,7 +713,7 @@ describe('assistant session resolution', () => {
     expect(result.paths).toBe(resolvedSession.paths)
     expect(result.session.sessionId).toBe(resolvedSession.session.sessionId)
     expect(result.session.target).toEqual(hostedDefaultTarget)
-    expect(result.session.providerOptions.model).toBe('gpt-5.6-terra')
+    expect(result.session.providerOptions.model).toBe('gpt-6.1-sol')
     expect(result.session.providerOptions.modelProvider).toBe('hosted-openai')
     expect(result.session.providerOptions.reasoningEffort).toBe('high')
     expect(result.session.resumeState).toMatchObject({
@@ -737,12 +737,12 @@ describe('assistant session resolution', () => {
 
   it('clears native resume when the model provider changes', async () => {
     const previousTarget = createCodexTarget({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       reasoningEffort: 'low',
     })
     const nextTarget = createCodexTarget({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       reasoningEffort: 'low',
     })
@@ -774,7 +774,7 @@ describe('assistant session resolution', () => {
 
   it('projects explicit message target overrides into hosted sessions before turn routing', async () => {
     const hostedDefaultTarget = createCodexTarget({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       reasoningEffort: 'low',
     })
@@ -802,7 +802,7 @@ describe('assistant session resolution', () => {
     })
 
     expect(result.session.target).toEqual(createCodexTarget({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       reasoningEffort: 'high',
     }))
@@ -864,7 +864,7 @@ describe('assistant session resolution', () => {
 
   it('keeps hosted resume state when the hosted default continuity has not changed', async () => {
     const hostedDefaultTarget = createCodexTarget({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       reasoningEffort: 'high',
     })

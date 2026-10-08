@@ -38,7 +38,7 @@ function createSetupOptions(
 }
 
 test('setup assistant prompt flow asks directly for the Codex model id', async () => {
-  promptState.answers = ['gpt-5.6-terra-medium']
+  promptState.answers = ['gpt-6.1-sol-medium']
 
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
@@ -71,7 +71,7 @@ test('setup assistant prompt flow asks directly for the Codex model id', async (
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra-medium',
+    model: 'gpt-6.1-sol-medium',
     modelProvider: null,
     codexCommand: null,
     codexHome: null,
@@ -82,7 +82,7 @@ test('setup assistant prompt flow asks directly for the Codex model id', async (
     oss: false,
     account: null,
     detail:
-      'Use Codex with gpt-5.6-terra-medium.',
+      'Use Codex with gpt-6.1-sol-medium.',
   })
 })
 

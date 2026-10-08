@@ -58,13 +58,13 @@ test('setup assistant option normalization infers Codex presets', () => {
   assert.equal(hasExplicitSetupAssistantOptions({}), false)
   assert.equal(
     hasExplicitSetupAssistantOptions({
-      assistantModel: 'gpt-5.6-terra',
+      assistantModel: 'gpt-6.1-sol',
     }),
     true,
   )
   assert.equal(
     inferSetupAssistantPresetFromOptions({
-      assistantModel: 'gpt-5.6-terra',
+      assistantModel: 'gpt-6.1-sol',
     }),
     'codex',
   )
@@ -84,7 +84,7 @@ test('setup assistant defaults round-trip Codex defaults', () => {
       approvalPolicy: 'never',
       codexCommand: 'codex',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: null,
       oss: false,
       profile: 'primary',
@@ -103,7 +103,7 @@ test('setup assistant defaults round-trip Codex defaults', () => {
   }
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(codexDefaults), {
     assistantPreset: 'codex',
-    assistantModel: 'gpt-5.6-terra',
+    assistantModel: 'gpt-6.1-sol',
     assistantCodexCommand: 'codex',
     assistantCodexHome: '/tmp/codex-home',
     assistantProfile: 'primary',
@@ -111,7 +111,7 @@ test('setup assistant defaults round-trip Codex defaults', () => {
   })
   assert.equal(
     formatSavedAssistantDefaultsSummary(codexDefaults),
-    'gpt-5.6-terra via Codex app-server (Team account)',
+    'gpt-6.1-sol via Codex app-server (Team account)',
   )
   assert.equal(formatSavedAssistantDefaultsSummary(null), null)
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(null), {})
@@ -122,7 +122,7 @@ test('setup assistant summary helpers label Codex accounts consistently', () => 
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: null,
     codexCommand: null,
     codexHome: undefined,
@@ -143,7 +143,7 @@ test('setup assistant summary helpers label Codex accounts consistently', () => 
 
   assert.equal(
     formatAssistantDefaultsSummary(assistant),
-    'gpt-5.6-terra via Codex app-server (Plus account)',
+    'gpt-6.1-sol via Codex app-server (Plus account)',
   )
   assert.equal(
     formatSetupAssistantAccountLabel(assistant.account),
@@ -304,7 +304,7 @@ test('setup assistant account resolver merges Codex auth and RPC snapshots', asy
       preset: 'codex',
       enabled: true,
       provider: 'codex-cli',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: null,
       codexCommand: 'codex',
       codexHome: '/tmp/custom-codex',
@@ -337,7 +337,7 @@ test('setup assistant selection normalizes Codex values into operator defaults p
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: null,
     codexCommand: 'codex',
     codexHome: '/tmp/codex-home',
@@ -363,7 +363,7 @@ test('setup assistant selection normalizes Codex values into operator defaults p
       approvalPolicy: 'never',
       codexCommand: 'codex',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: null,
       oss: false,
       profile: 'team',
@@ -416,7 +416,7 @@ test('setup assistant defaults helpers clear backend state and summarize empty s
         approvalPolicy: 'never',
         codexCommand: 'codex',
         codexHome: null,
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6.1-sol',
         modelProvider: null,
         oss: false,
         profile: null,
@@ -490,7 +490,7 @@ test('setup assistant resolver handles skip and OpenAI Codex models', async () =
     allowPrompt: false,
     commandName: 'murph setup',
     options: createSetupOptions({
-      assistantModel: 'gpt-5.6-terra',
+      assistantModel: 'gpt-6.1-sol',
       assistantCodexCommand: 'codex-beta',
       assistantProfile: 'team',
     }),
@@ -500,7 +500,7 @@ test('setup assistant resolver handles skip and OpenAI Codex models', async () =
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: null,
     codexCommand: 'codex-beta',
     codexHome: '/tmp/codex-home',
@@ -511,7 +511,7 @@ test('setup assistant resolver handles skip and OpenAI Codex models', async () =
     oss: false,
     account: { source: 'codex-auth-json', kind: 'account', planCode: 'team', planName: 'Team', quota: null },
     detail:
-      'Use Codex with gpt-5.6-terra. An explicit Codex home is configured; path redacted in CLI output. Detected Team account from local Codex credentials.',
+      'Use Codex with gpt-6.1-sol. An explicit Codex home is configured; path redacted in CLI output. Detected Team account from local Codex credentials.',
   })
   assert.equal(capturedAssistants.length, 2)
 })

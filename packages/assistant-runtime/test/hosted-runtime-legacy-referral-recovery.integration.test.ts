@@ -102,7 +102,7 @@ const MEMBER_ID = "member_legacy_referral";
 const cleanupRoots: string[] = [];
 const modelTarget = createAssistantModelTarget({
   approvalPolicy: "never",
-  model: "gpt-5.6-terra",
+  model: "gpt-6.1-sol",
   modelProvider: "hosted-openai",
   provider: "codex-cli",
   reasoningEffort: "medium",

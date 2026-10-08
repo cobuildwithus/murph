@@ -923,13 +923,13 @@ test('model --preset codex replaces an unsupported persisted backend', async () 
     '--preset',
     'codex',
     '--model',
-    'gpt-5.6-terra',
+    'gpt-6.1-sol',
   ])
 
   assert.equal(result.exitCode, null)
   assert.equal(result.envelope.ok, true)
   assert.equal(result.envelope.data?.backend?.adapter, 'codex-cli')
-  assert.equal(result.envelope.data?.backend?.model, 'gpt-5.6-terra')
+  assert.equal(result.envelope.data?.backend?.model, 'gpt-6.1-sol')
   assert.equal(result.envelope.data?.backend?.modelProvider, null)
 
   const config = await readOperatorConfig(homeRoot)
@@ -1046,7 +1046,7 @@ test('interactive bare model uses the Codex wizard selection before resolving de
       preset,
       enabled: true,
       provider: 'codex-cli',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: null,
       codexCommand: null,
       codexHome: options.assistantCodexHome ?? null,
@@ -1097,7 +1097,7 @@ test('interactive bare model uses the Codex wizard selection before resolving de
   })
   assert.equal(
     result.envelope.data?.summary,
-    'gpt-5.6-terra via Codex app-server',
+    'gpt-6.1-sol via Codex app-server',
   )
 })
 

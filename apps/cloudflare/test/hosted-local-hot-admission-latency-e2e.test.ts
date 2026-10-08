@@ -51,7 +51,7 @@ describe("hosted local hot admission benchmark", () => {
     const homePhone = buildLinqHomePhoneNumber(memberId);
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: memberPhone,
@@ -61,7 +61,7 @@ describe("hosted local hot admission benchmark", () => {
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       },
       assistantProviderMode: "stub",
-      assistantProviderStubModelId: "gpt-5.6-terra",
+      assistantProviderStubModelId: "gpt-6.1-sol",
       persistDirPrefix: "murph-hosted-local-hot-admission-",
       requiredRunnerEnvProfile: "linq",
       scenarioLabel: "Local hosted hot admission benchmark",

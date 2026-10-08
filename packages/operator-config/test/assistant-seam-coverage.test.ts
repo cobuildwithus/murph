@@ -155,7 +155,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
 
   const mergedCodex = mergeAssistantProviderConfigs(null, {
     provider: 'codex-cli',
-    model: ' gpt-5.6-terra ',
+    model: ' gpt-6.1-sol ',
     modelProvider: ' OpenAI ',
   })
   assert.deepEqual(mergedCodex, {
@@ -167,7 +167,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
     target: {
       codexCommand: null,
       codexHome: null,
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       oss: false,
       profile: null,
@@ -189,7 +189,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
       'sha256:f5efdf258853d4e25eaea6c82afed8676c17ee9001ce6533148d8bf5c236dc28',
     executionDriver: 'codex-app-server',
     approvalPolicy: null,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'openai',
     oss: false,
     profile: null,
@@ -202,7 +202,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
     approvalPolicy: null,
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     modelProvider: 'openai',
     oss: false,
     profile: null,
@@ -239,7 +239,7 @@ test('hosted assistant config helpers normalize Codex profiles and sparse fallba
     id: ' codex-profile ',
     providerConfig: {
       provider: 'codex-cli',
-      model: ' gpt-5.6-terra ',
+      model: ' gpt-6.1-sol ',
       modelProvider: ' openai ',
     },
   })
@@ -290,7 +290,7 @@ test('hosted assistant config helpers normalize Codex profiles and sparse fallba
         id: '   ',
         providerConfig: {
           provider: 'codex-cli',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: 'openai',
         },
       }),

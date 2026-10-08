@@ -273,7 +273,7 @@ describe("hosted runner container identity", () => {
       expectedModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
       fleetModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
       hostedAssistantModelOverride: null,
-      name: "preserves Terra without an override",
+      name: "keeps the default model without an override",
     },
   ] as const)("$name", async ({
     expectedModel,

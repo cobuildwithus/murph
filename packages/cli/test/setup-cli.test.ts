@@ -1973,7 +1973,7 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
       '--assistantPreset',
       'codex',
       '--assistantModel',
-      'gpt-5.6-terra',
+      'gpt-6.1-sol',
       '--format',
       'json',
       '--full-output',
@@ -1988,7 +1988,7 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
   assert.deepEqual(resolvedAssistants, [
     {
       allowPrompt: false,
-      assistantModel: 'gpt-5.6-terra',
+      assistantModel: 'gpt-6.1-sol',
       preset: 'codex',
     },
   ])
@@ -1997,7 +1997,7 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
       preset: 'codex',
       enabled: true,
       provider: 'codex-cli',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6.1-sol',
       modelProvider: null,
       codexCommand: null,
       profile: null,
@@ -2843,7 +2843,7 @@ test.sequential('setup persistence can replace unsupported assistant defaults', 
       buildAssistantProviderDefaultsPatch({
         defaults: null,
         providerConfig: {
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6.1-sol',
           modelProvider: null,
           sandbox: 'danger-full-access',
           approvalPolicy: 'never',
@@ -2860,7 +2860,7 @@ test.sequential('setup persistence can replace unsupported assistant defaults', 
       config?.assistant?.backend?.adapter === 'codex-cli'
         ? config.assistant.backend.model
         : null,
-      'gpt-5.6-terra',
+      'gpt-6.1-sol',
     )
     assert.equal(
       config?.assistant?.backend?.adapter === 'codex-cli'

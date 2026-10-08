@@ -187,7 +187,7 @@ describe("startAssistantProviderStubServer", () => {
               }),
             },
             input: [],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
             stream: true,
           }),
           headers: {
@@ -254,7 +254,7 @@ describe("startAssistantProviderStubServer", () => {
         {
           body: JSON.stringify({
             input: [],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
             stream: true,
           }),
           headers: {
@@ -309,7 +309,7 @@ describe("startAssistantProviderStubServer", () => {
           body: JSON.stringify({
             client_metadata: { "x-codex-turn-metadata": metadata },
             input: [],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
           }),
           headers: { "content-type": "application/json; charset=utf-8" },
           method: "POST",
@@ -368,7 +368,7 @@ describe("startAssistantProviderStubServer", () => {
               },
             }),
             input,
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -449,7 +449,7 @@ describe("startAssistantProviderStubServer", () => {
       let returned = false;
       const response = fetch(`${buildHostLoopbackStubBaseUrl(server, "tool barrier")}/v1/responses`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ input: [], model: "gpt-5.6-terra", stream: true }),
+        body: JSON.stringify({ input: [], model: "gpt-6.1-sol", stream: true }),
       }).then(value => { returned = true; return value; });
       await started;
       expect(requests).toHaveLength(1);
@@ -481,7 +481,7 @@ describe("startAssistantProviderStubServer", () => {
       const toolCallResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -501,7 +501,7 @@ describe("startAssistantProviderStubServer", () => {
       const followupResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -536,7 +536,7 @@ describe("startAssistantProviderStubServer", () => {
         {
           body: JSON.stringify({
             input: [],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
             stream: true,
           }),
           headers: {
@@ -584,7 +584,7 @@ describe("startAssistantProviderStubServer", () => {
       const backgroundResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [{ content: "background wake", role: "user" }],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -606,7 +606,7 @@ describe("startAssistantProviderStubServer", () => {
       const targetResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [{ content: "please handle this target message", role: "user" }],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -650,7 +650,7 @@ describe("startAssistantProviderStubServer", () => {
     try {
       const body = JSON.stringify({
         input: [{ content: "background wake", role: "user" }],
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       });
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const response = await fetch(
@@ -715,7 +715,7 @@ describe("startAssistantProviderStubServer", () => {
                 role: "user",
               },
             ],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -759,7 +759,7 @@ describe("startAssistantProviderStubServer", () => {
       const toolCallResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [{ content: triggerText, role: "user" }],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -785,7 +785,7 @@ describe("startAssistantProviderStubServer", () => {
               role: "user",
             },
           ],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
           stream: true,
         }),
         headers: {
@@ -825,7 +825,7 @@ describe("startAssistantProviderStubServer", () => {
         {
           body: JSON.stringify({
             input: [{ content: "please handle this target message", role: "user" }],
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -864,7 +864,7 @@ describe("startAssistantProviderStubServer", () => {
       const firstResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -874,7 +874,7 @@ describe("startAssistantProviderStubServer", () => {
       const secondResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.6-terra",
+          model: "gpt-6.1-sol",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -969,7 +969,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(() => expectAdvertisedMurphDynamicTools([
       buildResponsesRequest([...baseToolNames, "murph.usage_diagnostics"]),
     ])).toThrow();
-    // Responses Lite models (e.g. gpt-5.6-terra) relocate the structured
+    // Responses Lite models (e.g. gpt-6.1-sol) relocate the structured
     // namespace into an additional_tools input item; it must still be read.
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames, "additional-tools"),
@@ -1062,7 +1062,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     );
 
     expect(env).toMatchObject({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:1234/v1",
@@ -1119,7 +1119,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     expect(
       resolveHostedAssistantLocalDevEnv(
         {
-          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+          HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
           HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             "http://127.0.0.1:4567/v1",
