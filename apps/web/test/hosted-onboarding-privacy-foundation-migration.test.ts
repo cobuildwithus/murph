@@ -1233,6 +1233,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261002010000_companion_presence",
       "20261005000000_device_sync_deferred_wake",
       "20261005120000_companion_wake_delivery",
+      "20261008210000_linq_bounded_terminal_recovery",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
