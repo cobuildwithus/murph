@@ -205,7 +205,7 @@ describe('assistant execution prompt contract', () => {
       'The room-scoped `murph.assistant_configuration` tool reads or changes the future room model only',
     )
     expect(prompt).toContain(
-      'A saved Luna, Terra, or Sol model starts next turn',
+      'A saved Luna or Sol model starts next turn',
     )
     expect(prompt).toContain(
       'one-task child models use `spawn_agent.model` and are never saved',
@@ -3552,7 +3552,7 @@ describe('assistant conversation scope', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(prompt).toContain(
-      'A saved Luna, Terra, or Sol model starts next turn',
+      'A saved Luna or Sol model starts next turn',
     )
     expect(prompt).toContain(
       'Provider and reasoning controls remain unavailable in a group',

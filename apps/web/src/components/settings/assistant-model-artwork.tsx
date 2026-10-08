@@ -3,14 +3,12 @@ import { cn } from "@/src/lib/utils";
 import styles from "./assistant-model-artwork.module.css";
 import { AstraStarfield } from "./astra-starfield";
 
-type AssistantModelArtworkVariant = "astra" | "luna" | "sol" | "terra";
+type AssistantModelArtworkVariant = "astra" | "luna" | "sol";
 
 const ASSISTANT_MODEL_CHOICE_CARD_CLASSES = {
   astra: "pointer-events-auto group-data-[disabled=true]:pointer-events-auto border-[#c5d5dd] [--primary:#426b80] [--primary-foreground:#fffcf6] [--muted-foreground:#435e6b] hover:border-[#7b9eaf] has-data-checked:border-[#426b80] has-data-checked:ring-[#7b9eaf]/20 has-data-checked:hover:border-[#426b80] data-[disabled=true]:hover:border-[#c5d5dd] [&>span[aria-hidden=true]]:w-full",
   luna:
     "hover:border-[#777b7d]/40 hover:bg-[#777b7d]/5 has-data-checked:border-[#777b7d] has-data-checked:bg-[#777b7d]/10 has-data-checked:ring-[#777b7d]/15 has-data-checked:hover:border-[#777b7d] has-data-checked:hover:bg-[#777b7d]/10 [&_[data-slot=radio-group-item][data-checked]]:border-[#777b7d] [&_[data-slot=radio-group-item][data-checked]]:bg-[#777b7d]",
-  terra:
-    "hover:border-[#557d78]/40 hover:bg-[#4f7f97]/5 has-data-checked:border-[#557d78] has-data-checked:bg-[#4f7f97]/10 has-data-checked:ring-[#758f5c]/20 has-data-checked:hover:border-[#557d78] has-data-checked:hover:bg-[#4f7f97]/10 [&_[data-slot=radio-group-item][data-checked]]:border-[#557d78] [&_[data-slot=radio-group-item][data-checked]]:bg-[#557d78]",
   sol: "hover:border-[#8f6817]/40 hover:bg-[#d9ad35]/5 has-data-checked:border-[#8f6817] has-data-checked:bg-[#d9ad35]/10 has-data-checked:ring-[#8f6817]/20 has-data-checked:hover:border-[#8f6817] has-data-checked:hover:bg-[#d9ad35]/10 [&_[data-slot=radio-group-item][data-checked]]:border-[#8f6817] [&_[data-slot=radio-group-item][data-checked]]:bg-[#8f6817]",
 } as const satisfies Record<AssistantModelArtworkVariant, string>;
 
@@ -45,7 +43,6 @@ export function AssistantModelArtwork({
       viewBox="0 0 240 160"
     >
       {variant === "luna" ? <LunaArtwork /> : null}
-      {variant === "terra" ? <TerraArtwork /> : null}
       {variant === "sol" ? <SolArtwork /> : null}
     </svg>
   );
@@ -59,36 +56,6 @@ function LunaArtwork() {
       <circle cx="225" cy="102" r="7" fill="#919597" />
       <circle cx="199" cy="137" r="16" fill="#686C6E" />
       <circle cx="237" cy="141" r="9" fill="#5F6365" />
-    </g>
-  );
-}
-
-function TerraArtwork() {
-  return (
-    <g opacity="0.27">
-      <circle cx="194" cy="104" r="90" fill="#4F7F97" />
-      <g transform="translate(194 104) scale(1.32) translate(-194 -104)">
-        <path
-          d="M155 67c14-17 36-29 57-28l-2 15-14 8-5 13-15 1-9 11-13-6Z"
-          fill="#758F5C"
-        />
-        <path
-          d="m175 101 16-9 18 6 3 13 13 9-6 18-16 10-9-13-12-7-3-14Z"
-          fill="#6C8755"
-        />
-        <path
-          d="M145 111c8 3 15 9 18 17l-10 11-12-8Z"
-          fill="#89A06C"
-        />
-      </g>
-      <circle
-        cx="194"
-        cy="104"
-        r="90"
-        fill="none"
-        stroke="#3E6D82"
-        strokeWidth="2"
-      />
     </g>
   );
 }

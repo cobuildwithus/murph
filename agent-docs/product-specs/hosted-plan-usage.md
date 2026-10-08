@@ -294,8 +294,8 @@ their current account links; they are not authority to invoke
 `murph.subscription`.
 
 When discussing a usage-saving model, call it “a less capable model that uses
-less AI usage.” Do not assume the member knows Luna, Terra, or
-Sol; name a model only if they ask. Never switch models automatically.
+less AI usage.” Do not assume the member knows Luna, Sol, or
+Astra; name a model only if they ask. Never switch models automatically.
 
 ## Runtime Access And Notices
 

@@ -4658,7 +4658,7 @@ describe('assistant Codex turn planning', () => {
       'synthetic Murph instance for this room',
     )
     expect(groupAssistantConfigurationTool?.description).toContain(
-      'Luna, Terra, or Sol may be selected',
+      'Luna or Sol may be selected',
     )
     const groupAssistantConfigurationSchema = JSON.stringify(
       groupAssistantConfigurationTool?.inputSchema,

@@ -1211,7 +1211,7 @@ Hosted AI usage metering:
 - GPT-6 Astra is an optional managed OpenAI model for active paid individual Edge/Max
   and active Family Edge/Max seats. The existing assistant preference owner enforces
   eligibility on writes and runtime reads; losing Edge/Max access retains the preference
-  while using Terra until access returns. Group rooms retain Luna/Terra/Sol.
+  while using the GPT-6.1 Sol default until access returns. Group rooms retain Luna and Sol.
   Astra uses $10 input, $1 cache reads, $12.50 cache writes, and $50 output per
   million tokens; OpenAI Flex uses half those rates. Exact requests above 272K
   input use twice the input/cache rates and 1.5 times the output rate. Hosted
