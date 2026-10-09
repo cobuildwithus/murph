@@ -12,6 +12,32 @@ endpoint. Local execution explicitly selects OpenAI even when the saved target
 omits a provider, and rejects local OSS mode. OpenAI API, ChatGPT subscription,
 and synthetic local-test transports retain their existing execution boundaries.
 
+## Codex failure telemetry
+
+Auto-reply failure context retains `codexErrorInfoPresent` only as a boolean,
+`codexErrorInfo` as a closed recognized kind or `unrecognized` for other strings,
+and `codexErrorHttpStatusCode` only as an integer from 100 through 599. Wrong
+kinds of values are omitted, not coerced. Hosted maintenance logs project these
+as `failureCodexErrorInfoPresent`, `failureCodexErrorInfo`, and
+`failureCodexErrorHttpStatusCode` without changing classification, retry policy,
+or event count.
+
+`internalServerError` identifies structured server-error evidence, unlike
+`responseStreamDisconnected` or `httpConnectionFailed`; the latter's status
+still affects the existing connection-loss classification. Presence `false`
+means no structured info was attached, so classification may be text-based.
+Missing presence is unavailable telemetry, not `false`; `unrecognized` retains
+presence without exposing the external kind string.
+
+Natural-traffic query (read-only): use one fixed UTC `[start, end)` window of at
+most 12 hours in the existing maintenance logs. Filter `type = 'input.reply-failed'`
+and `errorCode IN ('ASSISTANT_CODEX_FAILED', 'ASSISTANT_CODEX_CONNECTION_LOST',
+'ASSISTANT_CODEX_USAGE_LIMIT')`; group `COUNT(*)` by `errorCode`,
+`failureCodexErrorInfoPresent`, `failureCodexErrorInfo`,
+`failureCodexErrorHttpStatusCode`, and `failureRetryable`, limited to 100 groups.
+Keep missing values separate from `false`, select metadata only, and do not
+induce failures. An empty window is not evidence that the path works.
+
 ## Prompt time context
 
 Inbound auto-reply prompts render occurrence instants before provider execution.

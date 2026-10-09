@@ -23,7 +23,14 @@ import {
   assistantResultArtifactExists,
   writeAssistantChatErrorArtifacts,
 } from '../src/assistant/automation/artifacts.ts'
-import { describeAssistantAutoReplyFailure } from '../src/assistant/automation/failure-observability.ts'
+import {
+  buildCodexFailure,
+  buildCodexTurnFailedError,
+} from '../src/assistant-codex/failures.ts'
+import {
+  describeAssistantAutoReplyFailure,
+  normalizeAssistantSafeFailureContext,
+} from '../src/assistant/automation/failure-observability.ts'
 import { collectAssistantAutoReplyGroup } from '../src/assistant/automation/grouping.ts'
 import {
   createAssistantProviderWatchdog,
@@ -511,6 +518,139 @@ describe('assistant automation artifacts', () => {
 
 describe('assistant auto-reply failure observability', () => {
   const syntheticHomePath = `/${'Users'}/example-user`
+
+  describe.each([
+    ['turn', buildCodexTurnFailedError],
+    ['process', buildCodexFailure],
+  ] as const)('%s structured Codex failure context', (_stage, buildFailure) => {
+    const buildError = (
+      kind: string | null = 'internalServerError',
+      httpStatusCode: number | null = 503,
+    ) => buildFailure({
+      code: 1,
+      errorInfo: kind === null ? null : { kind, httpStatusCode },
+      fallback: 'stream disconnected before completion',
+      providerActionCount: 0,
+      codexThreadId: null,
+      signal: null,
+      status: 'failed',
+      stderr: '',
+    })
+
+    it.each([
+      ['internalServerError', 503, 'ASSISTANT_CODEX_FAILED', false],
+      ['internalServerError', 100, 'ASSISTANT_CODEX_FAILED', false],
+      ['internalServerError', 599, 'ASSISTANT_CODEX_FAILED', false],
+      ['responseStreamDisconnected', null, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
+      ['responseStreamConnectionFailed', null, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
+      ['responseTooManyFailedAttempts', null, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
+      ['serverOverloaded', 503, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
+      ['httpConnectionFailed', null, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
+      ['httpConnectionFailed', 408, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
+      ['httpConnectionFailed', 429, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
+      ['httpConnectionFailed', 503, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
+      ['httpConnectionFailed', 401, 'ASSISTANT_CODEX_FAILED', false],
+      ['usageLimitExceeded', 429, 'ASSISTANT_CODEX_USAGE_LIMIT', false],
+      [null, null, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
+    ] as const)('preserves %s/%s without reclassifying', (kind, status, code, retryable) => {
+      const error = buildError(kind, status)
+      const originalContext = { ...error.context }
+      const snapshot = describeAssistantAutoReplyFailure(error)
+      const context = normalizeAssistantSafeFailureContext(snapshot.context)
+
+      expect(snapshot).toMatchObject({ code, kind: 'provider', retryable })
+      expect(error).toMatchObject({ code, context: { retryable } })
+      expect(error.context).toEqual(originalContext)
+      expect(snapshot.context).toEqual(originalContext)
+      expect(context).toEqual(originalContext)
+      expect(context?.codexErrorInfoPresent).toBe(kind !== null)
+      expect(context?.codexErrorInfo).toBe(kind ?? undefined)
+      expect(context?.codexErrorHttpStatusCode).toBe(status ?? undefined)
+    })
+
+    it.each([
+      '',
+      'futureProviderError',
+      ' internalServerError ',
+      'https://provider.example.test/private/member-123?token=synthetic-secret\n{"payload":"private"}',
+    ])('bounds unknown structured kind %j', (kind) => {
+      const error = buildError(kind)
+      const snapshot = describeAssistantAutoReplyFailure(error)
+
+      expect(snapshot).toMatchObject({
+        code: 'ASSISTANT_CODEX_FAILED',
+        kind: 'provider',
+        retryable: false,
+      })
+      expect(error.context?.codexErrorInfo).toBe(kind)
+      expect(snapshot.context).toEqual({
+        ...error.context,
+        codexErrorInfo: 'unrecognized',
+      })
+      expect(normalizeAssistantSafeFailureContext(snapshot.context)).toEqual(
+        snapshot.context,
+      )
+      expect(JSON.stringify(snapshot)).not.toContain('synthetic-secret')
+      expect(JSON.stringify(snapshot)).not.toContain('member-123')
+    })
+
+    it.each([
+      ['codexErrorInfoPresent', [undefined, null, 'true', 'false', 0, 1, [], [true], {}]],
+      ['codexErrorInfo', [undefined, null, true, 503, [], ['internalServerError'], {}]],
+      ['codexErrorHttpStatusCode', [
+        undefined, null, '503', false, NaN, Infinity, -Infinity, 500.5,
+        99, 600, [], [503], {},
+      ]],
+    ] as const)('omits malformed %s', (key, values) => {
+      for (const value of values) {
+        const error = buildError()
+        Object.assign(error, { context: { ...error.context, [key]: value } })
+        const snapshot = describeAssistantAutoReplyFailure(error)
+
+        expect(snapshot).toMatchObject({
+          code: 'ASSISTANT_CODEX_FAILED',
+          kind: 'provider',
+          retryable: false,
+        })
+        expect(snapshot.context).not.toHaveProperty(key)
+        expect(normalizeAssistantSafeFailureContext(snapshot.context)).not.toHaveProperty(key)
+      }
+    })
+
+    it.each([true, false])('keeps sanitized context precedence (valid=%s)', (valid) => {
+      const details = {
+        codexErrorInfoPresent: true,
+        codexErrorInfo: 'internalServerError',
+        codexErrorHttpStatusCode: 503,
+      }
+      const context = valid
+        ? {
+            codexErrorInfoPresent: false,
+            codexErrorInfo: 'httpConnectionFailed',
+            codexErrorHttpStatusCode: 401,
+          }
+        : {
+            codexErrorInfoPresent: 'false',
+            codexErrorInfo: ['httpConnectionFailed'],
+            codexErrorHttpStatusCode: NaN,
+          }
+      const error = buildError()
+      Object.assign(error, {
+        details: { ...details, retryable: true },
+        context: { ...error.context, ...context },
+      })
+      const snapshot = describeAssistantAutoReplyFailure(error)
+
+      expect(snapshot).toMatchObject({
+        code: 'ASSISTANT_CODEX_FAILED',
+        kind: 'provider',
+        retryable: false,
+      })
+      expect(normalizeAssistantSafeFailureContext(snapshot.context)).toMatchObject(
+        valid ? context : details,
+      )
+    })
+  })
 
   it('classifies usage-limit provider failures and redacts secrets and home paths', () => {
     const error = Object.assign(
