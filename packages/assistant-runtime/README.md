@@ -320,6 +320,9 @@ from a fresh checkout. Vault-share entrypoint cases use the real isolated captur
 worker through its published package entrypoint; Vitest source aliases do not
 compile that separate Node worker. The prepared build includes this package and
 checks the compiled worker and its public import before reporting success.
+The entrypoint test harness rejects a missing capture worker as soon as a
+vault-share port is configured, with the package build command to run before
+retrying; this avoids misleading projection-delivery timeouts.
 
 Device import yield reasons and receipt-capacity slicing are specified in
 [`agent-docs/RELIABILITY.md`](../../agent-docs/RELIABILITY.md).
