@@ -1,6 +1,6 @@
 Entrypoint test worker build prerequisites are owned by
 `../packages/assistant-runtime/README.md#focused-tests`; repair evidence is tracked
-in [the worker preflight plan](exec-plans/active/2026-10-09-frog-entrypoint-build-preflight.md).
+in [the worker preflight plan](exec-plans/completed/2026-10-09-frog-entrypoint-build-preflight.md).
 
 OpenAI-only mixed-version rollout preparation is tracked in
 [the rollout plan](exec-plans/completed/2026-10-07-openai-rollout.md); the live
