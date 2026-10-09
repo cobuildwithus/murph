@@ -510,10 +510,10 @@ describe("runHostedAssistantAutomation", () => {
         eventCode: "assistant.automation_detail",
         level: failureEntry.level,
         phase: "invoke",
-        redactedJson: sanitizeHostedExecutionStructuredLogDetails(failureEntry.redacted),
+        redactedJson: failureEntry.redacted,
       }],
     });
-    expect(parsed.entries[0]?.redactedJson).toMatchObject({
+    expect(sanitizeHostedExecutionStructuredLogDetails(parsed.entries[0]?.redactedJson)).toMatchObject({
       failureCodexErrorInfoPresent: true,
       failureCodexErrorInfo: "internalServerError",
       failureCodexErrorHttpStatusCode: 503,
