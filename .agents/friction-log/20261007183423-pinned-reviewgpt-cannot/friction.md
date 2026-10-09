@@ -1,6 +1,7 @@
 ---
 title: 'Pinned ReviewGPT cannot traverse the current GPT-6 model picker'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4085'
 ---
 
 ## Expected Behavior

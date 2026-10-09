@@ -1,6 +1,7 @@
 ---
 title: 'Pinned ReviewGPT cannot select its concrete model in the current ChatGPT picker'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4092'
 ---
 
 ## Expected Behavior

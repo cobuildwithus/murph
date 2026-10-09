@@ -1,6 +1,7 @@
 ---
 title: 'OpenAI-only cutover instructions require an unavailable fleet admission pause'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4090'
 ---
 
 ## Expected Behavior

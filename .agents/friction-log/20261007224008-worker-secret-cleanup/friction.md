@@ -1,6 +1,7 @@
 ---
 title: 'Worker secret cleanup dry-run omits required-secret declarations'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4097'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Pinned ReviewGPT cannot select GPT-6 from the current named model menu'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4086'
 ---
 
 ## Expected Behavior

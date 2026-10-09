@@ -1,6 +1,7 @@
 ---
 title: 'System mailbox projection regressions fail on unchanged base'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4077'
 ---
 
 ## Expected Behavior

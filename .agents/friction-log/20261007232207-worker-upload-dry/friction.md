@@ -1,6 +1,7 @@
 ---
 title: 'Worker upload dry-run cannot validate inheritance source support'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4099'
 ---
 
 ## Expected Behavior

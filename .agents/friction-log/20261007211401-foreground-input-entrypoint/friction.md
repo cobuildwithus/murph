@@ -1,6 +1,7 @@
 ---
 title: 'Direct assistant-runtime entrypoint test runs fail without a prior package build'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4095'
 ---
 
 ## Expected Behavior
