@@ -1847,6 +1847,38 @@
     {
       "issue": "cobuildwithus/murph#4073",
       "path": ".agents/friction-log/20261007001040-frog-reconciliation-pull/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4077",
+      "path": ".agents/friction-log/20261007124010-system-mailbox-projection/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4085",
+      "path": ".agents/friction-log/20261007183423-pinned-reviewgpt-cannot/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4086",
+      "path": ".agents/friction-log/20261007155948-pinned-reviewgpt-cannot/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4090",
+      "path": ".agents/friction-log/20261007212342-openai-only-cutover/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4092",
+      "path": ".agents/friction-log/20261007161109-pinned-reviewgpt-cannot/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4095",
+      "path": ".agents/friction-log/20261007211401-foreground-input-entrypoint/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4097",
+      "path": ".agents/friction-log/20261007224008-worker-secret-cleanup/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4099",
+      "path": ".agents/friction-log/20261007232207-worker-upload-dry/friction.md"
     }
   ],
   "version": 1
