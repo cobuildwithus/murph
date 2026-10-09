@@ -13,6 +13,7 @@ import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instr
 import { buildAssistantSystemPromptLayers } from '../src/assistant/system-prompt.ts'
 import { writeHostedOpenAiMixedModeModelCatalogJson } from './support/codex-model-catalog.ts'
 import { prepareScriptedTurnScenario, readRecord, startScriptedResponsesStub } from './support/codex-scripted-provider.ts'
+import { assertModelVisibleToolContract, readProviderNativeTools, readVisibleCanonicalSchema } from './support/codex-tool-contract-proof.ts'
 
 // Credential-free, opt-in complete request measurement. The baseline module is
 // materialized beside its original imports and removed afterwards. Its unchanged
@@ -26,6 +27,15 @@ const baseModule = new URL('../src/assistant/system-prompt.usage-measurement-bas
 const baseCatalogModule = new URL('../src/assistant-codex/dynamic-tool-catalog.usage-measurement-base.ts', import.meta.url)
 const baseAutomationModule = new URL('../src/assistant-codex/dynamic-tools/automation.usage-measurement-base.ts', import.meta.url)
 const temporaryPaths: string[] = []
+const noExternalFetch: typeof fetch = async () => { throw new Error('Unexpected external effect') }
+
+function readFreshnessScopeKeySchema(schema: unknown): Record<string, unknown> {
+  const properties = readRecord(readRecord(schema)?.properties)
+  const items = readRecord(readRecord(properties?.freshness)?.items)
+  const scopeKey = readRecord(readRecord(items?.properties)?.projectionScopeKey)
+  assert.ok(scopeKey, 'Expected the captured group_data freshness scope-key schema')
+  return scopeKey
+}
 
 function gitSource(file: string): string {
   return execFileSync('git', ['show', `${base}:${file}`], { cwd: repository, encoding: 'utf8' })
@@ -60,7 +70,9 @@ afterAll(async () => {
 })
 
 describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency initial input', () => {
-  it.each(['direct', 'group'] as const)('complete first provider request (%s)', { timeout: 180_000 }, async (scope) => {
+  it.each(['direct', 'group', 'groupAvailable'] as const)('complete first provider request (%s)', { timeout: 180_000 }, async (fixture) => {
+    const scope = fixture === 'direct' ? 'direct' : 'group'
+    const groupAvailable = fixture === 'groupAvailable'
     await writeFile(baseModule, gitSource(promptPath), { flag: 'wx' })
     await writeFile(baseAutomationModule, gitSource('packages/assistant-engine/src/assistant-codex/dynamic-tools/automation.ts'), { flag: 'wx' })
     await writeFile(baseCatalogModule, gitSource('packages/assistant-engine/src/assistant-codex/dynamic-tool-catalog.ts').replaceAll(
@@ -70,22 +82,30 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
     try {
       const baseline: typeof import('../src/assistant/system-prompt.ts') = await import(baseModule.href)
       const baselineCatalog: typeof import('../src/assistant-codex/dynamic-tool-catalog.ts') = await import(baseCatalogModule.href)
-      const availability = {
+      const availability: Parameters<typeof resolveMurphDynamicTools>[0] = {
         allowFinishWithoutReply: true, automationAvailable: true,
-        personalizationAvailable: scope === 'direct', groupSharedReadAvailable: scope === 'group',
+        personalizationAvailable: scope === 'direct', groupSharedReadAvailable: fixture === 'group',
+        ...(groupAvailable ? { groupAvailable: true } : {}),
         imageGenerationAvailable: false, progressUpdatesAvailable: true, progressUpdateMode: scope,
       }
       const captures = []
+      const groupScopeKeySchemas: Record<string, unknown>[] = []
+      // The affected case changes ONLY the catalog. Reuse the current production
+      // prompt/config and the same isolated home/workspace across both phases.
+      // Keep the existing direct/shared-read fixtures' broader base/head capture.
+      let groupScenario: Awaited<ReturnType<typeof prepareScriptedTurnScenario>> | undefined
       for (const phase of ['base', 'head'] as const) {
         const tools = (phase === 'base' ? baselineCatalog.resolveMurphDynamicTools : resolveMurphDynamicTools)(availability)
-        const configSource = phase === 'base' ? gitSource(configPath) : await readFile(new URL(`../../../${configPath}`, import.meta.url), 'utf8')
-        const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, {
+        const configSource = phase === 'base' && !groupAvailable ? gitSource(configPath) : await readFile(new URL(`../../../${configPath}`, import.meta.url), 'utf8')
+        const scenario = groupScenario ?? await prepareScriptedTurnScenario(stub, temporaryPaths, {
           model: 'gpt-6.1-sol', additionalTomlLines: nativeDelegationConfig(configSource),
         })
-        const build = phase === 'base' ? baseline.buildAssistantSystemPromptLayers : buildAssistantSystemPromptLayers
+        if (groupAvailable) groupScenario = scenario
+        const build = phase === 'base' && !groupAvailable ? baseline.buildAssistantSystemPromptLayers : buildAssistantSystemPromptLayers
         const layers = build({
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantProgressUpdatesAvailable: true, channel: 'linq',
+          ...(groupAvailable ? { assistantHostedGroupToolSurface: 'families' as const } : {}),
           cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: scope,
           currentLocalDate: '2030-01-10', currentInstant: '2030-01-10T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
@@ -94,16 +114,22 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
         const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
           codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
         })
+        stub.markRequestBaseline()
         stub.captureProviderRequestDiagnostics({ completeInput: true })
         stub.queue({ text: 'SYNTHETIC_USAGE_INPUT_CAPTURED' })
         const result = await executeCodexAppServerTurn({
           ...scenario.turnInput, dynamicTools: tools, groupConversation: scope === 'group',
+          fetchImpl: noExternalFetch, publicInternetFetch: noExternalFetch,
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
-          prompt: [layers.dynamicTurnContextPrompt, 'Review the existing reminders and summarize which need attention.'].join('\n\n'),
+          prompt: [layers.dynamicTurnContextPrompt, groupAvailable
+            ? 'Summarize the shared sleep duration for January 10, 2030, with the shared timezone for each person. Keep it brief.'
+            : 'Review the existing reminders and summarize which need attention.'].join('\n\n'),
           env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
         })
         expect(result.finalMessage).toBe('SYNTHETIC_USAGE_INPUT_CAPTURED')
+        expect(result.runtimeIssueInputs).toEqual([])
+        expect(result.jsonEvents.filter((event) => readRecord(event)?.method === 'item/tool/call')).toEqual([])
         expect(stub.requestCountSinceBaseline()).toBe(1)
         const capture = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
         assert.ok(capture)
@@ -111,6 +137,18 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
         assert.ok(body)
         expect(body.model).toBe('gpt-6.1-sol')
         expect(capture.json).toContain('functions')
+        if (groupAvailable) {
+          const registered = tools.find((tool) => tool.namespace === 'murph' && tool.name === 'group_data')
+          assert.ok(registered, 'The affected fixture must register murph.group_data, not murph.group')
+          expect(registered).toMatchObject({ deferLoading: false })
+          const observed = readProviderNativeTools(capture.json)
+            .filter((tool) => tool.namespace === 'murph' && tool.name === 'group_data')
+          expect(observed).toHaveLength(1)
+          const visible = observed[0]
+          assert.ok(visible)
+          assertModelVisibleToolContract(registered, visible)
+          groupScopeKeySchemas.push(readFreshnessScopeKeySchema(readVisibleCanonicalSchema(visible.description)))
+        }
         captures.push({
           phase, bytes: Buffer.byteLength(capture.json),
           sha256: createHash('sha256').update(capture.json).digest('hex'),
@@ -122,8 +160,22 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
       }
       const [before, after] = captures
       assert.ok(before && after)
+      if (groupAvailable) {
+        const [baseScopeKey, headScopeKey] = groupScopeKeySchemas
+        assert.ok(baseScopeKey && headScopeKey)
+        // Fail rather than silently measuring two already-patched catalogs.
+        expect(baseScopeKey).not.toHaveProperty('enum')
+        const { enum: wearableKeys, ...unchangedScopeKey } = headScopeKey
+        assert.ok(Array.isArray(wearableKeys) && wearableKeys.length > 0)
+        expect(unchangedScopeKey).toEqual(baseScopeKey)
+        expect(after.registeredTools).toEqual(before.registeredTools)
+        expect(after.bytes).toBeGreaterThan(before.bytes)
+        expect(after.sha256).not.toBe(before.sha256)
+      }
       process.stdout.write(`[usage-input-proof] ${JSON.stringify({
-        scope, base, model: 'gpt-6.1-sol', nativeDelegation: true, captures,
+        fixture, scope, base, model: 'gpt-6.1-sol', provider: 'scripted-loopback', nativeDelegation: true, captures,
+        comparison: groupAvailable ? 'base/current catalog; identical current prompt, config and workspace' : 'base/head production inputs',
+        freshnessEnumSizes: groupScopeKeySchemas.map((schema) => Array.isArray(schema.enum) ? schema.enum.length : null),
         deltaBytes: after.bytes - before.bytes, deltaPercent: (after.bytes - before.bytes) / before.bytes * 100,
         tokens: null, tokenDelta: null, tokenLimitation: 'No exact GPT-6.1 Sol tokenizer is configured; no estimate is substituted.',
       })}\n`)

@@ -11679,6 +11679,122 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     }, 360_000,
   )
 
+  it(
+    'keeps group freshness wearable-only when reading dated sleep with shared timezone context',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-freshness-contract-e2e-'))
+      const sleepScope = { projectionKind: 'sleep-duration-days.v0' } as const
+      const timeZoneScope = { projectionKind: 'time-zone.v0' } as const
+      const date = '2030-04-12'
+      const freshness = [{ projectionScopeKey: sleepScope.projectionKind, date }]
+      const sharedRequests: AssistantHostedGroupSharedReadRequest[] = []
+      const forbiddenEffects: string[] = []
+      const forbidEffect = (effect: string): never => {
+        forbiddenEffects.push(effect)
+        throw new Error(`Unexpected synthetic shared-read effect: ${effect}`)
+      }
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const before = await snapshotRealCodexCanonicalVault(workingDirectory)
+        const writesBefore = await listWriteOperationMetadataPaths(workingDirectory)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          configOverrides: ['web_search="disabled"', 'features.image_generation=false'],
+          developerInstructions: buildHostedGroupStatusDeveloperInstructions('families', false, date),
+          dynamicTools: resolveMurphDynamicTools({ groupAvailable: true, progressUpdateMode: 'group' }),
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+          fetchImpl: async () => forbidEffect('provider-fetch'),
+          publicInternetFetch: async () => forbidEffect('public-fetch'),
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: { request: async () => forbidEffect('group-action') },
+            groupPermissionOfferTool: { request: async () => forbidEffect('consent-offer') },
+            groupEmailEffect: { request: async () => forbidEffect('group-email') },
+            automationTool: { request: async () => forbidEffect('automation') },
+            deviceTool: { request: async () => forbidEffect('device') },
+            groupSharedReader: { request: async (request) => {
+              sharedRequests.push(request)
+              return {
+                status: 'ok',
+                requestedProjectionScopeKeys: [sleepScope.projectionKind, timeZoneScope.projectionKind],
+                freshness: { checkedAt: `${date}T14:00:00.000Z`, refreshStatus: 'not_needed' },
+                members: [{
+                  displayName: 'Avery', currentTurnHandles: [],
+                  memberId: 'member_synthetic_sleep_timezone', participantId: 'participant_synthetic_sleep_timezone',
+                  projections: [{
+                    projectionScope: sleepScope, projectionScopeKey: sleepScope.projectionKind,
+                    grantStatus: 'granted', dataStatus: 'available', grantedAt: '2030-04-01T00:00:00.000Z',
+                    records: [{
+                      recordKey: `${date}.garmin`, occurredAt: `${date}T00:00:00.000Z`,
+                      source: { label: 'Garmin', source: 'garmin' },
+                      data: { date, metricKey: 'total-sleep-minutes', value: 437, unit: 'minutes' },
+                    }],
+                  }, {
+                    projectionScope: timeZoneScope, projectionScopeKey: timeZoneScope.projectionKind,
+                    grantStatus: 'granted', dataStatus: 'available', grantedAt: '2030-04-01T00:00:00.000Z',
+                    records: [{
+                      recordKey: 'time-zone', occurredAt: '2030-04-01T00:00:00.000Z',
+                      data: { timeZone: 'Pacific/Auckland' },
+                    }],
+                  }],
+                }],
+              } satisfies AssistantHostedGroupSharedReadResponse
+            } },
+            sendVaultFile: async () => forbidEffect('send-vault-file'), vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: 'Current group message: "What sleep duration is currently shared for everyone for April 12, 2030, and what timezone is each person sharing? Just a short text summary."',
+          reasoningEffort: 'low', sandbox: 'read-only', vaultRoot: workingDirectory, workingDirectory,
+        })
+        const attempts = readDynamicToolAttempts(result.jsonEvents)
+        const actions = readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')
+        process.stdout.write(`[group-freshness-contract-e2e] ${JSON.stringify({
+          scenario: 'dated shared sleep with timezone context', reply: result.finalMessage,
+          sharedReadCount: sharedRequests.length, forbiddenEffectCount: forbiddenEffects.length,
+        })}\n`)
+        // Count attempted calls as well as successful reads: no invalid call followed by a repair.
+        expect(attempts).toHaveLength(1)
+        expect(attempts[0]?.tool).toBe(MURPH_GROUP_DATA_TOOL.name)
+        expect(attempts[0]?.argumentsValue).toEqual({
+          action: 'read_shared', projectionScopes: expect.arrayContaining([sleepScope, timeZoneScope]), freshness,
+        })
+        expect(attempts[0]?.argumentsValue.projectionScopes).toHaveLength(2)
+        expect(actions).toHaveLength(1)
+        expect(actions[0]).toMatchObject({ tool: MURPH_GROUP_DATA_TOOL.name, success: true })
+        expect(sharedRequests).toEqual([{
+          includeCompanionPresence: true,
+          projectionScopes: expect.arrayContaining([sleepScope, timeZoneScope]), freshness,
+        }])
+        expect(sharedRequests[0]?.projectionScopes).toHaveLength(2)
+        const finalAnswer = readCompletedAgentMessages(result.jsonEvents)
+          .find((message) => message.text.trim() === result.finalMessage.trim())
+        expect(finalAnswer?.eventIndex).toBeGreaterThan(actions[0]!.eventIndex)
+        expect(forbiddenEffects).toEqual([])
+        expect(await snapshotRealCodexCanonicalVault(workingDirectory)).toEqual(before)
+        expect(await listWriteOperationMetadataPaths(workingDirectory)).toEqual(writesBefore)
+        expect(result.runtimeIssueInputs).toEqual([])
+        expect(result.responseMedia).toEqual([])
+        expect(result.responseCard).toBeNull()
+        expect(result.reactions).toEqual([])
+        const reply = renderMarkdownMessageText(result.finalMessage).text
+        expect(reply).toMatch(/Avery/iu)
+        expect(reply).toMatch(/\b7\s*(?:hours?|hrs?|h)\s*,?\s*(?:and\s*)?17\s*(?:minutes?|mins?|m)\b|\b437\s*(?:minutes?|mins?|m)\b/iu)
+        expect(reply).toMatch(/Auckland|New Zealand/iu)
+        expect(reply).toMatch(/Apr(?:il)?\s+12|12\s+Apr(?:il)?|2030-04-12|today/iu)
+        expect(reply).not.toMatch(/successfully synced|synced successfully|sync (?:is |has |has been )?(?:complete|completed|finished)|(?:watch|device|provider) (?:has |is )?synced|I (?:synced|refreshed)|reconnect|enable sharing|projectionScopeKey|freshness|\.v0/iu)
+        expect(reply.trim().split(/\s+/u).length).toBeLessThan(90)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 360_000,
+  )
+
   it.each(['available', 'missing', 'unavailable', 'previously_declined', 'usual_complete', 'usual_missing', 'unknown_history', 'known_late_arrival', 'multiple_dates'] as const)(
     'handles wearable freshness recovery in a scheduled group update: %s',
     async (scenario) => {

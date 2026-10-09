@@ -54,6 +54,7 @@ import {
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
 } from '@murphai/hosted-execution/vault-share'
@@ -906,12 +907,17 @@ const GROUP_SHARED_FRESHNESS_SCHEMA = {
   minItems: 1,
   maxItems: 21,
   uniqueItems: true,
-  description: 'Optional only for ordinary read_shared. For a dated wearable update, supply each required projectionScopeKey and YYYY-MM-DD date. Missing consented dates trigger a bounded sync request and fresh consent-aware reread. checkedAt is a shared-data check, not a device-upload time. Does not guarantee new provider data.',
+  description: 'Optional only for ordinary read_shared. For a dated wearable update, supply only requested wearable projectionScopeKeys from projectionScopes, paired with each required YYYY-MM-DD calendar date. Missing consented dates trigger a bounded sync request and fresh consent-aware reread. checkedAt is a shared-data check, not a device-upload time. Does not guarantee new provider data.',
   items: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      projectionScopeKey: { type: 'string', minLength: 1, maxLength: 191 },
+      projectionScopeKey: {
+        type: 'string', minLength: 1, maxLength: 191,
+        enum: HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS
+          .filter((spec) => spec.source.kind === 'metric-series')
+          .map((spec) => spec.projectionKind),
+      },
       date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
     },
     required: ['projectionScopeKey', 'date'],

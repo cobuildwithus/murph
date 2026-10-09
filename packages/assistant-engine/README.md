@@ -371,6 +371,9 @@ reads are routine and namespace discovery expands unrelated schemas. Its input
 schema and authorization remain identical; private conversations keep the group
 family deferred, and read-only scheduled group turns keep their narrower tool.
 
+The [vault-share freshness contract](../../agent-docs/references/hosted-runtime-protocol.md#vault-share-direct-read-and-cutover)
+owns the wearable-only schema domain and ordinary nonwearable shared reads.
+
 Response-card, exercise-routine, Telegram rich-content, and group-challenge
 card tools follow the same deferred contract. Resident messaging guidance
 provides the discovery trigger; the discovered tool remains the sole owner of
