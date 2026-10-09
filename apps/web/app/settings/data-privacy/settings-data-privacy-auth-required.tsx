@@ -8,70 +8,68 @@ import {
   HostedAuthRequiredScreenView,
 } from "@/src/components/hosted-onboarding/hosted-auth-required-screen";
 
+const DELETION_STEPS = [
+  "Log in with the email or phone number on your account.",
+  "Open Settings → Data & privacy.",
+  "Choose Delete account and confirm.",
+] as const;
+
+// Google Play links here as Murph's account deletion page, so it must show the
+// steps, what is deleted and how long anything is kept, even without the app.
 const DATA_PRIVACY_HANDOFF_COPY = {
-  description:
-    "You can request deletion on the web even if you no longer have the Murph Android app.",
-  detailsCompact: true,
+  description: "Log in to delete your account or download your data. You don’t need the app.",
   details: (
-    <>
-      <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-foreground">
-        Delete your Murph account
-      </p>
-      <ol className="mt-3 list-decimal space-y-2 pl-5">
-        <li>Log in with the email address or phone number on your account.</li>
-        <li>This page opens Data &amp; privacy in Settings.</li>
-        <li>Choose Delete account, review the details, and confirm.</li>
+    <div className="space-y-6">
+      <ol className="space-y-3 rounded-2xl border border-border bg-card p-5">
+        {DELETION_STEPS.map((step, index) => (
+          <li className="flex gap-3" key={step}>
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
+              {index + 1}
+            </span>
+            <span className="text-foreground">{step}</span>
+          </li>
+        ))}
       </ol>
 
-      <div className="mt-4 border-t border-border pt-4">
-        <p className="font-medium text-foreground">What deletion covers</p>
-        <p className="mt-1">
-          Murph deletes hosted account/profile data, health and user-submitted
-          content, derived health context, connected credentials, local billing
-          references, and subscription access. Copies delivered to external
-          carrier, Telegram, Linq, or email systems cannot be recalled.
+      <section className="space-y-1">
+        <h2 className="text-sm font-medium text-foreground">What’s deleted</h2>
+        <p>
+          Your account and profile, health data, anything you’ve sent Murph,
+          what Murph learned about you, connected apps and devices, and your
+          subscription. Messages already delivered by text, Telegram or email
+          can’t be recalled.
         </p>
+      </section>
 
-        <p className="mt-3 font-medium text-foreground">
-          Timing and limited retention
-        </p>
-        <ul className="mt-1 list-disc space-y-1 pl-5">
-          <li>
-            Health content, memories, and assistant history: active hosted
-            systems within 30 days; backups within 90 days.
-          </li>
-          <li>
-            Account/profile, wearable sync, webhook, and routing records: up
-            to 90 days; credentials: normally 7–30 days.
-          </li>
-          <li>
-            Support: up to 3 years; security logs: 90–365 days; billing or tax
-            records: as legally required.
-          </li>
+      <section className="space-y-1">
+        <h2 className="text-sm font-medium text-foreground">How long it takes</h2>
+        <ul className="list-disc space-y-1 pl-5">
+          <li>Health data, memories and chats: within 30 days, backups within 90</li>
+          <li>Account, device sync and messaging records: within 90 days</li>
+          <li>Support records up to 3 years, security logs up to 1 year, billing records as the law requires</li>
         </ul>
-      </div>
-    </>
+      </section>
+    </div>
   ),
   eyebrow: "Account privacy",
   eyebrowIcon: Trash2,
   footer: (
     <>
-      Need help or want only certain data deleted? Email{" "}
+      Want only some data deleted? Email{" "}
       <a
         className="underline underline-offset-4"
         href="mailto:legal@justco.build"
       >
         legal@justco.build
       </a>
-      . See the full{" "}
+      {" · "}
       <Link className="underline underline-offset-4" href="/legal/privacy">
-        retention policy
+        Retention policy
       </Link>
-      .
     </>
   ),
   loginLabel: "Log in",
-  title: "Sign in to manage your data",
+  title: "Delete your Murph account",
 } as const;
 
 export function SettingsDataPrivacyAuthRequired() {
