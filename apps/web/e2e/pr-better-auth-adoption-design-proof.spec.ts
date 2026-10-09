@@ -186,7 +186,7 @@ for (const width of [390, 1280]) {
     const study = page.locator("#better-auth-adoption");
     await expect(study).toBeVisible();
     await expect(study).toHaveAttribute("inert", "");
-    for (const state of ["phone", "email", "connections", "unconnected", "compact-code", "initial-passkey", "messaging", "recovery"]) {
+    for (const state of ["phone", "email", "connections", "unconnected", "compact-code", "signing-in", "initial-passkey", "messaging", "recovery"]) {
       const panel = study.locator(`[data-auth-study="${state}"]`);
       expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
       await panel.evaluate((element) => element.scrollIntoView({ block: "center" }));
