@@ -420,6 +420,9 @@ describe("runHostedAssistantAutomation", () => {
         failureContext: {
           codexAbortRequested: false,
           codexDiagnosticsPresent: true,
+          codexErrorInfoPresent: true,
+          codexErrorInfo: "internalServerError",
+          codexErrorHttpStatusCode: 503,
           codexExitCode: 1,
           codexExitSignal: "SIGKILL",
           codexLifecycleStage: "turn_running",
@@ -470,6 +473,9 @@ describe("runHostedAssistantAutomation", () => {
             errorCode: "ASSISTANT_CODEX_FAILED",
             failureCodexAbortRequested: false,
             failureCodexDiagnosticsPresent: true,
+            failureCodexErrorInfoPresent: true,
+            failureCodexErrorInfo: "internalServerError",
+            failureCodexErrorHttpStatusCode: 503,
             failureCodexExitCode: 1,
             failureCodexExitSignal: "SIGKILL",
             failureCodexLifecycleStage: "turn_running",
@@ -493,6 +499,26 @@ describe("runHostedAssistantAutomation", () => {
         }),
       ]),
     );
+    const failureEntry = result.redactedLogEntries.find(
+      (entry) => entry.redacted?.type === "input.reply-failed",
+    );
+    assert.ok(failureEntry);
+    const parsed = parseHostedRuntimeLogRequest({
+      entries: [{
+        at: "2026-04-08T00:00:00.000Z",
+        component: "assistant",
+        eventCode: "assistant.automation_detail",
+        level: failureEntry.level,
+        phase: "invoke",
+        redactedJson: failureEntry.redacted,
+      }],
+    });
+    expect(sanitizeHostedExecutionStructuredLogDetails(parsed.entries[0]?.redactedJson)).toMatchObject({
+      failureCodexErrorInfoPresent: true,
+      failureCodexErrorInfo: "internalServerError",
+      failureCodexErrorHttpStatusCode: 503,
+      failureRetryable: false,
+    });
   });
 
   it("retains safe skip categories without copying private event details", async () => {
