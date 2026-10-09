@@ -356,7 +356,7 @@ test("HomePage falls back to Telegram when no Messages line is assigned", async 
     }),
   }));
 
-  assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=I\+just\+connected\+my\+WHOOP"/);
+  assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, /aria-label="Text Murph in Telegram"/);
   assert.match(markup, />Text Murph</);
   assert.match(markup, />Continue exploring</);
