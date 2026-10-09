@@ -105,7 +105,7 @@ test("opens one picker dialog with every channel row and closes on selection", a
     assert.ok(telegramLink);
     assert.equal(
       telegramLink.getAttribute("href"),
-      "https://t.me/withmurph_bot?text=Done+with+the+browser+task.",
+      "https://t.me/withmurph_bot?text=Done%20with%20the%20browser%20task.",
     );
     assert.match(telegramLink.textContent ?? "", /Telegram/);
     assert.equal(
@@ -168,7 +168,7 @@ function textReplyOption() {
 
 function telegramReplyOption() {
   return {
-    href: "https://t.me/withmurph_bot?text=Done+with+the+browser+task.",
+    href: "https://t.me/withmurph_bot?text=Done%20with%20the%20browser%20task.",
     kind: "telegram" as const,
     label: "Telegram",
     rel: "noopener noreferrer",

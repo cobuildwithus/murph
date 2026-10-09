@@ -9,7 +9,7 @@ import { renderClientComponent } from "./render-client-component";
 
 test("MurphContactLink leaves Telegram web text links to normal navigation", async () => {
   const telegramHref =
-    "https://t.me/murphdevelopment_bot?text=Hey+Murph%2C+do+your+thing";
+    "https://t.me/murphdevelopment_bot?text=Hey%20Murph%2C%20do%20your%20thing";
   const onClick = vi.fn();
   const { assign, cleanup, container, window } = await renderClientComponent(
     createElement(

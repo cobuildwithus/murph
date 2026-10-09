@@ -46,7 +46,7 @@ vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => 
 import RootLayout, { metadata } from "../app/layout";
 
 const TELEGRAM_GOAL_OPTION: MurphContactOption = {
-  href: "https://t.me/withmurph_bot?text=Help+me+with+this+goal",
+  href: "https://t.me/withmurph_bot?text=Help%20me%20with%20this%20goal",
   kind: "telegram",
   label: "Telegram",
   rel: "noopener noreferrer",
