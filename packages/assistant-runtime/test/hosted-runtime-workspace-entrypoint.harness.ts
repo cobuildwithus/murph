@@ -147,6 +147,7 @@ import {
   readHostedExecutionSnapshotBaseRef,
 } from "@murphai/hosted-execution/parsers";
 import { describe, expect, type Mock, test, vi } from "vitest";
+import { assertHostedVaultShareWorkerBuilt } from "./hosted-vault-share-worker-build.ts";
 
 type HasCompleteAssistantAutoReplyDeliveryTerminalEvidence = (
   input: {
@@ -941,6 +942,7 @@ function createPlatform(input: {
   workspacePort: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimePlatform["workspaceSnapshotPort"] | null;
 }): HostedRuntimePlatform {
+  if (input.vaultSharePort) assertHostedVaultShareWorkerBuilt();
   const uploadedArtifactBytesByHash = new Map<string, Uint8Array>();
   const defaultAssistantConfigurationToolPort: NonNullable<
     HostedRuntimePlatform["assistantConfigurationToolPort"]
