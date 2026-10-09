@@ -57,6 +57,8 @@ export async function projectHostedVaultShareCheckpoint(input: {
     const capture = await captureInWorker({
       generationTokensByProjectionScopeKey: scopes.generationTokensByProjectionScopeKey,
       hasDeferredProjectionWork: scopes.hasDeferredProjectionWork,
+      publishedSourceWorkspaceVersionByProjectionScopeKey:
+        scopes.publishedSourceWorkspaceVersionByProjectionScopeKey,
       ...(scopes.projectionMode ? { projectionMode: scopes.projectionMode } : {}),
       projectionScopes: scopes.projectionScopes,
       sourceWorkspaceVersion: workspace.version,
@@ -66,6 +68,7 @@ export async function projectHostedVaultShareCheckpoint(input: {
     if (capture.outcome !== "captured") return { outcome: capture.outcome };
     return await offerCapturedHostedVaultShareProjectionBestEffort({
       capture: capture.capture,
+      publicationStateVaultRoot: input.vaultRoot,
       shouldStop: input.shouldStop,
       vaultSharePort: input.vaultSharePort,
     });

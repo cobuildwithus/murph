@@ -2043,12 +2043,18 @@ to apply after cutover.
   Abort, shutdown, and normal
   finalization join that same owner before a successor invocation or the
   existing continuation may retry. No projection stage continues detached.
-  Every delivery carries the committed source
-  workspace version bound to those bytes. Web
-  encrypts first, then briefly locks that existing workspace row before the
-  final share replacement; a delivery older than the current checkpoint becomes
-  a no-op, so wake-raced work cannot finish last or read successor-owned
-  vault state.
+  Every delivery carries the committed source workspace version bound to those
+  bytes. Web encrypts first, then briefly locks that existing workspace row
+  before the final share replacement; a delivery older than the current
+  checkpoint becomes a no-op, so wake-raced work cannot finish last or read
+  successor-owned vault state. After a successful ordinary-mode delivery, a
+  compatible runtime stores the generation token, captured content digest, and
+  delivered source workspace version in portable assistant operations state. A
+  later ordinary refresh may skip delivery only when Web reports that every
+  active destination in that returned generation is materialized at the same
+  published source version and that version, token, and digest match local
+  state; missing local state, a new token, mixed destination versions, or a null
+  snapshot falls back to delivery.
   This ordering adds no projection retry queue, group wake fanout, persisted
   projection watermark, or second freshness owner.
 - A group sender's daily-metric report is admitted under one deterministic

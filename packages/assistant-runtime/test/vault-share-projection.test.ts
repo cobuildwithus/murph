@@ -47,6 +47,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedVaultShareProjectionContentDigest,
   captureHostedVaultShareProjectionBestEffort,
   HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW,
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
@@ -108,6 +109,7 @@ function parseHostedVaultShareDeliverRequest(value: Record<string, unknown>) {
 async function offerHostedVaultShareProjectionBestEffort(input: {
   projectionMode?: HostedVaultShareProjectionMode;
   shouldStop?: () => boolean;
+  sourceWorkspaceVersion?: string;
   vaultRoot: string;
   vaultSharePort:
     | Parameters<
@@ -120,7 +122,8 @@ async function offerHostedVaultShareProjectionBestEffort(input: {
   }
   const scopeResolution = await resolveHostedVaultShareProjectionScopesBestEffort({
     ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
-    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    sourceWorkspaceVersion:
+      input.sourceWorkspaceVersion ?? TEST_SOURCE_WORKSPACE_VERSION,
     vaultSharePort: input.vaultSharePort,
   });
   if (scopeResolution.outcome !== "active-scopes") {
@@ -130,11 +133,14 @@ async function offerHostedVaultShareProjectionBestEffort(input: {
     generationTokensByProjectionScopeKey:
       scopeResolution.generationTokensByProjectionScopeKey,
     hasDeferredProjectionWork: scopeResolution.hasDeferredProjectionWork,
+    publishedSourceWorkspaceVersionByProjectionScopeKey:
+      scopeResolution.publishedSourceWorkspaceVersionByProjectionScopeKey,
     ...(scopeResolution.projectionMode
       ? { projectionMode: scopeResolution.projectionMode }
       : {}),
     projectionScopes: scopeResolution.projectionScopes,
-    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    sourceWorkspaceVersion:
+      input.sourceWorkspaceVersion ?? TEST_SOURCE_WORKSPACE_VERSION,
     vaultRoot: input.vaultRoot,
   });
   if (capture.outcome !== "captured") {
@@ -142,6 +148,7 @@ async function offerHostedVaultShareProjectionBestEffort(input: {
   }
   return await offerCapturedHostedVaultShareProjectionBestEffort({
     capture: capture.capture,
+    publicationStateVaultRoot: input.vaultRoot,
     ...(input.shouldStop ? { shouldStop: input.shouldStop } : {}),
     vaultSharePort: input.vaultSharePort,
   });
@@ -507,7 +514,14 @@ async function createMemoryDisplayNameVault(displayName: string | null): Promise
   if (!displayName) {
     return vaultRoot;
   }
+  await writeMemoryDisplayName(vaultRoot, displayName);
+  return vaultRoot;
+}
 
+async function writeMemoryDisplayName(
+  vaultRoot: string,
+  displayName: string,
+): Promise<void> {
   const document = setMemoryDisplayName(
     createEmptyMemoryDocument(new Date("2026-07-01T00:00:00.000Z")),
     {
@@ -521,8 +535,6 @@ async function createMemoryDisplayNameVault(displayName: string | null): Promise
     renderMemoryDocument({ document }),
     "utf8",
   );
-
-  return vaultRoot;
 }
 
 async function createProfileAndTimeZoneVault(
@@ -530,6 +542,14 @@ async function createProfileAndTimeZoneVault(
   timeZone: string,
 ): Promise<string> {
   const vaultRoot = await createMemoryDisplayNameVault(displayName);
+  await writeVaultTimeZone(vaultRoot, timeZone);
+  return vaultRoot;
+}
+
+async function writeVaultTimeZone(
+  vaultRoot: string,
+  timeZone: string,
+): Promise<void> {
   await writeFile(
     join(vaultRoot, "vault.json"),
     `${JSON.stringify({
@@ -541,7 +561,6 @@ async function createProfileAndTimeZoneVault(
     })}\n`,
     "utf8",
   );
-  return vaultRoot;
 }
 
 async function createLegacyMemoryDisplayNameVault(...texts: string[]): Promise<string> {
@@ -704,6 +723,397 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }],
       sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    });
+  });
+
+  it("skips delivery when captured content matches local state and Web published version", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    const deliveries: HostedVaultShareDeliverRequest[] = [];
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver(request) {
+          deliveries.push(request);
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    })).resolves.toEqual({ outcome: "delivered" });
+    const published = deliveries[0];
+    if (!published) throw new Error("Expected initial projection delivery.");
+    const deliver = vi.fn();
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+          },
+        }),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("delivers when captured content differs from local publication state", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver() {
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+    await writeMemoryDisplayName(vaultRoot, "Mina");
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+          },
+        }),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(deliver.mock.calls[0]?.[0]?.records)).toContain("Mina");
+  });
+
+  it("delivers when the generation token changes despite unchanged materialized content", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver() {
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+          },
+          generationTokensByProjectionScopeKey: {
+            [profileScopeKey]: "b".repeat(43),
+          },
+        }),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers when Web omits the published source version for a partial scope", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver() {
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers when local publication state is missing", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+          },
+        }),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers when Web published source version differs from local state", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver() {
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [profileScopeKey]: "6",
+          },
+        }),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers first materialization without updating ordinary publication state", async () => {
+    const records: HostedVaultShareDeliveryRecord[] = [{
+      data: { displayName: "Theo" },
+      occurredAt: "2026-07-01T00:00:00.000Z",
+      recordKey: "profile-name",
+      sourceRevision: "b".repeat(32),
+    }];
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    const contentDigest = buildHostedVaultShareProjectionContentDigest({
+      projectionScope: PROFILE_SCOPE,
+      records,
+    });
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    await offerCapturedHostedVaultShareProjectionBestEffort({
+      capture: {
+        hasDeferredProjectionWork: false,
+        publishedSourceWorkspaceVersionByProjectionScopeKey: {
+          [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+        },
+        snapshots: [{
+          contentDigest,
+          generationToken: GENERATION_TOKEN,
+          projectionScope: PROFILE_SCOPE,
+          records,
+        }],
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      },
+      publicationStateVaultRoot: vaultRoot,
+      vaultSharePort: {
+        deliver: vi.fn().mockResolvedValue({ status: "delivered" }),
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+
+    const result = await offerCapturedHostedVaultShareProjectionBestEffort({
+      capture: {
+        hasDeferredProjectionWork: false,
+        publishedSourceWorkspaceVersionByProjectionScopeKey: {
+          [profileScopeKey]: TEST_SOURCE_WORKSPACE_VERSION,
+        },
+        projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+        snapshots: [{
+          contentDigest,
+          generationToken: GENERATION_TOKEN,
+          projectionScope: PROFILE_SCOPE,
+          records,
+        }],
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      },
+      publicationStateVaultRoot: vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver).toHaveBeenCalledWith(expect.objectContaining({
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    }));
+  });
+
+  it("delivers stale destinations after first materializing a new destination", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const profileScopeKey = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+    const destinations = [
+      { deliveredNames: ["Old"], id: "share_a", version: "6" },
+      { deliveredNames: [] as string[], id: "share_b", version: null as string | null },
+    ];
+    const deliver = vi.fn(async (request: HostedVaultShareDeliverRequest) => {
+      const deliveredData = request.records[0]?.data;
+      if (
+        request.projectionKind !== "profile-name.v0"
+        || !deliveredData
+        || !("displayName" in deliveredData)
+        || typeof deliveredData.displayName !== "string"
+      ) {
+        throw new Error("Expected profile-name projection content.");
+      }
+      const deliveredName = deliveredData.displayName;
+      const updatedDestinations = request.projectionMode
+        === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
+        ? destinations.filter((destination) => destination.version === null)
+        : destinations;
+      for (const destination of updatedDestinations) {
+        destination.deliveredNames.push(deliveredName);
+        destination.version = request.sourceWorkspaceVersion;
+      }
+      return { status: "delivered" as const };
+    });
+    const activeResponse = (projectionMode?: HostedVaultShareProjectionMode) => {
+      const versions = new Set(
+        destinations
+          .map((destination) => destination.version)
+          .filter((version): version is string => version !== null),
+      );
+      const publishedVersion =
+        destinations.every((destination) => destination.version !== null)
+        && versions.size === 1
+          ? [...versions][0]
+          : undefined;
+      return {
+        ...activeProjectionResponse(PROFILE_SCOPE),
+        ...(projectionMode ? { projectionMode } : {}),
+        ...(publishedVersion
+          ? {
+              publishedSourceWorkspaceVersionByProjectionScopeKey: {
+                [profileScopeKey]: publishedVersion,
+              },
+            }
+          : {}),
+      };
+    };
+
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      sourceWorkspaceVersion: "7",
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async (request = {}) =>
+          activeResponse(request.projectionMode),
+      },
+    })).resolves.toEqual({ outcome: "delivered" });
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      sourceWorkspaceVersion: "8",
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => activeResponse(),
+      },
+    })).resolves.toEqual({ outcome: "delivered" });
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      sourceWorkspaceVersion: "9",
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => activeResponse(),
+      },
+    })).resolves.toEqual({ outcome: "delivered" });
+
+    expect(deliver).toHaveBeenCalledTimes(2);
+    expect(destinations).toEqual([
+      { deliveredNames: ["Old", "Theo"], id: "share_a", version: "8" },
+      { deliveredNames: ["Theo", "Theo"], id: "share_b", version: "8" },
+    ]);
+  });
+
+  it("delivers after a lost committed response even when content reverts", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    const timeZoneScopeKey = buildHostedVaultShareProjectionScopeKey(TIME_ZONE_SCOPE);
+    await offerHostedVaultShareProjectionBestEffort({
+      sourceWorkspaceVersion: "7",
+      vaultRoot,
+      vaultSharePort: {
+        async deliver() {
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => activeProjectionResponse(TIME_ZONE_SCOPE),
+      },
+    });
+
+    let webPublishedSourceWorkspaceVersion = "7";
+    await writeVaultTimeZone(vaultRoot, "America/Chicago");
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      sourceWorkspaceVersion: "8",
+      vaultRoot,
+      vaultSharePort: {
+        async deliver(request) {
+          webPublishedSourceWorkspaceVersion = request.sourceWorkspaceVersion;
+          throw new Error("synthetic lost response");
+        },
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(TIME_ZONE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [timeZoneScopeKey]: webPublishedSourceWorkspaceVersion,
+          },
+        }),
+      },
+    })).resolves.toEqual({ outcome: "error" });
+
+    await writeVaultTimeZone(vaultRoot, "UTC");
+    const retryDeliver = vi.fn(async (request: HostedVaultShareDeliverRequest) => {
+      webPublishedSourceWorkspaceVersion = request.sourceWorkspaceVersion;
+      return { status: "delivered" as const };
+    });
+
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      sourceWorkspaceVersion: "9",
+      vaultRoot,
+      vaultSharePort: {
+        deliver: retryDeliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(TIME_ZONE_SCOPE),
+          publishedSourceWorkspaceVersionByProjectionScopeKey: {
+            [timeZoneScopeKey]: webPublishedSourceWorkspaceVersion,
+          },
+        }),
+      },
+    })).resolves.toEqual({ outcome: "delivered" });
+
+    expect(retryDeliver).toHaveBeenCalledTimes(1);
+    expect(retryDeliver.mock.calls[0]?.[0]).toMatchObject({
+      projectionKind: "time-zone.v0",
+      records: [{ data: { timeZone: "UTC" } }],
+      sourceWorkspaceVersion: "9",
     });
   });
 
