@@ -6,6 +6,8 @@ import {
 } from '@murphai/hosted-execution/runtime-control'
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   type HostedVaultShareSelectableProjectionScope,
 } from '@murphai/hosted-execution/vault-share'
 import { parseAssistantRuntimeIssueRecord } from '@murphai/runtime-state/node'
@@ -32,6 +34,13 @@ import {
   type SafeToolCallValidationDigest,
 } from '../src/assistant/tool-validation-digest.js'
 import { buildToolCallValidationFeedback } from '../src/assistant/tool-validation-feedback.js'
+import {
+  asRecord,
+  MURPH_GROUP_DATA_TOOL,
+  MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
+} from '../src/assistant-codex/dynamic-tool-catalog.js'
+import { collectCanonicalToolInventory } from './support/codex-tool-contract-inventory.js'
+import { compileToolInputSchema } from './support/tool-input-schema-validation.js'
 
 const writes = vi.hoisted(() => ({
   write: vi.fn<typeof import('@murphai/runtime-state/node').writePendingAssistantRuntimeIssueRecord>(),
@@ -166,6 +175,67 @@ afterEach(async () => {
   writes.write.mockReset()
 })
 
+describe('advertised group freshness contract', () => {
+  it('limits every freshness-bearing descriptor to the owner wearable domain', () => {
+    const wearableScopes = HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS
+      .filter((spec) => spec.source.kind === 'metric-series')
+      .map((spec) => ({ projectionKind: spec.projectionKind }))
+    const wearableKeys = new Set(wearableScopes.map(buildHostedVaultShareProjectionScopeKey))
+    const nonwearableScopes = HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES
+      .filter((scope) => !wearableKeys.has(buildHostedVaultShareProjectionScopeKey(scope)))
+    // Includes exported registrations and the actual resolver's eager/route variants.
+    const tools = collectCanonicalToolInventory().filter((tool) => {
+      const properties = asRecord(asRecord(tool.inputSchema)?.properties)
+      return properties !== null && 'freshness' in properties
+    })
+    expect(tools).toEqual(expect.arrayContaining([
+      MURPH_GROUP_DATA_TOOL, MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
+    ]))
+    expect(wearableScopes.length).toBeGreaterThan(0)
+    expect(nonwearableScopes).toContainEqual(timeZone)
+
+    for (const tool of tools) {
+      const schema = asRecord(tool.inputSchema)
+      if (!schema) throw new Error(`Expected ${tool.name} input schema to be a record`)
+      const validate = compileToolInputSchema(schema)
+      for (const scope of wearableScopes) {
+        const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(scope)
+        const args = { action: 'read_shared', projectionScopes: [scope],
+          freshness: [{ projectionScopeKey, date: pair.date }] }
+        expect(validate(args), `${tool.name}: wearable ${projectionScopeKey}`).toBe(true)
+        expect(readRequest(args, tool.name).kind).toBe('group')
+      }
+      for (const scope of nonwearableScopes) {
+        const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(scope)
+        const args = { action: 'read_shared', projectionScopes: [scope] }
+        // These scopes remain available as ordinary shared context.
+        expect(validate(args), `${tool.name}: ordinary ${projectionScopeKey}`).toBe(true)
+        expect(validate({ ...args, freshness: [{ projectionScopeKey, date: pair.date }] }),
+          `${tool.name}: nonwearable freshness ${projectionScopeKey}`).toBe(false)
+        expect(validate.errors).toContainEqual(expect.objectContaining({
+          instancePath: '/freshness/0/projectionScopeKey', keyword: 'enum',
+        }))
+      }
+      const unknownScope = { action: 'read_shared', projectionScopes: [sleep],
+        freshness: [{ ...pair, projectionScopeKey: 'synthetic-unknown.v0' }] }
+      expect(validate(unknownScope)).toBe(false)
+      expect(validate.errors).toContainEqual(expect.objectContaining({
+        instancePath: '/freshness/0/projectionScopeKey', keyword: 'enum',
+      }))
+
+      const bounded = Array.from({ length: 21 }, (_, day) => ({
+        ...pair, date: `2030-04-${String(day + 1).padStart(2, '0')}`,
+      }))
+      const args = { action: 'read_shared', projectionScopes: [sleep, timeZone] }
+      expect(validate({ ...args, freshness: bounded })).toBe(true)
+      for (const freshness of [[], [...bounded, { ...pair, date: '2030-04-22' }], [pair, pair],
+        [{ ...pair, date: 'tomorrow' }], [{ ...pair, extra: true }]]) {
+        expect(validate({ ...args, freshness })).toBe(false)
+      }
+    }
+  })
+})
+
 describe('read_shared semantic rejection reason at the actual parser and issue boundary', () => {
   const cases = [
     { name: 'requested scope mismatch', reason: 'shared_freshness_scope_not_requested',
@@ -250,6 +320,11 @@ describe('read_shared semantic rejection reason at the actual parser and issue b
 
   it.each([
     { name: 'empty scopes', args: { action: 'read_shared', projectionScopes: [] } },
+    { name: 'empty freshness', args: { action: 'read_shared', projectionScopes: [sleep], freshness: [] } },
+    { name: 'freshness over the bound', args: { action: 'read_shared', projectionScopes: [sleep],
+      freshness: Array.from({ length: 22 }, (_, day) => ({
+        ...pair, date: `2030-04-${String(day + 1).padStart(2, '0')}`,
+      })) } },
     { name: 'non-ISO freshness date', args: { action: 'read_shared', projectionScopes: [sleep], freshness: [{ ...pair, date: 'tomorrow' }] } },
     { name: 'duplicate requested scopes', args: { action: 'read_shared', projectionScopes: [sleep, sleep] } },
     { name: 'forged reason key', args: { action: 'read_shared', projectionScopes: [sleep], semanticRejection: 'shared_freshness_duplicate_pair' } },
@@ -287,23 +362,24 @@ describe('read_shared semantic rejection reason at the actual parser and issue b
   })
 
   it('keeps nearby valid reads successful with exactly one fake read', async () => {
-    const fourteen = Array.from({ length: 14 }, (_, day) => ({
-      ...pair, date: `2026-08-${String(day + 1).padStart(2, '0')}`,
+    const twentyOne = Array.from({ length: 21 }, (_, day) => ({
+      ...pair, date: `2030-04-${String(day + 1).padStart(2, '0')}`,
     }))
     for (const args of [
-      { action: 'read_shared', projectionScopes: [sleep], freshness: fourteen },
-      { action: 'read_shared', projectionScopes: [sleep] },
+      { projectionScopes: [sleep], freshness: twentyOne },
+      { projectionScopes: [sleep] },
+      { projectionScopes: [timeZone] },
+      { projectionScopes: [sleep, timeZone], freshness: [pair] },
     ]) {
       const ports = harness()
-      const request = readRequest(args, MURPH_GROUP_TOOL_NAME)
+      const request = readRequest({ action: 'read_shared', ...args })
       expect(request.kind).toBe('group')
       const result = await ports.execute(request)
       expect(result.rpcResult.success).toBe(true)
       expect(result.failureDiagnostic).toBeUndefined()
       expect(ports.sharedRead).toHaveBeenCalledTimes(1)
-      expect(ports.sharedRead).toHaveBeenCalledWith(expect.objectContaining({
-        projectionScopes: [sleep], ...('freshness' in args ? { freshness: fourteen } : {}),
-      }))
+      expect(ports.sharedRead).toHaveBeenCalledWith(expect.objectContaining(args))
+      if (!('freshness' in args)) expect(ports.sharedRead.mock.calls[0]![0]).not.toHaveProperty('freshness')
       ports.expectNoOtherEffects()
     }
   })

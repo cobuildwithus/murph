@@ -549,6 +549,16 @@ infrastructure fields.
 
 Ordinary shared reads may additionally request one to twenty-one unique
 `freshness` scope/date pairs for daily wearable metrics already in that read.
+Every model-visible schema exposing `freshness` derives its
+`projectionScopeKey` enum from the public
+`HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS` catalog's `metric-series`
+entries, matching the existing freshness parser and handler domain. Each pair
+must also name a scope in the request's `projectionScopes` and a real calendar
+date; duplicates and the existing bounds remain enforced. Nonwearable context,
+such as `time-zone.v0`, remains readable through ordinary `projectionScopes`
+without a freshness entry for that scope. This advertised constraint does not
+change runtime acceptance, semantic diagnostics, authorization, or refresh work.
+
 Web filters the recent reconcile dates independently, so older or future requested
 dates cannot suppress recovery of eligible missing dates. Missing granted dates
 in that recent window cause Web to recheck the
