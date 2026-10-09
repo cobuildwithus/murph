@@ -201,7 +201,7 @@ function HostedAssistantModelSettingsForm(
             Choose one model for new Murph replies.
           </FieldDescription>
           <RadioGroup
-            className="grid gap-3 sm:grid-cols-2"
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
             disabled={controlsDisabled}
             value={draftModel}
             onValueChange={(value) => {
