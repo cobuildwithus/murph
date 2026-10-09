@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-09",
+  "order": 100,
+  "item": {
+    "id": "models-side-by-side",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Model choices side by side",
+    "summary": "On wider screens, Settings shows Luna, Sol, and Astra in a single row.",
+    "relevanceTags": [
+      "settings"
+    ],
+    "tryIt": {
+      "label": "Choose your model",
+      "href": "/settings"
+    },
+    "sourcePullRequests": []
+  }
+}
