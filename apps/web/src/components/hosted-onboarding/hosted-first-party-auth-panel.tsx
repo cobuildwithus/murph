@@ -45,7 +45,7 @@ export function HostedFirstPartyAuthPanel({
 }: HostedFirstPartyAuthPanelProps) {
   const request = authRequestContext(reauthenticate, inviteCode);
   const [method, setMethod] = useState<Method>(methods[0] ?? "phone");
-  const [step, setStep] = useState<"entry" | "resume" | "consent">("entry");
+  const [step, setStep] = useState<"entry" | "completing" | "resume" | "consent">("entry");
   const [active, setActive] = useState(false);
   const [pending, setPending] = useState(false);
   const [declining, setDeclining] = useState(false);
@@ -59,7 +59,15 @@ export function HostedFirstPartyAuthPanel({
     mounted.current = true;
     return () => { mounted.current = false; operation.current?.abort(); };
   }, []);
-  const view = step === "consent" ? "consent" : active || step === "resume" ? "auth-active" : "auth";
+  useEffect(() => {
+    // Going back through the bfcache would otherwise revive the redirect's loading state with no way forward.
+    const restore = (event: PageTransitionEvent) => {
+      if (event.persisted) setStep((current) => current === "completing" ? "resume" : current);
+    };
+    window.addEventListener("pageshow", restore);
+    return () => window.removeEventListener("pageshow", restore);
+  }, []);
+  const view = step === "consent" ? "consent" : active || step !== "entry" ? "auth-active" : "auth";
   useLayoutEffect(() => { onViewChange?.(view); }, [onViewChange, view]);
 
   async function complete() {
@@ -67,6 +75,8 @@ export function HostedFirstPartyAuthPanel({
     const controller = new AbortController();
     operation.current = controller;
     setPending(true); setError(null);
+    // Success keeps this loading state until the redirect replaces the page.
+    setStep((current) => current === "consent" ? current : "completing");
     try {
       const payload = await requestHostedOnboardingJson<HostedPrivyCompletionPayload>({
         url: "/api/auth/complete", method: "POST", payload: {}, signal: controller.signal,
@@ -79,7 +89,10 @@ export function HostedFirstPartyAuthPanel({
       if (onCompleted) await onCompleted(payload);
       else navigateHostedAuthRedirect(isHostedOnboardingAccessibleStage(payload.stage) ? HOSTED_APP_HOME_PATH : payload.joinUrl);
     } catch (caught) {
-      if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Your account could not load. Try again.");
+      if (!controller.signal.aborted) {
+        setError(caught instanceof Error ? caught.message : "Your account could not load. Try again.");
+        setStep((current) => current === "completing" ? "resume" : current);
+      }
     } finally {
       if (!controller.signal.aborted) { operation.current = null; setPending(false); }
     }
@@ -93,7 +106,7 @@ export function HostedFirstPartyAuthPanel({
       onReauthenticated();
       return;
     }
-    setStep("resume"); setActive(false);
+    setActive(false);
     await complete();
   }
 
@@ -122,7 +135,7 @@ export function HostedFirstPartyAuthPanel({
       onAccepted={() => complete()} onDecline={() => void endSession(true)}
       onRequirementChange={(required) => { if (!required) void complete(); }}
       preferredScope="launch.legal" source="homepage-auth-dialog"
-    /> : step === "resume" ? <HostedAuthCompletionRetry pending={pending} onContinue={() => void complete()} onSignOut={() => void endSession(false)} /> : <>
+    /> : step !== "entry" ? <HostedAuthCompletion completing={step === "completing"} pending={pending} onContinue={() => void complete()} onSignOut={() => void endSession(false)} /> : <>
       {method === "telegram" ? <HostedTelegramProofButton key="telegram" purpose={request.purpose}
         onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)} />
         : <HostedContactCodeForm key={method} method={method} size={size} autoFocus={method === "email" || phoneInputAutoFocus}
@@ -173,14 +186,23 @@ function signupContext(inviteCode?: string | null) {
   return { ...(inviteCode ? { inviteCode } : {}), ...(timeZone ? { timeZone } : {}) };
 }
 
-export function HostedAuthCompletionRetry({ pending, onContinue, onSignOut }: {
+export function HostedAuthCompletionStatus() {
+  return <p role="status" className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+    <Spinner aria-hidden="true" />Loading your account...
+  </p>;
+}
+
+// Completion holds one quiet loading state; retry controls appear only after it fails.
+export function HostedAuthCompletion({ completing, pending, onContinue, onSignOut }: {
+  completing: boolean;
   pending: boolean;
   onContinue: () => void;
   onSignOut: () => void;
 }) {
+  if (completing) return <HostedAuthCompletionStatus />;
   return <>
       <p className="text-sm text-muted-foreground">You’re signed in. Continue to your account.</p>
-      <Button type="button" size="xl" className="w-full" aria-busy={pending} disabled={pending} onClick={onContinue}>{pending ? <><Spinner aria-hidden="true" />Loading your account...</> : "Continue"}</Button>
+      <Button type="button" size="xl" className="w-full" disabled={pending} onClick={onContinue}>Continue</Button>
       <Button type="button" variant="ghost" size="lg" className="w-full text-muted-foreground hover:text-foreground" disabled={pending} onClick={onSignOut}>Use a different account</Button>
   </>;
 }

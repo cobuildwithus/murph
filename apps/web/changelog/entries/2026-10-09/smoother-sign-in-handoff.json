@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-09",
+  "order": 100,
+  "item": {
+    "id": "smoother-sign-in-handoff",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "A smoother handoff after sign-in",
+    "summary": "After you enter your code, the sign-in window shows one loading state until your account opens, instead of briefly flashing a Continue button.",
+    "details": "Continue and Use a different account appear only if your account cannot load, so you can retry without entering another code.",
+    "relevanceTags": ["sign-in", "account"],
+    "sourcePullRequests": [4117]
+  }
+}

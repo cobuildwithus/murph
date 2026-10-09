@@ -4,7 +4,7 @@ import { useState } from "react";
 import { HostedLoginMethodDialog } from "@/src/components/settings/hosted-login-method-dialog";
 import type { HostedCredentialChange } from "@/src/lib/better-auth/credential-change";
 import { JoinInviteMessagingSetupIsland } from "@/src/components/hosted-onboarding/join-invite-islands";
-import { HostedFirstPartyAuthPanel } from "@/src/components/hosted-onboarding/hosted-first-party-auth-panel";
+import { HostedAuthCompletionStatus, HostedFirstPartyAuthPanel } from "@/src/components/hosted-onboarding/hosted-first-party-auth-panel";
 import { HostedLoginMethodSettingsView } from "@/src/components/settings/hosted-login-method-settings";
 import { HostedSignupReferralLinkButtonView } from "@/src/components/settings/hosted-signup-referral-link-button";
 import { HostedApprovalRecoverySettings } from "@/src/components/settings/hosted-approval-recovery-settings";
@@ -50,6 +50,10 @@ export function BetterAuthAdoptionStudy() {
       <div className="space-y-3"><HostedVerificationCodeStep size="compact" autoFocus={false} code="" description="We texted the latest code to •••• 0152."
         disabled={false} pendingAction={null} primaryActionLabel="Verify phone" primaryActionPendingLabel="Finishing..."
         onCodeChange={() => undefined} onResendCode={() => undefined} onSubmit={() => undefined} /></div>
+    </div>
+    <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="signing-in">
+      <h3 className="mb-4 font-serif text-xl">Log in or sign up</h3>
+      <HostedAuthCompletionStatus />
     </div>
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="initial-passkey">
       <h3 className="mb-4 font-serif text-xl">Security</h3>
