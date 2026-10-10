@@ -124,6 +124,12 @@ projection-aware runner because the preceding v2 value reader is strict; deploy
 this runner with immediate container rollout and use a forward fix below that
 floor rather than adding a second compatibility owner for a derived hint.
 
+Snapshot session start/complete annotations on `checkpoint.snapshot_failed`
+use fixed phase allowlists. Recognized phases survive absent or invalid optional
+timeouts; unknown phases are omitted. Timeout diagnostics include only
+nonnegative safe integers in milliseconds, including values above 60 seconds.
+This validates telemetry only and imposes no execution timeout limit.
+
 For hosted conversation traffic, the mailbox importer is the source adapter. It
 stages bounded `AssistantInputEvent` records in the warm live workspace.
 Plain-text Linq plus attachment-free Telegram and WhatsApp input proceeds

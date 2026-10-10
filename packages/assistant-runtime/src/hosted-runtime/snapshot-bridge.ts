@@ -1248,16 +1248,12 @@ function readHostedWorkspaceSnapshotFailure(error: unknown): {
   if (!kind) {
     return null;
   }
-  if (timeoutMs === undefined) {
-    return { kind, phase };
-  }
   if (
     typeof timeoutMs !== "number"
     || !Number.isSafeInteger(timeoutMs)
     || timeoutMs < 0
-    || timeoutMs > 60_000
   ) {
-    return null;
+    return { kind, phase };
   }
   return { kind, phase, timeoutMs };
 }
