@@ -1,6 +1,6 @@
 # Sleep-pattern focused freshness
 
-Status: active; parent verification recorded; final ReviewGPT and exact-head CI pending.
+Status: completed
 Base: `6e17cee941f46b8a65f32913d2127ff1374dd795`.
 
 ## Outcome
@@ -87,11 +87,11 @@ no mixed-workflow gain is claimed.
 
 ### Validation gates
 
-Gate status: pending parent validation of this plan/changelog delta,
-final ReviewGPT and exact-head CI.
+Gate status: parent validation of this plan/changelog delta,
+final ReviewGPT and exact-head CI passed.
 Content-only validation requires changelog generation, the focused archive
 test and Web typecheck; no presentation or visual changes are included.
-After all gates pass, parent archives the plan via `scripts/finish-task`.
+All gates passed; parent archives the plan via `scripts/finish-task`.
 
 ## Evidence and limits
 
@@ -108,3 +108,5 @@ Changelog: updated; meaningful member performance improvement.
 Items: 2026-10-09 · `faster-sleep-pattern-reads` (PR #4118).
 Query README: unchanged; public inputs, outputs and selection contracts are
 unchanged. This plan records the internal freshness-owner reuse and its proof.
+Updated: 2026-10-09
+Completed: 2026-10-09
