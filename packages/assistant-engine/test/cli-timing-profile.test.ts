@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { stripTypeScriptTypes } from 'node:module'
+import { setTimeout as delay } from 'node:timers/promises'
 import { test } from 'vitest'
 
 import { ASSISTANT_USAGE_SCHEMA, parseAssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import { emptyCliTiming, normalizeCliTiming, type CliTiming } from '@murphai/runtime-state/cli-timing'
 import { timeCliDispatch, timeCliPhaseSync, withCliTiming } from '@murphai/runtime-state/node/cli-timing'
 import { VAULT_CLI_BATCH_RESULT_SCHEMA } from '@murphai/operator-config/vault-cli-contracts'
+import { createCodexCliTimingReceiver } from '../src/assistant-codex/cli-timing.ts'
 import { buildAssistantCodexTurnProfileJson } from '../src/assistant/providers/helpers.ts'
 
 const turnId = 'turn-synthetic'
@@ -175,6 +177,9 @@ test('parser validation survives portable, profile and hosted readback without c
     ['knowledge show', 'arguments', 'custom', false],
     ['knowledge upsert', 'arguments', 'custom', false],
     ['meal edit', 'arguments', 'custom', false],
+    ['meal edit', 'id', 'invalid_type', true],
+    ['meal edit', 'nutritionProteinGrams', 'too_small', false],
+    ['meal edit', 'nutritionConfidence', 'invalid_value', false],
     ['knowledge upsert', 'body', 'invalid_type', true],
   ] as const) {
     let report!: CliTiming
@@ -443,4 +448,117 @@ test.skipIf(!patternTimingCompatibilityBase)('Patterns stages survive new consum
   const oldInput = usage({ ...legacy, cliTiming: oldReport })
   assert.deepEqual(old.parseAssistantUsageRecord(oldInput), oldInput)
   assert.deepEqual(parseAssistantUsageRecord(oldInput), oldInput)
+})
+
+async function exerciseMealFailures(batch: boolean, publish?: (report: CliTiming) => void) {
+  const run = async () => {
+    for (const [field, code, missing] of [
+      ['id', 'invalid_type', true], ['nutritionProteinGrams', 'too_small', false],
+      ['nutritionConfidence', 'invalid_value', false],
+    ] as const) {
+      const original = Object.assign(new Error('PRIVATE_SENTINEL'), { name: 'Incur.ValidationError',
+        publicIssues: [{ path: field, code, missing, message: 'PRIVATE_SENTINEL' }] })
+      await assert.rejects(withCliTiming(() => timeCliDispatch('meal edit', async () => { throw original }), publish),
+        caught => caught === original)
+      await delay(10)
+    }
+    for (const code of ['invalid_operation', 'unknown']) {
+      const original = Object.assign(new Error('PRIVATE_SENTINEL'), { code })
+      await assert.rejects(withCliTiming(() => timeCliDispatch('meal remove-photo', async () => { throw original }), publish),
+        caught => caught === original)
+      await delay(10)
+    }
+    for (const command of ['meal edit', 'meal remove-photo']) {
+      await withCliTiming(() => timeCliDispatch(command, async () => {}), publish)
+      await delay(10)
+    }
+  }
+  if (batch) await withCliTiming(() => timeCliDispatch('batch', run), publish)
+  else await run()
+}
+
+test('meal original failures cross real UDP, receiver, profile and hosted admission without native accounting changes', async () => {
+  const previous = process.env.MURPH_CLI_TIMING_ENDPOINT
+  for (const batch of [false, true]) {
+    const receiver = createCodexCliTimingReceiver()
+    try {
+      const setting = receiver.launchArgs[1]!
+      assert.ok(setting)
+      process.env.MURPH_CLI_TIMING_ENDPOINT = JSON.parse(setting.slice(setting.indexOf('=') + 1))
+      await delay(10)
+      const finish = receiver.begin()
+      await exerciseMealFailures(batch)
+      await delay(10)
+      const event = finish(turnId) as { method: string; params: { timing: unknown } }
+      assert.ok(event)
+      assert.equal(event.method, 'murph/cliTiming')
+      const report = normalizeCliTiming(event.params.timing)
+      assert.ok(report)
+      assert.equal(report.reportCount, batch ? 1 : 7)
+      assert.equal(report.batchContainers, batch ? 1 : 0)
+      assert.equal(report.commands.reduce((sum, command) => sum + command.calls, 0), 7)
+      assert.equal(report.droppedCalls, 0)
+      assert.equal(report.droppedSpans, 0)
+      assert.equal(report.outOfWindowReports, 0)
+      assert.equal(report.transportTruncated, false)
+      assert.deepEqual(report.commands[0]!.failures, [
+        { code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation: { field: 'id', code: 'invalid_type', missing: true } },
+        { code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation: { field: 'nutritionProteinGrams', code: 'too_small', missing: false } },
+        { code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation: { field: 'nutritionConfidence', code: 'invalid_value', missing: false } },
+      ])
+      assert.deepEqual(report.commands[1]!.failures, [
+        { code: 'invalid_operation', stage: 'unknown', count: 1 }, { code: 'unknown', stage: 'unknown', count: 1 },
+      ])
+      for (const command of report.commands.filter(command => command.outcome === 'ok')) {
+        assert.equal(command.failures, undefined)
+      }
+      const rawEvents = [...baseEvents, native('vault-cli batch', 'PRIVATE_SENTINEL')]
+      const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
+      const profile = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents, event], turnId })!
+      const { cliTiming, ...legacy } = profile
+      assert.deepEqual(legacy, baseline)
+      assert.deepEqual(cliTiming, report)
+      const parsed = usage(JSON.parse(JSON.stringify(profile)))
+      assert.deepEqual(parsed.turnProfileJson, profile)
+      assert.equal(parsed.inputTokens, 17)
+      assert.equal(parsed.outputTokens, 11)
+      assert.equal(JSON.stringify(parsed).includes('PRIVATE_SENTINEL'), false)
+    } finally {
+      receiver.close()
+      if (previous === undefined) delete process.env.MURPH_CLI_TIMING_ENDPOINT
+      else process.env.MURPH_CLI_TIMING_ENDPOINT = previous
+    }
+  }
+})
+
+const mealAttributionCompatibilityBase = process.env.MURPH_CLI_MEAL_FAILURE_ATTRIBUTION_COMPAT_BASE
+test.skipIf(!mealAttributionCompatibilityBase)('actual pre-meal-attribution hosted reader preserves timing, profiles and token accounting', async () => {
+  assert.match(mealAttributionCompatibilityBase ?? '', /^[a-f0-9]{40}$/u)
+  const source = (file: string) => execFileSync('git', ['show', `${mealAttributionCompatibilityBase}:${file}`],
+    { encoding: 'utf8', maxBuffer: 1_000_000 })
+  const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(text)).toString('base64')}`
+  const oldTimingUrl = moduleUrl(source('packages/runtime-state/src/cli-timing.ts'))
+  const oldUsageSource = source('packages/hosted-execution/src/assistant-usage.ts')
+  assert.ok(oldUsageSource.includes('"@murphai/runtime-state/cli-timing"'))
+  const old: { parseAssistantUsageRecord: typeof parseAssistantUsageRecord } = await import(moduleUrl(
+    oldUsageSource.replace('"@murphai/runtime-state/cli-timing"', JSON.stringify(oldTimingUrl))))
+  let report!: CliTiming
+  await exerciseMealFailures(true, value => { report = value })
+  const oldReport = structuredClone(report)
+  oldReport.commands[0]!.failures = [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 3 }]
+  oldReport.commands[1]!.failures = [{ code: 'unknown', stage: 'unknown', count: 2 }]
+  const legacy = buildAssistantCodexTurnProfileJson({ rawEvents: baseEvents, turnId })!
+  for (const schema of ['murph.assistant-turn-profile.v1', 'murph.assistant-turn-profile.v2']) {
+    const profile = { ...legacy, schema, tools: [], cliTiming: report }
+    const input = usage(profile)
+    const expected = { ...input, turnProfileJson: { ...profile, cliTiming: oldReport } }
+    assert.deepEqual(old.parseAssistantUsageRecord(JSON.parse(JSON.stringify(input))), expected)
+    assert.deepEqual(parseAssistantUsageRecord(expected), expected)
+    assert.equal(expected.inputTokens, 17)
+    assert.equal(expected.outputTokens, 11)
+    const absent = structuredClone(expected)
+    for (const command of absent.turnProfileJson.cliTiming.commands) delete command.failures
+    assert.deepEqual(old.parseAssistantUsageRecord(absent), absent)
+    assert.deepEqual(parseAssistantUsageRecord(absent), absent)
+  }
 })

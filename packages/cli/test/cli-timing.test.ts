@@ -587,6 +587,8 @@ test('real meal validation preserves output and mutation boundaries while admitt
   const edit = vi.spyOn(core, 'upsertEvent')
   const records = await import('@murphai/vault-usecases/records')
   const editRecord = vi.spyOn(records, 'editMealRecord')
+  const removeRecord = vi.spyOn(records, 'removeAutomaticMealPhotoRecord')
+  const removePhoto = vi.spyOn(core, 'removeAutomaticMealPhoto')
   const runtime = await import('@murphai/vault-usecases/runtime')
   const importers = vi.spyOn(runtime, 'loadImportersRuntimeModule')
   vi.spyOn(performance, 'now').mockReturnValue(0)
@@ -601,6 +603,13 @@ test('real meal validation preserves output and mutation boundaries while admitt
       for (const field of ['nutritionCalories', 'nutritionSource', 'occurredAt']) {
         assert.equal(Object.hasOwn(schema.options.properties, field), true, `${action}/${field}`)
       }
+      if (action === 'edit') {
+        assert.deepEqual(schema.args.required, ['id'])
+        for (const field of ['id']) assert.equal(Object.hasOwn(schema.args.properties, field), true)
+        for (const field of ['nutritionProteinGrams', 'nutritionConfidence']) {
+          assert.equal(Object.hasOwn(schema.options.properties, field), true)
+        }
+      }
       // Edit's real positional lookup is syntactically valid but deliberately absent.
       // Option rejection must precede even the edit lookup, not merely its write.
       const args = ['meal', action, ...(action === 'edit' ? ['meal_synthetic_missing'] : [])]
@@ -608,8 +617,14 @@ test('real meal validation preserves output and mutation boundaries while admitt
         [['--nutrition-calories', '-1'], 'nutritionCalories', 'too_small'],
         [['--nutrition-source', 'PRIVATE_SENTINEL'], 'nutritionSource', 'invalid_value'],
         [['--PRIVATE_SENTINEL'], 'arguments', 'custom'],
+        ...(action === 'edit' ? [
+          [['--nutrition-protein-grams', '-1'], 'nutritionProteinGrams', 'too_small'],
+          [['--nutrition-confidence', 'PRIVATE_SENTINEL'], 'nutritionConfidence', 'invalid_value'],
+          [[], 'id', 'invalid_type'],
+        ] as const : []),
       ] as const) {
-        const argv = [...args, ...flags, '--note', 'PRIVATE_SENTINEL', '--vault', root, '--format', 'json']
+        const argv = [...(field === 'id' ? ['meal', 'edit'] : args), ...flags,
+          '--note', 'PRIVATE_SENTINEL', '--vault', root, '--format', 'json']
         const baseline = await invoke(argv)
         const captured = await collect(() => invoke(argv))
         assert.deepEqual(captured.result, baseline)
@@ -619,7 +634,9 @@ test('real meal validation preserves output and mutation boundaries while admitt
         assert.equal(output.code, 'VALIDATION_ERROR')
         assert.equal(output.stage, 'validation')
         assert.equal(output.retryable, false)
-        const validation = { field, code, missing: false }
+        const validation = { field, code, missing: field === 'id' }
+        assert.ok(output.fieldErrors.some((issue: { path: string; code: string; missing?: boolean }) =>
+          issue.path === field && issue.code === code && issue.missing === validation.missing))
         assert.deepEqual(cliTimingValidationFailure(`meal ${action}`, output.code, output, 'fieldErrors'), { validation })
         assert.equal(captured.timing.reportCount, 1)
         assert.equal(captured.timing.commands.length, 1)
@@ -637,10 +654,39 @@ test('real meal validation preserves output and mutation boundaries while admitt
         assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
       }
     }
+    for (const [args, field, code, missing] of [
+      [['meal', 'edit'], 'id', 'invalid_type', true],
+      [['meal', 'edit', 'meal_synthetic_missing', '--nutrition-protein-grams', '-1'], 'nutritionProteinGrams', 'too_small', false],
+      [['meal', 'edit', 'meal_synthetic_missing', '--nutrition-confidence', 'PRIVATE_SENTINEL'], 'nutritionConfidence', 'invalid_value', false],
+    ] as const) for (const compact of [false, true]) {
+      const argv = ['batch', '--vault', root, '--format', 'json', '--stop-on-error',
+        ...(compact ? ['--compact'] : []), '--command', JSON.stringify(args), '--command', '["meal","list"]']
+      const baseline = await invoke(argv)
+      const captured = await collect(() => invoke(argv))
+      assert.deepEqual(captured.result, baseline)
+      assert.equal(captured.result.thrown, null)
+      assert.deepEqual(captured.result.exits, [], 'The batch container returns child failures, not an extra exit.')
+      const output = JSON.parse(captured.result.stdout)
+      assert.equal(output.executed, 1)
+      assert.equal(output.failed, 1)
+      assert.equal(output.stoppedEarly, true)
+      assert.equal(output.commands[0].error.code, 'VALIDATION_ERROR')
+      assert.equal(captured.timing.batchContainers, 1)
+      assert.equal(captured.timing.commands.length, 1)
+      assert.equal(captured.timing.commands[0]!.command, 'meal edit')
+      assert.equal(captured.timing.commands[0]!.calls, 1)
+      assert.deepEqual(captured.timing.commands[0]!.failures, [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1,
+        validation: { field, code, missing } }])
+      assert.equal(captured.timing.droppedCalls, 0)
+      assert.equal(captured.timing.droppedSpans, 0)
+      assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+    }
     assert.equal(importers.mock.calls.length, 0)
     assert.equal(editRecord.mock.calls.length, 0)
     assert.equal(add.mock.calls.length, 0)
     assert.equal(edit.mock.calls.length, 0)
+    assert.equal(removeRecord.mock.calls.length, 0)
+    assert.equal(removePhoto.mock.calls.length, 0)
     assert.equal((await records.listMealRecords({ vault: root })).count, 0)
 
     // Follow the unchanged validation recovery with one real save of each kind.
@@ -658,10 +704,13 @@ test('real meal validation preserves output and mutation boundaries while admitt
     const edited = await collect(() => invoke(['meal', 'edit', meal.mealId,
       '--day-key-policy', 'keep',
       '--nutrition-calories', '430', '--nutrition-source', 'estimated',
+      '--nutrition-protein-grams', '30', '--nutrition-confidence', 'medium',
       '--occurred-at', '2030-01-15T11:00:00.000Z', '--vault', root, '--format', 'json']))
     assert.equal(edited.result.thrown, null)
     assert.deepEqual(edited.result.exits, [])
     assert.equal(JSON.parse(edited.result.stdout).entity.data.nutrition.totals.calories, 430)
+    assert.equal(JSON.parse(edited.result.stdout).entity.data.nutrition.totals.proteinGrams, 30)
+    assert.equal(JSON.parse(edited.result.stdout).entity.data.nutrition.provenance.confidence, 'medium')
     assert.equal(add.mock.calls.length, 1)
     assert.equal(edit.mock.calls.length, 1)
     assert.equal(importers.mock.calls.length, 1)
@@ -679,6 +728,72 @@ test('real meal validation preserves output and mutation boundaries while admitt
       assert.equal(captured.timing.droppedSpans, 0)
       assert.equal(captured.timing.transportTruncated, false)
       assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
+      assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+    }
+    const readArgs = ['meal', 'show', meal.mealId, '--vault', root, '--format', 'json']
+    const beforeRemoval = await invoke(readArgs)
+    const read = await collect(() => invoke(readArgs))
+    assert.deepEqual(read.result, beforeRemoval)
+    assert.deepEqual(read.result.exits, [])
+    assert.equal(read.timing.commands[0]!.failures, undefined)
+    for (const batch of [false, true]) {
+      const args = ['meal', 'remove-photo', meal.mealId]
+      const argv = batch
+        ? ['batch', '--vault', root, '--format', 'json', '--stop-on-error', '--command', JSON.stringify(args),
+          '--command', '["meal","list"]']
+        : [...args, '--vault', root, '--format', 'json']
+      const baseline = await invoke(argv)
+      const captured = await collect(() => invoke(argv))
+      assert.deepEqual(captured.result, baseline)
+      assert.equal(captured.result.thrown, null)
+      assert.deepEqual(captured.result.exits, batch ? [] : [1])
+      const output = JSON.parse(captured.result.stdout)
+      if (batch) {
+        assert.equal(output.executed, 1)
+        assert.equal(output.stoppedEarly, true)
+      }
+      assert.equal((batch ? output.commands[0].error : output).code, 'invalid_operation')
+      assert.equal(captured.timing.batchContainers, batch ? 1 : 0)
+      assert.equal(captured.timing.commands.length, 1)
+      assert.equal(captured.timing.commands[0]!.command, 'meal remove-photo')
+      assert.equal(captured.timing.commands[0]!.calls, 1)
+      assert.deepEqual(captured.timing.commands[0]!.failures, [{ code: 'invalid_operation', stage: 'unknown', count: 1 }])
+      assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+    }
+    assert.equal(removeRecord.mock.calls.length, 4, 'One real handler per failed invocation, no retries.')
+    assert.equal(removePhoto.mock.calls.length, 4)
+    assert.equal(add.mock.calls.length, 1)
+    assert.equal(edit.mock.calls.length, 1)
+    assert.deepEqual(await invoke(readArgs), beforeRemoval, 'Ordinary-meal rejection leaves canonical data unchanged.')
+
+    const photoPath = path.join(home, 'PRIVATE_SENTINEL.jpg')
+    await writeFile(photoPath, 'synthetic image bytes')
+    const automatic = await core.addMeal({ vaultRoot: root, photoPath, source: 'device',
+      occurredAt: '2030-01-15T09:00:00.000Z',
+      nutrition: { totals: { calories: 500, proteinGrams: 25 }, provenance: { source: 'estimated', confidence: 'medium' } },
+      externalRef: { system: 'meal-photo-capture', resourceType: 'photo',
+        resourceId: 'synthetic-capture', version: 'b'.repeat(64) } })
+    const automaticArgs = ['meal', 'remove-photo', automatic.mealId, '--vault', root, '--format', 'json']
+    const removed = await collect(() => invoke(automaticArgs))
+    assert.equal(removed.result.thrown, null)
+    assert.deepEqual(removed.result.exits, [])
+    const entity = JSON.parse(removed.result.stdout).entity
+    assert.deepEqual(entity.data.attachments ?? [], [])
+    assert.equal(entity.data.nutrition.totals.proteinGrams, 25)
+    const idempotentBaseline = await invoke(automaticArgs)
+    const idempotent = await collect(() => invoke(automaticArgs))
+    assert.deepEqual(idempotent.result, idempotentBaseline)
+    assert.deepEqual(idempotent.result, removed.result, 'No extra revision on idempotent removal.')
+    assert.equal(removeRecord.mock.calls.length, 7)
+    assert.equal(removePhoto.mock.calls.length, 7)
+    const removals = await Promise.all(removePhoto.mock.results.slice(4).map(result => result.value))
+    assert.deepEqual(removals.map(result => result.removedPhotoCount), [1, 0, 0])
+    assert.equal(add.mock.calls.length, 2)
+    assert.equal(edit.mock.calls.length, 1)
+    for (const captured of [removed, idempotent]) {
+      assert.equal(captured.timing.commands[0]!.outcome, 'ok')
+      assert.equal(captured.timing.commands[0]!.calls, 1)
+      assert.equal(captured.timing.commands[0]!.failures, undefined)
       assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
     }
     assert.equal(fetchImpl.mock.calls.length, 0)

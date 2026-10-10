@@ -623,6 +623,7 @@ for (const [command, field] of [
   ["event list", "arguments"], ["knowledge upsert", "arguments"],
   ["meal add", "nutritionCalories"], ["meal edit", "nutritionSource"],
   ["meal add", "occurredAt"], ["meal edit", "arguments"],
+  ["meal edit", "id"], ["meal edit", "nutritionProteinGrams"], ["meal edit", "nutritionConfidence"],
 ] as const) test(`${command}/${field} validation reads a fixed prefix without getters, prototypes, causes or proxy escapes`, () => {
   let reads = 0;
   const getter = { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } };
@@ -739,10 +740,16 @@ const mealValidationCases = [
   ["meal edit", "arguments", "custom", false],
 ] as const;
 
+const mealEditValidationCases = [
+  ["meal edit", "id", "invalid_type", true],
+  ["meal edit", "nutritionProteinGrams", "too_small", false],
+  ["meal edit", "nutritionConfidence", "invalid_value", false],
+] as const;
+
 test("allowlisted commands preserve original errors and round-trip only finite validation detail", async () => {
   for (const [command, field, code, missing] of [
     ["automation list", "limit", "too_big", false], ["automation list", "status", "invalid_value", false],
-    ...readValidationCases, ...measurementValidationCases, ...eventInvocationValidationCases, ...mealValidationCases,
+    ...readValidationCases, ...measurementValidationCases, ...eventInvocationValidationCases, ...mealValidationCases, ...mealEditValidationCases,
   ] as const) for (const property of ["publicIssues", "fieldErrors"] as const) {
     const validation = { field, code, missing };
     const original = Object.assign(new Error("PRIVATE_SENTINEL"), {
@@ -800,8 +807,8 @@ test("command validation omits other fields, commands and malformed evidence on 
       [command, field, ["value", "unit", "slug", "body", "sourcePath"]] as const),
     ...eventInvocationValidationCases.map(([command, field]) =>
       [command, field, ["value", "unit", "cursor", "text"]] as const),
-    ...mealValidationCases.map(([command, field]) =>
-      [command, field, ["id", "source", "timeZone", "dayKey", "note", "photo", "audio", "ingredient", "nutrition",
+    ...[...mealValidationCases, ...mealEditValidationCases].map(([command, field]) =>
+      [command, field, [...(command === "meal add" ? ["id"] : []), "source", "timeZone", "dayKey", "note", "photo", "audio", "ingredient", "nutrition",
         "nutritionSourceDetail", "nutrition.totals.calories", "env", "0", "value", "context"]] as const),
   ] as const) {
     const good = { path: field, code: "invalid_value", missing: false };
@@ -862,6 +869,7 @@ for (const [reader, base, cases] of [
   ["measurement-validation", process.env.MURPH_CLI_MEASUREMENT_VALIDATION_COMPAT_BASE, measurementValidationCases],
   ["event-invocation-validation", process.env.MURPH_CLI_EVENT_INVOCATION_VALIDATION_COMPAT_BASE, eventInvocationValidationCases],
   ["meal-validation", process.env.MURPH_CLI_MEAL_VALIDATION_COMPAT_BASE, mealValidationCases],
+  ["meal-edit-validation", process.env.MURPH_CLI_MEAL_FAILURE_ATTRIBUTION_COMPAT_BASE, mealEditValidationCases],
   ["knowledge-parser-validation", process.env.MURPH_CLI_KNOWLEDGE_PARSER_VALIDATION_COMPAT_BASE,
     [["knowledge show", "arguments", "custom", false]]],
 ] as const) test.skipIf(!base)(`actual older ${reader} consumer drops detail but preserves the envelope and counts`, async () => {
@@ -1248,4 +1256,100 @@ test("synchronous query stage timing preserves values, immediate execution and t
       phase => [phase.phase, phase.count, phase.sumUs]), [["query-entity-read", 1, 12], ["query-metric-read", 1, 34]]);
     assert.deepEqual(normalizeCliTiming(report), report);
   });
+});
+
+test("new meal edit fields remain absent on every other command", () => {
+  for (const [, field, code, missing] of mealEditValidationCases) {
+    for (const command of ["meal add", "meal remove-photo", "meal show", "event edit", "other"]) {
+      for (const property of ["publicIssues", "fieldErrors", "validation"] as const) {
+        const source = { [property]: property === "validation" ? { field, code, missing } : [{ path: field, code, missing }] };
+        assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", source, property), {});
+      }
+    }
+  }
+});
+
+test("invalid_operation is exact meal remove-photo evidence, never a global failure-code admission", async () => {
+  for (const command of ["meal remove-photo", "meal edit", "meal add", "event show", "other"]) {
+    const expected = command === "meal remove-photo" ? "invalid_operation" : "unknown";
+    assert.equal(cliTimingFailureCode("invalid_operation", command), expected);
+    const original = Object.assign(new Error("PRIVATE_SENTINEL"), { code: "invalid_operation", cause: { code: "PRIVATE_SENTINEL" } });
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw original; }),
+      value => { report = value; }), caught => caught === original);
+    assert.deepEqual(report.commands[0]!.failures, [{ code: expected, stage: "unknown", count: 1 }]);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    const incoming = { ...report, commands: [{ ...report.commands[0],
+      failures: [{ code: "invalid_operation", stage: "unknown", count: 1 }] }] };
+    assert.deepEqual(normalizeCliTiming(incoming), report);
+    assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+    assert.equal(normalizeCliTiming({ ...incoming, commands: [{ ...incoming.commands[0], outcome: "ok" }] })
+      ?.commands[0]!.failures, undefined);
+  }
+  for (const command of [undefined, "MEAL REMOVE-PHOTO", "meal remove-photo ", "meal remove-photo PRIVATE_SENTINEL"]) {
+    assert.equal(cliTimingFailureCode("invalid_operation", command), "unknown");
+  }
+  for (const code of ["unknown", "PRIVATE_SENTINEL", "INVALID_OPERATION", "invalid_operation ",
+    "invalid_operation_PRIVATE_SENTINEL", "invalid-operatiоn", { toString() { throw Error("PRIVATE_SENTINEL"); } }]) {
+    assert.equal(cliTimingFailureCode(code, "meal remove-photo"), "unknown");
+  }
+  const { noteCliTimingFailure } = await import("../src/node/cli-timing.ts");
+  let reads = 0;
+  const getter = { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } };
+  const revoked = Proxy.revocable({}, {}); revoked.revoke();
+  for (const error of [Object.defineProperty({}, "code", getter), Object.create({ code: "invalid_operation" }),
+    new Proxy({}, { getOwnPropertyDescriptor() { throw Error("PRIVATE_SENTINEL"); } }), revoked.proxy,
+    { cause: { code: "invalid_operation" } }]) {
+    let report!: CliTiming;
+    await withCliTiming(() => timeCliDispatch("meal remove-photo", async () => {
+      noteCliTimingFailure(error); noteCliTimingExit(1, false);
+    }), value => { report = value; });
+    assert.deepEqual(report.commands[0]!.failures, [{ code: "unknown", stage: "unknown", count: 1 }]);
+    assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+  }
+  assert.equal(reads, 0);
+});
+
+test("meal edit variants saturate independently of calls and legacy absence", () => {
+  const aggregate = emptyCliTiming();
+  const variants = mealEditValidationCases.flatMap(([, field]) =>
+    ["invalid_type", "custom", "too_small"].map(code => ({ field, code, missing: false })));
+  for (const validation of [...variants, variants[0]]) {
+    const report = sample("meal edit");
+    const incoming = normalizeCliTiming({ ...report, commands: [{ ...report.commands[0], outcome: "error",
+      failures: [{ code: "VALIDATION_ERROR", stage: "validation", count: 1, validation }] }] });
+    assert.ok(incoming);
+    mergeCliTiming(aggregate, incoming);
+  }
+  assert.equal(aggregate.commands[0]!.calls, 10);
+  assert.equal(aggregate.commands[0]!.failures?.length, 8);
+  assert.equal(aggregate.commands[0]!.failures?.[0]!.count, 2);
+  assert.equal(aggregate.commands[0]!.droppedFailures, 1);
+  const legacy = sample("meal edit"); legacy.commands[0]!.outcome = "error";
+  mergeCliTiming(aggregate, legacy);
+  assert.equal(aggregate.commands[0]!.calls, 11);
+  assert.equal(aggregate.commands[0]!.failures?.reduce((sum, failure) => sum + failure.count, 0), 9);
+  assert.deepEqual(normalizeCliTiming(aggregate), aggregate);
+});
+
+const mealFailureCompatibilityBase = process.env.MURPH_CLI_MEAL_FAILURE_ATTRIBUTION_COMPAT_BASE;
+test.skipIf(!mealFailureCompatibilityBase)("actual pre-meal-attribution reader loses specificity, not timing", async () => {
+  assert.match(mealFailureCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${mealFailureCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; cliTimingFailureCode: typeof cliTimingFailureCode } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`);
+  assert.equal(old.cliTimingFailureCode("invalid_operation", "meal remove-photo"), "unknown");
+  const report = sample("meal remove-photo");
+  Object.assign(report.commands[0]!, { outcome: "error", calls: 3, droppedFailures: 1,
+    failures: [{ code: "invalid_operation", stage: "unknown", count: 1 }, { code: "unknown", stage: "unknown", count: 1 }] });
+  const legacy = structuredClone(report);
+  legacy.commands[0]!.failures = [{ code: "unknown", stage: "unknown", count: 2 }];
+  assert.deepEqual(normalizeCliTiming(report), report);
+  assert.deepEqual(old.normalizeCliTiming(report), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy);
+  const merged = emptyCliTiming(); mergeCliTiming(merged, report); mergeCliTiming(merged, legacy);
+  const oldMerged = emptyCliTiming(); mergeCliTiming(oldMerged, legacy); mergeCliTiming(oldMerged, legacy);
+  assert.deepEqual(old.normalizeCliTiming(merged), oldMerged);
+  assert.equal(normalizeCliTiming(legacy)?.commands[0]!.failures?.[0]!.code, "unknown", "Never backfill old evidence.");
 });
