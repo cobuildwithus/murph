@@ -1,6 +1,6 @@
 # Distinguish connected-app transport failures
 
-Status: active
+Status: completed
 Created: 2026-10-10
 
 ## Outcome
@@ -38,4 +38,12 @@ produce identical private logs while each preserves one fetch and retryable503.
   SDK classification, not proof that the configured deadline elapsed.
 - Parent candidate review: Ready. Existing private error only, eight-node limit,
   no new event, I/O, model input, public response, retry, or state change.
-- Privacy/docs/complexity guards pass. Final pushed review and CI pending.
+- Privacy/docs/complexity guards pass. Final ReviewGPT PASS on
+  13df3f7648b427282efab13a7832d2f84254630b, with no qualifying findings.
+- Parent final review: Ready. Reviewed source, tests and owner documentation
+  remain unchanged by this explanatory plan/index closeout.
+- Required final-head CI remains pending and gates telemetry-only merge.
+- Production verification must confirm managed admission, serving source and
+  natural diagnostic observations; no synthetic provider activity is authorized.
+Updated: 2026-10-10
+Completed: 2026-10-10
