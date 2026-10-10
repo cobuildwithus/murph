@@ -60,6 +60,48 @@ describe("Twilio Verify SMS transport", () => {
     log.mockRestore();
   });
 
+  it.each([undefined, privateSuffix])("returns fixed mobile-number guidance for numeric 21614 with message %j", async (message) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      request.mockResolvedValueOnce(Response.json({ code: 21614, message, more_info: privateSuffix }, { status: 400 }));
+      const error = await hostedAuthSmsVerification().send({ phoneNumber }).catch((failure: unknown) => failure);
+      const response = jsonError(error);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: {
+        code: "AUTH_REQUEST_INVALID",
+        message: "Enter a mobile phone number that can receive SMS, including its country code, and try again.",
+        retryable: false,
+      } });
+      expect(log).not.toHaveBeenCalled();
+      expect(request).toHaveBeenCalledOnce();
+    } finally { log.mockRestore(); }
+  });
+
+  it.each([[400, "21614"], [400, 21615], [429, 21614], [500, 21614]] as const)("keeps destination failures unavailable at HTTP %s with code %s", async (status, code) => {
+    await expectSendUnavailable(Response.json({ code, message: privateSuffix }, { status }),
+      `Twilio Verify send: provider_http; HTTP ${status}${typeof code === "number" ? `; code ${code}` : ""}; response parsed.`);
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it.each([400, 429, 500])("keeps numeric 21614 unavailable during verification at HTTP %s", async (status) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      request.mockResolvedValueOnce(Response.json({ code: 21614, message: privateSuffix }, { status }));
+      const error = await hostedAuthSmsVerification().check({ phoneNumber, verificationSid: sid, code: "123456" })
+        .catch((failure: unknown) => failure);
+      const response = jsonError(error);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: {
+        code: "AUTH_VERIFICATION_UNAVAILABLE", message: "We could not verify your sign-in code. Try again shortly.", retryable: false,
+      } });
+      expect(log).toHaveBeenCalledOnce();
+      expect(log).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
+        errorCauseMessage: `Twilio Verify check: provider_http; HTTP ${status}; code 21614; response parsed.`,
+      }));
+      expect(request).toHaveBeenCalledOnce();
+    } finally { log.mockRestore(); }
+  });
+
   it.each(["Channel", "RiskCheck", "Code", "VerificationSid"])("keeps invalid %s configuration diagnosable without blaming the phone number", async (parameter) => {
     await expectSendUnavailable(Response.json({ code: 60200, message: `Invalid parameter: ${parameter}` }, { status: 400 }),
       `Twilio Verify send: provider_http; HTTP 400; code 60200; parameter ${parameter}; response parsed; parameterKind recognized.`);

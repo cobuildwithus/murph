@@ -104,6 +104,12 @@ These hints do not prove whether a browser action took effect and never change
 retry or unknown-outcome handling. The event omits provider prose, scripts,
 URLs, and page contents; its existing private subject binding is unchanged.
 
+Twilio Verify send failures with HTTP 400 and numeric code 21614 return the
+existing invalid-request response with guidance to use an SMS-capable mobile
+number. This classification does not apply to verification checks, string codes,
+or other HTTP statuses. Code 60200 retains its exact allowlisted `To` parameter
+requirement.
+
 Twilio failures use the existing private route-error cause. Alongside operation,
 HTTP status, numeric provider code, and exact allowlisted parameter labels, it
 records whether the bounded response was parsed, missing, oversized, invalid
