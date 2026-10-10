@@ -1,6 +1,6 @@
 # Preserve snapshot failure diagnostics for supported timeouts
 
-Status: active
+Status: completed
 Created: 2026-10-10
 Updated: 2026-10-10
 
@@ -36,4 +36,5 @@ Numeric validation must not leak arbitrary error properties or invent a timeout.
 
 ## Verification
 
-Baseline diagnostic reproduction: 1 failed, 78 skipped in hosted-invocation-bridge.test.ts, with expected phase and 120,000 millisecond timeout missing. The temporary test modification was restored before authoring. ReviewGPT authored the correction and 30 synthetic cases. The new cases on unchanged source produce 12 failures and 18 passing controls; the corrected full bridge suite passes 109 tests. Package typecheck, log privacy guard, docs drift, and complexity guard pass. The three reported file hotspots are unchanged orchestration/appender functions (56/25/24); the parser correction removes four net source lines and requires no broader refactor. Docs gardening passes with zero issues. External completion gates remain pending.
+Baseline diagnostic reproduction: 1 failed, 78 skipped in hosted-invocation-bridge.test.ts, with expected phase and 120,000 millisecond timeout missing. The temporary test modification was restored before authoring. ReviewGPT authored the correction and 30 synthetic cases. The new cases on unchanged source produce 12 failures and 18 passing controls; the corrected full bridge suite passes 109 tests. Package typecheck, log privacy guard, docs drift, and complexity guard pass. The three reported file hotspots are unchanged orchestration/appender functions (56/25/24); the parser correction removes four net source lines and requires no broader refactor. Docs gardening passes with zero issues. Ten actual Web-parser compatibility cases also pass; the deployed-source parser is byte-identical. Final ReviewGPT round 1 passed on the pushed source candidate with zero findings and independently confirmed all 30 regression cases and the 12/18 base split. The parent reviewed the full diff and confirmed unchanged execution behavior, event count, phase privacy boundaries, and runtime cost. All four required exact-head checks passed on source candidate 7c8edb1be24d5eaeb6f0138a93d9a13ffa65a02e. The explanatory plan closeout leaves source, tests, config, schemas, and the implemented contract unchanged; final-head CI remains a merge gate. Telemetry-only deployment and natural observation are separate operational steps, and the original stalled operation remains unresolved.
+Completed: 2026-10-10
