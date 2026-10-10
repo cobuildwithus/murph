@@ -69,6 +69,7 @@ import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GroupStartStudy } from "./group-start-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
+import { GroupsWorkspacePrototypeStudy } from "./groups-workspace-prototype-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
@@ -762,6 +763,12 @@ export function SectionsContent({
 
       {category === "groups" ? (
         <>
+          <Separator />
+
+          <StudySection title="Groups workspace prototype">
+            <GroupsWorkspacePrototypeStudy />
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Group join invites, source-aware sharing, and setup recovery">
