@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-10",
+  "order": 100,
+  "item": {
+    "id": "sms-mobile-number-guidance",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer help for SMS sign-in",
+    "summary": "If your number cannot receive an SMS sign-in code, Murph now asks for a mobile number that can.",
+    "details": "Check the number and country code before requesting another code. Temporary delivery problems still ask you to try again shortly.",
+    "relevanceTags": [
+      "account",
+      "sign-in"
+    ],
+    "sourcePullRequests": []
+  }
+}

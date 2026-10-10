@@ -770,6 +770,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-codex-0158-live-port.md` | Codex 0.158.0 public Live patch port, removal review, and native compatibility verification; deployment gates remain. | Historical implementation evidence | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-10-10-snapshot-failure-timeout-diagnostics.md` | Preserve existing snapshot failure diagnostics for supported long deadlines. | Assistant runtime telemetry | Medium | 2026-10-10 |
+| `agent-docs/exec-plans/active/2026-10-10-sms-mobile-number-guidance.md` | Unsupported SMS destination guidance correction and focused proof. | Task plan | Medium | 2026-10-10 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/completed/2026-10-02-checkpoint-progress-generation.md` | Canonical checkpoint-generation ownership correction and composed regression proof. | Checkpoint generation execution plan | Medium | 2026-10-02 |
 | `agent-docs/exec-plans/completed/2026-10-02-otp-parameter-diagnostic.md` | Bounded Verify parameter-hint telemetry and unchanged authentication proof. | OTP diagnostic execution plan | Medium | 2026-10-02 |
