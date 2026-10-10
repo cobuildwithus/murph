@@ -507,6 +507,9 @@ describe('bounded CLI validation completion metadata', () => {
     ['meal edit', 'nutritionSource', 'invalid_value', false],
     ['meal edit', 'occurredAt', 'invalid_format', false],
     ['meal edit', 'arguments', 'custom', false],
+    ['meal edit', 'id', 'invalid_type', true],
+    ['meal edit', 'nutritionProteinGrams', 'too_small', false],
+    ['meal edit', 'nutritionConfidence', 'invalid_value', false],
   ] as const)('selects one finite %s %s issue from the existing error envelope', (command, field, code, missing) => {
     const error = { ...envelope('VALIDATION_ERROR'), fieldErrors: [
       { path: `body.${sentinel}`, code: 'invalid_type', missing: true },
@@ -572,6 +575,9 @@ describe('bounded CLI validation completion metadata', () => {
       { path: 'arguments', code: 'custom', missing: false },
     ]],
     ['meal edit', [
+      { path: 'id', code: 'invalid_type', missing: true },
+      { path: 'nutritionProteinGrams', code: 'too_small', missing: false },
+      { path: 'nutritionConfidence', code: 'invalid_value', missing: false },
       { path: 'nutritionCalories', code: 'too_small', missing: false },
       { path: 'nutritionSource', code: 'invalid_value', missing: false },
       { path: 'occurredAt', code: 'invalid_format', missing: false },
@@ -688,6 +694,9 @@ describe('existing diagnostic transport and denominator', () => {
     ['knowledge show', 'arguments', 'custom', false],
     ['knowledge upsert', 'arguments', 'custom', false],
     ['meal edit', 'arguments', 'custom', false],
+    ['meal edit', 'id', 'invalid_type', true],
+    ['meal edit', 'nutritionProteinGrams', 'too_small', false],
+    ['meal edit', 'nutritionConfidence', 'invalid_value', false],
   ] as const)('round-trips %s %s details through the real sanitizer/parser with the existing cap and best-effort writes', async (command, field, code, missing) => {
     const automation = await dispatch(requests[0], { automationTool: { request: vi.fn<AssistantHostedAutomationTool['request']>().mockRejectedValue(
       Object.assign(new Error(sentinel), { code: 'invalid_option', cause: { content: sentinel } }),
@@ -861,4 +870,29 @@ describe('research scout-batch completion diagnostics', () => {
       expect(JSON.stringify(issue)).not.toContain(unknown)
     }
   })
+})
+
+it('recognizes invalid_operation only on positively attributed meal remove-photo completion', () => {
+  for (const full of [false, true]) {
+    const error = envelope('invalid_operation')
+    const output = JSON.stringify(full ? { ok: false, error } : error)
+    const command = `vault-cli meal remove-photo ${sentinel} --format json`
+    const issue = commandIssue(output, command)
+    expect(issue?.details).toMatchObject({ vaultCliCommand: 'meal remove-photo',
+      vaultCliErrorAttribution: 'recognized', vaultCliErrorCode: 'invalid_operation',
+      failureReason: 'nonzero_exit', exitCode: 1 })
+    expect(issue?.details?.vaultCliErrorStage).toBeUndefined()
+    expect(issue?.details?.vaultCliValidationField).toBeUndefined()
+    expect(JSON.stringify(issue)).not.toContain(sentinel)
+    expect(commandIssue(output, command, 0)).toBeNull()
+    for (const other of ['vault-cli meal edit synthetic', 'vault-cli meal add', 'vault-cli event show synthetic',
+      'vault-cli meal remove-photo synthetic && node synthetic.js']) {
+      expect(commandIssue(output, other)?.details?.vaultCliErrorCode).toBeUndefined()
+    }
+    for (const code of ['unknown', 'invalid_operation_extra', 'INVALID_OPERATION', 'invalid_operation ', sentinel]) {
+      const rejected = envelope(code)
+      expect(commandIssue(JSON.stringify(full ? { ok: false, error: rejected } : rejected), command)
+        ?.details?.vaultCliErrorCode).toBeUndefined()
+    }
+  }
 })

@@ -25,7 +25,7 @@ export type CliTimingOutcome = "ok" | "error" | "unknown";
 // names or stages by pattern; adding a value requires consumer-first rollout.
 export const CLI_TIMING_MAX_FAILURES = 8;
 export const CLI_TIMING_FAILURE_CODES = [
-  "unknown", "invalid_option", "invalid_payload", "VALIDATION_ERROR", "VAULT_INVALID_INPUT",
+  "unknown", "invalid_option", "invalid_payload", "invalid_operation", "VALIDATION_ERROR", "VAULT_INVALID_INPUT",
   "exercise_not_found", "exercise_catalog_unavailable", "exercise_catalog_invalid",
   "memory_not_found", "memory_document_invalid",
   "research_scout_invalid_batch_payload", "research_scout_invalid_window", "research_exa_token_missing",
@@ -48,7 +48,9 @@ export interface CliFailureTiming {
   validation?: CliValidationDiagnostic;
   rejection?: CliTimingRejection;
 }
-export function cliTimingFailureCode(value: unknown): CliFailureTiming["code"] {
+export function cliTimingFailureCode(value: unknown, command?: unknown): CliFailureTiming["code"] {
+  // Only the registered meal-photo removal owner is qualified for this code.
+  if (value === "invalid_operation" && command !== "meal remove-photo") return "unknown";
   return CLI_TIMING_FAILURE_CODES.find((code) => code === value) ?? "unknown";
 }
 export function cliTimingFailureStage(value: unknown): CliFailureTiming["stage"] {
@@ -66,7 +68,8 @@ const validationFields = [
   ["knowledge show", ["slug", "arguments"]],
   ["measurement entry list", ["metric", "from", "to", "limit"]],
   ["meal add", ["nutritionCalories", "nutritionSource", "occurredAt", "arguments"]],
-  ["meal edit", ["nutritionCalories", "nutritionSource", "occurredAt", "arguments"]],
+  ["meal edit", ["id", "nutritionCalories", "nutritionProteinGrams", "nutritionSource",
+    "nutritionConfidence", "occurredAt", "arguments"]],
   ["food search-labels", ["query", "limit"]],
   ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks",
     "relatedSlug", "librarySlug", "sourcePath", "arguments"]],
@@ -327,7 +330,7 @@ function normalizeCommandFailures(command: {
       observations += count;
       // Nonnegative integer counts stay safe while bounded by the safe call count.
       if (observations > calls) return {};
-      const code = cliTimingFailureCode(readCliTimingOwnData(entry, "code"));
+      const code = cliTimingFailureCode(readCliTimingOwnData(entry, "code"), name);
       const stage = cliTimingFailureStage(readCliTimingOwnData(entry, "stage"));
       const failure: CliFailureTiming = { code, stage, count,
         ...cliTimingValidationFailure(name, code, entry, "validation"),

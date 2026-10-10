@@ -2086,7 +2086,10 @@ static field names are admitted:
 - `meal add` and `meal edit`: nutritionCalories, nutritionSource, occurredAt,
   plus the fixed Incur invocation field arguments. These options are registered
   in `packages/cli/src/commands/meal.ts`; edit inherits occurredAt from
-  `record-mutation-command-helpers.ts`. No other meal fields are admitted: no
+  `record-mutation-command-helpers.ts`. `meal edit` additionally admits only
+  id, nutritionProteinGrams and nutritionConfidence: its required positional id
+  and two exact top-level options in the same registered schema. These names
+  are not admitted for `meal add` or other commands. No other meal fields are admitted: no
   base vault/request/environment fields, free-text/media fields, nested nutrition
   paths, arrays/indices, arbitrary option names or values.
 
@@ -2230,6 +2233,46 @@ Historical meal failures cannot be attributed or backfilled from this extension.
 These probes prove diagnostic loss, not a preventable meal-behavior cause.
 No automatic rollback is authorized or required by a new attribution.
 
+The meal edit/remove-photo refinement uses the same owner and rollout order.
+`cliTimingFailureCode(value, command)` admits the exact existing
+`invalid_operation` code only for positively resolved `meal remove-photo`.
+The original-error observer, portable normalizer and bounded completion reader
+all supply their registered command. Missing/other command attribution and
+unknown/lookalike codes remain `unknown`; success remains detail-free. No new
+optional classification is needed: a command gate on the existing code field
+is narrower than global admission and avoids another wire property, identity
+axis or capture hook. The source mapping is
+`removeAutomaticMealPhotoEventRecord`: core
+`MEAL_PHOTO_RETENTION_SOURCE_INVALID` becomes `invalid_operation`. Neither
+that mapping nor photo removal, schemas, prompt text or public output changes.
+The new field names likewise extend only the existing validation allowlist.
+
+Run portable and hosted history-backed tests with
+`MURPH_CLI_MEAL_FAILURE_ATTRIBUTION_COMPAT_BASE` set to the exact pre-extension
+commit used for the candidate. Deploy Web/hosted usage, engine receiver/profile
+and completion readers, including warm processes, before runner/CLI writers.
+An older reader omits the three new validation tuples, reduces the new code to
+`unknown`, and coalesces equal variants without losing timing, profiles or token
+accounting. New readers accept old/absent detail; they cannot reconstruct an
+old `unknown` or establish that a historical rejection was expected.
+
+Earliest useful evidence is one naturally produced, newly attributed failure
+**after verified reader/writer deployment convergence**, not the merge time or
+an earlier usage row. That singleton warrants bounded inspection and synthetic
+reproduction, not a behavior fix. Use the command-specific query below with
+its literal command filter narrowed to `meal edit` and `meal remove-photo` and
+fixed UTC bounds wholly after convergence; a completed comparison window is
+not needed to inspect a singleton. Retain unknown and absent detail separately.
+Do not add native action-completion counts to overlapping CLI/profile counts.
+The first-8-issues and 8-failure-variants limits, 32 command/outcome summaries,
+64 spans per invocation, 256 reports per attempt, 8 KiB UDP envelope and 16 KiB
+usage-body bound still apply. Drops, missing reports, or row/output-cap saturation
+make observed counts lower bounds; narrow the fixed query window/filter instead
+of interpreting non-observation as success. No induced provider/model calls are
+needed for this probe. A paid-model replay is unnecessary only once the local
+investigator verifies exact public output/exit/effect parity and unchanged
+prompt/tool inputs against the base; authoring alone is not that validation.
+
 The `knowledge show` arguments admission and parser-capture correction reuse
 that reader-first order: deploy the portable reader in Web/hosted usage,
 engine/profile and completion consumers (including warm processes), then the
@@ -2347,7 +2390,9 @@ implementation-investigation threshold above does not gate this inspection.
 Attribution is not an automatic behavior or prompt change. Reproduce the exact
 attributed path synthetically and prove the earliest violated behavioral invariant
 before proposing one. This also applies to a single newly attributed meal failure;
-its field/code does not establish why the input was selected.
+its field/code does not establish why the input was selected. The same singleton
+inspection threshold applies to newly retained `meal remove-photo / invalid_operation`;
+an old `unknown` remains unresolved, not an inferred ordinary-photo rejection.
 For show/upsert, event-list and meal probes, `arguments / custom` identifies an Incur
 invocation rejection, not a particular option or its value. A specific option
 such as `limit / too_big` supports inspecting that option's existing contract;
@@ -2362,11 +2407,14 @@ turn-level provider loss. None can be equated with these input rejections.
 After consumer/producer convergence, run this read-only query on the primary
 usage database for a fixed natural-traffic window. Bind `:window_start_utc` and
 `:window_end_utc` to UTC timestamps (use consecutive 12-hour windows for a
-comparison). It returns only finite command/field/code/missing groups, keeps absent
+comparison). It returns only finite command/failure-code/stage/field/issue-code/missing groups, keeps absent
 validation visible, and uses turn IDs only internally to avoid summing repeated
 profile snapshots.
 A 10,000-row cap hit requires a narrower window; counts are observed lower bounds,
-not complete attempt totals. Check missing reports and drop counters separately.
+not complete attempt totals. A full 50-row output also requires a narrower
+command filter/window before coverage claims. Check missing reports and drop
+counters separately. The remove-photo branch selects only the new exact code
+and its unresolved `unknown / unknown` neighbor, not all possible photo failures.
 
 ```sql
 WITH rows AS MATERIALIZED (
@@ -2383,14 +2431,15 @@ WITH rows AS MATERIALIZED (
   CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
   WHERE t ->> 'schema' = 'murph.cli-timing.v1'
     AND c ->> 'command' IN ('automation list', 'knowledge show', 'knowledge upsert',
-      'event list', 'event payload-schema', 'measurement entry list', 'meal add', 'meal edit')
+      'event list', 'event payload-schema', 'measurement entry list', 'meal add', 'meal edit', 'meal remove-photo')
     AND c ->> 'outcome' = 'error'
 ), per_turn AS (
-  SELECT turn_id, c ->> 'command' AS command, f.field, f.issue_code, f.missing,
+  SELECT turn_id, c ->> 'command' AS command, f.failure_code, f.failure_stage, f.field, f.issue_code, f.missing,
          max(f.observations) AS observations
   FROM commands
   CROSS JOIN LATERAL (
-    SELECT CASE
+    SELECT e ->> 'code' AS failure_code, e ->> 'stage' AS failure_stage,
+           CASE
              WHEN c ->> 'command' = 'automation list' AND e -> 'validation' ->> 'field' IN ('limit', 'status')
                OR c ->> 'command' = 'knowledge show' AND e -> 'validation' ->> 'field' IN ('slug', 'arguments')
                OR c ->> 'command' = 'knowledge upsert' AND e -> 'validation' ->> 'field' IN (
@@ -2402,6 +2451,8 @@ WITH rows AS MATERIALIZED (
                OR c ->> 'command' = 'measurement entry list' AND e -> 'validation' ->> 'field' IN ('metric', 'from', 'to', 'limit')
                OR c ->> 'command' IN ('meal add', 'meal edit') AND e -> 'validation' ->> 'field' IN (
                  'nutritionCalories', 'nutritionSource', 'occurredAt', 'arguments')
+               OR c ->> 'command' = 'meal edit' AND e -> 'validation' ->> 'field' IN (
+                 'id', 'nutritionProteinGrams', 'nutritionConfidence')
              THEN e -> 'validation' ->> 'field' END AS field,
            CASE WHEN e -> 'validation' ->> 'code' IN (
              'invalid_type', 'too_big', 'too_small', 'invalid_format', 'not_multiple_of',
@@ -2411,19 +2462,22 @@ WITH rows AS MATERIALIZED (
              THEN e -> 'validation' ->> 'missing' END AS missing,
            sum((e ->> 'count')::numeric) AS observations
     FROM jsonb_array_elements(c -> 'failures') e
-    WHERE e ->> 'code' = 'VALIDATION_ERROR'
-      AND e ->> 'stage' = 'validation'
-    GROUP BY 1, 2, 3
+    WHERE (c ->> 'command' <> 'meal remove-photo'
+      AND e ->> 'code' = 'VALIDATION_ERROR' AND e ->> 'stage' = 'validation')
+      OR (c ->> 'command' = 'meal remove-photo'
+        AND e ->> 'code' IN ('invalid_operation', 'unknown') AND e ->> 'stage' = 'unknown')
+    GROUP BY 1, 2, 3, 4, 5
   ) f
-  GROUP BY turn_id, c ->> 'command', f.field, f.issue_code, f.missing
+  GROUP BY turn_id, c ->> 'command', f.failure_code, f.failure_stage, f.field, f.issue_code, f.missing
 )
-SELECT command, field, issue_code, missing, count(*) AS independent_turns,
+SELECT command, failure_code, failure_stage, field, issue_code, missing, count(*) AS independent_turns,
        sum(observations) AS observed_failures_lower_bound,
-       (field IS NOT NULL AND issue_code IS NOT NULL) AS inspect,
+       ((field IS NOT NULL AND issue_code IS NOT NULL)
+         OR (command = 'meal remove-photo' AND failure_code = 'invalid_operation')) AS inspect,
        (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
 FROM per_turn
-GROUP BY command, field, issue_code, missing
-ORDER BY independent_turns DESC, command, field, issue_code, missing
+GROUP BY command, failure_code, failure_stage, field, issue_code, missing
+ORDER BY independent_turns DESC, command, failure_code, failure_stage, field, issue_code, missing
 LIMIT 50;
 ```
 

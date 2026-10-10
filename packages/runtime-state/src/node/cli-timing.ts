@@ -135,7 +135,7 @@ export function noteCliTimingFailure(error: unknown): void {
   const stage = ownData(ownData(error, "context"), "stage") ?? ownData(error, "stage") ??
     (validation ? "validation" : undefined);
   // Domain validation uses fieldErrors; schema-owned publicIssues take precedence.
-  invocation.failure = { code: cliTimingFailureCode(code), stage: cliTimingFailureStage(stage), count: 1,
+  invocation.failure = { code: cliTimingFailureCode(code, invocation.command), stage: cliTimingFailureStage(stage), count: 1,
     ...cliTimingValidationFailure(invocation.command, code, error, "fieldErrors"),
     ...cliTimingValidationFailure(invocation.command, code, error, "publicIssues"),
     ...cliTimingRejectionFailure(invocation.command, code, error, "cliTimingRejection") };
