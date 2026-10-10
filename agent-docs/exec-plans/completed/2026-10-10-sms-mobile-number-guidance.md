@@ -1,6 +1,6 @@
 # Explain unsupported SMS destinations
 
-Status: active
+Status: completed
 Created: 2026-10-10
 
 ## Outcome
@@ -40,4 +40,13 @@ Unrelated onboarding edits remain in their original checkout.
 - New before-proof: 2 positive cases fail, 65 controls pass. After: 67 transport,
   6 client and 10 changelog tests pass. Web typecheck and local guards pass.
 - Parent candidate review: Ready; no added I/O, state, retry or privacy exposure.
-- Pushed candidate CI and final ReviewGPT remain pending; human merge only.
+- Final ReviewGPT PASS on 4095485236779506a287a000cc5a7d0de3222a59;
+  no qualifying findings and no accepted unresolved findings.
+- Exact candidate CI: 36 passing checks, three correctly skipped optional lanes;
+  all required aggregates pass. Current-base merge-tree proof passes.
+- Parent final review: Ready. Only explanatory plan/index closeout remains;
+  functional source and regression proof stay byte-identical to reviewed head.
+- Human merge only. No production OTP, configuration, or deployment action.
+- Required final-head CI remains a gate after the explanatory closeout push.
+Updated: 2026-10-10
+Completed: 2026-10-10
