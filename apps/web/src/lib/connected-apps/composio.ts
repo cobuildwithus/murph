@@ -1,6 +1,11 @@
 import "server-only";
 
-import Composio, { APIConnectionError, APIError } from "@composio/client";
+import Composio, {
+  APIConnectionError,
+  APIConnectionTimeoutError,
+  APIError,
+  APIUserAbortError,
+} from "@composio/client";
 import type {
   SessionCreateParams,
   SessionExecuteParams,
@@ -389,7 +394,7 @@ async function requestComposio<T>(request: () => Promise<T>): Promise<T> {
       );
     }
     throw new ComposioConnectedAppsRequestError(
-      "Composio is temporarily unavailable.",
+      `Composio is temporarily unavailable. Transport diagnostic: ${describeComposioTransportFailure(error)}.`,
       null,
       {
         cause: error instanceof APIConnectionError && error.cause
@@ -399,6 +404,52 @@ async function requestComposio<T>(request: () => Promise<T>): Promise<T> {
       },
     );
   }
+}
+
+function describeComposioTransportFailure(error: unknown): string {
+  let current = error;
+  const visited = new Set<unknown>();
+  try {
+    // Inspect SDK classes before requestComposio unwraps their causes.
+    // The fixed depth also bounds non-cyclic chains; never inspect free-form text.
+    for (let depth = 0; depth < 8 && !visited.has(current); depth += 1) {
+      visited.add(current);
+      if (current instanceof APIConnectionTimeoutError) {
+        return "sdk_timeout";
+      }
+      if (current instanceof APIUserAbortError) {
+        return "abort";
+      }
+      const record = asRecord(current);
+      if (!record) {
+        break;
+      }
+      if (record.name === "AbortError") {
+        return "abort";
+      }
+      switch (record.code) {
+        case "ABORT_ERR":
+        case "UND_ERR_ABORTED":
+          return "abort";
+        case "ENOTFOUND":
+        case "EAI_AGAIN":
+          return "dns";
+        case "ECONNREFUSED":
+        case "ENETUNREACH":
+        case "EHOSTUNREACH":
+        case "UND_ERR_CONNECT_TIMEOUT":
+          return "connect";
+        case "ECONNRESET":
+        case "EPIPE":
+        case "UND_ERR_SOCKET":
+          return "socket";
+      }
+      current = record.cause;
+    }
+  } catch {
+    // Observation must not replace the original request failure.
+  }
+  return "unknown";
 }
 
 function createBoundedComposioFetch(fetchImpl: typeof fetch): typeof fetch {

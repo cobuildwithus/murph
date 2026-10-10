@@ -113,6 +113,28 @@ never retained. These additive diagnostics describe new failures only; they
 cannot reconstruct previously discarded historical details. Verify using
 natural traffic after the managed production deployment reaches its domains.
 
+## Connected-app transport diagnostics
+
+Composio failures without a provider HTTP status append a fixed
+`Transport diagnostic: <category>.` observation to the existing private route-error cause
+message. The six categories are `sdk_timeout`, `abort`, `dns`, `connect`, `socket`,
+and `unknown`; cause traversal is bounded to eight nodes and handles cycles.
+Only SDK classes and exact allowlisted names/codes select categories. Raw cause
+names, codes, prose, stacks, URLs, arguments and payloads are never added.
+
+`sdk_timeout` means the installed SDK classified the failure as a timeout; its
+own upstream normalization can use error text, so this does not prove that the
+configured request deadline elapsed. Categories cannot prove whether a write
+took effect. Public errors, retryability, ambiguous-write handling, cause chains,
+provider calls and existing event counts remain unchanged.
+
+After the managed Web deployment reaches production, inspect natural
+`Hosted onboarding route failed.` records whose existing `errorDetails.type`
+is `composio_transport_error`, grouping only the fixed category from
+`errorCauseMessage`. Keep failures without a category as pre-deployment or
+missing evidence. No new event is emitted on success, and historical causes
+cannot be reconstructed from this observation.
+
 ## Reconciliation-facts failure observability
 
 The success record's diagnostic `status` is `blocked` when access is blocked,
