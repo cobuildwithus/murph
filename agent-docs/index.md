@@ -1,3 +1,6 @@
+Sleep-pattern focused freshness and pending validation are tracked in
+[the active sleep-pattern plan](exec-plans/active/2026-10-09-sleep-pattern-focused-freshness.md).
+
 Entrypoint test worker build prerequisites are owned by
 `../packages/assistant-runtime/README.md#focused-tests`; repair evidence is tracked
 in [the worker preflight plan](exec-plans/completed/2026-10-09-frog-entrypoint-build-preflight.md).

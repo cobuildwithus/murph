@@ -1478,6 +1478,132 @@ describeRealCodex('real Codex focused wearable activity projection e2e', () => {
   }, 360_000)
 })
 
+async function seedFocusedSleepPatternProjectionVault(vaultRoot: string): Promise<void> {
+  await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-01-01T00:00:00Z' })
+  const events = ['2026-01-01', '2026-01-02', '2026-01-03'].flatMap(date =>
+    ['oura', 'garmin'].map(provider => {
+      const durationMinutes = provider === 'oura' ? 450 : 600
+      const endAt = `${date}T11:00:00.000Z`
+      const startAt = new Date(Date.parse(endAt) - durationMinutes * 60_000).toISOString()
+      return {
+        dayKey: date, durationMinutes, endAt,
+        externalRef: { system: provider, resourceType: 'sleep', resourceId: `focused-sleep-${provider}-${date}` },
+        id: `evt_focused_sleep_${provider}_${date.replaceAll('-', '')}`,
+        kind: 'sleep_session', occurredAt: startAt, recordedAt: `${date}T11:05:00.000Z`,
+        schemaVersion: 'murph.event.v1', sleepType: 'main_sleep', source: 'device',
+        startAt, title: 'Synthetic provider sleep',
+      }
+    }))
+  await mkdir(path.join(vaultRoot, 'ledger/events/2026'), { recursive: true })
+  await writeFile(path.join(vaultRoot, 'ledger/events/2026/2026-01.jsonl'),
+    `${events.map(event => JSON.stringify(event)).join('\n')}\n`, 'utf8')
+}
+
+async function buildFocusedSleepPatternProjectionInstructions() {
+  const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+    workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+  })
+  expect(manifest.commands.find(command => command.name === 'wearables sleep pattern')?.schema?.options?.properties)
+    .toMatchObject({
+      from: expect.any(Object), to: expect.any(Object), provider: expect.any(Object),
+      timeZone: expect.any(Object), windowDays: expect.any(Object),
+    })
+  const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+  if (!assistantCliContract) throw new Error('Expected the generated sleep-pattern CLI contract.')
+  const instructions = buildAssistantSystemPrompt({
+    assistantCliContract, assistantHostedAutomationAvailable: false,
+    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    conversationScope: 'direct', currentInstant: '2026-01-04T12:00:00.000Z',
+    currentLocalDate: '2026-01-04', currentTimeZone: 'UTC', hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+  })
+  expect(instructions).toContain(assistantCliContract)
+  expect(assistantCliContract).toContain('sleep pattern')
+  return instructions
+}
+
+function readFocusedSleepPatternProjectionCommand(command: string): string {
+  expect(command).not.toMatch(/[\r\n]/u)
+  const unwrapped = command.match(/^\/bin\/zsh -c '([^']+)'$/u)?.[1] ?? command
+  expect(unwrapped).toMatch(/^[ \t]*vault-cli[ \t]+wearables[ \t]+sleep[ \t]+pattern(?:[ \t]|$)/u)
+  expect(unwrapped).not.toMatch(/[^A-Za-z0-9_= \t-]/u)
+  return unwrapped
+}
+
+describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
+  it('answers duration and usable nights from one native sleep-pattern read without other reads or effects', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-sleep-pattern-projection-e2e-'))
+    const vaultRoot = path.join(root, 'vault'); const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await seedFocusedSleepPatternProjectionVault(vaultRoot)
+      const developerInstructions = await buildFocusedSleepPatternProjectionInstructions()
+      // Reuse the existing native production CLI wrapper, including its command log.
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions,
+        env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Read my Oura wearable sleep pattern from 2026-01-01 through 2026-01-03 once, using the native JSON format. Report the mean session duration in minutes (not total asleep time) and usable night count in one sentence. Use provider oura and those exact date bounds. No other reads, help commands, advice, messages to anyone, or changes.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      expect(commands).toHaveLength(1)
+      expect(commands[0]).toMatch(/^wearables sleep pattern(?:\s|$)/u)
+      const tokens = commands[0]!.split(/\s+/u).slice(3)
+      const options = new Map<string, string>()
+      while (tokens.length) {
+        const [flag, inline] = tokens.shift()!.split('=')
+        expect(['--from', '--to', '--provider', '--format']).toContain(flag)
+        expect(options.has(flag!)).toBe(false)
+        const value = inline ?? tokens.shift()
+        expect(value).toBeDefined(); options.set(flag!, value!)
+      }
+      expect(Object.fromEntries(options)).toEqual({
+        '--from': '2026-01-01', '--to': '2026-01-03', '--provider': 'oura', '--format': 'json',
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions).toHaveLength(1)
+      const action = actions[0]!
+      if (action.kind !== 'command') throw new Error('Only the focused native sleep-pattern read is permitted.')
+      expect(action.ok).toBe(true)
+      readFocusedSleepPatternProjectionCommand(action.command)
+      const document = readRecord(JSON.parse(action.output))
+      expect(document?.ok === true ? document.data : document).toMatchObject({
+        summary: {
+          from: '2026-01-01', to: '2026-01-03', providers: ['oura'],
+          validNightCount: 3, expectedNightCount: 3, reportingTimeZone: 'UTC',
+          sessionDurationMinutes: { average: 450, count: 3, median: 450 },
+        },
+      })
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(await getQueryProjectionStatus(vaultRoot)).toMatchObject({
+        exists: true, fresh: false, builtAt: null, entityCount: 0, searchDocumentCount: 0,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[focused-sleep-pattern-projection-e2e] ${JSON.stringify({ reads: commands.length, reply })}\n`)
+      const plainReply = reply.replace(/[*_`]/gu, '')
+      expect(plainReply).toMatch(/\b450\s*(?:minutes?|mins?)\b/iu)
+      expect(plainReply).toMatch(/\b(?:3|three)\s+(?:(?:usable|valid)\s+)?nights?\b|\bnights?\s*:\s*(?:3|three)\b/iu)
+      expect(plainReply).not.toMatch(/\b600\b|\b(?:updated|changed|deleted|sent|scheduled)\b|\?/iu)
+      expect(reply.length).toBeLessThanOrEqual(400)
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+  }, 360_000)
+})
+
 describeRealCodex('real model canonical production journeys', () => {
   it('real model canonical meal persists across assistant restart', async () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })

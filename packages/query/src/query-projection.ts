@@ -49,6 +49,7 @@ import {
 import {
   listCanonicalSourceManifest,
   readCanonicalEntityFamilySource,
+  readVaultMetadataSource,
   readVaultSourceStrict,
   readVaultSourceTolerant,
   type VaultSourceSnapshot,
@@ -344,23 +345,49 @@ export async function summarizeWearableSleepPatternRuntime(
   vaultRoot: string,
   filters: WearableSleepPatternFilters = {},
 ): Promise<WearableSleepPatternSummary> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const metadata = filters.timeZone === undefined
-    ? readStoredVaultMetadata(location)
-    : null;
-  const vaultTimeZone = typeof metadata?.timezone === "string"
-    && isValidIanaTimeZone(metadata.timezone)
-    ? metadata.timezone
-    : undefined;
-  const resolvedFilters = filters.timeZone === undefined && vaultTimeZone
-    ? { ...filters, timeZone: vaultTimeZone }
-    : filters;
-  const readFilters = resolveWearableSleepPatternReadFilters(resolvedFilters);
+  const location = currentQueryProjectionLocation(vaultRoot);
+  const status = await timeCliPhase("query-freshness", async () => {
+    const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+    return timeCliPhase("query-status", () => readProjectionStatus(location, manifest));
+  });
+  const captureSleepPatternInput = async () => {
+    const metadata = filters.timeZone === undefined
+      ? status?.fresh
+        ? readStoredVaultMetadata(location)
+        : await readVaultMetadataSource(vaultRoot)
+      : null;
+    const vaultTimeZone = typeof metadata?.timezone === "string"
+      && isValidIanaTimeZone(metadata.timezone)
+      ? metadata.timezone
+      : undefined;
+    const resolvedFilters = filters.timeZone === undefined && vaultTimeZone
+      ? { ...filters, timeZone: vaultTimeZone }
+      : filters;
+    const readFilters = resolveWearableSleepPatternReadFilters(resolvedFilters);
+    const rowFilters = { ...readFilters, summaryKinds: ["sleep", "source_health"] as const };
+    const rows = status?.fresh
+      ? readWearableSummaryRows(location, rowFilters)
+      : await readFreshWearableSummaryRows(vaultRoot, rowFilters);
+    return { rows, readFilters, resolvedFilters, vaultTimeZone };
+  };
+
+  // Keep the fresh-global path unlocked. Otherwise metadata and row capture
+  // share the focused owner's reentrant boundary, without global query work.
+  const endWait = status?.fresh ? null : startCliPhase("query-wait");
+  let captured: Awaited<ReturnType<typeof captureSleepPatternInput>>;
+  try {
+    captured = status?.fresh
+      ? await captureSleepPatternInput()
+      : await withCanonicalWriteLock(vaultRoot, () => {
+        endWait?.();
+        return captureSleepPatternInput();
+      });
+  } finally {
+    endWait?.();
+  }
+  const { rows, readFilters, resolvedFilters, vaultTimeZone } = captured;
   const bundle = composePublicWearableSummaryBundleFromStoredRows(
-    readWearableSummaryRows(location, {
-      ...readFilters,
-      summaryKinds: ["sleep", "source_health"],
-    }),
+    rows,
     readFilters,
     { retainSourceHealthOutsideDateFilters: true },
   );
