@@ -91,8 +91,8 @@ describe("device sync messaging return route", () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('content="0;url=https://t.me/murph_bot?text=I+just+connected+my+Oura"');
-    expect(html).toContain('href="https://t.me/murph_bot?text=I+just+connected+my+Oura"');
+    expect(html).toContain('content="0;url=https://t.me/murph_bot?text=I%20just%20connected%20my%20Oura"');
+    expect(html).toContain('href="https://t.me/murph_bot?text=I%20just%20connected%20my%20Oura"');
     expect(html).toContain("Oura is connected");
   });
 
@@ -107,10 +107,10 @@ describe("device sync messaging return route", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain(
-      'content="0;url=https://t.me/murphdevelopment_bot?text=I+just+connected+my+device"',
+      'content="0;url=https://t.me/murphdevelopment_bot?text=I%20just%20connected%20my%20device"',
     );
     expect(html).toContain(
-      'href="https://t.me/murphdevelopment_bot?text=I+just+connected+my+device"',
+      'href="https://t.me/murphdevelopment_bot?text=I%20just%20connected%20my%20device"',
     );
     expect(html).not.toContain("murph_bot");
   });
@@ -126,10 +126,10 @@ describe("device sync messaging return route", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain(
-      'content="0;url=https://t.me/murph_bot?text=I+just+connected+my+device"',
+      'content="0;url=https://t.me/murph_bot?text=I%20just%20connected%20my%20device"',
     );
     expect(html).toContain(
-      'href="https://t.me/murph_bot?text=I+just+connected+my+device"',
+      'href="https://t.me/murph_bot?text=I%20just%20connected%20my%20device"',
     );
   });
 
@@ -158,8 +158,8 @@ describe("device sync messaging return route", () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('content="0;url=https://t.me/withmurph_bot?text=I+just+connected+my+device"');
-    expect(html).toContain('href="https://t.me/withmurph_bot?text=I+just+connected+my+device"');
+    expect(html).toContain('content="0;url=https://t.me/withmurph_bot?text=I%20just%20connected%20my%20device"');
+    expect(html).toContain('href="https://t.me/withmurph_bot?text=I%20just%20connected%20my%20device"');
   });
 
   it("ignores unsafe provider display values on supported targets", async () => {

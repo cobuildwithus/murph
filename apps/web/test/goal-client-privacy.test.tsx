@@ -40,7 +40,7 @@ vi.mock("next/link", async () => {
 });
 
 const telegramOption: MurphContactOption = {
-  href: "https://t.me/withmurph_bot?text=Help+me+with+this+goal",
+  href: "https://t.me/withmurph_bot?text=Help%20me%20with%20this%20goal",
   kind: "telegram",
   label: "Telegram",
   rel: "noopener noreferrer",

@@ -720,7 +720,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     if (kind === "invalid-chat") provider.telegram.mockResolvedValue({ ok: true, result: { message_id: 1, chat: { id: 987654321, type: "private" } } });
     else provider.telegram.mockRejectedValue(new Error(kind === "forbidden" ? "Synthetic Telegram 403" : "Synthetic timeout"));
     const completed = await completeNativeTelegram(nativeRequest(f.token, t.body));
-    expect(await completed.json()).toMatchObject({ ok: true, linked: true, telegramAwaitingInbound: true, telegramUrl: "https://t.me/synthetic_murph_bot?text=Hey+Murph" });
+    expect(await completed.json()).toMatchObject({ ok: true, linked: true, telegramAwaitingInbound: true, telegramUrl: "https://t.me/synthetic_murph_bot?text=Hey%20Murph" });
     const routing = await readHostedMemberRoutingState(f);
     expect(routing?.telegramUserId).toBe("123456789");
     expect(routing?.telegramThreadId).toBeNull();
