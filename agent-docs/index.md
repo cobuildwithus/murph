@@ -40,6 +40,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Typing preparation lifetime across completed-import handoff is owned by
+[`RELIABILITY.md`](RELIABILITY.md); synthetic lifecycle proof is tracked in
+[the typing lifetime plan](exec-plans/completed/2026-10-11-warm-typing-lifetime.md).
+
 Member-then-root lock order for Telegram direct ingress and Telegram Family
 invite acceptance is proven by the Telegram PostgreSQL rows in
 [`testing-ci-map.md`](references/testing-ci-map.md); evidence is tracked in

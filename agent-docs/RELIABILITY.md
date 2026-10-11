@@ -2508,6 +2508,9 @@ to apply after cutover.
   evidence. The existing per-chat claim retains one preparation handle; the
   validated turn takes it only through the same provider-fetch authority,
   rebinding cancellation without another start or a reset session budget.
+  Preparation uses the invocation cancellation signal, not the temporary import
+  pass signal: a completed import yielding to foreground work must not stop its
+  admitted indicator before turn handoff.
   Import failure cancels only an unclaimed preparation. Terminal non-reply
   completion also cancels the exact input's preparation in the same runtime;
   invocation cleanup drains its remaining unclaimed preparations. A canceled

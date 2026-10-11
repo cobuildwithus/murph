@@ -17,6 +17,7 @@ import type { HostedAssistantLinqDeliveryContext } from "../src/hosted-runtime/l
 const mocks = vi.hoisted(() => ({
   cancel: null as (() => void) | null,
   importedFetch: undefined as typeof fetch | null | undefined,
+  importedTypingSignal: undefined as AbortSignal | null | undefined,
   start: vi.fn(),
   stop: vi.fn(async () => undefined),
 }));
@@ -36,12 +37,14 @@ vi.mock("../src/hosted-runtime/mailbox-conversation-import.ts", async (importOri
     ...actual,
     createHostedConversationMailboxImportItem: (
       input: Parameters<typeof actual.createHostedConversationMailboxImportItem>[0],
-    ) => async (_item: unknown, context?: { runtimeAttemptId?: string | null }) => {
+    ) => async (_item: unknown, context?: { runtimeAttemptId?: string | null; typingSignal?: AbortSignal | null }) => {
       mocks.importedFetch = input.runtime.platform.providerFetch;
+      mocks.importedTypingSignal = context?.typingSignal;
       mocks.cancel = startHostedLinqInputTyping({
         inputId: "synthetic_input", runtimeAttemptId: context?.runtimeAttemptId,
         forwardedEnv: input.runtime.forwardedEnv, userEnv: input.runtime.userEnv,
         providerFetch: input.runtime.platform.providerFetch, linqDeliveryContext: route,
+        signal: context?.typingSignal ?? undefined,
       });
       return { status: "imported" as const };
     },
@@ -94,6 +97,8 @@ test.each([
         }
         if (skipTurn) return { progressed: false };
         assert.ok(guardedFetch);
+        assert.ok(mocks.importedTypingSignal, "runtime must own the preparation lifetime");
+        assert.equal(mocks.importedTypingSignal.aborted, false);
         assert.notEqual(guardedFetch, originalFetch);
         const typing = createHostedAssistantChannelTypingDependencies({
           forwardedEnv: input.runtime.forwardedEnv, userEnv: input.runtime.userEnv,

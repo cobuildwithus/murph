@@ -268,7 +268,7 @@ export type HostedConversationMailboxImportOutcome =
 type HostedConversationMailboxImportContext = Pick<
   HostedConversationMailboxImportInput,
   | "latencyMilestones" | "onConversationActivityObserved" | "onConversationInputStaged"
-  | "runtimeAttemptId" | "signal"
+  | "runtimeAttemptId" | "signal" | "typingSignal"
 >;
 
 type HostedConversationMailboxImporter = ((
@@ -317,6 +317,7 @@ interface HostedConversationMailboxImportInput {
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
+  typingSignal?: AbortSignal | null;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
   vaultRoot: string;
 }
@@ -534,6 +535,7 @@ async function stageHostedConversationMailboxItem(
     runtime: input.runtime,
     runtimeAttemptId: input.runtimeAttemptId,
     signal: input.signal,
+    typingSignal: input.typingSignal,
   });
   let importSucceeded = false;
   return {
@@ -611,6 +613,7 @@ function startHostedConversationInputTyping(input: {
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
+  typingSignal?: AbortSignal | null;
 }): ReturnType<typeof startHostedLinqInputTyping> {
   if (!input.foregroundAssistantInputId) {
     return null;
@@ -627,7 +630,9 @@ function startHostedConversationInputTyping(input: {
     } : null,
     linqDeliveryContext: input.linqDeliveryContext,
     providerFetch: input.runtime.platform.providerFetch,
-    signal: input.signal ?? undefined,
+    // An admitted preparation outlives an import pass yielding to foreground
+    // work. Import failure still cancels it; the turn rebinds its owner.
+    signal: input.typingSignal ?? input.signal ?? undefined,
     userEnv: input.runtime.userEnv,
   });
 }

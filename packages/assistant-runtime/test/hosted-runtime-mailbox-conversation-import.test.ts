@@ -815,6 +815,7 @@ describe("hosted mailbox conversation import adapter", () => {
     else if (scenario === "failed-start") start.mockRejectedValue(new Error("synthetic start failure"));
     else start.mockResolvedValue(handle);
     const signal = new AbortController();
+    const typingLifetime = new AbortController();
     const enqueuePendingReply = vi.fn(async () => {
       if (scenario === "enqueue-failed") throw new Error("synthetic pending admission failure");
     });
@@ -825,6 +826,7 @@ describe("hosted mailbox conversation import adapter", () => {
       item: { ...createResolvedConversationMailboxItem(), durablyConsumed: scenario === "consumed-replay" },
       runtime: createRuntime({ platform: { providerFetch: vi.fn<typeof fetch>() } }),
       signal: signal.signal,
+      typingSignal: typingLifetime.signal,
       vaultRoot,
       async prepareWakeContext() {},
       async stageAssistantInputEvent() {
@@ -870,9 +872,70 @@ describe("hosted mailbox conversation import adapter", () => {
     } finally {
       releaseStage.resolve(undefined);
       signal.abort();
+      typingLifetime.abort();
       providerReady.resolve(handle);
       await importing.catch(() => undefined);
       if (scenario === "pending-start") await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+    }
+  });
+
+  test("admitted typing survives import cancellation until turn handoff", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-typing-import-lifetime-"));
+    tempRoots.push(vaultRoot);
+    const importController = new AbortController();
+    const runtimeController = new AbortController();
+    const turnController = new AbortController();
+    const stop = vi.fn(async () => {});
+    const acceptedAt = "2026-04-26T00:00:00.000Z";
+    const start = vi.spyOn(channelAdapters, "startLinqTypingIndicator").mockResolvedValue({
+      acceptedAt, stop, isActive: () => true,
+    });
+    const providerFetch = vi.fn<typeof fetch>();
+    const runtime = createRuntime({ platform: { providerFetch } });
+    const wake = createConversationWake({ message: {
+      channel: "linq", phoneLookupKey: "synthetic_lookup",
+      linqMessage: {
+        chatId: "synthetic_import_handoff_chat", from: "synthetic_sender",
+        isFromMe: false, messageId: "synthetic_import_handoff_message",
+        parts: [{ type: "text", value: "Help me plan tomorrow." }], threadIsDirect: true,
+      },
+    } });
+    const importInput = {
+      decodePayload: createDecodedPayloadDecoder(wake),
+      item: createResolvedConversationMailboxItem(), runtime, vaultRoot,
+      runtimeAttemptId: "synthetic_import_handoff_attempt",
+      signal: importController.signal, typingSignal: runtimeController.signal,
+      async prepareWakeContext() {},
+      stageAssistantInputEvent: createAssistantInputEventStager({ attachmentDescriptorCount: 0 }),
+    };
+    let turnTyping: AssistantChannelActivityHandle | undefined;
+    try {
+      const outcome = await importHostedConversationMailboxItem(importInput);
+      assert.equal(outcome.status, "imported");
+      await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+      // The import pass yields after durable admission, before the foreground
+      // turn has taken the preparation. This is not runtime termination.
+      importController.abort(new Error("Synthetic import pass yielded."));
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(stop).not.toHaveBeenCalled();
+      assert.equal(outcome.status, "imported");
+      if (outcome.status !== "imported") return;
+      const typing = createHostedAssistantChannelTypingDependencies({
+        forwardedEnv: runtime.forwardedEnv, userEnv: runtime.userEnv, providerFetch,
+        linqDeliveryContexts: outcome.linqDeliveryContext ? [outcome.linqDeliveryContext] : [],
+        signal: turnController.signal,
+      });
+      turnTyping = (await typing.startLinqTyping?.({ target: "synthetic_import_handoff_chat" })) || undefined;
+      assert.ok(turnTyping);
+      assert.equal(turnTyping.acceptedAt, acceptedAt);
+      expect(start).toHaveBeenCalledOnce();
+      turnController.abort();
+      await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+    } finally {
+      importController.abort();
+      runtimeController.abort();
+      turnController.abort();
+      await turnTyping?.stop({ providerStop: false });
     }
   });
 
