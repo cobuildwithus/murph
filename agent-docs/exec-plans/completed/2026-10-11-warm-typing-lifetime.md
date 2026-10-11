@@ -1,6 +1,6 @@
 # Preserve typing preparation through import handoff
 
-Status: active
+Status: completed
 Created: 2026-10-11
 Updated: 2026-10-11
 
@@ -62,6 +62,8 @@ yields before the foreground reply turn takes ownership.
   import stopped the provider handle before foreground handoff.
 - Focused importer, attachment-typing, and runtime-handoff tests cover success,
   failures, cancellation, provider authority, reuse, and final cleanup.
-- Run assistant-runtime typecheck, complexity diff, docs checks, changelog
-  generation and focused archive rendering proof before the candidate is Ready.
+- Passed: assistant-runtime and Web typechecks; 113 importer, attachment, and
+  runtime-handoff tests; 10 archive tests; complexity diff (unchanged hotspot
+  debt); docs drift and gardening; changelog generation; git diff --check.
 - Record exact-head external review and CI evidence in the PR.
+Completed: 2026-10-11
