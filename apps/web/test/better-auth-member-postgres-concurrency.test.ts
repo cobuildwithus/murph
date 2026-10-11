@@ -547,6 +547,20 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect((await readHostedMemberIdentity(f))?.phoneNumber).toBe(change.value);
   }));
 
+  it("native phone send rejected before sending does not start the cooldown", () => withInitialPasskeyMember(async (f) => {
+    vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+    const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550193" };
+    await f.prisma.hostedAuthRecord.deleteMany({ where: { id: { in: ["send:cooldown", "send:contact"].map((prefix) => `arl_${authLookupKey("verification", "rate-limit", `${prefix}:phone:${change.value}`)}`) } } });
+    const setPrimaryAuthenticatedAt = (at: Date) => hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt: at },
+    });
+    await setPrimaryAuthenticatedAt(new Date(Date.now() - 360_000));
+    expect((await sendNativePhone(nativeRequest(f.token, { change }))).status).toBe(403);
+    await setPrimaryAuthenticatedAt(new Date());
+    expect((await sendNativePhone(nativeRequest(f.token, { change }))).status).toBe(200);
+    expect((await sendNativePhone(nativeRequest(f.token, { change }))).status).toBe(429);
+  }));
+
   it("native phone verifies through canonical owners, rejects cookies and wrong codes, and clears readiness", () => withInitialPhoneMember(async (f) => {
     const body = { change: f.change, code: f.code };
     expect((await verifyNativePhone(nativeRequest(f.token, body, true))).status).toBe(401);

@@ -52,14 +52,14 @@ export async function changeHostedLoginMethodRequest(request: Request, operation
     const limits = hostedAuthRateLimitStorage(prisma);
     const value = change.value ?? change.expectedIdentity;
     const send = operation === "send";
+    const consume = async (key: string, max: number, window: number) => {
+      if (!(await limits.consume(key, { max, window })).allowed) throw hostedOnboardingError({ code: "AUTH_RATE_LIMITED", httpStatus: 429, message: "Too many attempts. Wait a moment and try again.", retryable: true });
+    };
     for (const [key, max, window] of [
       [`credential:${operation}:member:${session.member.id}`, send ? 5 : 30, 600],
       [`${operation}:ip:${hostedAuthRequestIp(request)}`, send ? 20 : 100, 600],
       [`${operation}:contact:${change.method}:${value}`, send ? 5 : 20, 600],
-      ...(send ? [[`send:cooldown:${change.method}:${value}`, 1, 60] as const] : []),
-    ] as const) {
-      if (!(await limits.consume(key, { max, window })).allowed) throw hostedOnboardingError({ code: "AUTH_RATE_LIMITED", httpStatus: 429, message: "Too many attempts. Wait a moment and try again.", retryable: true });
-    }
+    ] as const) await consume(key, max, window);
     const prepared = await prepareHostedCredentialChange({ change, session, request, prisma, transport,
       ...((operation === "verify" || operation === "remove") ? { authorization: body.authorization } : {}),
     });
@@ -67,7 +67,13 @@ export async function changeHostedLoginMethodRequest(request: Request, operation
     if (operation === "challenge") return jsonOk(await createSensitiveActionChallenge({
       bindingHash: prepared.bindingHash, kind: HOSTED_CREDENTIAL_CHANGE_KIND, memberId: session.member.id, prisma,
     }));
-    if (operation === "send") await sendHostedCredentialOtp({ change, prepared, request, prisma, delivery: hostedAuthDelivery(request.signal) });
+    if (operation === "send") {
+      // The cooldown paces codes actually sent to a contact. A request rejected
+      // above (stale session, conflict, approval) sent nothing, so it must not
+      // make the member's immediate retry wait.
+      await consume(`send:cooldown:${change.method}:${value}`, 1, 60);
+      await sendHostedCredentialOtp({ change, prepared, request, prisma, delivery: hostedAuthDelivery(request.signal) });
+    }
     let dispatch: Awaited<ReturnType<typeof prepared.commit>> = null;
     if (operation === "verify") dispatch = await commitHostedCredentialOtp({ change, prepared, request, prisma, code: body.code! });
     if (operation === "remove") dispatch = await prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
