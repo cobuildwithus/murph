@@ -36,8 +36,8 @@ const DATA_PRIVACY_HANDOFF_COPY = {
         <p>
           Your account and profile, health data, anything you’ve sent Murph,
           what Murph learned about you, connected apps and devices, and your
-          subscription. Messages already delivered by text, Telegram or email
-          can’t be recalled.
+          subscription. Messages already delivered to external carrier,
+          Telegram, Linq, or email systems can’t be recalled.
         </p>
       </section>
 
@@ -46,7 +46,7 @@ const DATA_PRIVACY_HANDOFF_COPY = {
         <ul className="list-disc space-y-1 pl-5">
           <li>Health data, memories and chats: within 30 days, backups within 90</li>
           <li>Account, device sync and messaging records: within 90 days</li>
-          <li>Support records up to 3 years, security logs up to 1 year, billing records as the law requires</li>
+          <li>Support records up to 3 years, security logs 90–365 days, billing records as the law requires</li>
         </ul>
       </section>
     </div>
