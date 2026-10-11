@@ -1,3 +1,5 @@
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
+import { HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER } from "../runner-outbound/headers.ts";
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   parseHostedMailboxFetchResponse,
@@ -42,38 +44,65 @@ export function createHostedWebMailboxPort(input: {
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[0],
       context?: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[1],
     ) {
-      let payload: unknown;
+      const correlationId = crypto.randomUUID();
+      const startedAt = performance.now();
+      const startedAtEpochMs = Date.now();
+      let decodedAt: number | null = null;
+      let decodedAtEpochMs: number | null = null;
+      let importReadyAtEpochMs: number | null = null;
       try {
-        payload = await fetchReplaySafeHostedWebControlPlaneJson({
-          body: { ...request, decodeInlinePayloads: true },
-          boundUserId: input.boundUserId,
-          description: "Hosted mailbox fetch",
-          fetchImpl: input.fetchImpl,
-          route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch,
-          ...(context?.signal ? { signal: context.signal } : {}),
-          timeoutMs: input.timeoutMs,
-          transport: input.transport,
-        });
-      } catch (error) {
-        if (context?.signal?.aborted) {
-          throw context.signal.reason;
+        let payload: unknown;
+        try {
+          payload = await fetchReplaySafeHostedWebControlPlaneJson({
+            body: { ...request, decodeInlinePayloads: true },
+            boundUserId: input.boundUserId,
+            description: "Hosted mailbox fetch",
+            fetchImpl: input.fetchImpl,
+            headers: new Headers({ [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: correlationId }),
+            route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch,
+            ...(context?.signal ? { signal: context.signal } : {}),
+            timeoutMs: input.timeoutMs,
+            transport: input.transport,
+          });
+        } catch (error) {
+          if (context?.signal?.aborted) throw context.signal.reason;
+          throw error;
         }
-        throw error;
+        decodedAt = performance.now();
+        decodedAtEpochMs = Date.now();
+        const mailbox = parseHostedMailboxFetchResponse(payload);
+        // The ordinary parser proves these item records. Only the Worker port
+        // accepts this ephemeral enrichment; Web's canonical parser discards it.
+        const rawItems = (payload as { items: Array<Record<string, unknown>> }).items;
+        const result = {
+          ...mailbox,
+          items: mailbox.items.map((item, index) => ({
+            ...item,
+            ...(rawItems[index]?.decodedWake === undefined ? {} : {
+              decodedWake: parseHostedExecutionWake(rawItems[index]!.decodedWake),
+            }),
+          })),
+        };
+        importReadyAtEpochMs = Date.now();
+        return result;
+      } finally {
+        emitHostedExecutionStructuredLog({
+          component: "mailbox",
+          details: {
+            mailboxFetchCorrelationId: correlationId,
+            mailboxRuntimeFetchStartedAtEpochMs: startedAtEpochMs,
+            mailboxRuntimeResponseDecodedAtEpochMs: decodedAtEpochMs,
+            mailboxRuntimeImportReadyAtEpochMs: importReadyAtEpochMs,
+            mailboxRuntimeFetchAndDecodeMs: decodedAt === null ? null : Math.max(0, Math.round(decodedAt - startedAt)),
+            mailboxRuntimeParseMs: decodedAt === null ? null : Math.max(0, Math.round(performance.now() - decodedAt)),
+            mailboxRuntimeTotalMs: Math.max(0, Math.round(performance.now() - startedAt)),
+            mailboxRuntimeImportReady: importReadyAtEpochMs !== null,
+          },
+          level: importReadyAtEpochMs === null ? "warn" : "info",
+          message: "Hosted runtime mailbox fetch finished.",
+          phase: "wake.running",
+        });
       }
-
-      const mailbox = parseHostedMailboxFetchResponse(payload);
-      // The ordinary parser proves these item records. Only the Worker port
-      // accepts this ephemeral enrichment; Web's canonical parser discards it.
-      const rawItems = (payload as { items: Array<Record<string, unknown>> }).items;
-      return {
-        ...mailbox,
-        items: mailbox.items.map((item, index) => ({
-          ...item,
-          ...(rawItems[index]?.decodedWake === undefined ? {} : {
-            decodedWake: parseHostedExecutionWake(rawItems[index]!.decodedWake),
-          }),
-        })),
-      };
     },
     async fetchPayload(
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetchPayload"]>[0],

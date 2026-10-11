@@ -728,6 +728,36 @@ private deployment boundaries still apply.
 
 ## Private Operational Telemetry
 
+Linq typing-start fetches mint one random UUID in
+`x-hosted-runtime-fetch-correlation-id`. The runtime records
+`providerRuntimeStartedAtEpochMs`, `providerRuntimeResumedAtEpochMs` and monotonic
+`providerRuntimeRoundTripMs` under `providerFetchCorrelationId`. The Worker adds
+the same ID, native-authorized `runtimeAttemptId` and
+`providerWorkerStartedAtEpochMs` to its existing total, authorization and upstream
+duration record. Subtracting Worker elapsed time from runtime elapsed time shows
+time outside Worker processing; it does not distinguish outbound proxy queueing,
+network transit or a delayed runtime continuation. Epoch clocks can differ across
+hosts and cannot independently prove an event-loop stall.
+
+Mailbox port fetches use the same private header with `mailboxFetchCorrelationId`.
+The Worker attaches the authorized attempt to existing mailbox timing fields.
+The runtime records fetch start, response JSON decoded and validated import-ready
+epoch markers, plus monotonic fetch/decode, parse and total milliseconds. One
+logical fetch ID spans existing read retries and can join multiple Worker records;
+its total includes retry waits. A failed/canceled fetch records false
+`mailboxRuntimeImportReady` and unset markers for unfinished phases (null in the
+emitter input; omitted by structured-log sanitization). Import-ready
+means the port can return validated items, not that the runtime has imported or
+staged them; compare the subsequent mailbox milestones separately.
+
+These IDs are diagnostic only. The Worker accepts UUID-v4 shape only and strips
+the header before provider or Web forwarding; request bodies, recipients and
+credentials are excluded. Old runtimes omit the header, and old Workers ignore
+it for behavior. Roll out the Worker before the runtime image so newly emitted
+headers are stripped at egress; complete joins require both new revisions.
+Use ordinary authorized traffic to verify correlation after rollout. Missing
+historical IDs cannot be reconstructed or treated as zero latency.
+
 Successful warm ensure-processing requests omit the detached processing summary
 only when they complete within one second. Slower successes retain the existing
 native wake entry, dispatch, response, and handler timing fields, so platform

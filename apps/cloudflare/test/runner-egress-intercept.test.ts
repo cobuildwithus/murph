@@ -1,3 +1,4 @@
+import { createCloudflareHostedProviderFetch } from "../src/runtime-platform/provider-fetch.ts";
 import type { TestProviderContext } from "./postgres-owner-fixtures.ts";
 import { createPostgresTestOwner } from "./postgres-owner-fixtures.ts";
 import { createHash } from "node:crypto";
@@ -62,6 +63,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
+  HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -5746,6 +5748,97 @@ describe("hostedRunnerIntercept", () => {
       }),
     );
   });
+
+  it.each(["https://api.linqapp.com/api/partner/v3", "https://linq.example.test/custom/v3"])(
+    "correlates typing runtime resume with Worker egress under %s without forwarding diagnostics",
+    async (base) => {
+      let clock = 100;
+      const performanceSpy = vi.spyOn(performance, "now").mockImplementation(() => clock);
+      const response = new Response(null, { status: 204 });
+      const upstream = vi.fn<typeof fetch>(async () => response);
+      vi.stubGlobal("fetch", upstream);
+      const env = createInterceptEnv({ LINQ_API_BASE_URL: base, LINQ_API_TOKEN: "synthetic-worker-secret",
+        validateRuntimeWriteFence: async () => true });
+      const proxy = vi.fn<typeof fetch>(async (request, init) => {
+        const result = await hostedRunnerIntercept(new Request(request, init), env,
+          { className: "RunnerContainer", containerId: "opaque-container-id" });
+        // A controlled continuation gap is runtime-side, after Worker completion.
+        clock += 250;
+        return result;
+      });
+      const runtimeFetch = createCloudflareHostedProviderFetch("member_123", proxy, {
+        providerFetchBaseUrlSource: { LINQ_API_BASE_URL: base }, providerFetchBaseUrls: [base],
+      });
+      const result = await runtimeFetch(`${base}/chats/synthetic-private-chat/typing`, {
+        method: "POST", headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: "synthetic-private-caller-value",
+        },
+      });
+      expect(result).toBe(response);
+      expect(proxy).toHaveBeenCalledTimes(1);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      expect(readForwardedRequest(upstream).headers.has(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER)).toBe(false);
+      const entries = mocks.emitHostedExecutionStructuredLog.mock.calls.map(([entry]) => entry);
+      const runtimeLog = entries.find(entry => entry.message === "Hosted runtime typing fetch resumed.");
+      const workerLog = entries.find(entry => entry.message === "Hosted runner provider egress completed.");
+      expect(runtimeLog?.details).toMatchObject({ providerRuntimeRoundTripMs: 250, responseStatus: 204 });
+      expect(runtimeLog?.details.providerFetchCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(workerLog?.details).toMatchObject({
+        providerFetchCorrelationId: runtimeLog?.details.providerFetchCorrelationId,
+        runtimeAttemptId: "attempt_1", providerTotalDurationMs: expect.any(Number),
+        providerUpstreamDurationMs: expect.any(Number),
+      });
+      expect(JSON.stringify(entries)).not.toMatch(/synthetic-private-chat|synthetic-private-caller-value|synthetic-worker-secret/);
+      performanceSpy.mockRestore();
+    },
+  );
+
+  it("preserves typing transport failure identity and records its correlation", async () => {
+    const error = new Error("Synthetic transport failure");
+    const transport = vi.fn<typeof fetch>(async () => { throw error; });
+    const runtimeFetch = createCloudflareHostedProviderFetch("member_123", transport, {});
+    await expect(runtimeFetch("https://api.linqapp.com/api/partner/v3/chats/synthetic-chat/typing",
+      { method: "POST" })).rejects.toBe(error);
+    expect(transport).toHaveBeenCalledTimes(1);
+    const correlationId = new Request(transport.mock.calls[0]![0]).headers.get(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER);
+    expect(correlationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      level: "warn", details: expect.objectContaining({ providerFetchCorrelationId: correlationId,
+        providerRuntimeRoundTripMs: expect.any(Number) }),
+    }));
+  });
+
+  it("does not attach typing diagnostics to a typing-stop request", async () => {
+    const response = new Response(null, { status: 204 });
+    const transport = vi.fn<typeof fetch>(async () => response);
+    const runtimeFetch = createCloudflareHostedProviderFetch("member_123", transport, {});
+    expect(await runtimeFetch("https://api.linqapp.com/api/partner/v3/chats/synthetic-chat/typing", {
+      method: "DELETE", headers: { [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: crypto.randomUUID() },
+    })).toBe(response);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(new Request(transport.mock.calls[0]![0]).headers.has(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER)).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
+  });
+
+  it.each(["not-a-uuid", "11111111-1111-1111-1111-111111111111"])(
+    "omits malformed typing correlation metadata (%s) without changing egress", async (id) => {
+      const upstream = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+      vi.stubGlobal("fetch", upstream);
+      const response = await hostedRunnerIntercept(new Request(
+        "https://api.linqapp.com/api/partner/v3/chats/synthetic-chat/typing", {
+          method: "POST", headers: { ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+            [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: id },
+        }), createInterceptEnv({ LINQ_API_TOKEN: "synthetic-secret", validateRuntimeWriteFence: async () => true }),
+        { className: "RunnerContainer", containerId: "opaque-container-id" });
+      expect(response.status).toBe(204);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      expect(readForwardedRequest(upstream).headers.has(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER)).toBe(false);
+      const log = mocks.emitHostedExecutionStructuredLog.mock.calls.find(([entry]) =>
+        entry.message === "Hosted runner provider egress completed.")?.[0];
+      expect(log.details).not.toHaveProperty("providerFetchCorrelationId");
+    },
+  );
 
   it("honors configured Linq base URL pathname prefixes before validating allowed suffixes", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));

@@ -69,11 +69,14 @@ import {
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+  HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER,
+  readHostedRuntimeFetchCorrelationId,
 } from "./runner-outbound/headers.ts";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
 import {
+  DEFAULT_LINQ_API_BASE_URL,
   readAllowedHostedLinqOperation,
   type HostedLinqProviderOperation,
 } from "./runner-egress-linq-policy.ts";
@@ -131,7 +134,6 @@ const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
 ] as const;
 
-const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
 const HOSTED_OPENAI_RESPONSES_MAX_BODY_BYTES = 32 * 1024 * 1024;
 const OPENAI_AUTHORIZATION_ALERT_SINGLETON_NAME = "production";
@@ -2707,6 +2709,7 @@ function emitHostedProviderEgressDiagnostic(input: {
       providerUpstreamDurationMs: input.upstreamDurationMs,
       providerEgressAuthDurationMs: input.authorization.durationMs,
       providerEgressAuthMode: input.authorization.mode,
+      ...readTypingFetchCorrelationDetails(input),
       ...(input.providerOperation ? { providerOperation: input.providerOperation } : {}),
       responseOk: input.response?.ok ?? null,
       responseStatus: input.response?.status ?? null,
@@ -2780,8 +2783,21 @@ function readSafeCloudflareRay(value: string | null): string | null {
     : null;
 }
 
+function readTypingFetchCorrelationDetails(
+  input: Parameters<typeof emitHostedProviderEgressDiagnostic>[0],
+): Record<string, string | number | null> {
+  if (input.providerKind !== "linq" || input.providerOperation !== "typing_start") return {};
+  const correlationId = readHostedRuntimeFetchCorrelationId(input.request.headers);
+  return correlationId ? {
+    providerFetchCorrelationId: correlationId,
+    runtimeAttemptId: input.authorization.writeFence?.attemptId ?? null,
+    providerWorkerStartedAtEpochMs: input.startedAt,
+  } : {};
+}
+
 function stripHostedRuntimeAuthorityHeaders(headers: Headers): Headers {
   const stripped = new Headers(headers);
+  stripped.delete(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER);
   for (const name of HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES) {
     stripped.delete(name);
   }

@@ -26,7 +26,9 @@ import {
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+  HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER,
 } from "../runner-outbound/headers.ts";
+import { DEFAULT_LINQ_API_BASE_URL, readAllowedHostedLinqOperation } from "../runner-egress-linq-policy.ts";
 import { writeRunnerRuntimeWriteFenceHeaders } from "../runner-outbound/headers.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import {
@@ -309,11 +311,30 @@ export function createCloudflareHostedProviderFetch(
     headers.delete(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
     headers.delete(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER);
     headers.delete(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER);
+    headers.delete(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER);
     headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
 
+    const correlationId = isHostedLinqTypingStart(request, url, options.providerFetchBaseUrlSource)
+      ? crypto.randomUUID() : null;
+    if (correlationId) headers.set(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER, correlationId);
     const providerRequest = new Request(request, { headers });
+    const startedAt = performance.now();
+    const startedAtEpochMs = Date.now();
+    const timingDetails = (): Record<string, string | number> => correlationId ? {
+      providerFetchCorrelationId: correlationId,
+      providerRuntimeStartedAtEpochMs: startedAtEpochMs,
+      providerRuntimeResumedAtEpochMs: Date.now(),
+      providerRuntimeRoundTripMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    } : {};
     try {
-      return await normalizedFetchImpl(providerRequest);
+      const response = await normalizedFetchImpl(providerRequest);
+      if (correlationId) emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: { ...timingDetails(), providerOperation: "typing_start", responseStatus: response.status },
+        message: "Hosted runtime typing fetch resumed.",
+        phase: "outbox",
+      });
+      return response;
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "assistant-delivery",
@@ -321,6 +342,7 @@ export function createCloudflareHostedProviderFetch(
           host: normalizeCloudflareHostedFetchHostname(url.hostname),
           method: readHostedRunnerDiagnosticMethod(providerRequest.method),
           operation: "provider_fetch",
+          ...timingDetails(),
           ...buildHostedRuntimeSafeErrorMetadata(error),
         },
         level: "warn",
@@ -331,6 +353,18 @@ export function createCloudflareHostedProviderFetch(
       throw error;
     }
   }) as typeof fetch;
+}
+
+function isHostedLinqTypingStart(
+  request: Request, url: URL, source?: Readonly<Record<string, unknown>>,
+): boolean {
+  const configured = source?.LINQ_API_BASE_URL;
+  const base = parseAllowedCloudflareHostedProviderFetchBaseUrl(
+    typeof configured === "string" && configured.trim() ? configured.trim() : DEFAULT_LINQ_API_BASE_URL,
+    source,
+  );
+  if (!base || url.origin !== base.origin || !isCloudflareHostedProviderFetchPathWithinBase(url, base)) return false;
+  return readAllowedHostedLinqOperation(request.method, url.pathname.slice(normalizeCloudflareHostedProviderFetchBasePath(base).length)) === "typing_start";
 }
 
 const CLOUDFLARE_HOSTED_PROVIDER_FETCH_BASE_URL_ENV_KEYS = [

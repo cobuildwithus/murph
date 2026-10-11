@@ -203,6 +203,7 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   boundUserId: string;
   description: string;
   fetchImpl: typeof fetch;
+  headers?: Headers;
   route: HostedRunnerWebControlRoute;
   signal?: AbortSignal | null;
   timeoutMs: number;

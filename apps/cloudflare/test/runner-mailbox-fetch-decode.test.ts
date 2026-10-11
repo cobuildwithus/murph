@@ -1,3 +1,4 @@
+import { HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER } from "../src/runner-outbound/headers.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
 import { buildHostedSecureBoxAad, sealHostedSecureBox, serializeHostedSecureBoxEnvelope } from "@murphai/runtime-state";
@@ -100,9 +101,54 @@ describe("Worker mailbox fetch/decode composition", () => {
     const headers = new Headers(mocks.forward.mock.calls[0]![0].headers);
     expect(headers.get("x-hosted-runtime-attempt-id")).toBe("synthetic-attempt");
     expect(headers.get("x-hosted-runtime-lease-generation")).toBe("1");
+    expect(headers.has(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER)).toBe(false);
+    const logs = mocks.log.mock.calls.map(([entry]) => entry);
+    const runtimeLog = logs.find(entry => entry.message === "Hosted runtime mailbox fetch finished.");
+    const workerLog = logs.find(entry => entry.message === "Hosted runner web-control response received.");
+    expect(runtimeLog?.details).toMatchObject({ mailboxRuntimeImportReady: true,
+      mailboxRuntimeFetchAndDecodeMs: expect.any(Number), mailboxRuntimeParseMs: expect.any(Number) });
+    expect(runtimeLog?.details.mailboxFetchCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(workerLog?.details).toMatchObject({
+      mailboxFetchCorrelationId: runtimeLog?.details.mailboxFetchCorrelationId,
+      runtimeAttemptId: "synthetic-attempt", mailboxWorkerTotalMs: expect.any(Number),
+    });
+    expect(JSON.stringify([runtimeLog, workerLog])).not.toContain(wake.userId);
+    expect(runtimeLog.details.mailboxRuntimeImportReadyAtEpochMs).toBeGreaterThanOrEqual(
+      runtimeLog.details.mailboxRuntimeResponseDecodedAtEpochMs);
     // Canonical Web parsing never accepts the ephemeral plaintext field.
     expect(parseHostedMailboxFetchResponse(fetched).items[0]).not.toHaveProperty("decodedWake");
   });
+  it("records a failed mailbox readiness boundary while preserving cancellation", async () => {
+    const controller = new AbortController();
+    const reason = new Error("Synthetic canceled mailbox read");
+    const fetchImpl = vi.fn<typeof fetch>(async () => { controller.abort(reason); throw reason; });
+    const port = createHostedWebMailboxPort({ boundUserId: wake.userId, fetchImpl,
+      timeoutMs: 1000, transport: { mode: "proxy" } });
+    await expect(port.fetch(requestBody, { signal: controller.signal })).rejects.toBe(reason);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const log = mocks.log.mock.calls.find(([entry]) => entry.message === "Hosted runtime mailbox fetch finished.")?.[0];
+    expect(log.details).toMatchObject({ mailboxRuntimeImportReady: false,
+      mailboxRuntimeResponseDecodedAtEpochMs: null, mailboxRuntimeImportReadyAtEpochMs: null });
+  });
+
+  it("retains one logical mailbox correlation across an existing transport retry", async () => {
+    const mailbox = await mailboxFixture();
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(Response.json(mailbox));
+    const port = createHostedWebMailboxPort({ boundUserId: wake.userId, fetchImpl,
+      timeoutMs: 1000, transport: { mode: "proxy" } });
+    await port.fetch(requestBody);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const ids = fetchImpl.mock.calls.map(([url, init]) =>
+      new Request(url, init).headers.get(HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER));
+    expect(ids[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(ids[1]).toBe(ids[0]);
+    const logs = mocks.log.mock.calls.filter(([entry]) => entry.message === "Hosted runtime mailbox fetch finished.");
+    expect(logs).toHaveLength(1);
+    expect(logs[0]![0].details).toMatchObject({ mailboxFetchCorrelationId: ids[0], mailboxRuntimeImportReady: true });
+  });
+
   it.each(["previous", "current", "retired-provider"])(
     "returns fixed OpenAI wire metadata and decoded wakes for a %s Web response",
     async (webContract) => {
