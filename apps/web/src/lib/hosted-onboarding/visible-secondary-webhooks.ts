@@ -8,6 +8,7 @@ import {
 import type { HostedMember, PrismaClient } from "@prisma/client";
 
 import {
+  withMurphTelegramText,
   buildMurphTelegramUrl,
   resolveMurphTelegramBotUsername,
 } from "../murph-contact-routing";
@@ -425,8 +426,7 @@ export async function resolveHostedPublicGoalTelegramResumeUrl(input: {
 
   const resumeUrl = new URL(input.botUrl);
   resumeUrl.searchParams.delete("start");
-  resumeUrl.searchParams.set("text", input.inboundText);
-  return resumeUrl.toString();
+  return withMurphTelegramText(resumeUrl.toString(), input.inboundText);
 }
 
 export function resolvePublicMurphTelegramBotUrl(

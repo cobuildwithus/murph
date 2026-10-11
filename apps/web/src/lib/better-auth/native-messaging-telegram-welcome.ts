@@ -10,6 +10,7 @@ import { readHostedMemberRoutingState, upsertHostedMemberTelegramRoutingBindingT
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { enqueueHostedMemberChannelsUpdatedForActiveMemberTx } from "../hosted-onboarding/member-channel-sync";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
+import { withMurphTelegramText } from "../murph-contact-routing";
 import { buildHostedTelegramBotLink } from "../hosted-onboarding/telegram";
 import { callHostedTelegramApi } from "../hosted-onboarding/telegram-client";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
@@ -57,8 +58,6 @@ export async function welcomeNativeMessagingTelegram(input: { memberId: string; 
 
 function result(telegramAwaitingInbound: boolean) {
   const link = buildHostedTelegramBotLink();
-  const url = link ? new URL(link) : null;
-  url?.searchParams.set("text", "Hey Murph");
-  return { telegramAwaitingInbound, telegramUrl: url?.toString() ?? null };
+  return { telegramAwaitingInbound, telegramUrl: link ? withMurphTelegramText(link, "Hey Murph") : null };
 }
 function changedAccount() { return hostedOnboardingError({ code: "LINKED_ACCOUNT_CHANGED", httpStatus: 409, message: "Your sign-in methods changed. Try again." }); }
