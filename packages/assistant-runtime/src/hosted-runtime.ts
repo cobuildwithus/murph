@@ -845,6 +845,8 @@ export interface HostedWorkspaceRuntimeJobImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
+  /** Invocation lifetime for admitted typing; import passes can yield sooner. */
+  typingSignal?: AbortSignal | null;
 }
 
 interface HostedRuntimeWakeLatencySeed {
@@ -1896,6 +1898,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       },
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
+      typingSignal: runtimeAbortController.signal,
     });
     const selectNextApprovedDetachedAssistantAskItemId = async (): Promise<
       string | null
