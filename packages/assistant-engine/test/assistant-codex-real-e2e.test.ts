@@ -1,4 +1,5 @@
 import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
+import { seedImportedRecallMeal, seedImportedRecallPhoto, SYNTHETIC_IMPORTED_MEAL } from './support/imported-record-recall-fixture.js'
 import { buildHostedVaultShareProjectionScopeKey } from '@murphai/hosted-execution/vault-share'
 import { observesAppointmentConsentMutation } from './support/appointment-consent-observer.js'
 import { seedMurphOnboardingEarlyStallAutomation } from '../src/assistant/onboarding-followup-seed.ts'
@@ -1479,6 +1480,160 @@ describeRealCodex('real Codex focused wearable activity projection e2e', () => {
 })
 
 describeRealCodex('real model canonical production journeys', () => {
+  it.each(['single message', 'live follow-up', 'split question'] as const)('natural recall inspects photo-only device captures arriving outside a resumed private conversation: %s', async (messageShape) => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config, 'linq')
+    const executeTurn = clinicalExtractionCodex.executeCodexAppServerTurn
+    let injectFollowUp: (() => Promise<void>) | null = null
+    const steerCompleted = createDeferred<void>()
+    const steerOutcome = steerCompleted.promise.then(() => null, (error: unknown) => error)
+    const provider = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+      .mockImplementation((input) => executeTurn({
+        ...input,
+        configOverrides: [...(input.configOverrides ?? []), ...buildRealCodexShellEnvironmentConfigOverrides(input.env)],
+        onLiveTurn: (turn) => {
+          const release = input.onLiveTurn?.(turn)
+          if (injectFollowUp) {
+            const sendFollowUp = injectFollowUp
+            injectFollowUp = null
+            void sendFollowUp().then(
+              () => steerCompleted.resolve(), (error) => steerCompleted.reject(error),
+            )
+          }
+          return release
+        },
+      }))
+    try {
+      Object.assign(fixture.env, await prepareRealCodexFixtureShellEnvironment({
+        binDirectory: path.join(fixture.root, '.local', 'bin'),
+        env: fixture.env, workingDirectory: fixture.root,
+      }))
+      const warm = await fixture.message("I'll come back to this chat later.")
+      const capturedAt = Date.now() - 10 * 60_000
+      await seedImportedRecallPhoto(fixture.vault, new Date(capturedAt - 10_000).toISOString(), 'synthetic_photo_earlier')
+      const latest = await seedImportedRecallPhoto(fixture.vault, new Date(capturedAt).toISOString(), 'synthetic_photo_latest')
+      const preflight = await fixture.cli(['meal', 'list', '--limit', '2', '--format', 'json'])
+      expect(preflight).toContain(latest.mealId)
+      expect(preflight).not.toMatch(/avocado|chickpea/iu)
+      await writeFile(fixture.env.MURPH_CANONICAL_JOURNEY_COMMANDS!, '')
+      provider.mockClear()
+      let activeTurnId: string | null = null
+      if (messageShape !== 'single message') injectFollowUp = async () => {
+        if (!activeTurnId) throw new Error('Expected the production turn admission hook before provider start.')
+        await sendAssistantMessageLocal({
+          vault: fixture.vault,
+          expectedActiveTurnId: activeTurnId,
+          conversation: {
+            channel: 'linq', directness: 'direct',
+            identityId: warm.session.binding.identityId,
+            threadId: warm.session.binding.threadId!,
+          },
+          prompt: messageShape === 'split question' ? 'my most recent meal?' : 'Do you remember it?',
+          deliverResponse: false,
+        })
+      }
+      const result = await fixture.message(messageShape === 'split question' ? 'Can you recall' : 'What was the last meal I had?', {
+        beforeProviderAcceptedInputs: ({ turnId }) => { activeTurnId = turnId },
+      })
+      if (messageShape !== 'single message') {
+        const steerError = await steerOutcome
+        if (steerError) throw steerError
+      }
+      expect(provider.mock.calls[0]?.[0].resumeSessionId).toBeTruthy()
+      const turns = await Promise.all(provider.mock.results.map((item) => item.value))
+      const actions = turns.flatMap((turn) => readCapabilityRoutingActions(turn.jsonEvents))
+      const recordReads = actions.filter((action) => action.kind === 'command' && action.ok
+        && /\bvault-cli\b[^\n;]*\b(?:meal\s+(?:list|show)|timeline|batch)\b/u.test(action.command)
+        && action.output.includes(latest.mealId))
+      const commands = (await readFile(fixture.env.MURPH_CANONICAL_JOURNEY_COMMANDS!, 'utf8'))
+        .split('\n').filter(Boolean).map((line) => JSON.parse(line) as string[])
+      process.stdout.write(`[photo-only-recall-proof] ${JSON.stringify({
+        scenario: 'two-out-of-conversation-photo-only-device-captures',
+        messageShape,
+        commands: commands.map((argv) => argv.map((value) => value.replaceAll(fixture.root, '<FIXTURE_ROOT>'))),
+        actions: actions.map((action) => action.kind === 'command' ? {
+          kind: action.kind, ok: action.ok,
+          command: action.command.replaceAll(fixture.root, '<FIXTURE_ROOT>').replaceAll(homedir(), '<HOME_DIR>'),
+          ...(!action.ok ? { error: action.output.slice(0, 800).replaceAll(fixture.root, '<FIXTURE_ROOT>').replaceAll(homedir(), '<HOME_DIR>') } : {}),
+        } : { kind: action.kind, tool: action.tool }),
+        reply: result.response,
+      })}\n`)
+      expect(recordReads.length).toBeGreaterThan(0)
+      expect(result.response).toMatch(/avocado/iu)
+      expect(result.response).toMatch(/chickpea/iu)
+      expect(result.response).not.toMatch(/don['’]t know|tell me what|remind me what|(?:send|upload|share).{0,20}(?:photo|picture)/iu)
+      expect(commands.some((argv) => argv[0] === 'meal' && ['add', 'remove'].includes(argv[1] ?? ''))).toBe(false)
+      expect(result.delivery).toBeNull()
+    } finally {
+      provider.mockRestore()
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
+  it('natural recall retrieves a device meal arriving outside a resumed private conversation', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config, 'linq')
+    const executeTurn = clinicalExtractionCodex.executeCodexAppServerTurn
+    // Local Codex profiles can restrict shell variables. Preserve the synthetic
+    // journey's generated CLI/skill environment without changing its prompts.
+    const provider = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+      .mockImplementation((input) => executeTurn({
+        ...input,
+        configOverrides: [
+          ...(input.configOverrides ?? []),
+          ...buildRealCodexShellEnvironmentConfigOverrides(input.env),
+        ],
+      }))
+    try {
+      Object.assign(fixture.env, await prepareRealCodexFixtureShellEnvironment({
+        binDirectory: path.join(fixture.root, '.local', 'bin'),
+        env: fixture.env, workingDirectory: fixture.root,
+      }))
+      await fixture.message("I'll come back to this chat later.")
+      expect(provider.mock.calls[0]?.[0].developerInstructions).toContain('Resolve ambiguity with available context first')
+      const occurredAt = new Date(Date.now() - 10 * 60_000).toISOString()
+      const day = occurredAt.slice(0, 10)
+      await seedImportedRecallMeal(fixture.vault, occurredAt)
+      const preflight = await fixture.cli(['meal', 'list', '--from', day, '--to', day, '--limit', '10', '--format', 'json'])
+      expect(preflight).toContain(SYNTHETIC_IMPORTED_MEAL)
+      const logPath = fixture.env.MURPH_CANONICAL_JOURNEY_COMMANDS!
+      await writeFile(logPath, '')
+      provider.mockClear()
+      const result = await fixture.message('What was the last meal I had?')
+      expect(provider.mock.calls[0]?.[0].resumeSessionId).toBeTruthy()
+      const commands = (await readFile(logPath, 'utf8')).split('\n').filter(Boolean).map((line) => JSON.parse(line) as string[])
+      const turns = await Promise.all(provider.mock.results.map((item) => item.value))
+      const actions = turns.flatMap((turn) => readCapabilityRoutingActions(turn.jsonEvents))
+      // The production setup can resolve the shipped CLI directly, bypassing
+      // the fixture's PATH recorder. Observe native commands as well as argv.
+      const recordReads = actions.filter((action) => action.kind === 'command' && action.ok
+        && /\b(?:vault-cli|bin\.js)\b[^\n;]*\b(?:meal\s+(?:list|show)|list|show|search|timeline|batch)\b/u.test(action.command)
+        && !/--(?:help|schema)\b/u.test(action.command)
+        && action.output.includes(SYNTHETIC_IMPORTED_MEAL))
+      process.stdout.write(`[natural-recall-proof] ${JSON.stringify({
+        scenario: 'out-of-conversation-device-meal',
+        commands: commands.map((argv) => argv.map((value) => value.replaceAll(fixture.root, '<FIXTURE_ROOT>'))),
+        actions: actions.map((action) => action.kind === 'command' ? {
+          kind: action.kind,
+          ok: action.ok,
+          command: action.command.replaceAll(fixture.root, '<FIXTURE_ROOT>').replaceAll(homedir(), '<HOME_DIR>'),
+          ...(!action.ok ? { error: action.output.slice(0, 800).replaceAll(fixture.root, '<FIXTURE_ROOT>').replaceAll(homedir(), '<HOME_DIR>') } : {}),
+        } : { kind: action.kind }),
+        reply: result.response,
+      })}\n`)
+      expect(recordReads.length).toBeGreaterThan(0)
+      expect(result.response).toMatch(/buckwheat/iu)
+      expect(result.response).toMatch(/plum/iu)
+      expect(result.response).not.toMatch(/\?|don['’]t know|tell me|remind me|haven['’]t (?:got|seen|received)/iu)
+      expect(commands.some((argv) => argv[0] === 'meal' && ['add', 'edit', 'remove'].includes(argv[1] ?? ''))).toBe(false)
+      expect(await fixture.cli(['meal', 'list', '--from', day, '--to', day, '--limit', '10', '--format', 'json'])).toBe(preflight)
+      expect(result.delivery).toBeNull()
+    } finally {
+      provider.mockRestore()
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
   it('real model canonical meal persists across assistant restart', async () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })
     try { await runCanonicalMealRestartJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }

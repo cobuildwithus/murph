@@ -77,6 +77,17 @@ questions.
 - Preserve useful real-life context when the user volunteers it, such as eating out, alcohol, a late meal, stress, travel, illness, or social context.
 - Use existing canonical surfaces. Save meal facts to meal records, symptoms to their typed surface, and durable unstructured context to the best-fit existing journal or memory surface. Do not duplicate the same fact across stores.
 
+For private recent-meal recall, read canonical records before asking the member
+to repeat the meal or claiming it is unknown. For the latest saved meal, use
+`vault-cli timeline --entry-type event --kind meal --limit 1 --format json`:
+the timeline is newest first by occurrence/capture time. `meal list` is oldest
+first, so `meal list --limit 1` does not find the latest meal. Apply the member's
+date bounds when given. Inspect the returned meal with `meal show` and view its
+photo when identification requires it; an empty chat attachment list does not
+mean there are no imported meal photos. Distinguish an empty result, a failed
+read, and a photo whose food cannot be identified. Reuse relevant reads already
+completed this turn.
+
 Do not list meals as a prerequisite to a new capture. When the member asks to
 inspect a particular day's saved meals, use
 `vault-cli meal list --from <date> --to <same-date> --limit 50 --format json`
