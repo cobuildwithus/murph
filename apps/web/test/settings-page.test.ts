@@ -657,16 +657,18 @@ test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for s
 
   const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
 
-  assert.match(markup, /Sign in to manage your data/);
-  assert.match(markup, /Choose Delete account, review the details, and confirm\./);
-  assert.match(markup, /Health content, memories, and assistant history/);
-  assert.match(markup, /active hosted/);
-  assert.match(markup, /systems within 30 days; backups within 90 days/);
-  assert.match(markup, /Account\/profile, wearable sync, webhook, and routing records/);
-  assert.match(markup, /Support: up to 3 years/);
-  assert.match(markup, /external carrier, Telegram, Linq, or email systems cannot be recalled/);
+  // Google Play links here: the steps, what is deleted and retention must stay.
+  assert.match(markup, /Delete your Murph account/);
+  assert.match(markup, /Choose Delete account and confirm\./);
+  assert.match(markup, /What’s deleted/);
+  assert.match(markup, /can’t be recalled/);
+  assert.match(markup, /Health data, memories and chats: within 30 days, backups within 90/);
+  assert.match(markup, /Account, device sync and messaging records: within 90 days/);
+  assert.match(markup, /Support records up to 3 years/);
   assert.match(markup, /mailto:legal@justco\.build/);
   assert.match(markup, /href="\/legal\/privacy"/);
+  // The sign-in action comes before the supporting details.
+  assert.ok(markup.indexOf(">Log in<") < markup.indexOf("What’s deleted"));
 });
 
 test.each(["legacy", "passkey", "outage"])("Data privacy preserves deletion without loading an SDK for %s factor state", async (state) => {
