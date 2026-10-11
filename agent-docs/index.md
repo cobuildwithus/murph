@@ -40,6 +40,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Typing egress and mailbox runtime timing correlation is owned by
+[`Cloudflare private telemetry`](../apps/cloudflare/README.md#private-operational-telemetry);
+implementation evidence is tracked in
+[the timing diagnostics plan](exec-plans/active/2026-10-11-typing-phase-diagnostics.md).
+
 Typing preparation lifetime across completed-import handoff is owned by
 [`RELIABILITY.md`](RELIABILITY.md); synthetic lifecycle proof is tracked in
 [the typing lifetime plan](exec-plans/completed/2026-10-11-warm-typing-lifetime.md).

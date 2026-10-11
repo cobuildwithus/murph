@@ -63,6 +63,7 @@ import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
+  readHostedRuntimeFetchCorrelationId,
 } from "./headers.ts";
 
 const HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES = 256 * 1024;
@@ -270,6 +271,7 @@ export async function handleRunnerWebControlRequest(input: {
       method,
       operation: policy.operation,
       ...mailboxResponse?.timings,
+      ...readMailboxFetchCorrelationDetails(input.request, policy.operation, writeAuthority.attemptId),
       ...responseBodyMetadata,
       ...readHostedSnapshotResponseHeaderMetadata(
         response,
@@ -304,6 +306,14 @@ export async function handleRunnerWebControlRequest(input: {
     status: response.status,
     statusText: response.statusText,
   });
+}
+
+function readMailboxFetchCorrelationDetails(
+  request: Request, operation: string, runtimeAttemptId: string,
+): Record<string, string> {
+  if (operation !== "mailbox_fetch") return {};
+  const mailboxFetchCorrelationId = readHostedRuntimeFetchCorrelationId(request.headers);
+  return mailboxFetchCorrelationId ? { mailboxFetchCorrelationId, runtimeAttemptId } : {};
 }
 
 async function forwardWithRuntimeUsageSettlement(input: {
