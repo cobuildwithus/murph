@@ -3413,6 +3413,91 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
+  it("completes an unowned canceled deletion without rediscovery or billing side effects", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent("customer.subscription.deleted");
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription({
+      metadata: { memberId: "deleted_member" },
+      status: "canceled",
+    }));
+    mocks.findMemberForStripeSubscription
+      .mockReset()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ core: { id: "replacement_member" } });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ activatedMemberId: null, status: "completed" });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
+    expect(mocks.findMemberForStripeSubscription).toHaveBeenCalledTimes(2);
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSubscriptionCancellationEmailForMember).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(prisma.rows[0]).toMatchObject({
+      attemptCount: 1,
+      lastErrorCode: null,
+      status: HostedStripeEventStatus.completed,
+    });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toBeNull();
+  });
+
+  it("preserves Family cancellation processing when no direct member owns the subscription", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent("customer.subscription.deleted");
+    const canonicalSubscription = makeCanonicalSubscription({
+      metadata: { kind: "hosted_family_plan" },
+      status: "canceled",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.findMemberForStripeSubscription.mockResolvedValue(null);
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
+      canonicalSubscription,
+      expect.objectContaining({ sourceType: "stripe.customer.subscription.deleted" }),
+      prisma.client,
+      expect.any(Map),
+    );
+    expect(prisma.rows[0]?.status).toBe(HostedStripeEventStatus.completed);
+  });
+
+  it("does not ignore an unowned deletion whose canonical subscription is active", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent("customer.subscription.deleted");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription({
+      status: "active",
+    }));
+    mocks.findMemberForStripeSubscription.mockResolvedValue(null);
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    expect(prisma.rows[0]?.status).toBe(HostedStripeEventStatus.failed);
+    errorSpy.mockRestore();
+  });
+
   it("keeps an ambiguous Pulse Checkout as an explicit no-op", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makePulseTrialCheckoutCompletedEvent();

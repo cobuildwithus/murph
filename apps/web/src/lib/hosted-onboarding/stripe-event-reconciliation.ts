@@ -1500,6 +1500,17 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
     processingContext.canonicalSubscription?.metadata.kind !==
       HOSTED_FAMILY_STRIPE_METADATA_KIND
   ) {
+    if (
+      stripeEvent.type === "customer.subscription.deleted" &&
+      processingContext.canonicalSubscription?.status === "canceled"
+    ) {
+      // Account deletion can remove the owner before Stripe emits cancellation.
+      // Do not let an unlocked handler rediscover or mutate a different owner.
+      return {
+        memberId: null,
+        result: buildEmptyHostedStripeEventProcessingResult(),
+      };
+    }
     throw new Error("Canonical Stripe billing owner was unavailable for locked processing.");
   }
 
