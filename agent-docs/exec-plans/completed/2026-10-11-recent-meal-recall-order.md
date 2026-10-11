@@ -1,6 +1,6 @@
 # Select the newest canonical meal for recent recall
 
-Status: active
+Status: completed
 Created: 2026-10-11
 Updated: 2026-10-11
 
@@ -39,3 +39,13 @@ Keep canonical ordering unchanged. Teach the owning food-journal guidance to use
 - Assistant-engine focused deterministic tests and typecheck.
 - Opt-in real Codex subscription journeys on the product model.
 - Diff checks and complexity review; exact-head CI and requested ReviewGPT before merge.
+
+## Implementation evidence
+
+- The split-question baseline chose the older capture using `meal list --limit 1`; the exact capture-identity assertion failed.
+- The same journey with corrected guidance selected the newest capture through the descending timeline and passed.
+- All four focused real-model variants passed individually: identified-device meal, photo-only single message, photo-only follow-up, and photo-only split question. Product model: gpt-6.1-sol; local subscription; replies reviewed Ready.
+- Assistant-engine typecheck and focused source-first/skill tests passed (35 tests, 7 existing skips). Changelog generation and archive rendering passed (10 tests). Complexity and diff guards passed.
+- Candidate review confirms the only runtime change is deferred food-journal guidance. Initial skill registry and tool contracts are unchanged. No production data, member transcript, or diagnostic answer is included.
+- PR #4125 owns the candidate. Required external review and exact-head CI remain merge gates; runtime deployment remains with the coordinated deployment owner.
+Completed: 2026-10-11

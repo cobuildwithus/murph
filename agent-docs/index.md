@@ -42,7 +42,7 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 Private latest-meal recall uses the descending canonical timeline; the ordering
 contract and synthetic capture-identity proof are tracked in
-[the recall ordering plan](exec-plans/active/2026-10-11-recent-meal-recall-order.md).
+[the recall ordering plan](exec-plans/completed/2026-10-11-recent-meal-recall-order.md).
 
 Typing preparation lifetime across completed-import handoff is owned by
 [`RELIABILITY.md`](RELIABILITY.md); synthetic lifecycle proof is tracked in
