@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-11",
+  "order": 100,
+  "item": {
+    "id": "latest-saved-meal-recall",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More accurate recall of your latest saved meal",
+    "summary": "When you ask about your latest saved meal in a private conversation, Murph checks the newest capture instead of treating the first saved record as the latest.",
+    "details": "This includes meals saved as photos. Murph checks the available record before asking you to describe the meal again.",
+    "relevanceTags": ["nutrition", "memory"],
+    "sourcePullRequests": []
+  }
+}
