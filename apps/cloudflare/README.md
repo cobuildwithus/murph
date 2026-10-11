@@ -745,7 +745,8 @@ The runtime records fetch start, response JSON decoded and validated import-read
 epoch markers, plus monotonic fetch/decode, parse and total milliseconds. One
 logical fetch ID spans existing read retries and can join multiple Worker records;
 its total includes retry waits. A failed/canceled fetch records false
-`mailboxRuntimeImportReady` and null markers for unfinished phases. Import-ready
+`mailboxRuntimeImportReady` and unset markers for unfinished phases (null in the
+emitter input; omitted by structured-log sanitization). Import-ready
 means the port can return validated items, not that the runtime has imported or
 staged them; compare the subsequent mailbox milestones separately.
 
