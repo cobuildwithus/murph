@@ -45,6 +45,10 @@ Typing egress and mailbox runtime timing correlation is owned by
 implementation evidence is tracked in
 [the timing diagnostics plan](exec-plans/completed/2026-10-11-typing-phase-diagnostics.md).
 
+Private latest-meal recall uses the descending canonical timeline; the ordering
+contract and synthetic capture-identity proof are tracked in
+[the recall ordering plan](exec-plans/completed/2026-10-11-recent-meal-recall-order.md).
+
 Typing preparation lifetime across completed-import handoff is owned by
 [`RELIABILITY.md`](RELIABILITY.md); synthetic lifecycle proof is tracked in
 [the typing lifetime plan](exec-plans/completed/2026-10-11-warm-typing-lifetime.md).
