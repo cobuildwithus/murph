@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-12",
+  "order": 100,
+  "item": {
+    "id": "shorter-group-recap-gaps",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Cleaner group wearable recaps",
+    "summary": "Group recaps show how many nights or days each result covers instead of adding paragraphs about missing dates.",
+    "details": "Missing days still never count as zeros. Murph still names someone whose data for today hasn't arrived, someone with nothing shared for the whole period, or a date you asked about by name.",
+    "relevanceTags": [
+      "groups",
+      "wearables"
+    ],
+    "sourcePullRequests": []
+  }
+}

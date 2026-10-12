@@ -273,6 +273,10 @@ describe("murph.group dynamic tool", () => {
       .toContain("trusted host owns the exact consent copy");
     expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
       .toContain("actual scope snapshot");
+    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
+      .toContain("Let reported counts carry date coverage");
+    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
+      .not.toContain("State requested versus actually available date coverage");
     expect(GROUP_TOOL_INPUT_PROPERTIES.membershipId.description)
       .toContain("exact opaque membershipId from list_memberships");
     expect(GROUP_TOOL_INPUT_PROPERTIES.cursor.description)
@@ -1440,6 +1444,8 @@ describe("murph.group dynamic tool", () => {
   it("uses the existing metric scope for bounded participant history, including detached reads", async () => {
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("every active metric grant already covers this window");
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("not_granted means the metric itself is unshared");
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("Let trend counts carry date coverage");
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).not.toContain("State requested range");
     expect(JSON.stringify(MURPH_GROUP_SHARED_READ_TOOL.inputSchema)).not.toContain("historyDays");
     const args = {
       action: "read_shared", participantId: "participant_history",
