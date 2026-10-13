@@ -62,7 +62,7 @@ Check, when relevant:
   and compare repeated readings for a trend. Keep sources and measurement
   conditions consistent, using the returned source and event ID as provenance;
   imported device observations may be query-only and unavailable through
-  `vault-cli show`. No returned entries means missing coverage rather than no
+  `vault-cli show`. With no returned entries, say none was recorded; never read that as no
   change
 - strength, repetitions, training quality, and resistance-training consistency
 - meal or food pattern, estimated protein, alcohol, liquid calories, appetite, and food access
@@ -159,8 +159,8 @@ Escalate urgent symptoms such as fainting, confusion, chest pain, severe weaknes
 ## Answer Shape
 
 - State the lane and the decision that matters now.
-- Name the evidence already available and the largest uncertainty.
+- Name the evidence the decision rests on.
 - Give one primary action, one measurement plan, and the review timing.
 - Include the hold or adjustment rule and the maintenance or exit path.
 - Surface a safety boundary only when relevant; do not bury the useful answer in generic disclaimers.
-- Keep estimates and heuristics labeled. Be direct about where evidence is weak.
+- Keep estimates and heuristics labeled.

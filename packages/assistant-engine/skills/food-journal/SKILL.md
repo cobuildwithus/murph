@@ -39,14 +39,14 @@ For a connected carbohydrate-record question, use one bounded day or
 short-range read:
 `vault-cli measurement entry list --metric carbohydrates --from <date> --to <date> --limit 50 --format json`.
 Returned grams are partial intake evidence. Do not infer food identity, a
-complete meal, total daily carbohydrate, or eaten calories from them. No
-returned entry means unavailable, not zero.
+complete meal, total daily carbohydrate, or eaten calories from them. With no
+returned entry, say none was recorded.
 
 For a connected or saved-meal vitamin, mineral, or water question, use one
 bounded day or short-range read:
 `vault-cli meal nutrients --from <date> --to <date> --format json`.
 The response lists every supported nutrient field. A `null` total with zero
-contributing meals means unavailable, not zero. A `contributingMealCount` below
+contributing meals means no recorded value; never report it as zero. A `contributingMealCount` below
 the enclosing `mealCount` means the total is partial across the selected stored
 meals; do not extrapolate the missing meals. Equal counts mean every selected
 stored meal record supplied that field, not that every meal eaten that day was
@@ -195,7 +195,7 @@ is neither a numeric proposal nor acceptance.
 
 ## Provide numbers by default, with safety exceptions
 
-- Provide calorie and macro estimates by default when logging a meal, using available label facts or clearly marked estimates with provenance, confidence, and the key assumptions.
+- Provide calorie and macro estimates by default when logging a meal, using available label facts or clearly marked estimates, such as "about 640 kcal"; mention an assumption only when it changes the totals, such as an unknown amount of oil.
 - Do not estimate or surface calories or macros for intuitive-eating contexts, eating-disorder risk, or number-sensitive users. In symptom or digestion work, keep numbers secondary to the focus rather than leading with them.
 - Structured label facts may remain available when useful; surface the details relevant to the user's request alongside the default totals.
 
@@ -363,7 +363,7 @@ Before calculating a meal total:
   its bounded browser recovery only when a material fact requires interaction
   or visual inspection unavailable through web search/text reading.
 - After this bounded pass fails, give a clearly marked estimate or useful range
-  for routine calories/macros, with the assumptions and material uncertainty.
+  for routine calories/macros, naming only an assumption that materially changes it.
   Do not keep researching minor ingredients or ask for brand details that would
   not meaningfully change the answer. Never invent an exact label or imply that
   a visual portion estimate was database-measured. New product identity or
@@ -375,8 +375,8 @@ Before calculating a meal total:
 - On a correction, remove excluded components without researching them and
   rescale unchanged components from established serving facts. If editing a
   saved meal, read that record once when needed, edit the authorized record,
-  and verify the result. Answer a totals request with the recalculated totals
-  and material uncertainty, not just an ingredient list or a new meal record.
+  and verify the result. Answer a totals request with the recalculated totals,
+  never just an ingredient list or a new meal record.
 
 For a fridge or pantry photo, enumerate distinct visible products and resolve
 them in one batch. Summarize only relevant nutrition, ingredient, allergen, and
@@ -403,9 +403,9 @@ Reuse existing meal, symptom, journal, wearable, memory, and automation surfaces
 
 At review:
 
-- state what coverage exists and where it is sparse
+- describe what showed up across the logged days, such as "on 4 of 5 logged days"
 - describe observations and associations, not causal conclusions
-- name important uncertainty and plausible confounders
+- name a confounder only when it changes the next step
 - offer at most one optional next step
 
 An experiment is an option after review, not the required reward for logging. The user can extend, change focus, stop, or leave the observations alone.

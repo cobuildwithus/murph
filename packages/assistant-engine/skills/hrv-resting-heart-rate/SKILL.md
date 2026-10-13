@@ -24,7 +24,7 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 - Check the user's baseline, measurement device, wear consistency, recent 7-30 day trend, sleep, alcohol, illness, heat, altitude, training load, hydration, and menstrual phase when relevant.
 - Do not compare HRV across people; method, age, genetics, and device algorithms dominate.
-- Treat a single low HRV day as context, not a verdict.
+- Weigh a single low HRV day against the multi-day trend.
 
 ## If Context Is Thin
 
