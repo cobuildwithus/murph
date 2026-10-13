@@ -312,7 +312,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
   it.each(["stale", "exchanged", "future"] as const)("legacy repair: %s sessions are not fresh proof", (kind) => withLegacyRepairMember(async (f) => {
     await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
       model: "session", where: [{ field: "token", value: f.token }],
-      update: { primaryAuthenticatedAt: kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -6 : 6) * 60_000) },
+      update: { primaryAuthenticatedAt: kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -11 : 11) * 60_000) },
     });
     const result = await legacyRepairOptions(f.request({}));
     expect(result.status).toBe(403);
@@ -542,6 +542,8 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     const response = await sendNativePhone(nativeRequest(f.token, { change }));
     expect(await response.json()).toEqual({ ok: true });
     expect(response.headers.has("set-cookie")).toBe(false);
+    // Like sign-in, a contact gets two codes a minute; the third waits.
+    expect((await sendNativePhone(nativeRequest(f.token, { change }))).status).toBe(200);
     expect((await sendNativePhone(nativeRequest(f.token, { change }))).status).toBe(429);
     expect((await verifyNativePhone(nativeRequest(f.token, { change, code: provider.codes.get(change.value!) }))).status).toBe(200);
     expect((await readHostedMemberIdentity(f))?.phoneNumber).toBe(change.value);
@@ -554,9 +556,11 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     const setPrimaryAuthenticatedAt = (at: Date) => hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
       model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt: at },
     });
-    await setPrimaryAuthenticatedAt(new Date(Date.now() - 360_000));
+    await setPrimaryAuthenticatedAt(new Date(Date.now() - 660_000));
     expect((await sendNativePhone(nativeRequest(f.token, { change }))).status).toBe(403);
     await setPrimaryAuthenticatedAt(new Date());
+    expect((await sendNativePhone(nativeRequest(f.token, { change }))).status).toBe(200);
+    // Like sign-in, a contact gets two codes a minute.
     expect((await sendNativePhone(nativeRequest(f.token, { change }))).status).toBe(200);
     expect((await sendNativePhone(nativeRequest(f.token, { change }))).status).toBe(429);
   }));
@@ -575,9 +579,11 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
   }));
 
   it("native phone send preserves cooldown, target conflicts and strict add-only input", () => withInitialPhoneMember(async (f) => {
+    // The fixture sent the first code; a second is allowed and the third waits.
+    expect((await sendNativePhone(nativeRequest(f.token, { change: f.change }))).status).toBe(200);
     expect((await sendNativePhone(nativeRequest(f.token, { change: f.change }))).status).toBe(429);
     expect((await sendNativePhone(nativeRequest(f.token, { change: { ...f.change, method: "email", value: "test@example.test" } }))).status).toBe(400);
-    await verifyNativePhone(nativeRequest(f.token, { change: f.change, code: f.code }));
+    await verifyNativePhone(nativeRequest(f.token, { change: f.change, code: provider.codes.get(f.change.value!)! }));
     await withInitialPasskeyMember(async (other) => {
       const result = await sendNativePhone(nativeRequest(other.token, { change: f.change }));
       // Clear only the synthetic contact cooldown so conflict reaches its owner.
@@ -594,7 +600,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     if (kind === "revoked") await logoutBrowser(f.request({}));
     else if (kind === "protected") await registerPasskey(f.request(await initialEnrollment(f.request)));
     else await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
-      model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt: new Date(Date.now() - 360_000) },
+      model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt: new Date(Date.now() - 660_000) },
     });
     expect([401, 403]).toContain((await verifyNativePhone(nativeRequest(f.token, { change: f.change, code: f.code }))).status);
     expect((await readHostedMemberIdentity(f))?.phoneNumber).toBeNull();
@@ -703,7 +709,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     if (kind === "revoked") await logoutBrowser(f.request({}));
     else if (kind === "protected") await registerPasskey(f.request(await initialEnrollment(f.request)));
     else await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
-      model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt: new Date(Date.now() - 360_000) },
+      model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt: new Date(Date.now() - 660_000) },
     });
     expect([401, 403]).toContain((await completeNativeTelegram(nativeRequest(f.token, t.body))).status);
     expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.telegram).toBeNull();
@@ -769,7 +775,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     else if (kind === "revoked") await logoutBrowser(f.request({}));
     else await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
       model: "session", where: [{ field: "token", value: f.token }],
-      update: { primaryAuthenticatedAt: kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -6 : 6) * 60_000) },
+      update: { primaryAuthenticatedAt: kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -11 : 11) * 60_000) },
     });
     const response = await verifyCredentialCode(f.request({ change: f.change, code: f.code }));
     expect([400, 401, 403]).toContain(response.status);
@@ -1109,7 +1115,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
   }));
 
   it.each(["exchanged", "stale", "future"] as const)("rejects %s primary proof for initial factor setup", (kind) => withInitialPasskeyMember(async (f) => {
-    const primaryAuthenticatedAt = kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -6 : 6) * 60_000);
+    const primaryAuthenticatedAt = kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -11 : 11) * 60_000);
     await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
       model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt },
     });
