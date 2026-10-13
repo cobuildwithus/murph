@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-13",
+  "order": 100,
+  "item": {
+    "id": "faster-meal-logging",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Faster meal logging with complete fat values",
+    "summary": "Logging a meal from a photo, label, or description takes fewer steps, so your nutrition card arrives sooner.",
+    "details": "Food lookups now include fat and more fiber values, and everyday ingredients such as milk, butter, and eggs match the right food more often. Number-sensitive preferences and accepted nutrition goals work as before.",
+    "relevanceTags": ["nutrition", "food-journal"],
+    "sourcePullRequests": [4135]
+  }
+}
