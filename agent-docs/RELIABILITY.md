@@ -166,18 +166,26 @@ to apply after cutover.
   and exact `code` matching against `HOSTED_ACCESS_REQUIRED`,
   `HOSTED_MEMBER_SUSPENDED`, and `HOSTED_CONSENT_REQUIRED`. Foreign/lookalike and
   unknown errors, or failures during classification, yield `other`, which narrows
-  no cause and does not imply a database failure. Non-authority exceptions remain
-  completely uninspected. Raw errors, messages, stacks, causes, details,
-  identifiers, refs, keys, payloads and goal contents remain excluded. Existing
-  successful/not-ready paths and their literal stage assignments are unchanged;
-  diagnostic allocation and emission remain failure-only. The
-  four-value reason only refines two of the eleven stages; logging volume stays
-  at most one warning per failed read. Classification or logging failure still
-  yields the unchanged generic 503, with no API or authorization change. For a
-  bounded natural-traffic query, filter the last 24 hours of Web logs by that
-  exact message and return only counts grouped by stage and, at authority stages,
-  the closed reason; do not invoke extra canaries, poll the endpoint, retry, wake
-  or refresh to collect evidence.
+  no cause and does not imply a database failure. Only `session_request` adds
+  `sessionRequestFailureReason`: `http`, `timeout`, `abort`, or `other`, plus
+  `httpStatus` only for a helper-recognized HTTP error with a finite numeric own
+  data status. The HTTP helper receives inert code/status data with the caught
+  value's prototype, never its code/status getters or freeform server code.
+  Timeout/abort use the native, brand-checked DOMException code accessor.
+  `TypeError` and `SyntaxError` remain `other`: this boundary includes auth,
+  fetch, JSON parsing and typed validation, so they do not identify a substage.
+  Unknown/hostile values and failed classification yield `other`. Other
+  non-authority stages remain completely uninspected. Raw errors, messages,
+  stacks, causes, details, identifiers, refs, keys, payloads and goal contents
+  remain excluded. Existing successful/not-ready paths and their literal stage
+  assignments are unchanged; diagnostic allocation and emission remain
+  failure-only, with at most one warning per failed read. Classification or
+  logging failure still yields the unchanged generic 503, with no API or
+  authorization change. For a bounded natural-traffic query, filter the last
+  24 hours of Web logs by that exact message and return only counts grouped by
+  stage and the applicable closed reason (plus finite HTTP status at
+  `session_request`); do not invoke extra canaries, poll the endpoint, retry,
+  wake or refresh to collect evidence.
 - Protected native iOS and Android hosted E2E controllers run staggered every
   twelve hours and execute each admitted journey even when the same revision
   previously passed. Provider behavior can change independently of source.
