@@ -72,6 +72,24 @@ describe('group shared metric presentation prompt', () => {
     expect(prompt).toContain('A refusal or unrelated reply leaves the schedule unchanged')
   })
 
+  it('keeps gap rules out of group recap copy', () => {
+    const prompt = buildHostedGroupSharedPrompt()
+    expect(prompt).toContain('Gap rules decide what you count; they are not reply content.')
+    expect(prompt).toContain('let the counts carry coverage, such as "across 6 nights" or "3 workout days"')
+    expect(prompt).toContain('Mention missing data only for someone missing the current day or the whole period, or for a date the request names individually')
+    expect(prompt).toContain('Do not add a coverage note, list other missing dates, restate the date range for each metric, note excluded days, explain what a missing day means, or describe a metric by what it is not.')
+    expect(prompt).toContain("A loaded skill's required completeness line still applies.")
+    expect(prompt).toContain('a gap is never a zero')
+    expect(prompt).toContain('For a current-day gap, with `no_recent_reporting` say only that no recent shared data is available; with `recent_reporting` or `unknown_history`, give the actual last check time')
+    for (const removed of [
+      'An absent historical date does not prove',
+      'distinguish an ongoing absence from a new delay',
+      'An ongoing absence alone does not need a check-time footer',
+      'For recent or unknown gaps, give the actual last check time',
+      'State requested versus actually available date coverage',
+    ]) expect(prompt).not.toContain(removed)
+  })
+
   it('separates same-row name presentation from sender effects', () => {
     const prompt = buildHostedGroupSharedPrompt()
 

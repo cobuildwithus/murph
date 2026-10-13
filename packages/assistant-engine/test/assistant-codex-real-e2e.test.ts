@@ -12009,6 +12009,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const reply = renderMarkdownMessageText(decision.text).text
         process.stdout.write(`[wearable-freshness-e2e] ${JSON.stringify({ scenario, reply })}\n`)
         expect(sharedRequests).toEqual([{
+          includeCompanionPresence: true,
           projectionScopes: [{ projectionKind: 'sleep-duration-days.v0' }],
           freshness: scenario === 'multiple_dates'
             ? expect.arrayContaining([{ projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-03' }, { projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-05' }])
@@ -12045,6 +12046,92 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             }
           }
         }
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 360_000,
+  )
+
+  it(
+    'keeps sparse-day coverage out of a scheduled weekly group recap',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-weekly-gap-e2e-'))
+      const sharedRequests: AssistantHostedGroupSharedReadRequest[] = []
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        // The first day of the week is missing for everyone and workout days are sparse.
+        const observedDates = ['2026-07-30', '2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04']
+        const people = [
+          { displayName: 'Rowan', sleep: [452, 438, 470, 445, 461, 446], movement: [260, 280, 270, 275, 265, 276], workouts: { '2026-08-02': 45 } },
+          { displayName: 'Quinn', sleep: [410, 405, 420, 398, 415, 424], movement: [290, 300, 310, 295, 305, 288], workouts: { '2026-08-02': 40, '2026-08-03': 35, '2026-08-04': 50 } },
+        ]
+        const garmin = { source: 'garmin', label: 'Garmin' }
+        const dailyProjection = (projectionKind: 'sleep-duration-days.v0' | 'activity-days.v0', metricKey: string, values: number[]) => ({
+          projectionScope: { projectionKind }, projectionScopeKey: projectionKind,
+          grantStatus: 'granted', dataStatus: 'available', grantedAt: '2026-07-01T00:00:00.000Z',
+          records: observedDates.map((date, day) => ({ recordKey: `${date}.garmin`, occurredAt: `${date}T00:00:00.000Z`, source: garmin,
+            data: { date, metricKey, value: values[day]!, unit: 'minutes' } })),
+        }) as const
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions('group', 'shared_read'),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot }, groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false, currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            groupSharedReader: { request: async (request) => {
+              sharedRequests.push(request)
+              return {
+                status: 'ok', requestedProjectionScopeKeys: ['sleep-duration-days.v0', 'workout-days.v0', 'activity-days.v0'],
+                ...(request.freshness ? { freshness: { checkedAt: '2026-08-06T01:00:20.000Z', refreshStatus: 'requested' } } : {}),
+                members: people.map((person, index) => ({
+                  displayName: person.displayName, currentTurnHandles: [],
+                  memberId: `member_weekly_${index}`, participantId: `participant_weekly_${index}`,
+                  projections: [
+                    dailyProjection('sleep-duration-days.v0', 'total-sleep-minutes', person.sleep),
+                    dailyProjection('activity-days.v0', 'activity-minutes', person.movement),
+                    {
+                      projectionScope: { projectionKind: 'workout-days.v0' }, projectionScopeKey: 'workout-days.v0',
+                      grantStatus: 'granted', dataStatus: 'available', grantedAt: '2026-07-01T00:00:00.000Z',
+                      records: Object.entries(person.workouts).map(([date, workoutMinutes]) => ({
+                        recordKey: `${date}.garmin`, occurredAt: `${date}T00:00:00.000Z`, source: garmin,
+                        data: { date, metricSemantics: 'canonical-workout-day', workoutCount: 1, workoutMinutes },
+                      })),
+                    },
+                  ],
+                })),
+              } satisfies AssistantHostedGroupSharedReadResponse
+            } },
+            sendVaultFile: async () => { throw new Error('Unavailable in synthetic journey.'); }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [
+            'Scheduled group automation: weekly-recap. Runs every Wednesday at 21:00 America/New_York.',
+            'Recipe: Weekly recap for the last seven completed days, July 29 through August 4: each person’s average sleep, workout days, and everyday movement minutes, then one suggested goal for next week. Keep it short.',
+          ].join('\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected the weekly recap.')
+        const reply = renderMarkdownMessageText(decision.text).text
+        process.stdout.write(`[group-weekly-gap-e2e] ${JSON.stringify({ model: config.model, reply })}\n`)
+        expect(sharedRequests).toHaveLength(1)
+        expect(sharedRequests[0]?.projectionScopes).toEqual(expect.arrayContaining([
+          { projectionKind: 'sleep-duration-days.v0' }, { projectionKind: 'workout-days.v0' }, { projectionKind: 'activity-days.v0' },
+        ]))
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(1)
+        expect(reply).toMatch(/Rowan/u)
+        expect(reply).toMatch(/Quinn/u)
+        expect(reply).toMatch(/7\s*(?:h|hours?)\s*(?:and\s*)?32|7:32|452/iu)
+        expect(reply).toMatch(/6\s*(?:h|hours?)\s*(?:and\s*)?52|6:52|412/iu)
+        // The recipe already names the week; restating July 30 as a per-metric start is coverage narration.
+        expect(reply).not.toMatch(/coverage|unknown|unavailable|missing|rest days?|unconfirmed|not confirmed|exclud|returned|incomplete|not (?:full|workout|a workout)|do(?:es)? not (?:establish|count|mean)|July 30|Jul\.? 30|7\/30|reconnect|permission/iu)
+        expect(reply.trim().split(/\s+/u).length).toBeLessThan(110)
       } finally {
         await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
       }
