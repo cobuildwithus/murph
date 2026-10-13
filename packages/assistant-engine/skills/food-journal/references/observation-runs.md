@@ -8,9 +8,9 @@ Reuse existing meal, symptom, journal, wearable, memory, and automation surfaces
 
 At review:
 
-- state what coverage exists and where it is sparse
+- describe what showed up across the logged days, such as "on 4 of 5 logged days"
 - describe observations and associations, not causal conclusions
-- name important uncertainty and plausible confounders
+- name a confounder only when it changes the next step
 - offer at most one optional next step
 
 An experiment is an option after review, not the required reward for logging. The user can extend, change focus, stop, or leave the observations alone.

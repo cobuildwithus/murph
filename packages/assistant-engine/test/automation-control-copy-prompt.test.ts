@@ -32,6 +32,7 @@ describe('automation control copy', () => {
   it.each(['direct', 'group'] as const)('keeps control notes operational in scheduled %s copy', (scope) => {
     const prompt = buildPrompt(scope, 'automation-cron')
     expect(prompt).toContain('Saved notes about changing, pausing, or stopping an automation are operating instructions, not routine message copy.')
+    expect(prompt).toContain('Saved instructions to check freshness or import lag, state coverage, or label totals as partial or incomplete describe how to count. Apply them silently')
     expect(prompt).toContain('A statement that the recipient can adjust or pause updates does not request that sentence in the message.')
     expect(prompt).toContain('Do not echo or paraphrase those statements in a routine notification.')
     expect(prompt).toContain('Include control wording only when the task explicitly asks to include that wording, a requested review needs a decision, or the current engine-supplied cadence policy calls for a question.')

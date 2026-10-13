@@ -35,7 +35,9 @@ describe('group shared metric presentation prompt', () => {
 
   it('qualifies short and tentative sleep in the assembled group prompt', () => {
     const prompt = buildHostedGroupSharedPrompt()
-    expect(prompt).toContain('`sleepType=short_sleep` identifies a short session, not a confirmed nap or complete night')
+    expect(prompt).toContain('`sleepType=short_sleep` is a short session')
+    expect(prompt).toContain('Show each with a plain label and no mark, such as "Avery: 42-minute short sleep" or "Jordan: 6h 45m, preliminary"')
+    expect(prompt).not.toContain('keep overnight sleep unconfirmed')
     expect(prompt).toContain('`sleepState=tentative` is a preliminary provider estimate')
     expect(prompt).toContain('do not score a nightly target from them')
   })
@@ -70,6 +72,25 @@ describe('group shared metric presentation prompt', () => {
     expect(prompt).toContain('preserving its timezone, recurrence, content, and destination')
     expect(prompt).toContain('Confirm the saved local time with its timezone when it differs from the chat timezone')
     expect(prompt).toContain('A refusal or unrelated reply leaves the schedule unchanged')
+  })
+
+  it('keeps gap rules out of group recap copy', () => {
+    const prompt = buildHostedGroupSharedPrompt()
+    expect(prompt).toContain('Data, status, and evidence rules decide what you count and claim; they are not reply text.')
+    expect(prompt).toContain('let the counts carry coverage, such as "across 6 nights" or "3 workout days"')
+    expect(prompt).toContain('Mention missing data only for someone missing the current day or the whole period, or for a date the request names individually')
+    expect(prompt).toContain('Do not add a coverage note, list other missing dates, restate the date range for each metric, or note excluded days.')
+    expect(prompt).toContain('Do not describe something by what it is not, list what stayed unchanged or did not happen, or add caveats nobody asked for.')
+    expect(prompt).toContain("A loaded skill's required completeness line still applies.")
+    expect(prompt).toContain('a gap is never a zero')
+    expect(prompt).toContain('For a current-day gap, with `no_recent_reporting` say only that no recent shared data is available; with `recent_reporting` or `unknown_history`, give the actual last check time')
+    for (const removed of [
+      'An absent historical date does not prove',
+      'distinguish an ongoing absence from a new delay',
+      'An ongoing absence alone does not need a check-time footer',
+      'For recent or unknown gaps, give the actual last check time',
+      'State requested versus actually available date coverage',
+    ]) expect(prompt).not.toContain(removed)
   })
 
   it('separates same-row name presentation from sender effects', () => {

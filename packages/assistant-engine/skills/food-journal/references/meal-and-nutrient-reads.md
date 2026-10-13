@@ -28,14 +28,14 @@ For a connected carbohydrate-record question, use one bounded day or
 short-range read:
 `vault-cli measurement entry list --metric carbohydrates --from <date> --to <date> --limit 50 --format json`.
 Returned grams are partial intake evidence. Do not infer food identity, a
-complete meal, total daily carbohydrate, or eaten calories from them. No
-returned entry means unavailable, not zero.
+complete meal, total daily carbohydrate, or eaten calories from them. With no
+returned entry, say none was recorded.
 
 For a connected or saved-meal vitamin, mineral, or water question, use one
 bounded day or short-range read:
 `vault-cli meal nutrients --from <date> --to <date> --format json`.
 The response lists every supported nutrient field. A `null` total with zero
-contributing meals means unavailable, not zero. A `contributingMealCount` below
+contributing meals means no recorded value; never report it as zero. A `contributingMealCount` below
 the enclosing `mealCount` means the total is partial across the selected stored
 meals; do not extrapolate the missing meals. Equal counts mean every selected
 stored meal record supplied that field, not that every meal eaten that day was
