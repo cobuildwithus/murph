@@ -157,6 +157,10 @@ jobs:
           if [[ "${SELECT_RESULT}" == success && "${SELECTED}" != true ]]; then
             state=success
             description='No hosted Temporal compatibility owner changed.'
+          elif [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" == cancelled ]]; then
+            # A newer Repo Hygiene run for this commit normally replaced this
+            # one and reports here; until then the status stays pending.
+            exit 0
           elif [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
             description='Repo Hygiene did not pass for this exact commit.'
           elif [[ "${SELECT_RESULT}" == success && "${TRUSTED}" != true ]]; then
@@ -172,4 +176,5 @@ jobs:
             -f context='Temporal compatibility' \
             -f description="${description}" \
             -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null
-          [[ "${state}" == success ]]
+          # The commit status carries the verdict. Failing this job would only
+          # mark the main commit that workflow_run check runs attach to.

@@ -1626,6 +1626,9 @@ test("workflow status shell executes every terminal outcome", async () => {
     [{ SELECT_RESULT: "failure" }, "failure", "Temporal compatibility selection failed."],
     [{ SELECTED: "false" }, "success", "No hosted Temporal compatibility owner changed."],
     [{ SOURCE_RESULT: "failure" }, "failure", "Repo Hygiene did not pass for this exact commit."],
+    // A superseded Repo Hygiene run leaves the status to its replacement.
+    [{ SOURCE_RESULT: "cancelled" }, null, null],
+    [{ SELECTED: "false", SOURCE_RESULT: "cancelled" }, "success", "No hosted Temporal compatibility owner changed."],
     [{ TRUSTED: "false" }, "failure", "Relevant changes require a same-repository human-authored head."],
     [{ COMPATIBILITY_RESULT: "success" }, "success", "Exact public SHA passed every supported private Temporal reader."],
     [{ COMPATIBILITY_RESULT: "failure" }, "failure", "No complete exact-SHA private Temporal compatibility proof was recorded."],
@@ -1653,7 +1656,12 @@ printf '%s\n' "$@" > "$GH_CAPTURE"
           STATUS_SHA: PUBLIC_SHA,
         },
       });
-      assert.equal(result.status, expectedState === "success" ? 0 : 1, result.stderr);
+      // The commit status carries the verdict; the job itself never fails.
+      assert.equal(result.status, 0, result.stderr);
+      if (expectedState === null) {
+        await assert.rejects(readFile(capturePath, "utf8"), { code: "ENOENT" });
+        continue;
+      }
       const ghArgs = (await readFile(capturePath, "utf8")).trimEnd().split("\n");
       assert.ok(ghArgs.includes(`state=${expectedState}`));
       assert.ok(ghArgs.includes(`description=${expectedDescription}`));
