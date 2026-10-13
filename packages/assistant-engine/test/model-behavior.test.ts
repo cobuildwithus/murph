@@ -1978,7 +1978,9 @@ describe('assistant consumption lookup guidance', () => {
       'Preserve medication state correctly: completed historical courses use `vault-cli medication history add`; current medication regimens use `regimen save --kind medication` with correct status and dates; one dose taken at a specific time uses `event medication-intake add`.',
     )
     expect(prompt).not.toContain('Do not assume calorie or macro tracking is the purpose of a meal log')
-    expect(prompt).not.toContain('vault-cli food search-labels-batch')
+    // Meal lookups start beside the food-journal read; the skill keeps the
+    // complete food and supplement label contracts.
+    expect(prompt.match(/vault-cli food search-labels-batch/gu)).toHaveLength(1)
     expect(prompt).not.toContain('vault-cli supplement search-labels-batch')
     expect(prompt).not.toContain('Do not infer contaminants for similar names')
   })
@@ -2262,7 +2264,12 @@ describe('assistant system prompt cache stability', () => {
     // Complete native requests measure the runtime delta from weekly main:
     // +1,889 UTF-8 bytes private and +78 group; live Sol verifies child discovery.
     // Retain a 2-character margin for the combined guidance.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_615)
+    // Meal first-step lookups add 302 characters so a new meal starts its
+    // label lookups beside the food-journal read instead of one provider round
+    // later, and the ready totals-only card exception adds 37 so a routine meal
+    // save attaches it without tool discovery. The live meal intake speed
+    // benchmark measures the removed rounds.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_952)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

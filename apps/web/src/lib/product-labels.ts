@@ -2783,6 +2783,18 @@ async function searchGenericProductLabels(
       })`
     : "strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0";
   const typoMatchOrderSql = privateFood ? "whole_name_match DESC," : "";
+  // Generic USDA names lead with the primary food ("Milk, whole"). Among
+  // names containing every query word, prefer one whose leading segment the
+  // query covers; after name similarity, prefer fewer unrequested words over
+  // text rank, which rewards words repeated in composite dishes.
+  const genericIdentity = input.genericSearchDataOrigins
+    ? {
+        primarySegmentMatchSql: (completeNameMatchSql: string) =>
+          `CASE WHEN ${completeNameMatchSql} AND to_tsvector('simple', query.raw_q) @@ plainto_tsquery('simple', split_part(name, ',', 1)) THEN 1 ELSE 0 END`,
+        unmatchedWordCountSql:
+          "cardinality(ARRAY(SELECT unnest(tsvector_to_array(to_tsvector('simple', name))) EXCEPT SELECT unnest(tsvector_to_array(to_tsvector('simple', query.raw_q)))))",
+      }
+    : { primarySegmentMatchSql: () => "0", unmatchedWordCountSql: "0" };
   const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
     "data_origin",
     input.excludedDataOrigins,
@@ -2948,6 +2960,8 @@ async function searchGenericProductLabels(
               ELSE 0
             END AS name_phrase_length,
             ${stemmedSql.stemmedNameMatchSql} AS stemmed_name_match,
+            ${genericIdentity.primarySegmentMatchSql(nameMatchSql)} AS primary_segment_match,
+            ${genericIdentity.unmatchedWordCountSql} AS unmatched_word_count,
             data_origin_priority
           FROM fts_matches, query
         ),
@@ -3016,6 +3030,8 @@ async function searchGenericProductLabels(
               ELSE 0
             END AS name_phrase_length,
             ${stemmedSql.stemmedNameMatchSql} AS stemmed_name_match,
+            ${genericIdentity.primarySegmentMatchSql("strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0")} AS primary_segment_match,
+            ${genericIdentity.unmatchedWordCountSql} AS unmatched_word_count,
             data_origin_priority
           FROM trigram_matches, query
         ),
@@ -3034,7 +3050,9 @@ async function searchGenericProductLabels(
                 name_phrase_match DESC,
                 name_phrase_length DESC,
                 stemmed_name_match DESC,
+                primary_segment_match DESC,
                 name_similarity DESC,
+                unmatched_word_count ASC,
                 search_rank DESC,
                 "offMarket" ASC,
                 data_origin_priority ASC,
@@ -3054,7 +3072,9 @@ async function searchGenericProductLabels(
             name_phrase_match DESC,
             name_phrase_length DESC,
             stemmed_name_match DESC,
+            primary_segment_match DESC,
             name_similarity DESC,
+            unmatched_word_count ASC,
             search_rank DESC,
             data_origin_priority ASC,
             name ASC,
@@ -3074,7 +3094,9 @@ async function searchGenericProductLabels(
                 name_phrase_match DESC,
                 name_phrase_length DESC,
                 stemmed_name_match DESC,
+                primary_segment_match DESC,
                 name_similarity DESC,
+                unmatched_word_count ASC,
                 search_rank DESC,
                 data_origin_priority ASC,
                 name ASC,

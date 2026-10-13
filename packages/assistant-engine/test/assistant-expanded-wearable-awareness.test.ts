@@ -100,7 +100,13 @@ describe('expanded wearable awareness', () => {
   })
 
   it('routes connected carbohydrate records without inventing complete intake', async () => {
-    const skill = await readSkill('food-journal')
+    expect(await readSkill('food-journal')).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/meal-and-nutrient-reads.md',
+    )
+    const skill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'food-journal', 'references', 'meal-and-nutrient-reads.md'),
+      'utf8',
+    )).replace(/\s+/gu, ' ')
 
     expect(skill).toContain(
       'vault-cli measurement entry list --metric carbohydrates --from <date> --to <date> --limit 50 --format json',

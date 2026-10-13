@@ -442,11 +442,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "3b81d5ea06d1b880060e69d575658a5e5314af63034a00979a8093fc9aeaed3d",
-        "group": "93803fc4515e313d00569b74e17034a97b39ff64f91084456b8b17a370618811",
+        "direct": "630d5e1e2ef50fc7bd3fa3deb2c98ec269416e1a97f966c560e37693542bbaa3",
+        "group": "4d753f70a0ee07f2d6f4adb690719fa9daeb992201a172884bf5498f511fd412",
         "maintenance": "ac022f98be034bc9bbcfd987fb422a0546cfa1899d4c99b97167d7d22527547e",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "a4f3b99448e46e0c23ee8995c64bf84c07413b2ae7cb0c754fb402d4de0a4f7e",
+        "scheduledEmail": "21731e19a5b2ea4e11368edcc3f65e1d7ed676a9b07eab73365713351fc70762",
       }
     `)
   })

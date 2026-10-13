@@ -3,8 +3,10 @@ import {
   MEAL_MICRONUTRIENT_KEYS,
   NUTRITION_CONFIDENCE_LEVELS,
   NUTRITION_PROVENANCE_SOURCES,
+  type DailyNutritionResponseCardV2,
   type EventSource,
   type MealNutrition,
+  dailyNutritionResponseCardV2AuthoringSchema,
   eventSourceSchema,
   mealNutritionSchema,
 } from '@murphai/contracts'
@@ -415,6 +417,7 @@ const mealAddWithDailyTotalsResultSchema = mealAddResultSchema.extend({
     z.object({
       status: z.literal('available'),
       data: mealNutritionTotalsResultSchema,
+      totalsOnlyCard: dailyNutritionResponseCardV2AuthoringSchema.nullable(),
     }),
     z.object({
       status: z.literal('unavailable'),
@@ -612,7 +615,14 @@ async function runMealAdd(
         resolveGoals: true,
       }),
     )
-    return { ...saved, dailyTotals: { status: 'available' as const, data } }
+    return {
+      ...saved,
+      dailyTotals: {
+        status: 'available' as const,
+        data,
+        totalsOnlyCard: buildTotalsOnlyDailyNutritionCard(data),
+      },
+    }
   } catch (error) {
     // The write already succeeded. A read failure must not turn it into a
     // retryable mutation and cause a duplicate meal.
@@ -626,6 +636,37 @@ async function runMealAdd(
       },
     }
   }
+}
+
+const DAILY_NUTRITION_CARD_METRICS = [
+  'calories', 'proteinGrams', 'carbsGrams', 'fatGrams', 'fiberGrams',
+] as const
+
+/**
+ * Copies the fresh canonical day into the totals-only card so a routine meal
+ * log can attach it without re-authoring numbers. Accepted goals need
+ * model-authored statuses, and incomplete coverage needs recovery first, so
+ * both yield null.
+ */
+function buildTotalsOnlyDailyNutritionCard(
+  data: z.infer<typeof mealNutritionTotalsResultSchema>,
+): DailyNutritionResponseCardV2 | null {
+  const localDate = data.goalContext?.localDate
+  if (data.goalContext?.status !== 'missing' || !localDate) return null
+  if (DAILY_NUTRITION_CARD_METRICS.some((metric) =>
+    data.totals[metric].total === null || data.totals[metric].mealCount !== data.mealCount)) {
+    return null
+  }
+  const card = dailyNutritionResponseCardV2AuthoringSchema.safeParse({
+    kind: 'daily_nutrition',
+    version: 2,
+    localDate,
+    mealCount: data.mealCount,
+    totals: Object.fromEntries(DAILY_NUTRITION_CARD_METRICS.map((metric) =>
+      [metric, { total: data.totals[metric].total, mealCount: data.totals[metric].mealCount }])),
+    goals: Object.fromEntries(DAILY_NUTRITION_CARD_METRICS.map((metric) => [metric, null])),
+  })
+  return card.success ? card.data : null
 }
 
 export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
@@ -662,7 +703,7 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         },
       ],
       hint:
-        'Use typed flags for ordinary meal logs; add --with-daily-totals when preparing a daily nutrition card to save and read fresh totals/goal context in one call. The save result is authoritative. Reuse dailyTotals.data when available; if unavailable, retry only meal totals, never the save. Use meal import-json --input @meal.json or meal import-json --input - for a structured payload; explicit flags override payload fields.',
+        'Use typed flags for ordinary meal logs; add --with-daily-totals when preparing a daily nutrition card to save and read fresh totals/goal context in one call. The save result is authoritative. Reuse dailyTotals.data when available; a non-null dailyTotals.totalsOnlyCard is the complete no-goals card for that day. If unavailable, retry only meal totals, never the save. Use meal import-json --input @meal.json or meal import-json --input - for a structured payload; explicit flags override payload fields.',
       args: z.object({}),
       options: mealAddTypedOptionShape,
       output: mealAddWithDailyTotalsResultSchema,

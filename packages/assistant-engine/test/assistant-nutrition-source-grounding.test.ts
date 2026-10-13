@@ -12,14 +12,18 @@ function compact(value: string): string {
 describe('assistant nutrition source grounding', () => {
   it('uses USDA and label facts for nutrient density before visual estimation', async () => {
     const skillsRoot = resolveAssistantSkillsRoot()
-    const [foodJournal, automaticMealCapture] = await Promise.all([
+    const [foodJournal, contaminants, automaticMealCapture] = await Promise.all([
       readFile(path.join(skillsRoot, 'food-journal', 'SKILL.md'), 'utf8'),
+      readFile(path.join(skillsRoot, 'food-journal', 'references', 'contaminants.md'), 'utf8'),
       readFile(
         path.join(skillsRoot, 'automatic-meal-capture', 'SKILL.md'),
         'utf8',
       ),
     ])
     const food = compact(foodJournal)
+    // Contaminant interpretation is read only before discussing a summary.
+    expect(food).toContain('read `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/contaminants.md` before discussing one.')
+    const contaminantGuidance = compact(contaminants)
     const automatic = compact(automaticMealCapture)
 
     expect(food).toContain(
@@ -38,34 +42,34 @@ describe('assistant nutrition source grounding', () => {
     expect(food).toContain(
       'The default returns one compact nutrition match per component with serving, calories, protein, carbohydrate, fat, fiber, and a bounded exact-product contaminant summary.',
     )
-    expect(food).toContain(
+    expect(contaminantGuidance).toContain(
       'Read `contaminantSummary` by default: `no_known_product_tests` means evidence is unknown',
     )
-    expect(food).toContain(
+    expect(contaminantGuidance).toContain(
       'When an alert includes `screeningPolicy`, use its exposure and ratio to interpret unlike result/threshold units',
     )
-    expect(food).toContain(
+    expect(contaminantGuidance).toContain(
       'that context is not a personalized safety verdict.',
     )
-    expect(food).toContain(
+    expect(contaminantGuidance).toContain(
       '`murphConcernLevel` is the strongest threshold-screening result among the linked tests, not product safety or personal risk.',
     )
-    expect(food).toContain(
+    expect(contaminantGuidance).toContain(
       '`none` means no represented comparable observation triggered an alert, not that no contaminants were measured.',
     )
-    expect(food).toContain(
+    expect(contaminantGuidance).toContain(
       'Alerts are a subset of observations; never add their counts together.',
     )
-    expect(food).toContain(
+    expect(contaminantGuidance).toContain(
       'For a routine meal log, inspect the summary silently and mention it only when the user asks or a material exact-product alert warrants a brief, source-specific screening caveat.',
     )
-    expect(food).toContain(
+    expect(contaminantGuidance).toContain(
       "For a material alert, attribute the measured result to `source`, and attribute the concern level, exposure, and ratio to Murph's comparison against the named `threshold.authority` and threshold.",
     )
-    expect(food).toContain(
+    expect(contaminantGuidance).toContain(
       'Never say the source reported a concern level unless the evidence explicitly states that.',
     )
-    expect(food).toContain(
+    expect(contaminantGuidance).toContain(
       'Do not inject unknown or `none` results into every acknowledgment.',
     )
     expect(food).toContain(
@@ -87,7 +91,7 @@ describe('assistant nutrition source grounding', () => {
       'Use a normal exact restaurant/menu search rather than a generic substitute.',
     )
     expect(food).toContain(
-      'Run this database search first even when the user supplies an official restaurant URL.',
+      'Run this database search even when the user supplies an official restaurant URL, together with the official-source web search from step 1.',
     )
     expect(food).toContain(
       'When a numeric safety exception already applies, save the meal without calorie or macro estimates.',
@@ -96,7 +100,7 @@ describe('assistant nutrition source grounding', () => {
       'Do not force a nutrition lookup, clarification, or safety preflight just to capture the meal.',
     )
     expect(food).toContain(
-      "If that search has no exact result, use the bounded source fallback below.",
+      'Use an exact database result; otherwise use the official source under the bounded source fallback below.',
     )
     expect(food).toContain(
       'When using that official source, retain its URL in nutrition source detail.',

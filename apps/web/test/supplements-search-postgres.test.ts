@@ -991,7 +991,19 @@ describe.runIf(Boolean(testDatabaseUrl))(
             'Roasted Chickpeas with Herbs and Lemon Ready to Eat Family Size', NULL,
             'Roasted Chickpeas with Herbs and Lemon Ready to Eat Family Size'),
           ('food-brand-only-chickpeas', 'usda_branded', 'Lemonade', 'Chickpeas Co',
-            'Chickpeas Co Lemonade')
+            'Chickpeas Co Lemonade'),
+          ('food-generic-whole-milk', 'usda_fndds', 'Milk, whole', NULL, 'Milk, whole'),
+          ('food-generic-mashed-potatoes', 'usda_sr_legacy',
+            'Potatoes, mashed, prepared from flakes without milk, whole milk and butter added', NULL,
+            'Potatoes, mashed, prepared from flakes without milk, whole milk and butter added'),
+          ('food-generic-butter-salted', 'usda_sr_legacy', 'Butter, salted', NULL, 'Butter, salted'),
+          ('food-generic-ghee', 'usda_sr_legacy', 'Butter, Clarified butter (ghee)', NULL,
+            'Butter, Clarified butter (ghee)'),
+          ('food-generic-reduced-fat-milk', 'usda_fndds', 'Milk, reduced fat (2%)', NULL,
+            'Milk, reduced fat (2%)'),
+          ('food-generic-cornbread', 'usda_sr_legacy',
+            'Bread, cornbread, dry mix, prepared with 2% milk, 80% margarine, and eggs', NULL,
+            'Bread, cornbread, dry mix, prepared with 2% milk, 80% margarine, and eggs')
         ) AS fixtures(id, origin, name, brand, search_text)
       `);
       await client.query(
@@ -1151,6 +1163,12 @@ describe.runIf(Boolean(testDatabaseUrl))(
       { q: "Meadow Pantry lentils", genericOnly: false, expected: "food-branded-lentils" },
       { q: "chikpeas", genericOnly: true, expected: "food-long-chickpeas" },
       { q: "chickpeas", genericOnly: false, expected: "food-long-chickpeas" },
+      // Generic USDA names lead with the primary food; repeated words in a
+      // composite dish must not outrank it.
+      { q: "whole milk", genericOnly: true, expected: "food-generic-whole-milk" },
+      { q: "milk whole", genericOnly: true, expected: "food-generic-whole-milk" },
+      { q: "butter", genericOnly: true, expected: "food-generic-butter-salted" },
+      { q: "2% milk", genericOnly: true, expected: "food-generic-reduced-fat-milk" },
     ])("ranks the complete food identity for $q", async ({ q, genericOnly, expected }) => {
       const rows = await foodQueries.searchFoods({
         q, genericOnly, includeOffMarket: false, limit: 5,
