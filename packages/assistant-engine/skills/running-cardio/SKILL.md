@@ -167,7 +167,7 @@ RPE is session- and duration-dependent. Do not present these numbers as laborato
 
 First determine whether the user means a device zone, a laboratory threshold model, or simply easy aerobic work. Zone labels are not standardized across two-, three-, and five-zone systems.
 
-When the system is unknown, prescribe **easy aerobic below the first ventilatory/lactate threshold** in practical terms: full sentences, RPE roughly 2–4/10, and a pace that remains steady without drift into controlled-hard work. Treat watch heart rate as supporting evidence, not a verdict.
+When the system is unknown, prescribe **easy aerobic below the first ventilatory/lactate threshold** in practical terms: full sentences, RPE roughly 2–4/10, and a pace that remains steady without drift into controlled-hard work. Use watch heart rate as supporting evidence for that effort.
 
 Do not promise that Zone 2 is uniquely necessary or superior to all other aerobic training.
 

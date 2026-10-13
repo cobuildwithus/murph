@@ -442,11 +442,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "3b81d5ea06d1b880060e69d575658a5e5314af63034a00979a8093fc9aeaed3d",
-        "group": "93803fc4515e313d00569b74e17034a97b39ff64f91084456b8b17a370618811",
-        "maintenance": "ac022f98be034bc9bbcfd987fb422a0546cfa1899d4c99b97167d7d22527547e",
-        "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "a4f3b99448e46e0c23ee8995c64bf84c07413b2ae7cb0c754fb402d4de0a4f7e",
+        "direct": "befefa2647a515392532f8f0713dd955111e5130ffca7fc4c039aa13c1d3e4e7",
+        "group": "36f3ab5f1dbc74c8a22fac56215f27d7925a9c38c931104b575ee3300973e29c",
+        "maintenance": "4def8e201c9fe004f9f60f5ac3ec5ecf084f63f7bc5c70e1a6409107487300be",
+        "outputOnly": "7f13d7195b8e231e1fba2e5bd5e91437b30756cd8fcf763edd47fe27de6f7d6e",
+        "scheduledEmail": "01153c8f4e5dc8652ef7429cdf8997aa446710277bacc902098494ca409be1dc",
       }
     `)
   })

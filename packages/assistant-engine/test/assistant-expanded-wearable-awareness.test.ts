@@ -42,15 +42,15 @@ describe('expanded wearable awareness', () => {
     expect(prompt).toContain('read `cardiometabolic-health`')
     expect(prompt).not.toContain('respiratory, metabolic, treatment, alert')
     expect(prompt).toContain('not `wearables metric`')
-    expect(prompt).toContain('missing is unavailable, not zero or proof')
+    expect(prompt).toContain('a missing entry is no reading, never a zero')
+    expect(prompt).not.toContain('not zero or proof')
     expect(prompt).toContain(
       'Raw ECG voltage/workout points are not stored',
     )
     expect(prompt).toContain(
-      'Burned calories are expenditure; carbs can be partial intake evidence',
+      'Burned calories are expenditure; connected carbs are one input to intake',
     )
-    expect(prompt).toContain('not proof of a complete meal or eaten-calorie total')
-    expect(prompt).toContain('read `food-journal`')
+    expect(prompt).toContain('read `food-journal` for meal totals')
   })
 
   it('routes expanded activity signals through the lossless global metric surface', async () => {
@@ -75,7 +75,7 @@ describe('expanded wearable awareness', () => {
       expect(skill).toContain(`\`${metric}\``)
     }
     expect(skill).toMatch(/global\s+metric index, not the narrower `wearables metric`/u)
-    expect(skill).toMatch(/No returned entries\s+means missing coverage, not zero/u)
+    expect(skill).toMatch(/With no returned\s+entries, say none was recorded for that date; never report a zero/u)
     expect(skill).toContain('returned source and event ID as provenance')
     expect(skill).toContain('query-only and unavailable through `vault-cli show`')
     expect(skill).toContain(
@@ -109,7 +109,7 @@ describe('expanded wearable awareness', () => {
     expect(skill).toContain('Do not infer food identity')
     expect(skill).toContain('a complete meal')
     expect(skill).toContain('eaten calories')
-    expect(skill).toContain('unavailable, not zero')
+    expect(skill).toMatch(/With no\s+returned entry, say none was recorded\./u)
   })
 
   it('uses connected body metrics as source-aware trends rather than ground truth', async () => {
@@ -127,7 +127,7 @@ describe('expanded wearable awareness', () => {
       expect(skill).toContain(`\`${metric}\``)
     }
     expect(skill).toMatch(/compare repeated readings for a trend\. Keep sources and measurement\s+conditions consistent/u)
-    expect(skill).toMatch(/No returned entries means missing coverage rather than no\s+change/u)
+    expect(skill).toMatch(/With no returned entries, say none was recorded; never read that as no\s+change/u)
     expect(skill).toContain('returned source and event ID as provenance')
     expect(skill).toMatch(/query-only and unavailable through\s+`vault-cli show`/u)
   })

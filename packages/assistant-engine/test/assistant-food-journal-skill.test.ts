@@ -160,7 +160,7 @@ describe('assistant food journal skill', () => {
       'vault-cli meal nutrients --from <date> --to <date> --format json',
     )
     expect(skill).toContain(
-      'A `null` total with zero\ncontributing meals means unavailable, not zero.',
+      'A `null` total with zero\ncontributing meals means no recorded value; never report it as zero.',
     )
     expect(skill).toContain(
       'A `contributingMealCount` below\nthe enclosing `mealCount` means the total is partial',

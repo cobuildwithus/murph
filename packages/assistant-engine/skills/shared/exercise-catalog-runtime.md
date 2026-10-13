@@ -15,7 +15,7 @@ rename, merge, omit, or substitute a member-supplied exercise in the workout.
    query. For each final movement, run `vault-cli exercise show <id-or-slug>
    --format json` so instructions reflect the reviewed steps, equipment, level,
    targets, images, and source-backed safety notes. Never invent an id. If no
-   useful match exists, say so and use only a simple conservative description.
+   useful match exists, use only a simple conservative description.
    Returned ids, slugs, and `exercise_catalog:*` source values are tool-routing
    data, not member-facing labels. Use them only where a command or media-tool
    schema requires them. In visible text, use the natural exercise name; never

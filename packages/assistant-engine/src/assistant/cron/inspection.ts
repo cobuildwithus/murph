@@ -89,7 +89,7 @@ export async function getAssistantCronAutomationInspection(
       historyTruncated: runs.length > HISTORY_LIMIT,
       nextStep: readInspectionNextStep(phase, runs[0]?.outcome),
       interpretation: 'This is retained attempt history, newest first, not a complete lifetime history. '
-        + 'A failed, expired, skipped_gate, or no_op run is not delivery confirmation. Report delivery as unconfirmed after failure; failure alone proves neither sending nor that nothing was sent. '
+        + 'A failed, expired, skipped_gate, or no_op run is not delivery confirmation. After failure, say the message may not have gone out; failure alone proves neither sending nor that nothing was sent. '
         + 'delivery_pending means execution queued a message; use the outstanding delivery status when present. '
         + 'Only delivered or delivery.status=sent confirms sending, not reading. '
         + 'A retry is scheduled only when current.retryAt or delivery.nextAttemptAt is present; a running attempt may still finish. '
@@ -120,7 +120,7 @@ function readInspectionNextStep(phase: ExecutionPhase, outcome: AssistantCronRun
     return 'Explain the current work and any recorded retry time or outstanding delivery status. Do not promise delivery or create a replacement while work is pending.'
   }
   if (outcome === 'failed' || outcome === 'expired') {
-    return 'Explain the recorded failure without inventing a cause. State that sending is unconfirmed, and include the option to reschedule the missed occurrence if it is still wanted. Do not change or recreate it during inspection.'
+    return 'Explain the recorded failure without inventing a cause. Say it may not have gone out, and include the option to reschedule the missed occurrence if it is still wanted. Do not change or recreate it during inspection.'
   }
   return 'Explain the recorded outcome and use the stored schedule and occurrence projection for future timing. Missing retained history is not proof of delivery.'
 }

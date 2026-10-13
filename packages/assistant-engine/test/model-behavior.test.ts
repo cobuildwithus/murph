@@ -1567,11 +1567,9 @@ describe('assistant execution prompt contract', () => {
         'Do not shift action-timed cues such as bedtime reminders.',
       )
       expect(prompt).toContain(
-        'Stored instructions must name the completed period, check coverage and freshness each run',
+        'Stored instructions name the completed period and metrics, count only dates with data, show coverage only as counts such as "6 of 7 days", and never treat a missing date as zero; leave timing rationale and other data caveats out of them.',
       )
-      expect(prompt).toContain(
-        'delayed, stale, or missing data as unknown or incomplete—not zero or failure',
-      )
+      expect(prompt).not.toContain('check coverage and freshness each run')
       expect([
         ...prompt.matchAll(/Wearable freshness for scheduled summaries:/gu),
       ]).toHaveLength(1)
@@ -2592,7 +2590,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '6324f7e80517c979431bbd53f6527197e815f43af6629c0793abff4668fb498b',
+      '8fc6bd3af451f6af738e5646f7c1cda7489b1ba03ea885bd28a08b12293383d0',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2759,7 +2757,8 @@ describe('assistant experiment onboarding guidance', () => {
       'Health reasoning or advice beyond the returned label facts still requires Commons.',
     )
     expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
-    expect(prompt).toContain('If unavailable or empty, continue honestly.')
+    expect(prompt).toContain('Ground the answer in its evidence and safety guidance. If unavailable or empty, answer from general knowledge.')
+    expect(prompt).not.toContain('Use evidence, caveats, safety, and sources.')
     expect(prompt).toContain('Skip jokes, thanks, logs, logistics, and non-health turns.')
     expect(prompt).not.toContain('private longitudinal policy')
     expect(prompt).not.toContain(
@@ -2918,10 +2917,10 @@ describe('assistant experiment onboarding guidance', () => {
       'then ask every needed concrete question—one at a time on texting routes, or a short related set elsewhere.',
     )
     expect(prompt).toContain(
-      'Continue only while answers could materially change safety, interpretation, action, or follow-through; otherwise name uncertainty and help now.',
+      'Continue only while answers could materially change safety, interpretation, action, or follow-through; otherwise help now.',
     )
     expect(prompt).toContain(
-      'If the user declines, wants an answer now, or has low capacity, help from what is known and name uncertainty.',
+      'If the user declines, wants an answer now, or has low capacity, help from what is known.',
     )
 
     // Motivation is captured once, in the user's own words.
