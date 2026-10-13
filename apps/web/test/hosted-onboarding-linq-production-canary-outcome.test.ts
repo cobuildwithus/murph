@@ -1,3 +1,4 @@
+import { createCloudflareHostedControlClient, readCloudflareHostedControlHttpError } from "@murphai/cloudflare-hosted-control/client";
 import {
   buildHostedWorkspaceSnapshotV2Aad,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
@@ -247,18 +248,124 @@ describe("production canary canonical outcome observer", () => {
     { stage: "final_readiness", reads: 9, fail: (error: Error, workspace: HostedWorkspaceRecord) =>
       mocks.workspace.mockResolvedValueOnce(workspace).mockRejectedValueOnce(error) },
     { stage: "final_readiness", reads: 10, fail: (error: Error) => mocks.memberId.mockResolvedValueOnce(memberId).mockRejectedValueOnce(error) },
-  ])("logs only $stage on failure after $reads operations, without retrying", async ({ stage, reads, fail }) => {
+  ])("logs bounded $stage diagnostics after $reads operations, without retrying", async ({ stage, reads, fail }) => {
     const workspace = await installEncryptedReplica([goal()]);
     const privateError = new Error("synthetic-private-message", { cause: new Error("synthetic-private-cause") });
     privateError.stack = "synthetic-private-stack";
     await fail(privateError, workspace);
     const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
-    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage });
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, {
+      stage, ...(stage === "session_request" ? { sessionRequestFailureReason: "other" } : {}),
+    });
     expect(console.error).not.toHaveBeenCalled();
     expectReadOrder(readOrder.slice(0, reads));
     await expectUnavailable(error);
     expect(JSON.stringify([vi.mocked(console.warn).mock.calls, vi.mocked(console.error).mock.calls]))
       .not.toContain("synthetic-private");
+  });
+
+  it.each([
+    { failure: "HTTP 429", diagnostic: { sessionRequestFailureReason: "http", httpStatus: 429 },
+      respond: () => Response.json({ error: { code: "synthetic-private-server-code" } }, { status: 429 }) },
+    { failure: "HTTP 503", diagnostic: { sessionRequestFailureReason: "http", httpStatus: 503 },
+      respond: () => Response.json({ error: { code: "synthetic-private-server-code" } }, { status: 503 }) },
+    { failure: "native timeout", diagnostic: { sessionRequestFailureReason: "timeout" },
+      respond: () => { throw new DOMException("synthetic-private-timeout", "TimeoutError"); } },
+    { failure: "native abort", diagnostic: { sessionRequestFailureReason: "abort" },
+      respond: () => { throw new DOMException("synthetic-private-abort", "AbortError"); } },
+    { failure: "fetch TypeError", diagnostic: { sessionRequestFailureReason: "other" },
+      respond: () => { throw new TypeError("synthetic-private-transport"); } },
+    { failure: "fetch SyntaxError", diagnostic: { sessionRequestFailureReason: "other" },
+      respond: () => { throw new SyntaxError("synthetic-private-fetch"); } },
+    { failure: "malformed JSON", diagnostic: { sessionRequestFailureReason: "other" },
+      respond: () => new Response("synthetic-private-not-json", { status: 200 }) },
+    { failure: "typed response validation", diagnostic: { sessionRequestFailureReason: "other" },
+      respond: () => Response.json({ privatePayload: "synthetic-private-response" }) },
+  ] as const)("distinguishes $failure through the real control client without retrying", async ({ respond, diagnostic }) => {
+    await installEncryptedReplica([goal()]);
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () => respond());
+    const { getBearerToken } = installSyntheticControl(fetchImpl);
+    await expectSessionRequestFailure(diagnostic);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(getBearerToken).toHaveBeenCalledOnce();
+    expect(getBearerToken.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.session.mock.invocationCallOrder[0]!);
+    expect(fetchImpl.mock.invocationCallOrder[0]).toBeGreaterThan(getBearerToken.mock.invocationCallOrder[0]!);
+  });
+
+  it.each([
+    { name: "TimeoutError", reason: "timeout" }, { name: "AbortError", reason: "abort" },
+  ] as const)("uses the native $name brand without reading private getters", async ({ name, reason }) => {
+    await installEncryptedReplica([goal()]);
+    const rejection = new DOMException("synthetic-private-message", name);
+    const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
+    for (const key of ["stack", "name", "message", "code", "status", "cause", "payload", "memberId", "keys"]) {
+      Object.defineProperty(rejection, key, { get: inspect });
+    }
+    mocks.session.mockRejectedValueOnce(rejection);
+    await expectSessionRequestFailure({ sessionRequestFailureReason: reason });
+    expect(inspect).not.toHaveBeenCalled();
+  });
+
+  it.each([503, NaN, Infinity, -Infinity, "503", null, undefined, "getter", "coercible"])(
+    "retains genuine HTTP classification without getters or status coercion (%s)", async (status) => {
+      await installEncryptedReplica([goal()]);
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json({ error: { code: "synthetic-private-server-code" } }, { status: 503 }),
+      );
+      const { control, getBearerToken } = installSyntheticControl(fetchImpl);
+      const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
+      mocks.session.mockImplementationOnce(async (input) => {
+        try {
+          return await control.createBrowserVaultSession(input);
+        } catch (rejection) {
+          expect(readCloudflareHostedControlHttpError(rejection)?.status).toBe(503);
+          for (const key of ["stack", "name", "message", "code", "cause", "payload", "memberId", "keys"]) {
+            Object.defineProperty(rejection, key, { get: inspect });
+          }
+          Object.defineProperty(rejection, "status", status === "getter" ? { get: inspect } : {
+            value: status === "coercible" ? { [Symbol.toPrimitive]: inspect } : status,
+          });
+          throw rejection;
+        }
+      });
+      await expectSessionRequestFailure({
+        sessionRequestFailureReason: "http",
+        ...(typeof status === "number" && Number.isFinite(status) ? { httpStatus: status } : {}),
+      });
+      expect(inspect).not.toHaveBeenCalled();
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(getBearerToken).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    { failure: "null", create: () => null },
+    { failure: "undefined", create: () => undefined },
+    { failure: "primitive", create: () => "synthetic-private-thrown-value" },
+    { failure: "symbol", create: () => Symbol("synthetic-private-symbol") },
+    { failure: "HTTP lookalike", create: () => ({ name: "HostedExecutionHttpResponseError", status: 503 }) },
+    { failure: "timeout name lookalike", create: () => Object.assign(new Error(), { name: "TimeoutError" }) },
+    { failure: "unbranded DOMException", create: () => Object.create(DOMException.prototype) },
+    { failure: "private getters", create: (inspect: () => never) => Object.defineProperties({}, {
+      name: { get: inspect }, code: { get: inspect }, status: { get: inspect }, message: { get: inspect },
+    }) },
+    { failure: "property proxy", create: (inspect: () => never) => new Proxy({}, { get: inspect, ownKeys: inspect }) },
+    { failure: "prototype trap", create: (_inspect: () => never, reflect: () => never) =>
+      new Proxy({}, { getPrototypeOf: reflect }) },
+    { failure: "descriptor trap", create: (_inspect: () => never, reflect: () => never) =>
+      new Proxy({}, { getOwnPropertyDescriptor: reflect }) },
+    { failure: "revoked proxy", create: () => {
+      const { proxy, revoke } = Proxy.revocable({}, {});
+      revoke();
+      return proxy;
+    } },
+  ])("keeps other explicit for a $failure at session_request", async ({ create }) => {
+    await installEncryptedReplica([goal()]);
+    const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
+    const reflect = vi.fn(() => { throw new Error("synthetic-private-reflection"); });
+    mocks.session.mockRejectedValueOnce(create(inspect, reflect));
+    await expectSessionRequestFailure({ sessionRequestFailureReason: "other" });
+    expect(inspect).not.toHaveBeenCalled();
   });
 
   describe.each([
@@ -367,17 +474,16 @@ describe("production canary canonical outcome observer", () => {
     expect(console.error).not.toHaveBeenCalled();
   });
 
-  it.each(["session_request", "decryption"] as const)("never inspects a caught %s exception", async (stage) => {
+  it("never inspects a caught decryption exception", async () => {
     await installEncryptedReplica([goal()]);
     const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
     const rejection = new Proxy(new Error("synthetic-private-message"), {
       get: inspect, ownKeys: inspect, getOwnPropertyDescriptor: inspect, getPrototypeOf: inspect,
     });
-    if (stage === "session_request") mocks.session.mockRejectedValueOnce(rejection);
-    else vi.spyOn(browserVaultLoader, "decodeReadyBrowserVaultSession").mockRejectedValueOnce(rejection);
+    vi.spyOn(browserVaultLoader, "decodeReadyBrowserVaultSession").mockRejectedValueOnce(rejection);
     const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
     expect(inspect).not.toHaveBeenCalled();
-    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage });
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage: "decryption" });
     expectReadOrder(readOrder.slice(0, 7));
     await expectUnavailable(error);
     expect(inspect).not.toHaveBeenCalled();
@@ -388,10 +494,14 @@ describe("production canary canonical outcome observer", () => {
     mocks.session.mockRejectedValueOnce(new Error("synthetic-private-transport"));
     vi.mocked(console.warn).mockImplementation(() => { throw new Error("synthetic-private-logger"); });
     const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
-    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage: "session_request" });
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, {
+      stage: "session_request", sessionRequestFailureReason: "other",
+    });
     expectReadOrder(readOrder.slice(0, 7));
+    expect(console.error).not.toHaveBeenCalled();
     await expectUnavailable(error);
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("synthetic-private");
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
   });
 
   it("keeps stages local when an earlier authority check fails after another read reaches control", async () => {
@@ -405,7 +515,7 @@ describe("production canary canonical outcome observer", () => {
     rejectAuthority(new Error("synthetic-private-authority"));
     const firstError = await first;
     expect(vi.mocked(console.warn).mock.calls).toEqual([
-      [diagnosticMessage, { stage: "session_request" }],
+      [diagnosticMessage, { stage: "session_request", sessionRequestFailureReason: "other" }],
       [diagnosticMessage, { stage: "initial_authority", authorityFailureReason: "other" }],
     ]);
     expectReadOrder(["memberId", "memberId", "authority", "authority", "pending", "workspace", "control", "keys", "session"]);
@@ -423,6 +533,29 @@ function expectReadOrder(expected: readonly string[]): void {
   if (expected.includes("control")) expect(mocks.control).toHaveBeenCalledWith(10_000);
 }
 
+function installSyntheticControl(fetchImpl: typeof fetch) {
+  const getBearerToken = vi.fn(async () => "synthetic-private-token");
+  const control = createCloudflareHostedControlClient({
+    baseUrl: "https://control.example.test", fetchImpl, getBearerToken, timeoutMs: 10_000,
+  });
+  mocks.session.mockImplementation((input) => control.createBrowserVaultSession(input));
+  return { control, getBearerToken };
+}
+
+async function expectSessionRequestFailure(diagnostic: {
+  sessionRequestFailureReason: "http" | "timeout" | "abort" | "other";
+  httpStatus?: number;
+}): Promise<void> {
+  const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+  expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage: "session_request", ...diagnostic });
+  expect(console.error).not.toHaveBeenCalled();
+  expectReadOrder(readOrder.slice(0, 7));
+  expect(mocks.session).toHaveBeenCalledOnce();
+  expect(mocks.runtimeAccess).toHaveBeenCalledOnce();
+  await expectUnavailable(error);
+  expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+}
+
 async function expectUnavailable(error: unknown): Promise<void> {
   expect(error).toBeInstanceOf(HostedOnboardingError);
   expect(error).toMatchObject({
@@ -432,6 +565,7 @@ async function expectUnavailable(error: unknown): Promise<void> {
   });
   expect(error).not.toHaveProperty("stage");
   expect(error).not.toHaveProperty("authorityFailureReason");
+  expect(error).not.toHaveProperty("sessionRequestFailureReason");
   const response = jsonError(error);
   expect(response.status).toBe(503);
   expect(response.headers.get("cache-control")).toBe("no-store");

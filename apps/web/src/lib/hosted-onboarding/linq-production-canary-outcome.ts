@@ -1,5 +1,6 @@
 import "server-only";
 
+import { readCloudflareHostedControlHttpError } from "@murphai/cloudflare-hosted-control/client";
 import { isContractId } from "@murphai/contracts";
 import { assessBrowserVaultReplicaFreshness, parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 import { isHostedWorkspaceSnapshotV2Ref, parseHostedExecutionSnapshotRef } from "@murphai/hosted-execution/parsers";
@@ -120,10 +121,11 @@ export async function readHostedLinqProductionCanaryOutcome(input: {
         .map((entity) => entity.id)).size,
     };
   } catch (error) {
-    // Only authority failures are classified; all other exceptions stay untouched.
+    // Classify only authority/session-request failures; never log the caught value.
     try {
       console.warn("Hosted Linq production canary outcome read failed.", {
         stage, ...readAuthorityFailureDiagnostic(stage, error),
+        ...readSessionRequestFailureDiagnostic(stage, error),
       });
     } catch {
       // Diagnostic failure must not replace the generic unavailable error.
@@ -159,6 +161,35 @@ async function assertCanaryRuntimeAuthority(input: {
       message: "The production canary runtime is not authorized.",
     });
   }
+}
+
+function readSessionRequestFailureDiagnostic(stage: string, error: unknown): {
+  sessionRequestFailureReason: "http" | "timeout" | "abort" | "other";
+  httpStatus?: number;
+} | undefined {
+  if (stage !== "session_request") return undefined;
+  try {
+    if (typeof error === "object" && error !== null) {
+      // Preserve the helper's local instance check without reading code/status getters.
+      const http = readCloudflareHostedControlHttpError(Object.create(Object.getPrototypeOf(error), {
+        code: { value: undefined },
+        status: { value: Object.getOwnPropertyDescriptor(error, "status")?.value },
+      }));
+      if (http) return {
+        sessionRequestFailureReason: "http",
+        ...(typeof http.status === "number" && Number.isFinite(http.status) ? { httpStatus: http.status } : {}),
+      };
+      if (typeof DOMException !== "undefined" && error instanceof DOMException) {
+        // This native, brand-checked accessor ignores the input's name/code getters.
+        const code: unknown = Object.getOwnPropertyDescriptor(DOMException.prototype, "code")?.get?.call(error);
+        if (code === DOMException.TIMEOUT_ERR) return { sessionRequestFailureReason: "timeout" };
+        if (code === DOMException.ABORT_ERR) return { sessionRequestFailureReason: "abort" };
+      }
+    }
+  } catch {
+    // Hostile reflection must not suppress the warning or replace the generic 503.
+  }
+  return { sessionRequestFailureReason: "other" };
 }
 
 function readAuthorityFailureDiagnostic(stage: string, error: unknown): {
