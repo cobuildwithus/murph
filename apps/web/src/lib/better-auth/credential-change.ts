@@ -91,7 +91,7 @@ export async function readHostedInitialMessagingSetupAllowed(prisma: Client, ses
 
 export function assertInitialMessagingSetupFresh(session: HostedAppSession) {
   const age = Date.now() - (session.primaryAuthenticatedAt?.getTime() ?? Number.NaN);
-  if (!Number.isFinite(age) || age < 0 || age > 5 * 60_000) throw hostedOnboardingError({
+  if (!Number.isFinite(age) || age < 0 || age > 10 * 60_000) throw hostedOnboardingError({
     code: "AUTH_FRESH_LOGIN_REQUIRED", httpStatus: 403, message: "Sign in again before connecting a messaging account.",
   });
 }
