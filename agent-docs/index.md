@@ -1196,3 +1196,5 @@ The six-hour freshness window for Flex-retry managed automations is tracked in
 
 Meal telemetry authoring and validation handoff are recorded in
 [the meal failure attribution plan](exec-plans/completed/2026-10-10-meal-failure-attribution.md).
+
+Control response MIME diagnostics: [`2026-10-13-control-response-mime-diagnostic.md`](exec-plans/completed/2026-10-13-control-response-mime-diagnostic.md).
