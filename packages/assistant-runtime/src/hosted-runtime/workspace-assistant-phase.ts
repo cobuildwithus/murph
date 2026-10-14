@@ -47,6 +47,7 @@ import {
   resolveAssistantCronDefaultTimeZoneProjection,
   resolveMurphManagedAutomationOwnerScope,
   upsertAssistantInputEvent,
+  widenAssistantCronActiveUntilForFinalOccurrence,
   type AssistantAutomationOccurrenceProjection,
   type AssistantAutomationOccurrenceProjectionIssue,
   type AssistantAutomationOperationScope,
@@ -1013,9 +1014,12 @@ function createHostedAssistantAutomationTool(input: {
           status,
         });
         const result = await upsertAutomation({
-          ...(request.activeUntil === undefined
-            ? {}
-            : { activeUntil: request.activeUntil }),
+          ...await resolveHostedAutomationActiveUntilWrite({
+            existing: null,
+            requestedActiveUntil: request.activeUntil,
+            requestedSchedule: request.schedule,
+            vaultRoot: input.vaultRoot,
+          }),
           ...(request.assistantTargetOverride === undefined
             ? {}
             : { assistantTargetOverride: request.assistantTargetOverride }),
@@ -1090,9 +1094,12 @@ function createHostedAssistantAutomationTool(input: {
         status: request.status ?? existing.status,
       });
       const result = await patchAutomation({
-        ...(request.activeUntil === undefined
-          ? {}
-          : { activeUntil: request.activeUntil }),
+        ...await resolveHostedAutomationActiveUntilWrite({
+          existing,
+          requestedActiveUntil: request.activeUntil,
+          requestedSchedule: request.schedule,
+          vaultRoot: input.vaultRoot,
+        }),
         ...(request.assistantTargetOverride === undefined
           ? {}
           : { assistantTargetOverride: request.assistantTargetOverride }),
@@ -1250,6 +1257,38 @@ type HostedAutomationToolResponseInput =
       routeBinding: "current_conversation" | "member_notification" | "preserved";
       vaultRoot: string;
     };
+
+// Widens a finite wall-clock cutoff so its final occurrence keeps the normal
+// delivery window. A schedule-only patch re-checks the stored cutoff and writes
+// it only when widening changes it; a timezone-less replacement schedule keeps
+// the stored timezone, matching core patch resolution.
+async function resolveHostedAutomationActiveUntilWrite(input: {
+  existing: AutomationRecord | null;
+  requestedActiveUntil: string | null | undefined;
+  requestedSchedule: AutomationRecord["schedule"] | undefined;
+  vaultRoot: string;
+}): Promise<{ activeUntil?: string | null }> {
+  const requested = input.requestedActiveUntil;
+  const current = requested !== undefined || input.requestedSchedule === undefined
+    ? requested
+    : input.existing?.activeUntil;
+  const schedule = input.requestedSchedule ?? input.existing?.schedule;
+  if (
+    typeof current !== "string"
+    || (schedule?.kind !== "cron" && schedule?.kind !== "dailyLocal")
+  ) {
+    return requested === undefined ? {} : { activeUntil: requested };
+  }
+  const stored = input.existing?.schedule;
+  const widened = widenAssistantCronActiveUntilForFinalOccurrence({
+    activeUntil: current,
+    schedule,
+    timeZone: schedule.timeZone
+      ?? (stored?.kind === "cron" || stored?.kind === "dailyLocal" ? stored.timeZone : undefined)
+      ?? (await resolveAssistantCronDefaultTimeZoneProjection(input.vaultRoot)).timeZone,
+  });
+  return requested === undefined && widened === current ? {} : { activeUntil: widened };
+}
 
 async function projectHostedAutomationResponseFields(input: {
   record: AutomationRecord;

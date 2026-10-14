@@ -220,7 +220,7 @@ const automationAuthoringActiveUntilSchema = automationActiveUntilSchema
   .nullable()
   .optional()
   .describe(
-    'Optional exclusive delivery cutoff. For a finite recurrence, express the repeating days in schedule and expiration here, after the final desired occurrence. Omit it for an ordinary one-shot; when supplied for a one-shot, it must be strictly after the scheduled occurrence. On patch, omit to preserve the existing cutoff or pass null to clear it.',
+    'Optional exclusive delivery cutoff. For a finite recurrence, express the repeating days in schedule and expiration here, after the final desired occurrence; the host extends a cutoff less than one hour after that occurrence to one hour, never past the next occurrence. Omit it for an ordinary one-shot; when supplied for a one-shot, it must be strictly after the scheduled occurrence. On patch, omit to preserve the existing cutoff or pass null to clear it.',
   )
 
 const automationDynamicToolScheduleSchema = z.union([

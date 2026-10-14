@@ -20519,6 +20519,101 @@ describeRealCodex('real Codex health-purpose scheduled follow-ups', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex standalone scheduled support messages', () => {
+  const unrelatedRecentConversation = [
+    'Available recent conversation (newest last):',
+    'October 6, 10:00 America/New_York. Assistant: tuesday. after lunch, do the two-minute hamstring and hip stretch. tiny version: one stretch.',
+    'October 8, 12:05. Member: are lentils a good protein source? Assistant: yes, about 18 grams of protein per cooked cup, plus fiber.',
+    'October 10, 19:40. Member: any quick dinner ideas with chickpeas? Assistant: try a chickpea and spinach curry; it takes about 20 minutes.',
+    'October 11, 16:20. Member: what is a good stretch for tight calves? Assistant: a wall calf stretch, 30 seconds per side.',
+    'No member reply mentions stretching since October 6.',
+  ].join('\n')
+  it.each([
+    {
+      scenario: 'four-week review written with internal support labels',
+      supportKind: 'review' as const,
+      schedule: { kind: 'at' as const, at: '2026-10-13T14:00:00.000Z' },
+      instructions: 'subject anchor: daily stretch-after-lunch plan. run a brief four-week review. ask whether the tuesday cue and friday check-in helped, and offer one clear disposition: keep, change timing, or stop. avoid guilt. do not claim stretches happened without reliable evidence.',
+      expectedText: /stretch/iu,
+      maxQuestions: 1,
+    },
+    {
+      scenario: 'one-time reminder written with an internal cue label',
+      supportKind: null,
+      schedule: { kind: 'at' as const, at: '2026-10-13T14:00:00.000Z' },
+      instructions: 'subject anchor: after-lunch stretch. send the cue: after lunch, do the two-minute hamstring and hip stretch. tiny version: one stretch.',
+      expectedText: /stretch/iu,
+      maxQuestions: 0,
+    },
+    {
+      scenario: 'weekly check-in written with an internal cue label',
+      supportKind: 'check_in' as const,
+      schedule: { kind: 'cron' as const, expression: '0 10 * * 5', timeZone: 'America/New_York' },
+      instructions: 'subject anchor: daily stretch-after-lunch plan. it is friday. first check recent conversation for a stretch report this week. if already reported, stay silent. if unknown, ask one neutral, no-guilt question about whether the tuesday cue helped. do not treat missing evidence as a miss.',
+      expectedText: /stretch/iu,
+      maxQuestions: 1,
+    },
+    {
+      scenario: 'member-dictated exact reminder copy',
+      supportKind: null,
+      schedule: { kind: 'at' as const, at: '2026-10-13T14:00:00.000Z' },
+      instructions: 'The member asked for this exact reminder text, word for word: "water the fern". Send exactly that text.',
+      expectedText: /^water the fern\.?$/iu,
+      maxQuestions: 0,
+    },
+  ])('standalone scheduled support $scenario', async ({ scenario, supportKind, schedule, instructions, expectedText, maxQuestions }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-standalone-support-e2e-'))
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const occurrenceAt = '2026-10-13T14:00:00.000Z'
+      const created = await upsertAutomation({
+        continuityPolicy: 'preserve',
+        instructions,
+        now: new Date('2026-09-14T14:00:00.000Z'),
+        route: { channel: 'linq', deliveryTarget: 'synthetic-standalone-support', identityId: null,
+          participantId: null, threadId: 'synthetic-standalone-support', threadIsDirect: true },
+        schedule, slug: 'synthetic-standalone-support', status: 'active', supportKind, tags: [],
+        title: 'Synthetic standalone support', vaultRoot: workingDirectory,
+      })
+      const source = findCanonicalAssistantCronRecordInList(
+        await listCanonicalAssistantCronRecords(workingDirectory), created.record.automationId)
+      if (!source || source.kind !== 'automation') throw new Error('Expected synthetic automation.')
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+        jobId: resolveCanonicalAssistantCronJobId(source), now: occurrenceAt,
+      })
+      const executionInstructions = buildAssistantCronExecutionInstructions({
+        job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+        kind: 'canonical', runtimeState, source,
+      }, { automationId: null, contextReferences: [] })
+      const prepared = await prepareAssistantCronNotificationInput({
+        instructions: executionInstructions, vault: workingDirectory, workingDirectory,
+        turnTrigger: 'automation-cron', scheduledAutomationScheduleKind: schedule.kind,
+      })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: buildScheduledAutomationDeveloperInstructions('direct'),
+        dynamicTools: [], env: config.env, model: config.model, modelProvider: config.modelProvider,
+        prompt: [prepared.instructions, unrelatedRecentConversation].join('\n\n'),
+        reasoningEffort: 'high', sandbox: 'read-only', workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`${JSON.stringify({ scenario, model: config.model, decision })}\n`)
+      expect(decision.kind).toBe('send_message')
+      expect(result.followUpRequest).toBeNull()
+      if (decision.kind === 'send_message') {
+        expect(decision.text.trim()).toMatch(expectedText)
+        expect(decision.text).not.toMatch(/\bcues?\b|subject anchor|disposition|support series|automation|\bcontext\b|\bevidence\b|escalat/iu)
+        expect((decision.text.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(maxQuestions)
+        expect(decision.text.length).toBeLessThan(240)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex recurring reminder conversation e2e', () => {
   it('keeps saved control notes out of routine summaries while preserving requested controls', async () => {
     const config = await resolveRealCodexE2eConfig()

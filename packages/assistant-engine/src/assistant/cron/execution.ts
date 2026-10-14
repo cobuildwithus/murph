@@ -202,6 +202,14 @@ export const ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS = [
   '- Completion of a broader plan is not proof that this occurrence\'s requested action already happened.',
   '- You may still skip when the saved instructions authorize that outcome or current evidence proves the requested action already happened.',
 ].join('\n')
+export const ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS = [
+  'Member-facing wording (engine-supplied; applies to any message this run sends):',
+  "- The saved instructions above are Murph's own notes, not message copy. The member may not have thought about this plan for days and has probably been texting about other things since, so the message must make sense on its own.",
+  '- Name the specific plan, task, or item in everyday words that respect any saved privacy boundary, and refer to earlier messages by what they said and when.',
+  '- Never call an earlier message a "cue" or "check-in", and never write disposition, support kind, or subject anchor. These are internal labels, even when the saved instructions use them. Say what the earlier message reminded or asked instead. For example, say "the monday walk reminders and friday questions about your walks" instead of "the monday cue and friday check-in".',
+  '- Do not describe what context or evidence you could or could not see.',
+  '- Keep saved wording verbatim only when the member dictated that exact copy.',
+].join('\n')
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
@@ -1904,6 +1912,7 @@ export function buildAssistantCronExecutionInstructions(
   )
   const recurringReminderConversation =
     buildAssistantCronRecurringReminderConversationInstructions(job)
+  const memberWording = buildAssistantCronMemberWordingInstructions(job)
   const overlays = [
     buildMurphManagedJournalCalendarWindowInstructions(
       job.kind === 'canonical' && job.source.kind === 'automation' ? job.source.automationId : null,
@@ -1915,6 +1924,7 @@ export function buildAssistantCronExecutionInstructions(
     recurringReminderConversation,
     supportScope,
     exerciseCue,
+    memberWording,
   ]
     .filter((section): section is string => section !== null)
   const providerSafeBase =
@@ -1990,6 +2000,22 @@ function buildAssistantCronIndependentAutomationAuthorityInstructions(
   return ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS
 }
 
+function buildAssistantCronMemberWordingInstructions(
+  job: ResolvedAssistantCronJob,
+): string | null {
+  // Murph-managed jobs follow their owning skill's message shape.
+  if (
+    job.kind !== 'canonical' ||
+    job.source.kind !== 'automation' ||
+    assistantCronJobIsPreemptibleBackgroundMaintenance(job) ||
+    resolveMurphManagedAutomationOwnerScope(job.source.automationId) !== null
+  ) {
+    return null
+  }
+
+  return ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS
+}
+
 function buildAssistantCronSupportScopeInstructions(
   job: ResolvedAssistantCronJob,
 ): string | null {
@@ -2008,7 +2034,7 @@ function buildAssistantCronSupportScopeInstructions(
     ? 'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so, plus any necessary skip or invalid-state note. For a recurring reminder, the engine-supplied cadence-administration question is the sole allowed exception to cue-only delivery. Do not ask whether the action was completed or add a proactive repair, accountability, or reflection question.'
     : job.source.supportKind === 'check_in'
       ? 'Ask at most one narrow check-in or repair question about the current plan. Do not expand into a review, digest, or new coaching agenda.'
-      : "Conduct only the bounded review and ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
+      : "Conduct only the bounded review and ask exactly one question about what the user wants next; fold any question about whether the support helped into it. Offer the next-step options the saved instructions name; if they name none, ask whether to continue, modify, pause, stop, or escalate. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
 
   return [
     'Accepted support scope (engine-supplied; this overrides any broader repair or follow-up option above):',
