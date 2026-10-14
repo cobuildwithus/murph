@@ -950,6 +950,127 @@ describeRealCodex('real Codex event-list family isolation', () => {
   }, 360_000)
 })
 
+const BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION = 'Maximum number of results to return, from 1 to 200.'
+
+function buildBoundedEventListPrompt(assistantCliContract: string, conversationScope: 'direct' | 'group') {
+  return buildAssistantSystemPrompt({
+    assistantCliContract, assistantHostedAutomationAvailable: false,
+    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    conversationScope, currentInstant: '2026-04-11T12:00:00.000Z',
+    currentLocalDate: '2026-04-11', currentTimeZone: 'America/New_York', hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+  })
+}
+
+async function readBoundedEventListManifest() {
+  return await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+    workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+  })
+}
+
+describe('bounded event list limit production contract', () => {
+  it('discloses the cap only in command help, leaving the composed CLI contract unchanged', async () => {
+    const manifest = await readBoundedEventListManifest()
+    expect(manifest.commands.find(command => command.name === 'event list')?.schema?.options?.properties?.limit)
+      .toMatchObject({ maximum: 200, default: 10, description: BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION })
+    // Substitute the prior description everywhere and rebuild through the same
+    // production builders: the compact index and composed prompts must not move.
+    const prior = JSON.parse(JSON.stringify(manifest).replaceAll(
+      BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION, 'Maximum number of results to return.',
+    )) as typeof manifest
+    const contract = buildAssistantCliSurfaceContract(manifest)
+    if (!contract) throw new Error('Expected the generated production CLI contract.')
+    expect(buildAssistantCliSurfaceContract(prior)).toBe(contract)
+    expect(contract).not.toContain(BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION)
+    expect(buildBoundedEventListPrompt(contract, 'direct')).toContain('read `vault-cli <command> --help`')
+    for (const scope of ['direct', 'group'] as const) {
+      expect(buildBoundedEventListPrompt(contract, scope)).not.toContain(BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION)
+    }
+  }, 120_000)
+})
+
+describeRealCodex('real Codex bounded event list limit e2e', () => {
+  it('bounded event list limit reads an oversized note request once within the cap', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-event-limit-e2e-'))
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      const assistantCliContract = buildAssistantCliSurfaceContract(await readBoundedEventListManifest())
+      if (!assistantCliContract) throw new Error('Expected the generated production CLI contract.')
+      const developerInstructions = buildBoundedEventListPrompt(assistantCliContract, 'direct')
+      await initializeVault({ vaultRoot, timezone: 'America/New_York' })
+      for (const [title, day, tag] of [
+        ['Pack the travel adapter.', '2026-04-08', 'trip-log'],
+        ['The hotel checkout is at eleven.', '2026-04-09', 'trip-log'],
+        ['The lighthouse tour starts at the north pier.', '2026-04-10', 'trip-log'],
+        ['Water the fern on Sunday.', '2026-04-10', 'home'],
+      ] as const) {
+        await upsertEvent({ vaultRoot, payload: {
+          kind: 'note', source: 'manual', title, note: title, tags: [tag],
+          occurredAt: `${day}T14:00:00Z`, timeZone: 'America/New_York',
+        } })
+      }
+      await writeFile(commandLogPath, '')
+      // The recorder runs the shipped source CLI; no event output is fixtured.
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const canonicalBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions,
+        env: config.env,
+        fixtureBinDirectory: binDirectory,
+        groupConversation: false,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: "Pull up to 1,000 of my saved notes tagged trip-log and list their titles. Don't change anything.",
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const reads = readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command'
+        && /\bvault-cli\b[^;\n]*\bevent\s+list\b/u.test(action.command)
+        && !isRecordedVaultHelpCommand(action.command))
+      const reply = result.finalMessage.trim()
+      const commands = expandRecordedVaultCommands((await readFile(commandLogPath, 'utf8'))
+        .split('\n').filter(Boolean)).filter((command) =>
+        !isRecordedVaultHelpCommand(command) && !/^--(?:llms(?:-full)?|version)(?:\s|$)/u.test(command)
+      )
+      const limits = commands.map((command) => command.match(/(?:^|\s)--limit(?:=|\s+)(\S+)/u)?.[1] ?? null)
+      process.stdout.write(`[event-list-limit-e2e] ${JSON.stringify({
+        scenario: 'oversized-note-limit', eventReads: reads.length, limits, reply,
+      })}\n`)
+      // One successful bounded read: no oversized attempt and no unchanged retry.
+      expect(commands).toHaveLength(1)
+      expect(commands[0]).toMatch(/^event list(?:\s|$)/u)
+      expect(limits.every((limit) => limit === null || (/^\d+$/u.test(limit) && Number(limit) >= 1 && Number(limit) <= 200))).toBe(true)
+      expect(reads).toHaveLength(1)
+      expect(reads[0]?.kind === 'command' && reads[0].ok).toBe(true)
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(canonicalBefore)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(reply).toMatch(/travel adapter/iu)
+      expect(reply).toMatch(/hotel checkout/iu)
+      expect(reply).toMatch(/lighthouse tour/iu)
+      expect(reply).not.toMatch(/fern/iu)
+      expect(reply).not.toMatch(/VALIDATION|too_big|invalid|error|\b200\b|\bcap(?:ped)?\b|maximum|retry|unable|couldn['’]t|could not/iu)
+      expect(reply.length).toBeLessThanOrEqual(400)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 async function seedFocusedFollowupVault(vaultRoot: string) {
   await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-04-01T00:00:00Z' })
   const { createExperiment } = await import('@murphai/core')
