@@ -19,4 +19,4 @@ Run `pnpm --silent review:gpt --prompt-file <synthetic-prompt> --wait --response
 
 This delays authorized telemetry implementation before any model work starts. No production content, browser account details, or private attachment contents are required to diagnose the staging state.
 
-For implementation authoring only, the same first lane accepted a supported `--no-artifacts --no-zip` request containing the relevant public source inline. This narrows the submission failure to the attachment-bearing path without establishing a deterministic cause. The workaround does not waive final review's guarded, exact-head repository snapshot requirement.
+For implementation authoring only, the same first lane accepted a supported `--no-artifacts --no-zip` request containing the relevant public source inline. A later guarded final-review snapshot also submitted and completed on that lane, confirming the failure is intermittent rather than a permanent attachment limitation. The authoring workaround does not waive final review's guarded, exact-head repository snapshot requirement.

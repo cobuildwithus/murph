@@ -258,6 +258,8 @@ traffic using a fixed 24-hour UTC window after rollout (`start <= timestamp < st
 filter `component = "hosted.runtime.control-plane"` and
 `message = "Hosted runtime control-plane response returned invalid JSON."`, then
 count by `details.path`, `details.responseStatus`, and `details.responseMimeCategory`.
+Include the production runner-container application streams as well as the Worker;
+container records identify their application through `$containers.applicationId`.
 An absent field is unknown, not `missing`; zero matches do not establish health.
 
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.

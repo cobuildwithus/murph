@@ -1,8 +1,8 @@
 # Classify invalid control response content types
 
-Status: active
+Status: completed
 Created: 2026-10-13
-Updated: 2026-10-14
+Updated: 2026-10-13
 
 ## Goal
 
@@ -55,4 +55,12 @@ Distinguish JSON-labeled malformed control responses from unexpected HTML, text,
 - Applying only the tests to the original transport produced 17 missing-category failures and 82 passing controls. Applying the transport change produced 99 passing tests across the new generic and existing snapshot diagnostic suites.
 - Cloudflare typecheck, logging privacy guard, docs drift, whitespace checks, and complexity diff passed. The request-attempt function's existing complexity of 40 is unchanged; the extracted classifier avoids duplication and no unrelated control-flow refactor is justified.
 - Parent review confirmed fixed categories only, preserved snapshot classification, unchanged throw/replay behavior, no additional request or log event, and no success-path metadata.
-- Final ReviewGPT and exact-head CI remain pending on the pushed candidate. Merge and deployment remain gated on those results and the current release boundary.
+- Final ReviewGPT round 1 passed with zero findings on `f3ff1295fb4ad39f54d065af3889561d23b3fea2`: guarded full snapshot, exact accepted turn, selected and sent GPT-6 Pro, response hash, and minimum response time verified. Parent final review accepted the result.
+- A read-only query reproduction established that runner-container application streams must be included alongside Worker records. The owner documentation now names that existing surface; this explanatory addition changes no executable behavior.
+
+## Completion and handoff
+
+- Implementation and review are complete in PR #4141. Final changes only close this plan and clarify operational documentation; the reviewed runtime and test trees remain unchanged.
+- Required exact-head CI remains a merge gate. Any telemetry-only merge and canonical deployment must recheck the current public/private release boundary and protected approvals. Record rollout and natural-event verification in the sweep handoff; the original invalid-response cause and exact publish outcome remain unresolved.
+- No migration, new credential, policy, configuration, state owner, retry, timeout, or functional recovery is included. Preserve the fixed-window observation query when natural traffic has not exercised the deployed field.
+Completed: 2026-10-13
