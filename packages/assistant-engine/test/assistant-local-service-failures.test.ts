@@ -1185,6 +1185,7 @@ test('sendAssistantMessageLocal surfaces queued delivery state after queue-only 
       error: queuedError,
       intentId: 'intent-queued',
       kind: 'queued',
+      media: [],
       session: queuedSession,
     },
   })
@@ -1280,6 +1281,7 @@ test('sendAssistantMessageLocal uses the Codex route and not-requested delivery 
     deliveryOutcome: {
       intentId: 'intent-not-requested',
       kind: 'not-requested',
+      media: [],
       session,
     },
     plan,
