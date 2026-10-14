@@ -2216,6 +2216,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
     const groupRequest: NonNullable<
       HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
     >["request"] = groupRequestMock;
+    const logRequests: HostedRuntimeLogRequest[] = [];
     try {
       await initializeVault({
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -2293,6 +2294,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
         assistantInputIds: [emailInputId, linqInputId, telegramInputId],
         importedCount: 3,
+        logRequests,
         runtimeGroupToolPort: { request: groupRequest },
         vaultRoot,
       }));
@@ -2697,6 +2699,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
         slug: "other-group-check-in",
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({ status: "active" }));
+      await drainHostedRuntimeLogWritesBestEffort();
+      const readTimings = logRequests
+        .flatMap((logRequest) => parseHostedRuntimeLogRequest(logRequest).entries)
+        .filter((entry) => entry.redactedJson?.type === "hosted_group_shared_read_timing");
+      // Only the Linq turn reads through groupSharedReader; the Telegram turn
+      // calls groupTool directly, which this timing does not cover.
+      expect(readTimings.map((entry) => entry.redactedJson)).toEqual([
+        expect.objectContaining({ groupSharedReadCallbackCount: 1, groupSharedReadDecision: "no_freshness",
+          groupSharedReadLane: "interactive", groupSharedReadOutcome: "none", groupSharedReadWaitBudgetMs: 15_000 }),
+      ]);
+      expect(JSON.stringify(readTimings)).not.toMatch(/steps-days|1234567890|15555550123|linq_group_chat/u);
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }

@@ -152,6 +152,7 @@ import {
   createHostedGroupParticipantDisplayNameReader,
   createHostedGroupSharedReader,
   normalizeHostedGroupSharedProjectionScopes,
+  type HostedGroupSharedReadTelemetry,
 } from "./group-shared-reader.ts";
 import {
   resolveHostedOldestAssistantInputOccurredAt,
@@ -484,6 +485,8 @@ function createHostedAssistantAutomationOperationScope(
         groupToolPort: input.runtime.platform.groupToolPort ?? null,
         linqDeliveryContexts: durableContext.linqDeliveryContexts,
         linqService: durableContext.linqService,
+        onGroupSharedReadCompleted: (telemetry) =>
+          writeHostedGroupSharedReadRuntimeLog(input, "interactive", telemetry),
         runtimeMemberId: input.request.userId,
         telegramSenderHandles: durableContext.telegramSenderHandles,
         vaultRoot: input.restored.vaultRoot,
@@ -696,6 +699,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
   linqService: HostedUsageReferralLinqService | null;
+  onGroupSharedReadCompleted: (telemetry: HostedGroupSharedReadTelemetry) => void;
   runtimeMemberId: string;
   telegramSenderHandles?: readonly string[];
   vaultRoot: string;
@@ -716,6 +720,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
     freshnessWaitMs: input.groupEmailIngress ? undefined : 15_000,
     groupSharedReadAvailable: input.groupSharedReadAvailable,
     groupToolPort: scopedGroupToolPort,
+    onReadCompleted: input.onGroupSharedReadCompleted,
   });
   if (!sharedScopedExecutionContext.hosted) {
     return sharedScopedExecutionContext;
@@ -756,6 +761,7 @@ function scopeHostedGroupSharedReaderToAssistantOperation(input: {
   freshnessWaitMs?: number;
   groupSharedReadAvailable: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
+  onReadCompleted: (telemetry: HostedGroupSharedReadTelemetry) => void;
 }): AssistantExecutionContext {
   if (!input.executionContext.hosted) {
     return input.executionContext;
@@ -773,6 +779,7 @@ function scopeHostedGroupSharedReaderToAssistantOperation(input: {
             groupSharedReader: createHostedGroupSharedReader({
               groupToolPort: input.groupToolPort,
               freshnessWaitMs: input.freshnessWaitMs,
+              onReadCompleted: input.onReadCompleted,
             }),
           }
         : {}),
@@ -787,6 +794,7 @@ function createHostedScheduledGroupTools(input: {
   channel: string;
   containerMemberId: string;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
+  onGroupSharedReadCompleted: (telemetry: HostedGroupSharedReadTelemetry) => void;
   target: string;
   threadIsDirect: boolean;
 }): {
@@ -819,6 +827,7 @@ function createHostedScheduledGroupTools(input: {
   const unobservedGroupSharedReader = createHostedGroupSharedReader({
     groupToolPort: input.groupToolPort,
     freshnessWaitMs: 5 * 60_000,
+    onReadCompleted: input.onGroupSharedReadCompleted,
   });
   const groupSharedReader: AssistantHostedGroupSharedReader = {
     async request(request, context) {
@@ -1751,6 +1760,8 @@ export async function runHostedWorkspaceAssistantPhase(
             channel,
             containerMemberId: input.request.userId,
             groupToolPort: input.runtime.platform.groupToolPort ?? null,
+            onGroupSharedReadCompleted: (telemetry) =>
+              writeHostedGroupSharedReadRuntimeLog(input, "scheduled", telemetry),
             target,
             threadIsDirect,
           }),
@@ -7754,6 +7765,39 @@ function writeHostedAssistantTurnTimingRuntimeLog(input: {
       redactedJson,
     },
     platform: input.input.platform,
+  });
+}
+
+const HOSTED_GROUP_SHARED_READ_TIMING_SCHEMA = "murph.hosted-group-shared-read-timing.v1";
+const HOSTED_GROUP_SHARED_READ_TIMING_TYPE = "hosted_group_shared_read_timing";
+
+// One queued info record per accepted shared read; returned so the reader's
+// containment also absorbs any rejection. See docs/hosted-runtime-log-database.md.
+function writeHostedGroupSharedReadRuntimeLog(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  lane: "interactive" | "scheduled",
+  telemetry: HostedGroupSharedReadTelemetry,
+): Promise<void> {
+  return writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.request.attemptId,
+        leaseGeneration: input.request.leaseGeneration,
+        workspaceVersion: input.request.workspaceVersion,
+      }),
+      component: "assistant",
+      eventCode: "assistant.automation_detail",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        ...telemetry,
+        detailLabel: "Hosted group shared read finished.",
+        groupSharedReadLane: lane,
+        schema: HOSTED_GROUP_SHARED_READ_TIMING_SCHEMA,
+        type: HOSTED_GROUP_SHARED_READ_TIMING_TYPE,
+      },
+    },
+    platform: input.platform,
   });
 }
 
