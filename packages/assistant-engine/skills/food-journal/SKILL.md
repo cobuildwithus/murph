@@ -35,64 +35,47 @@ Infer the focus from the conversation:
 
 Ask at most one question, and only when the missing detail materially changes safety, the chosen focus, or whether the record will be useful.
 
-For a connected carbohydrate-record question, use one bounded day or
-short-range read:
-`vault-cli measurement entry list --metric carbohydrates --from <date> --to <date> --limit 50 --format json`.
-Returned grams are partial intake evidence. Do not infer food identity, a
-complete meal, total daily carbohydrate, or eaten calories from them. With no
-returned entry, say none was recorded.
-
-For a connected or saved-meal vitamin, mineral, or water question, use one
-bounded day or short-range read:
-`vault-cli meal nutrients --from <date> --to <date> --format json`.
-The response lists every supported nutrient field. A `null` total with zero
-contributing meals means no recorded value; never report it as zero. A `contributingMealCount` below
-the enclosing `mealCount` means the total is partial across the selected stored
-meals; do not extrapolate the missing meals. Equal counts mean every selected
-stored meal record supplied that field, not that every meal eaten that day was
-logged. The aggregate may combine connected and manually saved meals. Do not
-attribute its totals or coverage to one provider or claim that provider was
-complete unless separate provider-specific evidence establishes that.
-
-Treat this as a bounded sum of stored meal fields, not a copy of the source
-app's daily dashboard. Source-app targets, daily percentages, and completeness
-claims are not imported. When asked what is "low," report the observed total and
-coverage first. Do not call an intake low, adequate, deficient, or excessive
-unless a trustworthy target applies to this member and the stored unit and
-nutrient form are compatible with it; name the target basis and remaining
-uncertainty. If the member asks for a reference comparison, use a current
-authoritative source rather than a remembered target and obtain the age, sex,
-and pregnancy or lactation context needed for that source. Do not directly
-compare provider fields for folic acid, vitamin A, vitamin E, or niacin to DFE,
-RAE, alpha-tocopherol, or niacin-equivalent targets unless the imported form and
-conversion basis are known. One day of food records does not diagnose a
-deficiency. Use
-`nutrition-strategy` for food-first suggestions and
-`micronutrients-supplements` for labs, supplement dosing, or deficiency-risk
-questions.
+For a connected carbohydrate, vitamin, mineral, or water question, read
+`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/meal-and-nutrient-reads.md`
+first.
 
 ## Capture with low friction
+
+### Routine meal log in three steps
+
+Each step is one tool step: batch its independent calls together, in one
+code-mode `exec` script when available.
+
+1. Look up. Run the label lookups below for every material component whose
+   label or USDA facts are not already known. Phrase generic queries in USDA
+   order, primary food first: `bananas raw`, `milk reduced fat 2%`,
+   `rice white long-grain cooked`, `chicken breast meat only roasted`. For a
+   named restaurant, menu, or packaged item, run its database search and one
+   official-source web search in this same step. Skip lookups for
+   member-provided totals or a fully readable label.
+2. Save and attach. Scale and sum the components in that same script (no
+   separate calculation step), rounding to whole calories and one-decimal
+   grams. Save all five metrics: when a lookup row lacks one (Foundation rows
+   often omit fiber), use a marked estimate instead of omitting it, because a
+   missing metric leaves the day incomplete and blocks its card. Run the
+   combined save below and parse its JSON. When `dailyTotals.totalsOnlyCard`
+   is non-null, attach it unchanged with `murph.attach_response_card` in that
+   script; in code mode,
+   `await tools.murph__attach_response_card({ card: saved.dailyTotals.totalsOnlyCard })`
+   needs no tool discovery. It is the complete fresh no-goals card for the
+   saved day and needs no other read. Otherwise print the save result and
+   apply the recovery and accepted-goal rules below.
+3. Finish. After a successful card, end with no final text unless the fixed
+   optional introduction below applies.
 
 - A photo, voice note, or rough phrase can be a complete meal log.
 - Preserve useful real-life context when the user volunteers it, such as eating out, alcohol, a late meal, stress, travel, illness, or social context.
 - Use existing canonical surfaces. Save meal facts to meal records, symptoms to their typed surface, and durable unstructured context to the best-fit existing journal or memory surface. Do not duplicate the same fact across stores.
 
-For private recent-meal recall, read canonical records before asking the member
-to repeat the meal or claiming it is unknown. For the latest saved meal, use
-`vault-cli timeline --entry-type event --kind meal --limit 1 --format json`:
-the timeline is newest first by occurrence/capture time. `meal list` is oldest
-first, so `meal list --limit 1` does not find the latest meal. Apply the member's
-date bounds when given. Inspect the returned meal with `meal show` and view its
-photo when identification requires it; an empty chat attachment list does not
-mean there are no imported meal photos. Distinguish an empty result, a failed
-read, and a photo whose food cannot be identified. Reuse relevant reads already
-completed this turn.
-
-Do not list meals as a prerequisite to a new capture. When the member asks to
-inspect a particular day's saved meals, use
-`vault-cli meal list --from <date> --to <same-date> --limit 50 --format json`
-and check for a truncated result before claiming complete coverage. `meal list`
-has no `--date` option. Use the typed save flags below directly; reading this skill
+Do not list meals as a prerequisite to a new capture. For recent-meal recall
+or a saved-day review, read
+`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/meal-and-nutrient-reads.md` first.
+Use the typed save flags below directly; reading this skill
 already supplies the ordinary capture contract. Execute the documented save
 for a resolved meal; optional enrichment is not a reason to rediscover the
 schema before saving.
@@ -100,10 +83,11 @@ schema before saving.
 When the user names a restaurant and recognizable menu item, and known context
 does not trigger one of the numeric safety exceptions below, resolve nutrition
 before the meal mutation. Use a normal exact restaurant/menu search rather
-than a generic substitute. Run this database search first even when the user
-supplies an official restaurant URL. If that search has no exact result, use the bounded
-source fallback below. An official menu or label does not itself require a
-live browser.
+than a generic substitute. Run this database search even when the user
+supplies an official restaurant URL, together with the official-source web
+search from step 1. Use an exact database result; otherwise use the official
+source under the bounded source fallback below. An official menu or label does
+not itself require a live browser.
 When using that official source, retain its URL in nutrition source detail.
 Use `--nutrition-source label` for published official item/serving facts;
 `database` is for facts returned by the food-label database.
@@ -142,8 +126,10 @@ vault-cli meal add --with-daily-totals --format json \
   --nutrition-confidence <confidence> --nutrition-source-detail "<evidence or URL>"
 ```
 Nutrition source is `user`, `label`, `database`, `inherited`, or `estimated`;
-confidence is `low`, `medium`, or `high`. For member-provided portion totals,
-use `--nutrition-source user`; do not look up a substitute estimate.
+confidence is `low`, `medium`, or `high`. Keep `--nutrition-source-detail` to
+at most 240 characters: the key sources, ids or URL, and decisive assumption.
+For member-provided portion totals, use `--nutrition-source user`; do not look
+up a substitute estimate.
 `--with-daily-totals` also works with `meal import-json` for structured ingredients.
 This command shape is the execution contract. Do not rediscover these flags
 through help/schema calls, repository searches, or CLI implementation reads
@@ -154,9 +140,10 @@ provides `dailyTotals.data`, the fresh canonical `meal totals --resolve-goals`
 result for the saved meal's local date, including coverage and goal context.
 Reuse it for the eligible same-date card; do not add `meal show`, `meal list`,
 or a separate `meal totals` read just to confirm this save. With context already
-known and complete nutrition, this is one save-and-read call followed by
-`murph.attach_response_card`. For an ordinary card, the rules here and in the
-card tool provide the target-authority and complete active-Goal discovery contract.
+known and complete nutrition, this is one save-and-read call that attaches a
+non-null `dailyTotals.totalsOnlyCard` in the same step. For an ordinary card,
+the rules here and in the card tool provide the
+target-authority and complete active-Goal discovery contract.
 Do not read the goal-derivation reference or full nutrition-strategy skill
 unless the member explicitly engages in target-setting.
 
@@ -214,64 +201,12 @@ or target-resolution mechanics.
 
 ### Complete an interactive day before attaching its card
 
-Use this selected-date recovery during private meal logging and estimation,
-including explicit app submissions, as well as daily nutrition card or summary
-requests. A separate request to estimate an already-saved meal is unnecessary.
-When totals expose incomplete meals, inspect and complete those existing records
-from available evidence, or ask one focused follow-up for essential missing
-identity or amount. Do not end with a missing-estimate refusal before trying
-this recovery. Keep reads bounded to the selected date; unrelated conversation
-does not trigger meal recovery.
-
-After the fresh selected-date totals read (standalone or combined save), compare every
-metric's `mealCount` with the top-level `mealCount`. When any metric has lower
-coverage, do not treat the normal interactive card workflow as finished with a
-partial card. List only that selected date, show the exact meals that lack
-nutrition, and try to complete those existing records from accepted current
-conversation context, their saved identity, ingredients, and amount, and a
-bounded matching prior meal when useful. A member's current statement that the
-meal is equivalent to a specific prior meal is usable evidence. A similar
-informal name alone is not: require matching saved ingredients and portion
-evidence or ask instead of copying nutrition.
-
-Use only the canonical meal surface for this recovery: `vault-cli meal list
---from <date> --to <date> --limit 200 --format json`, `vault-cli meal show
-<meal-id> --format json`, and `vault-cli meal edit <meal-id>` with the typed
-`--nutrition-calories`, `--nutrition-protein-grams`,
-`--nutrition-carbs-grams`, `--nutrition-fat-grams`,
-`--nutrition-fiber-grams`, `--nutrition-source`,
-`--nutrition-confidence`, and `--nutrition-source-detail` flags. Never inspect
-or modify raw vault files. After the date lists identify the records, show the
-selected prior meal before copying its saved totals. After the edit succeeds,
-run the exact edited-meal `meal show` readback and fresh same-date `meal totals`
-command before attaching the card. Use `--nutrition-source inherited` for
-copied prior-meal totals and preserve the prior source in
-`--nutrition-source-detail`.
-
-Apply the estimation-eligibility and label/database grounding rules below. If
-the available evidence supports a meaningful bounded estimate, edit and read
-back the exact existing meal, then rerun fresh same-date totals before any card.
-Never add a replacement meal or calculate around the incomplete record. If
-identity or amount remains too indeterminate, ask one compact question for only
-that missing detail and stop without a card. The answer resumes the exact-meal
-edit, read-back, fresh-totals, and eligible-card workflow. Do not ask merely to
-enable numeric output for an intuitive-eating, eating-disorder-risk, or
-number-sensitive member.
-
-This generic recovery question is interactive-only. Scheduled automatic
-closeout keeps the narrower question authority in `automatic-meal-capture`.
-Attach a partial card only when the member explicitly asks to see the currently
-available partial data after the limitation is clear; partial-card schema and
-rendering remain compatibility surfaces, not the normal interactive closeout.
-
-An explicit target-setting response still explains a paused canonical proposal
-in ordinary text, not a card. Only unambiguous acceptance of that explained
-proposal may activate it. When an explicit combined target-setting and card
-request remains pending, the acceptance response may complete it after suitability,
-activation/readback, and fresh same-date totals. Ordinary summary requests use
-all-null goals when accepted authority is missing; they do not repeat a paused
-proposal or change its status. Complete stored records do not prove every meal
-eaten was logged; the card reports estimated nutrition logged so far.
+When a fresh selected-date totals read (standalone or combined save) shows any
+metric `mealCount` below the top-level `mealCount`, read
+`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/day-recovery.md` before
+any card. This applies during private meal logging and estimation, explicit app
+submissions, and daily nutrition card or summary requests. Do not end with a missing-estimate refusal or a partial card
+before that recovery.
 
 ## Ground numeric estimates in label and USDA data
 
@@ -297,7 +232,7 @@ Before calculating a meal total:
   toppings, and caloric drinks when they are visible, named, or strongly implied
   by the preparation. Do not silently assume restaurant or prepared food has no
   added fat.
-- Use `vault-cli food search-labels 'rolled oats' --generic --format json`
+- Use `vault-cli food search-labels 'rolled oats' --generic`
   for one item (the documented `--query 'rolled oats'` alternative is also
   accepted; never supply both forms), or
   `vault-cli food search-labels-batch` for several before estimating from memory
@@ -306,8 +241,9 @@ Before calculating a meal total:
   or exact-FDC searches. Because `--generic` applies to the whole batch, split a
   mixed meal into at most two lookups: one generic USDA batch and one normal
   branded/menu/package batch. Repeat the singular `--query` flag, for example:
-  `vault-cli food search-labels-batch --generic --query 'cooked chickpeas' --query 'cooked brown rice' --format json`.
-  Do not pass a JSON array or invent `--queries`. When independent label
+  `vault-cli food search-labels-batch --generic --query 'chickpeas mature seeds cooked' --query 'rice brown long-grain cooked'`.
+  Do not pass a JSON array or invent `--queries`. Lookups use the compact
+  default output; add `--format json` only when a script parses the result. When independent label
   lookups and a needed compact memory read are known, run them in the same
   tool round; save only after their results are available.
   For a syntax failure, correct the returned field using these examples;
@@ -315,25 +251,11 @@ Before calculating a meal total:
   output schema to discover a query flag or positional argument.
   The default returns one compact nutrition match
   per component with serving, calories, protein, carbohydrate, fat, fiber, and
-  a bounded exact-product contaminant summary. Read `contaminantSummary` by
-  default: `no_known_product_tests` means evidence is unknown, observations are
-  measured or reported findings rather than verdicts, and truncation means more
-  linked evidence exists. When an alert includes `screeningPolicy`, use its
-  exposure and ratio to interpret unlike result/threshold units and state its
-  fixed serving-per-day and body-weight assumptions; that context is not a
-  personalized safety verdict. `murphConcernLevel` is the strongest
-  threshold-screening result among the linked tests, not product safety or
-  personal risk. `none` means no represented comparable observation triggered
-  an alert, not that no contaminants were measured. Alerts are a subset of
-  observations; never add their counts together. For a routine meal log, inspect
-  the summary silently and mention it only when the user asks or a material
-  exact-product alert warrants a brief, source-specific screening caveat. For a
-  material alert, attribute the measured result to `source`, and attribute the
-  concern level, exposure, and ratio to Murph's comparison against the named
-  `threshold.authority` and threshold. Never say the source reported a concern
-  level unless the evidence explicitly states that. Do not inject unknown or
-  `none` results into every acknowledgment. Increase `--limit`
-  only for an ambiguous match, and
+  a bounded exact-product contaminant summary. For a routine meal log, inspect
+  `contaminantSummary` silently and mention it only when the user asks or a
+  material exact-product alert warrants a brief, source-specific screening
+  caveat; read `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/contaminants.md`
+  before discussing one. Increase `--limit` only for an ambiguous match, and
   use `--full-label` whenever the user needs a fact outside that compact
   response. This includes sugars, saturated fat, cholesterol, sodium or other
   micronutrients, ingredients, allergens, or complete contaminant observation,
@@ -395,20 +317,8 @@ absence of an exact test is not proof that a product is clean or safe.
 
 ## Bounded observation runs
 
-Use a bounded observation run when the user wants Murph to notice before changing behavior.
-
-A valid run has one focus, a duration, a review point, and an off-ramp. Seven days is a sensible default when the user has not chosen another credible window.
-
-Reuse existing meal, symptom, journal, wearable, memory, and automation surfaces. The observation run is a conversational plan, not a new persisted entity. If the plan must survive the current thread, store only its focus, window, and review preference in existing Context memory or confirmed automation instructions. Create a review automation only with the user's confirmation. Put the focus, window, relevant record types, and review rules directly in confirmed automation instructions.
-
-At review:
-
-- describe what showed up across the logged days, such as "on 4 of 5 logged days"
-- describe observations and associations, not causal conclusions
-- name a confounder only when it changes the next step
-- offer at most one optional next step
-
-An experiment is an option after review, not the required reward for logging. The user can extend, change focus, stop, or leave the observations alone.
+When the user wants Murph to notice patterns before changing behavior, read
+`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/observation-runs.md`.
 
 ## Safety and sharing
 

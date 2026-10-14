@@ -365,6 +365,11 @@ import {
   runCanonicalMealRestartJourney,
   runCanonicalReminderJourney,
 } from './support/canonical-live-journeys.ts'
+import {
+  MEAL_INTAKE_BENCHMARK_CASES,
+  readMealIntakeBenchmarkEnvironment,
+  runMealIntakeBenchmarkCase,
+} from './support/meal-intake-benchmark.ts'
 
 import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import {
@@ -33902,6 +33907,24 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
       expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
     } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
   })
+})
+
+describeRealCodex('real Codex meal intake speed benchmark', () => {
+  // Opt-in speed benchmark through the hosted automation entrypoint. Run one
+  // case per invocation; see support/meal-intake-benchmark.ts for its inputs.
+  it.each(MEAL_INTAKE_BENCHMARK_CASES.map((benchmarkCase) => [benchmarkCase.id, benchmarkCase] as const))(
+    'meal intake speed: %s',
+    { timeout: 900_000 },
+    async (_caseId, benchmarkCase) => {
+      const config = await resolveRealCodexE2eConfig()
+      try {
+        const result = await runMealIntakeBenchmarkCase({
+          benchmarkCase, config, ...readMealIntakeBenchmarkEnvironment(),
+        })
+        expect(result.failures).toEqual([])
+      } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+    },
+  )
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {

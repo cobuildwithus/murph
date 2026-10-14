@@ -84,6 +84,46 @@ describe("foods query helpers", () => {
     expect(liveRolloutSql).not.toContain("foods_canonical_rank_idx");
   });
 
+  it("keeps USDA fat and Foundation fiber rows in compact meal nutrition", () => {
+    const projected = toFoodNutritionSearchItem({
+      id: "fdc:2346396",
+      dataOrigin: "usda_foundation",
+      dataOriginId: "2346396",
+      name: "Example grain",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {
+        nutrientsPer100g: [
+          { name: "Protein", unit: "g", value: 13.5 },
+          { name: "Total lipid (fat)", unit: "g", value: 5.9 },
+          { name: "Fatty acids, total saturated", unit: "g", value: 1.1 },
+          { name: "Carbohydrate, by difference", unit: "g", value: 68.7 },
+          { name: "Total dietary fiber (AOAC 2011.25)", unit: "g", value: 10.1 },
+          { name: "High Molecular Weight Dietary Fiber (HMWDF)", unit: "g", value: 7.9 },
+          { name: "Sodium, Na", unit: "mg", value: 4 },
+          { name: "Energy (Atwater General Factors)", unit: "kcal", value: 381.6 },
+        ],
+      },
+      contaminants: {
+        status: "no_known_product_tests",
+        murphConcernLevel: "unknown",
+        alertCount: 0,
+        alerts: [],
+        observationCount: 0,
+        observations: [],
+      },
+    });
+
+    expect(projected.label.nutrition.rows.map((row) => row.name)).toEqual([
+      "Protein",
+      "Total lipid (fat)",
+      "Carbohydrate, by difference",
+      "Total dietary fiber (AOAC 2011.25)",
+      "Energy (Atwater General Factors)",
+    ]);
+  });
+
   it("projects meal nutrition and bounded contaminant evidence without unrelated payloads", () => {
     const projected = toFoodNutritionSearchItem({
       id: "fdc:123",
