@@ -384,8 +384,8 @@ its conditional delivery, reconciliation, and repair rules live in
 Goal-setup latency investigation and focused verification are recorded in
 [`2026-09-24-goal-turn-latency.md`](exec-plans/completed/2026-09-24-goal-turn-latency.md).
 
-Group shared-read timing telemetry (#3997) is tracked in
-[`2026-10-13-group-shared-read-timing.md`](exec-plans/active/2026-10-13-group-shared-read-timing.md);
+Group shared-read timing telemetry (#3997) is recorded in
+[`2026-10-13-group-shared-read-timing.md`](exec-plans/completed/2026-10-13-group-shared-read-timing.md);
 its log contract is owned by `docs/hosted-runtime-log-database.md`.
 
 Runtime authority lock/read consolidation is recorded in

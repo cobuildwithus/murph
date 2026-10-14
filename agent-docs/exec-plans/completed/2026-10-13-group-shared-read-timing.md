@@ -1,6 +1,6 @@
 # Group shared-read timing telemetry
 
-Status: active
+Status: completed
 Created: 2026-10-13
 Updated: 2026-10-13
 
@@ -60,10 +60,22 @@ Updated: 2026-10-13
   `test/hosted-runtime-workspace-assistant-phase-scheduling.test.ts`, and the
   interactive wiring test (outcome `none`) in
   `test/hosted-runtime-workspace-assistant-phase-managed-automation.test.ts`.
+- Candidate `4b79a89b318c88e70d8e828f69f7665e9e54fd1b`: 161 tests in 5 files
+  passed; assistant-runtime typecheck passed; reader complexity max 20 with
+  debt 0 and the phase file's existing debt (279, max 116) unchanged; docs
+  drift, doc gardening, and `git diff --check` passed.
+- Final review and required CI passed on that candidate; receipts are on
+  [PR #4140](https://github.com/cobuildwithus/murph/pull/4140).
 
-## Remaining
+## Deployment and measurement
 
-- Parent: review, PR, CI, and #3997 update.
-- After a verified deployment of this revision, run the owner-doc aggregate over
-  a 24–72 hour window. Protected deployment may be blocked if the workflow
-  cannot select this candidate revision; record the observed condition.
+- Not deployed. The current canonical private deploy workflow checks out
+  public `main` only and takes no SHA or ref input, and this automation's scope
+  allows isolated telemetry only, with no merge. No measurement window has
+  started.
+- The 24–72 hour normal-traffic window begins only after an authorized
+  deployment of this exact revision is verified. That measurement belongs to
+  #3997, which stays unresolved, and PR #4140, using the owner-doc aggregate;
+  it is not remaining work for this plan.
+- No latency or efficiency gain is claimed.
+Completed: 2026-10-13

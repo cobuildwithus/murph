@@ -1089,8 +1089,10 @@ it is never awaited, and an observer throw or rejection cannot change the read.
 and only:
 
 - `groupSharedReadLane`: `interactive` or `scheduled`
-- `groupSharedReadFreshnessRequested`: freshness requirements were supplied to
-  the initial Web read. It does not mean Web accepted or completed a refresh.
+- `groupSharedReadFreshnessRequested`: the caller supplied freshness
+  requirements for the initial Web read. It does not prove that a request was
+  sent or accepted (a pre-aborted read makes zero Web calls) or that a refresh
+  completed.
 - `groupSharedReadWaitBudgetMs`: the configured deadline for the existing
   sleep-and-reread loop (15,000 interactive, 300,000 scheduled, 0 read-only).
   It bounds when another poll may start; it is not a callback timeout, so total
@@ -1116,7 +1118,8 @@ and only:
     narrower than every requested or historical date being populated.
   - `deadline`: the polling deadline passed while recovery was still needed
   - `invalid`: Web returned a non-`read_shared` response
-  - `fallback`: the initial request threw and an ordinary reread succeeded
+  - `fallback`: the initial or a poll callback threw and an ordinary reread
+    succeeded
   - `error`: the request and any fallback failed
   - `canceled`: the operation signal aborted
 
