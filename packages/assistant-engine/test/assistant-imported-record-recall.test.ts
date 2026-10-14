@@ -46,9 +46,11 @@ describe('imported-record natural recall evidence', () => {
 
   it('routes private latest-meal recall to a descending read without adding a new-capture preflight', async () => {
     const skill = await readFile(new URL('../skills/food-journal/SKILL.md', import.meta.url), 'utf8')
-    expect(skill).toContain('For private recent-meal recall, read canonical records before asking')
-    expect(skill).toContain('vault-cli timeline --entry-type event --kind meal --limit 1 --format json')
-    expect(skill).toContain('`meal list --limit 1` does not find the latest meal')
+    const reads = await readFile(new URL('../skills/food-journal/references/meal-and-nutrient-reads.md', import.meta.url), 'utf8')
+    expect(skill).toContain('For recent-meal recall\nor a saved-day review, read\n`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/meal-and-nutrient-reads.md` first.')
+    expect(reads).toContain('For private recent-meal recall, read canonical records before asking')
+    expect(reads).toContain('vault-cli timeline --entry-type event --kind meal --limit 1 --format json')
+    expect(reads).toContain('`meal list --limit 1` does not find the latest meal')
     expect(skill).toContain('Do not list meals as a prerequisite to a new capture.')
   })
   it('keeps an out-of-conversation device record readable despite omission from the navigation snapshot', async () => {

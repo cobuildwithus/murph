@@ -247,6 +247,21 @@ The runner container sends runtime internal Worker requests to normal virtual ho
 
 The shared canonical completion publisher additionally emits one failure-isolated info observation per existing call after it settles: `runtimeCompletionCaller` is `runtime_callback` without native settlement evidence or `native_invocation` when the call supplies the settled target. The latter includes exact native-receipt reconciliation and does not exclusively identify the outer supervisor. `runtimeCompletionOutcome` is `updated` for an acknowledged canonical update, `not_updated` for a settled non-update, or `unconfirmed` when the call throws. The event reuses `workspaceAttemptId` correlation; user identity is handled by the existing structured-log redaction. It contains no target, generation, error text, or payload and adds no I/O, retry, timer, or control decision. Join this observation to callback warnings on the exact attempt: a newer attempt cannot prove the older one completed, and canonical acknowledgment does not prove message delivery. Missing observations on older Workers or unexercised paths remain unknown.
 Shared runtime ports cannot supply raw Web-control methods or paths. They must use a branded route descriptor from the same registry that derives the Worker proxy allowlist; bounded query-bearing and device-connect variants can only bind to an already-registered pathname. Cloudflare typecheck rejects an unregistered caller at compile time, and the Node route-contract suite enumerates the registry to prove each exact method/path is allowed while the opposite method and path variants remain blocked.
+
+The existing `Hosted runtime control-plane response returned invalid JSON.` warning
+includes `responseMimeCategory` (`missing`, `json`, `html`, `text`, `other`) for
+non-device responses too, including sensitive bodies. It categorizes only the
+server-declared `content-type`, without logging raw header values; it does not
+prove body contents or root cause. This is failure-only enrichment: no new events
+or success log volume, and no changes to snapshot-only fields. Follow up on natural
+traffic using a fixed 24-hour UTC window after rollout (`start <= timestamp < start + 24h`):
+filter `component = "hosted.runtime.control-plane"` and
+`message = "Hosted runtime control-plane response returned invalid JSON."`, then
+count by `details.path`, `details.responseStatus`, and `details.responseMimeCategory`.
+Include the production runner-container application streams as well as the Worker;
+container records identify their application through `$containers.applicationId`.
+An absent field is unknown, not `missing`; zero matches do not establish health.
+
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
 `murph.plan_usage` uses one allowlisted signed `web-control.worker` callback.
 Cloudflare transports and validates the strict result but owns no billing or

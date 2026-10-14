@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-13",
+  "order": 100,
+  "item": {
+    "id": "plainer-data-replies",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Plainer answers about your data",
+    "summary": "Murph leads with what your sleep, activity, meals, and shared group data show and mentions a gap or uncertainty only when it changes the takeaway.",
+    "details": "Missing days still never count as zeros, and safety guidance is unchanged. Scheduled summaries you already have stop repeating notes about data coverage and sync timing.",
+    "relevanceTags": [
+      "wearables",
+      "groups"
+    ],
+    "sourcePullRequests": [4134]
+  }
+}

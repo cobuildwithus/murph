@@ -365,6 +365,11 @@ import {
   runCanonicalMealRestartJourney,
   runCanonicalReminderJourney,
 } from './support/canonical-live-journeys.ts'
+import {
+  MEAL_INTAKE_BENCHMARK_CASES,
+  readMealIntakeBenchmarkEnvironment,
+  runMealIntakeBenchmarkCase,
+} from './support/meal-intake-benchmark.ts'
 
 import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import {
@@ -11549,13 +11554,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       })
       process.stdout.write(`[group-history-e2e] ${JSON.stringify({ finalMessage: result.finalMessage, sharedRequests })}\n`)
       expect(sharedRequests).toEqual([
-        { projectionScopes: [{ projectionKind: 'steps-days.v0' }] },
-        { projectionScopes: [{ projectionKind: 'steps-days.v0' }], participantId: 'participant_history', history: { fromDate: '2026-06-21', throughDate: '2026-09-18' } },
-        { projectionScopes: [{ projectionKind: 'steps-days.v0' }], participantId: 'participant_history', history: { fromDate: '2026-09-18', throughDate: '2026-09-18' } },
+        { includeCompanionPresence: true, projectionScopes: [{ projectionKind: 'steps-days.v0' }] },
+        { includeCompanionPresence: true, projectionScopes: [{ projectionKind: 'steps-days.v0' }], participantId: 'participant_history', history: { fromDate: '2026-06-21', throughDate: '2026-09-18' } },
+        { includeCompanionPresence: true, projectionScopes: [{ projectionKind: 'steps-days.v0' }], participantId: 'participant_history', history: { fromDate: '2026-09-18', throughDate: '2026-09-18' } },
       ])
       expect(result.finalMessage).toMatch(/4,?000/u)
       expect(result.finalMessage).toMatch(/8,?000/u)
-      expect(result.finalMessage).toMatch(/(?:two|2) (?:recorded |available |shared |observed |data )?(?:days|dates|points|observations|endpoints)|only.*(?:June 21|Jun 21)/iu)
+      expect(result.finalMessage).toMatch(/(?:two|2) (?:of 90 )?(?:recorded |available |shared |observed |data )?(?:days|dates|points|observations|endpoints)|only.*(?:June 21|Jun 21)/iu)
       expect(result.finalMessage).toMatch(/(?:not|can.t|cannot|insufficient|isn.t|too (?:little|sparse)|doesn.t).*?(?:trend|steady|consistent)|(?:trend|steady|consistent).*?(?:not|can.t|cannot|insufficient|isn.t|doesn.t)/isu)
       expect(result.finalMessage).not.toMatch(/(?:steady|consistent) (?:90.day |three.month )?increase|averaged? .* (?:over|across) (?:all )?90 days/iu)
       expect(result.finalMessage).not.toMatch(/(?:enable|expand|approve|grant|upgrade).{0,50}(?:history|90.day)|(?:visit|open).{0,30}(?:settings|permissions)/iu)
@@ -11681,6 +11686,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           },
         })
         expect(sharedRequests).toEqual([{
+          includeCompanionPresence: true,
           projectionScopes: [{ projectionKind: 'workout-days.v0' }],
         }])
         expect(finalAnswerEventIndex).toBeGreaterThan(
@@ -12009,6 +12015,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const reply = renderMarkdownMessageText(decision.text).text
         process.stdout.write(`[wearable-freshness-e2e] ${JSON.stringify({ scenario, reply })}\n`)
         expect(sharedRequests).toEqual([{
+          includeCompanionPresence: true,
           projectionScopes: [{ projectionKind: 'sleep-duration-days.v0' }],
           freshness: scenario === 'multiple_dates'
             ? expect.arrayContaining([{ projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-03' }, { projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-05' }])
@@ -12045,6 +12052,107 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             }
           }
         }
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 360_000,
+  )
+
+  it.each(['recipe', 'legacy-instructions'] as const)(
+    'keeps sparse-day coverage out of a scheduled weekly group recap: %s',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-weekly-gap-e2e-'))
+      const sharedRequests: AssistantHostedGroupSharedReadRequest[] = []
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        // The first day of the week is missing for everyone and workout days are sparse.
+        const observedDates = ['2026-07-30', '2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04']
+        const daily = {
+          'sleep-duration-days.v0': { metricKey: 'total-sleep-minutes', unit: 'minutes' },
+          'steps-days.v0': { metricKey: 'steps', unit: 'count' },
+          'activity-days.v0': { metricKey: 'activity-minutes', unit: 'minutes' },
+        } as const
+        const people: { displayName: string, workouts: Record<string, number>, values: Record<keyof typeof daily, number[]> }[] = [
+          { displayName: 'Rowan', workouts: { '2026-08-02': 45 }, values: {
+            'sleep-duration-days.v0': [452, 438, 470, 445, 461, 446], 'steps-days.v0': [8200, 9100, 7600, 10400, 8800, 9300], 'activity-days.v0': [260, 280, 270, 275, 265, 276] } },
+          { displayName: 'Quinn', workouts: { '2026-08-02': 40, '2026-08-03': 35, '2026-08-04': 50 }, values: {
+            'sleep-duration-days.v0': [410, 405, 420, 398, 415, 424], 'steps-days.v0': [11000, 9800, 12500, 10200, 9900, 11300], 'activity-days.v0': [290, 300, 310, 295, 305, 288] } },
+        ]
+        const garmin = { source: 'garmin', label: 'Garmin' }
+        // Serve only the requested scopes, as the host does.
+        const projectionFor = (person: (typeof people)[number], scope: AssistantHostedGroupSharedReadRequest['projectionScopes'][number]) => {
+          const kind = scope.projectionKind
+          const base = { projectionScope: scope, projectionScopeKey: kind, grantStatus: 'granted', grantedAt: '2026-07-01T00:00:00.000Z' } as const
+          if (kind === 'workout-days.v0') {
+            return { ...base, dataStatus: 'available', records: Object.entries(person.workouts).map(([date, workoutMinutes]) => ({
+              recordKey: `${date}.garmin`, occurredAt: `${date}T00:00:00.000Z`, source: garmin,
+              data: { date, metricSemantics: 'canonical-workout-day' as const, workoutCount: 1, workoutMinutes },
+            })) } as const
+          }
+          if (kind === 'sleep-duration-days.v0' || kind === 'steps-days.v0' || kind === 'activity-days.v0') {
+            return { ...base, dataStatus: 'available', records: observedDates.map((date, day) => ({
+              recordKey: `${date}.garmin`, occurredAt: `${date}T00:00:00.000Z`, source: garmin,
+              data: { date, metricKey: daily[kind].metricKey, value: person.values[kind][day]!, unit: daily[kind].unit },
+            })) } as const
+          }
+          return { ...base, dataStatus: 'missing', records: [] } as const
+        }
+        const prompt = scenario === 'recipe'
+          ? 'Recipe: Weekly recap for the last seven completed days, July 29 through August 4: each person’s average sleep, workout days, and everyday movement minutes, then one suggested goal for next week. Keep it short.'
+          // Instructions authored under the earlier freshness guidance carried caveat copy into every run.
+          : 'Saved instructions: Send a concise weekly steps and total sleep summary for everyone in this group for the most recently completed week, July 29 through August 4. Report total steps and total sleep in hours and minutes, with coverage for each metric. Check source freshness and expected three-to-six-hour import lag before calculating. Missing, delayed, stale, or unavailable records are unknown or incomplete, never zero or failure. Label partial sums as recorded totals and state missing coverage; do not extrapolate. Do not add targets, health advice, or accountability questions.'
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions('group', 'shared_read'),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot }, groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false, currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            groupSharedReader: { request: async (request) => {
+              sharedRequests.push(request)
+              return {
+                status: 'ok', requestedProjectionScopeKeys: request.projectionScopes.map((scope) => scope.projectionKind),
+                ...(request.freshness ? { freshness: { checkedAt: '2026-08-06T01:00:20.000Z', refreshStatus: 'requested' } } : {}),
+                members: people.map((person, index) => ({
+                  displayName: person.displayName, currentTurnHandles: [],
+                  memberId: `member_weekly_${index}`, participantId: `participant_weekly_${index}`,
+                  projections: request.projectionScopes.map((scope) => projectionFor(person, scope)),
+                })),
+              } satisfies AssistantHostedGroupSharedReadResponse
+            } },
+            sendVaultFile: async () => { throw new Error('Unavailable in synthetic journey.'); }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: ['Scheduled group automation: weekly-recap. Runs every Wednesday at 21:00 America/New_York.', prompt].join('\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        const reply = decision.kind === 'send_message' ? renderMarkdownMessageText(decision.text).text : ''
+        process.stdout.write(`[group-weekly-gap-e2e] ${JSON.stringify({ scenario, model: config.model, reply, decision })}\n`)
+        expect(decision.kind).toBe('send_message')
+        expect(sharedRequests).toHaveLength(1)
+        expect(sharedRequests[0]?.projectionScopes).toEqual(expect.arrayContaining(scenario === 'recipe'
+          ? [{ projectionKind: 'sleep-duration-days.v0' }, { projectionKind: 'workout-days.v0' }, { projectionKind: 'activity-days.v0' }]
+          : [{ projectionKind: 'sleep-duration-days.v0' }, { projectionKind: 'steps-days.v0' }]))
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(1)
+        expect(reply).toMatch(/Rowan/u)
+        expect(reply).toMatch(/Quinn/u)
+        if (scenario === 'recipe') {
+          expect(reply).toMatch(/7\s*(?:h|hours?)\s*(?:and\s*)?32|7:32|452/iu)
+          expect(reply).toMatch(/6\s*(?:h|hours?)\s*(?:and\s*)?52|6:52|412/iu)
+        } else {
+          expect(reply).toMatch(/53,?400|53\.4\s*k/iu)
+          expect(reply).toMatch(/64,?700|64\.7\s*k/iu)
+          expect(reply).toMatch(/45\s*(?:h|hours?)\s*(?:and\s*)?12/iu)
+          expect(reply).toMatch(/41\s*(?:h|hours?)\s*(?:and\s*)?12/iu)
+        }
+        // The week is already named; restating July 30 as a per-metric start is coverage narration.
+        expect(reply).not.toMatch(/coverage|unknown|unavailable|missing|rest days?|unconfirmed|not confirmed|exclud|returned|incomplete|(?:never|not) zero|not (?:full|workout|a workout)|do(?:es)? not (?:establish|count|mean)|\blag\b|delay|stale|freshness|July 30|Jul\.? 30|7\/30|reconnect|permission/iu)
+        expect(reply.trim().split(/\s+/u).length).toBeLessThan(110)
       } finally {
         await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
       }
@@ -12129,6 +12237,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(complete).toMatch(/7\s*h(?:ours?)?\s*30|7:30|450/iu)
         expect(complete).toMatch(/[✅✓✔☑]/u)
         expect(reply).not.toMatch(/disconnected|reconnect|definitely a nap/iu)
+        // Plain labels only; internal qualifications are not member copy.
+        expect(reply).not.toMatch(/unconfirmed|not (?:a )?confirmed|confirmed short/iu)
       } finally {
         await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
       }
@@ -18806,6 +18916,8 @@ describeRealCodex('real Codex focused sleep list e2e', () => {
       expect(result.finalMessage).toMatch(/450\s*(?:minutes?|mins?)|(?:7|seven)\s*(?:hours?|hrs?|h)\s*(?:,|and)?\s*(?:30|thirty)\s*(?:minutes?|mins?|m)|7(?:\.5|½)\s*(?:hours?|hrs?|h)|seven and a half hours/iu)
       expect(result.finalMessage).not.toMatch(/(?:you (?:actually )?slept|asleep for|total sleep(?: was|:)?)\s+(?:480\s*(?:minutes?|mins?)|(?:8|eight)\s*(?:hours?|hrs?|h))\b/iu)
       expect(result.finalMessage).not.toMatch(/\b(?:updated|saved|logged|sent|scheduled)\b|\?/iu)
+      // Report the asleep total without contrasting it with time in bed.
+      expect(result.finalMessage).not.toMatch(/\bnot (?:your |the )?(?:time )?in bed\b/iu)
     } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
   }, 720_000)
 })
@@ -29464,10 +29576,9 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         expect(request.instructions).toMatch(
           /(?:completed|previous|prior|last)[^.!?\n]{0,80}week|week[^.!?\n]{0,80}(?:completed|previous|prior|last)/iu,
         )
-        expect(request.instructions).toMatch(/fresh|coverage|sync|delay|stale|missing/iu)
-        expect(request.instructions).toMatch(
-          /unknown|incomplete|not[^.!?\n]{0,40}zero|do not[^.!?\n]{0,40}zero/iu,
-        )
+        expect(request.instructions).toMatch(/(?:never|not)[^.!?\n]{0,60}zero/iu)
+        // Saved instructions are run-time rules; caveat copy in them is repeated in every message.
+        expect(request.instructions).not.toMatch(/freshness|\blag\b|missing coverage|label partial|partial (?:sums|totals)|unknown or incomplete/iu)
         if (request.schedule.kind !== 'cron') {
           throw new Error('Expected a weekly cron schedule.')
         }
@@ -33891,6 +34002,24 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
       expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
     } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
   })
+})
+
+describeRealCodex('real Codex meal intake speed benchmark', () => {
+  // Opt-in speed benchmark through the hosted automation entrypoint. Run one
+  // case per invocation; see support/meal-intake-benchmark.ts for its inputs.
+  it.each(MEAL_INTAKE_BENCHMARK_CASES.map((benchmarkCase) => [benchmarkCase.id, benchmarkCase] as const))(
+    'meal intake speed: %s',
+    { timeout: 900_000 },
+    async (_caseId, benchmarkCase) => {
+      const config = await resolveRealCodexE2eConfig()
+      try {
+        const result = await runMealIntakeBenchmarkCase({
+          benchmarkCase, config, ...readMealIntakeBenchmarkEnvironment(),
+        })
+        expect(result.failures).toEqual([])
+      } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+    },
+  )
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {

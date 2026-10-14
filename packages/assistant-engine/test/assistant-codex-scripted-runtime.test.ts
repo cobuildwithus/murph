@@ -2038,7 +2038,7 @@ text(result.output);
     scenario.stub.queue({
       requestIncludes: [
         'Raw ECG voltage/workout points are not stored',
-        'Burned calories are expenditure; carbs can be partial intake evidence',
+        'Burned calories are expenditure; connected carbs are one input to intake',
       ],
       text: answer,
     })

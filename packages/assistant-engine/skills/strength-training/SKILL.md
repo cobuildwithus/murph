@@ -16,7 +16,7 @@ A strong response:
 - matches the dose to the goal, experience, equipment, schedule, and other demands
 - makes progression and adaptation observable
 - adds behavior support only where friction exists
-- names material uncertainty and safety limits without medicalizing ordinary training
+- names safety limits when they apply, without medicalizing ordinary training
 - leaves one clear next action and a review point
 
 The skill should increase competence and self-trust—not app dependence, body surveillance, or protocol accumulation.
@@ -64,7 +64,7 @@ The boundaries below apply even when no reference is loaded.
 
 ### Direct question
 
-Answer first with the smallest useful recommendation, why it fits, and the main caveat. Do not turn “How long should I rest?” into an intake or full program.
+Answer first with the smallest useful recommendation and why it fits. Do not turn “How long should I rest?” into an intake or full program.
 
 ### Plan request
 

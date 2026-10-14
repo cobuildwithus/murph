@@ -71,7 +71,7 @@ export async function changeHostedLoginMethodRequest(request: Request, operation
       // The cooldown paces codes actually sent to a contact. A request rejected
       // above (stale session, conflict, approval) sent nothing, so it must not
       // make the member's immediate retry wait.
-      await consume(`send:cooldown:${change.method}:${value}`, 1, 60);
+      await consume(`send:cooldown:${change.method}:${value}`, 2, 60);
       await sendHostedCredentialOtp({ change, prepared, request, prisma, delivery: hostedAuthDelivery(request.signal) });
     }
     let dispatch: Awaited<ReturnType<typeof prepared.commit>> = null;

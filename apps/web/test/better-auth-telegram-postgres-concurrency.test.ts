@@ -295,7 +295,7 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     else if (kind === "revoked") await prisma.hostedAuthRecord.delete({ where: { model_id: { model: "session", id: session!.sessionId } } });
     else await hostedAuthAdapter(prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
       model: "session", where: [{ field: "id", value: session!.sessionId }],
-      update: { primaryAuthenticatedAt: kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -6 : 6) * 60_000) },
+      update: { primaryAuthenticatedAt: kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -11 : 11) * 60_000) },
     });
     const response = await verifyCredential(request("/api/settings/login-methods/telegram/verify", { change: prepared.change, idToken: flow.idToken }, cookie));
     expect([400, 401, 403]).toContain(response.status);
