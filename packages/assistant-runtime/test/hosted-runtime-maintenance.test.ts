@@ -4243,6 +4243,16 @@ describe("runHostedDeviceSyncPass", () => {
       { label: "invalid ECG counts", reason: "voltage_source_mismatch", expectedReason: "voltage_source_mismatch",
         extraDetails: { junctionEcgPageCount: -1, junctionEcgGroupCount: 100_002,
           junctionEcgProviderMatchGroupCount: "3", junctionEcgInstanceMatchGroupCount: 0.5, junctionEcgMatchedGroupCount: null } },
+      // "ECG matching counts" above models an older producer: the missing-instance field stays absent.
+      { label: "ECG absent-instance count", reason: "voltage_source_mismatch", expectedReason: "voltage_source_mismatch",
+        extraDetails: { junctionEcgProviderMatchGroupCount: 3, junctionEcgInstanceMatchGroupCount: 0,
+          junctionEcgInstanceMissingGroupCount: 2 },
+        expectedExtra: { junctionEcgProviderMatchGroupCount: 3, junctionEcgInstanceMatchGroupCount: 0,
+          junctionEcgInstanceMissingGroupCount: 2 } },
+      ...[100_002, -1, 0.5, Infinity, "2", "synthetic-private-ecg-device", null].map((value) => ({
+        label: `invalid ECG absent-instance count ${String(value)}`,
+        reason: "voltage_source_mismatch", expectedReason: "voltage_source_mismatch",
+        extraDetails: { junctionEcgInstanceMissingGroupCount: value } })),
       { label: "missing reason" },
       { label: "unknown token", reason: "unknown_binding_reason" },
       { label: "freeform reason", reason: "synthetic-private-ecg detail" },

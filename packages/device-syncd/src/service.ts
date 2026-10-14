@@ -2736,6 +2736,7 @@ function readSafeJunctionEcgFailureContext(
   | "junctionEcgGroupCount"
   | "junctionEcgProviderMatchGroupCount"
   | "junctionEcgInstanceMatchGroupCount"
+  | "junctionEcgInstanceMissingGroupCount"
   | "junctionEcgMatchedGroupCount"
   | "junctionEcgExpectedRecordingCount"
   | "junctionEcgExpectedSampleCount"
@@ -2762,6 +2763,7 @@ function readSafeJunctionEcgFailureContext(
     junctionEcgGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.groupCount),
     junctionEcgProviderMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.providerMatchGroupCount),
     junctionEcgInstanceMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.instanceMatchGroupCount),
+    junctionEcgInstanceMissingGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.instanceMissingGroupCount),
     junctionEcgMatchedGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.matchedGroupCount),
     junctionEcgExpectedRecordingCount: readSafeJunctionEcgDiagnosticCount(
       error.details?.expectedRecordingCount,

@@ -2379,6 +2379,7 @@ const JUNCTION_ECG_DIAGNOSTIC_COUNT_FIELDS = [
   "junctionEcgMaxRecordingCount", "junctionEcgMaxSampleCount",
   "junctionEcgPageCount", "junctionEcgGroupCount", "junctionEcgProviderMatchGroupCount",
   "junctionEcgInstanceMatchGroupCount", "junctionEcgMatchedGroupCount",
+  "junctionEcgInstanceMissingGroupCount",
 ] as const satisfies readonly DeviceSyncFailureDiagnosticNumberField[];
 
 function buildHostedDeviceSyncFailureDiagnosticRedactedJson(

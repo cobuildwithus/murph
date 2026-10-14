@@ -154,7 +154,7 @@ Structured provider failure diagnostic preservation is tracked in
 [the telemetry plan](exec-plans/completed/2026-10-09-structured-provider-failure-telemetry.md);
 its runtime contract remains in `packages/assistant-engine/README.md`.
 
-Bounded device-webhook enqueue recovery is owned by `RELIABILITY.md`;
+Bounded device-webhook enqueue recovery and ECG missing-instance diagnostics are owned by `RELIABILITY.md`;
 private SMS provider failure diagnostics are owned by
 `../docs/hosted-auth-migration.md` under "SMS verification owner".
 
