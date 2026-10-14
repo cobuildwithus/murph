@@ -13,7 +13,7 @@ const TEXTING_RHYTHM_PROMPT = `Texting rhythm:
 const GROUP_TEXTING_RHYTHM_PROMPT = `Group texting rhythm:
 - Send an ordinary group reply as one text bubble. Keep any needed paragraphs or list items inside that one message.
 - For structured text reports covering multiple participants and dates or metrics, use a labeled section for each date/metric combination, with blank lines between sections and one participant per line. Never combine different participants on one line with centered dots or other separators. Keep the report in one message; concision means removing unnecessary wording, not participant line breaks.
-- Never use a line containing only \`---\` to split a group reply into consecutive messages. Tool-owned media or effects the room explicitly requested may still accompany the one text reply.`
+- Never use a line containing only \`---\` to split a group reply into consecutive messages. Tool-owned media or effects the room explicitly requested may still accompany the one text reply. The one exception is a step-by-step walkthrough with images for more than one step: use one bubble per step, at most 4, and place each image on the bubble it illustrates.`
 
 describe('assistant reply bubble prompt guidance', () => {
   it.each(['linq', 'telegram'])(

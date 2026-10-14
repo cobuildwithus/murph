@@ -1172,6 +1172,102 @@ describe("assistant delivery orchestration seam", () => {
     ]);
   });
 
+  it("sends each linq walkthrough bubble with its own placed images", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "linq-actor",
+        channel: "linq",
+        conversationKey: "linq-conversation",
+        delivery: {
+          kind: "thread",
+          target: "linq-thread",
+        },
+        identityId: "linq-identity",
+        threadId: "linq-thread",
+        threadIsDirect: false,
+      },
+    });
+    const image = (name: string) => ({
+      kind: "image" as const,
+      url: `https://cdn.example.test/${name}.png`,
+      alt: null,
+      source: null,
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "delivery-walkthrough",
+        messageLength: 8,
+        providerMessageId: "provider-walkthrough",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "linq-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-walkthrough",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    const outcome = await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "delivery-base",
+        prompt: "show me",
+        vault: "/vault",
+      },
+      media: [
+        { ...image("reach-forward"), bubble: 1 },
+        { ...image("reach-side"), bubble: 1 },
+        { ...image("hinge"), bubble: 2 },
+        image("hop"),
+      ],
+      response: "First, reaches.\n---\nNext, hinges.\n---\nLast, hops.",
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "linq",
+            threadIsDirect: false,
+          },
+        },
+      }),
+      turnId: "turn-linq-walkthrough",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map((call) => ({
+        deliveryIdempotencyKey: call[0]?.deliveryIdempotencyKey,
+        media: call[0]?.media,
+        message: call[0]?.message,
+      })),
+    ).toStrictEqual([
+      {
+        deliveryIdempotencyKey: "delivery-base:bubble:0",
+        media: [image("reach-forward"), image("reach-side")],
+        message: "First, reaches.",
+      },
+      {
+        deliveryIdempotencyKey: "delivery-base:bubble:1",
+        media: [image("hinge")],
+        message: "Next, hinges.",
+      },
+      {
+        deliveryIdempotencyKey: "delivery-base",
+        media: [image("hop")],
+        message: "Last, hops.",
+      },
+    ]);
+    expect(outcome.media).toStrictEqual([
+      image("reach-forward"),
+      image("reach-side"),
+      image("hinge"),
+      image("hop"),
+    ]);
+  });
+
   it("keeps reviewed Assistant Ask replies in one proof-bound delivery", async () => {
     const session = createAssistantSession({
       binding: {

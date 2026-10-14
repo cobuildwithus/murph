@@ -1237,6 +1237,34 @@ describe('assistant outbox runtime', () => {
     expect(retry.intentId).not.toBe(failed.intentId)
   })
 
+  it('persists outbox media without authored bubble placement', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-media-placement-',
+    )
+    const media = {
+      alt: null,
+      kind: 'image' as const,
+      source: null,
+      url: 'https://cdn.example.test/step-two.png',
+    }
+    const intent = await createIntent(vaultRoot, {
+      actorId: null,
+      channel: 'linq',
+      createdAt: '2026-04-08T00:30:00.000Z',
+      dedupeToken: 'media-placement',
+      explicitTarget: 'linq-media-placement-thread',
+      identityId: null,
+      media: [{ ...media, bubble: 2 }],
+      message: 'Step two.',
+      sessionId: 'session-media-placement',
+      threadId: 'linq-media-placement-thread',
+      threadIsDirect: false,
+      turnId: 'turn-media-placement',
+    })
+
+    expect(intent.media).toStrictEqual([media])
+  })
+
   it('persists native reply intent explicitly while omitting it from legacy messages', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-native-reply-state-')
     const legacy = await createIntent(vaultRoot, {

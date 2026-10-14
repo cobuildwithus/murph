@@ -1276,6 +1276,37 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('keeps each image bubble placement on the final response media', async () => {
+    const placedMedia = [
+      {
+        kind: 'image' as const,
+        url: 'https://cdn.example.test/assistant/step-one.png',
+        alt: 'Step one',
+        source: 'step-one',
+        bubble: 1,
+      },
+      {
+        kind: 'image' as const,
+        url: 'https://cdn.example.test/assistant/step-two.png',
+        alt: 'Step two',
+        source: 'step-two',
+        bubble: 2,
+      },
+    ]
+
+    await expect(
+      runCodexResponseMediaToolTurn([
+        {
+          id: 43,
+          media: placedMedia,
+          expectedText: '2 response images attached',
+        },
+      ]),
+    ).resolves.toMatchObject({
+      responseMedia: placedMedia,
+    })
+  })
+
   it('clears response media when attach_response_media receives an empty batch', async () => {
     await expect(
       runCodexResponseMediaToolTurn([

@@ -71,11 +71,15 @@ rename, merge, omit, or substitute a member-supplied exercise in the workout.
    Construct its source as
    `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>` and keep
    the returned order. For Linq/iMessage, use the existing response-media path
-   when images improve the instruction. On Telegram, follow the routine-card
-   tool's per-movement mapping and bounded validation-repair guidance. Keep
-   catalog images inside that card and never use separate response media as its
-   fallback. If the card still cannot attach, use one complete generic Rich
-   Message without images and name every movement separately. Do not paste image
+   when images improve the instruction. When a walkthrough shows images for more
+   than one movement, give each movement, or a closely related pair, its own
+   `---` bubble, at most four, and set each image's `bubble` to the bubble that
+   teaches it so every step arrives with its own pictures. On Telegram, follow
+   the routine-card tool's per-movement mapping and bounded validation-repair
+   guidance. Keep catalog images inside that card and never use separate
+   response media as its fallback. If the card still cannot attach, use one
+   complete generic Rich Message without images and name every movement
+   separately. Do not paste image
    URLs into message text when media delivery exists. If an important movement
    has no useful image, keep the written cue clear and never imply that an image
    was attached.
