@@ -2702,6 +2702,102 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
     }
   });
 
+  it("widens a finite weekly cutoff so the final occurrence keeps its delivery window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-01T12:00:00.000Z"));
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-cutoff-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inputId = "ain_55555555555555555555555555555555";
+
+    try {
+      await initializeVault({
+        createdAt: "2026-08-01T12:00:00.000Z",
+        timezone: "America/New_York",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockResolvedValue({
+        conversation: {
+          accountId: "linq_identity_cutoff",
+          actorId: "linq_participant_cutoff",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "linq_thread_cutoff",
+          threadIsDirect: true,
+        },
+        replyTarget: {
+          channel: "linq",
+          messageId: "linq_message_cutoff",
+          threadId: "linq_chat_cutoff",
+        },
+      });
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [inputId],
+        importedCount: 1,
+        vaultRoot,
+      }));
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+      const requestAutomation = async (
+        request: Parameters<
+          NonNullable<
+            NonNullable<AssistantExecutionContext["hosted"]>["automationTool"]
+          >["request"]
+        >[0],
+      ) => await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request(request);
+        },
+        turnEnvironment: null,
+      });
+      const readActiveUntil = async (automationId: string) =>
+        (await showAutomation({ automationId, vaultRoot }))?.activeUntil;
+
+      // Final Wednesday occurrence is 07:15 CDT (12:15Z); one minute later is
+      // too tight for a run that starts late.
+      const saved = await requestAutomation({
+        action: "save",
+        activeUntil: "2026-08-05T07:16:00-05:00",
+        instructions: "Send the weekly walk reminder.",
+        schedule: { expression: "15 7 * * 3", kind: "cron", timeZone: "America/Chicago" },
+        title: "Weekly walk reminder",
+      });
+      if (saved.action !== "save") throw new Error("Expected save result.");
+      expect(await readActiveUntil(saved.automationId)).toBe("2026-08-05T13:15:00.000Z");
+
+      // A timezone-less replacement keeps America/Chicago, so the new final
+      // occurrence is 12:45Z rather than the vault's 11:45Z.
+      const rescheduled = await requestAutomation({
+        action: "patch",
+        expectedUpdatedAt: saved.updatedAt,
+        lookup: saved.automationId,
+        schedule: { expression: "45 7 * * 3", kind: "cron" },
+      });
+      if (rescheduled.action !== "patch") throw new Error("Expected patch result.");
+      expect(await readActiveUntil(saved.automationId)).toBe("2026-08-05T13:45:00.000Z");
+
+      await requestAutomation({
+        action: "patch",
+        activeUntil: null,
+        expectedUpdatedAt: rescheduled.updatedAt,
+        lookup: saved.automationId,
+      });
+      expect(await readActiveUntil(saved.automationId)).toBeNull();
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
   it("distinguishes pending scheduler work, stale recurrences, and resolved occurrences after reminder patches", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-01T12:00:00.000Z"));

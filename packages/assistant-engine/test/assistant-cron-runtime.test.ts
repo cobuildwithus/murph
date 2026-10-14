@@ -207,6 +207,7 @@ import {
   resolveCanonicalRuntimeState,
 } from '../src/assistant/cron/canonical-jobs.ts'
 import {
+  ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS,
   claimResolvedAssistantCronJob,
   executeClaimedAssistantCronJob,
 } from '../src/assistant/cron/execution.ts'
@@ -4428,9 +4429,15 @@ describe('assistant cron runtime orchestration', () => {
       expect(providerInput?.instructions).toContain(
         'ordinary canonical read surface',
       )
+      expect(providerInput?.instructions).toContain(
+        ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS,
+      )
       if (supportKind === 'review') {
         expect(providerInput?.instructions).toContain(
-          "ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision",
+          'ask exactly one question about what the user wants next; fold any question about whether the support helped into it',
+        )
+        expect(providerInput?.instructions).toContain(
+          'Offer the next-step options the saved instructions name',
         )
         expect(providerInput?.instructions).not.toContain('request or record')
       }
@@ -6583,6 +6590,10 @@ describe('assistant cron runtime orchestration', () => {
     expect(retried).toEqual({ failed: 0, processed: 1, succeeded: 1 })
     expect(cronMocks.canSkipManagedPersonalPatterns).not.toHaveBeenCalled()
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
+    expect(
+      (cronMocks.sendAssistantMessageLocal.mock.calls[1]?.[0] as { instructions?: string } | undefined)
+        ?.instructions,
+    ).not.toContain('Member-facing wording (engine-supplied')
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({

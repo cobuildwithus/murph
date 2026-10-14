@@ -1196,17 +1196,24 @@ describe('assistant execution prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'include a privacy-safe user-facing subject anchor in the stored instructions',
+      "write stored instructions in the member's everyday words",
     )
     expect(prompt).toContain(
-      'after hours of unrelated conversation, the recipient should still know what it is about from the message itself',
+      'open with a privacy-safe description of the plan, task, or item',
     )
     expect(prompt).toContain(
-      'A title, slug, metadata, or preserved thread is not enough.',
+      'not by internal role names such as cue, check-in, or review',
     )
     expect(prompt).toContain(
-      'Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject.',
+      'the recipient must know what the message is about from the message alone',
     )
+    expect(prompt).toContain(
+      'a title, slug, metadata, or preserved thread is not enough.',
+    )
+    expect(prompt).toContain(
+      'never only "it", "this", "the timing", or "the plan".',
+    )
+    expect(prompt).not.toContain('subject anchor in the stored instructions')
   })
 
   it('tells the assistant it can read the canonical product update feeds', () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   isCanonicalAssistantCronNotificationOccurrenceDeliverable,
+  widenAssistantCronActiveUntilForFinalOccurrence,
   type CanonicalAutomationAssistantCronJobRecord,
 } from '../src/assistant/cron/canonical-jobs.js'
 import {
@@ -90,5 +91,54 @@ describe('canonical notification freshness', () => {
     expect(deliverable(sixHours, {
       schedule: { kind: 'cron', expression: '0 13 * * *' },
     })).toBe(true)
+  })
+})
+
+describe('finite series activeUntil widening', () => {
+  const weeklyTuesday = { kind: 'cron', expression: '30 18 * * 2', timeZone: 'America/Denver' } as const
+
+  it('gives the final weekly occurrence the normal delivery window', () => {
+    // Final Tuesday occurrence is 18:30 MDT (00:30Z); a one-minute cutoff
+    // would drop a run that starts a few minutes late.
+    expect(widenAssistantCronActiveUntilForFinalOccurrence({
+      activeUntil: '2026-09-15T18:31:00-06:00',
+      schedule: weeklyTuesday,
+      timeZone: 'UTC',
+    })).toBe('2026-09-16T01:30:00.000Z')
+  })
+
+  it.each([
+    ['already leaves the window', '2026-09-15T20:00:00-06:00'],
+    ['lands exactly on an excluded occurrence', '2026-09-22T18:30:00-06:00'],
+    ['falls between occurrences beyond the window', '2026-09-19T00:00:00-06:00'],
+  ])('keeps a cutoff that %s', (_label, activeUntil) => {
+    expect(widenAssistantCronActiveUntilForFinalOccurrence({
+      activeUntil, schedule: weeklyTuesday, timeZone: 'UTC',
+    })).toBe(activeUntil)
+  })
+
+  it('never widens past the next occurrence', () => {
+    expect(widenAssistantCronActiveUntilForFinalOccurrence({
+      activeUntil: '2026-09-15T17:01:00Z',
+      schedule: { kind: 'cron', expression: '*/15 * * * *' },
+      timeZone: 'UTC',
+    })).toBe('2026-09-15T17:15:00.000Z')
+  })
+
+  it('uses the supplied timezone for a dailyLocal schedule without one', () => {
+    expect(widenAssistantCronActiveUntilForFinalOccurrence({
+      activeUntil: '2026-09-15T09:02:00+08:00',
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      timeZone: 'Asia/Kuala_Lumpur',
+    })).toBe('2026-09-15T02:00:00.000Z')
+  })
+
+  it.each([
+    ['one-shot', { kind: 'at', at: '2026-09-16T00:30:00.000Z' }, '2026-09-16T00:31:00.000Z'],
+    ['cleared cutoff', weeklyTuesday, null],
+  ] as const)('leaves a %s unchanged', (_label, schedule, activeUntil) => {
+    expect(widenAssistantCronActiveUntilForFinalOccurrence({
+      activeUntil, schedule, timeZone: 'UTC',
+    })).toBe(activeUntil)
   })
 })
