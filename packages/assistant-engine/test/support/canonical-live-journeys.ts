@@ -55,7 +55,11 @@ const CLI_WRAPPER = [
   '',
 ].join('\n')
 
-function canonicalCodexLauncher(): string {
+export function canonicalCodexLauncher(
+  extraOverrides: readonly string[] = [],
+  // Local stand-ins for the hosted runner's read-only /app install root.
+  appReadRoots: readonly string[] = [],
+): string {
   let section = ''
   let rows: string[] = []
   const overrides: string[] = []
@@ -66,9 +70,13 @@ function canonicalCodexLauncher(): string {
   for (const line of buildMurphHostedPermissionProfileTomlLines()) {
     if (!line || line.startsWith('#')) continue
     if (line.startsWith('[')) { flush(); section = line.slice(1, -1).replaceAll('"', '') }
-    else rows.push(line)
+    else {
+      rows.push(line)
+      if (line === '"/app" = "read"') rows.push(...appReadRoots.map((root) => `${JSON.stringify(root)} = "read"`))
+    }
   }
   flush()
+  overrides.push(...extraOverrides)
   const args = overrides.map((value) => `-c '${value.replaceAll("'", "'\\''")}'`).join(' ')
   // exec preserves native process ownership and stdio. The wrapper supplies
   // only production permission definitions, never model responses or tools.
