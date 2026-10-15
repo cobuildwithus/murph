@@ -47,6 +47,7 @@ import {
 } from '@murphai/hosted-execution/assistant-model'
 import { HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES } from '@murphai/hosted-execution/plan-usage'
 import { ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS } from '../assistant/response-media.js'
+import { MAX_ASSISTANT_REPLY_BUBBLES } from '../assistant/reply-bubbles.js'
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
@@ -201,7 +202,7 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   namespace: 'murph',
   name: 'attach_response_media',
   description:
-    `Attach up to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly. For charts, the final reply must include one brief numeric takeaway from the source data, such as the start/end values or range; do not list every plotted value.`,
+    `Attach up to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly. When the final reply uses \`---\` bubbles, set each image's bubble to the bubble it illustrates; each bubble is sent with its own images. Images without a bubble follow the final bubble. For charts, the final reply must include one brief numeric takeaway from the source data, such as the start/end values or range; do not list every plotted value.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -238,6 +239,13 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
                     { type: 'null' },
                   ],
                 },
+                bubble: {
+                  type: 'integer',
+                  minimum: 1,
+                  maximum: MAX_ASSISTANT_REPLY_BUBBLES,
+                  description:
+                    '1-based `---` reply bubble this image follows. Omit to send it with the final bubble.',
+                },
               },
               required: ['url'],
             },
@@ -272,6 +280,13 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
                     { type: 'string', minLength: 1, maxLength: 200 },
                     { type: 'null' },
                   ],
+                },
+                bubble: {
+                  type: 'integer',
+                  minimum: 1,
+                  maximum: MAX_ASSISTANT_REPLY_BUBBLES,
+                  description:
+                    '1-based `---` reply bubble this image follows. Omit to send it with the final bubble.',
                 },
               },
               required: [

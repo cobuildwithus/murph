@@ -325,6 +325,10 @@ import {
   ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION as REAL_GROUP_RECONSIDERATION_INSTRUCTION,
 } from '../src/assistant/group-reply-reconsideration.ts'
 import {
+  placeAssistantResponseMediaInReplyBubbles,
+  splitAssistantReplyBubbles,
+} from '../src/assistant/reply-bubbles.ts'
+import {
   buildAssistantCliSurfaceContract,
 } from '../src/assistant/cli-surface-bootstrap.ts'
 import {
@@ -8246,6 +8250,200 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(second.sessionId).toBe(first.sessionId)
         expect(second.finalMessage.trim()).toBe('')
         expect(finishCalls).toHaveLength(1)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
+    'places group walkthrough images on the bubble that teaches each movement',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-media-walkthrough-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+
+      try {
+        await materializeRoutinePresentationVaultCli(binDirectory)
+        const exerciseGuidance = await readFile(
+          path.join(
+            resolveAssistantSkillsRoot(),
+            'shared/exercise-catalog-runtime.md',
+          ),
+          'utf8',
+        )
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: [
+            buildGroupPointOfViewDeveloperInstructions(),
+            exerciseGuidance,
+          ].join('\n\n'),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+          env: {
+            ...config.env,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: 'A participant: "Murph, walk us through a balance warmup: ankle circles, torso turns, a tandem stand, then side-to-side weight shifts. Send pictures for each."',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const mediaCalls = readCapabilityRoutingActions(result.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+          )
+        const bubbles = splitAssistantReplyBubbles(result.finalMessage)
+        const groups = placeAssistantResponseMediaInReplyBubbles({
+          bubbleCount: bubbles.length,
+          media: result.responseMedia,
+        })
+        process.stdout.write(
+          `[group-media-walkthrough-e2e] ${JSON.stringify({
+            bubbles: bubbles.map((text, index) => ({
+              images: groups[index]?.map((item) =>
+                item.kind === 'image' ? item.source : item.kind
+              ),
+              text,
+            })),
+            mediaCalls: mediaCalls.length,
+          })}\n`,
+        )
+
+        expect(mediaCalls.length).toBeGreaterThanOrEqual(1)
+        expect(bubbles.length).toBeGreaterThanOrEqual(2)
+        expect(bubbles.length).toBeLessThanOrEqual(4)
+        const movements = [
+          ['exercise_catalog:MB101:1', /ankle circle/iu],
+          ['exercise_catalog:BL201:1', /tandem/iu],
+          ['exercise_catalog:MB102:1', /torso turn/iu],
+          ['exercise_catalog:BL202:1', /weight shift/iu],
+        ] as const
+        expect(
+          result.responseMedia.map((item) =>
+            item.kind === 'image' ? item.source : item.kind
+          ).sort(),
+        ).toEqual(movements.map(([source]) => source).sort())
+        expect(
+          groups.filter((group) => group.length > 0).length,
+          'images spread across bubbles',
+        ).toBeGreaterThanOrEqual(2)
+        for (const [source, name] of movements) {
+          const bubbleIndex = groups.findIndex((group) =>
+            group.some((item) => item.kind === 'image' && item.source === source)
+          )
+          expect(bubbles[bubbleIndex], `${source} bubble text`).toMatch(name)
+        }
+        expect(result.finalMessage).not.toMatch(
+          /MB101|MB102|BL201|BL202|exercise_catalog|https?:/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
+    're-attaches draft images after group reconsideration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-reconsideration-media-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+
+      try {
+        await materializeRoutinePresentationVaultCli(binDirectory)
+        const exerciseGuidance = await readFile(
+          path.join(
+            resolveAssistantSkillsRoot(),
+            'shared/exercise-catalog-runtime.md',
+          ),
+          'utf8',
+        )
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: [
+            buildGroupPointOfViewDeveloperInstructions(),
+            exerciseGuidance,
+          ].join('\n\n'),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+          env: {
+            ...config.env,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const initialBeat =
+          'A participant: "Murph, show us how to do a tandem stand, with a picture."'
+        const draft = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: initialBeat,
+        })
+        expect(draft.responseMedia).toEqual([
+          expect.objectContaining({ source: 'exercise_catalog:BL201:1' }),
+        ])
+
+        const final = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+            initialBeat,
+            'Another participant: "Murph, how long should we hold each side?"',
+          ].join('\n\n'),
+          resumeSessionId: draft.sessionId,
+        })
+        const finalMediaCalls = readCapabilityRoutingActions(final.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+          )
+        process.stdout.write(
+          `[group-reconsideration-media-e2e] ${JSON.stringify({
+            finalMessage: final.finalMessage,
+            mediaCalls: finalMediaCalls.length,
+            sources: final.responseMedia.map((item) =>
+              item.kind === 'image' ? item.source : item.kind
+            ),
+          })}\n`,
+        )
+
+        expect(final.sessionId).toBe(draft.sessionId)
+        expect(finalMediaCalls.length).toBeGreaterThanOrEqual(1)
+        expect(final.responseMedia).toEqual([
+          expect.objectContaining({ source: 'exercise_catalog:BL201:1' }),
+        ])
+        expect(final.finalMessage).toMatch(/heel/iu)
+        expect(final.finalMessage).toMatch(/\d+\s*(?:seconds?|secs?)/iu)
+        expect(final.finalMessage).not.toMatch(
+          /draft|held|not sent|previous response|re-?attach|discarded/iu,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
