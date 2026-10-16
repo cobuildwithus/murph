@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-16",
+  "order": 100,
+  "item": {
+    "id": "scheduled-cancellation-plan-guidance",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer guidance when cancellation blocks a plan change",
+    "summary": "Settings now explains when a scheduled subscription cancellation prevents a plan change.",
+    "details": "The message points you to support if you want to change plans instead. Your scheduled cancellation stays in place.",
+    "relevanceTags": ["billing", "settings"],
+    "sourcePullRequests": []
+  }
+}
