@@ -953,7 +953,7 @@ function buildHostedStripeSubscriptionStateUnsupportedError(reason: string) {
     },
     httpStatus: 409,
     message: reason === "cancellation"
-      ? "Your subscription is scheduled to cancel, so a plan change cannot be scheduled. Contact support if you want to change plans instead."
+      ? "Your subscription is scheduled to cancel. Open Manage billing to renew it, then try changing plans again."
       : "Your subscription state is not ready for this plan change.",
   });
 }

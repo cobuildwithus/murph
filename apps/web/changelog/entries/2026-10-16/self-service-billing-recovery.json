@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-10-16",
+  "order": 200,
+  "item": {
+    "id": "self-service-billing-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Manage a scheduled cancellation from Settings",
+    "summary": "When a scheduled cancellation blocks a plan change, Settings now offers a direct way to manage billing.",
+    "details": "Open billing to renew your subscription, then return to change plans. Your cancellation stays in place until you choose to renew.",
+    "relevanceTags": [
+      "billing",
+      "settings"
+    ],
+    "sourcePullRequests": []
+  }
+}

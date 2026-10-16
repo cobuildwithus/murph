@@ -1611,10 +1611,11 @@ export function ComponentsContent() {
                 >
                   <HostedPlanChangeConfirmationContent
                     currentPeriodEnd="2026-08-27T04:00:00.000Z"
-                    errorMessage="Your subscription is scheduled to cancel, so a plan change cannot be scheduled. Contact support if you want to change plans instead."
+                    errorMessage="Your subscription is scheduled to cancel. Open Manage billing to renew it, then try changing plans again."
                     onClose={() => undefined}
                     onConfirm={() => undefined}
                     pending={false}
+                    showCancellationRecovery
                     targetPlanCode="launch_group_monthly"
                   />
                 </div>
