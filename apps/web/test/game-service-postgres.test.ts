@@ -339,20 +339,26 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(home.games.map((game) => game.id).sort()).toEqual([open!.id, ...settledIds.slice(1)].sort());
   });
 
-  it("voids an unclaimed invite past its expiry on the next read", async () => {
+  it("voids an unclaimed invite past its expiry on the next read and keeps it on Home for a week", async () => {
     const kat = await member("Kat", "Europe/London");
-    const gameId = randomUUID();
-    await ok(kat, {
-      gameId,
-      inviteeFirstName: "Leo",
-      terms: { schedule: { count: 3 }, stakes: [], tasks: [{ seat: 0, text: "Swim" }, { seat: 1, text: "Run" }] },
-      type: "createGame",
-    });
-    await getPrisma().game.update({ data: { inviteExpiresAt: new Date(Date.now() - 60_000) }, where: { id: gameId } });
-    expect((await readHome(kat)).games).toEqual([]);
+    const invite = async (expiredMsAgo: number) => {
+      const gameId = randomUUID();
+      await ok(kat, { gameId, inviteeFirstName: "Leo", terms: TERMS, type: "createGame" });
+      await getPrisma().game.update({ data: { inviteExpiresAt: new Date(Date.now() - expiredMsAgo) }, where: { id: gameId } });
+      return gameId;
+    };
+    const hour = 60 * 60 * 1000;
+    const gameId = await invite(60_000);
+    expect((await readHome(kat)).games.map((game) => [game.id, game.status])).toEqual([[gameId, "void"]]);
     expect(await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void" });
     expect((await getPrisma().gameEvent.findMany({ orderBy: { id: "asc" }, where: { gameId } })).map((event) => [event.type, event.actor]))
       .toEqual([["created", kat], ["expired", "system"]]);
+
+    // At most the three latest, and nothing older than a week.
+    const [oneHour, twoHours] = [await invite(hour), await invite(2 * hour)];
+    await invite(3 * hour);
+    await invite(8 * 24 * hour);
+    expect((await readHome(kat)).games.map((game) => game.id).sort()).toEqual([gameId, oneHour, twoHours].sort());
   });
 });
 

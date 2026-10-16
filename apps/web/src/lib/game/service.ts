@@ -65,6 +65,8 @@ export type GameCommandResult =
 const SYSTEM_ACTOR = "system";
 const HOME_CANDIDATE_LIMIT = 50;
 const HOME_SETTLED_SHOWN = 3;
+const HOME_EXPIRED_SHOWN = 3;
+const HOME_EXPIRED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
 const WALLET_LIMIT = 200;
 
 // ------------------------------------------------------------------- writes
@@ -657,13 +659,21 @@ export async function readGame(gameId: string, memberId: string): Promise<GameVi
   return view;
 }
 
-/** Home shows what's open (invited, live) and the three most recently settled games. */
-function homeGames(games: readonly LoadedGame[]): LoadedGame[] {
-  const settled = games
-    .filter((game) => game.row.status === "settled")
-    .sort((a, b) => (b.row.settledAt?.getTime() ?? 0) - (a.row.settledAt?.getTime() ?? 0))
-    .slice(0, HOME_SETTLED_SHOWN);
-  return games.filter((game) => game.row.status === "invited" || game.row.status === "live" || settled.includes(game));
+/**
+ * Home shows what's open (invited, live), the three most recently settled
+ * games, and up to three invites that expired in the last week, so the
+ * challenger sees "invite expired" rather than the game vanishing.
+ */
+function homeGames(games: readonly LoadedGame[], now: Date): LoadedGame[] {
+  const latest = (status: "settled" | "void", at: (game: LoadedGame) => Date | null, count: number) => games
+    .filter((game) => game.row.status === status && at(game) !== null)
+    .sort((a, b) => at(b)!.getTime() - at(a)!.getTime())
+    .slice(0, count);
+  const settled = latest("settled", (game) => game.row.settledAt, HOME_SETTLED_SHOWN);
+  const expired = latest("void", (game) => game.row.inviteExpiresAt, HOME_EXPIRED_SHOWN)
+    .filter((game) => now.getTime() - game.row.inviteExpiresAt!.getTime() <= HOME_EXPIRED_FOR_MS);
+  const shown = new Set([...settled, ...expired]);
+  return games.filter((game) => game.row.status === "invited" || game.row.status === "live" || shown.has(game));
 }
 
 export async function readHome(memberId: string): Promise<GameHomeView> {
@@ -674,7 +684,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
       orderBy: { joinedAt: "desc" },
       select: { gameId: true },
       take: HOME_CANDIDATE_LIMIT,
-      where: { game: { status: { in: ["invited", "live", "settled"] } }, memberId },
+      where: { game: { status: { in: ["invited", "live", "settled", "void"] } }, memberId },
     }),
     prisma.gameTicket.findMany({
       include: { game: { select: { createdBy: true, id: true, termsWordsEncrypted: true } } },
@@ -683,7 +693,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
       where: { OR: [{ owedTo: memberId }, { owedBy: memberId }] },
     }),
   ]);
-  const games = homeGames(await loadCurrent(seats.map((seat) => seat.gameId)));
+  const games = homeGames(await loadCurrent(seats.map((seat) => seat.gameId)), new Date());
   const views = await buildViews(games, memberId);
   const words = await readTermWords([...new Map(tickets.map((ticket) => [ticket.gameId, ticket.game])).values()]);
   const [firstName] = await openGameTexts(profile
