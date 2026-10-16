@@ -5,8 +5,8 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { sendPendingHostedLinqAlertsBestEffort } from "../hosted-onboarding/linq-alert-email";
 import { getPrisma } from "../prisma";
 
-export const HOSTED_WARM_TYPING_ALERT_THRESHOLD_MS = 3_000;
-export const HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS = 8_000;
+export const HOSTED_WARM_TYPING_ALERT_THRESHOLD_MS = 2_500;
+export const HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS = 7_000;
 const ALERT_READ_LIMIT = 1_000;
 const ALERT_SEND_LIMIT = 50;
 // Allow delayed telemetry to arrive before calling an absent indicator slow.
@@ -53,9 +53,8 @@ export async function runHostedRuntimeTypingAlertMonitor(input: TypingAlertInput
       kind: row.workspaceState === "warm"
         ? "runtime_warm_typing_slow" : "runtime_cold_typing_slow",
       status: "pending",
-      subject: row.workspaceState === "warm"
-        ? "Murph warm workspace typing exceeded 3 seconds"
-        : "Murph cold workspace typing exceeded 8 seconds",
+      subject: `Murph ${row.workspaceState === "warm" ? "warm" : "cold"} workspace typing`
+        + ` exceeded ${row.thresholdMs / 1_000} seconds`,
       // This frozen body survives retries without leaking member/message identity.
       detailsJson: {
         schemaVersion: 1,

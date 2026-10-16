@@ -2472,8 +2472,8 @@ to apply after cutover.
   establishes Web acceptance. Malformed timestamp values and raw wake reasons
   are never copied into these fields.
 - Per-message typing alerts independently measure the member's wait through the
-  earliest accepted typing indicator: strictly over 3 seconds for a warm
-  workspace and over 8 seconds for a cold workspace. Linq waits start at the
+  earliest accepted typing indicator: strictly over 2.5 seconds for a warm
+  workspace and over 7 seconds for a cold workspace. Linq waits start at the
   latest recorded provider event for the exact member-bound message (its own
   creation, or a later edit), never after the Web route's receipt instant, so
   time before the route runs, such as a fresh Web instance boot, counts.
@@ -2502,7 +2502,7 @@ to apply after cutover.
   or delivery operation waits for this diagnostic persistence.
   A restore completed before the message arrived, or an explicit reused restore,
   identifies warmth. This includes later messages within an invocation that
-  originally started cold. Missing warmth evidence uses the 8-second cutoff and
+  originally started cold. Missing warmth evidence uses the 7-second cutoff and
   is labeled unconfirmed; deployment version, rollout convergence, canary identity,
   access changes, other incidents, and quiet hours do not suppress these alerts.
   An exact member-bound mailbox item with recorded `ai_usage_denied_at` is
