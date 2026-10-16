@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { runInNewContext } from 'node:vm'
 
 import { HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV } from '@murphai/hosted-execution/env'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { executeCodexAppServerTurn, resolveMurphDynamicTools, stopWarmCodexAppServer } from '../src/assistant-codex.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
@@ -19,7 +19,7 @@ import { materializeUsageInputBaseline } from './support/usage-input-baseline.ts
 // Snapshot all assistant-engine source together so relative imports cannot fall
 // through to head modules. Public workspace dependencies and Codex stay installed
 // at the candidate version; the output records that measurement boundary.
-const base = process.env.MURPH_USAGE_INPUT_BASE ?? 'origin/main'
+let base = process.env.MURPH_USAGE_INPUT_BASE ?? 'origin/main'
 const repository = fileURLToPath(new URL('../../../', import.meta.url))
 const configPath = 'packages/assistant-runtime/src/hosted-runtime/codex-config.ts'
 const temporaryPaths: string[] = []
@@ -58,6 +58,13 @@ afterAll(async () => {
 })
 
 describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency initial input', () => {
+  beforeAll(() => {
+    // Freeze mutable refs once before any source or config reads.
+    base = execFileSync('git', ['rev-parse', '--verify', '--end-of-options', `${base}^{commit}`], {
+      cwd: repository, encoding: 'utf8', timeout: 30_000,
+    }).trim()
+  })
+
   it.each(['direct', 'group', 'groupAvailable'] as const)('complete first provider request (%s)', { timeout: 180_000 }, async (fixture) => {
     const scope = fixture === 'direct' ? 'direct' : 'group'
     const groupAvailable = fixture === 'groupAvailable'
