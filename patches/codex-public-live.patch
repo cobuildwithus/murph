@@ -4528,10 +4528,10 @@ index fa79c1fd87231ecb9268ac946041899443ea3e5c..a872d4b30a5b00cb9b10d24a9aefd1a6
  /// EXPERIMENTAL - append audio input to thread realtime.
  #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
 diff --git a/codex-rs/app-server/README.md b/codex-rs/app-server/README.md
-index a6bcb1ab33..2c8434d26a 100644
+index a6bcb1ab331e96fb945dab1c6ad41671c9ee7fbb..c65b86fbe1736d920f74287db4167ee2fe5855b1 100644
 --- a/codex-rs/app-server/README.md
 +++ b/codex-rs/app-server/README.md
-@@ -486,3 +486,25 @@ and out-of-scope item IDs return invalid params (`-32602`) with
+@@ -486,3 +486,38 @@ and out-of-scope item IDs return invalid params (`-32602`) with
  Omitted or null cursors preserve normal first-page behavior. Continue anchored
  pages with the returned opaque string `nextCursor`; response fields and
  `backwardsCursor` semantics are unchanged.
@@ -4557,6 +4557,19 @@ index a6bcb1ab33..2c8434d26a 100644
 +while closing; notification delivery itself is not durable acceptance. Omitting
 +the flag preserves native start-or-steer behavior. Input delivery and client-managed handoff
 +output are independent.
++
++### User configuration isolation
++
++The CLI and standalone app-server accept `--ignore-user-config` when running the
++server. This explicit host option excludes personal behavioral configuration and
++global `AGENTS.md`/`AGENTS.override.md` instructions. Authentication keeps the same
++Codex home and the user layer's credential-store selection, `secret_auth_storage`
++backend, forced login/workspace restrictions and ChatGPT endpoint. These settings
++retain their normal precedence, including selected profile files, CLI overrides
++and managed requirements. Other personal features and proxy preferences are not
++restored by this projection. Managed requirements, project configuration and instructions,
++and exec-policy rules still apply. Omitting the flag preserves normal loading;
++the flag does not apply to app-server daemon or schema-generation subcommands.
 diff --git a/codex-rs/app-server/src/request_processors/turn_processor.rs b/codex-rs/app-server/src/request_processors/turn_processor.rs
 index e42e53de1ff20d6b2049900442dde1e783f235c9..02843a2193e5d42409d21ba4f98d8f06cebcd4d4 100644
 --- a/codex-rs/app-server/src/request_processors/turn_processor.rs
@@ -8661,3 +8674,869 @@ index c6345c160d18898ef27a9fea9b3a1fa26e7fad42..2b32ad51893aea320a079babcee10df8
  #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
  async fn responses_websocket_v2_sets_openai_beta_header() {
      skip_if_no_network!();
+diff --git a/codex-rs/app-server/Cargo.toml b/codex-rs/app-server/Cargo.toml
+index 8834c54b7ec57c70fb13c996f6d0d925765975f4..a50155c47e261dcee804079adaee7fe58f84304e 100644
+--- a/codex-rs/app-server/Cargo.toml
++++ b/codex-rs/app-server/Cargo.toml
+@@ -127,6 +127,7 @@ tikv-jemallocator = { workspace = true }
+ codex-windows-sandbox = { workspace = true }
+
+ [dev-dependencies]
++keyring = { workspace = true }
+ codex-uds = { workspace = true }
+ app_test_support = { workspace = true }
+ axum = { workspace = true, default-features = false, features = [
+diff --git a/codex-rs/app-server/src/in_process.rs b/codex-rs/app-server/src/in_process.rs
+index b467a33ec245499ef76f131f174dabe026fe6ae0..12a0c17d753666f02489f5462459f90636a480c2 100644
+--- a/codex-rs/app-server/src/in_process.rs
++++ b/codex-rs/app-server/src/in_process.rs
+@@ -425,6 +425,7 @@ async fn run_outbound_router(
+ }
+
+ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcessClientHandle> {
++    let ignore_user_config = args.loader_overrides.ignore_user_config;
+     let config_manager = ConfigManager::new(
+         args.config.codex_home.to_path_buf(),
+         args.cli_overrides,
+@@ -495,6 +496,7 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
+         let (processor_tx, mut processor_rx) = mpsc::channel::<ProcessorCommand>(channel_capacity);
+         let mut processor_handle = tokio::spawn(async move {
+             let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++                ignore_user_config,
+                 outgoing: Arc::clone(&processor_outgoing),
+                 analytics_events_client,
+                 arg0_paths: args.arg0_paths,
+diff --git a/codex-rs/app-server/src/lib.rs b/codex-rs/app-server/src/lib.rs
+index d1a622ca8cc94ab626e8e377333c9d875cd18451..795ac9b29bf5ec2c473dd2b5c63e8336035725d7 100644
+--- a/codex-rs/app-server/src/lib.rs
++++ b/codex-rs/app-server/src/lib.rs
+@@ -140,6 +140,7 @@ mod thread_status;
+ mod transport;
+ mod turn_admission;
+ mod turn_cost_worker;
++mod user_instructions;
+ mod user_verification;
+ mod user_verification_response;
+
+@@ -504,7 +505,7 @@ pub async fn run_main_with_transport_options(
+ ) -> IoResult<AppServerExit> {
+     #[cfg(target_os = "windows")]
+     let _registered_core = codex_windows_sandbox::registered_core_requested();
+-    let loader_overrides = loader_overrides_with_test_user_config_file(
++    let mut loader_overrides = loader_overrides_with_test_user_config_file(
+         loader_overrides,
+         test_user_config_file_from_env(),
+     )?;
+@@ -528,6 +529,7 @@ pub async fn run_main_with_transport_options(
+         arg0_paths.codex_linux_sandbox_exe.clone(),
+     )?;
+     let ignore_user_config = loader_overrides.ignore_user_config;
++    loader_overrides.retain_user_auth_config = ignore_user_config;
+     let config_manager = ConfigManager::new(
+         codex_home.to_path_buf(),
+         cli_kv_overrides.clone(),
+@@ -970,6 +972,7 @@ pub async fn run_main_with_transport_options(
+         let initialize_notification_sender = outgoing_message_sender.clone();
+         let outbound_control_tx = outbound_control_tx;
+         let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++            ignore_user_config,
+             outgoing: outgoing_message_sender,
+             analytics_events_client,
+             arg0_paths,
+@@ -1532,6 +1535,9 @@ fn analytics_rpc_transport(transport: &AppServerTransport) -> AppServerRpcTransp
+     }
+ }
+
++#[cfg(test)]
++mod user_config_auth_tests;
++
+ #[cfg(test)]
+ #[path = "stderr_logging_tests.rs"]
+ mod stderr_logging_tests;
+diff --git a/codex-rs/app-server/src/main.rs b/codex-rs/app-server/src/main.rs
+index 4119cedfe413005e165ca8b00b86699dabe4458a..b89b81e3e7aa7b27dbf9bdcaab5d3f3d69f0a9a1 100644
+--- a/codex-rs/app-server/src/main.rs
++++ b/codex-rs/app-server/src/main.rs
+@@ -30,6 +30,10 @@ const DISABLE_MANAGED_CONFIG_ENV_VAR: &str = "CODEX_APP_SERVER_DISABLE_MANAGED_C
+ #[derive(Debug, Parser)]
+ #[command(version)]
+ struct AppServerArgs {
++    /// Skip personal behavior and global AGENTS instructions; retain auth settings, managed policy, and exec rules.
++    #[arg(long, default_value_t = false)]
++    ignore_user_config: bool,
++
+     #[command(flatten)]
+     config_overrides: CliConfigOverrides,
+
+@@ -80,6 +84,7 @@ fn main() -> anyhow::Result<()> {
+     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
+     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
+         let AppServerArgs {
++            ignore_user_config,
+             config_overrides,
+             code_mode_host,
+             listen,
+@@ -91,13 +96,14 @@ fn main() -> anyhow::Result<()> {
+             remote_control,
+             managed_daemon,
+         } = AppServerArgs::parse();
+-        let loader_overrides = if disable_managed_config_from_debug_env() {
++        let mut loader_overrides = if disable_managed_config_from_debug_env() {
+             LoaderOverrides::without_managed_config_for_tests()
+         } else {
+             managed_config_path_from_debug_env()
+                 .map(LoaderOverrides::with_managed_config_path_for_tests)
+                 .unwrap_or_default()
+         };
++        loader_overrides.ignore_user_config = ignore_user_config;
+         let transport = listen;
+         let auth = auth.try_into_settings()?;
+         let mut runtime_options = AppServerRuntimeOptions {
+diff --git a/codex-rs/app-server/src/message_processor.rs b/codex-rs/app-server/src/message_processor.rs
+index 9e9a90437b3fddde282a0d05216907d77fa5a745..f94c33cff46d6010c332b39c3a5d445e86ccb067 100644
+--- a/codex-rs/app-server/src/message_processor.rs
++++ b/codex-rs/app-server/src/message_processor.rs
+@@ -58,6 +58,7 @@ use crate::thread_state::ThreadStateManager;
+ use crate::transport::AppServerTransport;
+ use crate::transport::RemoteControlHandle;
+ use crate::turn_cost_worker::TurnCostWorker;
++use crate::user_instructions::NoUserInstructions;
+ use codex_analytics::AnalyticsEventsClient;
+ use codex_analytics::AppServerRpcTransport;
+ use codex_app_server_protocol::ClientNotification;
+@@ -79,6 +80,7 @@ use codex_core::config::Config;
+ use codex_core::config::ThreadStoreConfig;
+ use codex_exec_server::EnvironmentManager;
+ use codex_extension_api::TurnStartAdmission;
++use codex_extension_api::UserInstructionsProvider;
+ use codex_feedback::CodexFeedback;
+ use codex_goal_extension::GoalService;
+ use codex_home::CodexHomeUserInstructionsProvider;
+@@ -245,6 +247,7 @@ impl ConnectionSessionState {
+ }
+
+ pub(crate) struct MessageProcessorArgs {
++    pub(crate) ignore_user_config: bool,
+     pub(crate) outgoing: Arc<OutgoingMessageSender>,
+     pub(crate) analytics_events_client: AnalyticsEventsClient,
+     pub(crate) arg0_paths: Arg0DispatchPaths,
+@@ -271,6 +274,7 @@ impl MessageProcessor {
+     /// `Sender` so handlers can enqueue messages to be written to stdout.
+     pub(crate) fn new(args: MessageProcessorArgs) -> Self {
+         let MessageProcessorArgs {
++            ignore_user_config,
+             outgoing,
+             analytics_events_client,
+             arg0_paths,
+@@ -322,6 +326,13 @@ impl MessageProcessor {
+         let turn_start_admission: Arc<dyn TurnStartAdmission> = Arc::new(turn_admission.clone());
+         let extension_event_sink =
+             app_server_extension_event_sink(outgoing.clone(), thread_state_manager.clone());
++        let user_instructions_provider: Arc<dyn UserInstructionsProvider> = if ignore_user_config {
++            Arc::new(NoUserInstructions)
++        } else {
++            Arc::new(CodexHomeUserInstructionsProvider::new(
++                config.codex_home.clone(),
++            ))
++        };
+         let mut queue_service = None;
+         let thread_manager = Arc::new_cyclic(|thread_manager| {
+             queue_service = queue_store.map(|queue| {
+@@ -352,9 +363,7 @@ impl MessageProcessor {
+                     queue_service: queue_service.clone(),
+                     turn_start_admission: Some(Arc::clone(&turn_start_admission)),
+                 }),
+-                Arc::new(CodexHomeUserInstructionsProvider::new(
+-                    config.codex_home.clone(),
+-                )),
++                Arc::clone(&user_instructions_provider),
+                 Some(analytics_events_client.clone()),
+                 codex_core::passthrough_image_store(),
+                 Arc::clone(&thread_store),
+diff --git a/codex-rs/app-server/src/message_processor_tracing_tests.rs b/codex-rs/app-server/src/message_processor_tracing_tests.rs
+index 41d843c743abf671b82983e3bcec118ea5df99d2..3dcfd35807005e0ff0c66ba6b097e829797a0cce 100644
+--- a/codex-rs/app-server/src/message_processor_tracing_tests.rs
++++ b/codex-rs/app-server/src/message_processor_tracing_tests.rs
+@@ -261,6 +261,7 @@ pub(super) async fn build_test_processor(
+         analytics_events_client.clone(),
+     ));
+     let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++        ignore_user_config: false,
+         outgoing,
+         analytics_events_client,
+         arg0_paths: Arg0DispatchPaths::default(),
+diff --git a/codex-rs/app-server/src/user_config_auth_tests.rs b/codex-rs/app-server/src/user_config_auth_tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..fe33a111b92079c522b3fe37f8fd9fccdd4d5bc6
+--- /dev/null
++++ b/codex-rs/app-server/src/user_config_auth_tests.rs
+@@ -0,0 +1,165 @@
++//! Nextest runs this test in its own process: every keyring operation uses only
++//! this in-memory builder, installed before authentication is initialized.
++use crate::config_manager::ConfigManager;
++use codex_config::LoaderOverrides;
++use codex_config::NoopThreadConfigLoader;
++use codex_config::types::AuthCredentialsStoreMode;
++use codex_config::types::AuthKeyringBackendKind;
++use codex_login::AuthManager;
++use codex_login::login_with_api_key;
++use keyring::credential::Credential;
++use keyring::credential::CredentialApi;
++use keyring::credential::CredentialBuilderApi;
++use keyring::mock::MockCredential;
++use pretty_assertions::assert_eq;
++use std::any::Any;
++use std::collections::HashMap;
++use std::sync::Arc;
++use std::sync::Mutex;
++use tempfile::TempDir;
++
++#[derive(Default)]
++struct SyntheticKeyring(Mutex<HashMap<(String, String), Arc<MockCredential>>>);
++struct SharedCredential(Arc<MockCredential>);
++
++impl CredentialBuilderApi for SyntheticKeyring {
++    fn build(
++        &self,
++        _target: Option<&str>,
++        service: &str,
++        user: &str,
++    ) -> keyring::Result<Box<Credential>> {
++        let credential = self
++            .0
++            .lock()
++            .expect("synthetic keyring lock")
++            .entry((service.to_owned(), user.to_owned()))
++            .or_default()
++            .clone();
++        Ok(Box::new(SharedCredential(credential)))
++    }
++    fn as_any(&self) -> &dyn Any {
++        self
++    }
++}
++impl CredentialApi for SharedCredential {
++    fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
++        self.0.set_secret(secret)
++    }
++    fn get_secret(&self) -> keyring::Result<Vec<u8>> {
++        self.0.get_secret()
++    }
++    fn delete_credential(&self) -> keyring::Result<()> {
++        self.0.delete_credential()
++    }
++    fn as_any(&self) -> &dyn Any {
++        self
++    }
++}
++
++#[tokio::test]
++async fn isolated_startup_preserves_keyring_only_auth_and_managed_precedence() -> anyhow::Result<()>
++{
++    keyring::set_default_credential_builder(Box::<SyntheticKeyring>::default());
++    for backend in [
++        AuthKeyringBackendKind::Direct,
++        AuthKeyringBackendKind::Secrets,
++    ] {
++        let home = TempDir::new()?;
++        login_with_api_key(
++            home.path(),
++            "synthetic-keyring-only",
++            AuthCredentialsStoreMode::Keyring,
++            backend,
++        )?;
++        assert!(!home.path().join("auth.json").exists());
++        for store in ["keyring", "auto"] {
++            for isolated in [false, true] {
++                for constraint in [
++                    "none",
++                    "cli-file",
++                    "managed-file",
++                    "managed-login",
++                    "user-login",
++                ] {
++                    let user_login = if constraint == "user-login" {
++                        "forced_login_method = \"chatgpt\"\n"
++                    } else {
++                        ""
++                    };
++                    std::fs::write(
++                        home.path().join("config.toml"),
++                        format!(
++                            "cli_auth_credentials_store = \"{store}\"\ndeveloper_instructions = \"synthetic personal\"\nchatgpt_base_url = \"http://127.0.0.1:1/backend-api/\"\n{user_login}[features]\nsecret_auth_storage = {}\n",
++                            backend == AuthKeyringBackendKind::Secrets,
++                        ),
++                    )?;
++                    let managed = TempDir::new()?;
++                    let mut overrides = LoaderOverrides::with_managed_config_path_for_tests(
++                        managed.path().join("managed_config.toml"),
++                    );
++                    overrides.ignore_user_config = isolated;
++                    overrides.retain_user_auth_config = isolated;
++                    std::fs::write(
++                        managed.path().join("requirements.toml"),
++                        match constraint {
++                            "managed-file" => "cli_auth_credentials_store = \"file\"\n",
++                            "managed-login" => "allowed_login_methods = [\"chatgpt\"]\n",
++                            _ => "",
++                        },
++                    )?;
++                    let cli = if constraint == "cli-file" {
++                        vec![(
++                            "cli_auth_credentials_store".to_owned(),
++                            toml::Value::String("file".to_owned()),
++                        )]
++                    } else {
++                        vec![]
++                    };
++                    let manager = ConfigManager::new(
++                        home.path().to_path_buf(),
++                        cli,
++                        overrides,
++                        /*strict_config*/ false,
++                        Default::default(),
++                        Default::default(),
++                        Arc::new(NoopThreadConfigLoader),
++                    );
++                    let config = manager.load_startup_config(/*fallback_cwd*/ None).await?;
++                    assert_eq!(
++                        config.developer_instructions.as_deref(),
++                        if isolated {
++                            None
++                        } else {
++                            Some("synthetic personal")
++                        }
++                    );
++                    assert_eq!(config.chatgpt_base_url, "http://127.0.0.1:1/backend-api/");
++                    assert_eq!(config.auth_keyring_backend_kind(), backend);
++                    let expected_mode = match constraint {
++                        "cli-file" | "managed-file" => AuthCredentialsStoreMode::File,
++                        _ if store == "keyring" => AuthCredentialsStoreMode::Keyring,
++                        _ => AuthCredentialsStoreMode::Auto,
++                    };
++                    assert_eq!(config.cli_auth_credentials_store_mode, expected_mode);
++                    let auth = AuthManager::shared_from_config(
++                        &config, /*enable_codex_api_key_env*/ false,
++                    )
++                    .await?
++                    .auth()
++                    .await;
++                    assert_eq!(
++                        auth.as_ref().and_then(|auth| auth.api_key()),
++                        if constraint == "none" {
++                            Some("synthetic-keyring-only")
++                        } else {
++                            None
++                        }
++                    );
++                    assert!(!home.path().join("auth.json").exists());
++                }
++            }
++        }
++    }
++    Ok(())
++}
+diff --git a/codex-rs/app-server/src/user_instructions.rs b/codex-rs/app-server/src/user_instructions.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..94426cef75277ee4b16a138e38f3b1411c5bf0d6
+--- /dev/null
++++ b/codex-rs/app-server/src/user_instructions.rs
+@@ -0,0 +1,12 @@
++use codex_extension_api::LoadInstructionsFuture;
++use codex_extension_api::LoadedUserInstructions;
++use codex_extension_api::UserInstructionsProvider;
++
++/// An explicitly isolated host contributes no personal global instructions.
++pub(crate) struct NoUserInstructions;
++
++impl UserInstructionsProvider for NoUserInstructions {
++    fn load_user_instructions(&self) -> LoadInstructionsFuture<'_> {
++        Box::pin(async { LoadedUserInstructions::default() })
++    }
++}
+diff --git a/codex-rs/app-server/src/user_verification_test_support.rs b/codex-rs/app-server/src/user_verification_test_support.rs
+index d2096bc1f17dce225d4e2edad6c62bbb67eb162b..45515039e4cff5d8295ac3d80162f6fad8ef2a81 100644
+--- a/codex-rs/app-server/src/user_verification_test_support.rs
++++ b/codex-rs/app-server/src/user_verification_test_support.rs
+@@ -154,6 +154,7 @@ impl Harness {
+             AnalyticsEventsClient::disabled(),
+         ));
+         let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++            ignore_user_config: false,
+             outgoing: Arc::clone(&outgoing),
+             analytics_events_client: AnalyticsEventsClient::disabled(),
+             arg0_paths: Arg0DispatchPaths::default(),
+diff --git a/codex-rs/app-server/tests/suite/v2/ignore_user_config.rs b/codex-rs/app-server/tests/suite/v2/ignore_user_config.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..90dc0e27f7164b921eaaa38476575a3260fef53f
+--- /dev/null
++++ b/codex-rs/app-server/tests/suite/v2/ignore_user_config.rs
+@@ -0,0 +1,132 @@
++//! Explicit app-server isolation excludes personal inputs without moving the auth home.
++
++use anyhow::Result;
++use app_test_support::TestAppServer;
++use codex_app_server_protocol::Account;
++use codex_app_server_protocol::ConfigReadParams;
++use codex_app_server_protocol::ConfigReadResponse;
++use codex_app_server_protocol::GetAccountParams;
++use codex_app_server_protocol::GetAccountResponse;
++use codex_app_server_protocol::ThreadStartParams;
++use codex_app_server_protocol::ThreadStartResponse;
++use pretty_assertions::assert_eq;
++use serde_json::Value;
++use serde_json::json;
++use std::time::Duration;
++use tempfile::TempDir;
++use tokio::time::timeout;
++
++const READ_TIMEOUT: Duration = Duration::from_secs(60);
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn ignore_user_config_retains_auth_and_managed_requirements() -> Result<()> {
++    let home = TempDir::new()?;
++    std::fs::write(
++        home.path().join("config.toml"),
++        r#"cli_auth_credentials_store = "file"
++default_permissions = "synthetic"
++developer_instructions = "synthetic personal instructions"
++[permissions.synthetic.filesystem]
++"/synthetic-extra-read" = "read"
++"#,
++    )?;
++    std::fs::write(
++        home.path().join("auth.json"),
++        r#"{"OPENAI_API_KEY":"synthetic-test-key"}"#,
++    )?;
++    std::fs::write(
++        home.path().join("requirements.toml"),
++        "allow_remote_control = false\n[application.network]\nenabled = false\n",
++    )?;
++    for isolated in [false, true] {
++        let mut args = vec![];
++        if isolated {
++            args.push("--ignore-user-config");
++        }
++        let mut server = TestAppServer::builder()
++            .with_codex_home(home.path())
++            .with_args(&args)
++            .build_initialized_with_timeout(READ_TIMEOUT)
++            .await?;
++        let config_id = server
++            .send_config_read_request(ConfigReadParams {
++                include_layers: false,
++                cwd: None,
++            })
++            .await?;
++        let config: ConfigReadResponse =
++            timeout(READ_TIMEOUT, server.read_response(config_id)).await??;
++        let config_json = serde_json::to_value(config.config)?;
++        assert_eq!(
++            config_json
++                .to_string()
++                .contains("synthetic personal instructions"),
++            !isolated
++        );
++        assert_eq!(
++            config_json.to_string().contains("synthetic-extra-read"),
++            !isolated
++        );
++
++        let requirements_id = server.send_config_requirements_read_request().await?;
++        let requirements: Value =
++            timeout(READ_TIMEOUT, server.read_response(requirements_id)).await??;
++        assert_eq!(
++            requirements["requirements"]["application"]["network"]["enabled"],
++            json!(false)
++        );
++
++        let account_id = server
++            .send_get_account_request(GetAccountParams {
++                refresh_token: false,
++            })
++            .await?;
++        let account: GetAccountResponse =
++            timeout(READ_TIMEOUT, server.read_response(account_id)).await??;
++        assert_eq!(account.account, Some(Account::ApiKey {}));
++        assert_eq!(
++            std::fs::read_to_string(home.path().join("auth.json"))?,
++            r#"{"OPENAI_API_KEY":"synthetic-test-key"}"#
++        );
++    }
++    Ok(())
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn ignore_user_config_excludes_global_but_keeps_project_instructions() -> Result<()> {
++    for isolated in [false, true] {
++        let home = TempDir::new()?;
++        let workspace = TempDir::new()?;
++        let global = home.path().join("AGENTS.override.md");
++        let project = workspace.path().join("AGENTS.md");
++        std::fs::write(&global, "synthetic global instructions")?;
++        std::fs::write(&project, "synthetic project instructions")?;
++        let args = if isolated {
++            vec!["--ignore-user-config"]
++        } else {
++            vec![]
++        };
++        let mut server = TestAppServer::builder()
++            .with_codex_home(home.path())
++            .without_auto_env()
++            .with_args(&args)
++            .build_initialized_with_timeout(READ_TIMEOUT)
++            .await?;
++        let request_id = server
++            .send_thread_start_request(ThreadStartParams {
++                cwd: Some(workspace.path().display().to_string()),
++                ..Default::default()
++            })
++            .await?;
++        let response: ThreadStartResponse =
++            timeout(READ_TIMEOUT, server.read_response(request_id)).await??;
++        let sources = response
++            .instruction_sources
++            .into_iter()
++            .map(|path| std::fs::canonicalize(path.as_str()))
++            .collect::<std::io::Result<Vec<_>>>()?;
++        assert!(sources.contains(&std::fs::canonicalize(project)?));
++        assert_eq!(sources.contains(&std::fs::canonicalize(global)?), !isolated);
++    }
++    Ok(())
++}
+diff --git a/codex-rs/app-server/tests/suite/v2/mod.rs b/codex-rs/app-server/tests/suite/v2/mod.rs
+index d24896903618042f177fe8e85a80707d60463e87..bcc1b48b073648189b2ed56f3fb91bc1b13bda8e 100644
+--- a/codex-rs/app-server/tests/suite/v2/mod.rs
++++ b/codex-rs/app-server/tests/suite/v2/mod.rs
+@@ -60,6 +60,7 @@ mod guardian_v2;
+ mod history_notes_extension;
+ mod hooks_list;
+ mod host_skills;
++mod ignore_user_config;
+ mod imagegen_extension;
+ mod initialize;
+ mod luna_reserve;
+diff --git a/codex-rs/cli/src/app_server_user_config_tests.rs b/codex-rs/cli/src/app_server_user_config_tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..d05e738234e740353c12cd4b464cef451f63a4e3
+--- /dev/null
++++ b/codex-rs/cli/src/app_server_user_config_tests.rs
+@@ -0,0 +1,18 @@
++use super::MultitoolCli;
++use super::Subcommand;
++use clap::Parser;
++use pretty_assertions::assert_eq;
++
++#[test]
++fn app_server_user_config_isolation_is_explicit() {
++    for (args, expected) in [
++        (vec!["codex", "app-server"], false),
++        (vec!["codex", "app-server", "--ignore-user-config"], true),
++    ] {
++        let cli = MultitoolCli::try_parse_from(args).expect("parse app-server flags");
++        let Some(Subcommand::AppServer(app_server)) = cli.subcommand else {
++            panic!("expected app-server command");
++        };
++        assert_eq!(app_server.ignore_user_config, expected);
++    }
++}
+diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
+index bdd7771b3aadfd69f46698c14844a6d65e1e65ba..d1925c6e98c705edd034af7204853a92142358f1 100644
+--- a/codex-rs/cli/src/main.rs
++++ b/codex-rs/cli/src/main.rs
+@@ -551,6 +551,10 @@ struct LogoutCommand {
+
+ #[derive(Debug, Parser)]
+ struct AppServerCommand {
++    /// Skip personal behavior and global AGENTS instructions; retain auth settings, managed policy, and exec rules.
++    #[arg(long, default_value_t = false)]
++    ignore_user_config: bool,
++
+     /// Omit to run the app server; specify a subcommand for tooling.
+     #[command(subcommand)]
+     subcommand: Option<AppServerSubcommand>,
+@@ -1218,6 +1222,7 @@ async fn cli_main(
+         }
+         Some(Subcommand::AppServer(app_server_cli)) => {
+             let AppServerCommand {
++                ignore_user_config,
+                 subcommand,
+                 code_mode_host,
+                 strict_config: app_server_strict_config,
+@@ -1228,6 +1233,9 @@ async fn cli_main(
+                 analytics_default_enabled,
+                 auth,
+             } = app_server_cli;
++            if ignore_user_config && subcommand.is_some() {
++                anyhow::bail!("--ignore-user-config applies only when running app-server");
++            }
+             let strict_config = app_server_strict_config || root_strict_config;
+             reject_strict_config_for_app_server_subcommand(strict_config, subcommand.as_ref())?;
+             reject_remote_mode_for_app_server_subcommand(
+@@ -1263,7 +1271,10 @@ async fn cli_main(
+                     let exit = codex_app_server::run_main_with_transport_options(
+                         arg0_paths.clone(),
+                         root_config_overrides,
+-                        LoaderOverrides::default(),
++                        LoaderOverrides {
++                            ignore_user_config,
++                            ..Default::default()
++                        },
+                         strict_config,
+                         analytics_default_enabled,
+                         transport,
+@@ -4907,3 +4918,7 @@ mod tests {
+ #[cfg(all(test, unix))]
+ #[path = "daemon_update_tests.rs"]
+ mod daemon_update_tests;
++
++#[cfg(test)]
++#[path = "app_server_user_config_tests.rs"]
++mod app_server_user_config_tests;
+diff --git a/codex-rs/config/src/loader/mod.rs b/codex-rs/config/src/loader/mod.rs
+index c4505879853e69103cce67e6f635e1f6167d8594..47d6c20de3e015f4ec77f4dda04632662b0dbc63 100644
+--- a/codex-rs/config/src/loader/mod.rs
++++ b/codex-rs/config/src/loader/mod.rs
+@@ -200,6 +200,7 @@ pub async fn load_config_layers_state(
+     };
+     let active_user_profile = overrides.user_config_profile.clone();
+     let ignore_user_config = overrides.ignore_user_config;
++    let retain_user_auth_config = overrides.retain_user_auth_config;
+     let ignore_project_config = overrides.ignore_project_config;
+     let ignore_user_and_project_exec_policy_rules =
+         overrides.ignore_user_and_project_exec_policy_rules;
+@@ -293,6 +294,7 @@ pub async fn load_config_layers_state(
+         &base_user_file,
+         /*profile*/ None,
+         ignore_user_config,
++        retain_user_auth_config,
+         strict_config,
+     )
+     .await?;
+@@ -327,6 +329,7 @@ pub async fn load_config_layers_state(
+                 &active_user_file,
+                 active_user_profile.as_ref(),
+                 ignore_user_config,
++                retain_user_auth_config,
+                 strict_config,
+             )
+             .await?,
+@@ -505,10 +508,11 @@ async fn load_user_config_layer(
+     user_file: &AbsolutePathBuf,
+     profile: Option<&ProfileV2Name>,
+     ignore_user_config: bool,
++    retain_user_auth_config: bool,
+     strict_config: bool,
+ ) -> io::Result<ConfigLayerEntry> {
+     let profile = profile.map(ToString::to_string);
+-    if ignore_user_config {
++    if ignore_user_config && !retain_user_auth_config {
+         return Ok(ConfigLayerEntry::new(
+             ConfigLayerSource::User {
+                 file: user_file.clone(),
+@@ -518,7 +522,24 @@ async fn load_user_config_layer(
+         ));
+     }
+
+-    load_config_toml_for_required_layer(fs, user_file, strict_config, |config_toml| {
++    load_config_toml_for_required_layer(fs, user_file, strict_config, |mut config_toml| {
++        if ignore_user_config && let Some(table) = config_toml.as_table_mut() {
++            table.retain(|key, value| match key {
++                "cli_auth_credentials_store"
++                | "forced_login_method"
++                | "forced_chatgpt_workspace_id"
++                | "chatgpt_base_url" => true,
++                "features" => {
++                    if let Some(features) = value.as_table_mut() {
++                        features.retain(|key, _| key == "secret_auth_storage");
++                        !features.is_empty()
++                    } else {
++                        false
++                    }
++                }
++                _ => false,
++            });
++        }
+         ConfigLayerEntry::new(
+             ConfigLayerSource::User {
+                 file: user_file.clone(),
+diff --git a/codex-rs/config/src/loader/tests.rs b/codex-rs/config/src/loader/tests.rs
+index e1ae693f30340744eecc53d076c27b4c0d9ffbc8..d352cd89e085118ea7d3b54807b8f0927323321c 100644
+--- a/codex-rs/config/src/loader/tests.rs
++++ b/codex-rs/config/src/loader/tests.rs
+@@ -1078,3 +1078,142 @@ fn project_config_cannot_change_system_proxy_routing() {
+         }
+     }
+ }
++
++#[tokio::test]
++async fn isolated_user_config_retains_only_auth_store_in_original_layers() -> anyhow::Result<()> {
++    let tmp = tempdir()?;
++    let base_file = AbsolutePathBuf::from_absolute_path(tmp.path().join(CONFIG_TOML_FILE))?;
++    for store in ["file", "keyring", "auto"] {
++        std::fs::write(
++            base_file.as_path(),
++            format!(
++                "cli_auth_credentials_store = \"{store}\"\ndeveloper_instructions = \"personal\"\n[permissions.personal.filesystem]\n\"/synthetic-grant\" = \"read\"\n"
++            ),
++        )?;
++        for retain in [false, true] {
++            let layer = load_user_config_layer(
++                &TestFileSystem,
++                &base_file,
++                /*profile*/ None,
++                /*ignore_user_config*/ true,
++                retain,
++                /*strict_config*/ false,
++            )
++            .await?;
++            let expected: TomlValue = if retain {
++                toml::from_str(&format!("cli_auth_credentials_store = \"{store}\""))?
++            } else {
++                TomlValue::Table(Default::default())
++            };
++            assert_eq!(layer.config, expected);
++        }
++    }
++    // The selected profile-v2 is a second user layer; only its store survives.
++    let selected = tmp.path().join("selected.toml");
++    std::fs::write(
++        &selected,
++        "cli_auth_credentials_store = \"keyring\"\ndeveloper_instructions = \"profile personal\"\n",
++    )?;
++    let managed = tmp.path().join("managed.toml");
++    for (cli, managed_store, expected) in [
++        (None, None, "keyring"),
++        (Some("file"), None, "file"),
++        (Some("file"), Some("auto"), "auto"),
++    ] {
++        let mut overrides = LoaderOverrides::without_managed_config_for_tests();
++        overrides.ignore_user_config = true;
++        overrides.retain_user_auth_config = true;
++        overrides.user_config_path = Some(AbsolutePathBuf::from_absolute_path(&selected)?);
++        overrides.user_config_profile = Some("selected".parse()?);
++        overrides.managed_config_path = Some(managed.clone());
++        std::fs::write(
++            &managed,
++            managed_store
++                .map(|value| format!("cli_auth_credentials_store = \"{value}\"\n"))
++                .unwrap_or_default(),
++        )?;
++        let cli = cli
++            .map(|value| {
++                (
++                    "cli_auth_credentials_store".to_string(),
++                    TomlValue::String(value.to_string()),
++                )
++            })
++            .into_iter()
++            .collect::<Vec<_>>();
++        let stack = load_config_layers_state(
++            &TestFileSystem,
++            tmp.path(),
++            /*cwd*/ None,
++            &cli,
++            overrides,
++            &crate::NoopThreadConfigLoader,
++        )
++        .await?;
++        assert_eq!(
++            stack.effective_config()["cli_auth_credentials_store"].as_str(),
++            Some(expected)
++        );
++        let user = stack.effective_user_config().expect("user config");
++        assert_eq!(
++            user,
++            toml::from_str::<TomlValue>("cli_auth_credentials_store = \"keyring\"")?
++        );
++    }
++    Ok(())
++}
++
++#[tokio::test]
++async fn isolated_user_config_preserves_identity_constraints_without_behavior() -> anyhow::Result<()>
++{
++    let tmp = tempdir()?;
++    let user_file = AbsolutePathBuf::from_absolute_path(tmp.path().join(CONFIG_TOML_FILE))?;
++    let authentication = r#"cli_auth_credentials_store = "keyring"
++forced_login_method = "chatgpt"
++forced_chatgpt_workspace_id = ["synthetic-workspace"]
++chatgpt_base_url = "https://auth.example.invalid/backend-api/"
++[features]
++secret_auth_storage = true
++"#;
++    std::fs::write(
++        user_file.as_path(),
++        format!(
++            "developer_instructions = \"personal\"\n{authentication}memories = true\nrespect_system_proxy = true\nsystem_proxy_fallback = true\n[permissions.personal.filesystem]\n\"/synthetic-grant\" = \"read\"\n"
++        ),
++    )?;
++    let layer = load_user_config_layer(
++        &TestFileSystem,
++        &user_file,
++        /*profile*/ None,
++        /*ignore_user_config*/ true,
++        /*retain_user_auth_config*/ true,
++        /*strict_config*/ false,
++    )
++    .await?;
++    assert_eq!(layer.config, toml::from_str::<TomlValue>(authentication)?);
++    Ok(())
++}
++
++#[tokio::test]
++async fn isolated_user_config_drops_unrelated_non_table_features() -> anyhow::Result<()> {
++    let tmp = tempdir()?;
++    let file = AbsolutePathBuf::from_absolute_path(tmp.path().join(CONFIG_TOML_FILE))?;
++    let authentication = "cli_auth_credentials_store = \"keyring\"\n";
++    for features in ["true", "[]", "\"personal-invalid-value\""] {
++        std::fs::write(
++            file.as_path(),
++            format!("{authentication}features = {features}\n"),
++        )?;
++        let layer = load_user_config_layer(
++            &TestFileSystem,
++            &file,
++            /*profile*/ None,
++            /*ignore_user_config*/ true,
++            /*retain_user_auth_config*/ true,
++            /*strict_config*/ false,
++        )
++        .await?;
++        assert_eq!(layer.config, toml::from_str::<TomlValue>(authentication)?);
++    }
++    Ok(())
++}
+diff --git a/codex-rs/config/src/state.rs b/codex-rs/config/src/state.rs
+index ec271fd820d07ca027aaec900721a0da3f4a1f7a..bcdf55b8f5dc7d46b63350217a75327aa90c3d10 100644
+--- a/codex-rs/config/src/state.rs
++++ b/codex-rs/config/src/state.rs
+@@ -52,6 +52,9 @@ pub struct LoaderOverrides {
+     /// Remote app servers own their authentication policy independently.
+     pub ignore_login_requirements: bool,
+     pub ignore_user_config: bool,
++    /// When ignoring user behavior, retain credential backend and identity settings.
++    /// This stays in its original user layer, below CLI and managed config.
++    pub retain_user_auth_config: bool,
+     /// Skip project-root discovery and all project configuration layers.
+     pub ignore_project_config: bool,
+     pub ignore_user_and_project_exec_policy_rules: bool,
+@@ -77,6 +80,7 @@ impl LoaderOverrides {
+             ignore_managed_requirements: false,
+             ignore_login_requirements: false,
+             ignore_user_config: false,
++            retain_user_auth_config: false,
+             ignore_project_config: false,
+             ignore_user_and_project_exec_policy_rules: false,
+             #[cfg(target_os = "macos")]
+diff --git a/codex-rs/Cargo.lock b/codex-rs/Cargo.lock
+--- a/codex-rs/Cargo.lock
++++ b/codex-rs/Cargo.lock
+@@ -2144,6 +2144,7 @@
+  "futures",
+  "hmac 0.12.1",
+  "http 1.4.0",
++ "keyring",
+  "opentelemetry",
+  "opentelemetry_sdk",
+  "pretty_assertions",

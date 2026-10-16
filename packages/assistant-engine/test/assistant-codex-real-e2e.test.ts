@@ -367,8 +367,11 @@ import {
   createCanonicalLiveFixture,
   runCanonicalGroupBoundaryJourney,
   runCanonicalMealRestartJourney,
+  runCanonicalHostedMealJourney,
   runCanonicalReminderJourney,
 } from './support/canonical-live-journeys.ts'
+import { inspectCanonicalCodex } from './support/canonical-codex-inspection.js'
+import { realCodexProviderTomlLines, type RealCodexProviderConfig } from './support/real-codex-provider.js'
 import {
   MEAL_INTAKE_BENCHMARK_CASES,
   readMealIntakeBenchmarkEnvironment,
@@ -1890,6 +1893,11 @@ describeRealCodex('real model canonical production journeys', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 600_000)
+  it('real model canonical hosted meal uses local installed CLI under member permissions', async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    try { await runCanonicalHostedMealJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
+    finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  }, 600_000)
   it('real model canonical meal persists across assistant restart', async () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })
     try { await runCanonicalMealRestartJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
@@ -2042,7 +2050,6 @@ type RealCodexOnboardingScenario =
   keyof typeof REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS
 const OPENAI_ENV_MODEL_PROVIDER = HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
 const OPENAI_SUBSCRIPTION_MODEL_PROVIDER = 'openai'
-const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 const OPENAI_API_KEY_ENV = 'OPENAI_API_KEY'
 const REAL_CODEX_E2E_TSX_TSCONFIG_PATH = fileURLToPath(
   new URL('../../../tsconfig.base.json', import.meta.url),
@@ -2073,6 +2080,7 @@ const realCodexProviderApiKeyEnvByEnvironment = new WeakMap<
 >()
 
 interface RealCodexE2eConfig {
+  providerConfig?: RealCodexProviderConfig
   codexHome: string | null
   env: NodeJS.ProcessEnv
   model: string
@@ -4072,6 +4080,55 @@ describe('real Codex live fixture contracts', () => {
     expect(toml).toContain(`base_url = "${OPENAI_CODEX_MODEL_PROVIDER_CONFIG.baseUrl}"`)
     expect(toml).toContain('"MURPH_CANONICAL_JOURNEY_CLI"')
     expect(toml.split('[model_providers.')[0]).not.toContain('OPENAI_API_KEY')
+  })
+  it.skipIf(!process.env.MURPH_REAL_CODEX_COMMAND)('preserves resolved provider configuration through the isolated canonical adapter without personal inputs', { timeout: 60_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true, sourceEnv: {
+      PATH: process.env.PATH, MURPH_REAL_CODEX_AUTH: 'provider',
+      MURPH_REAL_CODEX_PROVIDER_ENV_KEY: 'SYNTHETIC_PROVIDER_KEY',
+      SYNTHETIC_PROVIDER_KEY: 'synthetic-only-no-provider-request',
+    } })
+    const fixture = await createCanonicalLiveFixture(config)
+    try {
+      const home = fixture.codexHome
+      const original = await readFile(path.join(home, 'config.toml'), 'utf8')
+      await writeFile(path.join(home, 'config.toml'), [
+        'developer_instructions = "SYNTHETIC_PERSONAL_DEVELOPER"', original,
+        '[permissions.murph-member-workspace.filesystem]',
+        '"/synthetic-extra-read" = "read"',
+      ].join('\n'))
+      await writeFile(path.join(home, 'AGENTS.override.md'), 'SYNTHETIC_GLOBAL_INSTRUCTIONS')
+      await writeFile(path.join(fixture.vault, 'AGENTS.md'), 'SYNTHETIC_PROJECT_INSTRUCTIONS')
+      const inspected = await inspectCanonicalCodex({
+        command: fixture.codexCommand, cwd: fixture.vault,
+        env: { ...fixture.env, CODEX_HOME: home },
+        // The provider table must arrive through the resolver and launcher.
+        // Thread/start supplies only the same model and policy selection as a journey.
+        threadParams: { model: config.model, modelProvider: config.modelProvider,
+          approvalPolicy: 'never', config: { model_reasoning_effort: 'low' } },
+      })
+      expect(inspected.config).toMatchObject({ config: {
+        model_providers: { [OPENAI_ENV_MODEL_PROVIDER]: {
+          name: 'OpenAI', base_url: OPENAI_CODEX_MODEL_PROVIDER_CONFIG.baseUrl,
+          env_key: 'SYNTHETIC_PROVIDER_KEY', wire_api: 'responses',
+          request_max_retries: 4, stream_max_retries: 5, supports_websockets: true,
+        } },
+        default_permissions: 'murph-member-workspace', allow_login_shell: false,
+        shell_environment_policy: { ignore_default_excludes: false, include_only: expect.arrayContaining(['HOME', 'PATH']) },
+      } })
+      expect(inspected.config).not.toMatchObject({ config: { shell_environment_policy: { include_only: expect.arrayContaining(['SYNTHETIC_PROVIDER_KEY']) } } })
+      expect(fixture.env.SYNTHETIC_PROVIDER_KEY).toBe('synthetic-only-no-provider-request')
+      expect(inspected.started).toMatchObject({ model: config.model, modelProvider: config.modelProvider, approvalPolicy: 'never' })
+      const readback = JSON.stringify(inspected)
+      expect(readback).not.toContain('SYNTHETIC_PERSONAL_DEVELOPER')
+      expect(readback).not.toContain('/synthetic-extra-read')
+      expect(readback).not.toContain('synthetic-only-no-provider-request')
+      expect(inspected.instructionSources.some((source) => source.endsWith('/AGENTS.override.md'))).toBe(false)
+      expect(inspected.instructionSources.some((source) => source.endsWith('/vault/AGENTS.md'))).toBe(true)
+      expect(await fixture.commandCount()).toBe(0)
+    } finally {
+      await fixture.close()
+      for (const temporaryPath of config.temporaryPaths) await removeRealCodexTemporaryPath(temporaryPath)
+    }
   })
   it('executes canonical gate CLI commands and rejects an unknown command without a model', async () => {
     const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6-sol', modelProvider: OPENAI_ENV_MODEL_PROVIDER })
@@ -43324,6 +43381,7 @@ async function resolveRealCodexE2eConfig(
     model,
     modelProvider,
     providerApiKeyEnv: apiKeyEnv,
+    providerConfig: { apiKeyEnv, modelProvider, productionTransport: input.productionTransport },
     temporaryPaths,
   }
 }
@@ -43358,9 +43416,6 @@ function buildRealCodexConfigToml(input: {
   productionTransport?: boolean
   sandboxMode?: 'workspace-write' | null
 }): string {
-  const baseUrl = OPENAI_BASE_URL
-  const providerName = 'OpenAI'
-
   return [
     `model = ${tomlString(input.model)}`,
     `model_provider = ${tomlString(input.modelProvider)}`,
@@ -43382,14 +43437,7 @@ function buildRealCodexConfigToml(input: {
     ...(input.productionTransport ? ['HOME', 'VAULT', 'MURPH_CANONICAL_JOURNEY_CLI', 'MURPH_CANONICAL_JOURNEY_COMMANDS'].map((key) => `  ${tomlString(key)},`) : []),
     ']',
     '',
-    `[model_providers.${tomlKey(input.modelProvider)}]`,
-    `name = ${tomlString(providerName)}`,
-    `base_url = ${tomlString(baseUrl)}`,
-    `env_key = ${tomlString(input.apiKeyEnv)}`,
-    'wire_api = "responses"',
-    'request_max_retries = 4',
-    'stream_max_retries = 5',
-    `supports_websockets = ${input.productionTransport === true && input.modelProvider === OPENAI_ENV_MODEL_PROVIDER && OPENAI_CODEX_MODEL_PROVIDER_CONFIG.supportsWebSockets}`,
+    ...realCodexProviderTomlLines(input),
     '',
   ].join('\n')
 }

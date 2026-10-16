@@ -29,6 +29,15 @@ function gitSource(file: string): string {
   return execFileSync('git', ['show', `${base}:${file}`], { cwd: repository, encoding: 'utf8' })
 }
 
+async function nativeDelegationSource(phase: 'base' | 'head'): Promise<string> {
+  const sharedPath = 'packages/hosted-execution/src/codex-behavior.ts'
+  if (phase === 'base') {
+    const committed = execFileSync('git', ['ls-tree', '--name-only', base, '--', sharedPath], { cwd: repository, encoding: 'utf8' }).trim()
+    return gitSource(committed === sharedPath ? sharedPath : configPath)
+  }
+  return readFile(new URL(`../../../${sharedPath}`, import.meta.url), 'utf8')
+}
+
 function nativeDelegationConfig(source: string): string[] {
   const names = [
     ['usage_hint_text', 'HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT'],
@@ -85,7 +94,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
       let workingDirectory: string | undefined
       for (const phase of ['base', 'head'] as const) {
         const tools = (phase === 'base' ? baselineCatalog.resolveMurphDynamicTools : resolveMurphDynamicTools)(availability)
-        const configSource = phase === 'base' ? gitSource(configPath) : await readFile(new URL(`../../../${configPath}`, import.meta.url), 'utf8')
+        const configSource = await nativeDelegationSource(phase)
         const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, {
           model: 'gpt-6.1-sol', additionalTomlLines: nativeDelegationConfig(configSource),
         })
