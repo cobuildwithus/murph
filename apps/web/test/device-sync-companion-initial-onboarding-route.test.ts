@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   completeHostedInitialOnboardingTx: vi.fn(),
   getPrisma: vi.fn(),
   issueMurphContactCardHandoffClaim: vi.fn(),
+  lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   parseHostedInitialOnboardingCompletionRequest: vi.fn(),
   readHostedInitialOnboardingState: vi.fn(),
   readHostedMemberMessagingSetupState: vi.fn(),
@@ -33,6 +34,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  lookupHostedMemberByVerifiedEmailAddress:
+    mocks.lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberMessagingSetupState:
     mocks.readHostedMemberMessagingSetupState,
 }));
@@ -172,6 +175,43 @@ describe("companion initial onboarding routes", () => {
       messagingSetupRequired: true,
       status: "completed",
     });
+    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { code: "246810", lookupMemberId: "member_123", expected: false },
+    { code: "246810", lookupMemberId: "member_other", expected: true },
+    { code: "", lookupMemberId: "member_123", expected: true },
+  ])("lets only the configured review member past messaging setup (%j)", async ({ code, lookupMemberId, expected }) => {
+    vi.stubEnv("HOSTED_AUTH_REVIEW_EMAIL", " Review@Example.test ");
+    vi.stubEnv("HOSTED_AUTH_REVIEW_CODE", code);
+    mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+      identity: { phoneLookupKey: null },
+      routing: null,
+    });
+    mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue({
+      core: { id: lookupMemberId },
+      matchedBy: "verifiedEmail",
+    });
+    try {
+      const response = await route.GET(new Request(
+        "https://app.example.test/api/device-sync/companion/initial-onboarding",
+        { headers: { authorization: "Bearer identity-token" } },
+      ));
+
+      await expect(response.json()).resolves.toMatchObject({
+        messagingSetupRequired: expected,
+      });
+      if (code) {
+        expect(mocks.lookupHostedMemberByVerifiedEmailAddress).toHaveBeenCalledWith(
+          expect.objectContaining({ address: "review@example.test", projection: "core" }),
+        );
+      } else {
+        expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it.each([

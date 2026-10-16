@@ -74,6 +74,7 @@ import { exchangeHostedAuthSession, readHostedAuthSessionResponse, logoutHostedA
 import { upsertHostedMemberPendingLinqParticipantContactTx } from "../src/lib/hosted-onboarding/hosted-member-routing-store";
 import { issueHostedInvite } from "../src/lib/hosted-onboarding/invite-service";
 import { sendHostedAuthOtp } from "../src/lib/better-auth/send-otp";
+import { isHostedAuthReviewMember } from "../src/lib/better-auth/review-account";
 import { prepareHostedAuthSmsOtp } from "../src/lib/better-auth/sms-otp";
 import { syntheticSmsVerification } from "./support/better-auth-sms-verification";
 import { hostedAuthOtpIdentifier } from "../src/lib/better-auth/otp-store";
@@ -1271,6 +1272,12 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       expect(response.status).toBe(200);
       memberId = (await response.json()).memberId;
       expect(memberId).toEqual(expect.any(String));
+      // The verified sign-in email alone identifies the member that may skip messaging setup.
+      expect(await isHostedAuthReviewMember({ memberId: memberId!, prisma })).toBe(true);
+      expect(await isHostedAuthReviewMember({ memberId: `auth-other-${randomUUID()}`, prisma })).toBe(false);
+      vi.stubEnv("HOSTED_AUTH_REVIEW_CODE", "");
+      expect(await isHostedAuthReviewMember({ memberId: memberId!, prisma })).toBe(false);
+      vi.stubEnv("HOSTED_AUTH_REVIEW_CODE", "246810");
       // Every other address keeps a random, emailed code.
       expect((await sendNativeCode(request({ kind: "email", value: other }))).status).toBe(200);
       expect(provider.codes.get(other)).toMatch(/^\d{6}$/u);
