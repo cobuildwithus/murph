@@ -97,11 +97,11 @@ describe("hosted invocation fetch transport diagnostics", () => {
   test("writes the import pass's own read timing onto its existing mailbox.imported row", async () => {
     const { imported, finished } = await runEmptyInvocation({
       attemptId: "attempt_synthetic_pass_read_timing",
-      passReadTiming: { passMailboxFetchResponseWaitMs: 1464, passMailboxFetchAttemptCount: 1 },
+      passReadTiming: { passMailboxFetchResponseWaitMs: 333, passMailboxFetchAttemptCount: 1 },
       readFetchTransportDiagnostics: () => ({ firstMailboxFetchResponseWaitMs: 11 }),
     });
     assert.equal(imported.length, 1);
-    assert.equal(imported[0]?.redactedJson?.passMailboxFetchResponseWaitMs, 1464);
+    assert.equal(imported[0]?.redactedJson?.passMailboxFetchResponseWaitMs, 333);
     assert.equal(imported[0]?.redactedJson?.passMailboxFetchAttemptCount, 1);
     // Invocation-first fields stay on the terminal row, never on the pass row.
     assert.equal(Object.hasOwn(imported[0]?.redactedJson ?? {}, "firstMailboxFetchResponseWaitMs"), false);

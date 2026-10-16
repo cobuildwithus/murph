@@ -2428,7 +2428,7 @@ describe("hosted mailbox import pass read timing", () => {
     const { mailboxPort: base } = createMailboxPort({ items: [createMailboxItem({ laneSeq: "1" })] });
     const mailboxPort = withReadTimings(base, [
       { passMailboxFetchResponseWaitMs: 11, passMailboxFetchAttemptCount: 1 },
-      { passMailboxFetchResponseWaitMs: 1464, passMailboxFetchAttemptCount: 1 },
+      { passMailboxFetchResponseWaitMs: 333, passMailboxFetchAttemptCount: 1 },
     ]);
     const prefetch = prefetchHostedMailboxPrefix({
       lanes: ["conversation"], limitPerLane: 10, mailboxPort, requestId: "synthetic_wake_1", state,
@@ -2444,13 +2444,13 @@ describe("hosted mailbox import pass read timing", () => {
     assert.deepEqual(first.fetchTransportTiming,
       { passMailboxFetchResponseWaitMs: 11, passMailboxFetchAttemptCount: 1 });
     assert.deepEqual(second.fetchTransportTiming,
-      { passMailboxFetchResponseWaitMs: 1464, passMailboxFetchAttemptCount: 1 });
+      { passMailboxFetchResponseWaitMs: 333, passMailboxFetchAttemptCount: 1 });
   });
 
   test("a failed prefetch is replaced by the refetch's own timing", async () => {
     const state = createEmptyHostedMailboxImportState();
     const { fetchRequests, mailboxPort: base } = createMailboxPort({ items: [createMailboxItem({ laneSeq: "1" })] });
-    const mailboxPort = withReadTimings(base, ["fail", { passMailboxFetchResponseWaitMs: 22 }]);
+    const mailboxPort = withReadTimings(base, ["fail", { passMailboxFetchResponseWaitMs: 77 }]);
     const prefetch = prefetchHostedMailboxPrefix({
       lanes: ["conversation"], limitPerLane: 10, mailboxPort, requestId: "synthetic_wake", state,
     });
@@ -2459,7 +2459,7 @@ describe("hosted mailbox import pass read timing", () => {
       mailboxPort, now: () => TEST_NOW, prefetch, requestId: "synthetic_pass", state,
     });
     assert.equal(fetchRequests.length, 1);
-    assert.deepEqual(result.fetchTransportTiming, { passMailboxFetchResponseWaitMs: 22 });
+    assert.deepEqual(result.fetchTransportTiming, { passMailboxFetchResponseWaitMs: 77 });
   });
 
   test("omits pass read timing when the read carries none", async () => {
