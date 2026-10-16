@@ -17,6 +17,7 @@ export const CLI_TIMING_PHASES = [
   "query-source-read", "query-wearable-dataset", "query-metric-projection",
   "query-wearable-summary", "query-search-documents", "query-publication",
   "query-entity-read", "query-wearable-compose", "query-metric-read", "query-pattern-report",
+  "service-runtime-load", "query-runtime-load", "query-projection-load",
 ] as const;
 export type CliTimingPhase = typeof CLI_TIMING_PHASES[number];
 export type CliTimingOutcome = "ok" | "error" | "unknown";
