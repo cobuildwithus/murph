@@ -25,5 +25,9 @@ export async function generateMetadata(props: GameInvitePageProps): Promise<Meta
 
 export default async function GameInvitePage(props: GameInvitePageProps) {
   const token = await resolveDecodedRouteParam(props.params, "token");
-  return <GameInviteView preview={await readPreview(token)} token={token} />;
+  return (
+    <main className="min-h-dvh bg-background px-6 py-7 text-foreground sm:px-10 sm:py-9">
+      <GameInviteView preview={await readPreview(token)} token={token} />
+    </main>
+  );
 }

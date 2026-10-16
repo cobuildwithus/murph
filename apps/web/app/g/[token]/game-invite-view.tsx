@@ -7,39 +7,37 @@ import { CopyInviteLink } from "./copy-invite-link";
 
 const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/** The page a texted challenge link opens. Server-rendered from the invite preview. */
+/** What a texted challenge link shows, from the invite preview. The page supplies `<main>`. */
 export function GameInviteView(props: { preview: GameInvitePreview | null; token: string }) {
   const { preview } = props;
   return (
-    <main className="min-h-dvh bg-background px-6 py-7 text-foreground sm:px-10 sm:py-9">
-      <div className="mx-auto flex max-w-md flex-col">
-        <Image alt="Murph" className="h-6 w-auto self-start" height={24} priority src="/logo.svg" width={107} />
-        {preview ? (
-          <section className="py-12 sm:py-16">
-            <h1 className="text-balance font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em] sm:text-5xl">
-              {preview.inviterFirstName} challenged you
-            </h1>
-            <dl className="mt-8 divide-y divide-border border-y border-border text-base">
-              {preview.terms.tasks.map((task) => (
-                <Row key={task.seat} label={task.seat === 0 ? preview.inviterFirstName : "You"} value={task.text} />
-              ))}
-              <Row label="Days" value={describeSchedule(preview.terms.schedule)} />
-              {preview.terms.stakes.map((stake, index) => (
-                <Row key={index} label={describeStakeLabel(stake)} value={stake.item} />
-              ))}
-            </dl>
-            <InviteAction preview={preview} token={props.token} />
-          </section>
-        ) : (
-          <section className="py-12 sm:py-16">
-            <h1 className="font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em]">
-              This invite isn&apos;t available
-            </h1>
-            <p className="mt-4 text-base leading-7 text-muted-foreground">Ask for a new link.</p>
-          </section>
-        )}
-      </div>
-    </main>
+    <div className="mx-auto flex max-w-md flex-col">
+      <Image alt="Murph" className="h-6 w-auto self-start" height={24} priority src="/logo.svg" width={107} />
+      {preview ? (
+        <section className="py-12 sm:py-16">
+          <h1 className="text-balance font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em] sm:text-5xl">
+            {preview.inviterFirstName} challenged you
+          </h1>
+          <dl className="mt-8 divide-y divide-border border-y border-border text-base">
+            {preview.terms.tasks.map((task) => (
+              <Row key={task.seat} label={task.seat === 0 ? preview.inviterFirstName : "You"} value={task.text} />
+            ))}
+            <Row label="Days" value={describeSchedule(preview.terms.schedule)} />
+            {preview.terms.stakes.map((stake, index) => (
+              <Row key={index} label={describeStakeLabel(stake)} value={stake.item} />
+            ))}
+          </dl>
+          <InviteAction preview={preview} token={props.token} />
+        </section>
+      ) : (
+        <section className="py-12 sm:py-16">
+          <h1 className="font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em]">
+            This invite isn&apos;t available
+          </h1>
+          <p className="mt-4 text-base leading-7 text-muted-foreground">Ask for a new link.</p>
+        </section>
+      )}
+    </div>
   );
 }
 
