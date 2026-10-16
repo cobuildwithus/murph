@@ -40,11 +40,18 @@ export function isGameMediaKey(key: string): boolean {
   return key.length <= KEY_MAX && KEY_PATTERN.test(key);
 }
 
+/** ISO base media major brands ("ftyp" box) each container type may carry. */
+const FTYP_BRANDS: Record<Exclude<GameMediaContentType, "image/jpeg">, readonly string[]> = {
+  "audio/m4a": ["M4A ", "mp42", "isom"],
+  "image/heic": ["heic", "heix", "mif1", "msf1"],
+};
+
 /** Cheap container check so a mislabeled upload is never served back under another type. */
 export function matchesGameMediaContentType(bytes: Uint8Array, contentType: GameMediaContentType): boolean {
   if (contentType === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  // HEIC and M4A are both ISO base media files: a size, then "ftyp".
-  return Buffer.from(bytes.subarray(4, 8)).toString("latin1") === "ftyp";
+  // HEIC and M4A are both ISO base media files: a size, "ftyp", then the major brand.
+  const box = Buffer.from(bytes.subarray(4, 12)).toString("latin1");
+  return box.startsWith("ftyp") && FTYP_BRANDS[contentType].includes(box.slice(4));
 }
 
 export function isGameMediaStorageAvailable(): boolean {

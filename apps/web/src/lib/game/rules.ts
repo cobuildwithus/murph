@@ -238,7 +238,9 @@ export function decideNewTerms(input: GameTermsInput, options: { newKey: () => s
     reject("INVALID_REQUEST", "Each player needs one task: seats 0 and 1.");
   }
   const schedule = validSchedule(input.schedule, lengthDays);
-  if (input.stakes.length > MAX_STAKES) reject("INVALID_REQUEST", `A game has up to ${MAX_STAKES} stakes.`);
+  if (input.stakes.length < 1 || input.stakes.length > MAX_STAKES) {
+    reject("INVALID_REQUEST", `A game has 1 to ${MAX_STAKES} stakes.`);
+  }
   const stakes = input.stakes.map((stake) => ({ item: stake.item, key: options.newKey(), kind: stake.kind }));
   return {
     lengthDays,

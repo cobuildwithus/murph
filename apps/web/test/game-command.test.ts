@@ -56,6 +56,27 @@ describe("weekly game command validator", () => {
     expect(codeOf(() => parseGameCommand({ ...post, captureAgeMs: -1 }))).toBe("INVALID_REQUEST");
   });
 
+  it("drops invisible characters from words, but keeps emoji joiners", () => {
+    const profile = (firstName: string) => parseGameCommand({ firstName, timeZone: "UTC", type: "setProfile" });
+    expect(profile("Le\u200Bo\u0007")).toMatchObject({ firstName: "Leo" });
+    expect(profile("\u{1F468}\u200D\u{1F373} Leo")).toMatchObject({ firstName: "\u{1F468}\u200D\u{1F373} Leo" });
+    expect(codeOf(() => profile("\u200B\u200D\uFEFF "))).toBe("INVALID_REQUEST");
+  });
+
+  it("matches a post's uploads to its kind", () => {
+    const post = (kind: string, extension: string) => ({
+      entryId: "entry_0001",
+      gameId: "game_0001",
+      kind,
+      mediaKeys: [`game/hbm_leo/${"b".repeat(64)}${extension}`],
+      type: "post",
+    });
+    expect(codeOf(() => parseGameCommand(post("photo", ".jpg")))).toBe("OK");
+    expect(codeOf(() => parseGameCommand(post("photo", ".heic")))).toBe("OK");
+    expect(codeOf(() => parseGameCommand(post("photo", ".m4a")))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => parseGameCommand(post("excuse", ".jpg")))).toBe("INVALID_REQUEST");
+  });
+
   it("takes a start date only as a real calendar date", () => {
     const create = (startsOn: unknown) => ({
       gameId: "game_0001",

@@ -5,6 +5,7 @@ import {
   GAME_STAKE_KINDS,
   GAME_WEEKDAYS,
   type GameCommand,
+  type GameEntryKind,
   type GameInviteeLabel,
   type GameSchedule,
   type GameStake,
@@ -59,14 +60,23 @@ const MEDIA_KEYS_MAX = 4;
 const CAPTURE_AGE_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 const LIST_MAX = 8;
 const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/u;
+const INVISIBLE = /[\p{Cc}\p{Cf}]/gu;
+const ZWJ = "\u200D";
+/** Which uploads each entry kind takes, by key extension. */
+const MEDIA_EXTENSIONS: Record<GameEntryKind, readonly string[]> = { excuse: [".m4a"], photo: [".jpg", ".heic"] };
 
 function post(input: Record<string, unknown>): GameCommand {
   const text = input.text === undefined ? "" : string(input.text, "text", POST_TEXT_MAX).trim();
+  const kind = oneOf(input.kind, "kind", GAME_ENTRY_KINDS);
+  const mediaKeys = list(input.mediaKeys ?? [], "mediaKeys", MEDIA_KEYS_MAX).map(mediaKey);
+  if (mediaKeys.some((key) => !MEDIA_EXTENSIONS[kind].some((extension) => key.endsWith(extension)))) {
+    reject("INVALID_REQUEST", kind === "photo" ? "A photo post takes photos." : "An excuse takes a voice memo.");
+  }
   return {
     entryId: clientId(input.entryId, "entryId"),
     gameId: clientId(input.gameId, "gameId"),
-    kind: oneOf(input.kind, "kind", GAME_ENTRY_KINDS),
-    mediaKeys: list(input.mediaKeys ?? [], "mediaKeys", MEDIA_KEYS_MAX).map(mediaKey),
+    kind,
+    mediaKeys,
     type: "post",
     ...(text ? { text } : {}),
     ...optional(input.captureAgeMs, (value) => ({ captureAgeMs: integer(value, "captureAgeMs", 0, CAPTURE_AGE_MAX_MS) })),
@@ -141,10 +151,17 @@ function string(value: unknown, field: string, max: number): string {
 }
 
 /** People's words: trimmed, 1 to 200 characters. */
+/**
+ * People's words: invisible format and control characters dropped (a
+ * zero-width space can't make a name), trimmed, 1 to 200 characters. The
+ * zero-width joiner stays inside emoji sequences.
+ */
 function words(value: unknown, field: string): string {
-  const trimmed = string(value, field, WORDS_MAX * 2).trim();
-  if (!trimmed || trimmed.length > WORDS_MAX) reject("INVALID_REQUEST", `${field} must be 1 to ${WORDS_MAX} characters.`);
-  return trimmed;
+  const cleaned = string(value, field, WORDS_MAX * 2).replace(INVISIBLE, (char) => (char === ZWJ ? char : "")).trim();
+  if (!cleaned.replaceAll(ZWJ, "").trim() || cleaned.length > WORDS_MAX) {
+    reject("INVALID_REQUEST", `${field} must be 1 to ${WORDS_MAX} characters.`);
+  }
+  return cleaned;
 }
 
 /** Ids the client mints (UUIDs): retries reuse them. */

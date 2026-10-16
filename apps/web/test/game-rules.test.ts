@@ -32,6 +32,7 @@ const JOIN_AT = new Date("2026-10-17T00:00:00Z");
 const EVERY_DAY: GameSchedule = { days: [0, 1, 2, 3, 4, 5, 6] };
 const WINNER_GETS: StoredStake = { key: "gsk_breakfast", kind: "winner_gets" };
 const PER_MISS: StoredStake = { key: "gsk_massage", kind: "per_miss" };
+const STAKE_INPUT = { item: "Breakfast in bed", kind: "winner_gets" as const };
 
 function invited(schedule: GameSchedule = EVERY_DAY, stakes: StoredStake[] = [WINNER_GETS], startsOn: string | null = null): RuleState {
   return {
@@ -156,17 +157,22 @@ describe("weekly game: terms", () => {
   });
 
   it("rejects bad schedules, counts and task lists", () => {
-    const base = { stakes: [], tasks: [{ seat: 0, text: "Run" }, { seat: 1, text: "Swim" }] };
+    const base = { stakes: [STAKE_INPUT], tasks: [{ seat: 0, text: "Run" }, { seat: 1, text: "Swim" }] };
     const options = { newKey: () => "gsk_x", today: "2026-10-16" };
     expect(codeOf(() => decideNewTerms({ ...base, schedule: { days: [] } }, options))).toBe("INVALID_REQUEST");
     expect(codeOf(() => decideNewTerms({ ...base, schedule: { count: 8 } }, options))).toBe("INVALID_REQUEST");
     expect(codeOf(() => decideNewTerms({ ...base, schedule: { count: 5 }, tasks: [{ seat: 0, text: "Run" }] }, options)))
       .toBe("INVALID_REQUEST");
     expect(codeOf(() => decideNewTerms({ ...base, lengthDays: 14, schedule: { count: 10 } }, options))).toBe("OK");
+    // Every game has one to three stakes.
+    expect(codeOf(() => decideNewTerms({ ...base, schedule: EVERY_DAY, stakes: [] }, options))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => decideNewTerms({ ...base, schedule: EVERY_DAY, stakes: Array(4).fill(STAKE_INPUT) }, options)))
+      .toBe("INVALID_REQUEST");
+    expect(codeOf(() => decideNewTerms({ ...base, schedule: EVERY_DAY, stakes: Array(3).fill(STAKE_INPUT) }, options))).toBe("OK");
   });
 
   it("takes a picked start date from tomorrow to 60 days out in the challenger's zone", () => {
-    const base = { schedule: EVERY_DAY, stakes: [], tasks: [{ seat: 0, text: "Run" }, { seat: 1, text: "Swim" }] };
+    const base = { schedule: EVERY_DAY, stakes: [STAKE_INPUT], tasks: [{ seat: 0, text: "Run" }, { seat: 1, text: "Swim" }] };
     const options = { newKey: () => "gsk_x", today: "2026-10-16" };
     expect(decideNewTerms({ ...base, startsOn: "2026-10-19" }, options).startsOn).toBe("2026-10-19");
     expect(decideNewTerms(base, options).startsOn).toBeNull();

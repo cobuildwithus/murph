@@ -345,6 +345,19 @@ describe("weekly game routes", () => {
       expect(response.status).toBe(400);
     });
 
+    it("tells HEIC from M4A by the container's brand", async () => {
+      const iso = (brand: string) => Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from(`ftyp${brand}`, "latin1"), Buffer.alloc(12)]);
+
+      const heic = await routes.upload.POST(uploadRequest({ body: iso("heic"), headers: { "content-type": "image/heic" } }));
+      const audioAsPhoto = await routes.upload.POST(uploadRequest({ body: iso("M4A "), headers: { "content-type": "image/heic" } }));
+      const photoAsAudio = await routes.upload.POST(uploadRequest({ body: iso("mif1"), headers: { "content-type": "audio/m4a" } }));
+
+      expect(heic.status).toBe(200);
+      expect((await heic.json()).mediaKey).toMatch(/\.heic$/u);
+      expect(audioAsPhoto.status).toBe(400);
+      expect(photoAsAudio.status).toBe(400);
+    });
+
     it("caps uploads at 8 MB", async () => {
       const response = await routes.upload.POST(uploadRequest({ headers: { "content-length": String(8 * 1024 * 1024 + 1) } }));
 
