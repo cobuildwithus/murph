@@ -2225,7 +2225,7 @@ of that category; recurrence is not required. A null-only result remains
 unresolved and justifies no prompt, schema or guidance change. The category
 identifies the first schema invariant, not why the model produced the input.
 
-#### Optional knowledge upsert parser rejection reason
+#### Optional parser rejection reason (knowledge upsert/show, wearables day)
 
 Every Incur argv rejection projects to the same privacy-safe
 `VALIDATION_ERROR / validation / arguments / custom / missing=false` envelope,
@@ -2235,15 +2235,17 @@ therefore sets `ParseError.reason` (`unknown_flag` or `missing_value`) at the
 exact command-parser (`Parser.parse`) throw sites only. It is a non-enumerable,
 non-writable own data property: `toErrorEnvelope`, JSON/RPC output, hints,
 exits and prompts are byte-identical, and config, stacked-alias, global/builtin
-flag and other ParseErrors carry no reason. Nothing parses argv or messages.
+flag and other ParseErrors carry no reason. The reason is the fixed literal of
+the parser throw site that ran; no diagnostic code parses argv or messages.
 
 `incurErrorBridge`, only while timing is active and only when the error's own
 data `kind` is `arguments`, copies that one own data descriptor value as
 `cliTimingRejection` onto its timing-only projection. Config ParseErrors share
 the projected code, so they never carry the reason even if one is supplied.
 `cliTimingRejectionFailure` admits it as `rejection` only for
-`knowledge upsert` with `VALIDATION_ERROR` and only these two literals; the
-research categories above stay gated to their own command/code. Accessors,
+`knowledge upsert`, `knowledge show` and `wearables day` with
+`VALIDATION_ERROR` and only these two literals; the research categories above
+and the search filter classes below stay gated to their own command/code. Accessors,
 spoofed/prototype values and wrong commands omit only the reason. A throwing
 descriptor trap falls back to the original error before projection, so it may
 also drop optional validation detail. No optional diagnostic fault can replace
@@ -2252,18 +2254,53 @@ base failure code/stage/count. Variant
 identity, the 8-failure cap, wire normalization and reader-first rollout match
 the research category. Older readers drop `rejection` and coalesce counts; new
 readers accept old reports without inferring a reason. Run the actual old-reader
-test with `MURPH_CLI_PARSE_REJECTION_COMPAT_BASE=a83068adbe524217d32a22c270902ef0b02c6921`.
+test with `MURPH_CLI_PARSE_REJECTION_COMPAT_BASE=a83068adbe524217d32a22c270902ef0b02c6921`
+(`knowledge upsert`) and
+`MURPH_CLI_FILTER_REJECTION_COMPAT_BASE=2899a61ce5b6de7f0b6184e8e5a73cb507a798ef`
+(`knowledge show`, `wearables day`, and the filter classes below).
 
 After convergence, reuse the research query above with
-`e ->> 'code' = 'VALIDATION_ERROR'`, `c ->> 'command' = 'knowledge upsert'` and
-`rejection IN ('unknown_flag', 'missing_value')`. Threshold: **any** natural
-attributed turn distinguishes the two causes enough to build a synthetic
-reproduction; null-only results stay unresolved and justify no prompt, schema
-or guidance change. Null means an older writer, schema validation, or an
-unclassified parse failure. Coverage is limited to argv invocations reaching
-the command middleware; built-in/global flag failures, HTTP/MCP parsing and
-other commands are not classified. The reason never says which flag or why the
-model chose it.
+`e ->> 'code' = 'VALIDATION_ERROR'`, `c ->> 'command'` set to one of the three
+admitted commands, and `rejection IN ('unknown_flag', 'missing_value')`.
+Threshold: **any** natural attributed turn distinguishes the two causes enough
+to build a synthetic reproduction; null-only results stay unresolved and
+justify no prompt, schema or guidance change. Null means an older writer,
+schema validation, or an unclassified parse failure. For `knowledge show` and
+`wearables day`, a reason separates an argv rejection from schema validation of
+the positional slug/date (`slug` or `date` validation detail, with no reason).
+Coverage is limited to argv invocations reaching the command middleware;
+built-in/global flag failures, HTTP/MCP parsing and other commands are not
+classified. The reason never identifies which flag was rejected, and it does
+not prove that a prompt, hint or help text caused the input; any such
+hypothesis needs a separate synthetic reproduction.
+
+#### Optional search query filter rejection class
+
+`search query` rejects an unsupported `--record-type` family and a
+comma-delimited `--record-type`, `--kind`, `--stream` or `--tag` value with the
+same `invalid_option / unknown` failure. The shared repeatable-flag normalizer
+in `packages/vault-usecases/src/option-utils.ts` therefore attaches
+`cliTimingRejection` (`comma_delimited` or `unsupported_value`) at exactly its
+two existing throw sites, as the same non-enumerable, non-writable own data
+property used by the research category. The normalizer's validation (which
+necessarily reads the supplied values), decisions, ordering, code, message,
+context and every projected envelope are unchanged. The diagnostic class is a
+fixed literal chosen by which throw site ran; the timing classifier never reads
+option names, values, argv or messages. Many commands share the
+normalizer, so `cliTimingRejectionFailure` admits the class only for
+`search query` with `invalid_option`; any other command or code omits it
+(including `list`, which uses the same normalizer). Reversed `--from`/`--to`
+dates keep their existing `invalid_option / validation` pair and carry no
+class. Identity, cap, wire normalization, reader-first rollout and old-reader
+behavior match the parser reason above.
+
+After convergence, reuse the research query above with
+`e ->> 'code' = 'invalid_option'`, `c ->> 'command' = 'search query'` and
+`rejection IN ('comma_delimited', 'unsupported_value')`. The same singleton
+threshold applies: one natural attributed turn justifies a targeted synthetic
+reproduction of that class; null-only results stay unresolved. The class never
+says which option or value, or why the model chose it. Do not manufacture
+traffic or wait for a quota of events.
 
 #### Optional schema-validation detail
 
@@ -2279,6 +2316,7 @@ static field names are admitted:
 
 - `automation list`: limit, status (only these two options from `packages/cli/src/commands/automation.ts`).
 - `food search-labels`: query, limit.
+- `wearables day`: date (required positional argument in `packages/cli/src/commands/wearables.ts`), provider, plus the fixed Incur invocation field arguments.
 - `knowledge show`: slug (required positional argument in `packages/cli/src/commands/knowledge.ts`), plus the fixed Incur invocation field arguments.
 - `measurement entry list`: metric, from, to, limit (only these top-level options from `packages/cli/src/commands/measurement.ts`; no metric array indices).
 - `event list`: kind, from, to, tag, experiment, limit (the command and its shared list factory), plus the fixed Incur invocation field arguments.
@@ -2586,7 +2624,7 @@ needed for this extension's unchanged output contract.
 #### Command-specific validation inspection (including singletons)
 
 For `automation list`, `knowledge show`, `knowledge upsert`, `event list`,
-`event payload-schema`, `measurement entry list`, `meal add` and `meal edit` with
+`event payload-schema`, `measurement entry list`, `wearables day`, `meal add` and `meal edit` with
 `VALIDATION_ERROR / validation`, **any newly
 attributed event warrants inspection, including one event in one turn**; the two-turn
 implementation-investigation threshold above does not gate this inspection.
@@ -2634,7 +2672,8 @@ WITH rows AS MATERIALIZED (
   CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
   WHERE t ->> 'schema' = 'murph.cli-timing.v1'
     AND c ->> 'command' IN ('automation list', 'knowledge show', 'knowledge upsert',
-      'event list', 'event payload-schema', 'measurement entry list', 'meal add', 'meal edit', 'meal remove-photo')
+      'event list', 'event payload-schema', 'measurement entry list', 'wearables day',
+      'meal add', 'meal edit', 'meal remove-photo')
     AND c ->> 'outcome' = 'error'
 ), per_turn AS (
   SELECT turn_id, c ->> 'command' AS command, f.failure_code, f.failure_stage, f.field, f.issue_code, f.missing,
@@ -2652,6 +2691,7 @@ WITH rows AS MATERIALIZED (
                  'kind', 'from', 'to', 'tag', 'experiment', 'limit', 'arguments')
                OR c ->> 'command' = 'event payload-schema' AND e -> 'validation' ->> 'field' IN ('kind', 'for')
                OR c ->> 'command' = 'measurement entry list' AND e -> 'validation' ->> 'field' IN ('metric', 'from', 'to', 'limit')
+               OR c ->> 'command' = 'wearables day' AND e -> 'validation' ->> 'field' IN ('date', 'provider', 'arguments')
                OR c ->> 'command' IN ('meal add', 'meal edit') AND e -> 'validation' ->> 'field' IN (
                  'nutritionCalories', 'nutritionSource', 'occurredAt', 'arguments')
                OR c ->> 'command' = 'meal edit' AND e -> 'validation' ->> 'field' IN (

@@ -119,7 +119,7 @@ const cases: Case[] = [
     validation: { field: 'heading', code: 'invalid_type', missing: true } },
   { name: 'knowledge show rejects named slug before effects', argv: ['knowledge', 'show', '--slug', 'synthetic-page'],
     command: 'knowledge show', code: 'VALIDATION_ERROR', field: 'arguments',
-    validation: { field: 'arguments', code: 'custom', missing: false } },
+    validation: { field: 'arguments', code: 'custom', missing: false }, rejection: 'unknown_flag' },
   { name: 'knowledge upsert rejects unknown option before writes', argv: ['knowledge', 'upsert', '--body', 'SYNTHETIC_HEALTH_HISTORY', '--PRIVATE_SENTINEL'],
     command: 'knowledge upsert', code: 'VALIDATION_ERROR', field: 'arguments',
     validation: { field: 'arguments', code: 'custom', missing: false }, rejection: 'unknown_flag' },

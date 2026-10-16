@@ -5,6 +5,8 @@ import { normalizeCliTiming, type CliTiming } from '@murphai/runtime-state/cli-t
 import * as timing from '@murphai/runtime-state/node/cli-timing'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { projectVaultCliError } from '../src/vault-cli-error-projection.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { normalizeRepeatableEnumFlagOption, normalizeRepeatableFlagOption } from '@murphai/vault-usecases'
 
 // Errors is a native ESM namespace. Mock the module export rather than
 // redefining it; keep the real classes, projection and timing scope owner.
@@ -158,16 +160,19 @@ test('nonparser errors preserve original handling and are never passed to the pa
   assert.equal(projection.mock.calls.length, 0)
 })
 
-test('parser-set reason reaches only knowledge upsert timing; hostile metadata cannot leak, throw or invoke accessors', async () => {
+test('parser-set reason reaches only its gated commands; hostile metadata cannot leak, throw or invoke accessors', async () => {
   for (const reason of ['unknown_flag', 'missing_value'] as const) {
     const original = new Errors.ParseError({ message: 'PRIVATE_SENTINEL', reason })
     const visible = { keys: Object.keys(original), json: JSON.stringify(original), envelope: Errors.toErrorEnvelope(original) }
     assert.deepEqual(visible.envelope, Errors.toErrorEnvelope(new Errors.ParseError({ message: 'PRIVATE_SENTINEL' })))
     assert.equal(JSON.stringify(visible).includes(reason), false)
-    const result = await observe(original, true, 'knowledge upsert')
-    assert.equal(result.caught, original)
-    assert.deepEqual(result.failures, [{ ...parserFailure, rejection: reason }])
-    assert.deepEqual((await observe(original)).failures, [parserFailure], 'Other commands never admit the reason.')
+    for (const command of ['knowledge upsert', 'knowledge show', 'wearables day']) {
+      const result = await observe(original, true, command)
+      assert.equal(result.caught, original)
+      assert.deepEqual(result.failures, [{ ...parserFailure, rejection: reason }])
+    }
+    assert.deepEqual((await observe(original, true, 'event list')).failures, [parserFailure],
+      'Other commands never admit the reason.')
     assert.equal((await observe(original, false, 'knowledge upsert')).caught, original)
     assert.deepEqual({ keys: Object.keys(original), json: JSON.stringify(original), envelope: Errors.toErrorEnvelope(original) }, visible)
   }
@@ -218,4 +223,30 @@ test('parser-set reason reaches only knowledge upsert timing; hostile metadata c
   const spoof = Object.defineProperty(Object.assign(new Error('PRIVATE_SENTINEL'), { name: 'Incur.ParseError' }),
     'reason', { value: 'unknown_flag' })
   assert.deepEqual((await observe(spoof, true, 'knowledge upsert')).failures, [codeOnly])
+})
+
+test('shared filter normalizer class reaches only search query timing; projected errors stay unchanged', async () => {
+  const thrown = (run: () => unknown) => { try { run() } catch (error) { return error } assert.fail('expected throw') }
+  const filterFailure = { code: 'invalid_option', stage: 'unknown', count: 1 }
+  for (const [rejection, error] of [
+    ['comma_delimited', thrown(() => normalizeRepeatableFlagOption(['PRIVATE,SENTINEL'], 'tag'))],
+    ['unsupported_value', thrown(() => normalizeRepeatableEnumFlagOption(['PRIVATE_SENTINEL'], 'record-type', ['event']))],
+  ] as const) {
+    assert.ok(error instanceof VaultCliError)
+    assert.deepEqual(Object.getOwnPropertyDescriptor(error, 'cliTimingRejection'),
+      { value: rejection, writable: false, enumerable: false, configurable: false })
+    const bare = new VaultCliError(error.code, error.message)
+    const visible = (value: VaultCliError) => ({ keys: Object.keys(value), json: JSON.stringify(value),
+      projected: projectVaultCliError(value) })
+    assert.deepEqual(visible(error), visible(bare), 'Envelope, serialization and projection are unchanged.')
+    const result = await observe(error, true, 'search query')
+    assert.ok(result.caught instanceof Errors.IncurError)
+    assert.equal(Object.hasOwn(result.caught, 'cliTimingRejection'), false)
+    assert.deepEqual(result.failures, [{ ...filterFailure, rejection }])
+    assert.deepEqual((await observe(bare, true, 'search query')).caught, result.caught)
+    for (const command of ['list', 'event list', 'knowledge show']) {
+      assert.deepEqual((await observe(error, true, command)).failures, [filterFailure])
+    }
+    assert.deepEqual((await observe(error, false, 'search query')).caught, result.caught)
+  }
 })
