@@ -1,16 +1,22 @@
 import { parseCommaSeparatedList } from "../primitives";
 
+type GameEnv = Readonly<Record<string, string | undefined>>;
+
 /**
  * The weekly game ships dark. `MURPH_GAME_ENABLED=true|false` decides; unset
  * means on outside production only. A non-empty comma-separated
  * `MURPH_GAME_MEMBER_ALLOWLIST` further limits it to those member ids.
  */
-export function isGameEnabledFor(memberId: string, env: Readonly<Record<string, string | undefined>> = process.env): boolean {
-  const flag = env.MURPH_GAME_ENABLED;
-  const enabled = flag === "true" || (flag !== "false" && env.NODE_ENV !== "production");
-  if (!enabled) return false;
+export function isGameEnabledFor(memberId: string, env: GameEnv = process.env): boolean {
+  if (!isGameEnabled(env)) return false;
   const allowlist = parseCommaSeparatedList(env.MURPH_GAME_MEMBER_ALLOWLIST);
   return allowlist.length === 0 || allowlist.includes(memberId);
+}
+
+/** The global switch alone, for surfaces with no signed-in member (invite links). */
+export function isGameEnabled(env: GameEnv = process.env): boolean {
+  const flag = env.MURPH_GAME_ENABLED;
+  return flag === "true" || (flag !== "false" && env.NODE_ENV !== "production");
 }
 
 /** Every media key a member uploads starts with this; posts may only use their own. */

@@ -91,6 +91,9 @@ describe.runIf(Boolean(testDatabaseUrl))("weekly game service against PostgreSQL
     const preview = await service.readInvitePreview(token);
     expect(preview).toMatchObject({ gameId, inviteeFirstName: "Ava", inviterFirstName: "Leo", status: "open" });
     expect(preview!.terms.tasks[0].text).toBe("100 pushups");
+    vi.stubEnv("MURPH_GAME_ENABLED", "false");
+    expect(await service.readInvitePreview(token)).toBeNull();
+    vi.unstubAllEnvs();
     const stakeKey = preview!.terms.stakes[0].key!;
 
     await ok(LEO, { relationship: "girlfriend", subject: { inviteToken: token }, type: "setLabel" });

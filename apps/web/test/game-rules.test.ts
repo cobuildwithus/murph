@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { GameEntryKind, GameSchedule } from "@/src/lib/game/contract";
-import { isGameEnabledFor, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
+import { isGameEnabled, isGameEnabledFor, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
 import {
   decideDeleteToday,
   decideDevAdvance,
@@ -376,6 +376,9 @@ describe("weekly game: access", () => {
     const allowlisted = { MURPH_GAME_ENABLED: "true", MURPH_GAME_MEMBER_ALLOWLIST: `${AVA}, hbm_other`, NODE_ENV: "production" };
     expect(isGameEnabledFor(AVA, allowlisted)).toBe(true);
     expect(isGameEnabledFor(LEO, allowlisted)).toBe(false);
+    // Invite links have no member, so only the global switch applies to them.
+    expect(isGameEnabled(allowlisted)).toBe(true);
+    expect(isGameEnabled({ MURPH_GAME_ENABLED: "false", NODE_ENV: "development" })).toBe(false);
   });
 
   it("scopes media keys to their uploader", () => {

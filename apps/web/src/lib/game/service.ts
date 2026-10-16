@@ -7,7 +7,7 @@ import type { Game, GameEntry, GamePlayer, Prisma } from "@prisma/client";
 import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
 import { generateHostedRandomPrefixedId, isRecord, sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
-import { mediaKeyOwner, mediaKeyPrefixFor } from "./access";
+import { isGameEnabled, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import {
   GAME_SCHEMA_VERSION,
   type GameCommand,
@@ -796,7 +796,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
 }
 
 export async function readInvitePreview(token: string): Promise<GameInvitePreview | null> {
-  if (typeof token !== "string" || !token) return null;
+  if (!isGameEnabled() || typeof token !== "string" || !token) return null;
   const row = await getPrisma().game.findUnique({
     include: { creator: true },
     where: { inviteTokenHash: sha256Hex(token) },
