@@ -590,7 +590,7 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_owner",
       suspendedAt: null,
     };
-    const tx = createTxMock({ billedSeatCount: null, group });
+    const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     tx.hostedMember.findUnique.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
@@ -686,7 +686,7 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_owner",
       suspendedAt: null,
     };
-    const tx = createTxMock({ billedSeatCount: null, group });
+    const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     tx.hostedMember.findUnique.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
@@ -737,7 +737,7 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_owner",
       suspendedAt: null,
     };
-    const tx = createTxMock({ billedSeatCount: null, group });
+    const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     tx.hostedMember.findUnique.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
@@ -1730,7 +1730,7 @@ describe("hosted Family plan", () => {
   it("keeps the Telegram route when family acceptance is rejected after member locking", async () => {
     const tx = createTxMock({
       activeMembershipCount: 4,
-      billedSeatCount: 4,
+      pulseCapacity: 4,
     });
     tx.hostedAccountGroupInvite.findMany.mockResolvedValueOnce([
       {
@@ -2099,7 +2099,7 @@ describe("hosted Family plan", () => {
   it("does not issue invites before paid billed seats are confirmed", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: null,
+      pulseCapacity: null,
       pendingInviteCount: 0,
     });
 
@@ -3720,7 +3720,7 @@ describe("hosted Family plan", () => {
   });
 
   it("downgrades a member at maximum capacity with one exact six-seat Stripe swap", async () => {
-    const tx = createTxMock({ activeMembershipCount: 6, billedSeatCount: 6 });
+    const tx = createTxMock({ activeMembershipCount: 6, pulseCapacity: 6 });
     const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
     tx.hostedAccountGroupMembership.findFirst
       .mockResolvedValueOnce({
@@ -4473,7 +4473,7 @@ describe("hosted Family plan", () => {
   it("revalidates Family seat authority inside the browser acceptance transaction", async () => {
     const tx = createTxMock({
       activeMembershipCount: 4,
-      billedSeatCount: 4,
+      pulseCapacity: 4,
     });
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValue(createPendingInvite({
       targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
@@ -4510,7 +4510,7 @@ describe("hosted Family plan", () => {
       subscriptionId: null,
     });
     const expiryTx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group: {
         billingStatus: HostedBillingStatus.not_started,
         id: "hbag_draft",
@@ -4546,7 +4546,7 @@ describe("hosted Family plan", () => {
 
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: 2,
+      pulseCapacity: 2,
       pendingInviteCountExcludingCurrent: 0,
     });
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(
@@ -4623,7 +4623,7 @@ describe("hosted Family plan", () => {
   it("does not abandon an inert draft when the paid invite later fails validation", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: 1,
+      pulseCapacity: 1,
       pendingInviteCountExcludingCurrent: 0,
     });
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(
@@ -4654,7 +4654,7 @@ describe("hosted Family plan", () => {
   it("keeps a paid invite pending while the member's own Checkout can still complete", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: 2,
+      pulseCapacity: 2,
       pendingInviteCountExcludingCurrent: 0,
     });
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(
@@ -4696,7 +4696,7 @@ describe("hosted Family plan", () => {
   it("lets a concurrent billing bind win over automatic draft abandonment", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: 2,
+      pulseCapacity: 2,
     });
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(
       createPendingInvite(),
@@ -4726,7 +4726,7 @@ describe("hosted Family plan", () => {
   it("preserves a claim-only owner draft during invite acceptance", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: 2,
+      pulseCapacity: 2,
     });
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(
       createPendingInvite(),
@@ -4857,7 +4857,7 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_mom",
       suspendedAt: null,
     };
-    const tx = createTxMock({ billedSeatCount: null, group: draftAccess });
+    const tx = createTxMock({ pulseCapacity: null, group: draftAccess });
     const draft = createNeverPaidFamilyDraftRecord({
       checkoutAttemptId,
       checkoutCreatedAt,
@@ -5381,7 +5381,7 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_mom",
       suspendedAt: null,
     };
-    const tx = createTxMock({ billedSeatCount: null, group: draftAccess });
+    const tx = createTxMock({ pulseCapacity: null, group: draftAccess });
     tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(
       createNeverPaidFamilyDraftRecord({
         checkoutAttemptId,
@@ -5431,7 +5431,7 @@ describe("hosted Family plan", () => {
   });
 
   it("does not delete a draft while a direct subscription can still convert to Family", async () => {
-    const tx = createTxMock({ billedSeatCount: null });
+    const tx = createTxMock({ pulseCapacity: null });
     const draft = createNeverPaidFamilyDraftRecord();
     tx.hostedAccountGroup.findUnique
       .mockResolvedValueOnce(draft)
@@ -5733,7 +5733,7 @@ describe("hosted Family plan", () => {
     // that invariant instead of re-deriving it on every access check.
     const tx = createTxMock({
       activeMembershipCount: 3,
-      billedSeatCount: 4,
+      pulseCapacity: 4,
       pendingInviteCount: 2,
     });
     tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
@@ -5799,7 +5799,6 @@ describe("hosted Family plan", () => {
 
     expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
-        billedSeatCount: 4,
         currentBillingPhase: "paid",
         currentBillingPlanCode: "launch_family_monthly",
         groupId: "hbag_family",
@@ -6044,7 +6043,6 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
-          billedSeatCount: 4,
           currentBillingPhase: "paid",
         }),
       }),
@@ -6355,7 +6353,6 @@ describe("hosted Family plan", () => {
     );
     expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
       update: expect.objectContaining({
-        billedSeatCount: null,
         currentBillingPhase: null,
         currentBillingPlanCode: "launch_family_monthly",
         currentPeriodEnd: null,
@@ -6429,11 +6426,6 @@ describe("hosted Family plan", () => {
       groupId: "hbag_family",
     });
 
-    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        billedSeatCount: 4,
-      }),
-    }));
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).toHaveBeenCalledTimes(2);
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).toHaveBeenNthCalledWith(1, {
       memberId: "member_owner",
@@ -6495,7 +6487,6 @@ describe("hosted Family plan", () => {
       expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           create: expect.objectContaining({
-            billedSeatCount: null,
             currentBillingPhase: null,
             currentPeriodEnd: null,
             currentPeriodStart: null,
@@ -6505,7 +6496,6 @@ describe("hosted Family plan", () => {
             stripeSubscriptionLookupKey: null,
           }),
           update: expect.objectContaining({
-            billedSeatCount: null,
             currentBillingPhase: null,
             currentPeriodEnd: null,
             currentPeriodStart: null,
@@ -6789,7 +6779,6 @@ describe("hosted Family plan", () => {
 
     expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
-        billedSeatCount: 2,
         currentBillingPhase: null,
       }),
     }));
@@ -6865,7 +6854,6 @@ describe("hosted Family plan", () => {
     );
     expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
-        billedSeatCount: 2,
         currentBillingPhase: null,
       }),
     }));
@@ -6934,13 +6922,11 @@ describe("hosted Family plan", () => {
 
     expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
-        billedSeatCount: null,
         currentBillingPhase: null,
         currentBillingPlanCode: "launch_family_monthly",
         stripeSubscriptionItemLookupKey: null,
       }),
       update: expect.objectContaining({
-        billedSeatCount: null,
         currentBillingPhase: null,
         currentBillingPlanCode: "launch_family_monthly",
         stripeSubscriptionItemLookupKey: null,
@@ -6978,12 +6964,10 @@ describe("hosted Family plan", () => {
 
     expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
-        billedSeatCount: null,
         currentBillingPhase: null,
         stripeSubscriptionItemLookupKey: null,
       }),
       update: expect.objectContaining({
-        billedSeatCount: null,
         currentBillingPhase: null,
         stripeSubscriptionItemLookupKey: null,
       }),
@@ -7034,7 +7018,6 @@ describe("hosted Family plan", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
-      billedSeatCount: 4,
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_family_monthly",
       currentPeriodEnd: null,
@@ -7072,7 +7055,6 @@ describe("hosted Family plan", () => {
   it("does not let checkout completion stale the first active subscription event", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupBillingRef.upsert.mockImplementationOnce(async ({ create }) => ({
-      billedSeatCount: create.billedSeatCount,
       currentBillingPhase: create.currentBillingPhase,
       currentBillingPlanCode: create.currentBillingPlanCode,
       currentPeriodEnd: create.currentPeriodEnd,
@@ -7102,7 +7084,6 @@ describe("hosted Family plan", () => {
     });
 
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
-      billedSeatCount: null,
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_family_monthly",
       currentPeriodEnd: null,
@@ -7141,7 +7122,7 @@ describe("hosted Family plan", () => {
 
   it("rejects synthetic owners before creating a Stripe Checkout Session", async () => {
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group: {
         billingStatus: HostedBillingStatus.not_started,
         id: "hbag_family",
@@ -7179,7 +7160,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique
@@ -7251,7 +7232,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
@@ -7310,7 +7291,6 @@ describe("hosted Family plan", () => {
       throw new TypeError("Expected the first Family checkout attempt to be persisted.");
     }
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(createBillingRefMock({
-      billedSeatCount: null,
       checkoutAttemptId,
       checkoutCreatedAt: new Date("2026-07-27T00:00:00.000Z"),
       checkoutSeatCount: 2,
@@ -7346,14 +7326,13 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_owner",
       suspendedAt: null,
     };
-    const tx = createTxMock({ billedSeatCount: null, group });
+    const tx = createTxMock({ pulseCapacity: null, group });
     let billingRefState: ReturnType<typeof createBillingRefMock> | null = null;
     tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(
       async () => billingRefState,
     );
     tx.hostedAccountGroupBillingRef.upsert.mockImplementation(async ({ create }) => {
       billingRefState = createBillingRefMock({
-        billedSeatCount: null,
         checkoutAttemptId: create.checkoutAttemptId,
         checkoutCreatedAt: create.checkoutCreatedAt,
         checkoutSeatCount: create.checkoutSeatCount,
@@ -7454,7 +7433,6 @@ describe("hosted Family plan", () => {
     });
 
     billingRefState = createBillingRefMock({
-      billedSeatCount: 2,
       checkoutAttemptId: null,
       checkoutCreatedAt: null,
       checkoutSeatCount: null,
@@ -7496,7 +7474,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
@@ -7557,7 +7535,7 @@ describe("hosted Family plan", () => {
         ownerMemberId: "member_owner",
         suspendedAt: null,
       };
-      const tx = createTxMock({ billedSeatCount: null, group });
+      const tx = createTxMock({ pulseCapacity: null, group });
       tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
       const prisma = tx as FamilyPlanTxMock & {
         $transaction: ReturnType<typeof vi.fn>;
@@ -7617,7 +7595,7 @@ describe("hosted Family plan", () => {
         ownerMemberId: "member_owner",
         suspendedAt: null,
       };
-      const tx = createTxMock({ billedSeatCount: null, group });
+      const tx = createTxMock({ pulseCapacity: null, group });
       tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
       const prisma = tx as FamilyPlanTxMock & {
         $transaction: ReturnType<typeof vi.fn>;
@@ -7702,7 +7680,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
@@ -7773,7 +7751,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
@@ -7879,10 +7857,9 @@ describe("hosted Family plan", () => {
     expect(tx.hostedMember.update).not.toHaveBeenCalled();
     expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
 
-    const webhookTx = createTxMock({ billedSeatCount: null, group });
+    const webhookTx = createTxMock({ pulseCapacity: null, group });
     webhookTx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(
       createBillingRefMock({
-        billedSeatCount: null,
         group,
         stripeCustomerIdEncrypted: null,
         stripeSubscriptionIdEncrypted: null,
@@ -7912,7 +7889,6 @@ describe("hosted Family plan", () => {
 
     expect(webhookTx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
-        billedSeatCount: 2,
         currentBillingPhase: "paid",
         currentPeriodEnd: FAMILY_STRIPE_PERIOD_END,
         currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
@@ -7953,7 +7929,7 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_owner",
       suspendedAt: null,
     };
-    const tx = createTxMock({ billedSeatCount: null, group });
+    const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     tx.hostedMember.findUnique.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
@@ -8032,7 +8008,7 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_owner",
       suspendedAt: null,
     };
-    const tx = createTxMock({ billedSeatCount: null, group });
+    const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     tx.hostedMember.findUnique.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
@@ -8091,7 +8067,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
@@ -8145,7 +8121,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
@@ -8202,7 +8178,6 @@ describe("hosted Family plan", () => {
     };
     const billingRef = {
       ...createBillingRefMock({
-        billedSeatCount: null,
         checkoutAttemptId: "hbfca_existing",
         checkoutCreatedAt: new Date("2026-07-28T11:00:00.000Z"),
         checkoutSeatCount: 3,
@@ -8212,7 +8187,7 @@ describe("hosted Family plan", () => {
       }),
       group,
     };
-    const tx = createTxMock({ billedSeatCount: null, group });
+    const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
     const prisma = tx as FamilyPlanTxMock & {
       $transaction: ReturnType<typeof vi.fn>;
@@ -8294,7 +8269,7 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_owner",
       suspendedAt: null,
     };
-    const tx = createTxMock({ billedSeatCount: null, group });
+    const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     const prisma = tx as FamilyPlanTxMock & {
       $transaction: ReturnType<typeof vi.fn>;
@@ -8324,7 +8299,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const replacementAttemptId = "hbfca_replacement";
-    const tx = createTxMock({ billedSeatCount: null, group });
+    const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
       ...createBillingRefMock({
         checkoutAttemptId: replacementAttemptId,
@@ -8376,7 +8351,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
@@ -8444,7 +8419,6 @@ describe("hosted Family plan", () => {
         suspendedAt: null,
       };
       const billingRef = createBillingRefMock({
-        billedSeatCount: null,
         checkoutAttemptId,
         checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
         checkoutSeatCount: 2,
@@ -8452,7 +8426,7 @@ describe("hosted Family plan", () => {
         stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
         stripeSubscriptionIdEncrypted: null,
       });
-      const tx = createTxMock({ billedSeatCount: null, group });
+      const tx = createTxMock({ pulseCapacity: null, group });
       tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
       const prisma = tx as FamilyPlanTxMock & {
         $transaction: ReturnType<typeof vi.fn>;
@@ -8522,7 +8496,6 @@ describe("hosted Family plan", () => {
     };
     const billingRef = {
       ...createBillingRefMock({
-        billedSeatCount: null,
         checkoutAttemptId: "hbfca_existing",
         checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
         checkoutSeatCount: 2,
@@ -8533,7 +8506,7 @@ describe("hosted Family plan", () => {
       group,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
@@ -8593,7 +8566,6 @@ describe("hosted Family plan", () => {
     };
     let billingRef = {
       ...createBillingRefMock({
-        billedSeatCount: null,
         checkoutAttemptId: "hbfca_existing",
         checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
         checkoutSeatCount: 2,
@@ -8604,7 +8576,7 @@ describe("hosted Family plan", () => {
       group,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(
@@ -8679,7 +8651,6 @@ describe("hosted Family plan", () => {
     };
     let billingRef = {
       ...createBillingRefMock({
-        billedSeatCount: null,
         checkoutAttemptId: "hbfca_existing",
         checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
         checkoutSeatCount: 2,
@@ -8690,7 +8661,7 @@ describe("hosted Family plan", () => {
       group,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(
@@ -8768,7 +8739,6 @@ describe("hosted Family plan", () => {
     };
     let billingRef = {
       ...createBillingRefMock({
-        billedSeatCount: null,
         checkoutAttemptId: "hbfca_expired",
         checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
         checkoutSeatCount: 2,
@@ -8779,7 +8749,7 @@ describe("hosted Family plan", () => {
       group,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(
@@ -8876,7 +8846,6 @@ describe("hosted Family plan", () => {
     };
     let billingRef = {
       ...createBillingRefMock({
-        billedSeatCount: null,
         checkoutAttemptId: "hbfca_expired",
         checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
         checkoutSeatCount: 2,
@@ -8886,7 +8855,7 @@ describe("hosted Family plan", () => {
       }),
       group,
     };
-    const tx = createTxMock({ billedSeatCount: null, group });
+    const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(
       async () => billingRef,
     );
@@ -8982,12 +8951,11 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
       ...createBillingRefMock({
-        billedSeatCount: null,
         checkoutAttemptId: "hbfca_ambiguous",
         checkoutCreatedAt: new Date("2026-07-27T11:59:59.999Z"),
         checkoutSeatCount: 2,
@@ -9027,7 +8995,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
@@ -9107,7 +9075,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
@@ -9145,7 +9113,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
@@ -9185,7 +9153,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
@@ -9213,7 +9181,6 @@ describe("hosted Family plan", () => {
   it("preserves subscription-owned billing fields when late checkout binds ids", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
-      billedSeatCount: 4,
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_family_monthly",
       currentPeriodEnd: new Date("2026-07-18T12:30:00.000Z"),
@@ -9346,7 +9313,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
@@ -9385,7 +9352,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
@@ -9421,7 +9388,7 @@ describe("hosted Family plan", () => {
 
   it("alerts for a provider failure that blocks a currently bound Family redirect", async () => {
     const sessionId = "cs_test_familyRedirectFailure123";
-    const tx = createTxMock({ billedSeatCount: null });
+    const tx = createTxMock({ pulseCapacity: null });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
       checkoutAttemptId: "hbfca_redirect_current",
     });
@@ -9474,7 +9441,7 @@ describe("hosted Family plan", () => {
 
   it("keeps an unbound Family redirect provider failure alert-silent", async () => {
     const sessionId = "cs_test_familyRedirectUnknown123";
-    const tx = createTxMock({ billedSeatCount: null });
+    const tx = createTxMock({ pulseCapacity: null });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     const retrieve = vi.fn().mockRejectedValue(
       buildFamilyStripeConnectionErrorWithoutRequestId(),
@@ -9510,7 +9477,7 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_owner",
       suspendedAt: null,
     };
-    const tx = createTxMock({ billedSeatCount: null, group });
+    const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
       ...createBillingRefMock({
         checkoutAttemptId: "hbfca_redirect_current",
@@ -9550,7 +9517,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     const pendingBillingRef = {
@@ -9661,7 +9628,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
@@ -9722,7 +9689,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
@@ -9770,7 +9737,7 @@ describe("hosted Family plan", () => {
       suspendedAt: null,
     };
     const tx = createTxMock({
-      billedSeatCount: null,
+      pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
@@ -9842,7 +9809,7 @@ describe("hosted Family plan", () => {
   it("updates exact mixed-tier capacity through one Stripe subscription", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: 2,
+      pulseCapacity: 2,
       pendingInviteCount: 0,
     });
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
@@ -9927,7 +9894,7 @@ describe("hosted Family plan", () => {
   it("revalidates an automatic-seat invite target under the capacity owner lock", async () => {
     const tx = createTxMock({
       activeMembershipCount: 2,
-      billedSeatCount: 2,
+      pulseCapacity: 2,
       pendingInviteCount: 0,
     });
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
@@ -9984,7 +9951,7 @@ describe("hosted Family plan", () => {
   it("lets an active Family owner with a separate direct trial add capacity", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: 2,
+      pulseCapacity: 2,
       pendingInviteCount: 0,
     });
     tx.hostedMember.findUnique.mockResolvedValue({
@@ -10042,7 +10009,7 @@ describe("hosted Family plan", () => {
   it("alerts for request-id-free Family capacity failures with stable effect identity", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: 2,
+      pulseCapacity: 2,
       pendingInviteCount: 0,
     });
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
@@ -10096,7 +10063,7 @@ describe("hosted Family plan", () => {
   it("keeps an already-applied Family capacity update alert-silent", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: 2,
+      pulseCapacity: 2,
       pendingInviteCount: 0,
     });
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
@@ -10131,7 +10098,7 @@ describe("hosted Family plan", () => {
   it("invoices a Family capacity reduction instead of silently discarding proration", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: 4,
+      pulseCapacity: 4,
       pendingInviteCount: 0,
     });
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
@@ -10189,7 +10156,7 @@ describe("hosted Family plan", () => {
   it("serializes concurrent tier-capacity changes through the owner Stripe lock", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
-      billedSeatCount: 5,
+      pulseCapacity: 5,
       pendingInviteCount: 0,
     });
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
@@ -10272,7 +10239,7 @@ describe("hosted Family plan", () => {
   it("does not allow manual capacity mutation while a member tier is pending", async () => {
     const tx = createTxMock({
       activeMembershipCount: 2,
-      billedSeatCount: 2,
+      pulseCapacity: 2,
       pendingInviteCount: 0,
     });
     tx.hostedAccountGroupMembership.findFirst
@@ -10367,7 +10334,6 @@ function readResendIdempotencyKey(
 }
 
 function createBillingRefMock(overrides: Partial<{
-  billedSeatCount: number | null;
   checkoutAttemptId: string | null;
   checkoutCreatedAt: Date | null;
   checkoutSeatCount: number | null;
@@ -10412,7 +10378,6 @@ function createBillingRefMock(overrides: Partial<{
     "encrypted:sub_family",
   );
   return {
-    billedSeatCount: resolveNullableOverride("billedSeatCount", 4),
     checkoutAttemptId: resolveNullableOverride("checkoutAttemptId", null),
     checkoutCreatedAt: resolveNullableOverride("checkoutCreatedAt", null),
     checkoutSeatCount: resolveNullableOverride("checkoutSeatCount", null),
@@ -10519,7 +10484,6 @@ function createNeverPaidFamilyDraftRecord(input: {
   const stripeSubscriptionId = input.stripeSubscriptionId ?? null;
   return {
     billingRef: {
-      billedSeatCount: null,
       checkoutAttemptId: input.checkoutAttemptId ?? null,
       checkoutCreatedAt: input.checkoutCreatedAt ?? null,
       checkoutSeatCount: input.checkoutSeatCount ?? null,
@@ -10590,7 +10554,7 @@ function createNeverPaidFamilyDraftMembership(input: {
 
 function createTxMock(input: {
   activeMembershipCount?: number;
-  billedSeatCount?: number | null;
+  pulseCapacity?: number | null;
   group?: {
     billingStatus: HostedBillingStatus;
     id: string;
@@ -10615,7 +10579,6 @@ function createTxMock(input: {
     status: "active",
   };
   const billingRef = createBillingRefMock({
-    billedSeatCount: input.billedSeatCount === undefined ? 4 : input.billedSeatCount,
     group,
   });
   let billingRefState = billingRef;
@@ -10666,7 +10629,6 @@ function createTxMock(input: {
         const stripeSubscriptionIdEncrypted =
           create.stripeSubscriptionIdEncrypted ?? null;
         billingRefState = {
-          billedSeatCount: create.billedSeatCount ?? null,
           checkoutAttemptId: create.checkoutAttemptId ?? null,
           checkoutCreatedAt: create.checkoutCreatedAt ?? null,
           checkoutSeatCount: create.checkoutSeatCount ?? null,
@@ -10781,9 +10743,9 @@ function createTxMock(input: {
     hostedAccountGroupPlanCapacity: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
       deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
-      findMany: vi.fn().mockResolvedValue(input.billedSeatCount === null
+      findMany: vi.fn().mockResolvedValue(input.pulseCapacity === null
         ? []
-        : [{ billedQuantity: input.billedSeatCount ?? 4, planCode: "pulse" }]),
+        : [{ billedQuantity: input.pulseCapacity ?? 4, planCode: "pulse" }]),
     },
   });
 
