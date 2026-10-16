@@ -1,6 +1,7 @@
 ---
 title: 'Initial provider input measurement harness is pinned to one prior PR'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4136'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Opt-in live freshness journey drifted from the host read request shape'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4137'
 ---
 
 ## Expected Behavior
