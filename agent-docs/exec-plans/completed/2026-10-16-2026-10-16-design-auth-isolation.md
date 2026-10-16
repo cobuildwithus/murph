@@ -1,6 +1,6 @@
 # Keep authentication catalog previews free of live requests
 
-Status: active
+Status: completed
 Created: 2026-10-16
 Updated: 2026-10-16
 
@@ -46,5 +46,8 @@ ReviewGPT authored the presentation seam, catalog composition, isolated settings
 - Browser: two real onboarding/popup tests, fourteen adoption/settings/confirmation tests, and two catalog network tests passed. The real Telegram popup is reused after a six-second preparation delay; messaging setup stays visible before settings resolve, then completes verification. Phone/email product-load recovery, cancellation/resend, recovery-key copy/download, credential add/change/remove and 390/1280px rendering remain covered.
 - Parent corrected proof-only drift found during execution: synthetic Telegram preparation/SDK fixtures and the existing records Manage disclosure. The associated task-owned Frog entry is included. An exploratory overlapping Playwright invocation lost its shared server; the catalog proof was rerun serially with its own server and passed. No production change was inferred from that harness error.
 - Web typecheck, complexity, docs drift/gardening and diff whitespace checks passed. Complexity: live panel maximum 20 to 19, catalog maximum 2 to 3, pure layout maximum 5; no changed-source hotspots above 20.
-- Native-resolution screenshots inspected for phone, email, messaging and recovery presentation. The existing production catalog anchor remains reachable and already represents these unchanged visible states; attached candidate images and the network tests establish the implementation-specific claim.
-- Final ReviewGPT and exact-head CI remain pending. Canonical Web admission and read-only production browser/outcome proof follow authorized merge; no Worker or runner rollout is required.
+- Native-resolution screenshots inspected for phone, email, messaging and recovery presentation. The existing production catalog anchor remains reachable and already represents these unchanged visible states; locally inspected candidate images and the network tests establish the implementation-specific claim. Image publication was unavailable with the installed GitHub CLI 2.96; the documented attachment route requires 2.99+.
+- Final ReviewGPT PASS with zero findings on pushed candidate `9ec80f61e75b5fbb9e7f8630c6adbd9e992c0a1f`: https://chatgpt.com/c/6ad25cda-c884-83e9-8851-87dccee1e06b. Full sensitive snapshot, verified GPT-6 Pro, accepted-turn linkage and exact response-file SHA-256 match; canonical 180-second minimum enforced. The reviewer inspected source and proof but did not rerun dependency-requiring checks.
+- The read-only production baseline independently reproduced eight attempted authentication/provider requests at both widths (seven APIs plus one SDK). Interception blocked all API/provider calls and three attempted POSTs; no production auth mutation occurred. The test route is already 404 before the new deployment.
+- Parent final review: Ready; no accepted findings remain, and the only closeout edits are this explanatory plan and its archival. Required exact-head CI remains a merge gate; canonical Web admission and read-only production outcome proof follow authorized merge. No Worker or runner rollout is required.
+Completed: 2026-10-16
