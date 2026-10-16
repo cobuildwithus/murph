@@ -54,7 +54,9 @@ CREATE TABLE "game" (
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "game_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "game_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "game_status_check" CHECK ("status" IN ('invited', 'live', 'settled', 'void')),
+    CONSTRAINT "game_length_days_check" CHECK ("length_days" BETWEEN 1 AND 28)
 );
 
 -- CreateTable
@@ -68,7 +70,8 @@ CREATE TABLE "game_player" (
     "active_member_id" TEXT,
     "joined_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "game_player_pkey" PRIMARY KEY ("game_id","member_id")
+    CONSTRAINT "game_player_pkey" PRIMARY KEY ("game_id","member_id"),
+    CONSTRAINT "game_player_active_member_check" CHECK ("active_member_id" IS NULL OR "active_member_id" = "member_id")
 );
 
 -- CreateTable
@@ -87,7 +90,8 @@ CREATE TABLE "game_entry" (
     "withdrawn_at" TIMESTAMP(3),
     "withdrawn_reason" TEXT,
 
-    CONSTRAINT "game_entry_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "game_entry_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "game_entry_attempt_check" CHECK ("attempt" BETWEEN 0 AND 2 AND ("attempt" = 0) = ("kind" = 'excuse'))
 );
 
 -- CreateTable
@@ -102,7 +106,8 @@ CREATE TABLE "game_ticket" (
     "redeemed_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "game_ticket_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "game_ticket_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "game_ticket_status_check" CHECK ("status" IN ('open', 'redeemed', 'void'))
 );
 
 -- CreateTable
@@ -201,16 +206,3 @@ ALTER TABLE "game_ticket" ADD CONSTRAINT "game_ticket_owed_to_fkey" FOREIGN KEY 
 
 -- AddForeignKey
 ALTER TABLE "game_event" ADD CONSTRAINT "game_event_game_id_fkey" FOREIGN KEY ("game_id") REFERENCES "game"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
-
--- Weekly game invariants the app relies on.
-ALTER TABLE "game" ADD CONSTRAINT "game_status_check"
-  CHECK ("status" IN ('invited', 'live', 'settled', 'void'));
-ALTER TABLE "game" ADD CONSTRAINT "game_length_days_check"
-  CHECK ("length_days" BETWEEN 1 AND 28);
-ALTER TABLE "game_player" ADD CONSTRAINT "game_player_active_member_check"
-  CHECK ("active_member_id" IS NULL OR "active_member_id" = "member_id");
-ALTER TABLE "game_entry" ADD CONSTRAINT "game_entry_attempt_check"
-  CHECK ("attempt" BETWEEN 0 AND 2 AND ("attempt" = 0) = ("kind" = 'excuse'));
-ALTER TABLE "game_ticket" ADD CONSTRAINT "game_ticket_status_check"
-  CHECK ("status" IN ('open', 'redeemed', 'void'));
