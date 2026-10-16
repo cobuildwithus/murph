@@ -66,7 +66,7 @@ implementation evidence is tracked in
 Internal fetch failure correlation is owned by
 [`Cloudflare private telemetry`](../apps/cloudflare/README.md#private-operational-telemetry);
 implementation and focused proof are tracked in
-[the failure correlation plan](exec-plans/active/2026-10-16-internal-fetch-failure-correlation.md).
+[the failure correlation plan](exec-plans/completed/2026-10-16-internal-fetch-failure-correlation.md).
 
 Private latest-meal recall uses the descending canonical timeline; the ordering
 contract and synthetic capture-identity proof are tracked in
