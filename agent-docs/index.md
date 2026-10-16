@@ -1198,3 +1198,6 @@ Meal telemetry authoring and validation handoff are recorded in
 [the meal failure attribution plan](exec-plans/completed/2026-10-10-meal-failure-attribution.md).
 
 Control response MIME diagnostics: [`2026-10-13-control-response-mime-diagnostic.md`](exec-plans/completed/2026-10-13-control-response-mime-diagnostic.md).
+
+Provider-input baseline snapshot repair and regression proof are tracked in
+[the measurement plan](exec-plans/active/2026-10-16-frog-input-measurement-4136.md).
