@@ -5432,3 +5432,26 @@ runtime scheduler owns delays. Session leases and durable duplicate-effect
 receipts stay in Web/Postgres; Bluetooth/vendor framing stays in the iOS app.
 See [wearable haptics](agent-docs/references/wearable-haptics.md) for the contract,
 query bounds, receipt semantics, foreground limit and rollout order.
+
+## Weekly Game
+
+`apps/web` owns the weekly game (product: `agent-docs/product-specs/weekly-game.md`).
+Postgres state tables are the truth: `game_profile`, `game_contact_label`,
+`game_circle`, `game`, `game_player`, `game_entry`, `game_ticket`, plus the
+append-only `game_event` audit log. Every member link cascades from
+`game_profile`, which cascades from `HostedMember`. Words (names, tasks, stakes,
+labels, entry text and data) are app-encrypted before any transaction; the
+structure that rules and settlement read stays plain, so neither decrypts.
+
+`runGameCommand` is the single write path. It locks the game row, reads the
+database clock, asks a pure `decide*` rule, writes state plus one event, and
+dedupes retries on the event's `(actor_id, request_id)`. One live game per
+person is a unique `game_player.active_member_id`, set only at go-live. Reads
+are viewer-scoped: another player's entry is omitted from the response, not
+just its media URL, until the viewer has posted that day.
+
+`/api/game/v1` uses a plain Better Auth bearer session, not the paid-member
+check, because invitees play free; the flag and allowlist then hide every route.
+The invite preview and `/g/<token>` page are unauthenticated and honor only the
+global flag. Dev time-travel routes return 404 in real production. Media is
+local-disk only until a Worker game-media path exists.
