@@ -52,3 +52,31 @@ Human merge approval is required for the shared configuration/trust-boundary
 surface. Final ReviewGPT and exact-head CI remain completion gates. The report
 remains open until the reviewed repair is merged and current-main behavior is
 verified; no closure or retirement has been performed.
+
+## Native isolation follow-on
+
+Candidate review reproduced a remaining cause: recursive TOML overlays preserve
+extra personal filesystem grants, and the native global instruction provider
+still reads AGENTS files from the authentication home. A synthetic probe proved
+both contamination paths. The earlier successful meal proves the local tool
+read-root fix only; it does not prove clean production-equivalent model input.
+
+Extend the pinned native patch's App Server entrypoint with the existing
+ignore-user-config loader option and an empty global instruction provider only
+when explicitly selected. Retain authentication, managed requirements, project
+instructions, exec rules, and the default native startup behavior. Do not copy
+authentication files or change global installations. Use the supported live
+runner `--codex-command` selection for the locally built artifact.
+
+- [x] Native synthetic config/instruction, auth, and managed-policy regressions.
+- [ ] Bounded two-job native build and selected-artifact live journey proof.
+- [ ] Regenerate exact-pin patch and run native-source verification.
+- [ ] Review final combined candidate and exact-head CI; human merge handoff.
+
+Native App Server focused proof passed: both normal/isolated config controls,
+synthetic auth preservation and managed network requirement retention; global
+instruction exclusion with project instructions retained and normal global
+loading preserved. One initial fixture omitted its required default permission
+profile; correcting the fixture made the affected regression pass. The optional
+flag implementation compiled without error. CLI/parser, built-artifact journey,
+full scoped crate checks, and final review/CI remain pending.

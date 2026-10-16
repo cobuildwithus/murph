@@ -497,12 +497,23 @@ package suite.
 ## Real-Codex test fixtures
 
 Canonical live fixtures and the meal benchmark use the shared hosted Codex
-behavior builder. Their launcher overrides hosted feature, memory, skill,
-history, and shell-policy values while preserving authentication in the original
-Codex home. The isolated checkout and Node install are read-only local stand-ins
-for `/app`; credential-shaped files stay denied. Production permission profiles
-are unchanged. Local shells retain the fixture PATH and Codex's credential
-exclusions, rather than inheriting hosted-only paths or sentinel credentials.
+behavior builder. Their App Server launcher requires Murph's patched native
+`app-server --ignore-user-config` option: it excludes the personal `config.toml`
+and global `AGENTS.md`/`AGENTS.override.md` inputs while retaining the original
+authentication home, managed requirements, project instructions, and exec rules.
+CLI table overrides alone cannot provide isolation because native TOML merging
+preserves unspecified personal permission grants.
+
+Build from the exact source pin with `patches/codex-public-live.patch` applied,
+then select that local artifact with `pnpm test:assistant:live -- --test <name>
+--codex-command <absolute-native-binary>`. The unpatched npm CLI does not support
+this App Server option. Keep the matching release's helper layout; the native
+build contract is documented in `apps/cloudflare/README.md`. Selecting a local
+verification binary does not install a global package or deploy the runner.
+
+The isolated checkout and Node install are read-only local stand-ins for `/app`;
+credential-shaped files stay denied. Production permission profiles are
+unchanged. Local shells retain the fixture PATH and Codex's credential exclusions.
 
 Synthetic real-Codex journeys that need fixture executables can opt into
 `executeRealCodexAppServerTurn`'s `fixtureBinDirectory`. The test harness adds

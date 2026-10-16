@@ -1151,6 +1151,13 @@ records the upstream revision and patch SHA-256 in `murph-source-revision`.
 Cargo concurrency is capped at two jobs so a high CPU count does not expand the
 native build's memory demand; the upstream release optimization profile is kept.
 
+For developer verification, the patch also exposes the opt-in App Server
+`--ignore-user-config` switch. It skips personal configuration and global user
+instructions without moving the auth home or disabling managed requirements,
+project instructions, or exec rules. The default startup path is unchanged;
+canonical local journey launchers explicitly select this option. CLI overrides
+still supply the hosted behavior and local installation read roots.
+
 Public Live transcript fragments use Codex's native normalized event stream and
 bounded transcript collection. Handoffs without separate task text use upstream
 transcript fallback and delegation formatting, including escaped, bounded input

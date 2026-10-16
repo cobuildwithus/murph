@@ -4528,10 +4528,10 @@ index fa79c1fd87231ecb9268ac946041899443ea3e5c..a872d4b30a5b00cb9b10d24a9aefd1a6
  /// EXPERIMENTAL - append audio input to thread realtime.
  #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
 diff --git a/codex-rs/app-server/README.md b/codex-rs/app-server/README.md
-index a6bcb1ab33..2c8434d26a 100644
+index a6bcb1ab331e96fb945dab1c6ad41671c9ee7fbb..6868b884ee47078f7dbdd16a3d6eb74aba8bd9a0 100644
 --- a/codex-rs/app-server/README.md
 +++ b/codex-rs/app-server/README.md
-@@ -486,3 +486,25 @@ and out-of-scope item IDs return invalid params (`-32602`) with
+@@ -486,3 +486,34 @@ and out-of-scope item IDs return invalid params (`-32602`) with
  Omitted or null cursors preserve normal first-page behavior. Continue anchored
  pages with the returned opaque string `nextCursor`; response fields and
  `backwardsCursor` semantics are unchanged.
@@ -4557,6 +4557,15 @@ index a6bcb1ab33..2c8434d26a 100644
 +while closing; notification delivery itself is not durable acceptance. Omitting
 +the flag preserves native start-or-steer behavior. Input delivery and client-managed handoff
 +output are independent.
++
++### User configuration isolation
++
++The CLI and standalone app-server accept `--ignore-user-config` when running the
++server. This explicit host option skips the user `config.toml` layer and global
++`AGENTS.md`/`AGENTS.override.md` instructions. Authentication continues to use the
++same Codex home. Managed requirements, project configuration and instructions,
++and exec-policy rules still apply. Omitting the flag preserves normal loading;
++the flag does not apply to app-server daemon or schema-generation subcommands.
 diff --git a/codex-rs/app-server/src/request_processors/turn_processor.rs b/codex-rs/app-server/src/request_processors/turn_processor.rs
 index e42e53de1ff20d6b2049900442dde1e783f235c9..02843a2193e5d42409d21ba4f98d8f06cebcd4d4 100644
 --- a/codex-rs/app-server/src/request_processors/turn_processor.rs
@@ -8661,3 +8670,411 @@ index c6345c160d18898ef27a9fea9b3a1fa26e7fad42..2b32ad51893aea320a079babcee10df8
  #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
  async fn responses_websocket_v2_sets_openai_beta_header() {
      skip_if_no_network!();
+diff --git a/codex-rs/app-server/src/in_process.rs b/codex-rs/app-server/src/in_process.rs
+index b467a33ec245499ef76f131f174dabe026fe6ae0..12a0c17d753666f02489f5462459f90636a480c2 100644
+--- a/codex-rs/app-server/src/in_process.rs
++++ b/codex-rs/app-server/src/in_process.rs
+@@ -425,6 +425,7 @@ async fn run_outbound_router(
+ }
+
+ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcessClientHandle> {
++    let ignore_user_config = args.loader_overrides.ignore_user_config;
+     let config_manager = ConfigManager::new(
+         args.config.codex_home.to_path_buf(),
+         args.cli_overrides,
+@@ -495,6 +496,7 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
+         let (processor_tx, mut processor_rx) = mpsc::channel::<ProcessorCommand>(channel_capacity);
+         let mut processor_handle = tokio::spawn(async move {
+             let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++                ignore_user_config,
+                 outgoing: Arc::clone(&processor_outgoing),
+                 analytics_events_client,
+                 arg0_paths: args.arg0_paths,
+diff --git a/codex-rs/app-server/src/lib.rs b/codex-rs/app-server/src/lib.rs
+index d1a622ca8cc94ab626e8e377333c9d875cd18451..80f81820cdb77953ad0051fbcd4747544351c465 100644
+--- a/codex-rs/app-server/src/lib.rs
++++ b/codex-rs/app-server/src/lib.rs
+@@ -140,6 +140,7 @@ mod thread_status;
+ mod transport;
+ mod turn_admission;
+ mod turn_cost_worker;
++mod user_instructions;
+ mod user_verification;
+ mod user_verification_response;
+
+@@ -970,6 +971,7 @@ pub async fn run_main_with_transport_options(
+         let initialize_notification_sender = outgoing_message_sender.clone();
+         let outbound_control_tx = outbound_control_tx;
+         let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++            ignore_user_config,
+             outgoing: outgoing_message_sender,
+             analytics_events_client,
+             arg0_paths,
+diff --git a/codex-rs/app-server/src/main.rs b/codex-rs/app-server/src/main.rs
+index 4119cedfe413005e165ca8b00b86699dabe4458a..c427a1ab2b01f42d64468b14eceddd150f3c504f 100644
+--- a/codex-rs/app-server/src/main.rs
++++ b/codex-rs/app-server/src/main.rs
+@@ -30,6 +30,10 @@ const DISABLE_MANAGED_CONFIG_ENV_VAR: &str = "CODEX_APP_SERVER_DISABLE_MANAGED_C
+ #[derive(Debug, Parser)]
+ #[command(version)]
+ struct AppServerArgs {
++    /// Skip user config.toml and global AGENTS instructions; retain auth, managed policy, and exec rules.
++    #[arg(long, default_value_t = false)]
++    ignore_user_config: bool,
++
+     #[command(flatten)]
+     config_overrides: CliConfigOverrides,
+
+@@ -80,6 +84,7 @@ fn main() -> anyhow::Result<()> {
+     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
+     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
+         let AppServerArgs {
++            ignore_user_config,
+             config_overrides,
+             code_mode_host,
+             listen,
+@@ -91,13 +96,14 @@ fn main() -> anyhow::Result<()> {
+             remote_control,
+             managed_daemon,
+         } = AppServerArgs::parse();
+-        let loader_overrides = if disable_managed_config_from_debug_env() {
++        let mut loader_overrides = if disable_managed_config_from_debug_env() {
+             LoaderOverrides::without_managed_config_for_tests()
+         } else {
+             managed_config_path_from_debug_env()
+                 .map(LoaderOverrides::with_managed_config_path_for_tests)
+                 .unwrap_or_default()
+         };
++        loader_overrides.ignore_user_config = ignore_user_config;
+         let transport = listen;
+         let auth = auth.try_into_settings()?;
+         let mut runtime_options = AppServerRuntimeOptions {
+diff --git a/codex-rs/app-server/src/message_processor.rs b/codex-rs/app-server/src/message_processor.rs
+index 9e9a90437b3fddde282a0d05216907d77fa5a745..f94c33cff46d6010c332b39c3a5d445e86ccb067 100644
+--- a/codex-rs/app-server/src/message_processor.rs
++++ b/codex-rs/app-server/src/message_processor.rs
+@@ -58,6 +58,7 @@ use crate::thread_state::ThreadStateManager;
+ use crate::transport::AppServerTransport;
+ use crate::transport::RemoteControlHandle;
+ use crate::turn_cost_worker::TurnCostWorker;
++use crate::user_instructions::NoUserInstructions;
+ use codex_analytics::AnalyticsEventsClient;
+ use codex_analytics::AppServerRpcTransport;
+ use codex_app_server_protocol::ClientNotification;
+@@ -79,6 +80,7 @@ use codex_core::config::Config;
+ use codex_core::config::ThreadStoreConfig;
+ use codex_exec_server::EnvironmentManager;
+ use codex_extension_api::TurnStartAdmission;
++use codex_extension_api::UserInstructionsProvider;
+ use codex_feedback::CodexFeedback;
+ use codex_goal_extension::GoalService;
+ use codex_home::CodexHomeUserInstructionsProvider;
+@@ -245,6 +247,7 @@ impl ConnectionSessionState {
+ }
+
+ pub(crate) struct MessageProcessorArgs {
++    pub(crate) ignore_user_config: bool,
+     pub(crate) outgoing: Arc<OutgoingMessageSender>,
+     pub(crate) analytics_events_client: AnalyticsEventsClient,
+     pub(crate) arg0_paths: Arg0DispatchPaths,
+@@ -271,6 +274,7 @@ impl MessageProcessor {
+     /// `Sender` so handlers can enqueue messages to be written to stdout.
+     pub(crate) fn new(args: MessageProcessorArgs) -> Self {
+         let MessageProcessorArgs {
++            ignore_user_config,
+             outgoing,
+             analytics_events_client,
+             arg0_paths,
+@@ -322,6 +326,13 @@ impl MessageProcessor {
+         let turn_start_admission: Arc<dyn TurnStartAdmission> = Arc::new(turn_admission.clone());
+         let extension_event_sink =
+             app_server_extension_event_sink(outgoing.clone(), thread_state_manager.clone());
++        let user_instructions_provider: Arc<dyn UserInstructionsProvider> = if ignore_user_config {
++            Arc::new(NoUserInstructions)
++        } else {
++            Arc::new(CodexHomeUserInstructionsProvider::new(
++                config.codex_home.clone(),
++            ))
++        };
+         let mut queue_service = None;
+         let thread_manager = Arc::new_cyclic(|thread_manager| {
+             queue_service = queue_store.map(|queue| {
+@@ -352,9 +363,7 @@ impl MessageProcessor {
+                     queue_service: queue_service.clone(),
+                     turn_start_admission: Some(Arc::clone(&turn_start_admission)),
+                 }),
+-                Arc::new(CodexHomeUserInstructionsProvider::new(
+-                    config.codex_home.clone(),
+-                )),
++                Arc::clone(&user_instructions_provider),
+                 Some(analytics_events_client.clone()),
+                 codex_core::passthrough_image_store(),
+                 Arc::clone(&thread_store),
+diff --git a/codex-rs/app-server/src/message_processor_tracing_tests.rs b/codex-rs/app-server/src/message_processor_tracing_tests.rs
+index 41d843c743abf671b82983e3bcec118ea5df99d2..3dcfd35807005e0ff0c66ba6b097e829797a0cce 100644
+--- a/codex-rs/app-server/src/message_processor_tracing_tests.rs
++++ b/codex-rs/app-server/src/message_processor_tracing_tests.rs
+@@ -261,6 +261,7 @@ pub(super) async fn build_test_processor(
+         analytics_events_client.clone(),
+     ));
+     let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++        ignore_user_config: false,
+         outgoing,
+         analytics_events_client,
+         arg0_paths: Arg0DispatchPaths::default(),
+diff --git a/codex-rs/app-server/src/user_instructions.rs b/codex-rs/app-server/src/user_instructions.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..94426cef75277ee4b16a138e38f3b1411c5bf0d6
+--- /dev/null
++++ b/codex-rs/app-server/src/user_instructions.rs
+@@ -0,0 +1,12 @@
++use codex_extension_api::LoadInstructionsFuture;
++use codex_extension_api::LoadedUserInstructions;
++use codex_extension_api::UserInstructionsProvider;
++
++/// An explicitly isolated host contributes no personal global instructions.
++pub(crate) struct NoUserInstructions;
++
++impl UserInstructionsProvider for NoUserInstructions {
++    fn load_user_instructions(&self) -> LoadInstructionsFuture<'_> {
++        Box::pin(async { LoadedUserInstructions::default() })
++    }
++}
+diff --git a/codex-rs/app-server/src/user_verification_test_support.rs b/codex-rs/app-server/src/user_verification_test_support.rs
+index d2096bc1f17dce225d4e2edad6c62bbb67eb162b..45515039e4cff5d8295ac3d80162f6fad8ef2a81 100644
+--- a/codex-rs/app-server/src/user_verification_test_support.rs
++++ b/codex-rs/app-server/src/user_verification_test_support.rs
+@@ -154,6 +154,7 @@ impl Harness {
+             AnalyticsEventsClient::disabled(),
+         ));
+         let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++            ignore_user_config: false,
+             outgoing: Arc::clone(&outgoing),
+             analytics_events_client: AnalyticsEventsClient::disabled(),
+             arg0_paths: Arg0DispatchPaths::default(),
+diff --git a/codex-rs/app-server/tests/suite/v2/ignore_user_config.rs b/codex-rs/app-server/tests/suite/v2/ignore_user_config.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..5532f71dd4c700ae780e955409304ac9d758f390
+--- /dev/null
++++ b/codex-rs/app-server/tests/suite/v2/ignore_user_config.rs
+@@ -0,0 +1,131 @@
++//! Explicit app-server isolation excludes personal inputs without moving the auth home.
++
++use anyhow::Result;
++use app_test_support::TestAppServer;
++use codex_app_server_protocol::Account;
++use codex_app_server_protocol::ConfigReadParams;
++use codex_app_server_protocol::ConfigReadResponse;
++use codex_app_server_protocol::GetAccountParams;
++use codex_app_server_protocol::GetAccountResponse;
++use codex_app_server_protocol::ThreadStartParams;
++use codex_app_server_protocol::ThreadStartResponse;
++use pretty_assertions::assert_eq;
++use serde_json::Value;
++use serde_json::json;
++use std::time::Duration;
++use tempfile::TempDir;
++use tokio::time::timeout;
++
++const READ_TIMEOUT: Duration = Duration::from_secs(60);
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn ignore_user_config_retains_auth_and_managed_requirements() -> Result<()> {
++    let home = TempDir::new()?;
++    std::fs::write(
++        home.path().join("config.toml"),
++        r#"default_permissions = "synthetic"
++developer_instructions = "synthetic personal instructions"
++[permissions.synthetic.filesystem]
++"/synthetic-extra-read" = "read"
++"#,
++    )?;
++    std::fs::write(
++        home.path().join("auth.json"),
++        r#"{"OPENAI_API_KEY":"synthetic-test-key"}"#,
++    )?;
++    std::fs::write(
++        home.path().join("requirements.toml"),
++        "allow_remote_control = false\n[application.network]\nenabled = false\n",
++    )?;
++    for isolated in [false, true] {
++        let mut args = vec!["-c", "cli_auth_credentials_store=\"file\""];
++        if isolated {
++            args.push("--ignore-user-config");
++        }
++        let mut server = TestAppServer::builder()
++            .with_codex_home(home.path())
++            .with_args(&args)
++            .build_initialized_with_timeout(READ_TIMEOUT)
++            .await?;
++        let config_id = server
++            .send_config_read_request(ConfigReadParams {
++                include_layers: false,
++                cwd: None,
++            })
++            .await?;
++        let config: ConfigReadResponse =
++            timeout(READ_TIMEOUT, server.read_response(config_id)).await??;
++        let config_json = serde_json::to_value(config.config)?;
++        assert_eq!(
++            config_json
++                .to_string()
++                .contains("synthetic personal instructions"),
++            !isolated
++        );
++        assert_eq!(
++            config_json.to_string().contains("synthetic-extra-read"),
++            !isolated
++        );
++
++        let requirements_id = server.send_config_requirements_read_request().await?;
++        let requirements: Value =
++            timeout(READ_TIMEOUT, server.read_response(requirements_id)).await??;
++        assert_eq!(
++            requirements["requirements"]["application"]["network"]["enabled"],
++            json!(false)
++        );
++
++        let account_id = server
++            .send_get_account_request(GetAccountParams {
++                refresh_token: false,
++            })
++            .await?;
++        let account: GetAccountResponse =
++            timeout(READ_TIMEOUT, server.read_response(account_id)).await??;
++        assert_eq!(account.account, Some(Account::ApiKey {}));
++        assert_eq!(
++            std::fs::read_to_string(home.path().join("auth.json"))?,
++            r#"{"OPENAI_API_KEY":"synthetic-test-key"}"#
++        );
++    }
++    Ok(())
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn ignore_user_config_excludes_global_but_keeps_project_instructions() -> Result<()> {
++    for isolated in [false, true] {
++        let home = TempDir::new()?;
++        let workspace = TempDir::new()?;
++        let global = home.path().join("AGENTS.override.md");
++        let project = workspace.path().join("AGENTS.md");
++        std::fs::write(&global, "synthetic global instructions")?;
++        std::fs::write(&project, "synthetic project instructions")?;
++        let args = if isolated {
++            vec!["--ignore-user-config"]
++        } else {
++            vec![]
++        };
++        let mut server = TestAppServer::builder()
++            .with_codex_home(home.path())
++            .without_auto_env()
++            .with_args(&args)
++            .build_initialized_with_timeout(READ_TIMEOUT)
++            .await?;
++        let request_id = server
++            .send_thread_start_request(ThreadStartParams {
++                cwd: Some(workspace.path().display().to_string()),
++                ..Default::default()
++            })
++            .await?;
++        let response: ThreadStartResponse =
++            timeout(READ_TIMEOUT, server.read_response(request_id)).await??;
++        let sources = response
++            .instruction_sources
++            .into_iter()
++            .map(|path| std::fs::canonicalize(path.as_str()))
++            .collect::<std::io::Result<Vec<_>>>()?;
++        assert!(sources.contains(&std::fs::canonicalize(project)?));
++        assert_eq!(sources.contains(&std::fs::canonicalize(global)?), !isolated);
++    }
++    Ok(())
++}
+diff --git a/codex-rs/app-server/tests/suite/v2/mod.rs b/codex-rs/app-server/tests/suite/v2/mod.rs
+index d24896903618042f177fe8e85a80707d60463e87..bcc1b48b073648189b2ed56f3fb91bc1b13bda8e 100644
+--- a/codex-rs/app-server/tests/suite/v2/mod.rs
++++ b/codex-rs/app-server/tests/suite/v2/mod.rs
+@@ -60,6 +60,7 @@ mod guardian_v2;
+ mod history_notes_extension;
+ mod hooks_list;
+ mod host_skills;
++mod ignore_user_config;
+ mod imagegen_extension;
+ mod initialize;
+ mod luna_reserve;
+diff --git a/codex-rs/cli/src/app_server_user_config_tests.rs b/codex-rs/cli/src/app_server_user_config_tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..d05e738234e740353c12cd4b464cef451f63a4e3
+--- /dev/null
++++ b/codex-rs/cli/src/app_server_user_config_tests.rs
+@@ -0,0 +1,18 @@
++use super::MultitoolCli;
++use super::Subcommand;
++use clap::Parser;
++use pretty_assertions::assert_eq;
++
++#[test]
++fn app_server_user_config_isolation_is_explicit() {
++    for (args, expected) in [
++        (vec!["codex", "app-server"], false),
++        (vec!["codex", "app-server", "--ignore-user-config"], true),
++    ] {
++        let cli = MultitoolCli::try_parse_from(args).expect("parse app-server flags");
++        let Some(Subcommand::AppServer(app_server)) = cli.subcommand else {
++            panic!("expected app-server command");
++        };
++        assert_eq!(app_server.ignore_user_config, expected);
++    }
++}
+diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
+index bdd7771b3aadfd69f46698c14844a6d65e1e65ba..bcb4bfc43e372895645a9fd071d3506ad056a501 100644
+--- a/codex-rs/cli/src/main.rs
++++ b/codex-rs/cli/src/main.rs
+@@ -551,6 +551,10 @@ struct LogoutCommand {
+
+ #[derive(Debug, Parser)]
+ struct AppServerCommand {
++    /// Skip user config.toml and global AGENTS instructions; retain auth, managed policy, and exec rules.
++    #[arg(long, default_value_t = false)]
++    ignore_user_config: bool,
++
+     /// Omit to run the app server; specify a subcommand for tooling.
+     #[command(subcommand)]
+     subcommand: Option<AppServerSubcommand>,
+@@ -1218,6 +1222,7 @@ async fn cli_main(
+         }
+         Some(Subcommand::AppServer(app_server_cli)) => {
+             let AppServerCommand {
++                ignore_user_config,
+                 subcommand,
+                 code_mode_host,
+                 strict_config: app_server_strict_config,
+@@ -1228,6 +1233,9 @@ async fn cli_main(
+                 analytics_default_enabled,
+                 auth,
+             } = app_server_cli;
++            if ignore_user_config && subcommand.is_some() {
++                anyhow::bail!("--ignore-user-config applies only when running app-server");
++            }
+             let strict_config = app_server_strict_config || root_strict_config;
+             reject_strict_config_for_app_server_subcommand(strict_config, subcommand.as_ref())?;
+             reject_remote_mode_for_app_server_subcommand(
+@@ -1263,7 +1271,10 @@ async fn cli_main(
+                     let exit = codex_app_server::run_main_with_transport_options(
+                         arg0_paths.clone(),
+                         root_config_overrides,
+-                        LoaderOverrides::default(),
++                        LoaderOverrides {
++                            ignore_user_config,
++                            ..Default::default()
++                        },
+                         strict_config,
+                         analytics_default_enabled,
+                         transport,
+@@ -4907,3 +4918,7 @@ mod tests {
+ #[cfg(all(test, unix))]
+ #[path = "daemon_update_tests.rs"]
+ mod daemon_update_tests;
++
++#[cfg(test)]
++#[path = "app_server_user_config_tests.rs"]
++mod app_server_user_config_tests;

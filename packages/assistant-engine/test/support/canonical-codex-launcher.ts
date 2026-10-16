@@ -33,7 +33,7 @@ export function canonicalCodexLauncher(
     `model_auto_compact_token_limit=${HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT}`,
     'check_for_update_on_startup=false',
     'allow_login_shell=false',
-    // Overlay the production-owned behavior values on the authentication home.
+    // Load production-owned values after app-server excludes personal config.
     ...behavior,
     'features.apply_patch_freeform=false',
     ...tomlTablesAsOverrides(permissions),
@@ -43,7 +43,7 @@ export function canonicalCodexLauncher(
   ]
   const args = overrides.map((value) => `-c '${value.replaceAll("'", "'\\''")}'`).join(' ')
   // exec preserves native process ownership, stdio, and the existing auth home.
-  return `#!/bin/sh\nexec "$MURPH_CANONICAL_JOURNEY_CODEX" ${args} "$@"\n`
+  return `#!/bin/sh\nif [ "$1" = "app-server" ]; then\n  if ! "$MURPH_CANONICAL_JOURNEY_CODEX" app-server --help | /usr/bin/grep -q -- --ignore-user-config; then\n    printf '%s\\n' 'Canonical journeys require the Murph native patch; select its binary with --codex-command.' >&2\n    exit 64\n  fi\n  shift\n  set -- app-server --ignore-user-config "$@"\nfi\nexec "$MURPH_CANONICAL_JOURNEY_CODEX" ${args} "$@"\n`
 }
 
 // The shared builders emit table headings and single-line TOML assignments.

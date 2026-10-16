@@ -15,15 +15,15 @@ it('executes the launcher with shared hosted behavior and literal config argumen
   try {
     const capture = path.join(root, 'capture')
     const launcher = path.join(root, 'launcher')
-    await writeFile(capture, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)))\n`, { mode: 0o700 })
+    await writeFile(capture, `#!${process.execPath}\nprocess.stdout.write(process.argv.includes('--help') ? '--ignore-user-config' : JSON.stringify(process.argv.slice(2)))\n`, { mode: 0o700 })
     const syntheticRoot = "/fixture/install with 'quote'/$literal"
     await writeFile(launcher, canonicalCodexLauncher({ PATH: '/fixture/bin', HOME: '/fixture/home' }, [syntheticRoot]), { mode: 0o700 })
     const { stdout } = await execFileAsync(launcher, ['app-server'], {
       env: { MURPH_CANONICAL_JOURNEY_CODEX: capture }, timeout: 10_000,
     })
     const args: string[] = JSON.parse(stdout)
-    expect(args.at(-1)).toBe('app-server')
-    const overrides = args.filter((_, index) => index % 2 === 1)
+    expect(args.slice(-2)).toEqual(['app-server', '--ignore-user-config'])
+    const overrides = args.slice(0, -2).filter((_, index) => index % 2 === 1)
     const features = overrides.find((value) => value.startsWith('features='))!
     expect(features).toContain('plugins = false')
     expect(features).toContain('memories = false')
@@ -101,5 +101,23 @@ it.skipIf(process.platform !== 'darwin')('executes local install reads while den
       env: { ...env, MURPH_CANONICAL_JOURNEY_CODEX: path.resolve(import.meta.dirname, '../node_modules/.bin/codex') }, timeout: 15_000,
     })
     expect(stdout).toBe('sandbox-boundaries-pass')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+
+it('rejects an unpatched app-server before starting a journey', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-codex-capability-'))
+  try {
+    const launcher = path.join(root, 'launcher')
+    const codex = path.join(root, 'codex')
+    await writeFile(codex, '#!/bin/sh\nif [ "$2" = "--help" ]; then exit 0; fi\nprintf "unexpected-start"\n', { mode: 0o700 })
+    await writeFile(launcher, canonicalCodexLauncher({}, []), { mode: 0o700 })
+    await expect(execFileAsync(launcher, ['app-server'], {
+      env: { MURPH_CANONICAL_JOURNEY_CODEX: codex }, timeout: 10_000,
+    })).rejects.toMatchObject({
+      code: 64,
+      stdout: '',
+      stderr: 'Canonical journeys require the Murph native patch; select its binary with --codex-command.\n',
+    })
   } finally { await rm(root, { recursive: true, force: true }) }
 })
