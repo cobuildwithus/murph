@@ -451,11 +451,15 @@ active-member placeholder. This rule is app-card-specific; legacy media-only
 first contacts retain their existing behavior.
 
 The Web proxy rejects referral paths whose `/refer` prefix is immediately
-followed by a single-encoded slash or backslash before generated page loading.
-Its narrow matcher and fixed 404 preserve valid referral paths, encoded query
-values, normal missing-route handling, homepage negotiation, and workflow token
-validation. The isolated production routing proof uses no production credentials
-or full Web build:
+followed by a single-encoded slash or backslash, plus paths beginning with
+`/%5C` (case-insensitive percent encoding), before generated page loading.
+The root check does not decode paths or queries and excludes the `/%2F` and
+`/%255C` families. The narrow matchers and fixed 404 preserve valid referral
+paths, encoded query values, normal missing-route handling, homepage negotiation,
+and signed API/workflow paths, including workflow token validation.
+The isolated production routing fixture requires the fixed `Not Found` body
+for `/%5C` and `/%5c`, rather than accepting an ordinary app 404, and uses no
+production credentials or full Web build:
 
 ```sh
 pnpm exec node --import tsx apps/web/scripts/verify-referral-proxy-routing.ts
