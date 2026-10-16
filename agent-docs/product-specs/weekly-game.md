@@ -26,7 +26,9 @@ anyone.
 When inviting, the challenger can attach a private photo and relationship for
 the invitee alongside the first name they typed. Only the challenger ever sees
 them, in every game with that person; the photo is that player's picture in
-the challenger's views. There are no public profile photos.
+the challenger's views. The latest invite wins: a name, photo or relationship
+typed for that person replaces what the challenger typed before. There are no
+public profile photos.
 
 ## Rules
 
@@ -64,10 +66,13 @@ the challenger's views. There are no public profile photos.
   does either player accepting their next invite.
 - **Tickets.** "Winner gets" makes each loser owe the winner one ticket; a tie or
   an all-perfect week owes nothing. "Per miss" makes each player owe every
-  better player the difference in misses. Tickets stay open until the holder
-  redeems one after sending it through Messages.
+  better player the difference in misses. A ticket is good for 14 days: the
+  holder redeems it after sending it through Messages, and after its use-by
+  date it shows as expired and can't be redeemed.
 - **Rematch.** A new game can name the previous one. After a settled game with
   the same two people, its round is the previous round plus one; otherwise 1.
+  A rematch of a settled 1v1 is addressed to the other player: it appears on
+  their Home ready to accept, so nobody texts a second link.
 - **Retries.** Every action is safe to repeat: creating a game with the same id,
   posting the same entry, accepting an invite already accepted, or redeeming a
   ticket already redeemed returns the current game and changes nothing.

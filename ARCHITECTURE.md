@@ -5451,7 +5451,9 @@ state plus its history rows. There is no request-id dedupe: every command is
 keyed by its own ids or state, so a repeat writes nothing. One live game per
 person is a unique `game_player.active_member_id`, set only at go-live. There is
 no timer or cron: whether a game is over is computed from its state, and reads
-(and a player's next accept) settle it under the lock. Reads are viewer-scoped:
+(and a player's next accept) settle it under the lock. A rematch of a settled
+1v1 records its addressed invitee (`game.invitee_member_id`), who alone besides
+the challenger can read it and its invite token. Reads are viewer-scoped:
 another player's entry is omitted from the response, not just its media URL,
 until the viewer has posted that day; media reads use the same rule.
 
