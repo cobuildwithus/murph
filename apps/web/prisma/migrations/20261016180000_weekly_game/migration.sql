@@ -23,21 +23,11 @@ CREATE TABLE "game_contact_label" (
 );
 
 -- CreateTable
-CREATE TABLE "game_circle" (
-    "id" TEXT NOT NULL,
-    "hosted_group_id" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "game_circle_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "game" (
     "id" TEXT NOT NULL,
-    "circle_id" TEXT,
     "created_by" TEXT NOT NULL,
     "previous_game_id" TEXT,
-    "format" TEXT NOT NULL DEFAULT 'habit_days@1',
+    "round" INTEGER NOT NULL DEFAULT 1,
     "status" TEXT NOT NULL,
     "void_reason" TEXT,
     "terms" JSONB NOT NULL,
@@ -56,7 +46,8 @@ CREATE TABLE "game" (
 
     CONSTRAINT "game_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "game_status_check" CHECK ("status" IN ('invited', 'live', 'settled', 'void')),
-    CONSTRAINT "game_length_days_check" CHECK ("length_days" BETWEEN 1 AND 28)
+    CONSTRAINT "game_length_days_check" CHECK ("length_days" BETWEEN 1 AND 28),
+    CONSTRAINT "game_round_check" CHECK ("round" >= 1)
 );
 
 -- CreateTable
@@ -97,7 +88,6 @@ CREATE TABLE "game_entry" (
 -- CreateTable
 CREATE TABLE "game_ticket" (
     "id" TEXT NOT NULL,
-    "circle_id" TEXT NOT NULL,
     "game_id" TEXT,
     "stake_key" TEXT NOT NULL,
     "owed_by" TEXT NOT NULL,
@@ -107,7 +97,7 @@ CREATE TABLE "game_ticket" (
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "game_ticket_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "game_ticket_status_check" CHECK ("status" IN ('open', 'redeemed', 'void'))
+    CONSTRAINT "game_ticket_status_check" CHECK ("status" IN ('open', 'redeemed'))
 );
 
 -- CreateTable
@@ -131,9 +121,6 @@ CREATE UNIQUE INDEX "game_invite_token_hash_key" ON "game"("invite_token_hash");
 
 -- CreateIndex
 CREATE INDEX "game_next_due_at_idx" ON "game"("next_due_at");
-
--- CreateIndex
-CREATE INDEX "game_circle_id_created_at_idx" ON "game"("circle_id", "created_at");
 
 -- CreateIndex
 CREATE INDEX "game_created_by_idx" ON "game"("created_by");
@@ -178,9 +165,6 @@ ALTER TABLE "game_contact_label" ADD CONSTRAINT "game_contact_label_owner_member
 ALTER TABLE "game_contact_label" ADD CONSTRAINT "game_contact_label_subject_member_id_fkey" FOREIGN KEY ("subject_member_id") REFERENCES "game_profile"("member_id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "game" ADD CONSTRAINT "game_circle_id_fkey" FOREIGN KEY ("circle_id") REFERENCES "game_circle"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "game" ADD CONSTRAINT "game_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "game_profile"("member_id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -191,9 +175,6 @@ ALTER TABLE "game_player" ADD CONSTRAINT "game_player_member_id_fkey" FOREIGN KE
 
 -- AddForeignKey
 ALTER TABLE "game_entry" ADD CONSTRAINT "game_entry_game_id_member_id_fkey" FOREIGN KEY ("game_id", "member_id") REFERENCES "game_player"("game_id", "member_id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "game_ticket" ADD CONSTRAINT "game_ticket_circle_id_fkey" FOREIGN KEY ("circle_id") REFERENCES "game_circle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "game_ticket" ADD CONSTRAINT "game_ticket_game_id_fkey" FOREIGN KEY ("game_id") REFERENCES "game"("id") ON DELETE CASCADE ON UPDATE CASCADE;

@@ -2817,23 +2817,12 @@ model GameContactLabel {
   @@map("game_contact_label")
 }
 
-// The people who play together; home of rematch history and, later, their Murph chat.
-model GameCircle {
-  id            String       @id
-  hostedGroupId String?      @map("hosted_group_id")
-  createdAt     DateTime     @default(now()) @map("created_at")
-  games         Game[]
-  tickets       GameTicket[]
-
-  @@map("game_circle")
-}
-
 model Game {
   id                   String       @id
-  circleId             String?      @map("circle_id")
   createdBy            String       @map("created_by")
+  // Rematches chain through previous_game_id; round counts the chain.
   previousGameId       String?      @map("previous_game_id")
-  format               String       @default("habit_days@1")
+  round                Int          @default(1)
   status               String
   voidReason           String?      @map("void_reason")
   terms                Json
@@ -2849,14 +2838,12 @@ model Game {
   settledAt            DateTime?    @map("settled_at")
   createdAt            DateTime     @default(now()) @map("created_at")
   updatedAt            DateTime     @updatedAt @map("updated_at")
-  circle               GameCircle?  @relation(fields: [circleId], references: [id])
   creator              GameProfile  @relation(fields: [createdBy], references: [memberId], onDelete: Cascade)
   players              GamePlayer[]
   tickets              GameTicket[]
   events               GameEvent[]
 
   @@index([nextDueAt])
-  @@index([circleId, createdAt])
   @@index([createdBy])
   @@map("game")
 }
@@ -2895,6 +2882,7 @@ model GameEntry {
   captureAgeMs    Int?       @map("capture_age_ms")
   receivedAt      DateTime   @map("received_at")
   withdrawnAt     DateTime?  @map("withdrawn_at")
+  // "retake" (replaced by attempt 2) or "withdrawn" (taken back by its poster).
   withdrawnReason String?    @map("withdrawn_reason")
   player          GamePlayer @relation(fields: [gameId, memberId], references: [gameId, memberId], onDelete: Cascade)
 
@@ -2906,7 +2894,6 @@ model GameEntry {
 // One IOU. Its words come from the game's stake with the same key.
 model GameTicket {
   id         String      @id
-  circleId   String      @map("circle_id")
   gameId     String?     @map("game_id")
   stakeKey   String      @map("stake_key")
   owedBy     String      @map("owed_by")
@@ -2914,7 +2901,6 @@ model GameTicket {
   status     String      @default("open")
   redeemedAt DateTime?   @map("redeemed_at")
   createdAt  DateTime    @default(now()) @map("created_at")
-  circle     GameCircle  @relation(fields: [circleId], references: [id], onDelete: Cascade)
   game       Game?       @relation(fields: [gameId], references: [id], onDelete: Cascade)
   debtor     GameProfile @relation("GameTicketOwedBy", fields: [owedBy], references: [memberId], onDelete: Cascade)
   holder     GameProfile @relation("GameTicketOwedTo", fields: [owedTo], references: [memberId], onDelete: Cascade)
