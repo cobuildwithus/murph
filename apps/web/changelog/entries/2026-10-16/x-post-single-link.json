@@ -5,15 +5,16 @@
     "id": "x-post-single-link",
     "kind": "improvement",
     "priority": 2,
-    "title": "One link per X post",
-    "summary": "When Murph reads an X post for you, it links each post once and gets straight to what the post says.",
-    "details": "Murph still says when a post could not be found or a detail could not be confirmed, and tells you how it checked if you ask.",
+    "title": "Cleaner answers about X posts",
+    "summary": "When you share an X post, Murph answers about it without sending your link back, and links other posts only when the answer uses them.",
+    "details": "Ask for the link and Murph includes it. Murph still says when a post could not be found or a detail could not be confirmed, and tells you how it checked if you ask.",
     "relevanceTags": [
       "x",
       "replies"
     ],
     "sourcePullRequests": [
-      4165
+      4165,
+      4169
     ]
   }
 }
