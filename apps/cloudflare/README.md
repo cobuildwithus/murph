@@ -743,6 +743,17 @@ private deployment boundaries still apply.
 
 ## Private Operational Telemetry
 
+Existing internal-request failure and authority-rejection warnings include
+`workspaceAttemptId` from the canonical lease already read to fence that request.
+The value is captured before fetch and cannot follow a later lease change. Join
+it to the exact invocation's checkpoint/completion and work-mode records; it does
+not establish a failure's cause. Supplied workspace-snapshot fences, supplied
+POST latency-trace fences, and trusted internal fetches omit correlation because
+they do not read the current lease. Missing or rejected lease reads still fail
+before the existing request logs. No supplied header is used for diagnostics,
+and this adds no lease read, I/O, retry, or success-path logging. Shipping this
+runtime change requires rebuilding and deploying the runner image.
+
 The existing container request-exit warning retains `exitReason` and adds
 `requestKind` from the finite method/route owner (`unknown` for an unmatched or
 unclassified request), plus `workspaceAttemptId` from this request's successfully
