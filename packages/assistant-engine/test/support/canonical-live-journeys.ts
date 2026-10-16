@@ -16,6 +16,7 @@ import { sendAssistantMessageLocal, type AssistantMessageInput } from '../../src
 import type { AssistantHostedAutomationTool, AssistantHostedAutomationToolRequest } from '../../src/assistant/execution-context.js'
 import { stopWarmCodexAppServer, waitForWarmCodexBackgroundWork } from '../../src/assistant-codex.js'
 
+import type { RealCodexProviderConfig } from './real-codex-provider.js'
 import { canonicalCodexLauncher } from './canonical-codex-launcher.js'
 
 const execFileAsync = promisify(execFile)
@@ -26,6 +27,7 @@ const THREAD_ID = 'canonical-live-synthetic-thread'
 
 export interface CanonicalLiveConfig {
   codexHome: string | null
+  providerConfig?: RealCodexProviderConfig
   env: NodeJS.ProcessEnv
   model: string
   modelProvider: string
@@ -82,7 +84,7 @@ export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, ch
   await symlink(process.execPath, path.join(bin, 'node'))
   await writeFile(path.join(bin, 'vault-cli'), CLI_WRAPPER, { mode: 0o700 })
   const codexCommand = path.join(bin, 'codex-real')
-  await writeFile(codexCommand, canonicalCodexLauncher(env), { mode: 0o700 })
+  await writeFile(codexCommand, canonicalCodexLauncher(env, undefined, config.providerConfig), { mode: 0o700 })
   await writeFile(env.MURPH_CANONICAL_JOURNEY_COMMANDS!, '')
   // Bind the original authentication home explicitly while isolating operator
   // config and the first production CLI PATH entry. Auth is never copied.

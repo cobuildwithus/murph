@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { buildMurphHostedPermissionProfileTomlLines } from '@murphai/hosted-execution/assistant-permissions'
 import { buildHostedCodexBehaviorTomlLines, HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT } from '@murphai/hosted-execution/codex-behavior'
 
+import { realCodexProviderTomlLines, type RealCodexProviderConfig } from './real-codex-provider.js'
+
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url)).replace(/\/$/u, '')
 
 // This isolated checkout and Node install stand in for the runner's /app.
@@ -17,6 +19,7 @@ const LOCAL_APP_READ_ROOTS = [
 export function canonicalCodexLauncher(
   env: NodeJS.ProcessEnv,
   appReadRoots: readonly string[] = LOCAL_APP_READ_ROOTS,
+  providerConfig?: RealCodexProviderConfig,
 ): string {
   const behavior = tomlTablesAsOverrides(buildHostedCodexBehaviorTomlLines({ exposeSpawnAgentModelOverrides: false }))
   const permissions = buildMurphHostedPermissionProfileTomlLines().flatMap((line) => [
@@ -35,11 +38,12 @@ export function canonicalCodexLauncher(
     'allow_login_shell=false',
     // Load production-owned values after app-server excludes personal config.
     ...behavior,
+    ...(providerConfig ? tomlTablesAsOverrides(realCodexProviderTomlLines(providerConfig)) : []),
     'features.apply_patch_freeform=false',
     ...tomlTablesAsOverrides(permissions),
     // Keep local fixture PATH instead of production /app paths. Default credential
     // exclusions stay on: a developer environment is not the hosted sentinel env.
-    `shell_environment_policy={inherit="all",ignore_default_excludes=false,exclude=[],include_only=${JSON.stringify([...new Set([...Object.keys(env), 'MURPH_ASSISTANT_SKILLS_ROOT', 'MURPH_HEALTH_COMMONS_PACKAGE_ROOT'])].sort())},set={PATH=${JSON.stringify(env.PATH ?? path.dirname(process.execPath))}}}`,
+    `shell_environment_policy={inherit="all",ignore_default_excludes=false,exclude=[],include_only=${JSON.stringify([...new Set([...Object.keys(env), 'MURPH_ASSISTANT_SKILLS_ROOT', 'MURPH_HEALTH_COMMONS_PACKAGE_ROOT'])].filter((key) => key !== providerConfig?.apiKeyEnv).sort())},set={PATH=${JSON.stringify(env.PATH ?? path.dirname(process.execPath))}}}`,
   ]
   const args = overrides.map((value) => `-c '${value.replaceAll("'", "'\\''")}'`).join(' ')
   // The adapter appends app-server after its global config/timing arguments.

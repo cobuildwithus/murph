@@ -503,6 +503,12 @@ and global `AGENTS.md`/`AGENTS.override.md` inputs while retaining the original
 authentication home, managed requirements, project instructions, and exec rules.
 CLI table overrides alone cannot provide isolation because native TOML merging
 preserves unspecified personal permission grants.
+Provider-key fixtures pass their trusted provider definition explicitly through
+the launcher, using the same serializer as the generated fixture home. Only
+provider metadata and the environment-variable name enter configuration; the
+credential value remains in the process environment and its name is omitted
+from shell-tool allowlists. Model, provider, reasoning, and approval selections
+remain explicit journey inputs.
 
 Build from the exact source pin with `patches/codex-public-live.patch` applied,
 then select that local artifact with `pnpm test:assistant:live -- --test <name>

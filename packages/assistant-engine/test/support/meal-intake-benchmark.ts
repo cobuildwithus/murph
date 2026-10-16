@@ -20,6 +20,7 @@ import {
 import { NUTRITION_GOAL_INVITATION_SENT_MEMORY } from '../../src/assistant/nutrition-card-introduction.js'
 import { listAssistantOutboxIntents } from '../../src/assistant/outbox.js'
 import { saveAssistantAutomationState } from '../../src/assistant/store.js'
+import type { RealCodexProviderConfig } from './real-codex-provider.js'
 import { canonicalCodexLauncher } from './canonical-codex-launcher.js'
 
 const execFileAsync = promisify(execFile)
@@ -93,6 +94,7 @@ export const MEAL_INTAKE_BENCHMARK_CASES: readonly MealIntakeBenchmarkCase[] = [
 
 export interface MealIntakeBenchmarkConfig {
   codexHome: string | null
+  providerConfig?: RealCodexProviderConfig
   env: NodeJS.ProcessEnv
   model: string
   modelProvider: string
@@ -201,7 +203,7 @@ export async function runMealIntakeBenchmarkCase(input: {
       VAULT: vault,
     }
     const codexCommand = path.join(bin, 'codex-real')
-    await writeFile(codexCommand, canonicalCodexLauncher(env), { mode: 0o700 })
+    await writeFile(codexCommand, canonicalCodexLauncher(env, undefined, config.providerConfig), { mode: 0o700 })
     const now = new Date()
     const localDate = formatLocalDate(now)
     await seedEstablishedMember({ bin, env, now, vault })

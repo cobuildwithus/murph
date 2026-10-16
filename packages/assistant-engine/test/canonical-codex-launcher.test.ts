@@ -1,15 +1,12 @@
-import { execFile, spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile, readFile, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { createInterface } from 'node:readline'
 import { expect, it } from 'vitest'
 
 import { buildHostedCodexBehaviorTomlLines } from '@murphai/hosted-execution/codex-behavior'
-import { buildCodexAppServerArgs } from '../src/assistant-codex.js'
-import { createCodexCliTimingReceiver } from '../src/assistant-codex/cli-timing.js'
-import { readCodexRpcResponseId, rejectPendingCodexRpcRequests, resolvePendingCodexRpcRequest, stopCodexAppServerChild, tryParseJsonLine, waitForCodexSpawn, withCodexRpcTimeout, writeCodexRpcMessage, type CodexRpcId, type PendingCodexRpcRequest } from '../src/assistant-codex/app-server-rpc.js'
+import { canonicalAdapterArgs, inspectCanonicalCodex } from './support/canonical-codex-inspection.js'
 import { canonicalCodexLauncher } from './support/canonical-codex-launcher.js'
 
 const execFileAsync = promisify(execFile)
@@ -22,7 +19,7 @@ it.each(['direct', 'adapter'] as const)('executes the launcher with shared hoste
     await writeFile(capture, `#!${process.execPath}\nprocess.stdout.write(process.argv.includes('--help') ? '--ignore-user-config' : JSON.stringify(process.argv.slice(2)))\n`, { mode: 0o700 })
     const syntheticRoot = "/fixture/install with 'quote'/$literal"
     await writeFile(launcher, canonicalCodexLauncher({ PATH: '/fixture/bin', HOME: '/fixture/home' }, [syntheticRoot]), { mode: 0o700 })
-    const inputArgs = shape === 'adapter' ? adapterArgs() : ['app-server']
+    const inputArgs = shape === 'adapter' ? canonicalAdapterArgs() : ['app-server']
     const { stdout } = await execFileAsync(launcher, inputArgs, {
       env: { MURPH_CANONICAL_JOURNEY_CODEX: capture }, timeout: 10_000,
     })
@@ -118,7 +115,7 @@ it.each(['direct', 'adapter'] as const)('rejects an unpatched app-server before 
     const codex = path.join(root, 'codex')
     await writeFile(codex, '#!/bin/sh\nif [ "$2" = "--help" ]; then exit 0; fi\nprintf "unexpected-start"\n', { mode: 0o700 })
     await writeFile(launcher, canonicalCodexLauncher({}, []), { mode: 0o700 })
-    await expect(execFileAsync(launcher, shape === 'adapter' ? adapterArgs() : ['app-server'], {
+    await expect(execFileAsync(launcher, shape === 'adapter' ? canonicalAdapterArgs() : ['app-server'], {
       env: { MURPH_CANONICAL_JOURNEY_CODEX: codex }, timeout: 10_000,
     })).rejects.toMatchObject({
       code: 64,
@@ -127,18 +124,6 @@ it.each(['direct', 'adapter'] as const)('rejects an unpatched app-server before 
     })
   } finally { await rm(root, { recursive: true, force: true }) }
 })
-
-// Use the adapter's actual global arguments and timing receiver. Its process
-// constructor inserts these timing arguments before the trailing subcommand.
-function adapterArgs(): string[] {
-  const timing = createCodexCliTimingReceiver()
-  try {
-    expect(timing.launchArgs.length).toBeGreaterThan(0)
-    const args = buildCodexAppServerArgs({ configOverrides: ['cli_auth_credentials_store="file"'] })
-    args.splice(args.length - 1, 0, ...timing.launchArgs)
-    return args
-  } finally { timing.close() }
-}
 
 it.skipIf(!process.env.MURPH_TEST_CODEX_COMMAND)('isolates synthetic personal inputs through the adapter launch shape with the selected native artifact', { timeout: 60_000 }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'murph-codex-isolation-'))
@@ -160,46 +145,19 @@ it.skipIf(!process.env.MURPH_TEST_CODEX_COMMAND)('isolates synthetic personal in
     const launcher = path.join(root, 'launcher')
     const env = { HOME: root, CODEX_HOME: root, PATH: [path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter) }
     await writeFile(launcher, canonicalCodexLauncher(env, []), { mode: 0o700 })
-    const child = spawn(launcher, adapterArgs(), {
-      cwd: workspace, env: { ...env, MURPH_CANONICAL_JOURNEY_CODEX: process.env.MURPH_TEST_CODEX_COMMAND },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
-    const pendingRequests = new Map<CodexRpcId, PendingCodexRpcRequest>()
-    const lines = createInterface({ input: child.stdout })
-    child.stderr.resume()
-    child.on('error', (error) => rejectPendingCodexRpcRequests(pendingRequests, error))
-    child.on('exit', () => rejectPendingCodexRpcRequests(pendingRequests, new Error('Isolation fixture exited.')))
-    lines.on('line', (line) => {
-      const parsed = tryParseJsonLine(line)
-      if (!parsed.ok) return
-      const responseId = readCodexRpcResponseId(parsed.value)
-      if (responseId !== null) resolvePendingCodexRpcRequest({ message: parsed.value, responseId, pendingRequests })
-    })
-    let nextId = 0
-    async function request(method: string, params: Record<string, unknown>) {
-      const id = ++nextId
-      return withCodexRpcTimeout(new Promise<unknown>((resolve, reject) => {
-        pendingRequests.set(id, { method, resolve, reject })
-        writeCodexRpcMessage(child, { id, method, params })
-      }), 15_000, method, () => pendingRequests.delete(id))
-    }
-    try {
-      await waitForCodexSpawn(child)
-      await request('initialize', { clientInfo: { name: 'synthetic_isolation_test', version: '1' }, capabilities: { experimentalApi: true } })
-      writeCodexRpcMessage(child, { method: 'initialized', params: {} })
-      const config = JSON.stringify(await request('config/read', { includeLayers: false }))
-      expect(config).not.toContain('SYNTHETIC_PERSONAL_DEVELOPER')
-      expect(config).not.toContain('/synthetic-extra-read')
-      expect(await request('account/read', { refreshToken: false })).toMatchObject({ account: { type: 'apiKey' } })
-      expect(await readFile(path.join(root, 'auth.json'), 'utf8')).toBe(auth)
-      const started = await request('thread/start', { cwd: workspace, ephemeral: true, modelProvider: 'synthetic', config: {
+    const inspected = await inspectCanonicalCodex({
+      command: launcher, cwd: workspace,
+      env: { ...env, MURPH_CANONICAL_JOURNEY_CODEX: process.env.MURPH_TEST_CODEX_COMMAND },
+      threadParams: { modelProvider: 'synthetic', config: {
         'model_providers.synthetic': { name: 'Synthetic', base_url: 'http://127.0.0.1:1/v1', wire_api: 'responses' },
-      } })
-      const sources = started && typeof started === 'object' && 'instructionSources' in started ? started.instructionSources : null
-      if (!Array.isArray(sources) || !sources.every((value): value is string => typeof value === 'string')) throw new Error('Missing instruction sources.')
-      const canonicalSources = await Promise.all(sources.map((source) => realpath(source)))
-      expect(canonicalSources).toContain(await realpath(project))
-      expect(canonicalSources).not.toContain(await realpath(global))
-    } finally { await stopCodexAppServerChild({ child, closeStdin: () => { child.stdin.end(); return null } }); lines.close() }
+      } },
+    })
+    expect(JSON.stringify(inspected.config)).not.toContain('SYNTHETIC_PERSONAL_DEVELOPER')
+    expect(JSON.stringify(inspected.config)).not.toContain('/synthetic-extra-read')
+    expect(inspected.account).toMatchObject({ account: { type: 'apiKey' } })
+    expect(await readFile(path.join(root, 'auth.json'), 'utf8')).toBe(auth)
+    const canonicalSources = await Promise.all(inspected.instructionSources.map((source) => realpath(source)))
+    expect(canonicalSources).toContain(await realpath(project))
+    expect(canonicalSources).not.toContain(await realpath(global))
   } finally { await rm(root, { recursive: true, force: true }) }
 })
