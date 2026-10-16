@@ -63,6 +63,53 @@ function isLoopbackUrl(rawUrl: string): boolean {
   }
 }
 
+test("components catalog comparison rows fit responsive viewports", async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.route("**/*", (route) =>
+    isLoopbackUrl(route.request().url()) ? route.continue() : route.abort(),
+  );
+  const response = await page.goto("/design?tab=components#metric-card", {
+    waitUntil: "load",
+  });
+  expect(response?.status()).toBe(200);
+
+  for (const width of [320, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+    });
+    for (const id of ["metric-card", "expected-signal-card"]) {
+      const cards = page.locator(`#${id} > div > div`);
+      await expect(cards).toHaveCount(3);
+      const bounds = await cards.evaluateAll((nodes) => nodes.map((node) => {
+        const { left, right, top, bottom } = node.getBoundingClientRect();
+        return { left, right, top, bottom, overflow: node.scrollWidth - node.clientWidth };
+      }));
+      for (const card of bounds) {
+        expect(card.left).toBeGreaterThanOrEqual(0);
+        expect(card.right).toBeLessThanOrEqual(width + OVERFLOW_TOLERANCE_PX);
+        expect(card.overflow).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+      }
+      if (width < 768) {
+        expect(bounds[1].top).toBeGreaterThanOrEqual(bounds[0].bottom);
+        expect(bounds[2].top).toBeGreaterThanOrEqual(bounds[1].bottom);
+      } else {
+        expect(bounds[1].top).toBe(bounds[0].top);
+        expect(bounds[2].top).toBe(bounds[0].top);
+      }
+    }
+    // The reported whole-page regression is at 390px. Smaller fixed-size
+    // and tablet fixed-size studies remain separate from these comparison rows.
+    if (width === 390 || width === 1280) {
+      expect(await page.evaluate(() => document.documentElement.scrollWidth))
+        .toBeLessThanOrEqual(width + OVERFLOW_TOLERANCE_PX);
+    }
+  }
+});
+
 test("comparison evidence links keep 24px targets at narrow widths", async ({
   page,
 }) => {
