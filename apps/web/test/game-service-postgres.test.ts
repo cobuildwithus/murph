@@ -308,7 +308,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await getPrisma().game.update({ data: { inviteExpiresAt: new Date(Date.now() - 60_000) }, where: { id: gameId } });
     expect((await readHome(kat)).games).toEqual([]);
     expect(await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void" });
-    expect((await getPrisma().gameEvent.findMany({ where: { gameId } })).map((event) => [event.type, event.actor]))
+    expect((await getPrisma().gameEvent.findMany({ orderBy: { id: "asc" }, where: { gameId } })).map((event) => [event.type, event.actor]))
       .toEqual([["created", kat], ["expired", "system"]]);
   });
 });
