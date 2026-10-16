@@ -235,6 +235,37 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(label.relationshipEncrypted).toBeTruthy();
   });
 
+  it("shows the relationship the viewer typed only to them, and keeps it across a rematch", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "Australia/Sydney");
+    const kat = await member("Kat", "Europe/London");
+    const relationshipOf = (view: Awaited<ReturnType<typeof readGame>>, memberSeat: number) =>
+      view!.players.find((player) => player.seat === memberSeat)!.relationship;
+
+    const gameId = randomUUID();
+    const created = await ok(leo, { gameId, inviteeFirstName: "Ava", inviteeLabel: { relationship: "my partner" }, terms: TERMS, type: "createGame" });
+    expect(created!.players.map((player) => player.relationship)).toEqual([null, "my partner"]);
+    await ok(ava, { termsVersion: 1, timeZone: "UTC", token: created!.inviteToken!, type: "join" });
+
+    // The challenger sees it for the invitee; the invitee has no label for the challenger.
+    expect(relationshipOf(await readGame(gameId, leo), 1)).toBe("my partner");
+    expect(relationshipOf(await readGame(gameId, leo), 0)).toBeNull();
+    expect((await readGame(gameId, ava))!.players.map((player) => player.relationship)).toEqual([null, null]);
+    // Nobody else ever sees it: Kat isn't in the game, and in her own game with Ava it isn't her label.
+    expect(await readGame(gameId, kat)).toBeNull();
+    const katsGame = await startGame(kat, ava);
+    expect((await readGame(katsGame.gameId, kat))!.players.map((player) => player.relationship)).toEqual([null, null]);
+    expect(JSON.stringify(await readHome(kat))).not.toContain("my partner");
+    expect(JSON.stringify(await readHome(ava))).not.toContain("my partner");
+
+    // A rematch typed without a relationship keeps the one Leo saved, before and after Ava accepts.
+    await devSettleNow(gameId, leo);
+    const rematch = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", previousGameId: gameId, terms: TERMS, type: "createGame" });
+    expect(relationshipOf(rematch, 1)).toBe("my partner");
+    await ok(ava, { termsVersion: 1, timeZone: "UTC", token: rematch!.inviteToken!, type: "join" });
+    expect(relationshipOf(await readGame(rematch!.id, leo), 1)).toBe("my partner");
+  });
+
   it("addresses a rematch to the previous opponent, on their Home and nobody else's", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");

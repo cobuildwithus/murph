@@ -475,6 +475,7 @@ function viewFor(viewerId: string, entries: RuleEntry[]): GameView {
     invitee: null,
     names: new Map([[LEO, "Leo"], [AVA, "Ava"]]),
     now: NOW,
+    relationships: new Map(),
     result: null,
     round: 1,
     startedAt: new Date("2026-10-16T12:00:00.000Z"),

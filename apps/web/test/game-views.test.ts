@@ -72,6 +72,7 @@ function view(state: RuleState, viewerId: string, now: Date, overrides: Partial<
     inviteToken: null,
     names: new Map([[LEO, "Leo"], [AVA, "Ava"]]),
     now,
+    relationships: new Map(),
     result: null,
     round: 1,
     startedAt: JOIN_AT,
@@ -191,12 +192,18 @@ describe("weekly game views: post to unlock", () => {
   it("shows the invitee placeholder and invite token only to the challenger while invited", () => {
     const base = liveState();
     const invited: RuleState = { ...base, game: { ...base.game, status: "invited" }, players: [{ ...base.players[0], dayOne: null }] };
-    const leoView = view(invited, LEO, JOIN_AT, { invitee: { memberId: null, name: "Ava", photoKey: null }, inviteToken: "tok_123" });
+    const leoView = view(invited, LEO, JOIN_AT, { invitee: { memberId: null, name: "Ava", photoKey: null, relationship: null }, inviteToken: "tok_123" });
     expect(leoView.players.map((player) => [player.memberId, player.firstName])).toEqual([[LEO, "Leo"], [null, "Ava"]]);
     expect(leoView.inviteToken).toBe("tok_123");
     expect(leoView.days).toEqual([]);
     expect(leoView.startsOn).toBeNull();
     const picked: RuleState = { ...invited, game: { ...invited.game, startsOn: "2026-10-19" } };
-    expect(view(picked, LEO, JOIN_AT, { invitee: { memberId: null, name: "Ava", photoKey: null } }).startsOn).toBe("2026-10-19");
+    expect(view(picked, LEO, JOIN_AT, { invitee: { memberId: null, name: "Ava", photoKey: null, relationship: null } }).startsOn).toBe("2026-10-19");
+  });
+
+  it("shows the viewer's own typed relationship for others, never for themselves", () => {
+    const relationships = new Map([[AVA, "my partner"], [LEO, "should never show"]]);
+    expect(view(liveState(), LEO, JOIN_AT, { relationships }).players.map((player) => player.relationship)).toEqual([null, "my partner"]);
+    expect(view(liveState(), AVA, JOIN_AT).players.map((player) => player.relationship)).toEqual([null, null]);
   });
 });

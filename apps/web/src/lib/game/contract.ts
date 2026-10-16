@@ -135,6 +135,12 @@ export interface GamePlayerView {
   firstName: string;
   /** The photo the viewer attached when they invited this person; only they see it. */
   avatarUrl: string | null;
+  /**
+   * The relationship the viewer typed when they invited this person ("my
+   * partner"); only they see it. Null for yourself and anyone you haven't
+   * labelled.
+   */
+  relationship: string | null;
   isMe: boolean;
   /** This player's current 0-based day, or null before Day 1 / after the end. */
   dayIndex: number | null;

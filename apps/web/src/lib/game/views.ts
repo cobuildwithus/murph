@@ -61,11 +61,13 @@ export interface GameViewInput {
   names: ReadonlyMap<string, string>;
   /** Per member: the photo the viewer attached when they invited them, if any. */
   avatarKeys: ReadonlyMap<string, string | null>;
+  /** Per member: the relationship the viewer typed for them, if any. */
+  relationships: ReadonlyMap<string, string | null>;
   /**
    * The invitee while nobody has joined: the challenger's own words for them,
    * or, for an addressed rematch's invitee, their own name.
    */
-  invitee: { memberId: string | null; name: string; photoKey: string | null } | null;
+  invitee: { memberId: string | null; name: string; photoKey: string | null; relationship: string | null } | null;
   inviteToken: string | null;
   inviteExpiresAt: Date | null;
   /** Decrypted words for the entries `visibleEntryIds` allowed. */
@@ -178,12 +180,14 @@ function playerView(input: GameViewInput, player: RulePlayer): GamePlayerView {
   const started = today !== null && today >= 0;
   const resultScore = input.result?.scores.find((score) => score.memberId === player.memberId)?.score;
   const avatarKey = input.avatarKeys.get(player.memberId) ?? null;
+  const isMe = player.memberId === input.viewerId;
   return {
     avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null,
     dayIndex: started && today < game.lengthDays ? today : null,
     firstName: input.names.get(player.memberId) ?? "",
-    isMe: player.memberId === input.viewerId,
+    isMe,
     memberId: player.memberId,
+    relationship: isMe ? null : input.relationships.get(player.memberId) ?? null,
     score: resultScore ?? (started ? scorePlayer(input.state, player, today).score : 0),
     seat: player.seat,
   };
@@ -197,6 +201,7 @@ function inviteeView(invitee: NonNullable<GameViewInput["invitee"]>, seat: numbe
     firstName: invitee.name,
     isMe: invitee.memberId === viewerId,
     memberId: invitee.memberId,
+    relationship: invitee.memberId === viewerId ? null : invitee.relationship,
     score: 0,
     seat,
   };

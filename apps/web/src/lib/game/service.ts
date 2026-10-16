@@ -849,9 +849,11 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
   if (games.length === 0) return [];
   const prisma = getPrisma();
   const memberIds = [...new Set([viewerId, ...games.flatMap((game) => game.row.players.map((player) => player.memberId))])];
+  // An addressed rematch's invitee isn't a player yet, but the challenger's label for them still applies.
+  const labelSubjects = [...memberIds, ...games.flatMap((game) => (game.row.inviteeMemberId ? [game.row.inviteeMemberId] : []))];
   const [profiles, labels, tickets] = await Promise.all([
     prisma.gameProfile.findMany({ where: { memberId: { in: memberIds } } }),
-    prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: memberIds } } }),
+    prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: labelSubjects } } }),
     prisma.gameTicket.findMany({
       where: { gameId: { in: games.map((game) => game.row.id) }, OR: [{ owedTo: viewerId }, { owedBy: viewerId }] },
     }),
@@ -869,16 +871,26 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
     ask({ field: "first_name", memberId: profile.memberId, rowId: profile.memberId, table: "game_profile" }, profile.firstNameEncrypted),
   ]));
   const labelNameAt = new Map(labels.map((label) => [label.subjectMemberId, ask(labelTarget(viewerId, "name"), label.nameEncrypted)]));
+  const labelRelationshipAt = new Map(labels.map((label) => [
+    label.subjectMemberId,
+    ask(labelTarget(viewerId, "relationship"), label.relationshipEncrypted),
+  ]));
   const inviteAt = games.map((game) => {
     const { row } = game;
     if (row.status !== "invited") return null;
     const token = () => ask(gameTarget(row, "invite_token"), row.inviteTokenEncrypted);
     if (row.createdBy === viewerId) {
       const pending = parsePendingLabel(row.pendingLabel);
-      return { memberId: row.inviteeMemberId, name: ask(labelTarget(viewerId, "name"), pending.nameEncrypted), photoKey: pending.photoKey, token: token() };
+      return {
+        memberId: row.inviteeMemberId,
+        name: ask(labelTarget(viewerId, "name"), pending.nameEncrypted),
+        photoKey: pending.photoKey,
+        relationship: ask(labelTarget(viewerId, "relationship"), pending.relationshipEncrypted),
+        token: token(),
+      };
     }
     // The addressed invitee sees themselves by their own name, never the challenger's private label.
-    if (row.inviteeMemberId === viewerId) return { memberId: viewerId, name: null, photoKey: null, token: token() };
+    if (row.inviteeMemberId === viewerId) return { memberId: viewerId, name: null, photoKey: null, relationship: null, token: token() };
     return null;
   });
   const textAt = new Map<string, number>();
@@ -897,8 +909,14 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
     const labelName = profile.memberId !== viewerId && labelIndex !== undefined ? plain[labelIndex] : null;
     names.set(profile.memberId, labelName ?? plain[profileNameAt.get(profile.memberId)!] ?? "");
   }
-  // Only the viewer's own invite photos: nobody else ever sees them.
+  // Only the viewer's own invite photos and relationships: nobody else ever sees them.
   const avatarKeys = new Map(labels.map((label) => [label.subjectMemberId, label.photoKey]));
+  const relationships = new Map([...labelRelationshipAt].map(([memberId, at]) => [memberId, plain[at]]));
+  /** The invite's own typed relationship, else the viewer's existing label for an addressed rematch. */
+  const inviteeRelationship = (invite: NonNullable<(typeof inviteAt)[number]>) => {
+    const typed = invite.relationship === null ? null : plain[invite.relationship];
+    return typed ?? (invite.memberId ? relationships.get(invite.memberId) ?? null : null);
+  };
   const entryWords = new Map([...textAt].map(([entryId, at]) => [entryId, { text: plain[at] }]));
   return games.map((game, index) => {
     const invite = inviteAt[index];
@@ -909,9 +927,15 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
       inviteExpiresAt: game.row.inviteExpiresAt,
       inviteToken: invite ? plain[invite.token] : null,
       invitee: invite
-        ? { memberId: invite.memberId, name: (invite.name === null ? names.get(viewerId) : plain[invite.name]) ?? "", photoKey: invite.photoKey }
+        ? {
+          memberId: invite.memberId,
+          name: (invite.name === null ? names.get(viewerId) : plain[invite.name]) ?? "",
+          photoKey: invite.photoKey,
+          relationship: inviteeRelationship(invite),
+        }
         : null,
       names,
+      relationships,
       now: gameNow(clock, game.row),
       result,
       round: game.row.round,
