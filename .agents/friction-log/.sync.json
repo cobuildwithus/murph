@@ -1887,6 +1887,10 @@
     {
       "issue": "cobuildwithus/murph#4137",
       "path": ".agents/friction-log/20261012103953-opt-in-live/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4144",
+      "path": ".agents/friction-log/20261013121801-hosted-mode-real/friction.md"
     }
   ],
   "version": 1
