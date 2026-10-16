@@ -1,6 +1,7 @@
 ---
 title: 'Components catalog overflows the phone viewport outside scoped design proof'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4157'
 ---
 
 ## Expected Behavior
