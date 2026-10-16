@@ -250,7 +250,7 @@ source digests unchanged since the authored patch), executed and passed:
   - Both manifests have 336 commands with no leaf metadata difference. The CLI
     contract is the same 6,531 bytes, and head source equals the built dist.
   - Direct: 186,160 to 186,218 bytes (+58, +0.031%), only the CLI-route write
-    sentence. Group: 155,434 unchanged. Group with research available:
+    sentence. Group: 155,434 unchanged. Second group fixture:
     164,448 unchanged.
   - Registered tool payloads compare equal. Incidental UUIDs, paths, and
     timestamps are normalized; `prompt_cache_key` is the explicit transport
