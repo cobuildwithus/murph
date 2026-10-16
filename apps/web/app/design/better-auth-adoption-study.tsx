@@ -1,13 +1,17 @@
 "use client";
 
-import { useState } from "react";
-import { HostedLoginMethodDialog } from "@/src/components/settings/hosted-login-method-dialog";
-import type { HostedCredentialChange } from "@/src/lib/better-auth/credential-change";
-import { JoinInviteMessagingSetupIsland } from "@/src/components/hosted-onboarding/join-invite-islands";
-import { HostedAuthCompletionStatus, HostedFirstPartyAuthPanel } from "@/src/components/hosted-onboarding/hosted-first-party-auth-panel";
+import { Phone } from "lucide-react";
+import { EmailIcon } from "@/src/components/homepage/email-icon";
+import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
+import { HostedAuthEntryLayout } from "@/src/components/hosted-onboarding/hosted-auth-entry-layout";
+import { HostedContactChannelChoice } from "@/src/components/hosted-onboarding/hosted-contact-channel-choice";
+import { HostedContactCodeForm } from "@/src/components/hosted-onboarding/hosted-contact-code-form";
+import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
+import { HostedAuthCompletionStatus } from "@/src/components/hosted-onboarding/hosted-first-party-auth-panel";
 import { HostedLoginMethodSettingsView } from "@/src/components/settings/hosted-login-method-settings";
 import { HostedSignupReferralLinkButtonView } from "@/src/components/settings/hosted-signup-referral-link-button";
-import { HostedApprovalRecoverySettings } from "@/src/components/settings/hosted-approval-recovery-settings";
+import { ApprovalPasskeyStatus } from "@/src/components/settings/approval-passkey-status";
+import { Button } from "@/src/components/ui/button";
 import { InitialPasskeySetupView } from "@/src/components/settings/hosted-passkey-settings";
 import { HostedVerificationCodeStep } from "@/src/components/hosted-onboarding/hosted-verification-code-step";
 
@@ -18,20 +22,35 @@ const emailPreview = exampleEmail.attachments.reduce((html, attachment) => html.
 
 const verifiedAt = "2026-09-09T12:00:00Z";
 
+const ignoreAction = () => undefined;
+const ignoreProof = async () => undefined;
+
+function AuthEntryPreview({ method }: { method: "phone" | "email" }) {
+  return <div className="flex flex-col gap-4">
+    <HostedAuthEntryLayout showPassiveLegalNotice alternatives={<>
+      <HostedInlineAuthButton onClick={ignoreAction} icon={<TelegramIcon className="h-5 w-5" />}>Telegram</HostedInlineAuthButton>
+      <HostedInlineAuthButton onClick={ignoreAction} icon={method === "phone" ? <EmailIcon className="h-5 w-5" /> : <Phone aria-hidden="true" className="h-5 w-5" />}>
+        {method === "phone" ? "Email" : "Phone"}
+      </HostedInlineAuthButton>
+    </>}>
+      <HostedContactCodeForm method={method} onSend={ignoreProof} onVerify={ignoreProof} />
+    </HostedAuthEntryLayout>
+  </div>;
+}
+
 export function BetterAuthAdoptionStudy() {
-  const [selection, setSelection] = useState<Pick<HostedCredentialChange, "method" | "operation"> | null>(null);
   return <div id="better-auth-adoption" data-design-component="better-auth-adoption" className="grid items-start gap-6 lg:grid-cols-2" inert>
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="phone">
       <h3 className="mb-4 font-serif text-xl">Log in or sign up</h3>
-      <HostedFirstPartyAuthPanel methods={["phone", "email", "telegram"]} showPassiveLegalNotice />
+      <AuthEntryPreview method="phone" />
     </div>
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="email">
       <h3 className="mb-4 font-serif text-xl">Log in or sign up</h3>
-      <HostedFirstPartyAuthPanel methods={["email", "phone", "telegram"]} showPassiveLegalNotice />
+      <AuthEntryPreview method="email" />
     </div>
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="connections">
       <h3 className="mb-4 font-serif text-xl">Connected accounts</h3>
-      <HostedLoginMethodSettingsView onSelect={setSelection}
+      <HostedLoginMethodSettingsView onSelect={ignoreAction}
         referralAction={<HostedSignupReferralLinkButtonView status="ready" onAction={() => undefined} />}
         account={{
         email: { address: "member@example.test", verifiedAt },
@@ -41,7 +60,7 @@ export function BetterAuthAdoptionStudy() {
     </div>
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="unconnected">
       <h3 className="mb-4 font-serif text-xl">Connected accounts</h3>
-      <HostedLoginMethodSettingsView onSelect={setSelection}
+      <HostedLoginMethodSettingsView onSelect={ignoreAction}
         referralAction={<HostedSignupReferralLinkButtonView status="ready" onAction={() => undefined} />}
         account={{ email: { address: null, verifiedAt: null }, phone: { number: null, verifiedAt: null }, telegram: { telegramUserId: null } }} />
     </div>
@@ -61,15 +80,17 @@ export function BetterAuthAdoptionStudy() {
     </div>
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="messaging">
       <h3 className="mb-4 font-serif text-xl">How should Murph reach you?</h3>
-      <JoinInviteMessagingSetupIsland />
+      <HostedContactChannelChoice
+        phone={<HostedContactCodeForm method="phone" onSend={ignoreProof} onVerify={ignoreProof} />}
+        telegram={<HostedInlineAuthButton onClick={ignoreAction} icon={<TelegramIcon className="h-5 w-5" />}>Connect Telegram</HostedInlineAuthButton>}
+      />
     </div>
     <div className="overflow-hidden rounded-2xl border border-border" data-auth-study="code-email">
       <iframe title="Sign-in code email" srcDoc={emailPreview} sandbox="" className="h-[650px] w-full border-0" />
     </div>
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="recovery">
       <h3 className="mb-4 font-serif text-xl">Security</h3>
-      <HostedApprovalRecoverySettings enabled />
+      <ApprovalPasskeyStatus action={<Button type="button" size="sm" variant="ghost" onClick={ignoreAction}>Recovery key</Button>} />
     </div>
-    {selection ? <HostedLoginMethodDialog {...selection} onOpenChange={(open) => { if (!open) setSelection(null); }} /> : null}
   </div>;
 }
