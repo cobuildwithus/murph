@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-16",
+  "order": 100,
+  "item": {
+    "id": "device-sync-validation-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Pending ECG and blood oxygen imports ride out brief connection errors",
+    "summary": "When an ECG or blood oxygen import is still waiting for complete data from your connected device, a temporary error from the device service no longer ends its retries right away.",
+    "details": "These pending imports keep a limited number of further tries. Murph still imports the data only after it passes the same completeness and source checks as before.",
+    "relevanceTags": ["wearables", "reliability", "sync"],
+    "sourcePullRequests": []
+  }
+}

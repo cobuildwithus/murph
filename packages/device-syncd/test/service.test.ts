@@ -5770,6 +5770,182 @@ test.each(["blood_oxygen", "electrocardiogram_voltage"])(
   },
 );
 
+test.each([
+  ["blood_oxygen", "warm"],
+  ["blood_oxygen", "cold"],
+  ["electrocardiogram_voltage", "warm"],
+  ["electrocardiogram_voltage", "cold"],
+] as const)(
+  "Junction %s validation keeps a bounded transport retry across %s restart",
+  async (resource, restart) => {
+    const vaultRoot = await makeTempDirectory("murph-junction-validation-transport-retry");
+    let now = new Date("2026-04-03T12:00:00.000Z");
+    let stateDatabaseName = "state.sqlite";
+    let outcome: "validation" | "transport" | "valid" = "validation";
+    const createFixture = () => createServiceFixture({
+      secret: "secret-for-tests",
+      clock: { now: () => now },
+      config: { vaultRoot, publicBaseUrl: "https://sync.example.test",
+        stateDatabasePath: path.join(vaultRoot, stateDatabaseName) },
+      providers: [createFakeProvider({
+        provider: "junction",
+        descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+        async executeJob() {
+          if (outcome === "valid") return {};
+          if (outcome === "transport") {
+            throw deviceSyncError({ code: "JUNCTION_API_REQUEST_FAILED",
+              message: "Synthetic Junction request failure.", retryable: true, httpStatus: 500 });
+          }
+          if (resource === "blood_oxygen") {
+            throw new JunctionSparseCalendarRepairNormalizationError({
+              reason: "daily.value_out_of_range", valueKind: "number",
+              valueRange: "negative", unitKind: "percent",
+            });
+          }
+          throw deviceSyncError({
+            code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+            message: "Synthetic incomplete ECG collection.", retryable: true,
+            details: { reason: "voltage_collection_empty", pageCount: 1, groupCount: 0,
+              providerMatchGroupCount: 0, instanceMatchGroupCount: 0, matchedGroupCount: 0 },
+          });
+        },
+      })],
+    });
+    let fixture = createFixture();
+    const upsertAccount = () => fixture.store.upsertAccount({
+      provider: "junction", externalAccountId: "junction-validation-transport-retry",
+      displayName: "Junction", scopes: [], status: "active",
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: "2026-04-03T12:00:00.000Z",
+    });
+    const enqueue = (accountId: string, maxAttempts: number) => fixture.store.enqueueJob({
+      accountId, provider: "junction", kind: "resource", maxAttempts,
+      availableAt: now.toISOString(), dedupeKey: "validation-transport-resource-day",
+      payload: { resource, resourceCategory: "timeseries", sourceProviderSlug: "withings",
+        windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" },
+    });
+    try {
+      let account = upsertAccount();
+      let job = enqueue(account.id, 1);
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        assert.equal((await fixture.service.runWorkerOnce())?.id, job.id);
+        const retained = fixture.store.getJobById(job.id);
+        assert.ok(retained);
+        assert.equal(retained.status, "queued");
+        now = new Date(retained.availableAt);
+      }
+      const pastAllowance = fixture.store.getJobById(job.id);
+      assert.ok(pastAllowance);
+      assert.equal(pastAllowance.attempts, 3);
+      // Hosted cold handoff carries remaining attempts as maxAttempts and
+      // rehydrates the job with zero attempts in fresh local state.
+      const remainingAttempts = Math.max(1, pastAllowance.maxAttempts - pastAllowance.attempts);
+      fixture.close();
+      if (restart === "cold") stateDatabaseName = "cold-state.sqlite";
+      fixture = createFixture();
+      if (restart === "cold") {
+        account = upsertAccount();
+        job = enqueue(account.id, remainingAttempts);
+      }
+
+      outcome = "transport";
+      assert.equal((await fixture.service.runWorkerOnce())?.id, job.id);
+      const afterTransport = fixture.store.getJobById(job.id);
+      assert.ok(afterTransport);
+      assert.equal(afterTransport.status, "queued");
+      assert.equal(afterTransport.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(remainingAttempts, 5);
+      assert.equal(afterTransport.maxAttempts - afterTransport.attempts, 4);
+
+      outcome = "valid";
+      now = new Date(afterTransport.availableAt);
+      assert.equal((await fixture.service.runWorkerOnce())?.id, job.id);
+      assert.equal(fixture.store.getJobById(job.id)?.status, "succeeded");
+      assert.equal(fixture.store.getAccountById(account.id)?.lastErrorCode, null);
+    } finally {
+      fixture.close();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test("Junction validation transport retries stay bounded beside terminal and ordinary failures", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-validation-transport-bounds");
+  let now = new Date("2026-04-03T12:00:00.000Z");
+  let outcome: "validation" | "transport" | "fatal" = "validation";
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: { vaultRoot, publicBaseUrl: "https://sync.example.test",
+      stateDatabasePath: path.join(vaultRoot, "state.sqlite") },
+    providers: [createFakeProvider({
+      provider: "junction",
+      descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+      async executeJob(_context, job) {
+        if (job.payload.resource === "heartrate" || outcome === "transport") {
+          throw deviceSyncError({ code: "JUNCTION_API_REQUEST_FAILED",
+            message: "Synthetic Junction request failure.", retryable: true, httpStatus: 500 });
+        }
+        if (outcome === "fatal") {
+          throw deviceSyncError({ code: "SYNTHETIC_NONRETRYABLE_FAILURE",
+            message: "Synthetic nonretryable failure.", retryable: false, httpStatus: 400 });
+        }
+        throw deviceSyncError({
+          code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+          message: "Synthetic incomplete ECG collection.", retryable: true,
+          details: { reason: "voltage_collection_empty", pageCount: 1, groupCount: 0,
+            providerMatchGroupCount: 0, instanceMatchGroupCount: 0, matchedGroupCount: 0 },
+        });
+      },
+    })],
+  });
+  try {
+    const account = store.upsertAccount({
+      provider: "junction", externalAccountId: "junction-validation-transport-bounds",
+      displayName: "Junction", scopes: [], status: "active",
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: now.toISOString(),
+    });
+    const enqueue = (resource: string, dedupeKey: string) => store.enqueueJob({
+      accountId: account.id, provider: "junction", kind: "resource", maxAttempts: 1,
+      availableAt: now.toISOString(), dedupeKey,
+      payload: { resource, resourceCategory: "timeseries", sourceProviderSlug: "withings",
+        windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" },
+    });
+    const runStatus = async (jobId: string) => {
+      assert.equal((await service.runWorkerOnce())?.id, jobId);
+      const stored = store.getJobById(jobId);
+      assert.ok(stored);
+      now = new Date(Math.max(now.getTime(), Date.parse(stored.availableAt)));
+      return stored.status;
+    };
+
+    const ordinary = enqueue("heartrate", "ordinary-resource-day");
+    assert.equal(await runStatus(ordinary.id), "dead");
+
+    const repeated = enqueue("electrocardiogram_voltage", "validation-repeated-transport");
+    assert.equal(await runStatus(repeated.id), "queued");
+    outcome = "transport";
+    const transportStatuses: string[] = [];
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      transportStatuses.push(await runStatus(repeated.id));
+    }
+    assert.deepEqual(transportStatuses, ["queued", "queued", "queued", "queued", "dead"]);
+    assert.equal(store.getJobById(repeated.id)?.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+    assert.equal(await service.runWorkerOnce(), null);
+
+    outcome = "validation";
+    const terminal = enqueue("electrocardiogram_voltage", "validation-then-nonretryable");
+    assert.equal(await runStatus(terminal.id), "queued");
+    outcome = "fatal";
+    assert.equal(await runStatus(terminal.id), "dead");
+    assert.equal(store.getJobById(terminal.id)?.lastErrorCode, "SYNTHETIC_NONRETRYABLE_FAILURE");
+  } finally {
+    close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("device sync service retains one accepted sparse calendar job until canonical import succeeds", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-calendar-retained-import");
   let now = new Date("2026-07-10T13:46:00.000Z");

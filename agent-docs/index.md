@@ -40,6 +40,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Retained Junction validation jobs keep a bounded transport retry budget in the existing job store;
+[`RELIABILITY.md`](RELIABILITY.md) owns the retry and cold-handoff contract.
+
 Typing egress and mailbox runtime timing correlation is owned by
 [`Cloudflare private telemetry`](../apps/cloudflare/README.md#private-operational-telemetry);
 implementation evidence is tracked in
