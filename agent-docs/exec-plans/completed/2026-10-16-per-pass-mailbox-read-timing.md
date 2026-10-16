@@ -1,6 +1,6 @@
 # Time each import pass's conversation mailbox read
 
-Status: active
+Status: completed
 Created: 2026-10-16
 Updated: 2026-10-16
 
@@ -57,3 +57,4 @@ Updated: 2026-10-16
   preparation, invocation, entrypoint, mailbox import, and fetch-transport log
   tests; `pnpm complexity:diff`; `runner:bundle`.
 - Expected outcomes: all pass, and the invocation-first fields are unchanged.
+Completed: 2026-10-16
