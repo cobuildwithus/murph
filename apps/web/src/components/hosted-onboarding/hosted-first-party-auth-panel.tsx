@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { SettingsStatusLine } from "@/src/components/settings/connected-account-card";
 import { Phone } from "lucide-react";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 import { Button } from "@/src/components/ui/button";
@@ -13,7 +12,7 @@ import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/s
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { requestHostedOnboardingJson } from "./client-api";
 import { declineHostedLaunchConsent, logoutHostedAppSession, verifyHostedAppSession } from "./hosted-app-session-client";
-import { HostedAuthLegalNotice } from "./hosted-auth-shared";
+import { HostedAuthEntryLayout } from "./hosted-auth-entry-layout";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedContactCodeForm } from "./hosted-contact-code-form";
 import { HostedTelegramProofButton } from "./hosted-telegram-proof-button";
@@ -135,7 +134,21 @@ export function HostedFirstPartyAuthPanel({
       onAccepted={() => complete()} onDecline={() => void endSession(true)}
       onRequirementChange={(required) => { if (!required) void complete(); }}
       preferredScope="launch.legal" source="homepage-auth-dialog"
-    /> : step !== "entry" ? <HostedAuthCompletion completing={step === "completing"} pending={pending} onContinue={() => void complete()} onSignOut={() => void endSession(false)} /> : <>
+    /> : step !== "entry" ? <HostedAuthCompletion completing={step === "completing"} pending={pending} onContinue={() => void complete()} onSignOut={() => void endSession(false)} /> : <HostedAuthEntryLayout showPassiveLegalNotice={showPassiveLegalNotice} alternativeError={telegramError}
+      alternatives={!active && methods.some((entry) => entry !== method) ? (
+        (["telegram", "phone", "email"] as const).filter((entry) => methods.includes(entry) && entry !== method).map((entry) => entry === "telegram" ? <HostedTelegramProofButton
+            key={entry} purpose={request.purpose} label="Telegram" onErrorChange={setTelegramError}
+            onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)}
+          /> : <HostedInlineAuthButton
+            key={entry}
+            onClick={() => { setMethod(entry); setError(null); }}
+            icon={entry === "phone" ? <Phone aria-hidden="true" className="h-5 w-5" />
+              : <EmailIcon className="h-5 w-5" />}
+          >
+            {entry === "phone" ? "Phone" : "Email"}
+          </HostedInlineAuthButton>)
+      ) : null}
+    >
       {method === "telegram" ? <HostedTelegramProofButton key="telegram" purpose={request.purpose}
         onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)} />
         : <HostedContactCodeForm key={method} method={method} size={size} autoFocus={method === "email" || phoneInputAutoFocus}
@@ -147,29 +160,7 @@ export function HostedFirstPartyAuthPanel({
           }}
           onVerify={(value, code, signal) => verify("/api/auth/otp/verify", { kind: method, value, code }, signal)}
         />}
-      {!active && methods.some((entry) => entry !== method) ? <>
-        <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-          <span className="h-px flex-1 bg-border" />
-          OR
-          <span className="h-px flex-1 bg-border" />
-        </div>
-        <SettingsStatusLine message={telegramError} tone="destructive" className="empty:hidden" />
-        <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
-          {(["telegram", "phone", "email"] as const).filter((entry) => methods.includes(entry) && entry !== method).map((entry) => entry === "telegram" ? <HostedTelegramProofButton
-            key={entry} purpose={request.purpose} label="Telegram" onErrorChange={setTelegramError}
-            onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)}
-          /> : <HostedInlineAuthButton
-            key={entry}
-            onClick={() => { setMethod(entry); setError(null); }}
-            icon={entry === "phone" ? <Phone aria-hidden="true" className="h-5 w-5" />
-              : <EmailIcon className="h-5 w-5" />}
-          >
-            {entry === "phone" ? "Phone" : "Email"}
-          </HostedInlineAuthButton>)}
-        </div>
-      </> : null}
-      {showPassiveLegalNotice ? <HostedAuthLegalNotice /> : null}
-    </>}
+    </HostedAuthEntryLayout>}
     {error ? <Alert variant="destructive"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
   </div>;
 }
