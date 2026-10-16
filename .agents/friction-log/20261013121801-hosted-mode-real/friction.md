@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-mode real-Codex journeys diverge from production Codex config and sandbox'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4144'
 ---
 
 ## Expected Behavior
