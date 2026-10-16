@@ -446,6 +446,7 @@ export {
 } from "./knowledge-model.ts";
 export {
   KNOWLEDGE_READ_RECOVERY_ACTION,
+  knowledgeAbsentPageResultSchema,
   knowledgeGetResultSchema,
   knowledgeGraphSearchHitSchema,
   knowledgeGraphSearchResultSchema,
@@ -462,9 +463,11 @@ export {
   knowledgeReadIssueCodeSchema,
   knowledgeSearchHitSchema,
   knowledgeSearchResultSchema,
+  knowledgeShowResultSchema,
   knowledgeUpsertResultSchema,
 } from "./knowledge-contracts.ts";
 export type {
+  KnowledgeAbsentPageResult,
   KnowledgeGetResult,
   KnowledgeGraphSearchHit,
   KnowledgeGraphSearchResult,

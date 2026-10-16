@@ -6,6 +6,7 @@ import {
 import {
   appendKnowledgePageSection,
   getKnowledgePage,
+  getKnowledgePageIfExists,
   lintKnowledgePages,
   listKnowledgePages,
   rebuildKnowledgeIndex,
@@ -18,12 +19,12 @@ import {
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
-  knowledgeGetResultSchema as knowledgeShowResultSchema,
   knowledgeIndexRebuildResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
   knowledgeLogTailResultSchema,
   knowledgeSearchResultSchema,
+  knowledgeShowResultSchema,
   knowledgeUpsertResultSchema,
 } from '@murphai/query'
 import {
@@ -223,13 +224,21 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
     args: z.object({
       slug: slugSchema.describe('Knowledge page slug to inspect.'),
     }),
-    options: withBaseOptions(),
+    options: withBaseOptions({
+      ifExists: z
+        .boolean()
+        .optional()
+        .describe('For an optional page, return `page: null` instead of failing when no derived page exists for the slug. Fails instead when any invalid page leaves absence unconfirmed, and for unreadable, duplicate, or reserved pages.'),
+    }),
     output: knowledgeShowResultSchema,
     run({ args, options }) {
-      return getKnowledgePage({
+      const input = {
         vault: options.vault,
         slug: args.slug,
-      })
+      }
+      return options.ifExists === true
+        ? getKnowledgePageIfExists(input)
+        : getKnowledgePage(input)
     },
   })
 

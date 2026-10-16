@@ -1,9 +1,12 @@
+import * as z from "@murphai/contracts/zod-runtime";
 import { describe, expect, it } from "vitest";
 
 import {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
   KNOWLEDGE_READ_RECOVERY_ACTION,
+  knowledgeAbsentPageResultSchema,
   knowledgeGetResultSchema,
+  knowledgeShowResultSchema,
   knowledgeGraphSearchResultSchema,
   knowledgeIndexRebuildResultSchema,
   knowledgeListResultSchema,
@@ -175,5 +178,30 @@ describe("knowledge contracts", () => {
         vault: "/vault",
       }).problems[0]?.severity,
     ).toBe("warning");
+  });
+
+  it("keeps the show union exact while declaring its object root for MCP output", () => {
+    const strictSchema = z.toJSONSchema(knowledgeGetResultSchema);
+    const showSchema = z.toJSONSchema(knowledgeShowResultSchema);
+    expect(strictSchema.type).toBe("object");
+    expect(showSchema.type).toBe("object");
+    expect(showSchema.anyOf).toEqual([
+      strictSchema,
+      z.toJSONSchema(knowledgeAbsentPageResultSchema),
+    ].map(({ $schema: _schema, ...branch }) => branch));
+
+    const absent = { degradation: null, page: null, slug: "example", vault: "/vault" };
+    expect(knowledgeShowResultSchema.parse(absent)).toEqual(absent);
+    for (const invalid of [
+      {
+        ...absent,
+        degradation: { issueCodes: ["parse_frontmatter"], issueCount: 1, recoveryAction: KNOWLEDGE_READ_RECOVERY_ACTION },
+      },
+      { degradation: null, page: null, vault: "/vault" },
+      { ...absent, slug: "Invalid Slug" },
+    ]) {
+      expect(knowledgeShowResultSchema.safeParse(invalid).success).toBe(false);
+    }
+    expect(knowledgeGetResultSchema.safeParse(absent).success).toBe(false);
   });
 });
