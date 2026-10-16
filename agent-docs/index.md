@@ -1237,5 +1237,6 @@ Control response MIME diagnostics: [`2026-10-13-control-response-mime-diagnostic
 Provider-input baseline snapshot repair and regression proof are tracked in
 [the measurement plan](exec-plans/active/2026-10-16-frog-input-measurement-4136.md).
 
-Consumer-first optional knowledge reads and CLI wiki write guidance are tracked in
-[the knowledge optional-read plan](exec-plans/active/2026-10-16-knowledge-optional-read-and-write-guidance.md).
+Consumer-first optional knowledge reads and CLI wiki write guidance
+implementation and compatibility evidence are recorded in
+[the knowledge optional-read plan](exec-plans/completed/2026-10-16-knowledge-optional-read-and-write-guidance.md).

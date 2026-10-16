@@ -313,7 +313,7 @@ describe('onboarding first personal read', () => {
       'Return skip unless the scheduled occurrence context and current route are for one private member conversation.',
       'Return skip if the member asked not to receive this read, requested no follow-up, or otherwise revoked this proactive outreach.',
       'A generic closing invitation such as `anything else?` is not an unresolved task',
-      'return skip if the page itself is malformed or unreadable',
+      'Treat `page: null` as no prior personal insights, but return skip if the read fails.',
       'use its compact `claim:`, `evidence:`, `uncertainty:`, and canonical source paths only as the same occurrence\'s semantic candidate',
       'revalidate the candidate against current canonical sources',
       'redo the bounded evidence pass from canonical sources instead of treating transport formatting as a terminal skip',
