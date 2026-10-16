@@ -2834,6 +2834,9 @@ model Game {
   // The challenger's picked Day 1; Day 1 is the day after accept, or this if later.
   startsOn             DateTime?    @map("starts_on") @db.Date
   startedAt            DateTime?    @map("started_at")
+  // Dev time travel only: added to the database clock for this game. Null (no
+  // shift) everywhere else; production never writes it.
+  devClockOffsetMs     BigInt?      @map("dev_clock_offset_ms")
   result               Json?
   settledAt            DateTime?    @map("settled_at")
   createdAt            DateTime     @default(now()) @map("created_at")

@@ -10,6 +10,7 @@ import {
   decideSettle,
   decideStartNow,
   decideWithdraw,
+  dayIndexAt,
   GameRuleError,
   isGameDue,
   isScheduledDay,
@@ -471,17 +472,28 @@ describe("weekly game: schedules and scoring", () => {
 });
 
 describe("weekly game: dev time travel and start now", () => {
-  it("moves Day 1 so today moves forward, and starts today (over any picked date) only before anyone has", () => {
+  it("starts today (over any picked date) only before anyone has", () => {
     const state = live();
     const started = decideStartNow({ ...state, game: { ...state.game, startsOn: "2026-10-25" } }, JOIN_AT);
     expect(dayOneOf(started, LEO)).toBe("2026-10-16");
     expect(dayOneOf(started, AVA)).toBe("2026-10-17");
     const begun = { ...state, players: state.players.map((player) => ({ ...player, dayOne: dayOneOf(started, player.memberId) })) };
     expect(codeOf(() => decideStartNow(begun, JOIN_AT))).toBe("INVALID_REQUEST");
+  });
 
-    const advanced = decideDevAdvance(state, 2);
-    expect(dayOneOf(advanced, LEO)).toBe("2026-10-15");
-    expect(dayOneOf(advanced, AVA)).toBe("2026-10-16");
+  it("advances a live game's clock by whole days, 1 to 28, without touching its history", () => {
+    const state = live(invited({ days: [0, 1, 2, 3, 4] }), SYD, new Date("2026-10-16T00:00:00Z"));
+    expect(decideDevAdvance(state, 1)).toEqual({ addMs: 24 * 60 * 60 * 1000 });
+    expect(codeOf(() => decideDevAdvance(state, 28))).toBe("OK");
+    expect(codeOf(() => decideDevAdvance(state, 0))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => decideDevAdvance(state, 29))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => decideDevAdvance(invited(), 1))).toBe("GAME_NOT_LIVE");
+    // A Friday post stays on Friday's index; one day later "today" is Saturday, a day off.
+    const friday = post(state, LEO, at(state, LEO, 0, 9));
+    const saturday = new Date(at(state, LEO, 0, 9).getTime() + decideDevAdvance(state, 1).addMs);
+    expect(friday.entries[0].dayIndex).toBe(0);
+    expect(dayIndexAt(playerFor(friday, LEO)!, saturday)).toBe(1);
+    expect(isScheduledDay(friday, 1)).toBe(false);
   });
 });
 

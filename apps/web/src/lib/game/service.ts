@@ -40,6 +40,7 @@ import {
   parseTermWords,
   playerFor,
   reject,
+  settleDueAt,
   type RuleState,
   type Schedule,
   type StoredResult,
@@ -63,6 +64,7 @@ export type GameCommandResult =
   | { ok: false; error: GameError; status: number };
 
 const SYSTEM_ACTOR = "system";
+const DAY_MS = 24 * 60 * 60 * 1000;
 const HOME_CANDIDATE_LIMIT = 50;
 const HOME_SETTLED_SHOWN = 3;
 const HOME_EXPIRED_SHOWN = 3;
@@ -137,7 +139,10 @@ async function requireUploadedMedia(actor: string, command: GameCommand): Promis
 interface LockedStep {
   tx: Tx;
   loaded: LoadedGame;
+  /** The game's now, which decides days (moved by dev time travel). */
   now: Date;
+  /** The database clock, for the times rows record. */
+  clock: Date;
 }
 
 type GameEventType = "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted";
@@ -165,15 +170,23 @@ async function runLocked(
   await getPrisma().$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
     if (locked.length === 0) reject("GAME_NOT_FOUND", "Game not found.");
-    const now = context.now ?? await databaseNow(tx);
     const [loaded] = await loadGames(tx, [gameId]);
-    await writeEvents(tx, gameId, context.actor, await step({ loaded, now, tx }));
+    const clock = context.now ?? await databaseNow(tx);
+    await writeEvents(tx, gameId, context.actor, await step({ clock, loaded, now: gameNow(clock, loaded.row), tx }));
   });
 }
 
-async function databaseNow(tx: Tx): Promise<Date> {
-  const [row] = await tx.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;
+async function databaseNow(db: Db): Promise<Date> {
+  const [row] = await db.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;
   return row.now;
+}
+
+/**
+ * A game's "now": the database clock, moved by the game's dev time-travel
+ * offset when there is one. Production never sets it, so there it is the clock.
+ */
+function gameNow(clock: Date, row: Pick<Game, "devClockOffsetMs">): Date {
+  return row.devClockOffsetMs === null ? clock : new Date(clock.getTime() + Number(row.devClockOffsetMs));
 }
 
 async function seal(target: GameSealTarget, value: string): Promise<string> {
@@ -423,7 +436,7 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
     ? await seal({ field: "text", memberId: actor, rowId: entryId, table: "game_entry" }, command.text)
     : null;
   const captureAgeMs = command.captureAgeMs ?? null;
-  await runLocked(gameId, context, async ({ loaded, now, tx }) => {
+  await runLocked(gameId, context, async ({ clock, loaded, now, tx }) => {
     // A repeat of a post that already landed (a retry, or the same tap twice) changes nothing.
     const existing = await tx.gameEntry.findUnique({ select: { memberId: true }, where: { id: entryId } });
     if (existing) {
@@ -440,7 +453,7 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
     });
     if (decision.withdrawEntryId) {
       await tx.gameEntry.update({
-        data: { withdrawnAt: now, withdrawnReason: "retake" },
+        data: { withdrawnAt: clock, withdrawnReason: "retake" },
         where: { id: decision.withdrawEntryId },
       });
     }
@@ -454,7 +467,7 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
         kind,
         mediaKeys,
         memberId: actor,
-        receivedAt: now,
+        receivedAt: clock,
         textEncrypted,
       },
     });
@@ -466,10 +479,10 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
 
 async function withdraw(context: CommandContext, command: Extract<GameCommand, { type: "withdraw" }>): Promise<string> {
   const { entryId, gameId } = command;
-  await runLocked(gameId, context, async ({ loaded, now, tx }) => {
+  await runLocked(gameId, context, async ({ clock, loaded, now, tx }) => {
     const { withdraw: change } = decideWithdraw(loaded.state, { entryId, memberId: context.actor, now });
     if (!change) return [];
-    await tx.gameEntry.update({ data: { withdrawnAt: now, withdrawnReason: "withdrawn" }, where: { id: change.entryId } });
+    await tx.gameEntry.update({ data: { withdrawnAt: clock, withdrawnReason: "withdrawn" }, where: { id: change.entryId } });
     return [{ payload: change, type: "withdrew" }];
   });
   return gameId;
@@ -480,10 +493,10 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
   const { ticketId } = command;
   const ticket = await getPrisma().gameTicket.findUnique({ select: { gameId: true, owedTo: true }, where: { id: ticketId } });
   if (!ticket || ticket.owedTo !== actor) reject("TICKET_NOT_HELD", "That ticket isn't yours to cash in.");
-  await runLocked(ticket.gameId, context, async ({ now, tx }) => {
+  await runLocked(ticket.gameId, context, async ({ clock, tx }) => {
     // Already redeemed matches no row: a repeat, not an error.
     const changed = await tx.gameTicket.updateMany({
-      data: { redeemedAt: now, status: "redeemed" },
+      data: { redeemedAt: clock, status: "redeemed" },
       where: { id: ticketId, owedTo: actor, status: "open" },
     });
     return changed.count === 1 ? [{ payload: { ticketId }, type: "redeemed" }] : [];
@@ -494,18 +507,17 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
 // ------------------------------------------------------------------- settle
 
 /**
- * Ends one game if it's due (or `force`), deciding with the database clock
- * under the game lock: an unclaimed invite past its expiry becomes void; a
- * live game past its last day freezes its result and issues tickets.
+ * Ends one game if it's due, deciding with the game's clock under its lock:
+ * an unclaimed invite past its expiry becomes void; a live game past its last
+ * day freezes its result and issues tickets.
  */
-async function settleGame(gameId: string, options: { force?: boolean; actor?: string } = {}): Promise<void> {
+async function settleGame(gameId: string, actor = SYSTEM_ACTOR): Promise<void> {
   await getPrisma().$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
     if (locked.length === 0) return;
-    const now = await databaseNow(tx);
-    const [{ state }] = await loadGames(tx, [gameId]);
-    if (!options.force && !isGameDue(state, now)) return;
-    const actor = options.actor ?? SYSTEM_ACTOR;
+    const [{ row, state }] = await loadGames(tx, [gameId]);
+    const clock = await databaseNow(tx);
+    if (!isGameDue(state, gameNow(clock, row))) return;
     if (state.game.status === "invited") {
       await endGame(tx, gameId, { status: "void" });
       await writeEvents(tx, gameId, actor, [{ payload: {}, type: "expired" }]);
@@ -515,7 +527,7 @@ async function settleGame(gameId: string, options: { force?: boolean; actor?: st
     const decision = decideSettle(state);
     const tickets = decision.tickets.map((ticket) => ({ ...ticket, gameId, id: generateHostedRandomPrefixedId("gtk") }));
     await tx.gameTicket.createMany({ data: tickets });
-    await endGame(tx, gameId, { result: toPrismaJsonObject(decision.result), settledAt: now, status: "settled" });
+    await endGame(tx, gameId, { result: toPrismaJsonObject(decision.result), settledAt: clock, status: "settled" });
     const scores = decision.result.scores.map(({ score, seat }) => ({ score, seat }));
     await writeEvents(tx, gameId, actor, [{ payload: { scores, ticketIds: tickets.map((ticket) => ticket.id) }, type: "settled" }]);
   });
@@ -544,23 +556,28 @@ export async function devStartNow(gameId: string, memberId: string): Promise<Gam
   });
 }
 
-export async function devAdvanceDays(gameId: string, memberId: string, days: number): Promise<GameView> {
-  return runDevStep(gameId, memberId, async ({ loaded, tx }) => {
-    await writeSchedule(tx, gameId, decideDevAdvance(loaded.state, days));
-    if (loaded.row.startedAt) {
-      const startedAt = new Date(loaded.row.startedAt.getTime() - days * 24 * 60 * 60 * 1000);
-      await tx.game.update({ data: { startedAt }, where: { id: gameId } });
-    }
-    return [{ payload: { days }, type: "time_shifted" }];
-  });
+/** Moves only this game's clock; Day 1, posts and the start time keep their real dates. */
+async function shiftClock(tx: Tx, row: Game, addMs: number): Promise<GameEventDraft[]> {
+  const offset = Number(row.devClockOffsetMs ?? BigInt(0)) + addMs;
+  await tx.game.update({ data: { devClockOffsetMs: BigInt(offset) }, where: { id: row.id } });
+  return [{ payload: { days: addMs / DAY_MS }, type: "time_shifted" }];
 }
 
+export async function devAdvanceDays(gameId: string, memberId: string, days: number): Promise<GameView> {
+  return runDevStep(gameId, memberId, async ({ loaded, tx }) =>
+    shiftClock(tx, loaded.row, decideDevAdvance(loaded.state, days).addMs));
+}
+
+/** Moves the game's clock to its settle time, then settles it the ordinary way. */
 export async function devSettleNow(gameId: string, memberId: string): Promise<GameView> {
   assertDevTools();
-  const [loaded] = await loadGames(getPrisma(), [gameId]);
-  if (!loaded || !playerFor(loaded.state, memberId)) reject("GAME_NOT_FOUND", "Game not found.");
-  if (loaded.row.status !== "live") reject("GAME_NOT_LIVE", "This game isn't live.");
-  await settleGame(gameId, { actor: memberId, force: true });
+  await runLocked(gameId, { actor: memberId }, async ({ loaded, now, tx }) => {
+    if (!playerFor(loaded.state, memberId)) reject("GAME_NOT_FOUND", "Game not found.");
+    if (loaded.row.status !== "live") reject("GAME_NOT_LIVE", "This game isn't live.");
+    const shift = settleDueAt(loaded.state.players, loaded.state.game.lengthDays).getTime() - now.getTime();
+    return shift > 0 ? shiftClock(tx, loaded.row, shift) : [];
+  });
+  await settleGame(gameId, memberId);
   return requireView(gameId, memberId);
 }
 
@@ -641,21 +658,23 @@ function fromDbDate(date: Date | null): string | null {
   return date ? date.toISOString().slice(0, 10) : null;
 }
 
-/** Settles anything past due before showing it: there is no timer, any read ends a finished game. */
-async function loadCurrent(gameIds: readonly string[]): Promise<LoadedGame[]> {
+/**
+ * Settles anything past due before showing it: there is no timer, any read
+ * ends a finished game. Returns the database clock the reads were judged by.
+ */
+async function loadCurrent(gameIds: readonly string[]): Promise<{ games: LoadedGame[]; clock: Date }> {
   const prisma = getPrisma();
-  const loaded = await loadGames(prisma, gameIds);
-  const now = new Date();
-  const due = loaded.filter((game) => isGameDue(game.state, now));
-  if (due.length === 0) return loaded;
+  const [loaded, clock] = await Promise.all([loadGames(prisma, gameIds), databaseNow(prisma)]);
+  const due = loaded.filter((game) => isGameDue(game.state, gameNow(clock, game.row)));
+  if (due.length === 0) return { clock, games: loaded };
   for (const game of due) await settleGame(game.row.id);
-  return loadGames(prisma, gameIds);
+  return { clock, games: await loadGames(prisma, gameIds) };
 }
 
 export async function readGame(gameId: string, memberId: string): Promise<GameView | null> {
-  const [loaded] = await loadCurrent([gameId]);
+  const { clock, games: [loaded] } = await loadCurrent([gameId]);
   if (!loaded || !playerFor(loaded.state, memberId)) return null;
-  const [view] = await buildViews([loaded], memberId);
+  const [view] = await buildViews([loaded], memberId, clock);
   return view;
 }
 
@@ -693,8 +712,9 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
       where: { OR: [{ owedTo: memberId }, { owedBy: memberId }] },
     }),
   ]);
-  const games = homeGames(await loadCurrent(seats.map((seat) => seat.gameId)), new Date());
-  const views = await buildViews(games, memberId);
+  const current = await loadCurrent(seats.map((seat) => seat.gameId));
+  const games = homeGames(current.games, current.clock);
+  const views = await buildViews(games, memberId, current.clock);
   const words = await readTermWords([...new Map(tickets.map((ticket) => [ticket.gameId, ticket.game])).values()]);
   const [firstName] = await openGameTexts(profile
     ? [{ field: "first_name", memberId, rowId: memberId, table: "game_profile", value: profile.firstNameEncrypted }]
@@ -719,7 +739,8 @@ export async function readInvitePreview(token: string): Promise<GameInvitePrevie
     where: { inviteTokenHash: sha256Hex(token) },
   });
   if (!row) return null;
-  const expired = row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() < Date.now();
+  const now = gameNow(await databaseNow(getPrisma()), row);
+  const expired = row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() < now.getTime();
   if (row.status !== "invited" || expired) return { status: row.status === "void" || expired ? "expired" : "used" };
   const label = parsePendingLabel(row.pendingLabel);
   const [inviterFirstName, inviteeFirstName, words] = await openGameTexts([
@@ -792,8 +813,8 @@ async function readTermWords(
   return new Map(games.map((game, index) => [game.id, parseTermWords(texts[index] ?? "")]));
 }
 
-/** Decrypts exactly what each game's viewer may see (one batch), then builds the views. */
-async function buildViews(games: readonly LoadedGame[], viewerId: string): Promise<GameView[]> {
+/** Decrypts exactly what each game's viewer may see (one batch), then builds the views at each game's own now. */
+async function buildViews(games: readonly LoadedGame[], viewerId: string, clock: Date): Promise<GameView[]> {
   if (games.length === 0) return [];
   const prisma = getPrisma();
   const memberIds = [...new Set(games.flatMap((game) => game.row.players.map((player) => player.memberId)))];
@@ -845,7 +866,6 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string): Promi
   // Only the viewer's own invite photos: nobody else ever sees them.
   const avatarKeys = new Map(labels.map((label) => [label.subjectMemberId, label.photoKey]));
   const entryWords = new Map([...textAt].map(([entryId, at]) => [entryId, { text: plain[at] }]));
-  const now = new Date();
   return games.map((game, index) => {
     const invite = inviteAt[index];
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
@@ -856,7 +876,7 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string): Promi
       inviteToken: invite ? plain[invite.token] : null,
       invitee: invite ? { name: plain[invite.name] ?? "", photoKey: invite.photoKey } : null,
       names,
-      now,
+      now: gameNow(clock, game.row),
       result,
       round: game.row.round,
       startedAt: game.row.startedAt,

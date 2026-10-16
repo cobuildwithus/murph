@@ -434,11 +434,18 @@ export function decideStartNow(state: RuleState, now: Date): Schedule {
   return scheduleFor(state.players, (player) => gameLocalDate(now, player.timeZone));
 }
 
-/** Dev time travel: move every player's Day 1 back so "today" moves forward. */
-export function decideDevAdvance(state: RuleState, days: number): Schedule {
+export const GAME_DEV_ADVANCE_MAX_DAYS = GAME_MAX_LENGTH_DAYS;
+
+/**
+ * Dev time travel moves this game's clock forward by whole days. History
+ * (Day 1, posts, start time) stays as it was, so posts keep their real dates.
+ */
+export function decideDevAdvance(state: RuleState, days: number): { addMs: number } {
   if (state.game.status !== "live") reject("GAME_NOT_LIVE", "This game isn't live.");
-  if (!Number.isInteger(days) || days < 1 || days > GAME_MAX_LENGTH_DAYS) reject("INVALID_REQUEST", "Advance 1 or more days.");
-  return scheduleFor(state.players, (player) => addDays(player.dayOne!, -days));
+  if (!Number.isInteger(days) || days < 1 || days > GAME_DEV_ADVANCE_MAX_DAYS) {
+    reject("INVALID_REQUEST", `Advance 1 to ${GAME_DEV_ADVANCE_MAX_DAYS} days.`);
+  }
+  return { addMs: days * 24 * 60 * 60 * 1000 };
 }
 
 function requireLivePlayer(state: RuleState, memberId: string): RulePlayer {

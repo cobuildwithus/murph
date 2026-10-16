@@ -37,6 +37,7 @@ CREATE TABLE "game" (
     "length_days" INTEGER NOT NULL DEFAULT 7,
     "starts_on" DATE,
     "started_at" TIMESTAMP(3),
+    "dev_clock_offset_ms" BIGINT,
     "result" JSONB,
     "settled_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,

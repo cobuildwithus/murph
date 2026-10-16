@@ -18,7 +18,7 @@ import {
   readInvitePreview,
   runGameCommand,
 } from "@/src/lib/game/service";
-import { addDays, gameLocalDate } from "@/src/lib/game/time";
+import { addDays, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { getPrisma } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -202,7 +202,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const events = await getPrisma().gameEvent.findMany({ orderBy: { id: "asc" }, where: { gameId } });
     expect(events.map((event) => event.type)).toEqual([
       "created", "joined", "started", "started", "posted", "posted", "posted",
-      "withdrew", "posted", "time_shifted", "posted", "settled", "redeemed",
+      "withdrew", "posted", "time_shifted", "posted", "time_shifted", "settled", "redeemed",
     ]);
     expect(JSON.stringify(events.map((event) => event.payload))).not.toMatch(/pushups|Breakfast|done|girlfriend/u);
 
@@ -244,6 +244,32 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect((await readGame(created!.id, leo))!.days[0].localDate).toBe(startsOn);
     const players = await getPrisma().gamePlayer.findMany({ where: { gameId: created!.id } });
     expect(players.map((player) => player.dayOne?.toISOString().slice(0, 10))).toEqual([startsOn, startsOn]);
+  });
+
+  it("time-travels by moving only the game's clock: posts keep their real dates, and passing the end settles", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "UTC");
+    // Only today's weekday counts, so tomorrow is a day off.
+    const today = gameLocalDate(new Date(), "America/New_York");
+    const { gameId } = await startGame(leo, ava, { terms: { ...TERMS, schedule: { days: [weekdayOf(today)] } } });
+    await devStartNow(gameId, leo);
+    const shot = await photo(leo, gameId, "today");
+    await ok(leo, shot);
+    const before = await getPrisma().game.findUniqueOrThrow({ include: { players: true }, where: { id: gameId } });
+    const [entry] = await getPrisma().gameEntry.findMany({ where: { gameId } });
+
+    const advanced = await devAdvanceDays(gameId, leo, 1);
+    expect(advanced.players.find((player) => player.isMe)!.dayIndex).toBe(1);
+    expect(advanced.days[1].off).toBe(true);
+    expect(advanced.days[0]).toMatchObject({ localDate: today, mine: { entryId: shot.type === "post" ? shot.entryId : "" } });
+    const after = await getPrisma().game.findUniqueOrThrow({ include: { players: true }, where: { id: gameId } });
+    expect(after.devClockOffsetMs).toBe(BigInt(24 * 60 * 60 * 1000));
+    expect(after.startedAt).toEqual(before.startedAt);
+    expect(after.players.map((player) => player.dayOne)).toEqual(before.players.map((player) => player.dayOne));
+    expect((await getPrisma().gameEntry.findUniqueOrThrow({ where: { id: entry.id } })).receivedAt).toEqual(entry.receivedAt);
+
+    const ended = await devAdvanceDays(gameId, leo, 7);
+    expect(ended.status).toBe("settled");
   });
 
   it("starts the round count over when someone new takes a rematch", async () => {
