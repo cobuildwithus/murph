@@ -1,0 +1,29 @@
+"use client";
+
+import { useState } from "react";
+
+import { Button } from "@/src/components/ui/button";
+
+/** Fallback when the app link doesn't open: copy this page's link to paste in Murph. */
+export function CopyInviteLink() {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2_000);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <p className="flex flex-wrap items-center justify-center gap-x-1 text-sm text-muted-foreground">
+      Murph not opening? Copy this link and paste it in Murph.
+      <Button className="h-auto px-1" onClick={copy} size="unstyled" variant="link">
+        {copied ? "Copied" : "Copy link"}
+      </Button>
+    </p>
+  );
+}
