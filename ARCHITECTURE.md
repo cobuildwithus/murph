@@ -5437,21 +5437,32 @@ query bounds, receipt semantics, foreground limit and rollout order.
 
 `apps/web` owns the weekly game (product: `agent-docs/product-specs/weekly-game.md`).
 Postgres state tables are the truth: `game_profile`, `game_contact_label`,
-`game_circle`, `game`, `game_player`, `game_entry`, `game_ticket`, plus the
-append-only `game_event` audit log. Every member link cascades from
-`game_profile`, which cascades from `HostedMember`. Words (names, tasks, stakes,
-labels, entry text and data) are app-encrypted before any transaction; the
-structure that rules and settlement read stays plain, so neither decrypts.
+`game`, `game_player`, `game_entry`, `game_ticket`, plus `game_event`, a plain
+append-only history (one row per accepted change, ids and numbers only, read by
+nothing yet). Every member link cascades from `game_profile`, which cascades
+from `HostedMember`. Words (names, tasks, stakes, labels, excuse transcripts)
+are app-encrypted before any transaction; the structure that rules and
+settlement read stays plain, so neither decrypts.
 
-`runGameCommand` is the single write path. It locks the game row, reads the
-database clock, asks a pure `decide*` rule, writes state plus one event, and
-dedupes retries on the event's `(actor_id, request_id)`. One live game per
-person is a unique `game_player.active_member_id`, set only at go-live. Reads
-are viewer-scoped: another player's entry is omitted from the response, not
-just its media URL, until the viewer has posted that day.
+`runGameCommand` is the single write path, for the routes now and Murph's tools
+later. It validates the command (`command.ts`), checks uploads, seals words,
+then locks the game row, reads the database clock, asks a pure rule, and writes
+state plus its history rows. There is no request-id dedupe: every command is
+keyed by its own ids or state, so a repeat writes nothing. One live game per
+person is a unique `game_player.active_member_id`, set only at go-live. There is
+no timer or cron: whether a game is over is computed from its state, and reads
+(and a player's next accept) settle it under the lock. Reads are viewer-scoped:
+another player's entry is omitted from the response, not just its media URL,
+until the viewer has posted that day; media reads use the same rule.
 
-`/api/game/v1` uses a plain Better Auth bearer session, not the paid-member
-check, because invitees play free; the flag and allowlist then hide every route.
-The invite preview and `/g/<token>` page are unauthenticated and honor only the
-global flag. Dev time-travel routes return 404 in real production. Media is
-local-disk only until a Worker game-media path exists.
+`/api/game/v1` routes are thin: they fold path ids into one command. Writes:
+`PUT /me/profile`, `POST /games`, `POST /invites/:token/accept`,
+`POST /games/:id/entries`, `DELETE /games/:id/entries/:entryId`,
+`POST /tickets/:id/redeem`, and `POST /media`. Reads: `GET /home`,
+`GET /games/:id`, `GET /invites/:token`, `GET /media/:key`. They use a plain
+Better Auth bearer session, not the paid-member check, because invitees play
+free; the flag and allowlist then hide every route. The invite preview and
+`/g/<token>` page are unauthenticated and honor only the global flag. Dev
+time-travel routes return 404 in real production. Media keys are the uploader's
+prefix plus the SHA-256 of the bytes, so a retried upload lands on the same key;
+media is local-disk only until a Worker game-media path exists.

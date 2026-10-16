@@ -16,52 +16,60 @@ or any N days) and a stake ("winner gets breakfast in bed", or "for every day yo
 miss, you owe the other one"). Games run 7 days by default and at most 28.
 
 The MVP is private 1v1. The challenger creates a game and texts a single-use
-link (`/g/<token>`, valid 7 days) from their own phone. The invitee opens it,
-signs in, and shakes on the terms they saw; a changed version is refused with
-`TERMS_CHANGED`. Joining makes the game live. A person plays at most one live
-game at a time; an unclaimed invite never blocks anyone.
+link (`/g/<token>`, valid 7 days) from their own phone; an invite nobody accepts
+expires. The invitee opens it, signs in, and shakes on the terms they saw; a
+changed version is refused with `TERMS_CHANGED`. Accepting makes the game live.
+A person plays at most one live game at a time; an open invite never blocks
+anyone.
 
-Each player can attach a private name, photo, and relationship for the other
-person. Only its owner ever sees it, in every game.
+When inviting, the challenger can attach a private photo and relationship for
+the invitee alongside the first name they typed. Only the challenger ever sees
+them, in every game with that person; the photo is that player's picture in
+the challenger's views. There are no public profile photos.
 
 ## Rules
 
 - **Days.** Day 1 is each player's next local day after the game goes live, or
   today after Start now. A day runs 3am to 3am in the player's time zone, frozen
-  when they join, so New York and Sydney play different local dates paired by
-  day number.
-- **Posting.** One post per day: a photo now, with video, voice, text, workout,
-  and number kinds accepted by the contract. Deleting and retaking is allowed
-  once per day (two posts in total, withdrawn ones included). A voice excuse for
-  a missed day neither scores nor unlocks.
-- **Post to unlock.** You see nothing of another player's day (media, text,
-  data) until you have posted that day. Unlocking is permanent, so a withdrawn
-  post can't hide what was already seen. After settle, every non-excuse entry is
-  visible to the game's players. Excuse media stays private to its owner.
-- **Offline grace.** In the hour after a player's 3am boundary, a post the phone
-  says it captured before the boundary (monotonic capture age, with two minutes
-  of slack) counts for the day that just ended, if that day has no live post and
-  a post left. This is an honor rule for friends, not league evidence.
-- **Settle.** When the last player's last day ends plus one hour, the game
-  settles: score is scheduled days with a live post (capped at N in any-N
-  games), misses are scheduled days without one (the shortfall from N in any-N
-  games). The result is frozen on the game. A ten-minute cron settles due games,
-  and any read of a past-due game settles it first.
+  at go-live from their profile, so New York and Sydney play different local
+  dates paired by day number.
+- **Posting.** One photo a day. Taking it back and retaking is allowed once per
+  day (two photos in total, withdrawn ones included). An excuse is a voice memo
+  with its transcript; it neither scores nor unlocks.
+- **Post to unlock.** You see nothing of another player's day (photo or words)
+  until you have posted that day. Unlocking is permanent, so a withdrawn photo
+  can't hide what was already seen. After settle, every live photo is visible to
+  the game's players. Excuses stay private to their owner.
+- **Offline grace.** In the hour after a player's 3am boundary, a photo the
+  phone says it captured before the boundary (monotonic capture age, with 30
+  seconds of slack) counts for the day that just ended, if that was a scheduled
+  day with no live photo and a post left. This is an honor rule for friends, not
+  league evidence.
+- **Settle.** When the last player's last day ends plus one hour, the game is
+  over: score is scheduled days with a live photo (capped at N in any-N games),
+  misses are scheduled days without one (the shortfall from N in any-N games;
+  N counts across the whole game, not per week). The result is frozen on the
+  game. There is no timer: the first read of a finished game settles it, and so
+  does either player accepting their next invite.
 - **Tickets.** "Winner gets" makes each loser owe the winner one ticket; a tie or
   an all-perfect week owes nothing. "Per miss" makes each player owe every
   better player the difference in misses. Tickets stay open until the holder
   redeems one after sending it through Messages.
-- **Rematch.** A new game can name the previous one. It stays in the same
-  circle, keeps stake identity, and its round number counts the circle's earlier
-  settled games.
-- **Term changes.** Changes apply from the first day nobody has started. MVP
-  changes weekdays only; counts and stakes stay fixed for the game. No command
-  exposes this yet.
+- **Rematch.** A new game can name the previous one. After a settled game with
+  the same two people, its round is the previous round plus one; otherwise 1.
+- **Retries.** Every action is safe to repeat: creating a game with the same id,
+  posting the same entry, accepting an invite already accepted, or redeeming a
+  ticket already redeemed returns the current game and changes nothing.
+- **Account deletion.** Deleting an account deletes the games that person
+  created and the tickets they owe. Acceptable while the data is disposable;
+  revisit before real users.
 
 ## Deferred
 
 - Groups where everyone plays everyone, and a public league of matched strangers.
-- Murph as host in the group chat, with `read_game` and `update_game` tools.
+- Murph as host in the group chat, with `read_game` and `update_game` tools,
+  including mid-game term changes (from the first day nobody has started).
+- Declining or cancelling an invite; for now it simply expires.
 - Hosted media storage. Uploads work only on local stacks today; Vercel
   deployments return `GAME_MEDIA_UNAVAILABLE` until a Worker game-media path
   exists.
