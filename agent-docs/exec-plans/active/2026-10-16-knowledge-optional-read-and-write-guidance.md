@@ -117,6 +117,46 @@ Stage 1 exact candidate, executed and passed:
   - Strict missing recovery: one strict target show and no write. The reply
     invented no contents and was a truthful, concise recovery.
 
+Stage 1 MCP result-shape correction, after ReviewGPT Round 1. Round 1 PASSED
+on PR 4174 head `0d86418535`, which predates this fix, so that PASS does not
+cover it.
+
+- Parent finding: the `knowledgeShowResultSchema` union emitted no JSON Schema
+  root `type`. Incur's MCP output schema requires a root `object`, so
+  `knowledge_show` lost its `outputSchema`, and every successful call
+  (including existing strict present reads) lost `structuredContent`.
+- Fix: one annotation at the query owner,
+  `knowledgeShowResultSchema = z.union([...]).meta({ type: "object" })`.
+  Both branches are objects, so the annotation is truthful. Runtime
+  validation, the union, and strict `knowledgeGetResultSchema` are unchanged.
+  `gen:config-schema` changed only the skill hash, from `586c6dbed2103178` to
+  `91f14583a075221c`, and a rerun is idempotent.
+- Failing-before on head `0d86418535`: the new shipped-CLI MCP test failed at
+  `outputSchema.type` (`undefined`, expected `object`). The test stopped there,
+  so the missing `structuredContent` before the fix rests on the parent's
+  probe plus Incur's `callTool` gating, not on this test's later assertions.
+- Proof after the fix:
+  - CLI `shipped vault-cli MCP keeps structured knowledge_show results for
+    strict and optional reads` drives the built `vault-cli --mcp --vault`
+    over stdio JSON-RPC with production registration and progressive
+    discovery. `get_tool_details` shows an object `outputSchema` with two
+    `anyOf` branches. The strict present read and the explicit optional
+    absent read both return `structuredContent` equal to their text payload.
+    The strict missing read is still `isError` with no `structuredContent`,
+    and nothing is written.
+  - Query: knowledge-contracts covers the object root, `anyOf` equal to the
+    two exact branch schemas, and rejection of non-null degradation, a
+    missing slug, an invalid slug, and absent-through-strict. Result: 4
+    passed, plus root-surface for 5 total.
+  - CLI: 5 files, 112 passed. Typecheck reported 0 errors for query,
+    assistant-engine, and CLI. `complexity:diff` found no hotspots, and
+    `docs:drift` passed.
+  - Built `knowledge show --schema` and `--llms-full` both report
+    `output.type: object` with two `anyOf` branches and the `ifExists` option.
+- Still needed: a new independent ReviewGPT round and final-head CI. The
+  parent decides any minimal live repeat; the CLI handler behavior is
+  unchanged.
+
 Pre-split full candidate (Stage 1 plus Stage 2 together; not Stage 1 proof):
 
 - Results: engine 402 passed, CLI 111, query knowledge-contracts 3, Web

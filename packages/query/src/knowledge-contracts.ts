@@ -251,10 +251,11 @@ export const knowledgeAbsentPageResultSchema = z.object({
   vault: pathLikeSchema,
 }) satisfies z.ZodType<KnowledgeAbsentPageResult>;
 
+// Both branches are objects; the root type keeps MCP structured results.
 export const knowledgeShowResultSchema = z.union([
   knowledgeGetResultSchema,
   knowledgeAbsentPageResultSchema,
-]);
+]).meta({ type: "object" });
 
 export const knowledgeIndexRebuildResultSchema = z.object({
   indexPath: pathLikeSchema,

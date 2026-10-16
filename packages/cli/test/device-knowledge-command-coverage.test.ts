@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { createInterface } from 'node:readline'
 
 import { Cli } from 'incur'
 import { afterEach, test } from 'vitest'
@@ -33,9 +35,12 @@ import type {
 } from '@murphai/query'
 import { createVaultCli } from '../src/vault-cli.js'
 import {
+  binPath,
   createTempVaultContext,
+  ensureCliRuntimeArtifacts,
   runCli,
   runInProcessJsonCli,
+  withoutNodeV8Coverage,
 } from './cli-test-helpers.js'
 
 const cleanupPaths: string[] = []
@@ -860,3 +865,95 @@ test('optional knowledge show returns an absent page only when the graph confirm
   await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/pages/synthetic-ledger.md'), 'utf8'))
   await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/log.md'), 'utf8'))
 })
+
+test('shipped vault-cli MCP keeps structured knowledge_show results for strict and optional reads', async () => {
+  await ensureCliRuntimeArtifacts()
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-knowledge-mcp-show-')
+  cleanupPaths.push(parentRoot)
+  await writeVaultFile(vaultRoot, 'derived/knowledge/pages/present-ledger.md', [
+    '---', 'title: Synthetic ledger', 'slug: present-ledger', 'pageType: ledger', 'status: active', '---', '',
+    '# Synthetic ledger', '', '{"version":1}', '',
+  ].join('\n'))
+
+  // The vault is a process-level override, not an MCP tool argument.
+  const child = spawn(process.execPath, [binPath, '--mcp', '--vault', vaultRoot], {
+    env: withoutNodeV8Coverage(),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  const responses = new Map<number, McpResponse>()
+  createInterface({ input: child.stdout }).on('line', (line) => {
+    const message = JSON.parse(line) as McpResponse
+    if (typeof message.id === 'number') responses.set(message.id, message)
+  })
+  const request = async (id: number, method: string, params: unknown): Promise<McpResponse> => {
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    const deadline = Date.now() + 30_000
+    while (!responses.has(id)) {
+      if (Date.now() > deadline) throw new Error(`Timed out waiting for MCP response ${id}.`)
+      await new Promise<void>((resolve) => setTimeout(resolve, 10))
+    }
+    return responses.get(id) as McpResponse
+  }
+  let callerTool = 'call_write_tool'
+  const show = (id: number, args: Record<string, unknown>) =>
+    request(id, 'tools/call', {
+      name: callerTool,
+      arguments: { name: 'knowledge_show', arguments: args },
+    })
+
+  try {
+    await request(1, 'initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'knowledge-show-mcp', version: '1.0.0' },
+    })
+    // The shipped server uses progressive discovery; inspect the production tool entry.
+    const details = await request(2, 'tools/call', {
+      name: 'get_tool_details',
+      arguments: { name: 'knowledge_show' },
+    })
+    assert.equal(details.result?.isError, undefined)
+    const tool = JSON.parse(details.result?.content?.[0]?.text ?? 'null') as McpToolDetails | null
+    assert.equal(tool?.name, 'knowledge_show')
+    // A root object schema is what lets MCP return structuredContent; the union stays exact.
+    assert.equal(tool?.outputSchema?.type, 'object')
+    assert.equal(tool?.outputSchema?.anyOf?.length, 2)
+    if (tool?.annotations?.readOnlyHint === true) callerTool = 'call_read_tool'
+
+    const present = await show(3, { slug: 'present-ledger' })
+    assert.equal(present.result?.isError, undefined, present.result?.content?.[0]?.text)
+    assert.equal(present.result?.structuredContent?.page?.slug, 'present-ledger')
+    assert.deepEqual(present.result?.structuredContent, JSON.parse(present.result?.content?.[0]?.text ?? 'null'))
+
+    const absent = await show(4, { slug: 'absent-ledger', ifExists: true })
+    assert.equal(absent.result?.isError, undefined)
+    assert.deepEqual(absent.result?.structuredContent, {
+      degradation: null, page: null, slug: 'absent-ledger', vault: vaultRoot,
+    })
+
+    const strictMissing = await show(5, { slug: 'absent-ledger' })
+    assert.equal(strictMissing.result?.isError, true)
+    assert.equal(strictMissing.result?.structuredContent, undefined)
+    assert.match(strictMissing.result?.content?.[0]?.text ?? '', /No derived knowledge page exists for slug "absent-ledger"/u)
+  } finally {
+    child.stdin.end()
+    child.kill()
+  }
+  await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/pages/absent-ledger.md'), 'utf8'))
+  await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/log.md'), 'utf8'))
+})
+
+interface McpResponse {
+  id?: number
+  result?: {
+    content?: Array<{ text?: string }>
+    isError?: boolean
+    structuredContent?: { page?: { slug?: string } | null } & Record<string, unknown>
+  }
+}
+
+interface McpToolDetails {
+  annotations?: { readOnlyHint?: boolean }
+  name: string
+  outputSchema?: { anyOf?: unknown[]; type?: string }
+}
