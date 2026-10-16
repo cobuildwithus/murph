@@ -287,8 +287,25 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       run(ava, { termsVersion: 1, timeZone: "UTC", token: game!.inviteToken!, type: "join" })));
 
     expect(results.filter((result) => result.ok)).toHaveLength(1);
-    expect(results.filter((result) => !result.ok).map((result) => (result.ok ? null : result.error.code))).toEqual(["ALREADY_IN_A_GAME"]);
+    expect(results.flatMap((result) => (result.ok ? [] : [result.error]))).toEqual([
+      { code: "ALREADY_IN_A_GAME", message: "You're already in a game." },
+    ]);
     expect(await getPrisma().gamePlayer.count({ where: { activeMemberId: ava } })).toBe(1);
+  });
+
+  it("names whoever is busy, from the caller's side", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "Australia/Sydney");
+    const kat = await member("Kat", "Europe/London");
+    await startGame(leo, ava);
+    // Leo invites Kat while he's still playing Ava.
+    const fromLeo = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Kat", terms: TERMS, type: "createGame" });
+    const result = await run(kat, { termsVersion: 1, timeZone: "UTC", token: fromLeo!.inviteToken!, type: "join" });
+    expect(result).toMatchObject({ error: { code: "ALREADY_IN_A_GAME", message: "Leo is in another game right now." }, ok: false });
+    // Ava, mid-game herself, gets "you".
+    const fromKat = await ok(kat, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: TERMS, type: "createGame" });
+    const own = await run(ava, { termsVersion: 1, timeZone: "UTC", token: fromKat!.inviteToken!, type: "join" });
+    expect(own).toMatchObject({ error: { message: "You're already in a game." }, ok: false });
   });
 
   it("lands the same post sent twice at once exactly once", async () => {

@@ -84,21 +84,14 @@ export async function runGameCommand(input: {
   now?: Date;
 }): Promise<GameCommandResult> {
   const actor = input.actorMemberId;
-  let type: GameCommand["type"] | null = null;
   try {
     const command = parseGameCommand(input.command);
-    type = command.type;
     await requireUploadedMedia(actor, command);
     const gameId = await runCommand({ actor, now: input.now }, command);
     return { game: gameId ? await readGame(gameId, actor) : null, ok: true };
   } catch (error) {
     if (error instanceof GameRuleError) {
       return { error: error.error, ok: false, status: GAME_ERROR_STATUS[error.error.code] };
-    }
-    // Two games going live at once for the same person: the unique index decides.
-    if (type === "join" && isUniqueViolation(error)) {
-      const busy = { code: "ALREADY_IN_A_GAME" as const, message: "One of you is already in a game." };
-      return { error: busy, ok: false, status: GAME_ERROR_STATUS.ALREADY_IN_A_GAME };
     }
     throw error;
   }
@@ -308,7 +301,32 @@ async function join(context: CommandContext, command: Extract<GameCommand, { typ
     where: { activeMemberId: { in: [actor, target.createdBy] } },
   });
   await loadCurrent(held.map((player) => player.gameId));
-  await runLocked(target.id, context, async ({ loaded, now, tx }) => {
+  try {
+    await accept(context, command, target.id);
+  } catch (error) {
+    // Either the friendly check below or, when two games go live at once, the unique index.
+    const busy = isUniqueViolation(error) || (error instanceof GameRuleError && error.error.code === "ALREADY_IN_A_GAME");
+    if (!busy) throw error;
+    reject("ALREADY_IN_A_GAME", await busyMessage(actor, target.createdBy));
+  }
+  return target.id;
+}
+
+/** Who's busy, from the caller's side: "you", or the other player by their own first name. */
+async function busyMessage(actor: string, otherId: string): Promise<string> {
+  const prisma = getPrisma();
+  const busy = await prisma.gamePlayer.findMany({ select: { memberId: true }, where: { activeMemberId: { in: [actor, otherId] } } });
+  if (busy.length === 0 || busy.some((player) => player.memberId === actor)) return "You're already in a game.";
+  const profile = await prisma.gameProfile.findUnique({ select: { firstNameEncrypted: true }, where: { memberId: otherId } });
+  const [name] = await openGameTexts(profile
+    ? [{ field: "first_name", memberId: otherId, rowId: otherId, table: "game_profile", value: profile.firstNameEncrypted }]
+    : []);
+  return `${name ?? "The other player"} is in another game right now.`;
+}
+
+async function accept(context: CommandContext, command: Extract<GameCommand, { type: "join" }>, gameId: string): Promise<void> {
+  const { actor } = context;
+  await runLocked(gameId, context, async ({ loaded, now, tx }) => {
     const { row } = loaded;
     const decision = decideJoin(await withCurrentTimeZones(tx, loaded.state), {
       memberId: actor,
@@ -322,7 +340,7 @@ async function join(context: CommandContext, command: Extract<GameCommand, { typ
       select: { gameId: true },
       where: { activeMemberId: { in: decision.players.map((player) => player.memberId) } },
     });
-    if (busy) reject("ALREADY_IN_A_GAME", "One of you is already in a game.");
+    if (busy) reject("ALREADY_IN_A_GAME", "Someone's already in a game.");
     await tx.gamePlayer.create({ data: { gameId: row.id, memberId: actor, seat: decision.seat, timeZone: command.timeZone } });
     await writeSchedule(tx, row.id, decision, { activate: true });
     await tx.game.update({
@@ -335,7 +353,6 @@ async function join(context: CommandContext, command: Extract<GameCommand, { typ
       { payload: { startNow: false }, type: "started" },
     ];
   });
-  return target.id;
 }
 
 /** Everyone's time zone freezes at go-live, from their profile as of now. */
