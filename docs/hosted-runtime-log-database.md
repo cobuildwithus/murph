@@ -1071,6 +1071,94 @@ ORDER BY at DESC
 LIMIT 100;
 ```
 
+## Group shared-read timing
+
+Each accepted group `read_shared` request from the interactive group operation
+and the scheduled group operation (`createHostedGroupSharedReader` wired in
+`workspace-assistant-phase.ts`) queues one info `assistant.automation_detail`
+event when it settles. Only requests rejected by input or capability
+validation (invalid scopes or options, no group tool port, or freshness on a
+reader without a wait budget) emit nothing. A valid request whose operation
+signal is already aborted is accepted and records `canceled` with zero
+callbacks. The unscoped read-only reader used by detached asks is not instrumented. The record
+is queued through the existing nonblocking info buffer after the read settles;
+it is never awaited, and an observer throw or rejection cannot change the read.
+
+`redacted_json` holds `type = 'hosted_group_shared_read_timing'`,
+`schema = 'murph.hosted-group-shared-read-timing.v1'`, a fixed `detailLabel`,
+and only:
+
+- `groupSharedReadLane`: `interactive` or `scheduled`
+- `groupSharedReadFreshnessRequested`: the caller supplied freshness
+  requirements for the initial Web read. It does not prove that a request was
+  sent or accepted (a pre-aborted read makes zero Web calls) or that a refresh
+  completed.
+- `groupSharedReadWaitBudgetMs`: the configured deadline for the existing
+  sleep-and-reread loop (15,000 interactive, 300,000 scheduled, 0 read-only).
+  It bounds when another poll may start; it is not a callback timeout, so total
+  time can exceed it.
+- `groupSharedReadElapsedMs`: monotonic total from acceptance to settlement
+- `groupSharedReadCallbackCount`, `groupSharedReadCallbackElapsedMs`,
+  `groupSharedReadCallbackMaxElapsedMs`: Web callback attempts (including an
+  older-producer fallback) and their cumulative and longest wall time
+- `groupSharedReadPollCount`, `groupSharedReadPollElapsedMs`: intentional
+  freshness waits between rereads and their wall time, including timer
+  scheduling and abort latency (a canceled wait counts its partial time)
+- `groupSharedReadOutcome`: `ok`, `none`, `unavailable`, `error`, or
+  `canceled`. `ok`, `none` (Web found no shared data), and `unavailable` are
+  the returned result's own `status`; `unavailable` includes runtime-built
+  unavailable results such as an invalid response or failed fallback.
+- `groupSharedReadDecision`: the terminal reason. `not_ok` through `deadline`
+  follow the polling loop's original short-circuit order:
+  - `no_freshness`: no requirements were supplied
+  - `not_ok`: the current result was not `ok`
+  - `not_needed`: Web reported `refreshStatus = 'not_needed'`
+  - `refresh_unavailable`: Web reported `unavailable` or omitted freshness
+  - `satisfied`: the existing wearable-recovery predicate is false. That is
+    narrower than every requested or historical date being populated.
+  - `deadline`: the polling deadline passed while recovery was still needed
+  - `invalid`: Web returned a non-`read_shared` response
+  - `fallback`: the initial or a poll callback threw and an ordinary reread
+    succeeded
+  - `error`: the request and any fallback failed
+  - `canceled`: the operation signal aborted
+
+There are no dates, scope keys, health cardinalities, member or participant
+identifiers, values, arguments, results, or exception text. `canceled` means the
+operation signal aborted and the read rejected; it does not prove that in-flight
+Web work stopped. A process kill before settlement emits nothing, and the
+droppable info queue may shed records under backpressure, so absence is missing
+evidence rather than a fast read. `ok` with `deadline` is not latency health.
+
+Run this aggregate on the dedicated runtime-log database only, over a fixed
+window that begins **after** the instrumented revision is verified deployed.
+A telemetry-only protected deployment can be blocked when the deploy workflow
+cannot select that candidate revision; confirm the running revision rather than
+assuming it. Observe for 24–72 hours before deciding whether the remaining time
+is polling, callback latency, or freshness that never arrived.
+
+```sql
+SELECT redacted_json->>'groupSharedReadLane' AS lane,
+       redacted_json->>'groupSharedReadDecision' AS decision,
+       redacted_json->>'groupSharedReadOutcome' AS outcome,
+       count(*) AS reads,
+       sum((redacted_json->>'groupSharedReadPollCount')::bigint) AS polls,
+       percentile_disc(0.5) WITHIN GROUP (
+         ORDER BY (redacted_json->>'groupSharedReadElapsedMs')::numeric) AS p50_total_ms,
+       max((redacted_json->>'groupSharedReadElapsedMs')::numeric) AS max_total_ms,
+       sum((redacted_json->>'groupSharedReadPollElapsedMs')::numeric) AS poll_ms,
+       sum((redacted_json->>'groupSharedReadCallbackElapsedMs')::numeric) AS callback_ms,
+       max((redacted_json->>'groupSharedReadCallbackMaxElapsedMs')::numeric) AS max_callback_ms
+FROM hosted_runtime_log
+WHERE at >= $1 AND at < $2
+  AND event_code = 'assistant.automation_detail'
+  AND redacted_json->>'type' = 'hosted_group_shared_read_timing'
+  AND redacted_json->>'schema' = 'murph.hosted-group-shared-read-timing.v1'
+GROUP BY 1, 2, 3
+ORDER BY 1, 2, 3
+LIMIT 100;
+```
+
 ## Reads and retention
 
 Status and latency dashboards read only the isolated store. If a dedicated
