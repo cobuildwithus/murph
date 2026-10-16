@@ -2062,6 +2062,46 @@ of that category; recurrence is not required. A null-only result remains
 unresolved and justifies no prompt, schema or guidance change. The category
 identifies the first schema invariant, not why the model produced the input.
 
+#### Optional knowledge upsert parser rejection reason
+
+Every Incur argv rejection projects to the same privacy-safe
+`VALIDATION_ERROR / validation / arguments / custom / missing=false` envelope,
+so code, stage and validation detail cannot separate an unknown flag from a
+final option that lacks its value. The pinned `patches/incur@0.5.1.patch`
+therefore sets `ParseError.reason` (`unknown_flag` or `missing_value`) at the
+exact command-parser (`Parser.parse`) throw sites only. It is a non-enumerable,
+non-writable own data property: `toErrorEnvelope`, JSON/RPC output, hints,
+exits and prompts are byte-identical, and config, stacked-alias, global/builtin
+flag and other ParseErrors carry no reason. Nothing parses argv or messages.
+
+`incurErrorBridge`, only while timing is active and only when the error's own
+data `kind` is `arguments`, copies that one own data descriptor value as
+`cliTimingRejection` onto its timing-only projection. Config ParseErrors share
+the projected code, so they never carry the reason even if one is supplied.
+`cliTimingRejectionFailure` admits it as `rejection` only for
+`knowledge upsert` with `VALIDATION_ERROR` and only these two literals; the
+research categories above stay gated to their own command/code. Accessors,
+spoofed/prototype values and wrong commands omit only the reason. A throwing
+descriptor trap falls back to the original error before projection, so it may
+also drop optional validation detail. No optional diagnostic fault can replace
+the original error, change model-visible output or handling, or change the
+base failure code/stage/count. Variant
+identity, the 8-failure cap, wire normalization and reader-first rollout match
+the research category. Older readers drop `rejection` and coalesce counts; new
+readers accept old reports without inferring a reason. Run the actual old-reader
+test with `MURPH_CLI_PARSE_REJECTION_COMPAT_BASE=a83068adbe524217d32a22c270902ef0b02c6921`.
+
+After convergence, reuse the research query above with
+`e ->> 'code' = 'VALIDATION_ERROR'`, `c ->> 'command' = 'knowledge upsert'` and
+`rejection IN ('unknown_flag', 'missing_value')`. Threshold: **any** natural
+attributed turn distinguishes the two causes enough to build a synthetic
+reproduction; null-only results stay unresolved and justify no prompt, schema
+or guidance change. Null means an older writer, schema validation, or an
+unclassified parse failure. Coverage is limited to argv invocations reaching
+the command middleware; built-in/global flag failures, HTTP/MCP parsing and
+other commands are not classified. The reason never says which flag or why the
+model chose it.
+
 #### Optional schema-validation detail
 
 For `VALIDATION_ERROR` only, `validation: { field, code, missing? }` is one finite

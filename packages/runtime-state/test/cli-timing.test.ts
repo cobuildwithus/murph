@@ -7,7 +7,7 @@ import {
   addCliPhaseSample, CLI_TIMING_MAX_COMMANDS, CLI_TIMING_MAX_SPANS,
   CLI_TIMING_PHASES, cliTimingCommand, cliTimingFailureCode, emptyCliTiming, mergeCliTiming,
   normalizeCliTiming, cliTimingValidationFailure, CLI_TIMING_MAX_VALIDATION_ISSUES, type CliTiming, type CliValidationDiagnostic,
-  CLI_TIMING_REJECTIONS, cliTimingRejectionFailure,
+  CLI_TIMING_REJECTIONS, CLI_TIMING_PARSE_REJECTIONS, cliTimingRejectionFailure,
 } from "../src/cli-timing.ts";
 import {
   finishCliTimingAction, isCliTimingActive, noteCliTimingExit,
@@ -1149,6 +1149,105 @@ test.skipIf(!researchRejectionCompatibilityBase)("actual pre-rejection reader dr
   delete legacy.commands[0]!.droppedFailures;
   assert.deepEqual(old.normalizeCliTiming(legacy), legacy);
   assert.deepEqual(normalizeCliTiming(legacy), legacy);
+});
+
+// The CLI bridge's timing-only copy of Incur's typed projection plus parser reason.
+function parseRejectionEnvelope(value?: unknown): object {
+  return { code: "VALIDATION_ERROR", stage: "validation", message: "PRIVATE_MESSAGE",
+    fieldErrors: [{ path: "arguments", code: "custom", missing: false }],
+    ...(value === undefined ? {} : { cliTimingRejection: value }) };
+}
+const parseValidation = { field: "arguments", code: "custom", missing: false } as const;
+
+test("knowledge upsert parse rejection is gated, finite and separate from research categories", async () => {
+  const capture = async (error: object, command = "knowledge upsert") => {
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw error; }),
+      (value) => { report = value; }), (caught) => caught === error);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    assert.ok(!JSON.stringify(report).includes("PRIVATE"));
+    return report.commands[0]!.failures;
+  };
+  const base = { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: parseValidation } as const;
+  for (const rejection of CLI_TIMING_PARSE_REJECTIONS) {
+    assert.deepEqual(await capture(parseRejectionEnvelope(rejection)), [{ ...base, rejection }]);
+    assert.deepEqual(await capture(parseRejectionEnvelope(rejection), "event list"),
+      [{ ...base, validation: { ...parseValidation } }]);
+    const research = Object.assign(new Error("PRIVATE_MESSAGE"), { code: "research_scout_invalid_batch_payload" });
+    Object.defineProperty(research, "cliTimingRejection", { value: rejection });
+    assert.deepEqual(await capture(research, "research scout-batch"),
+      [{ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 }]);
+  }
+  let reads = 0;
+  for (const value of ["envelope", "PRIVATE_REASON", "Unknown_flag", new String("unknown_flag"), ["missing_value"], 1]) {
+    assert.deepEqual(await capture(parseRejectionEnvelope(value)), [{ ...base }]);
+  }
+  const accessor = Object.defineProperty(parseRejectionEnvelope(), "cliTimingRejection",
+    { enumerable: true, get: () => { reads += 1; return "unknown_flag"; } });
+  assert.deepEqual(await capture(accessor), [{ ...base }]);
+  assert.equal(reads, 0);
+  const other = { ...parseRejectionEnvelope("unknown_flag"), code: "knowledge_page_invalid" };
+  assert.deepEqual(cliTimingRejectionFailure("knowledge upsert", other.code, other, "cliTimingRejection"), {});
+});
+
+test("parse rejection variants coalesce, conserve counts and drop only malformed wire detail", () => {
+  const aggregate = emptyCliTiming();
+  for (const rejection of [...CLI_TIMING_PARSE_REJECTIONS, undefined, CLI_TIMING_PARSE_REJECTIONS[0]]) {
+    const incoming = sample("knowledge upsert");
+    incoming.commands[0]!.outcome = "error";
+    incoming.commands[0]!.failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 1,
+      validation: { ...parseValidation }, ...(rejection ? { rejection } : {}) }];
+    mergeCliTiming(aggregate, incoming);
+  }
+  const command = aggregate.commands[0]!;
+  assert.equal(command.calls, 4);
+  assert.deepEqual(command.failures!.map(({ rejection, count }) => ({ rejection, count })), [
+    { rejection: "unknown_flag", count: 2 }, { rejection: "missing_value", count: 1 }, { rejection: undefined, count: 1 },
+  ]);
+  assert.deepEqual(normalizeCliTiming(aggregate), aggregate);
+  const wire = sample("knowledge upsert");
+  wire.commands[0]!.outcome = "error";
+  wire.commands[0]!.calls = 4;
+  const entries = [
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, rejection: "PRIVATE_REASON" },
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, rejection: "envelope" },
+    { code: "knowledge_page_invalid", stage: "validation", count: 1, rejection: "unknown_flag" },
+    Object.defineProperty({ code: "VALIDATION_ERROR", stage: "validation", count: 1 }, "rejection",
+      { enumerable: true, get: () => "missing_value" }),
+  ];
+  const normalized = normalizeCliTiming({ ...wire, commands: [{ ...wire.commands[0]!, failures: entries }] });
+  assert.deepEqual(normalized?.commands[0]!.failures, [
+    { code: "VALIDATION_ERROR", stage: "validation", count: 3 },
+    { code: "knowledge_page_invalid", stage: "validation", count: 1 },
+  ]);
+  assert.ok(!JSON.stringify(normalized).includes("PRIVATE"));
+});
+
+// Actual pre-parse-rejection reader, never a copied parser.
+const parseRejectionCompatibilityBase = process.env.MURPH_CLI_PARSE_REJECTION_COMPAT_BASE;
+test.skipIf(!parseRejectionCompatibilityBase)("actual pre-parse-rejection reader drops only the reason and keeps counts", async () => {
+  assert.match(parseRejectionCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${parseRejectionCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; mergeCliTiming: typeof mergeCliTiming } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  const report = sample("knowledge upsert");
+  report.commands[0]!.outcome = "error";
+  report.commands[0]!.calls = 3;
+  report.commands[0]!.failures = [
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: { ...parseValidation }, rejection: "unknown_flag" },
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: { ...parseValidation }, rejection: "missing_value" },
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: { ...parseValidation } },
+  ];
+  assert.deepEqual(normalizeCliTiming(report), report);
+  const legacy = structuredClone(report);
+  legacy.commands[0]!.failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 3, validation: { ...parseValidation } }];
+  assert.deepEqual(old.normalizeCliTiming(report), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy, "New readers never invent a reason for old reports.");
+  const oldMerged = emptyCliTiming();
+  old.mergeCliTiming(oldMerged, report);
+  assert.deepEqual(oldMerged.commands, legacy.commands);
 });
 
 // Actual history-backed reader, not a copied parser or current-reader roundtrip.

@@ -487,18 +487,23 @@ test('real event and knowledge validation preserve output, effects and finite lo
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2030-01-15T10:00:00.000Z'))
   try {
-    for (const [args, field, code, missing] of [
+    // Optional parser reason is admitted only for knowledge upsert; trailing
+    // tokens follow the shared flags so a final option really lacks its value.
+    const rows: Array<[string[], string, string, boolean, string?, string[]?]> = [
       [['event', 'list', '--limit', '201'], 'limit', 'too_big', false],
       [['event', 'list', '--PRIVATE_SENTINEL'], 'arguments', 'custom', false],
       [['knowledge', 'show', '--slug', 'synthetic-page'], 'arguments', 'custom', false],
       [['knowledge', 'show'], 'slug', 'invalid_type', true],
       [['knowledge', 'show', 'PRIVATE_SENTINEL!'], 'slug', 'invalid_format', false],
-      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--PRIVATE_SENTINEL'], 'arguments', 'custom', false],
+      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--PRIVATE_SENTINEL'], 'arguments', 'custom', false, 'unknown_flag'],
+      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL'], 'arguments', 'custom', false, 'missing_value', ['--slug']],
       [['knowledge', 'upsert'], 'body', 'invalid_type', true],
       [['knowledge', 'upsert', '--body', ''], 'body', 'too_small', false],
       [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--related-slug', 'PRIVATE_SENTINEL!'], 'relatedSlug', 'invalid_format', false],
-    ] as const) {
-      const argv = [...args, '--vault', root, '--format', 'json']
+    ]
+    const outputs = new Map<string, string>()
+    for (const [args, field, code, missing, rejection, trailing = []] of rows) {
+      const argv = [...args, '--vault', root, '--format', 'json', ...trailing]
       const baseline = await invoke(argv)
       const captured = await collect(() => invoke(argv))
       assert.deepEqual(captured.result, baseline)
@@ -517,13 +522,19 @@ test('real event and knowledge validation preserve output, effects and finite lo
       assert.equal(command.calls, 1)
       const validation = { field, code, missing }
       assert.deepEqual(cliTimingValidationFailure(command.command, output.code, output, 'fieldErrors'), { validation })
-      assert.deepEqual(command.failures, [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation }])
+      assert.deepEqual(command.failures, [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation,
+        ...(rejection ? { rejection } : {}) }])
+      assert.equal(/unknown_flag|missing_value|cliTimingRejection/u.test(captured.result.stdout + captured.result.stderr), false)
+      if (rejection) outputs.set(rejection, captured.result.stdout)
       assert.equal(command.droppedFailures, undefined)
       assert.equal(captured.timing.droppedCalls, 0)
       assert.equal(captured.timing.droppedSpans, 0)
       assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
       assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
     }
+    // Distinct telemetry reasons; the model-visible fixed envelope stays identical.
+    assert.equal(outputs.size, 2)
+    assert.equal(outputs.get('unknown_flag'), outputs.get('missing_value'))
     assert.equal(upsert.mock.calls.length, 0)
     assert.equal(show.mock.calls.length, 0, 'Parser/schema rejection precedes the registered read handler.')
     assert.equal(eventCalls.reduce((sum, count) => sum + count(), 0), 0)
