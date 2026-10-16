@@ -155,11 +155,17 @@ export function dayIndexAt(player: RulePlayer, now: Date): number | null {
   return daysBetween(player.dayOne, gameLocalDate(now, player.timeZone));
 }
 
-export function isScheduledDay(terms: StoredTerms, player: RulePlayer, dayIndex: number): boolean {
-  const schedule = termsForDay(terms, dayIndex).schedule;
+/**
+ * Whether a day index counts. Weekdays follow the challenger's calendar
+ * (seat 0's Day 1 plus the index), so a day is on or off for everyone at
+ * once even when the players' local dates differ. Count mode counts every day.
+ */
+export function isScheduledDay(state: RuleState, dayIndex: number): boolean {
+  const schedule = termsForDay(state.game.terms, dayIndex).schedule;
   if ("count" in schedule) return true;
-  if (!player.dayOne) return false;
-  return schedule.days.includes(weekdayOf(addDays(player.dayOne, dayIndex)));
+  const challenger = state.players.find((player) => player.seat === 0);
+  if (!challenger?.dayOne) return false;
+  return schedule.days.includes(weekdayOf(addDays(challenger.dayOne, dayIndex)));
 }
 
 export function liveEntry(entries: readonly RuleEntry[], memberId: string, dayIndex: number): RuleEntry | null {
@@ -379,12 +385,12 @@ function postingDay(
   now: Date,
 ): number {
   const today = dayIndexAt(player, now)!;
-  const { lengthDays, terms } = state.game;
+  const { lengthDays } = state.game;
   const yesterday = today - 1;
   if (captureAgeMs !== null && yesterday >= 0 && yesterday < lengthDays) {
     const boundary = dayStartInstant(addDays(player.dayOne!, today), player.timeZone).getTime();
     const capturedAt = now.getTime() - captureAgeMs;
-    const open = isScheduledDay(terms, player, yesterday)
+    const open = isScheduledDay(state, yesterday)
       && !liveEntry(state.entries, player.memberId, yesterday)
       && (kind === "excuse"
         ? !hasExcuse(state.entries, player.memberId, yesterday)
@@ -457,7 +463,7 @@ export function scorePlayer(state: RuleState, player: RulePlayer, throughDay = s
   let credited = 0;
   let scheduledMissed = 0;
   for (let day = 0; day <= Math.min(throughDay, state.game.lengthDays - 1); day += 1) {
-    const scheduled = isScheduledDay(terms, player, day);
+    const scheduled = isScheduledDay(state, day);
     const posted = liveEntry(state.entries, player.memberId, day) !== null;
     if (scheduled && posted) credited += 1;
     if (scheduled && !posted) scheduledMissed += 1;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { GameSchedule } from "@/src/lib/game/contract";
 import { decideJoin, type RuleEntry, type RuleState, type TermWords } from "@/src/lib/game/rules";
 import { addDays, dayStartInstant } from "@/src/lib/game/time";
 import { buildGameView, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
@@ -16,7 +17,7 @@ const WORDS: TermWords = {
   }],
 };
 
-function liveState(): RuleState {
+function liveState(schedule: GameSchedule = { days: [0, 1, 2, 3, 4, 5, 6] }, joinAt = JOIN_AT): RuleState {
   const invited: RuleState = {
     entries: [],
     game: {
@@ -29,12 +30,12 @@ function liveState(): RuleState {
       status: "invited",
       terms: {
         v: 1,
-        versions: [{ fromDay: 0, n: 1, schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ key: "gsk_breakfast", kind: "winner_gets" }] }],
+        versions: [{ fromDay: 0, n: 1, schedule, stakes: [{ key: "gsk_breakfast", kind: "winner_gets" }] }],
       },
     },
     players: [{ active: false, dayOne: null, memberId: LEO, seat: 0, timeZone: "America/New_York" }],
   };
-  const join = decideJoin(invited, { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: "Australia/Sydney" });
+  const join = decideJoin(invited, { memberId: AVA, now: joinAt, termsVersion: 1, timeZone: "Australia/Sydney" });
   if (join.kind !== "join") throw new Error("expected a join");
   return {
     ...invited,
@@ -89,6 +90,19 @@ function noonOnDay(state: RuleState, memberId: string, dayIndex: number): Date {
 }
 
 describe("weekly game views: post to unlock", () => {
+  it("shows the same days off to both players and pairs their posts by index across time zones", () => {
+    // Leo (New York) starts Friday the 16th, Ava (Sydney) Saturday the 17th; weekdays only.
+    const base = liveState({ days: [0, 1, 2, 3, 4] }, new Date("2026-10-16T00:00:00Z"));
+    const state = { ...base, entries: [entry(LEO, 0, 1), entry(AVA, 0, 1)] };
+    const leoView = view(state, LEO, noonOnDay(state, LEO, 0));
+    const avaView = view(state, AVA, noonOnDay(state, AVA, 0));
+    expect(leoView.days.map((day) => day.off)).toEqual([false, true, true, false, false, false, false]);
+    expect(avaView.days.map((day) => day.off)).toEqual(leoView.days.map((day) => day.off));
+    expect(leoView.days[0].others[0].status).toBe("posted");
+    expect(avaView.days[0].others[0].status).toBe("posted");
+    expect(avaView.days[1].others[0].status).toBe("off");
+  });
+
   it("hides another player's post, words and media until you post that day", () => {
     const state = { ...liveState(), entries: [entry(LEO, 0, 1)] };
     const avaNow = noonOnDay(state, AVA, 0);

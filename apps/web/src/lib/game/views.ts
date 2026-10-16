@@ -207,7 +207,7 @@ function dayViews(input: GameViewInput, players: readonly RulePlayer[]): GameDay
       index,
       localDate: addDays(viewer.dayOne!, index),
       mine: mine && visible.has(mine.id) ? entryView(mine, input) : null,
-      off: !isScheduledDay(state.game.terms, viewer, index),
+      off: !isScheduledDay(state, index),
       others: others.map((other) => otherDayView(input, visible, other, index)),
     };
   });
@@ -230,7 +230,7 @@ function otherDayView(input: GameViewInput, visible: ReadonlySet<string>, other:
 
 function unpostedStatus(input: GameViewInput, other: RulePlayer, index: number): GameDayOtherStatus {
   const { game } = input.state;
-  if (!isScheduledDay(game.terms, other, index)) return "off";
+  if (!isScheduledDay(input.state, index)) return "off";
   // A blank day isn't a miss in a pick-any-days game; only the shortfall is.
   if ("count" in currentTerms(game.terms).schedule) return "none";
   const otherToday = dayIndexAt(other, input.now);

@@ -12,6 +12,7 @@ import {
   decideWithdraw,
   GameRuleError,
   isGameDue,
+  isScheduledDay,
   outcomeFor,
   parseStoredTerms,
   playerFor,
@@ -381,10 +382,24 @@ describe("weekly game: schedules and scoring", () => {
     for (const day of [0, 2, 4, 6]) state = post(state, LEO, at(state, LEO, day, 9)); // Sat, Mon, Wed, Fri
     const leo = scorePlayer(state, playerFor(state, LEO)!);
     expect(leo).toMatchObject({ misses: 0, score: 3 });
-    // Ava's Day 0 is Sunday in Sydney; she posts Mon and Wed only.
-    state = post(state, AVA, at(state, AVA, 1, 9));
-    state = post(state, AVA, at(state, AVA, 3, 9));
+    // Ava plays the same indices (Leo's Mon and Wed) from Sydney and misses Friday.
+    state = post(state, AVA, at(state, AVA, 2, 9));
+    state = post(state, AVA, at(state, AVA, 4, 9));
     expect(scorePlayer(state, playerFor(state, AVA)!)).toMatchObject({ misses: 1, score: 2 });
+  });
+
+  it("puts weekdays on the challenger's calendar, so a day is on or off for everyone", () => {
+    // Thursday 8pm in New York: Leo's Day 1 is Friday the 16th, Ava's (Sydney) Saturday the 17th.
+    let state = live(invited({ days: [0, 1, 2, 3, 4] }), SYD, new Date("2026-10-16T00:00:00Z"));
+    expect(state.players.map((player) => player.dayOne)).toEqual(["2026-10-16", "2026-10-17"]);
+    // Index 0 is Friday on Leo's calendar for both of them; 1 and 2 are the weekend.
+    expect(Array.from({ length: 7 }, (_, day) => isScheduledDay(state, day))).toEqual([true, false, false, true, true, true, true]);
+    for (const day of [0, 3]) {
+      state = post(state, LEO, at(state, LEO, day, 9));
+      state = post(state, AVA, at(state, AVA, day, 9));
+    }
+    expect(scorePlayer(state, playerFor(state, LEO)!)).toMatchObject({ misses: 3, score: 2 });
+    expect(scorePlayer(state, playerFor(state, AVA)!)).toMatchObject({ misses: 3, score: 2 });
   });
 
   it("caps count-mode scores and counts misses as the shortfall", () => {
