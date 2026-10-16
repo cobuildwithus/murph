@@ -1886,7 +1886,13 @@ to apply after cutover.
   malformed, and unknown reasons are omitted. Finite nonnegative integer counts
   bounded by the ECG sample limit plus one describe expected/actual recordings
   and samples, pages, total groups, provider-matching groups, instance-matching
-  groups, and fully matching groups. Empty collections, unmatched sources, and
+  groups, and fully matching groups. `junctionEcgInstanceMissingGroupCount`
+  counts provider-matching groups rejected because a requested instance had no
+  group instance identity; provider-matching minus instance-matching minus that
+  count gives present-but-unequal identities. Older producers omit it, and
+  absence means unknown, never zero. It stays only if 24-72 hours of natural
+  failures after producer convergence separate those diagnoses; otherwise a
+  later reviewed change removes it. Empty collections, unmatched sources, and
   matched groups without samples have distinct reasons, evaluated after all
   bounded pages. `providerHttpStatusSource=local_validation` distinguishes the
   validator's status from a provider HTTP response. Identifiers, raw errors,

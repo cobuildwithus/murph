@@ -5683,6 +5683,69 @@ test("device sync service retains one accepted companion RMSSD job until canonic
   }
 });
 
+test.each([
+  { label: "absent instance group", missing: 1, expected: 1 },
+  { label: "present unequal instance group", missing: 0, expected: 0 },
+  { label: "older producer", missing: undefined, expected: undefined },
+  { label: "out-of-range count", missing: Number.MAX_SAFE_INTEGER, expected: undefined },
+  { label: "negative count", missing: -1, expected: undefined },
+  { label: "fractional count", missing: 0.5, expected: undefined },
+  { label: "string count", missing: "1", expected: undefined },
+  { label: "private identity", missing: "synthetic-private-device", expected: undefined },
+])("Junction ECG binding diagnostics project only a bounded missing-instance count: $label", async ({ missing, expected }) => {
+  const vaultRoot = await makeTempDirectory("murph-junction-ecg-instance-diagnostic");
+  const now = new Date("2026-04-03T12:00:00.000Z");
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: { vaultRoot, publicBaseUrl: "https://sync.example.test", stateDatabasePath: path.join(vaultRoot, "state.sqlite") },
+    providers: [createFakeProvider({
+      provider: "junction",
+      descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+      async executeJob() {
+        throw deviceSyncError({
+          code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+          message: "Synthetic ECG source mismatch.", retryable: true,
+          details: { reason: "voltage_source_mismatch", pageCount: 1, groupCount: 2,
+            providerMatchGroupCount: 2, instanceMatchGroupCount: 0, matchedGroupCount: 0,
+            ...(missing === undefined ? {} : { instanceMissingGroupCount: missing }) },
+        });
+      },
+    })],
+  });
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction", externalAccountId: "junction-ecg-instance-diagnostic",
+      displayName: "Junction", scopes: [], status: "active",
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: now.toISOString(),
+    });
+    const job = fixture.store.enqueueJob({
+      accountId: account.id, provider: "junction", kind: "resource", maxAttempts: 1,
+      availableAt: now.toISOString(), dedupeKey: "ecg-instance-diagnostic",
+      payload: { resource: "electrocardiogram_voltage", resourceCategory: "timeseries",
+        sourceProviderSlug: "apple_health_kit",
+        windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" },
+    });
+    assert.equal((await fixture.service.runWorkerOnce())?.id, job.id);
+    const diagnostic = fixture.service.listJobFailureDiagnostics().at(-1);
+    assert.ok(diagnostic);
+    assert.equal(diagnostic.code, "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE");
+    assert.equal(diagnostic.details.junctionEcgProviderMatchGroupCount, 2);
+    assert.equal(diagnostic.details.junctionEcgInstanceMatchGroupCount, 0);
+    if (expected === undefined) {
+      // Unknown producers and rejected values omit the field rather than imply zero.
+      assert.equal(Object.hasOwn(diagnostic.details, "junctionEcgInstanceMissingGroupCount"), false);
+    } else {
+      assert.equal(diagnostic.details.junctionEcgInstanceMissingGroupCount, expected);
+    }
+    assert.doesNotMatch(JSON.stringify(diagnostic), /synthetic-private/u);
+  } finally {
+    fixture.close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.each(["blood_oxygen", "electrocardiogram_voltage"])(
   "Junction %s validation remains pending across exhaustion and restart until corrected",
   async (resource) => {

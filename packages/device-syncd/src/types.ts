@@ -117,6 +117,7 @@ export interface DeviceSyncJobFailureDiagnosticDetails extends JunctionRequestTi
   junctionEcgGroupCount?: number;
   junctionEcgProviderMatchGroupCount?: number;
   junctionEcgInstanceMatchGroupCount?: number;
+  junctionEcgInstanceMissingGroupCount?: number;
   junctionEcgMatchedGroupCount?: number;
   junctionEcgExpectedRecordingCount?: number;
   junctionEcgExpectedSampleCount?: number;

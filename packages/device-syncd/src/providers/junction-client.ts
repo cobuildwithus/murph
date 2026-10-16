@@ -602,6 +602,7 @@ export class JunctionClient {
       groupCount: 0,
       providerMatchGroupCount: 0,
       instanceMatchGroupCount: 0,
+      instanceMissingGroupCount: 0,
       matchedGroupCount: 0,
     };
     const records = await this.fetchWindowedCollection(
@@ -2043,6 +2044,7 @@ function extractBoundElectrocardiogramVoltageRecords(
     groupCount: number;
     providerMatchGroupCount: number;
     instanceMatchGroupCount: number;
+    instanceMissingGroupCount: number;
     matchedGroupCount: number;
   },
 ): unknown[] {
@@ -2098,6 +2100,7 @@ function extractBoundElectrocardiogramVoltageRecords(
         identity.sourceInstanceId
         && origin.sourceInstanceId !== identity.sourceInstanceId
       ) {
+        collection.instanceMissingGroupCount += Number(!origin.sourceInstanceId);
         continue;
       }
       collection.instanceMatchGroupCount += 1;
