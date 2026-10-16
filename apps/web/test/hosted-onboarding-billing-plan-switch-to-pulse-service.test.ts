@@ -712,7 +712,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
         code: "cancellation",
       },
       httpStatus: 409,
-      message: "Your subscription is scheduled to cancel, so a plan change cannot be scheduled. Contact support if you want to change plans instead.",
+      message: "Your subscription is scheduled to cancel. Open Manage billing to renew it, then try changing plans again.",
     });
 
     expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
