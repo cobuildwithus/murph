@@ -488,10 +488,12 @@ export function decideSettle(state: RuleState): SettleDecision {
   const tickets: SettleDecision["tickets"] = [];
   const top = Math.max(...scores.map((score) => score.score));
   const winners = scores.filter((score) => score.score === top);
+  // Same test as outcomeFor: when nobody missed a day, the outcome is perfect.
+  const perfect = scores.every((score) => score.misses === 0);
   for (const stake of version.stakes) {
     if (stake.kind === "winner_gets") {
-      // A tie (including everyone perfect) means nobody owes anything.
-      if (winners.length !== 1) continue;
+      // A tie or a perfect game means nobody owes anything.
+      if (perfect || winners.length !== 1) continue;
       for (const loser of scores) {
         if (loser.memberId === winners[0].memberId) continue;
         tickets.push({ owedBy: loser.memberId, owedTo: winners[0].memberId, stakeKey: stake.key });

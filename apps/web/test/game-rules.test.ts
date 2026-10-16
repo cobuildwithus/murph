@@ -402,6 +402,22 @@ describe("weekly game: schedules and scoring", () => {
     expect(scorePlayer(state, playerFor(state, AVA)!)).toMatchObject({ misses: 3, score: 2 });
   });
 
+  it("owes nothing for a perfect game, matching its perfect outcome", () => {
+    // Eight days of Mon/Wed/Fri: both post every scheduled day, and Leo also posts on days off.
+    const eightDays = invited({ days: [0, 2, 4] }, [WINNER_GETS, PER_MISS]);
+    eightDays.game.lengthDays = 8;
+    let state = live(eightDays);
+    for (let day = 0; day < 8; day += 1) {
+      state = post(state, LEO, at(state, LEO, day, 9));
+      if (isScheduledDay(state, day)) state = post(state, AVA, at(state, AVA, day, 9));
+    }
+    const settled = decideSettle(state);
+    expect(settled.result.scores.map((score) => score.misses)).toEqual([0, 0]);
+    expect(settled.tickets).toEqual([]);
+    expect(outcomeFor(settled.result, LEO)).toBe("perfect");
+    expect(outcomeFor(settled.result, AVA)).toBe("perfect");
+  });
+
   it("caps count-mode scores and counts misses as the shortfall", () => {
     let state = live(invited({ count: 3 }, [PER_MISS]));
     for (const day of [0, 1, 2, 3]) state = post(state, LEO, at(state, LEO, day, 9));
