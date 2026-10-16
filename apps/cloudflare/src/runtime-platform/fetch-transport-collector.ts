@@ -36,7 +36,7 @@ export type HostedRuntimeFetchTransportDiagnostics =
   ReturnType<typeof createHostedRuntimeFetchTransportDiagnostics>;
 
 // Key names avoid the runtime log's forbidden raw-field substrings.
-function summarizeFetchTransport(
+export function summarizeFetchTransport(
   prefix: string,
   timing: HostedRuntimeFetchTransportTiming,
   response?: Response,

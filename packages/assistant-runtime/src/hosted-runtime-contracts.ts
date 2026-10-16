@@ -44,6 +44,7 @@ export type {
   HostedRuntimeLabsToolPort,
   HostedRuntimeActionApprovalPort,
   HostedRuntimeLogPort,
+  HostedRuntimeMailboxFetchResponse,
   HostedRuntimeMailboxPort,
   HostedRuntimePhysicalNotePort,
   HostedRuntimePlatform,

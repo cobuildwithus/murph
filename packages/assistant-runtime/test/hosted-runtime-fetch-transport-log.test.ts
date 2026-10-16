@@ -26,6 +26,7 @@ import { createEmptyHostedMailboxImportState } from "../src/hosted-runtime/mailb
 async function runEmptyInvocation(input: {
   attemptId: string;
   readFetchTransportDiagnostics: () => Record<string, number | string | boolean | null>;
+  passReadTiming?: Record<string, number | string | boolean | null>;
 }) {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-fetch-transport-log-"));
   const logRequests: HostedRuntimeLogRequest[] = [];
@@ -51,7 +52,7 @@ async function runEmptyInvocation(input: {
         },
         platform: createPlatform({
           logRequests,
-          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          mailboxPort: withPassReadTiming(createMailboxPort({ events: [], items: [] }), input.passReadTiming),
           workspacePort: createWorkspacePort({
             checkpointRequests: [],
             events: [],
@@ -69,6 +70,8 @@ async function runEmptyInvocation(input: {
     return {
       finished: logRequests.flatMap((request) => request.entries).filter((entry) =>
         entry.attemptId === input.attemptId && entry.eventCode === "runtime.invocation_finished"),
+      imported: logRequests.flatMap((request) => request.entries).filter((entry) =>
+        entry.attemptId === input.attemptId && entry.eventCode === "mailbox.imported"),
       result,
     };
   } finally {
@@ -77,7 +80,35 @@ async function runEmptyInvocation(input: {
   }
 }
 
+function withPassReadTiming(
+  mailboxPort: ReturnType<typeof createMailboxPort>,
+  transportTiming?: Record<string, number | string | boolean | null>,
+): ReturnType<typeof createMailboxPort> {
+  if (!transportTiming) return mailboxPort;
+  return {
+    ...mailboxPort,
+    async fetch(request, context) {
+      return { ...await mailboxPort.fetch(request, context), transportTiming };
+    },
+  };
+}
+
 describe("hosted invocation fetch transport diagnostics", () => {
+  test("writes the import pass's own read timing onto its existing mailbox.imported row", async () => {
+    const { imported, finished } = await runEmptyInvocation({
+      attemptId: "attempt_synthetic_pass_read_timing",
+      passReadTiming: { passMailboxFetchResponseWaitMs: 1464, passMailboxFetchAttemptCount: 1 },
+      readFetchTransportDiagnostics: () => ({ firstMailboxFetchResponseWaitMs: 11 }),
+    });
+    assert.equal(imported.length, 1);
+    assert.equal(imported[0]?.redactedJson?.passMailboxFetchResponseWaitMs, 1464);
+    assert.equal(imported[0]?.redactedJson?.passMailboxFetchAttemptCount, 1);
+    // Invocation-first fields stay on the terminal row, never on the pass row.
+    assert.equal(Object.hasOwn(imported[0]?.redactedJson ?? {}, "firstMailboxFetchResponseWaitMs"), false);
+    assert.equal(finished[0]?.redactedJson?.firstMailboxFetchResponseWaitMs, 11);
+    assert.equal(Object.hasOwn(finished[0]?.redactedJson ?? {}, "passMailboxFetchResponseWaitMs"), false);
+  });
+
   test("adds the invocation's first-request scalars to the existing terminal entry", async () => {
     const { finished, result } = await runEmptyInvocation({
       attemptId: "attempt_synthetic_fetch_transport_present",
