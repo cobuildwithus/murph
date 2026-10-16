@@ -19,7 +19,6 @@ import {
 } from "../vault-source.ts";
 import { collectWearableDataset } from "../wearables/candidates.ts";
 import type { RebuildQueryProjectionResult } from "../query-projection-types.ts";
-import type { WearableSummaryFilters } from "../wearables.ts";
 import { insertQueryEntities } from "./entity-store.ts";
 import {
   isWearableProjectionFresh,
@@ -49,6 +48,7 @@ import {
   readWearableSummaryRows,
   type QueryWearableSummaryRow,
   type QueryWearableSummaryRowSet,
+  type ReadWearableSummaryRowsFilters,
 } from "./wearable-summary-store.ts";
 
 export async function rebuildQueryProjectionFromCanonicalSource(
@@ -176,7 +176,7 @@ export async function rebuildQueryProjectionFromCanonicalSource(
  * lock. A stale read publishes only wearables, never global query work. */
 export async function readFreshWearableSummaryRows(
   vaultRoot: string,
-  filters: Pick<WearableSummaryFilters, "providers">,
+  filters: ReadWearableSummaryRowsFilters,
 ): Promise<QueryWearableSummaryRowSet> {
   const endFreshness = startCliPhase("query-freshness");
   const endWait = startCliPhase("query-wait");
