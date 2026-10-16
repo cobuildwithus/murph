@@ -13,7 +13,8 @@ import {
 import type { Weekday } from "./contract";
 
 const DAY_START_HOUR = 3;
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 const MONDAY_FIRST: readonly Weekday[] = [6, 0, 1, 2, 3, 4, 5];
 /** A post captured just before 3am may still count for the day that ended. */
 export const GAME_GRACE_MS = 60 * 60 * 1000;
@@ -37,9 +38,22 @@ export function gameLocalDate(instant: Date, timeZone: string): string {
   return local.hour < DAY_START_HOUR ? addDays(local.dayKey, -1) : local.dayKey;
 }
 
-/** The instant a game day starts: 3am local on `date`. */
+/**
+ * The instant a game day starts: 3am local on `date`. When a clock change
+ * repeats or skips 3am, the day starts at the first instant `gameLocalDate`
+ * places in it (the first 3am, or the jump past it), so boundaries and day
+ * assignment always agree.
+ */
 export function dayStartInstant(date: string, timeZone: string): Date {
   const resolved = resolveFloatingIsoTimestampInTimeZone(`${date}T03:00:00`, timeZone);
-  if (!resolved) throw new RangeError(`No 3am on ${date} in ${timeZone}.`);
-  return new Date(resolved.timestamp);
+  if (resolved) return new Date(resolved.timestamp);
+  // Every zone's 3am on `date` falls within 15 hours of 3am UTC.
+  let before = Date.parse(`${date}T03:00:00Z`) - 15 * HOUR_MS;
+  let after = before + 30 * HOUR_MS;
+  while (after - before > 1) {
+    const middle = Math.floor((before + after) / 2);
+    if (gameLocalDate(new Date(middle), timeZone) >= date) after = middle;
+    else before = middle;
+  }
+  return new Date(after);
 }

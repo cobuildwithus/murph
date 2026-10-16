@@ -45,6 +45,16 @@ describe("weekly game time", () => {
     expect(gameLocalDate(new Date("2026-11-01T07:30:00Z"), "America/New_York")).toBe("2026-10-31");
   });
 
+  it("starts the day at the first 3am when a clock change repeats or skips it", () => {
+    // Athens falls back 04:00 → 03:00 on 2026-10-25, so 3am happens twice: the first one wins.
+    expect(dayStartInstant("2026-10-25", "Europe/Athens").toISOString()).toBe("2026-10-25T00:00:00.000Z");
+    expect(gameLocalDate(new Date("2026-10-24T23:59:59Z"), "Europe/Athens")).toBe("2026-10-24");
+    expect(gameLocalDate(new Date("2026-10-25T01:30:00Z"), "Europe/Athens")).toBe("2026-10-25");
+    // Athens springs forward 03:00 → 04:00 on 2027-03-28, so there is no 3am: the day starts at the jump.
+    expect(dayStartInstant("2027-03-28", "Europe/Athens").toISOString()).toBe("2027-03-28T01:00:00.000Z");
+    expect(gameLocalDate(new Date("2027-03-28T00:59:59Z"), "Europe/Athens")).toBe("2027-03-27");
+  });
+
   it("does plain date math on local dates", () => {
     expect(addDays("2026-10-31", 1)).toBe("2026-11-01");
     expect(addDays("2026-03-01", -1)).toBe("2026-02-28");

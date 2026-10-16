@@ -180,6 +180,14 @@ describe("weekly game: joining", () => {
     expect(isGameDue(state, new Date("2026-10-24T17:00:00Z"))).toBe(true);
   });
 
+  it("still settles a game whose last day ends on a clock change that repeats 3am", () => {
+    // Athens repeats 3am on 2026-10-25, the end of Ava's week; New York ends later and decides.
+    const state = live(invited(), "Europe/Athens", new Date("2026-10-17T10:00:00Z"));
+    expect(isGameDue(state, new Date("2026-10-25T07:59:59Z"))).toBe(false);
+    expect(isGameDue(state, new Date("2026-10-25T08:00:00Z"))).toBe(true);
+    expect(decideSettle(state).result.scores).toHaveLength(2);
+  });
+
   it("is single-use, expires, and holds everyone to the latest terms", () => {
     const state = live();
     expect(codeOf(() => decideJoin(state, { memberId: "hbm_kat", now: JOIN_AT, termsVersion: 1, timeZone: NYC })))
