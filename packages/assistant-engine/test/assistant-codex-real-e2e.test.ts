@@ -172,6 +172,7 @@ import {
 } from '../src/assistant-ask.ts'
 import {
   MURPH_ANALYZE_VIDEO_TOOL,
+  MURPH_ASK_GROK_TOOL,
   MURPH_CONVERSATION_ATTACHMENTS_TOOL,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ASSISTANT_STYLE_TOOL,
@@ -7538,6 +7539,248 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
       }
     },
     480_000,
+  )
+})
+
+describeRealCodex('real Codex X post reading e2e', () => {
+  const coachPost = 'https://x.com/synthetic_coach/status/2100000000000000001'
+  const runnerPost = 'https://x.com/synthetic_runner/status/2100000000000000002'
+  const lookupNarration = /\blive X\b|\bX (?:read|search|lookup)\b|\bGrok\b|from (?:the|my|a) (?:search|lookup|read)/iu
+  it.each([
+    {
+      scenarioLabel: 'group asks about one post returned under two URL spellings',
+      testName: 'x post reading in a group sends one link without lookup narration',
+      scope: 'group',
+      memberText: `Murph, what does the screenshot in this post say? ${coachPost}`,
+      answerText:
+        'The post text says "Morning check-in." The screenshot shows a chat reply that opens with an all-caps "HEYYY" and then advises drinking water, eating something, and resting. https://x.com/i/status/2100000000000000001',
+      annotationUrls: [coachPost],
+      citations: ['https://x.com/i/status/2100000000000000001'],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /HEYYY/u,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'member explicitly asks whether the post was read live',
+      testName: 'x post reading discloses the live lookup when asked how it checked',
+      scope: 'direct',
+      memberText: `Did you actually read this post live, and how did you check? What does its screenshot say? ${coachPost}`,
+      answerText:
+        'The post text says "Morning check-in." The screenshot shows a chat reply that opens with an all-caps "HEYYY" and then advises drinking water, eating something, and resting. https://x.com/i/status/2100000000000000001',
+      annotationUrls: [coachPost],
+      citations: ['https://x.com/i/status/2100000000000000001'],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /HEYYY[\s\S]*\b(?:live|search(?:ed)?|looked|checked|Grok)\b|\b(?:live|search(?:ed)?|looked|checked|Grok)\b[\s\S]*HEYYY/iu,
+      forbiddenReplyPattern: /\b(?:did not|didn['’]t|could(?:n['’]t| not)) (?:read|check|search|access)\b/iu,
+    },
+    {
+      scenarioLabel: 'Grok reads the post but cannot confirm a media detail',
+      testName: 'x post reading keeps partial media uncertainty visible',
+      scope: 'direct',
+      memberText: `How much weight is on the bar in this video? ${coachPost}`,
+      answerText:
+        'The post text says "Leg day." The attached video is blurry: it appears to show a barbell back squat, but the plates are not readable, so the weight on the bar cannot be confirmed.',
+      annotationUrls: [coachPost],
+      citations: ['https://x.com/i/status/2100000000000000001'],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /(?:can(?:no|['’])t|could(?:n['’]t| not)|unable|not (?:readable|clear|possible)|unclear|blurry)[\s\S]*\b(?:weight|plates?)\b|\b(?:weight|plates?)\b[\s\S]*(?:can(?:no|['’])t|could(?:n['’]t| not)|unable|not (?:readable|clear|possible)|unclear|blurry)/iu,
+      forbiddenReplyPattern: /\b\d+\s?(?:lb|lbs|kg|pounds|kilos)\b/iu,
+    },
+    {
+      scenarioLabel: 'one post returned under handle and i/status URL spellings',
+      testName: 'x post reading sends one link per post id without lookup narration',
+      scope: 'direct',
+      memberText: `What does the screenshot in this post say? ${coachPost}`,
+      answerText:
+        'The post text says "Morning check-in." The screenshot shows a chat reply that opens with an all-caps "HEYYY" and then advises drinking water, eating something, and resting. https://x.com/i/status/2100000000000000001',
+      annotationUrls: [coachPost],
+      citations: ['https://x.com/i/status/2100000000000000001'],
+      expectedPostIds: ['2100000000000000001'],
+      expectedReplyPattern: /HEYYY/u,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'two distinct posts each returned under two URL spellings',
+      testName: 'x post reading keeps distinct post links once each',
+      scope: 'direct',
+      memberText: `What do the videos in these two posts show? ${coachPost} and ${runnerPost}`,
+      answerText:
+        `The first video shows a coach demonstrating a slow goblet squat. ${coachPost} The second video shows a runner doing strides on a track. ${runnerPost}`,
+      annotationUrls: [coachPost, runnerPost],
+      citations: [
+        'https://x.com/i/status/2100000000000000001',
+        'https://x.com/i/status/2100000000000000002',
+      ],
+      expectedPostIds: ['2100000000000000001', '2100000000000000002'],
+      expectedReplyPattern: /squat[\s\S]*strides|strides[\s\S]*squat/iu,
+      forbiddenReplyPattern: lookupNarration,
+    },
+    {
+      scenarioLabel: 'Grok could not find the shared post',
+      testName: 'x post reading says plainly when the post could not be read',
+      scope: 'direct',
+      memberText: `What does the screenshot in this post say? ${coachPost}`,
+      answerText:
+        'I could not find or open that post. It may have been deleted or made private, so I cannot say what its screenshot shows.',
+      annotationUrls: [],
+      citations: [],
+      expectedPostIds: [],
+      expectedReplyPattern:
+        /could(?:n['’]t| not)|unable|was(?:n['’]t| not) able|(?:deleted|private)/iu,
+      forbiddenReplyPattern: /HEYYY|squat|the screenshot (?:says|shows)/iu,
+    },
+  ] as const)(
+    '$testName',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-x-post-e2e-'))
+      const providerBodies: unknown[] = []
+      try {
+        const promptResult = buildAssistantAutoReplyPrompt([{
+          actorIsSelf: false,
+          attachmentDescriptors: [],
+          attachmentEvidence: {
+            attachments: [],
+            optionalInboxCaptureId: 'synthetic-capture',
+            reasonCode: null,
+            source: 'manual',
+            status: 'available',
+            updatedAt: '2026-08-26T12:00:01.000Z',
+          },
+          conversation: {
+            accountId: null,
+            actorId: 'synthetic-member',
+            actorIsSelf: false,
+            source: 'telegram',
+            threadId: 'synthetic-direct-thread',
+            threadIsDirect: scenario.scope === 'direct',
+          },
+          inputId: `ain_${'c'.repeat(32)}`,
+          occurredAt: '2026-08-26T12:00:00.000Z',
+          projection: {
+            optionalInboxCaptureId: 'synthetic-capture',
+            reasonCode: null,
+            status: 'succeeded',
+          },
+          receivedAt: '2026-08-26T12:00:01.000Z',
+          replyTarget: {
+            channel: 'telegram',
+            messageId: '101',
+            threadId: 'synthetic-direct-thread',
+          },
+          source: 'telegram',
+          sourceMetadata: {
+            externalThreadRouteAuthorityPresent: true,
+            kind: 'telegram',
+            mediaGroupId: null,
+            replyContext: null,
+            senderDisplayName: 'Member',
+            senderHandle: 'synthetic-member',
+          },
+          telegramMetadata: null,
+          text: scenario.memberText,
+        }])
+        if (promptResult.kind !== 'ready') {
+          throw new Error('Expected a ready X post prompt.')
+        }
+        const developerInstructions = scenario.scope === 'group'
+          ? buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true })
+          : buildAssistantSystemPrompt({
+            assistantCliContract: 'No vault command is needed for this X post request.',
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'telegram',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-26',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          askGrokRuntime: {
+            apiKey: 'synthetic-xai-key',
+            fetchImpl: async (_request, init) => {
+              providerBodies.push(JSON.parse(String(init?.body)))
+              return Response.json({
+                citations: scenario.citations,
+                output: [{
+                  type: 'message',
+                  role: 'assistant',
+                  content: [{
+                    type: 'output_text',
+                    text: scenario.answerText,
+                    annotations: scenario.annotationUrls.map((url) => ({
+                      type: 'url_citation',
+                      url,
+                    })),
+                  }],
+                }],
+                status: 'completed',
+              })
+            },
+            model: 'grok-4.5',
+          },
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions,
+          dynamicTools: [MURPH_ASK_GROK_TOOL],
+          env: config.env,
+          groupConversation: scenario.scope === 'group',
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: promptResult.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        })
+        const reply = result.finalMessage
+        const grokCalls = readCapabilityRoutingActions(result.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic' && action.tool === MURPH_ASK_GROK_TOOL.name
+          )
+        const replyPostIds = [...reply.matchAll(/status\/(\d+)/gu)]
+          .map((match) => match[1])
+        process.stdout.write(
+          `[x-post-reading-e2e] ${JSON.stringify({
+            providerCallCount: providerBodies.length,
+            reply,
+            scenario: scenario.scenarioLabel,
+            scope: scenario.scope,
+            toolCallCount: grokCalls.length,
+          })}\n`,
+        )
+        expect(grokCalls).toHaveLength(1)
+        expect(providerBodies).toHaveLength(1)
+        expect(grokCalls[0]).toMatchObject({ kind: 'dynamic', success: true })
+        expect(reply).toMatch(scenario.expectedReplyPattern)
+        expect(reply).not.toMatch(scenario.forbiddenReplyPattern)
+        if (scenario.expectedPostIds.length > 0) {
+          expect([...replyPostIds].sort()).toEqual([...scenario.expectedPostIds])
+        } else {
+          expect(replyPostIds.every((id) => coachPost.endsWith(id))).toBe(true)
+          expect(replyPostIds.length).toBeLessThanOrEqual(1)
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
   )
 })
 
