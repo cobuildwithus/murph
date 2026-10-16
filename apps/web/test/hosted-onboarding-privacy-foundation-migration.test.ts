@@ -91,6 +91,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "companionPushRoute CompanionPushRoute?",
     "conversationPolls HostedConversationPoll[]",
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
+    "gameProfile GameProfile?",
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
     'groupCurrentSenderClarificationsAsTarget HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")',
     'groupJournalCaptureConsentRequestedAt DateTime? @map("group_journal_capture_consent_requested_at")',
@@ -1234,6 +1235,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261005000000_device_sync_deferred_wake",
       "20261005120000_companion_wake_delivery",
       "20261008210000_linq_bounded_terminal_recovery",
+      "20261016180000_weekly_game",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
