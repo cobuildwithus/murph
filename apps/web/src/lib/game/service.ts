@@ -35,6 +35,7 @@ import {
   GAME_SEATS_1V1,
   GameRuleError,
   isGameDue,
+  isTicketExpired,
   parseStoredResult,
   parseStoredTerms,
   parseTermWords,
@@ -496,7 +497,9 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
   const { ticketId } = command;
   const ticket = await getPrisma().gameTicket.findUnique({ select: { gameId: true, owedTo: true }, where: { id: ticketId } });
   if (!ticket || ticket.owedTo !== actor) reject("TICKET_NOT_HELD", "That ticket isn't yours to cash in.");
-  await runLocked(ticket.gameId, context, async ({ clock, tx }) => {
+  await runLocked(ticket.gameId, context, async ({ clock, now, tx }) => {
+    const current = await tx.gameTicket.findUniqueOrThrow({ select: { createdAt: true, status: true }, where: { id: ticketId } });
+    if (isTicketExpired(current, now)) reject("TICKET_EXPIRED", "This ticket expired before it was used.");
     // Already redeemed matches no row: a repeat, not an error.
     const changed = await tx.gameTicket.updateMany({
       data: { redeemedAt: clock, status: "redeemed" },
@@ -709,7 +712,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
       where: { game: { status: { in: ["invited", "live", "settled", "void"] } }, memberId },
     }),
     prisma.gameTicket.findMany({
-      include: { game: { select: { createdBy: true, id: true, termsWordsEncrypted: true } } },
+      include: { game: { select: { createdBy: true, devClockOffsetMs: true, id: true, termsWordsEncrypted: true } } },
       orderBy: { createdAt: "desc" },
       take: WALLET_LIMIT,
       where: { OR: [{ owedTo: memberId }, { owedBy: memberId }] },
@@ -722,13 +725,15 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
   const [firstName] = await openGameTexts(profile
     ? [{ field: "first_name", memberId, rowId: memberId, table: "game_profile", value: profile.firstNameEncrypted }]
     : []);
-  const wallet = tickets.map((ticket) => ticketView(toTicketRow(ticket), words.get(ticket.gameId) ?? null, memberId));
+  const wallet = tickets.map((ticket) =>
+    ticketView(toTicketRow(ticket), words.get(ticket.gameId) ?? null, memberId, gameNow(current.clock, ticket.game)));
   return {
     games: views,
     me: { firstName: firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
-      held: wallet.filter((ticket) => ticket.status === "open" && ticket.youHold),
-      owed: wallet.filter((ticket) => ticket.status === "open" && !ticket.youHold),
+      // Expired tickets stay where they were, marked expired.
+      held: wallet.filter((ticket) => ticket.status !== "redeemed" && ticket.youHold),
+      owed: wallet.filter((ticket) => ticket.status !== "redeemed" && !ticket.youHold),
       redeemed: wallet.filter((ticket) => ticket.status === "redeemed"),
     },
   };

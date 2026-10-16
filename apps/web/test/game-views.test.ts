@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { GameSchedule } from "@/src/lib/game/contract";
 import { decideJoin, type RuleEntry, type RuleState, type TermWords } from "@/src/lib/game/rules";
 import { addDays, dayStartInstant } from "@/src/lib/game/time";
-import { buildGameView, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
+import { buildGameView, ticketView, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
 
 const LEO = "hbm_leo";
 const AVA = "hbm_ava";
@@ -88,6 +88,31 @@ function noonOnDay(state: RuleState, memberId: string, dayIndex: number): Date {
   const player = state.players.find((candidate) => candidate.memberId === memberId)!;
   return new Date(dayStartInstant(addDays(player.dayOne!, dayIndex), player.timeZone).getTime() + 9 * 60 * 60 * 1000);
 }
+
+describe("weekly game views: tickets", () => {
+  it("expires an open ticket just after its 14-day use-by time, and never a redeemed one", () => {
+    const row = {
+      createdAt: new Date("2026-10-24T17:00:00Z"),
+      gameId: "game_views_1",
+      id: "gtk_1",
+      owedBy: AVA,
+      owedTo: LEO,
+      redeemedAt: null,
+      stakeKey: "gsk_breakfast",
+      status: "open" as const,
+    };
+    const useBy = new Date("2026-11-07T17:00:00Z");
+    expect(ticketView(row, WORDS, LEO, useBy)).toMatchObject({
+      status: "open",
+      useBy: useBy.toISOString(),
+      what: "Breakfast in bed",
+      youHold: true,
+    });
+    expect(ticketView(row, WORDS, LEO, new Date(useBy.getTime() + 1)).status).toBe("expired");
+    const redeemed = { ...row, redeemedAt: new Date("2026-10-25T09:00:00Z"), status: "redeemed" as const };
+    expect(ticketView(redeemed, WORDS, AVA, new Date("2027-01-01T00:00:00Z")).status).toBe("redeemed");
+  });
+});
 
 describe("weekly game views: post to unlock", () => {
   it("shows the same days off to both players and pairs their posts by index across time zones", () => {

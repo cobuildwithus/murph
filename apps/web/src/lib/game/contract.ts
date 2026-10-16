@@ -164,7 +164,10 @@ export interface GameDayView {
 export interface GameTicketView {
   id: string;
   what: string;
-  status: "open" | "redeemed";
+  /** "expired" once it's past `useBy` unredeemed; expired tickets stay in the wallet. */
+  status: "open" | "redeemed" | "expired";
+  /** Redeem by this time: 14 days after the ticket was issued. */
+  useBy: string;
   owedByMemberId: string;
   owedToMemberId: string;
   /** True when the viewer holds it (is owed). */
@@ -228,6 +231,7 @@ export type GameErrorCode =
   | "RETAKE_USED"
   | "MEDIA_MISSING"
   | "TICKET_NOT_HELD"
+  | "TICKET_EXPIRED"
   | "PROFILE_REQUIRED";
 
 export interface GameError {

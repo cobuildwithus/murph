@@ -235,6 +235,27 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(label.relationshipEncrypted).toBeTruthy();
   });
 
+  it("lets a ticket expire 14 days after it's issued, refusing to redeem it then", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "Australia/Sydney");
+    const { gameId } = await startGame(leo, ava);
+    await devStartNow(gameId, leo);
+    await ok(leo, await photo(leo, gameId, "only-leo"));
+    const [ticket] = (await devSettleNow(gameId, leo)).tickets;
+    expect(ticket).toMatchObject({ status: "open", youHold: true });
+    expect(new Date(ticket.useBy).getTime() - new Date(ticket.createdAt).getTime()).toBe(14 * 24 * 60 * 60 * 1000);
+
+    await getPrisma().gameTicket.update({
+      data: { createdAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000) },
+      where: { id: ticket.id },
+    });
+    expect((await readHome(leo)).wallet.held).toEqual([expect.objectContaining({ id: ticket.id, status: "expired" })]);
+    expect((await readHome(ava)).wallet.owed).toEqual([expect.objectContaining({ id: ticket.id, status: "expired" })]);
+    const refused = await run(leo, { ticketId: ticket.id, type: "redeem" });
+    expect(refused).toMatchObject({ error: { code: "TICKET_EXPIRED" }, ok: false, status: 410 });
+    expect((await getPrisma().gameTicket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe("open");
+  });
+
   it("starts on the challenger's picked date, shown before and after accept", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");

@@ -19,12 +19,14 @@ import {
   dayIndexAt,
   hasUnlockedDay,
   isScheduledDay,
+  isTicketExpired,
   liveEntry,
   outcomeFor,
   attemptsUsed,
   GAME_POSTS_PER_DAY,
   playerFor,
   scorePlayer,
+  ticketUseBy,
   type RuleEntry,
   type RulePlayer,
   type RuleState,
@@ -111,14 +113,16 @@ export function termsView(state: RuleState, words: TermWords): GameTermsVersion 
   };
 }
 
-export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId: string): GameTicketView {
+/** `now` is the ticket's game clock: it decides whether an open ticket has expired. */
+export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId: string, now: Date): GameTicketView {
   return {
     createdAt: row.createdAt.toISOString(),
     id: row.id,
     owedByMemberId: row.owedBy,
     owedToMemberId: row.owedTo,
     redeemedAt: row.redeemedAt?.toISOString() ?? null,
-    status: row.status,
+    status: isTicketExpired(row, now) ? "expired" : row.status,
+    useBy: ticketUseBy(row.createdAt).toISOString(),
     what: words ? stakeItem(words, row.stakeKey) : "",
     youHold: row.owedTo === viewerId,
   };
@@ -161,7 +165,7 @@ export function buildGameView(input: GameViewInput): GameView {
     terms: termsView(state, input.words),
     tickets: input.tickets
       .filter((ticket) => ticket.owedBy === viewerId || ticket.owedTo === viewerId)
-      .map((ticket) => ticketView(ticket, input.words, viewerId)),
+      .map((ticket) => ticketView(ticket, input.words, viewerId, input.now)),
   };
 }
 

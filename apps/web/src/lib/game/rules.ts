@@ -95,6 +95,17 @@ export const GAME_SEATS_1V1 = 2;
 export const GAME_DEFAULT_LENGTH_DAYS = 7;
 export const GAME_MAX_LENGTH_DAYS = 28;
 export const GAME_MAX_START_DAYS_OUT = 60;
+export const GAME_TICKET_USE_DAYS = 14;
+
+/** A ticket's redeem-by time: derived, never stored. */
+export function ticketUseBy(createdAt: Date): Date {
+  return new Date(createdAt.getTime() + GAME_TICKET_USE_DAYS * 24 * 60 * 60 * 1000);
+}
+
+/** Open tickets expire just after their use-by time; redeemed ones never do. */
+export function isTicketExpired(ticket: { status: string; createdAt: Date }, now: Date): boolean {
+  return ticket.status === "open" && now.getTime() > ticketUseBy(ticket.createdAt).getTime();
+}
 export const GAME_POSTS_PER_DAY = 2;
 export const GAME_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_STAKES = 3;
@@ -114,6 +125,7 @@ export const GAME_ERROR_STATUS: Record<GameErrorCode, number> = {
   PROFILE_REQUIRED: 409,
   RETAKE_USED: 409,
   TERMS_CHANGED: 409,
+  TICKET_EXPIRED: 410,
   TICKET_NOT_HELD: 403,
   UNAUTHENTICATED: 401,
 };
