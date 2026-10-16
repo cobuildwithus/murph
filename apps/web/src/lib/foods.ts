@@ -34,8 +34,10 @@ const FOOD_MEAL_NUTRIENT_NAME_PATTERNS = [
   /^(?:calories?|energy)(?:\b|\s*\()/u,
   /^protein\b/u,
   /^(?:carbohydrate|total carbohydrate|carbs?)\b/u,
-  /^(?:total lipid \(fat\)|total fat|fat)\b/u,
-  /^(?:fiber|dietary fiber|fiber, total dietary)\b/u,
+  // USDA names fat "Total lipid (fat)"; no word boundary follows its ")".
+  /^(?:total lipid \(fat\)|total fat\b|fat\b)/u,
+  // Foundation foods report "Total dietary fiber (AOAC 2011.25)".
+  /^(?:fiber|dietary fiber|fiber, total dietary|total dietary fiber)\b/u,
 ] as const;
 
 export type FoodSearchItem = ProductLabelSearchItem;

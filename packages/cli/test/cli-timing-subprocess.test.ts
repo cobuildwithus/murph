@@ -10,7 +10,7 @@ import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { test } from 'vitest'
 import { createEmptyMemoryDocument, memoryDocumentRelativePath, renderMemoryDocument, upsertMemoryRecord } from '@murphai/contracts'
-import { CLI_TIMING_MAX_REPORT_BYTES, normalizeCliTiming, type CliTiming, type CliValidationDiagnostic } from '@murphai/runtime-state/cli-timing'
+import { CLI_TIMING_MAX_REPORT_BYTES, normalizeCliTiming, type CliTiming, type CliTimingParseRejection, type CliValidationDiagnostic } from '@murphai/runtime-state/cli-timing'
 import { syntheticOats } from './fixtures/food-label-response.ts'
 
 const root = fileURLToPath(new URL('../../..', import.meta.url))
@@ -89,7 +89,7 @@ async function isolated(run: (directory: string, invoke: (
 }
 
 type Case = { name: string; argv: string[]; command: string; code?: string; field?: string;
-  validation?: CliValidationDiagnostic; requests?: number }
+  validation?: CliValidationDiagnostic; rejection?: CliTimingParseRejection; requests?: number }
 const cases: Case[] = [
   { name: 'food conflicting query forms', argv: ['food', 'search-labels', 'synthetic oats', '--query', 'PRIVATE_SENTINEL'],
     command: 'food search-labels', code: 'VALIDATION_ERROR', field: 'query',
@@ -122,7 +122,7 @@ const cases: Case[] = [
     validation: { field: 'arguments', code: 'custom', missing: false } },
   { name: 'knowledge upsert rejects unknown option before writes', argv: ['knowledge', 'upsert', '--body', 'SYNTHETIC_HEALTH_HISTORY', '--PRIVATE_SENTINEL'],
     command: 'knowledge upsert', code: 'VALIDATION_ERROR', field: 'arguments',
-    validation: { field: 'arguments', code: 'custom', missing: false } },
+    validation: { field: 'arguments', code: 'custom', missing: false }, rejection: 'unknown_flag' },
   { name: 'meal edit rejects unknown option before lookup or writes', argv: ['meal', 'edit', 'meal_synthetic_missing', '--PRIVATE_SENTINEL'],
     command: 'meal edit', code: 'VALIDATION_ERROR', field: 'arguments',
     validation: { field: 'arguments', code: 'custom', missing: false } },
@@ -215,7 +215,8 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
     assert.equal(commands[0]!.calls, 1)
     assert.deepEqual(commands[0]!.failures, sample.code
       ? [{ code: sample.code, stage: sample.field ? 'validation' : 'unknown', count: 1,
-          ...(sample.validation ? { validation: sample.validation } : {}) }] : undefined)
+          ...(sample.validation ? { validation: sample.validation } : {}),
+          ...(sample.rejection ? { rejection: sample.rejection } : {}) }] : undefined)
   })
 }, 90_000)
 

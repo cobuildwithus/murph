@@ -7,6 +7,7 @@ import { initializeVault } from "@murphai/core";
 import { withCliTiming, timeCliDispatch } from "@murphai/runtime-state/node/cli-timing";
 import { normalizeCliTiming, type CliTiming } from "@murphai/runtime-state/cli-timing";
 import { buildPersonalPatternReportRuntime } from "../src/query-projection.ts";
+import { buildPersonalPatternReportRuntime as buildPublicPersonalPatternReport } from "../src/index.ts";
 
 const expectedPhases = ["query-entity-read", "query-wearable-compose", "query-metric-read", "query-pattern-report"];
 test("Patterns cold and fresh public reads report each post-freshness stage without changing the report", async () => {
@@ -39,5 +40,19 @@ test("Patterns cold and fresh public reads report each post-freshness stage with
     }
     assert.deepEqual(results[0], results[1]);
     assert.deepEqual(results[0], await buildPersonalPatternReportRuntime(vault, options));
+    // Public index wrapper: one separate load span ahead of the unchanged query phases.
+    let timing: CliTiming | undefined;
+    let publicResult: unknown;
+    await withCliTiming(() => timeCliDispatch("wearables patterns", async () => {
+      publicResult = await buildPublicPersonalPatternReport(vault, options);
+    }), report => { timing = report; });
+    assert.ok(timing);
+    assert.deepEqual(normalizeCliTiming(timing), timing);
+    assert.deepEqual(publicResult, results[0]);
+    const phases = timing.commands[0]!.phases;
+    assert.deepEqual(phases.filter(phase => phase.phase.endsWith("-load")).map(phase => [phase.phase, phase.count]),
+      [["query-projection-load", 1]]);
+    assert.deepEqual(phases.filter(phase => expectedPhases.includes(phase.phase)).map(phase => phase.count), [1, 1, 1, 1]);
+    assert.deepEqual(await buildPublicPersonalPatternReport(vault, options), results[0]);
   } finally { await rm(vault, { recursive: true, force: true }); }
 });

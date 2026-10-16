@@ -665,6 +665,88 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     },
   )
 
+  it.skipIf(process.env.MURPH_MEASURE_MEDIA_PLACEMENT_INPUT !== '1').each(['direct', 'group'] as const)(
+    'media bubble placement: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const headTools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: true, progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-10-01',
+        currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      // Base is an exact ablation of this change: the attach-media placement
+      // sentence and per-image bubble fields, plus the group walkthrough line.
+      const placementSentence = " When the final reply uses `---` bubbles, set each image's bubble to the bubble it illustrates; each bubble is sent with its own images. Images without a bubble follow the final bubble."
+      const groupWalkthroughSentence = ' The one exception is a step-by-step walkthrough with images for more than one step: use one bubble per step, at most 4, and place each image on the bubble it illustrates.'
+      const headInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      assert.equal(headInstructions.includes(groupWalkthroughSentence), scope === 'group')
+      const headMediaTool = headTools.find((tool) => tool.name === 'attach_response_media')
+      assert.ok(headMediaTool)
+      assert.ok(headMediaTool.description.includes(placementSentence))
+      const withoutBubble = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(withoutBubble)
+        const record = readRecord(value)
+        if (!record) return value
+        return Object.fromEntries(Object.entries(record)
+          .filter(([key]) => key !== 'bubble')
+          .map(([key, entry]) => [key, withoutBubble(entry)]))
+      }
+      const baseTools = headTools.map((tool) => {
+        if (tool.name !== 'attach_response_media') return tool
+        const inputSchema = readRecord(withoutBubble(tool.inputSchema))
+        assert.ok(inputSchema)
+        return { ...tool, description: tool.description.replace(placementSentence, ''), inputSchema }
+      })
+      const measurements = []
+      for (const phase of ['base', 'head'] as const) {
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const tools = phase === 'base' ? baseTools : headTools
+        const developerInstructions = phase === 'base'
+          ? headInstructions.replace(groupWalkthroughSentence, '')
+          : headInstructions
+        const prompt = [layers.dynamicTurnContextPrompt, 'Walk us through a balance warmup with pictures for each move.'].join('\n\n')
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools, developerInstructions, prompt, groupConversation: scope === 'group',
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const captured: ReturnType<ScriptedStub['requestSummariesSinceBaseline']>[number]['completeProviderInput'] =
+          stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        assert.equal(captured.json.includes('set each image'), phase === 'head')
+        measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+          registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+          instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, prompt].join('\n\n')),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])],
+        })
+      }
+      process.stdout.write('[media-placement-input-proof] ' + JSON.stringify({ scope, measurements,
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured; scripted usage is not tokenization.',
+        baseline: 'exact attach-media placement and group walkthrough ablation; same tools and synthetic history',
+      }) + '\n')
+    },
+  )
+
   it.skipIf(process.env.MURPH_MEASURE_MEAL_INPUT !== '1').each(['direct', 'group'] as const)(
     'meal recovery: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
       stub ??= await startScriptedResponsesStub()

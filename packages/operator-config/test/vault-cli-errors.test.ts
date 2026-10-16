@@ -100,6 +100,28 @@ describe('projectVaultCliError', () => {
     expect(JSON.stringify(projection)).not.toContain(providerBody)
   })
 
+  test('states schema bounds for size issues without echoing submitted values', () => {
+    const submittedValue = 'private-detail-'.repeat(20)
+    const projection = projectVaultCliError(
+      new VaultCliError('invalid_payload', 'Payload is invalid.', {
+        issues: [
+          { code: 'too_big', origin: 'string', maximum: 240, inclusive: true, path: ['nutritionSourceDetail'], message: submittedValue },
+          { code: 'too_small', origin: 'array', minimum: 1, inclusive: true, path: ['query'] },
+          { code: 'too_big', origin: 'number', maximum: 10, inclusive: false, path: ['limit'] },
+          { code: 'too_big', origin: 'date', maximum: 5, path: ['occurredAt'] },
+        ],
+      }),
+    )
+
+    expect(projection.fieldErrors?.map(({ path, message }) => ({ path, message }))).toEqual([
+      { path: 'nutritionSourceDetail', message: 'Must be at most 240 characters.' },
+      { path: 'query', message: 'Must be at least 1 items.' },
+      { path: 'limit', message: 'Must be less than 10.' },
+      { path: 'occurredAt', message: 'This field is invalid.' },
+    ])
+    expect(JSON.stringify(projection)).not.toContain('private-detail-')
+  })
+
   test('ignores repair-shaped arbitrary context beside established Zod issues', () => {
     const projection = projectVaultCliError(
       new VaultCliError(

@@ -34,6 +34,11 @@ export const assistantBindingDeliverySchema = z.object({
   target: z.string().min(1),
 })
 
+// Authored reply placement: the 1-based `---` reply bubble an image follows.
+// Delivery consumes it to group images per bubble and strips it before any
+// outbox intent or provider send, so transports never see it.
+const assistantResponseMediaBubbleSchema = z.number().int().positive().optional()
+
 const assistantImageResponseMediaSchema = z
   .object({
     kind: z.literal('image').default('image'),
@@ -55,6 +60,7 @@ const assistantImageResponseMediaSchema = z
       }),
     alt: z.string().trim().min(1).max(500).nullable().default(null),
     source: z.string().trim().min(1).max(200).nullable().default(null),
+    bubble: assistantResponseMediaBubbleSchema,
   })
   .strict()
 
@@ -84,6 +90,7 @@ const assistantVaultImageResponseMediaSchema = z
     sizeBytes: z.number().int().positive().max(assistantVaultImageMaxBytes),
     alt: z.string().trim().min(1).max(500).nullable().default(null),
     source: z.string().trim().min(1).max(200).nullable().default(null),
+    bubble: assistantResponseMediaBubbleSchema,
   })
   .strict()
 

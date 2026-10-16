@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-10-14",
+  "order": 100,
+  "item": {
+    "id": "step-by-step-exercise-pictures",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Exercise pictures arrive step by step",
+    "summary": "When Murph walks you or your group through several exercises with pictures, each move arrives as its own message followed by its pictures.",
+    "details": "Pictures no longer go missing when someone sends a second message in a group just before Murph replies.",
+    "relevanceTags": [
+      "workouts",
+      "imessage",
+      "groups"
+    ],
+    "sourcePullRequests": [4145]
+  }
+}

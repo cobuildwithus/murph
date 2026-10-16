@@ -4094,15 +4094,20 @@ async function resolveAttachedResponseMedia(input: {
   try {
     const media: AssistantResponseMedia[] = []
     for (const item of input.media) {
+      if (item.kind !== 'vault_image') {
+        media.push(item)
+        continue
+      }
+      const resolvedItem = await resolveAssistantVaultImageResponseMedia({
+        alt: item.alt,
+        ref: item.ref,
+        source: item.source,
+        vaultRoot,
+      })
       media.push(
-        item.kind === 'vault_image'
-          ? await resolveAssistantVaultImageResponseMedia({
-              alt: item.alt,
-              ref: item.ref,
-              source: item.source,
-              vaultRoot,
-            })
-          : item,
+        item.bubble === undefined
+          ? resolvedItem
+          : { ...resolvedItem, bubble: item.bubble },
       )
     }
     return { media }

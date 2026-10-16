@@ -325,6 +325,10 @@ import {
   ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION as REAL_GROUP_RECONSIDERATION_INSTRUCTION,
 } from '../src/assistant/group-reply-reconsideration.ts'
 import {
+  placeAssistantResponseMediaInReplyBubbles,
+  splitAssistantReplyBubbles,
+} from '../src/assistant/reply-bubbles.ts'
+import {
   buildAssistantCliSurfaceContract,
 } from '../src/assistant/cli-surface-bootstrap.ts'
 import {
@@ -365,6 +369,11 @@ import {
   runCanonicalMealRestartJourney,
   runCanonicalReminderJourney,
 } from './support/canonical-live-journeys.ts'
+import {
+  MEAL_INTAKE_BENCHMARK_CASES,
+  readMealIntakeBenchmarkEnvironment,
+  runMealIntakeBenchmarkCase,
+} from './support/meal-intake-benchmark.ts'
 
 import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import {
@@ -1597,6 +1606,132 @@ describeRealCodex('real Codex focused wearable activity projection e2e', () => {
       reply: [/12,?300/u, /6,?200/u, /garmin/iu, /oura/iu, /steps/iu],
       rejectedReply: /8,?800|\b(?:updated|changed|deleted|sent|scheduled)\b|\?/iu,
     })
+  }, 360_000)
+})
+
+async function seedFocusedSleepPatternProjectionVault(vaultRoot: string): Promise<void> {
+  await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-01-01T00:00:00Z' })
+  const events = ['2026-01-01', '2026-01-02', '2026-01-03'].flatMap(date =>
+    ['oura', 'garmin'].map(provider => {
+      const durationMinutes = provider === 'oura' ? 450 : 600
+      const endAt = `${date}T11:00:00.000Z`
+      const startAt = new Date(Date.parse(endAt) - durationMinutes * 60_000).toISOString()
+      return {
+        dayKey: date, durationMinutes, endAt,
+        externalRef: { system: provider, resourceType: 'sleep', resourceId: `focused-sleep-${provider}-${date}` },
+        id: `evt_focused_sleep_${provider}_${date.replaceAll('-', '')}`,
+        kind: 'sleep_session', occurredAt: startAt, recordedAt: `${date}T11:05:00.000Z`,
+        schemaVersion: 'murph.event.v1', sleepType: 'main_sleep', source: 'device',
+        startAt, title: 'Synthetic provider sleep',
+      }
+    }))
+  await mkdir(path.join(vaultRoot, 'ledger/events/2026'), { recursive: true })
+  await writeFile(path.join(vaultRoot, 'ledger/events/2026/2026-01.jsonl'),
+    `${events.map(event => JSON.stringify(event)).join('\n')}\n`, 'utf8')
+}
+
+async function buildFocusedSleepPatternProjectionInstructions() {
+  const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+    workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+  })
+  expect(manifest.commands.find(command => command.name === 'wearables sleep pattern')?.schema?.options?.properties)
+    .toMatchObject({
+      from: expect.any(Object), to: expect.any(Object), provider: expect.any(Object),
+      timeZone: expect.any(Object), windowDays: expect.any(Object),
+    })
+  const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+  if (!assistantCliContract) throw new Error('Expected the generated sleep-pattern CLI contract.')
+  const instructions = buildAssistantSystemPrompt({
+    assistantCliContract, assistantHostedAutomationAvailable: false,
+    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    conversationScope: 'direct', currentInstant: '2026-01-04T12:00:00.000Z',
+    currentLocalDate: '2026-01-04', currentTimeZone: 'UTC', hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+  })
+  expect(instructions).toContain(assistantCliContract)
+  expect(assistantCliContract).toContain('sleep pattern')
+  return instructions
+}
+
+function readFocusedSleepPatternProjectionCommand(command: string): string {
+  expect(command).not.toMatch(/[\r\n]/u)
+  const unwrapped = command.match(/^\/bin\/zsh -c '([^']+)'$/u)?.[1] ?? command
+  expect(unwrapped).toMatch(/^[ \t]*vault-cli[ \t]+wearables[ \t]+sleep[ \t]+pattern(?:[ \t]|$)/u)
+  expect(unwrapped).not.toMatch(/[^A-Za-z0-9_= \t-]/u)
+  return unwrapped
+}
+
+describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
+  it('answers duration and usable nights from one native sleep-pattern read without other reads or effects', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-sleep-pattern-projection-e2e-'))
+    const vaultRoot = path.join(root, 'vault'); const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await seedFocusedSleepPatternProjectionVault(vaultRoot)
+      const developerInstructions = await buildFocusedSleepPatternProjectionInstructions()
+      // Reuse the existing native production CLI wrapper, including its command log.
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions,
+        env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Read my Oura wearable sleep pattern from 2026-01-01 through 2026-01-03 once, using the native JSON format. Report the mean session duration in minutes (not total asleep time) and usable night count in one sentence. Use provider oura and those exact date bounds. No other reads, help commands, advice, messages to anyone, or changes.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      expect(commands).toHaveLength(1)
+      expect(commands[0]).toMatch(/^wearables sleep pattern(?:\s|$)/u)
+      const tokens = commands[0]!.split(/\s+/u).slice(3)
+      const options = new Map<string, string>()
+      while (tokens.length) {
+        const [flag, inline] = tokens.shift()!.split('=')
+        expect(['--from', '--to', '--provider', '--format']).toContain(flag)
+        expect(options.has(flag!)).toBe(false)
+        const value = inline ?? tokens.shift()
+        expect(value).toBeDefined(); options.set(flag!, value!)
+      }
+      expect(Object.fromEntries(options)).toEqual({
+        '--from': '2026-01-01', '--to': '2026-01-03', '--provider': 'oura', '--format': 'json',
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions).toHaveLength(1)
+      const action = actions[0]!
+      if (action.kind !== 'command') throw new Error('Only the focused native sleep-pattern read is permitted.')
+      expect(action.ok).toBe(true)
+      readFocusedSleepPatternProjectionCommand(action.command)
+      const document = readRecord(JSON.parse(action.output))
+      expect(document?.ok === true ? document.data : document).toMatchObject({
+        summary: {
+          from: '2026-01-01', to: '2026-01-03', providers: ['oura'],
+          validNightCount: 3, expectedNightCount: 3, reportingTimeZone: 'UTC',
+          sessionDurationMinutes: { average: 450, count: 3, median: 450 },
+        },
+      })
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(await getQueryProjectionStatus(vaultRoot)).toMatchObject({
+        exists: true, fresh: false, builtAt: null, entityCount: 0, searchDocumentCount: 0,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[focused-sleep-pattern-projection-e2e] ${JSON.stringify({ reads: commands.length, reply })}\n`)
+      const plainReply = reply.replace(/[*_`]/gu, '')
+      expect(plainReply).toMatch(/\b450\s*(?:minutes?|mins?)\b/iu)
+      expect(plainReply).toMatch(/\b(?:3|three)\s+(?:(?:usable|valid)\s+)?nights?\b|\bnights?\s*:\s*(?:3|three)\b/iu)
+      expect(plainReply).not.toMatch(/\b600\b|\b(?:updated|changed|deleted|sent|scheduled)\b|\?/iu)
+      expect(reply.length).toBeLessThanOrEqual(400)
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
   }, 360_000)
 })
 
@@ -8362,6 +8497,200 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(second.sessionId).toBe(first.sessionId)
         expect(second.finalMessage.trim()).toBe('')
         expect(finishCalls).toHaveLength(1)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
+    'places group walkthrough images on the bubble that teaches each movement',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-media-walkthrough-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+
+      try {
+        await materializeRoutinePresentationVaultCli(binDirectory)
+        const exerciseGuidance = await readFile(
+          path.join(
+            resolveAssistantSkillsRoot(),
+            'shared/exercise-catalog-runtime.md',
+          ),
+          'utf8',
+        )
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: [
+            buildGroupPointOfViewDeveloperInstructions(),
+            exerciseGuidance,
+          ].join('\n\n'),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+          env: {
+            ...config.env,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: 'A participant: "Murph, walk us through a balance warmup: ankle circles, torso turns, a tandem stand, then side-to-side weight shifts. Send pictures for each."',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const mediaCalls = readCapabilityRoutingActions(result.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+          )
+        const bubbles = splitAssistantReplyBubbles(result.finalMessage)
+        const groups = placeAssistantResponseMediaInReplyBubbles({
+          bubbleCount: bubbles.length,
+          media: result.responseMedia,
+        })
+        process.stdout.write(
+          `[group-media-walkthrough-e2e] ${JSON.stringify({
+            bubbles: bubbles.map((text, index) => ({
+              images: groups[index]?.map((item) =>
+                item.kind === 'image' ? item.source : item.kind
+              ),
+              text,
+            })),
+            mediaCalls: mediaCalls.length,
+          })}\n`,
+        )
+
+        expect(mediaCalls.length).toBeGreaterThanOrEqual(1)
+        expect(bubbles.length).toBeGreaterThanOrEqual(2)
+        expect(bubbles.length).toBeLessThanOrEqual(4)
+        const movements = [
+          ['exercise_catalog:MB101:1', /ankle circle/iu],
+          ['exercise_catalog:BL201:1', /tandem/iu],
+          ['exercise_catalog:MB102:1', /torso turn/iu],
+          ['exercise_catalog:BL202:1', /weight shift/iu],
+        ] as const
+        expect(
+          result.responseMedia.map((item) =>
+            item.kind === 'image' ? item.source : item.kind
+          ).sort(),
+        ).toEqual(movements.map(([source]) => source).sort())
+        expect(
+          groups.filter((group) => group.length > 0).length,
+          'images spread across bubbles',
+        ).toBeGreaterThanOrEqual(2)
+        for (const [source, name] of movements) {
+          const bubbleIndex = groups.findIndex((group) =>
+            group.some((item) => item.kind === 'image' && item.source === source)
+          )
+          expect(bubbles[bubbleIndex], `${source} bubble text`).toMatch(name)
+        }
+        expect(result.finalMessage).not.toMatch(
+          /MB101|MB102|BL201|BL202|exercise_catalog|https?:/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
+    're-attaches draft images after group reconsideration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-reconsideration-media-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+
+      try {
+        await materializeRoutinePresentationVaultCli(binDirectory)
+        const exerciseGuidance = await readFile(
+          path.join(
+            resolveAssistantSkillsRoot(),
+            'shared/exercise-catalog-runtime.md',
+          ),
+          'utf8',
+        )
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: [
+            buildGroupPointOfViewDeveloperInstructions(),
+            exerciseGuidance,
+          ].join('\n\n'),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+          env: {
+            ...config.env,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const initialBeat =
+          'A participant: "Murph, show us how to do a tandem stand, with a picture."'
+        const draft = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: initialBeat,
+        })
+        expect(draft.responseMedia).toEqual([
+          expect.objectContaining({ source: 'exercise_catalog:BL201:1' }),
+        ])
+
+        const final = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+            initialBeat,
+            'Another participant: "Murph, how long should we hold each side?"',
+          ].join('\n\n'),
+          resumeSessionId: draft.sessionId,
+        })
+        const finalMediaCalls = readCapabilityRoutingActions(final.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+          )
+        process.stdout.write(
+          `[group-reconsideration-media-e2e] ${JSON.stringify({
+            finalMessage: final.finalMessage,
+            mediaCalls: finalMediaCalls.length,
+            sources: final.responseMedia.map((item) =>
+              item.kind === 'image' ? item.source : item.kind
+            ),
+          })}\n`,
+        )
+
+        expect(final.sessionId).toBe(draft.sessionId)
+        expect(finalMediaCalls.length).toBeGreaterThanOrEqual(1)
+        expect(final.responseMedia).toEqual([
+          expect.objectContaining({ source: 'exercise_catalog:BL201:1' }),
+        ])
+        expect(final.finalMessage).toMatch(/heel/iu)
+        expect(final.finalMessage).toMatch(/\d+\s*(?:seconds?|secs?)/iu)
+        expect(final.finalMessage).not.toMatch(
+          /draft|held|not sent|previous response|re-?attach|discarded/iu,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -20628,6 +20957,101 @@ describeRealCodex('real Codex health-purpose scheduled follow-ups', () => {
       if (decision.kind === 'send_message') {
         expect(decision.text).toMatch(expectedText!)
         expect(decision.text).not.toMatch(/did you (?:attend|arrive)|went as planned|hydration|jet lag/iu)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex standalone scheduled support messages', () => {
+  const unrelatedRecentConversation = [
+    'Available recent conversation (newest last):',
+    'October 6, 10:00 America/New_York. Assistant: tuesday. after lunch, do the two-minute hamstring and hip stretch. tiny version: one stretch.',
+    'October 8, 12:05. Member: are lentils a good protein source? Assistant: yes, about 18 grams of protein per cooked cup, plus fiber.',
+    'October 10, 19:40. Member: any quick dinner ideas with chickpeas? Assistant: try a chickpea and spinach curry; it takes about 20 minutes.',
+    'October 11, 16:20. Member: what is a good stretch for tight calves? Assistant: a wall calf stretch, 30 seconds per side.',
+    'No member reply mentions stretching since October 6.',
+  ].join('\n')
+  it.each([
+    {
+      scenario: 'four-week review written with internal support labels',
+      supportKind: 'review' as const,
+      schedule: { kind: 'at' as const, at: '2026-10-13T14:00:00.000Z' },
+      instructions: 'subject anchor: daily stretch-after-lunch plan. run a brief four-week review. ask whether the tuesday cue and friday check-in helped, and offer one clear disposition: keep, change timing, or stop. avoid guilt. do not claim stretches happened without reliable evidence.',
+      expectedText: /stretch/iu,
+      maxQuestions: 1,
+    },
+    {
+      scenario: 'one-time reminder written with an internal cue label',
+      supportKind: null,
+      schedule: { kind: 'at' as const, at: '2026-10-13T14:00:00.000Z' },
+      instructions: 'subject anchor: after-lunch stretch. send the cue: after lunch, do the two-minute hamstring and hip stretch. tiny version: one stretch.',
+      expectedText: /stretch/iu,
+      maxQuestions: 0,
+    },
+    {
+      scenario: 'weekly check-in written with an internal cue label',
+      supportKind: 'check_in' as const,
+      schedule: { kind: 'cron' as const, expression: '0 10 * * 5', timeZone: 'America/New_York' },
+      instructions: 'subject anchor: daily stretch-after-lunch plan. it is friday. first check recent conversation for a stretch report this week. if already reported, stay silent. if unknown, ask one neutral, no-guilt question about whether the tuesday cue helped. do not treat missing evidence as a miss.',
+      expectedText: /stretch/iu,
+      maxQuestions: 1,
+    },
+    {
+      scenario: 'member-dictated exact reminder copy',
+      supportKind: null,
+      schedule: { kind: 'at' as const, at: '2026-10-13T14:00:00.000Z' },
+      instructions: 'The member asked for this exact reminder text, word for word: "water the fern". Send exactly that text.',
+      expectedText: /^water the fern\.?$/iu,
+      maxQuestions: 0,
+    },
+  ])('standalone scheduled support $scenario', async ({ scenario, supportKind, schedule, instructions, expectedText, maxQuestions }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-standalone-support-e2e-'))
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const occurrenceAt = '2026-10-13T14:00:00.000Z'
+      const created = await upsertAutomation({
+        continuityPolicy: 'preserve',
+        instructions,
+        now: new Date('2026-09-14T14:00:00.000Z'),
+        route: { channel: 'linq', deliveryTarget: 'synthetic-standalone-support', identityId: null,
+          participantId: null, threadId: 'synthetic-standalone-support', threadIsDirect: true },
+        schedule, slug: 'synthetic-standalone-support', status: 'active', supportKind, tags: [],
+        title: 'Synthetic standalone support', vaultRoot: workingDirectory,
+      })
+      const source = findCanonicalAssistantCronRecordInList(
+        await listCanonicalAssistantCronRecords(workingDirectory), created.record.automationId)
+      if (!source || source.kind !== 'automation') throw new Error('Expected synthetic automation.')
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+        jobId: resolveCanonicalAssistantCronJobId(source), now: occurrenceAt,
+      })
+      const executionInstructions = buildAssistantCronExecutionInstructions({
+        job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+        kind: 'canonical', runtimeState, source,
+      }, { automationId: null, contextReferences: [] })
+      const prepared = await prepareAssistantCronNotificationInput({
+        instructions: executionInstructions, vault: workingDirectory, workingDirectory,
+        turnTrigger: 'automation-cron', scheduledAutomationScheduleKind: schedule.kind,
+      })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: buildScheduledAutomationDeveloperInstructions('direct'),
+        dynamicTools: [], env: config.env, model: config.model, modelProvider: config.modelProvider,
+        prompt: [prepared.instructions, unrelatedRecentConversation].join('\n\n'),
+        reasoningEffort: 'high', sandbox: 'read-only', workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`${JSON.stringify({ scenario, model: config.model, decision })}\n`)
+      expect(decision.kind).toBe('send_message')
+      expect(result.followUpRequest).toBeNull()
+      if (decision.kind === 'send_message') {
+        expect(decision.text.trim()).toMatch(expectedText)
+        expect(decision.text).not.toMatch(/\bcues?\b|subject anchor|disposition|support series|automation|\bcontext\b|\bevidence\b|escalat/iu)
+        expect((decision.text.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(maxQuestions)
+        expect(decision.text.length).toBeLessThan(240)
       }
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
@@ -34023,6 +34447,24 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
       expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
     } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
   })
+})
+
+describeRealCodex('real Codex meal intake speed benchmark', () => {
+  // Opt-in speed benchmark through the hosted automation entrypoint. Run one
+  // case per invocation; see support/meal-intake-benchmark.ts for its inputs.
+  it.each(MEAL_INTAKE_BENCHMARK_CASES.map((benchmarkCase) => [benchmarkCase.id, benchmarkCase] as const))(
+    'meal intake speed: %s',
+    { timeout: 900_000 },
+    async (_caseId, benchmarkCase) => {
+      const config = await resolveRealCodexE2eConfig()
+      try {
+        const result = await runMealIntakeBenchmarkCase({
+          benchmarkCase, config, ...readMealIntakeBenchmarkEnvironment(),
+        })
+        expect(result.failures).toEqual([])
+      } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+    },
+  )
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {

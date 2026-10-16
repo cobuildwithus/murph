@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   assistantChannelSupportsReplyBubbles,
+  placeAssistantResponseMediaInReplyBubbles,
   splitAssistantReplyBubbles,
   stripAssistantReplyBubbleDelimiters,
 } from '../src/assistant/reply-bubbles.ts'
@@ -70,5 +71,39 @@ describe('assistant reply bubbles', () => {
     const text = ' \n---\n \n---\n'
     expect(splitAssistantReplyBubbles(text)).toEqual([text])
     expect(stripAssistantReplyBubbleDelimiters(text)).toBe(text)
+  })
+
+  it('groups media under its bubble and strips the placement', () => {
+    const image = (name: string, bubble?: number) => ({
+      kind: 'image' as const,
+      url: `https://cdn.example.test/${name}.png`,
+      alt: null,
+      source: null,
+      ...(bubble === undefined ? {} : { bubble }),
+    })
+    const plain = (name: string) => image(name)
+
+    expect(
+      placeAssistantResponseMediaInReplyBubbles({
+        bubbleCount: 3,
+        media: [
+          image('reach-forward', 1),
+          image('reach-side', 1),
+          image('hinge', 2),
+          image('unplaced'),
+          image('past-last', 9),
+        ],
+      }),
+    ).toStrictEqual([
+      [plain('reach-forward'), plain('reach-side')],
+      [plain('hinge')],
+      [plain('unplaced'), plain('past-last')],
+    ])
+    expect(
+      placeAssistantResponseMediaInReplyBubbles({
+        bubbleCount: 1,
+        media: [image('one', 2), image('two')],
+      }),
+    ).toStrictEqual([[plain('one'), plain('two')]])
   })
 })

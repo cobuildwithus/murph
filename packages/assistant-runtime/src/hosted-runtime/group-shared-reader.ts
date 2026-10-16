@@ -14,6 +14,7 @@ import {
   parseHostedGroupSharedReadOptions,
   type HostedGroupSharedReadOptions,
   type HostedRuntimeGroupSharedReadRequest,
+  type HostedRuntimeGroupSharedReadResult,
   parseHostedGroupSharedFreshnessRequirements,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -91,6 +92,30 @@ interface HostedGroupParticipantDisplayNameCacheRead {
 }
 
 /**
+ * Content-free timing for one accepted read. Enum and numeric fields only:
+ * never dates, scope keys, member identifiers, values, or errors.
+ */
+export interface HostedGroupSharedReadTelemetry {
+  groupSharedReadCallbackCount: number;
+  groupSharedReadCallbackElapsedMs: number;
+  groupSharedReadCallbackMaxElapsedMs: number;
+  groupSharedReadDecision:
+    | "no_freshness" | "satisfied" | "not_needed" | "refresh_unavailable" | "deadline"
+    | "not_ok" | "invalid" | "fallback" | "error" | "canceled";
+  groupSharedReadElapsedMs: number;
+  groupSharedReadFreshnessRequested: boolean;
+  groupSharedReadOutcome: HostedRuntimeGroupSharedReadResult["status"] | "error" | "canceled";
+  groupSharedReadPollCount: number;
+  groupSharedReadPollElapsedMs: number;
+  groupSharedReadWaitBudgetMs: number;
+}
+
+type HostedGroupSharedReadStats = Pick<HostedGroupSharedReadTelemetry,
+  | "groupSharedReadCallbackCount" | "groupSharedReadCallbackElapsedMs"
+  | "groupSharedReadCallbackMaxElapsedMs" | "groupSharedReadDecision"
+  | "groupSharedReadPollCount" | "groupSharedReadPollElapsedMs">;
+
+/**
  * Creates a lazy operation-local adapter over the Web-owned shared-data read.
  * Construction performs no I/O. Each model-triggered request asks Web for one
  * current, consent-filtered, bounded snapshot of exactly the requested scopes.
@@ -99,6 +124,8 @@ export function createHostedGroupSharedReader(input: {
   groupToolPort: HostedRuntimeGroupToolPort | null;
   /** Omit for read-only callers. Explicitly set to admit sync requests. */
   freshnessWaitMs?: number;
+  /** Fire-and-forget; never awaited, and its throw or rejection is dropped. */
+  onReadCompleted?: (telemetry: HostedGroupSharedReadTelemetry) => void;
 }): AssistantHostedGroupSharedReader {
   const waitMs = Math.min(5 * 60_000, Math.max(0, input.freshnessWaitMs ?? 0));
   return {
@@ -121,19 +148,31 @@ export function createHostedGroupSharedReader(input: {
         return unavailable(GROUP_SHARED_REQUEST_INVALID);
       }
       const signal = context?.signal ?? undefined;
+      const startedAt = performance.now();
+      const stats: HostedGroupSharedReadStats = {
+        groupSharedReadCallbackCount: 0, groupSharedReadCallbackElapsedMs: 0,
+        groupSharedReadCallbackMaxElapsedMs: 0, groupSharedReadDecision: "error",
+        groupSharedReadPollCount: 0, groupSharedReadPollElapsedMs: 0,
+      };
+      const groupToolPort = timeHostedGroupToolPort(input.groupToolPort, stats);
+      let outcome: HostedGroupSharedReadTelemetry["groupSharedReadOutcome"] = "error";
       try {
-        return await readSharedGroupWithFreshness({
-          groupToolPort: input.groupToolPort, projectionScopes, requirements, signal, waitMs, options,
+        const result = await readSharedGroupWithFreshness({
+          groupToolPort, projectionScopes, requirements, signal, stats, waitMs, options,
         });
+        outcome = result.status;
+        return result;
       } catch (error) {
         if (signal?.aborted) throw error;
         // Older Web producers reject the additive request. Preserve an ordinary
         // current read without claiming the requested refresh was completed.
         if (requirements) {
           try {
-            const response = await input.groupToolPort.request({ action: "read_shared", projectionScopes, ...options },
+            const response = await groupToolPort.request({ action: "read_shared", projectionScopes, ...options },
               ...(signal ? [{ signal }] : []));
             if (response.action === "read_shared" && response.result.status === "ok") {
+              stats.groupSharedReadDecision = "fallback";
+              outcome = "ok";
               return { ...response.result, freshness: {
                 checkedAt: new Date().toISOString(), refreshStatus: "unavailable",
               } };
@@ -142,7 +181,58 @@ export function createHostedGroupSharedReader(input: {
             if (signal?.aborted) throw fallbackError;
           }
         }
+        outcome = "unavailable";
         return unavailable(GROUP_SHARED_READ_FAILED);
+      } finally {
+        finishHostedGroupSharedRead({
+          freshnessRequested: requirements !== undefined, observer: input.onReadCompleted,
+          outcome, signal, startedAt, stats, waitMs,
+        });
+      }
+    },
+  };
+}
+
+/** Builds the one content-free record and queues it off the read's path. */
+function finishHostedGroupSharedRead(input: {
+  freshnessRequested: boolean;
+  observer: ((telemetry: HostedGroupSharedReadTelemetry) => void) | undefined;
+  outcome: HostedGroupSharedReadTelemetry["groupSharedReadOutcome"];
+  signal: AbortSignal | undefined;
+  startedAt: number;
+  stats: HostedGroupSharedReadStats;
+  waitMs: number;
+}): void {
+  const { observer, signal, stats } = input;
+  let outcome = input.outcome;
+  // Abort rejects promptly; it does not prove in-flight Web work stopped.
+  if (signal?.aborted && outcome === "error") {
+    outcome = "canceled";
+    stats.groupSharedReadDecision = "canceled";
+  }
+  const telemetry: HostedGroupSharedReadTelemetry = {
+    ...stats, groupSharedReadElapsedMs: performance.now() - input.startedAt,
+    groupSharedReadFreshnessRequested: input.freshnessRequested,
+    groupSharedReadOutcome: outcome, groupSharedReadWaitBudgetMs: input.waitMs,
+  };
+  if (observer) void Promise.resolve().then(() => observer(telemetry)).catch(() => undefined);
+}
+
+/** Same calls in the same order; only accumulates callback wall time. */
+function timeHostedGroupToolPort(
+  port: HostedRuntimeGroupToolPort,
+  stats: HostedGroupSharedReadStats,
+): HostedRuntimeGroupToolPort {
+  return {
+    async request(request, context) {
+      const startedAt = performance.now();
+      stats.groupSharedReadCallbackCount += 1;
+      try {
+        return await port.request(request, ...(context ? [context] : []));
+      } finally {
+        const elapsedMs = performance.now() - startedAt;
+        stats.groupSharedReadCallbackElapsedMs += elapsedMs;
+        stats.groupSharedReadCallbackMaxElapsedMs = Math.max(stats.groupSharedReadCallbackMaxElapsedMs, elapsedMs);
       }
     },
   };
@@ -155,32 +245,59 @@ async function readSharedGroupWithFreshness(input: {
   projectionScopes: HostedVaultShareSelectableProjectionScope[];
   requirements: ReturnType<typeof parseHostedGroupSharedFreshnessRequirements> | undefined;
   signal: AbortSignal | undefined;
+  stats: HostedGroupSharedReadStats;
   waitMs: number;
 }) {
-  const { signal, requirements, projectionScopes, groupToolPort } = input;
+  const { signal, requirements, projectionScopes, groupToolPort, stats } = input;
   const deadline = Date.now() + input.waitMs;
   signal?.throwIfAborted();
   let response = await groupToolPort.request({
     action: "read_shared", projectionScopes, ...input.options,
     ...(requirements ? { freshness: requirements } : {}),
   }, ...(signal ? [{ signal }] : []));
-  if (response.action !== "read_shared") return unavailable(GROUP_SHARED_RESULT_INVALID);
+  if (response.action !== "read_shared") return invalidResult(stats);
   let result = response.result;
-  if (!requirements) return result;
-  while (result.status === "ok"
-    && result.freshness?.refreshStatus === "requested"
-    && hostedGroupSharedNeedsWearableRecovery(result, requirements)
-    && Date.now() < deadline) {
-    await delay(Math.min(15_000, deadline - Date.now()), undefined, { signal });
+  if (!requirements) {
+    stats.groupSharedReadDecision = "no_freshness";
+    return result;
+  }
+  let decision;
+  while ((decision = readFreshnessWaitDecision(result, requirements, deadline)) === null) {
+    stats.groupSharedReadPollCount += 1;
+    const pollStartedAt = performance.now();
+    try {
+      await delay(Math.min(15_000, deadline - Date.now()), undefined, { signal });
+    } finally {
+      stats.groupSharedReadPollElapsedMs += performance.now() - pollStartedAt;
+    }
     signal?.throwIfAborted();
     response = await groupToolPort.request({ action: "read_shared", projectionScopes, ...input.options },
       ...(signal ? [{ signal }] : []));
-    if (response.action !== "read_shared") return unavailable(GROUP_SHARED_RESULT_INVALID);
+    if (response.action !== "read_shared") return invalidResult(stats);
     result = response.result.status === "ok" ? { ...response.result, freshness: {
       checkedAt: new Date().toISOString(), refreshStatus: "requested",
     } } : response.result;
   }
+  stats.groupSharedReadDecision = decision;
   return result;
+}
+
+function invalidResult(stats: HostedGroupSharedReadStats) {
+  stats.groupSharedReadDecision = "invalid";
+  return unavailable(GROUP_SHARED_RESULT_INVALID);
+}
+
+/** Null continues polling; checks keep the original short-circuit order. */
+function readFreshnessWaitDecision(
+  result: HostedRuntimeGroupSharedReadResult,
+  requirements: ReturnType<typeof parseHostedGroupSharedFreshnessRequirements>,
+  deadline: number,
+): HostedGroupSharedReadTelemetry["groupSharedReadDecision"] | null {
+  if (result.status !== "ok") return "not_ok";
+  const refreshStatus = result.freshness?.refreshStatus;
+  if (refreshStatus !== "requested") return refreshStatus === "not_needed" ? "not_needed" : "refresh_unavailable";
+  if (!hostedGroupSharedNeedsWearableRecovery(result, requirements)) return "satisfied";
+  return Date.now() < deadline ? null : "deadline";
 }
 
 export function normalizeHostedGroupSharedProjectionScopes(

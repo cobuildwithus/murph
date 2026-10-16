@@ -112,7 +112,7 @@ function createValidationFieldErrors(
         path: normalizeValidationPath(path),
         expected: expected ?? '',
         received: 'invalid',
-        message: 'This field is invalid.',
+        message: describeValidationBound(issue) ?? 'This field is invalid.',
       }]
     },
   )
@@ -134,6 +134,36 @@ function createValidationFieldErrors(
   }
 
   return boundedFields
+}
+
+// The schema bound lets a caller fix an oversized or undersized field in one
+// retry. It is schema metadata, never the submitted value.
+function describeValidationBound(
+  issue: Record<PropertyKey, unknown>,
+): string | null {
+  const tooBig = issue.code === 'too_big'
+  if (!tooBig && issue.code !== 'too_small') {
+    return null
+  }
+  const bound = tooBig ? issue.maximum : issue.minimum
+  if (typeof bound !== 'number' || !Number.isFinite(bound)) {
+    return null
+  }
+  const unit = issue.origin === 'string'
+    ? ' characters'
+    : issue.origin === 'array' || issue.origin === 'set'
+      ? ' items'
+      : issue.origin === 'number'
+        ? ''
+        : null
+  if (unit === null) {
+    return null
+  }
+  const exclusive = issue.inclusive === false
+  const comparison = tooBig
+    ? exclusive ? 'less than' : 'at most'
+    : exclusive ? 'more than' : 'at least'
+  return `Must be ${comparison} ${bound}${unit}.`
 }
 
 function resolveValidationPath(

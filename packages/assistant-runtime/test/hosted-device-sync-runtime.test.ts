@@ -13247,20 +13247,24 @@ describe("hosted device-sync runtime", () => {
   });
 
   test.each(["blood_oxygen", "electrocardiogram_voltage"])(
-    "retained Junction %s validation restores from a hosted continuation without losing its delay or payload",
+    "retained Junction %s validation restores from a hosted continuation with its delay, payload, and transport budget",
     async (resource) => {
       const occurredAt = "2026-04-04T09:00:00.000Z";
       vi.useFakeTimers();
       vi.setSystemTime(new Date(occurredAt));
       const first = await createHostedRuntimeWorkspace("hosted-validation-first-");
       const cold = await createHostedRuntimeWorkspace("hosted-validation-cold-");
-      let corrected = false;
+      let outcome: "validation" | "transport" | "valid" = "validation";
       const baseProvider = createFakeProvider();
       const provider = createFakeProvider({
         provider: "junction",
         descriptor: { ...baseProvider.descriptor, provider: "junction" },
         jobExecutor: { async executeJob() {
-          if (corrected) return {};
+          if (outcome === "valid") return {};
+          if (outcome === "transport") {
+            throw deviceSyncError({ code: "JUNCTION_API_REQUEST_FAILED",
+              message: "Synthetic provider failure.", retryable: true, httpStatus: 500 });
+          }
           if (resource === "blood_oxygen") {
             throw new JunctionSparseCalendarRepairNormalizationError({ reason: "daily.value_out_of_range" });
           }
@@ -13302,7 +13306,7 @@ describe("hosted device-sync runtime", () => {
         assert.ok(recovery);
         const retry = recovery.wake.hint?.jobs?.[0];
         assert.ok(retry);
-        assert.equal(retry.maxAttempts, 1);
+        assert.equal(retry.maxAttempts, 5);
         assert.equal(retry.availableAt, "2026-04-04T09:30:00.000Z");
         assert.deepEqual(retry.payload, job.payload);
         assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
@@ -13315,13 +13319,16 @@ describe("hosted device-sync runtime", () => {
         assert.ok(restored);
         assert.deepEqual(restored.payload, job.payload);
         assert.equal(restored.availableAt, retry.availableAt);
+        assert.equal(restored.maxAttempts - restored.attempts, 5);
         assert.equal(await coldService.runWorkerOnce(coldAccountId), null);
         vi.setSystemTime(new Date(retry.availableAt));
+        outcome = "transport";
         assert.equal((await coldService.runWorkerOnce(coldAccountId))?.id, restored.id);
         const pending = getStore(coldService).getJobById(restored.id);
         assert.equal(pending?.status, "queued");
-        assert.equal(pending.availableAt, "2026-04-04T10:00:00.000Z");
-        corrected = true;
+        assert.equal(pending.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+        assert.equal(pending.maxAttempts - pending.attempts, 4);
+        outcome = "valid";
         vi.setSystemTime(new Date(pending.availableAt));
         await coldService.runWorkerOnce(coldAccountId);
         assert.equal(getStore(coldService).getJobById(restored.id)?.status, "succeeded");

@@ -1,3 +1,6 @@
+Sleep-pattern focused freshness implementation and parent-verified results are recorded in
+[the completed sleep-pattern plan](exec-plans/completed/2026-10-09-sleep-pattern-focused-freshness.md).
+
 Entrypoint test worker build prerequisites are owned by
 `../packages/assistant-runtime/README.md#focused-tests`; repair evidence is tracked
 in [the worker preflight plan](exec-plans/completed/2026-10-09-frog-entrypoint-build-preflight.md).
@@ -39,6 +42,11 @@ Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
 # Murph Agent Docs Index
+
+Retained Junction validation jobs keep a bounded transport retry budget in the existing job store;
+[`RELIABILITY.md`](RELIABILITY.md) owns the retry and cold-handoff contract.
+Implementation and review proof are recorded in the
+[retry-budget plan](exec-plans/completed/2026-10-16-junction-validation-retry-budget.md).
 
 Typing egress and mailbox runtime timing correlation is owned by
 [`Cloudflare private telemetry`](../apps/cloudflare/README.md#private-operational-telemetry);
@@ -316,6 +324,12 @@ recorded in
 Deployment remains blocked and not observation-ready; the live phase and
 reader-before-producer contract is owned by `docs/hosted-runtime-log-database.md`.
 
+Completed Patterns lazy load phase telemetry implementation, final review and
+candidate CI are recorded in
+[`2026-10-16-patterns-load-phase-telemetry.md`](exec-plans/completed/2026-10-16-patterns-load-phase-telemetry.md).
+Deployment remains blocked and not observation-ready; the live phase and
+reader-before-producer contract is owned by `docs/hosted-runtime-log-database.md`.
+
 Hosted-local pre-allocation barrier control recovery is tracked in
 [`2026-09-17-runtime-test-target-routing.md`](exec-plans/active/2026-09-17-runtime-test-target-routing.md).
 
@@ -383,6 +397,10 @@ its conditional delivery, reconciliation, and repair rules live in
 `packages/assistant-engine/skills/behavior-followthrough/references/support-runtime.md`.
 Goal-setup latency investigation and focused verification are recorded in
 [`2026-09-24-goal-turn-latency.md`](exec-plans/completed/2026-09-24-goal-turn-latency.md).
+
+Group shared-read timing telemetry (#3997) is recorded in
+[`2026-10-13-group-shared-read-timing.md`](exec-plans/completed/2026-10-13-group-shared-read-timing.md);
+its log contract is owned by `docs/hosted-runtime-log-database.md`.
 
 Runtime authority lock/read consolidation is recorded in
 [`2026-09-20-runtime-latency-delete-work.md`](exec-plans/active/2026-09-20-runtime-latency-delete-work.md).
@@ -1196,3 +1214,8 @@ The six-hour freshness window for Flex-retry managed automations is tracked in
 
 Meal telemetry authoring and validation handoff are recorded in
 [the meal failure attribution plan](exec-plans/completed/2026-10-10-meal-failure-attribution.md).
+
+Control response MIME diagnostics: [`2026-10-13-control-response-mime-diagnostic.md`](exec-plans/completed/2026-10-13-control-response-mime-diagnostic.md).
+
+Provider-input baseline snapshot repair and regression proof are tracked in
+[the measurement plan](exec-plans/active/2026-10-16-frog-input-measurement-4136.md).

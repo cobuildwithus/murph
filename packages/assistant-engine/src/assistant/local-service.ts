@@ -177,6 +177,7 @@ import { resolveAssistantConversationScope } from './conversation-policy.js'
 import {
   assistantChannelSupportsReplyBubbles,
   stripAssistantReplyBubbleDelimiters,
+  stripAssistantResponseMediaPlacement,
 } from './reply-bubbles.js'
 import type {
   AssistantMessageInput,
@@ -517,7 +518,7 @@ function buildCompletedAssistantAskResult(input: {
     ...(input.responseDisposition === 'none'
       ? { responseDisposition: 'none' as const }
       : {}),
-    media: outcome.media,
+    media: stripAssistantResponseMediaPlacement(outcome.media),
     session: outcome.session,
     delivery: outcome.kind === 'sent' ? outcome.delivery : null,
     deliveryDeferred: outcome.kind === 'queued',
