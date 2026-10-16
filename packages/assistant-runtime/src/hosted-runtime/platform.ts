@@ -54,6 +54,7 @@ import type {
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceReadResponse,
   HostedBrowserVaultReplicaPublishResponse,
+  HostedRuntimeRedactedObject,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantUsageRecord,
@@ -920,6 +921,8 @@ export interface HostedRuntimePlatform {
   usageDiagnosticsPort?: HostedRuntimeUsageDiagnosticsPort | null;
   physicalNotes?: HostedRuntimePhysicalNotePort | null;
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;
+  /** Diagnostic scalars for the invocation's completion log; never authority. */
+  readFetchTransportDiagnostics?: (() => HostedRuntimeRedactedObject) | null;
   subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;

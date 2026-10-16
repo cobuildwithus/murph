@@ -15,6 +15,7 @@ import {
   type HostedRuntimeLatencyTraceStagedMilestones,
   type HostedRuntimeOrchestrationLatencyDiagnostics,
   type HostedRuntimeRedactedJson,
+  type HostedRuntimeRedactedObject,
   type HostedMailboxLane,
   type HostedWorkspaceCheckpointResponse,
   type HostedWorkspaceInvocationProcessingMode,
@@ -1427,6 +1428,16 @@ function resolveHostedSystemMailboxProjectionMode(
   return HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
 }
 
+function readHostedFetchTransportDiagnosticsForLog(
+  platform: HostedRuntimePlatform,
+): HostedRuntimeRedactedObject {
+  try {
+    return platform.readFetchTransportDiagnostics?.() ?? {};
+  } catch {
+    return {};
+  }
+}
+
 export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
@@ -1472,6 +1483,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           runtimeReleaseSha && /^[0-9a-f]{40}$/u.test(runtimeReleaseSha)
             ? runtimeReleaseSha
             : null,
+        ...readHostedFetchTransportDiagnosticsForLog(options.platform),
       },
     },
     platform: options.platform,

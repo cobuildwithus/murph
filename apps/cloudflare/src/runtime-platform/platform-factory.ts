@@ -20,6 +20,7 @@ import { createHostedWebClinicalRecordsPort } from "./clinical-records-port.ts";
 import { createHostedRuntimeCodexAuthPort } from "./codex-auth-port.ts";
 import { createHostedWebConnectedAppsPort } from "./connected-apps-port.ts";
 import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
+import type { HostedRuntimeFetchTransportDiagnostics } from "./fetch-transport-collector.ts";
 import { createCloudflareEffectsPort } from "./effects-port.ts";
 import { createHostedRuntimeFamilyPlanToolPort } from "./family-plan-tool-port.ts";
 import { createHostedRuntimeGroupToolPort } from "./group-tool-port.ts";
@@ -53,6 +54,7 @@ import { createHostedWebWorkspacePort } from "./workspace-port.ts";
 import { createCloudflareWorkspaceSnapshotPort } from "./workspace-snapshot-port.ts";
 
 export function buildHostedExecutionRuntimePlatform(input: {
+  fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
@@ -146,6 +148,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
             input.boundUserId,
             baseFetchImpl,
             {
+              fetchTransportDiagnostics: input.fetchTransportDiagnostics,
               injectBoundUserIdHeader: true,
               providerFetchBaseUrlSource:
                 input.providerFetchBaseUrlSource ?? undefined,
@@ -195,6 +198,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     publicInternetFetch: createCloudflareHostedPublicInternetFetch(baseFetchImpl),
+    ...exposeFetchTransportDiagnostics(input.fetchTransportDiagnostics),
     ...(transport
       ? {
           codexAuthPort: createHostedRuntimeCodexAuthPort({
@@ -215,6 +219,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           mailboxPort: createHostedWebMailboxPort({
             boundUserId: input.boundUserId,
             fetchImpl,
+            fetchTransportDiagnostics: input.fetchTransportDiagnostics,
             timeoutMs,
             transport,
           }),
@@ -329,4 +334,10 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
   };
+}
+
+function exposeFetchTransportDiagnostics(
+  diagnostics: HostedRuntimeFetchTransportDiagnostics | null | undefined,
+): Pick<HostedRuntimePlatform, "readFetchTransportDiagnostics"> {
+  return diagnostics ? { readFetchTransportDiagnostics: diagnostics.read } : {};
 }

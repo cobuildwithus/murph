@@ -38,6 +38,8 @@ import {
   isInternalAuthorityRejectedStatus,
 } from "./authority-headers.ts";
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
+import type { HostedRuntimeFetchTransportDiagnostics } from "./fetch-transport-collector.ts";
+import { observeHostedRuntimeFetchTransport } from "./fetch-transport-diagnostics.ts";
 import { normalizeCloudflareWorkerFetch } from "../worker-fetch.ts";
 
 export function createCloudflareHostedInternalFetch(
@@ -281,6 +283,7 @@ export function createCloudflareHostedProviderFetch(
   boundUserId: string,
   fetchImpl: typeof fetch,
   options: {
+    fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
     injectBoundUserIdHeader?: boolean;
     providerFetchBaseUrlSource?: Readonly<Record<string, unknown>>;
     providerFetchBaseUrls?: readonly string[];
@@ -288,6 +291,7 @@ export function createCloudflareHostedProviderFetch(
   },
 ): typeof fetch {
   const normalizedFetchImpl = normalizeCloudflareWorkerFetch(fetchImpl);
+  const transportDiagnostics = options.fetchTransportDiagnostics ?? null;
   const internalFetch = createCloudflareHostedInternalFetch(
     boundUserId,
     normalizedFetchImpl,
@@ -327,7 +331,12 @@ export function createCloudflareHostedProviderFetch(
       providerRuntimeRoundTripMs: Math.max(0, Math.round(performance.now() - startedAt)),
     } : {};
     try {
-      const response = await normalizedFetchImpl(providerRequest);
+      const response = await (correlationId && transportDiagnostics
+        ? observeHostedRuntimeFetchTransport(
+          () => normalizedFetchImpl(providerRequest),
+          (timing, outcome) => transportDiagnostics.recordTypingStart(timing, outcome.response),
+        )
+        : normalizedFetchImpl(providerRequest));
       if (correlationId) emitHostedExecutionStructuredLog({
         component: "assistant-delivery",
         details: { ...timingDetails(), providerOperation: "typing_start", responseStatus: response.status },

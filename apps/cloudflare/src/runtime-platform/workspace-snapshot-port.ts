@@ -63,7 +63,7 @@ import {
 import {
   observeHostedWorkspaceSnapshotFetch,
   readHostedWorkspaceSnapshotResponseIds,
-} from "./workspace-snapshot-fetch-diagnostics.ts";
+} from "./fetch-transport-diagnostics.ts";
 
 const WORKSPACE_SNAPSHOT_READ_IDLE_TIMEOUT_MS = 15_000;
 const WORKSPACE_SNAPSHOT_PRESIGN_PUT_MAX_ATTEMPTS = 2;

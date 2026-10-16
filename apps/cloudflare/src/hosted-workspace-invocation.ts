@@ -34,6 +34,7 @@ import {
   createCloudflareHostedTrustedInternalFetch,
   readCloudflareHostedProviderFetchBaseUrls,
 } from "./runtime-platform.ts";
+import type { HostedRuntimeFetchTransportDiagnostics } from "./runtime-platform/fetch-transport-collector.ts";
 import { normalizeCloudflareWorkerFetch } from "./worker-fetch.ts";
 import {
   createCloudflareHostedMailboxPayloadDecoder,
@@ -93,6 +94,7 @@ export interface HostedWorkspaceInvocationOptions {
     sendWake: (input?: HostedWorkspaceInvocationRuntimeWakeInput) => boolean
   ) => void;
   orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
+  fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
   preparedWorkspaceRestore?: HostedWorkspaceRestorePreparation | null;
   runnerJobAcceptedAt?: string | null;
   releaseSha?: string | null;
@@ -194,6 +196,7 @@ export async function runHostedWorkspaceInvocation(
     );
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId,
+      fetchTransportDiagnostics: options.fetchTransportDiagnostics,
       commitTimeoutMs: job.runtime?.commitTimeoutMs ?? null,
       physicalNotesEnabled:
         job.runtime?.platformEnv?.HOSTED_PHYSICAL_NOTES_ENABLED

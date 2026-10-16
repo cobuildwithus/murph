@@ -12,10 +12,13 @@ import {
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
+import type { HostedRuntimeFetchTransportDiagnostics } from "./fetch-transport-collector.ts";
+import { observeHostedRuntimeFetchTransport } from "./fetch-transport-diagnostics.ts";
 
 export function createHostedWebMailboxPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
+  fetchTransportDiagnostics?: HostedRuntimeFetchTransportDiagnostics | null;
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }) {
@@ -50,6 +53,9 @@ export function createHostedWebMailboxPort(input: {
       let decodedAt: number | null = null;
       let decodedAtEpochMs: number | null = null;
       let importReadyAtEpochMs: number | null = null;
+      const transportDiagnostics = request.lanes.some(({ lane }) => lane === "conversation")
+        ? input.fetchTransportDiagnostics ?? null
+        : null;
       try {
         let payload: unknown;
         try {
@@ -57,7 +63,12 @@ export function createHostedWebMailboxPort(input: {
             body: { ...request, decodeInlinePayloads: true },
             boundUserId: input.boundUserId,
             description: "Hosted mailbox fetch",
-            fetchImpl: input.fetchImpl,
+            fetchImpl: transportDiagnostics
+              ? ((resource: RequestInfo | URL, init?: RequestInit) => observeHostedRuntimeFetchTransport(
+                () => input.fetchImpl(resource, init),
+                (timing, outcome) => transportDiagnostics.recordConversationMailboxFetch(timing, outcome.response),
+              )) as typeof fetch
+              : input.fetchImpl,
             headers: new Headers({ [HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER]: correlationId }),
             route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch,
             ...(context?.signal ? { signal: context.signal } : {}),
