@@ -1,0 +1,589 @@
+import { Buffer } from "node:buffer";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { GameView } from "../src/lib/game/contract";
+import type { RuleEntry, RuleState } from "../src/lib/game/rules";
+import { buildGameView } from "../src/lib/game/views";
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+
+vi.mock("server-only", () => ({}));
+
+const mocks = vi.hoisted(() => ({
+  authorizeMediaRead: vi.fn(),
+  devAdvanceDays: vi.fn(),
+  devSettleNow: vi.fn(),
+  devStartNow: vi.fn(),
+  getPrisma: vi.fn(),
+  isGameEnabledFor: vi.fn(),
+  mediaKeyPrefixFor: vi.fn(),
+  readGame: vi.fn(),
+  readHome: vi.fn(),
+  readInvitePreview: vi.fn(),
+  requireHostedMemberAuthFromBearerToken: vi.fn(),
+  runGameCommand: vi.fn(),
+  settleDueGames: vi.fn(),
+}));
+
+vi.mock("@/src/lib/game/service", () => ({
+  authorizeMediaRead: mocks.authorizeMediaRead,
+  devAdvanceDays: mocks.devAdvanceDays,
+  devSettleNow: mocks.devSettleNow,
+  devStartNow: mocks.devStartNow,
+  isGameEnabledFor: mocks.isGameEnabledFor,
+  mediaKeyPrefixFor: mocks.mediaKeyPrefixFor,
+  readGame: mocks.readGame,
+  readHome: mocks.readHome,
+  readInvitePreview: mocks.readInvitePreview,
+  runGameCommand: mocks.runGameCommand,
+  settleDueGames: mocks.settleDueGames,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireHostedMemberAuthFromBearerToken: mocks.requireHostedMemberAuthFromBearerToken,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
+
+type Routes = {
+  advanceDay: typeof import("../app/api/game/v1/dev/games/[id]/advance-day/route");
+  commands: typeof import("../app/api/game/v1/commands/route");
+  cron: typeof import("../app/api/internal/game/settle/cron/route");
+  game: typeof import("../app/api/game/v1/games/[id]/route");
+  home: typeof import("../app/api/game/v1/home/route");
+  invite: typeof import("../app/api/game/v1/invites/[token]/route");
+  media: typeof import("../app/api/game/v1/media/[...key]/route");
+  settle: typeof import("../app/api/game/v1/dev/games/[id]/settle/route");
+  startNow: typeof import("../app/api/game/v1/dev/games/[id]/start-now/route");
+  upload: typeof import("../app/api/game/v1/games/[id]/media/route");
+};
+
+let routes: Routes;
+let mediaDir: string;
+
+const LEO = "hbm_leo";
+const AVA = "hbm_ava";
+const GAME_ID = "game_1";
+const BASE = "http://localhost/api/game/v1";
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
+const VIEW: GameView = {
+  days: [],
+  id: GAME_ID,
+  inviteExpiresAt: null,
+  inviteToken: null,
+  lengthDays: 7,
+  players: [],
+  result: null,
+  retakeAvailable: true,
+  round: 1,
+  startedAt: null,
+  status: "live",
+  terms: { fromDay: 0, n: 1, schedule: { count: 5 }, stakes: [], tasks: [{ seat: 0, text: "100 pushups" }] },
+  termsVersion: 1,
+  tickets: [],
+};
+
+let signedInAs = LEO;
+
+describe("weekly game routes", () => {
+  beforeAll(async () => {
+    routes = {
+      advanceDay: await import("../app/api/game/v1/dev/games/[id]/advance-day/route"),
+      commands: await import("../app/api/game/v1/commands/route"),
+      cron: await import("../app/api/internal/game/settle/cron/route"),
+      game: await import("../app/api/game/v1/games/[id]/route"),
+      home: await import("../app/api/game/v1/home/route"),
+      invite: await import("../app/api/game/v1/invites/[token]/route"),
+      media: await import("../app/api/game/v1/media/[...key]/route"),
+      settle: await import("../app/api/game/v1/dev/games/[id]/settle/route"),
+      startNow: await import("../app/api/game/v1/dev/games/[id]/start-now/route"),
+      upload: await import("../app/api/game/v1/games/[id]/media/route"),
+    };
+  });
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mediaDir = await mkdtemp(path.join(process.env.MURPH_VITEST_TEMP_ROOT ?? tmpdir(), "game-media-"));
+    vi.stubEnv("MURPH_GAME_MEDIA_DIR", mediaDir);
+    vi.stubEnv("VERCEL_ENV", "development");
+    signedInAs = LEO;
+    mocks.getPrisma.mockReturnValue({});
+    mocks.requireHostedMemberAuthFromBearerToken.mockImplementation(async () => ({ member: { id: signedInAs } }));
+    mocks.isGameEnabledFor.mockResolvedValue(true);
+    mocks.mediaKeyPrefixFor.mockImplementation((memberId: string) => `game/${memberId}/`);
+    mocks.readGame.mockResolvedValue(VIEW);
+    mocks.runGameCommand.mockResolvedValue({ game: VIEW, ok: true });
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await rm(mediaDir, { force: true, recursive: true });
+  });
+
+  describe("auth", () => {
+    it("requires a signed-in session and never reaches the game", async () => {
+      mocks.requireHostedMemberAuthFromBearerToken.mockRejectedValue(
+        hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue." }),
+      );
+
+      const responses = await Promise.all([
+        routes.home.GET(new Request(`${BASE}/home`)),
+        routes.commands.POST(commandRequest({ command: { type: "redeem", ticketId: "t_1" } })),
+        routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID })),
+        routes.media.GET(new Request(`${BASE}/media/x`), params({ key: ["game", LEO, "x.jpg"] })),
+      ]);
+
+      for (const response of responses) {
+        expect(response.status).toBe(401);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(await response.json()).toEqual({
+          error: { code: "UNAUTHENTICATED", message: "Sign in to continue.", retryable: false },
+        });
+      }
+      expect(mocks.readHome).not.toHaveBeenCalled();
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+      expect(mocks.readGame).not.toHaveBeenCalled();
+      expect(mocks.authorizeMediaRead).not.toHaveBeenCalled();
+    });
+
+    it("uses the plain signed-in check, not the paid-member check", async () => {
+      mocks.readHome.mockResolvedValue({ games: [], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } });
+
+      const response = await routes.home.GET(new Request(`${BASE}/home`));
+
+      expect(response.status).toBe(200);
+      expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("flag", () => {
+    it("hides every signed-in route as 404 when the game is off for the member", async () => {
+      mocks.isGameEnabledFor.mockResolvedValue(false);
+
+      const responses = await Promise.all([
+        routes.home.GET(new Request(`${BASE}/home`)),
+        routes.commands.POST(commandRequest({ command: { type: "redeem", ticketId: "t_1" } })),
+        routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID })),
+        routes.upload.POST(uploadRequest(), params({ id: GAME_ID })),
+        routes.media.GET(new Request(`${BASE}/media/x`), params({ key: ["x"] })),
+        routes.startNow.POST(new Request(`${BASE}/dev/games/${GAME_ID}/start-now`, { method: "POST" }), params({ id: GAME_ID })),
+      ]);
+
+      for (const response of responses) {
+        expect(response.status).toBe(404);
+        expect((await response.json()).error.code).toBe("GAME_DISABLED");
+      }
+      expect(mocks.isGameEnabledFor).toHaveBeenCalledWith(LEO);
+      expect(mocks.readHome).not.toHaveBeenCalled();
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+      expect(mocks.devStartNow).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("commands", () => {
+    it("passes a clean command with the signed-in member as the actor", async () => {
+      const response = await routes.commands.POST(commandRequest({
+        command: { type: "join", token: "tok_1", termsVersion: 2, timeZone: "Australia/Sydney", memberId: AVA },
+      }));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual({ game: VIEW, ok: true });
+      expect(mocks.runGameCommand).toHaveBeenCalledWith({
+        actorMemberId: LEO,
+        request: {
+          command: { termsVersion: 2, timeZone: "Australia/Sydney", token: "tok_1", type: "join" },
+          requestId: "req_1",
+          schemaVersion: 1,
+        },
+      });
+    });
+
+    it.each([
+      ["a wrong schema version", { schemaVersion: 2 }],
+      ["an unknown command", { command: { type: "teleport" } }],
+      ["a fractional terms version", { command: { type: "join", token: "tok_1", termsVersion: 1.5, timeZone: "UTC" } }],
+      ["a schedule with both days and count", {
+        command: {
+          type: "createGame",
+          gameId: GAME_ID,
+          inviteeFirstName: "Ava",
+          terms: { schedule: { count: 3, days: [0] }, stakes: [], tasks: [{ seat: 0, text: "Run" }] },
+        },
+      }],
+      ["a weekday outside Monday to Sunday", {
+        command: {
+          type: "createGame",
+          gameId: GAME_ID,
+          inviteeFirstName: "Ava",
+          terms: { schedule: { days: [7] }, stakes: [], tasks: [{ seat: 0, text: "Run" }] },
+        },
+      }],
+      ["a label for two subjects", { command: { type: "setLabel", subject: { inviteToken: "t", memberId: AVA } } }],
+    ])("rejects %s", async (_label, overrides) => {
+      const response = await routes.commands.POST(commandRequest(overrides));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("INVALID_REQUEST");
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+    });
+
+    it("rejects an Idempotency-Key that differs from requestId", async () => {
+      const response = await routes.commands.POST(commandRequest({}, { "idempotency-key": "req_other" }));
+
+      expect(response.status).toBe(400);
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+    });
+
+    it("caps the body at 64 KB", async () => {
+      const response = await routes.commands.POST(commandRequest({
+        command: { type: "setProfile", firstName: "Leo", timeZone: "America/New_York", padding: "x".repeat(70 * 1024) },
+      }));
+
+      expect(response.status).toBe(413);
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+    });
+
+    it("renders service rejections in the error envelope", async () => {
+      mocks.runGameCommand.mockResolvedValue({
+        error: { code: "ALREADY_IN_A_GAME", message: "You're already in a game." },
+        ok: false,
+        status: 409,
+      });
+
+      const response = await routes.commands.POST(commandRequest({ command: { type: "redeem", ticketId: "t_1" } }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: { code: "ALREADY_IN_A_GAME", message: "You're already in a game.", retryable: false },
+      });
+    });
+
+    it("refuses a post whose media isn't the poster's upload, before the game write", async () => {
+      const uploaded = await uploadAs(LEO);
+
+      const foreign = await routes.commands.POST(commandRequest({ command: postCommand([`game/${AVA}/${"a".repeat(32)}.jpg`]) }));
+      const missing = await routes.commands.POST(commandRequest({ command: postCommand([`game/${LEO}/${"b".repeat(32)}.jpg`]) }));
+      expect(foreign.status).toBe(422);
+      expect((await foreign.json()).error.code).toBe("MEDIA_MISSING");
+      expect(missing.status).toBe(422);
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
+
+      const posted = await routes.commands.POST(commandRequest({ command: postCommand([uploaded]) }));
+      expect(posted.status).toBe(200);
+      expect(mocks.runGameCommand).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("viewer scoping", () => {
+    it("reads views only for the signed-in member, whatever the request says", async () => {
+      mocks.readHome.mockResolvedValue({ games: [VIEW], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } });
+
+      const home = await routes.home.GET(new Request(`${BASE}/home?memberId=${AVA}`, { headers: { "x-member-id": AVA } }));
+      const game = await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}?memberId=${AVA}`), params({ id: GAME_ID }));
+
+      expect(mocks.readHome).toHaveBeenCalledWith(LEO);
+      expect(mocks.readGame).toHaveBeenCalledWith(GAME_ID, LEO);
+      expect(await home.json()).toEqual({ games: [VIEW], me: { memberId: LEO }, ok: true, wallet: { held: [], owed: [], redeemed: [] } });
+      expect(await game.json()).toEqual({ game: VIEW, ok: true });
+    });
+
+    it("keeps another player's entry out of the response until the viewer posts that day", async () => {
+      const leoKey = `game/${LEO}/${"c".repeat(32)}.jpg`;
+      const leoPhoto = entry({ id: "entry_leo", kind: "photo", mediaKeys: [leoKey], memberId: LEO });
+      const avaPhoto = entry({ id: "entry_ava", kind: "photo", mediaKeys: [`game/${AVA}/${"d".repeat(32)}.jpg`], memberId: AVA });
+      signedInAs = AVA;
+
+      mocks.readGame.mockResolvedValueOnce(viewFor(AVA, [leoPhoto]));
+      const before = await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }));
+      const beforeText = await before.text();
+      const beforeBody = JSON.parse(beforeText);
+
+      expect(beforeBody.game.days[0].others).toEqual([{ entry: null, seat: 0, status: "locked" }]);
+      for (const secret of ["entry_leo", leoKey, encodeURIComponent(leoKey)]) {
+        expect(beforeText).not.toContain(secret);
+      }
+
+      mocks.readGame.mockResolvedValueOnce(viewFor(AVA, [leoPhoto, avaPhoto]));
+      const after = await (await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }))).json();
+
+      expect(after.game.days[0].others[0]).toEqual({
+        entry: {
+          data: { note: "data of entry_leo" },
+          entryId: "entry_leo",
+          kind: "photo",
+          mediaUrls: [`/api/game/v1/media/${encodeURIComponent(leoKey)}`],
+          text: "caption of entry_leo",
+        },
+        seat: 0,
+        status: "posted",
+      });
+    });
+
+    it("never shows another player's excuse, even after the viewer posts", async () => {
+      const excuseKey = `game/${LEO}/${"e".repeat(32)}.m4a`;
+      const excuse = entry({ attempt: 0, id: "entry_leo_excuse", kind: "excuse", mediaKeys: [excuseKey], memberId: LEO });
+      const avaPhoto = entry({ id: "entry_ava", kind: "photo", mediaKeys: [`game/${AVA}/${"d".repeat(32)}.jpg`], memberId: AVA });
+      signedInAs = AVA;
+      mocks.readGame.mockResolvedValueOnce(viewFor(AVA, [excuse, avaPhoto]));
+
+      const text = await (await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }))).text();
+
+      for (const secret of ["entry_leo_excuse", excuseKey, encodeURIComponent(excuseKey)]) {
+        expect(text).not.toContain(secret);
+      }
+    });
+
+    it("answers 404 for a game the member can't see", async () => {
+      mocks.readGame.mockResolvedValue(null);
+
+      const response = await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }));
+
+      expect(response.status).toBe(404);
+      expect((await response.json()).error.code).toBe("GAME_NOT_FOUND");
+    });
+  });
+
+  describe("media", () => {
+    it("stores an upload under the member's prefix and returns the same key on retry", async () => {
+      const first = await routes.upload.POST(uploadRequest(), params({ id: GAME_ID }));
+      const retry = await routes.upload.POST(uploadRequest(), params({ id: GAME_ID }));
+      const { mediaKey } = await first.json();
+
+      expect(first.status).toBe(200);
+      expect(mediaKey).toMatch(new RegExp(`^game/${LEO}/[a-f0-9]{32}\\.jpg$`, "u"));
+      expect((await retry.json()).mediaKey).toBe(mediaKey);
+      expect(mocks.readGame).toHaveBeenCalledWith(GAME_ID, LEO);
+    });
+
+    it("refuses reuse of an Idempotency-Key for different bytes", async () => {
+      await routes.upload.POST(uploadRequest(), params({ id: GAME_ID }));
+      const conflict = await routes.upload.POST(
+        uploadRequest({ body: Buffer.concat([JPEG, Buffer.from([0x00])]) }),
+        params({ id: GAME_ID }),
+      );
+
+      expect(conflict.status).toBe(409);
+      expect((await conflict.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
+    });
+
+    it.each([
+      ["an unsupported type", { "content-type": "image/png" }],
+      ["bytes that aren't the declared type", { "content-type": "video/mp4" }],
+      ["no media role", { "x-murph-media-role": "" }],
+      ["no Idempotency-Key", { "idempotency-key": "" }],
+    ])("rejects %s", async (_label, headers) => {
+      const response = await routes.upload.POST(uploadRequest({ headers }), params({ id: GAME_ID }));
+
+      expect(response.status).toBe(400);
+    });
+
+    it("refuses uploads to a game the member isn't in", async () => {
+      mocks.readGame.mockResolvedValue(null);
+
+      const response = await routes.upload.POST(uploadRequest(), params({ id: GAME_ID }));
+
+      expect(response.status).toBe(404);
+    });
+
+    it("caps uploads at 8 MB", async () => {
+      const response = await routes.upload.POST(
+        uploadRequest({ headers: { "content-length": String(8 * 1024 * 1024 + 1) } }),
+        params({ id: GAME_ID }),
+      );
+
+      expect(response.status).toBe(413);
+    });
+
+    it("serves bytes only when the service authorizes this viewer", async () => {
+      const key = await uploadAs(LEO);
+      signedInAs = AVA;
+      mocks.authorizeMediaRead.mockResolvedValue(false);
+
+      const locked = await routes.media.GET(mediaRequest(key), params({ key: key.split("/") }));
+
+      expect(locked.status).toBe(404);
+      expect((await locked.json()).error.code).toBe("MEDIA_MISSING");
+      expect(mocks.authorizeMediaRead).toHaveBeenCalledWith(AVA, key);
+
+      mocks.authorizeMediaRead.mockResolvedValue(true);
+      const unlocked = await routes.media.GET(mediaRequest(key), params({ key: [encodeURIComponent(key)] }));
+
+      expect(unlocked.status).toBe(200);
+      expect(unlocked.headers.get("content-type")).toBe("image/jpeg");
+      expect(unlocked.headers.get("cache-control")).toBe("private, no-store");
+      expect(Buffer.from(await unlocked.arrayBuffer())).toEqual(JPEG);
+    });
+
+    it("is unavailable on Vercel deployments until deployed storage exists", async () => {
+      vi.stubEnv("VERCEL_ENV", "preview");
+
+      const response = await routes.upload.POST(uploadRequest(), params({ id: GAME_ID }));
+
+      expect(response.status).toBe(503);
+      expect((await response.json()).error.code).toBe("GAME_MEDIA_UNAVAILABLE");
+    });
+  });
+
+  describe("dev routes", () => {
+    it("are 404 in production before auth or flags are consulted", async () => {
+      vi.stubEnv("VERCEL_ENV", "production");
+
+      const responses = await Promise.all([
+        routes.startNow.POST(devRequest("start-now"), params({ id: GAME_ID })),
+        routes.advanceDay.POST(devRequest("advance-day", { days: 1 }), params({ id: GAME_ID })),
+        routes.settle.POST(devRequest("settle"), params({ id: GAME_ID })),
+      ]);
+
+      for (const response of responses) expect(response.status).toBe(404);
+      expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
+      expect(mocks.devStartNow).not.toHaveBeenCalled();
+      expect(mocks.devAdvanceDays).not.toHaveBeenCalled();
+      expect(mocks.devSettleNow).not.toHaveBeenCalled();
+    });
+
+    it("move time for the signed-in member outside production", async () => {
+      mocks.devAdvanceDays.mockResolvedValue(VIEW);
+
+      const response = await routes.advanceDay.POST(devRequest("advance-day", { days: 3 }), params({ id: GAME_ID }));
+      const invalid = await routes.advanceDay.POST(devRequest("advance-day", { days: 0 }), params({ id: GAME_ID }));
+
+      expect(response.status).toBe(200);
+      expect(mocks.devAdvanceDays).toHaveBeenCalledWith(GAME_ID, LEO, 3);
+      expect(invalid.status).toBe(400);
+    });
+  });
+
+  describe("invite preview and settle timer", () => {
+    it("serves the invite preview without sign-in", async () => {
+      mocks.readInvitePreview.mockResolvedValueOnce(null);
+      const missing = await routes.invite.GET(new Request(`${BASE}/invites/tok_1`), params({ token: "tok_1" }));
+      expect(missing.status).toBe(404);
+      expect((await missing.json()).error.code).toBe("INVITE_NOT_FOUND");
+
+      mocks.readInvitePreview.mockResolvedValueOnce({ inviteeFirstName: "Ava", inviterFirstName: "Leo", status: "open" });
+      const found = await routes.invite.GET(new Request(`${BASE}/invites/tok_1`), params({ token: "tok_1" }));
+      expect(found.status).toBe(200);
+      expect((await found.json()).preview.inviterFirstName).toBe("Leo");
+      expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    });
+
+    it("settles due games only for the Vercel cron secret", async () => {
+      vi.stubEnv("CRON_SECRET", "cron-secret");
+      mocks.settleDueGames.mockResolvedValue({ settled: 2 });
+
+      const denied = await routes.cron.GET(new Request("http://localhost/api/internal/game/settle/cron"));
+      const allowed = await routes.cron.GET(new Request("http://localhost/api/internal/game/settle/cron", {
+        headers: { authorization: "Bearer cron-secret" },
+      }));
+
+      expect(denied.status).toBe(401);
+      expect(allowed.status).toBe(200);
+      expect(await allowed.json()).toEqual({ settled: 2 });
+      expect(mocks.settleDueGames).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+// Leo (New York) and Ava (Sydney) are both on day 0 at NOW.
+const NOW = new Date("2026-10-16T18:00:00.000Z");
+
+function entry(input: Partial<RuleEntry> & Pick<RuleEntry, "id" | "kind" | "mediaKeys" | "memberId">): RuleEntry {
+  return { attempt: 1, dayIndex: 0, withdrawnAt: null, ...input };
+}
+
+// The real view builder; the caller hands it every entry's words, as a buggy
+// loader would, so the test proves the builder itself withholds them.
+function viewFor(viewerId: string, entries: RuleEntry[]): GameView {
+  const state: RuleState = {
+    entries,
+    game: {
+      createdBy: LEO,
+      id: GAME_ID,
+      inviteExpiresAt: null,
+      lengthDays: 7,
+      nextDueAt: null,
+      seats: 2,
+      status: "live",
+      terms: { v: 1, versions: [{ fromDay: 0, n: 1, schedule: { count: 7 }, stakes: [{ key: "s1", kind: "winner_gets" }] }] },
+    },
+    players: [
+      { active: true, agreedTermsVersion: 1, dayOne: "2026-10-16", memberId: LEO, seat: 0, timeZone: "America/New_York" },
+      { active: true, agreedTermsVersion: 1, dayOne: "2026-10-17", memberId: AVA, seat: 1, timeZone: "Australia/Sydney" },
+    ],
+  };
+  return buildGameView({
+    avatarKeys: new Map(),
+    entryWords: new Map(entries.map((item) => [item.id, { data: { note: `data of ${item.id}` }, text: `caption of ${item.id}` }])),
+    inviteExpiresAt: null,
+    inviteToken: null,
+    invitee: null,
+    names: new Map([[LEO, "Leo"], [AVA, "Ava"]]),
+    now: NOW,
+    result: null,
+    round: 1,
+    startedAt: new Date("2026-10-16T12:00:00.000Z"),
+    state,
+    tickets: [],
+    viewerId,
+    words: { v: 1, versions: [{ n: 1, stakes: [{ item: "Breakfast in bed", key: "s1" }], tasks: [{ seat: 0, text: "100 pushups" }] }] },
+  });
+}
+
+function params<T>(value: T) {
+  return { params: Promise.resolve(value) };
+}
+
+function commandRequest(overrides: Record<string, unknown>, headers: Record<string, string> = {}) {
+  return new Request(`${BASE}/commands`, {
+    body: JSON.stringify({
+      command: { type: "deleteToday", gameId: GAME_ID },
+      requestId: "req_1",
+      schemaVersion: 1,
+      ...overrides,
+    }),
+    headers: { authorization: "Bearer token", "content-type": "application/json", ...headers },
+    method: "POST",
+  });
+}
+
+function postCommand(mediaKeys: string[]) {
+  return { type: "post", gameId: GAME_ID, entryId: "entry_1", kind: "photo", mediaKeys, captureAgeMs: 1200 };
+}
+
+function uploadRequest(input: { body?: Buffer; headers?: Record<string, string> } = {}) {
+  return new Request(`${BASE}/games/${GAME_ID}/media`, {
+    body: new Uint8Array(input.body ?? JPEG),
+    headers: {
+      authorization: "Bearer token",
+      "content-type": "image/jpeg",
+      "idempotency-key": "entry_1",
+      "x-murph-media-role": "front",
+      ...input.headers,
+    },
+    method: "POST",
+  });
+}
+
+async function uploadAs(memberId: string): Promise<string> {
+  const previous = signedInAs;
+  signedInAs = memberId;
+  const response = await routes.upload.POST(uploadRequest(), params({ id: GAME_ID }));
+  signedInAs = previous;
+  return (await response.json()).mediaKey;
+}
+
+function mediaRequest(key: string) {
+  return new Request(`${BASE}/media/${encodeURIComponent(key)}`, { headers: { authorization: "Bearer token" } });
+}
+
+function devRequest(action: string, body?: Record<string, unknown>) {
+  return new Request(`${BASE}/dev/games/${GAME_ID}/${action}`, {
+    ...(body ? { body: JSON.stringify(body) } : {}),
+    headers: { authorization: "Bearer token", "content-type": "application/json" },
+    method: "POST",
+  });
+}
