@@ -4915,6 +4915,22 @@ The four container-local stages are `lifecycle_lock_or_state_read`,
 `cold_health_or_finalization`. The cleanup boolean overlays the stage that
 triggered cleanup instead of replacing it.
 
+Only when the local cold `startAndWaitForPorts` catch has run, that same warning
+also carries `runtimeStartupColdWaitFailure`: `instance_start_aborted` matches
+exactly `Aborted waiting for container to start as we received a cancellation signal`
+from the pinned Containers SDK 0.3.7 `startContainerIfNotRunning` wait;
+`port_wait_aborted` matches exactly `Container request aborted.` from its separate
+`waitForPort` wait. The initial wait also probes the port, so these labels identify
+SDK cancellation boundaries, not infrastructure allocation versus process-start
+root causes. Classification reads only the caught Error's top-level message,
+before the existing cancellation-reason restoration and pending/cleanup handling;
+it never traverses causes or emits the message. Other errors, non-Errors, unreadable
+messages, and changed SDK wording are `unclassified`, not a guessed boundary.
+The field is omitted when no cold wait failure has been caught (including a caller
+settling before the SDK wait), on noncold failures, and by older code during skew.
+Successful-start timestamps cannot identify a failed SDK wait. The diagnostic
+changes no error identity, pending fence, cleanup, retry, or readiness behavior.
+
 A non-OK Web workspace read also retains one failure-only Worker diagnostic
 without changing its caller-visible exception or retry behavior. The Durable
 Object throws the same plain HTTP-status error immediately and schedules a

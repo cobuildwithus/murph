@@ -43,6 +43,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Failed native startup wait diagnostics are owned by
+[`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md); implementation
+and synthetic proof are tracked in
+[the startup wait plan](exec-plans/active/2026-10-16-startup-wait-diagnostics.md).
+
 Retained Junction validation jobs keep a bounded transport retry budget in the existing job store;
 [`RELIABILITY.md`](RELIABILITY.md) owns the retry and cold-handoff contract.
 Implementation and review proof are recorded in the

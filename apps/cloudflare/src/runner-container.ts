@@ -260,6 +260,7 @@ type RunnerContainerLocalStartupFailureStage = Exclude<
 >;
 
 interface RunnerContainerStartupFailureObservation {
+  coldWaitFailure?: "instance_start_aborted" | "port_wait_aborted" | "unclassified";
   stage: RunnerContainerLocalStartupFailureStage;
 }
 
@@ -1455,7 +1456,7 @@ export class RunnerContainer extends Container {
           cleanupUnsettled: true,
           orchestrationAttemptId: input.orchestrationAttemptId,
           readinessRequestedAtEpochMs,
-          stage: startupFailureObservation.stage,
+          ...startupFailureObservation,
           timeoutMs: input.timeoutMs,
         });
       }
@@ -1465,7 +1466,7 @@ export class RunnerContainer extends Container {
         cleanupUnsettled: cleanupSettlementTimedOut,
         orchestrationAttemptId: input.orchestrationAttemptId,
         readinessRequestedAtEpochMs,
-        stage: startupFailureObservation.stage,
+        ...startupFailureObservation,
         timeoutMs: input.timeoutMs,
       });
       if (cleanupSettlementTimedOut) {
@@ -3160,6 +3161,21 @@ export class RunnerContainer extends Container {
           portProbeTimeoutMS: RUNNER_PORT_PROBE_TIMEOUT_MS,
         },
       }).catch((error: unknown) => {
+        if (options.startupFailureObservation) {
+          options.startupFailureObservation.coldWaitFailure = "unclassified";
+          try {
+            // Pinned SDK wait boundaries, not allocation/process root causes.
+            const message = error instanceof Error ? error.message : undefined;
+            options.startupFailureObservation.coldWaitFailure =
+              message === "Aborted waiting for container to start as we received a cancellation signal"
+                ? "instance_start_aborted"
+                : message === "Container request aborted."
+                  ? "port_wait_aborted"
+                  : "unclassified";
+          } catch {
+            // An unreadable diagnostic must not replace the caller's failure.
+          }
+        }
         // The SDK can replace a cancellation reason with a plain Error.
         throwIfRunnerContainerOperationAborted(startupAbortSignal);
         throw error;
@@ -4657,11 +4673,10 @@ function hostedRunnerContainerFragmentsOverlap(left: string, right: string): boo
     && (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft));
 }
 
-function emitRunnerContainerStartupFailureObservation(input: {
+function emitRunnerContainerStartupFailureObservation(input: RunnerContainerStartupFailureObservation & {
   cleanupUnsettled: boolean;
   orchestrationAttemptId?: string;
   readinessRequestedAtEpochMs: number;
-  stage: RunnerContainerLocalStartupFailureStage;
   timeoutMs: number;
 }): void {
   try {
@@ -4678,6 +4693,9 @@ function emitRunnerContainerStartupFailureObservation(input: {
         ...(input.orchestrationAttemptId === undefined
           ? {}
           : { orchestrationAttemptId: input.orchestrationAttemptId }),
+        ...(input.coldWaitFailure === undefined
+          ? {}
+          : { runtimeStartupColdWaitFailure: input.coldWaitFailure }),
         runtimeStartupConfirmTimeoutMs: input.timeoutMs,
         runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
         runtimeStartupFailureElapsedMs: elapsedMs,
