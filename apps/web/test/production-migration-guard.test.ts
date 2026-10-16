@@ -2544,7 +2544,6 @@ fi
     const cronPaths = (vercelJson.crons ?? []).map((cron) => cron.path).sort();
 
     assert.deepEqual(cronPaths, [
-      "/api/internal/game/settle/cron",
       "/api/internal/hosted-execution/product-feedback/digest/cron",
       "/api/internal/hosted-execution/retention/control-plane/cron",
       "/api/internal/hosted-execution/retention/external/cron",

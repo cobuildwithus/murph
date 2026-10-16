@@ -25,12 +25,7 @@ export function parseGameCommand(value: unknown): GameCommand {
   const input = record(value, "command");
   switch (input.type) {
     case "setProfile":
-      return {
-        firstName: words(input.firstName, "firstName"),
-        timeZone: timeZone(input.timeZone),
-        type: "setProfile",
-        ...optional(input.photoKey, (key) => ({ photoKey: nullable(key, mediaKey) })),
-      };
+      return { firstName: words(input.firstName, "firstName"), timeZone: timeZone(input.timeZone), type: "setProfile" };
     case "createGame":
       return {
         gameId: clientId(input.gameId, "gameId"),
@@ -47,40 +42,19 @@ export function parseGameCommand(value: unknown): GameCommand {
         token: opaque(input.token, "token"),
         type: "join",
       };
-    case "void":
-      return input.reason === "declined"
-        ? { reason: "declined", token: opaque(input.token, "token"), type: "void" }
-        : { gameId: clientId(input.gameId, "gameId"), reason: oneOf(input.reason, "reason", ["cancelled"] as const), type: "void" };
     case "post":
       return post(input);
     case "withdraw":
       return { entryId: clientId(input.entryId, "entryId"), gameId: clientId(input.gameId, "gameId"), type: "withdraw" };
     case "redeem":
       return { ticketId: opaque(input.ticketId, "ticketId"), type: "redeem" };
-    case "setLabel":
-      return {
-        memberId: opaque(input.memberId, "memberId"),
-        type: "setLabel",
-        ...optional(input.name, (value) => ({ name: nullable(value, (name) => words(name, "name")) })),
-        ...optional(input.photoKey, (value) => ({ photoKey: nullable(value, mediaKey) })),
-        ...optional(input.relationship, (value) => ({ relationship: nullable(value, (text) => words(text, "relationship")) })),
-      };
     default:
       return reject("INVALID_REQUEST", "Unknown command.");
   }
 }
 
-/** A caller-minted id for one user action (a route's `Idempotency-Key`); retries reuse it. */
-export function parseRequestId(value: unknown): string {
-  if (typeof value !== "string" || !CLIENT_ID.test(value)) {
-    reject("INVALID_REQUEST", "Send an Idempotency-Key of 8-64 letters, digits, - or _.");
-  }
-  return value;
-}
-
 const WORDS_MAX = 200;
 const POST_TEXT_MAX = 2000;
-const DATA_MAX = 16_000;
 const MEDIA_KEYS_MAX = 4;
 const CAPTURE_AGE_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 const LIST_MAX = 8;
@@ -95,7 +69,6 @@ function post(input: Record<string, unknown>): GameCommand {
     mediaKeys: list(input.mediaKeys ?? [], "mediaKeys", MEDIA_KEYS_MAX).map(mediaKey),
     type: "post",
     ...(text ? { text } : {}),
-    ...optional(input.data, (value) => ({ data: data(value) })),
     ...optional(input.captureAgeMs, (value) => ({ captureAgeMs: integer(value, "captureAgeMs", 0, CAPTURE_AGE_MAX_MS) })),
   };
 }
@@ -115,7 +88,6 @@ function terms(input: Record<string, unknown>): GameTermsInput {
       return {
         item: words(stake.item, "terms.stakes[].item"),
         kind: oneOf(stake.kind, "terms.stakes[].kind", GAME_STAKE_KINDS),
-        ...optional(stake.key, (key) => ({ key: opaque(key, "terms.stakes[].key") })),
       };
     }),
     tasks: list(input.tasks, "terms.tasks", LIST_MAX).map((value): GameTask => {
@@ -198,12 +170,6 @@ function integer(value: unknown, field: string, min: number, max = Number.MAX_SA
     reject("INVALID_REQUEST", `${field} must be a whole number from ${min}.`);
   }
   return value;
-}
-
-function data(value: unknown): Record<string, unknown> {
-  const object = record(value, "data");
-  if (JSON.stringify(object).length > DATA_MAX) reject("INVALID_REQUEST", "data is too large.");
-  return object;
 }
 
 function oneOf<T extends string | number>(value: unknown, field: string, options: readonly T[]): T {

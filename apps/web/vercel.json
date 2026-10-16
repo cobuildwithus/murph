@@ -51,10 +51,6 @@
     {
       "path": "/api/internal/hosted-growth/snapshot/cron",
       "schedule": "10 0 * * *"
-    },
-    {
-      "path": "/api/internal/game/settle/cron",
-      "schedule": "*/10 * * * *"
     }
   ]
 }

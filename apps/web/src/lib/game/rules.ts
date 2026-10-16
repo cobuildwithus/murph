@@ -59,7 +59,6 @@ export interface RulePlayer {
   timeZone: string;
   /** Local date of this player's day 0, set at go-live. */
   dayOne: string | null;
-  agreedTermsVersion: number;
   active: boolean;
 }
 
@@ -82,7 +81,6 @@ export interface RuleGame {
   seats: number;
   terms: StoredTerms;
   inviteExpiresAt: Date | null;
-  nextDueAt: Date | null;
 }
 
 export interface RuleState {
@@ -97,7 +95,6 @@ export const GAME_MAX_LENGTH_DAYS = 28;
 export const GAME_POSTS_PER_DAY = 2;
 export const GAME_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_STAKES = 3;
-const MEDIA_KINDS: ReadonlySet<GameEntryKind> = new Set(["photo", "video", "voice"]);
 
 export const GAME_ERROR_STATUS: Record<GameErrorCode, number> = {
   ALREADY_IN_A_GAME: 409,
@@ -181,6 +178,17 @@ export function hasUnlockedDay(entries: readonly RuleEntry[], memberId: string, 
   return attemptsUsed(entries, memberId, dayIndex) > 0;
 }
 
+/**
+ * Whether a game is past its end: an invite past its expiry, or a live game
+ * once the last player's last day (plus grace) is over. Computed from state,
+ * so any read can settle it.
+ */
+export function isGameDue(state: RuleState, now: Date): boolean {
+  const { game } = state;
+  if (game.status === "invited") return game.inviteExpiresAt !== null && game.inviteExpiresAt <= now;
+  return game.status === "live" && settleDueAt(state.players, game.lengthDays) <= now;
+}
+
 /** When the last player's last day ends, plus grace: the settle time. */
 export function settleDueAt(players: readonly RulePlayer[], lengthDays: number): Date {
   let due = 0;
@@ -202,13 +210,9 @@ export interface NewTerms {
 
 /**
  * Turns what the challenger proposed into version 1 (words arrive checked and
- * trimmed). Stake keys the client sends are kept only when the previous game
- * had them (a rematch); every other stake gets `newKey()`.
+ * trimmed). Every stake gets a fresh key; tickets name their stake by it.
  */
-export function decideNewTerms(
-  input: GameTermsInput,
-  options: { previousStakeKeys: ReadonlySet<string>; newKey: () => string },
-): NewTerms {
+export function decideNewTerms(input: GameTermsInput, options: { newKey: () => string }): NewTerms {
   const lengthDays = input.lengthDays ?? GAME_DEFAULT_LENGTH_DAYS;
   if (lengthDays < 1 || lengthDays > GAME_MAX_LENGTH_DAYS) {
     reject("INVALID_REQUEST", `A game runs 1 to ${GAME_MAX_LENGTH_DAYS} days.`);
@@ -219,14 +223,7 @@ export function decideNewTerms(
   }
   const schedule = validSchedule(input.schedule, lengthDays);
   if (input.stakes.length > MAX_STAKES) reject("INVALID_REQUEST", `A game has up to ${MAX_STAKES} stakes.`);
-  const usedKeys = new Set<string>();
-  const stakes = input.stakes.map((stake) => {
-    const key = stake.key && options.previousStakeKeys.has(stake.key) && !usedKeys.has(stake.key)
-      ? stake.key
-      : options.newKey();
-    usedKeys.add(key);
-    return { item: stake.item, key, kind: stake.kind };
-  });
+  const stakes = input.stakes.map((stake) => ({ item: stake.item, key: options.newKey(), kind: stake.kind }));
   return {
     lengthDays,
     terms: {
@@ -262,12 +259,12 @@ export interface PlayerDays {
 
 export interface Schedule {
   players: PlayerDays[];
-  nextDueAt: Date;
 }
 
-function scheduleFor(players: readonly RulePlayer[], lengthDays: number, dayOneOf: (player: RulePlayer) => string): Schedule {
-  const days = players.map((player) => ({ memberId: player.memberId, timeZone: player.timeZone, dayOne: dayOneOf(player) }));
-  return { nextDueAt: settleDueAt(days.map((day, index) => ({ ...players[index], dayOne: day.dayOne })), lengthDays), players: days };
+function scheduleFor(players: readonly RulePlayer[], dayOneOf: (player: RulePlayer) => string): Schedule {
+  return {
+    players: players.map((player) => ({ dayOne: dayOneOf(player), memberId: player.memberId, timeZone: player.timeZone })),
+  };
 }
 
 export type JoinDecision =
@@ -289,16 +286,11 @@ export function decideJoin(
   const expired = game.inviteExpiresAt !== null && input.now.getTime() > game.inviteExpiresAt.getTime();
   if (game.status === "void" || (game.status === "invited" && expired)) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
   if (game.status !== "invited" || state.players.length >= game.seats) reject("INVITE_USED", "This invite was already used.");
-  const version = currentTerms(game.terms).n;
-  if (input.termsVersion !== version) {
+  if (input.termsVersion !== currentTerms(game.terms).n) {
     reject("TERMS_CHANGED", "The terms changed. Take another look.");
-  }
-  if (state.players.some((player) => player.agreedTermsVersion !== version)) {
-    reject("TERMS_CHANGED", "Everyone has to agree to the latest terms first.");
   }
   const joiner: RulePlayer = {
     active: true,
-    agreedTermsVersion: version,
     dayOne: null,
     memberId: input.memberId,
     seat: state.players.length,
@@ -309,13 +301,14 @@ export function decideJoin(
     kind: "join",
     seat: joiner.seat,
     startedAt: input.now,
-    ...scheduleFor([...state.players, joiner], game.lengthDays, (player) =>
-      addDays(gameLocalDate(input.now, player.timeZone), 1)),
+    ...scheduleFor([...state.players, joiner], (player) => addDays(gameLocalDate(input.now, player.timeZone), 1)),
   };
 }
 
 export interface PostDecision {
   dayIndex: number;
+  /** True when the post counted for the day that just ended (the capture-age grace). */
+  graceUsed: boolean;
   attempt: number;
   /** The live post this one replaces (a retake), if any. */
   withdrawEntryId: string | null;
@@ -328,29 +321,27 @@ export function decidePost(
     kind: GameEntryKind;
     mediaKeys: readonly string[];
     mediaKeyPrefix: string;
-    hasText: boolean;
     captureAgeMs: number | null;
     now: Date;
   },
 ): PostDecision {
   const player = requireLivePlayer(state, input.memberId);
-  if (MEDIA_KINDS.has(input.kind) && input.mediaKeys.length === 0) {
-    reject("MEDIA_MISSING", "Add the photo, video or voice memo first.");
-  }
-  if (input.kind === "text" && !input.hasText) reject("INVALID_REQUEST", "Write something first.");
+  if (input.mediaKeys.length === 0) reject("MEDIA_MISSING", "Add the photo or voice memo first.");
   if (input.mediaKeys.some((key) => !key.startsWith(input.mediaKeyPrefix))) {
     reject("MEDIA_MISSING", "Upload the media before posting it.");
   }
   const dayIndex = postingDay(state, player, input.kind, input.captureAgeMs, input.now);
+  const graceUsed = dayIndex !== dayIndexAt(player, input.now);
   if (input.kind === "excuse") {
     if (hasExcuse(state.entries, player.memberId, dayIndex)) reject("RETAKE_USED", "You already sent an excuse for today.");
-    return { attempt: 0, dayIndex, withdrawEntryId: null };
+    return { attempt: 0, dayIndex, graceUsed, withdrawEntryId: null };
   }
   const used = attemptsUsed(state.entries, player.memberId, dayIndex);
   if (used >= GAME_POSTS_PER_DAY) reject("RETAKE_USED", "You already used today's retake.");
   return {
     attempt: used + 1,
     dayIndex,
+    graceUsed,
     withdrawEntryId: liveEntry(state.entries, player.memberId, dayIndex)?.id ?? null,
   };
 }
@@ -400,21 +391,13 @@ function postingDay(
 export function decideWithdraw(
   state: RuleState,
   input: { memberId: string; entryId: string; now: Date },
-): { withdrawEntryId: string | null } {
+): { withdraw: { entryId: string; dayIndex: number } | null } {
   const player = requireLivePlayer(state, input.memberId);
   const entry = state.entries.find((candidate) => candidate.id === input.entryId);
   if (!entry || entry.memberId !== player.memberId || entry.attempt === 0) reject("GAME_NOT_FOUND", "That post isn't yours.");
-  if (entry.withdrawnAt) return { withdrawEntryId: null };
+  if (entry.withdrawnAt) return { withdraw: null };
   if (entry.dayIndex !== dayIndexAt(player, input.now)) reject("DAY_CLOSED", "Only today's post can be taken back.");
-  return { withdrawEntryId: entry.id };
-}
-
-/** Both only before anyone joins: a live game plays out. */
-export function decideVoid(state: RuleState, input: { memberId: string; reason: "declined" | "cancelled" }): void {
-  const isPlayer = playerFor(state, input.memberId) !== null;
-  if (state.game.status !== "invited") reject("GAME_NOT_LIVE", "Only an open invite can be called off.");
-  if (input.reason === "declined" && isPlayer) reject("INVALID_REQUEST", "Only the invitee can decline.");
-  if (input.reason === "cancelled" && !isPlayer) reject("NOT_A_PLAYER", "Only the challenger can cancel.");
+  return { withdraw: { dayIndex: entry.dayIndex, entryId: entry.id } };
 }
 
 /** Start now: everyone's Day 1 becomes today. Only before anyone has started. */
@@ -423,14 +406,14 @@ export function decideStartNow(state: RuleState, now: Date): Schedule {
   if (state.players.some((player) => (dayIndexAt(player, now) ?? -1) >= 0)) {
     reject("INVALID_REQUEST", "This game already started.");
   }
-  return scheduleFor(state.players, state.game.lengthDays, (player) => gameLocalDate(now, player.timeZone));
+  return scheduleFor(state.players, (player) => gameLocalDate(now, player.timeZone));
 }
 
 /** Dev time travel: move every player's Day 1 back so "today" moves forward. */
 export function decideDevAdvance(state: RuleState, days: number): Schedule {
   if (state.game.status !== "live") reject("GAME_NOT_LIVE", "This game isn't live.");
   if (!Number.isInteger(days) || days < 1 || days > GAME_MAX_LENGTH_DAYS) reject("INVALID_REQUEST", "Advance 1 or more days.");
-  return scheduleFor(state.players, state.game.lengthDays, (player) => addDays(player.dayOne!, -days));
+  return scheduleFor(state.players, (player) => addDays(player.dayOne!, -days));
 }
 
 function requireLivePlayer(state: RuleState, memberId: string): RulePlayer {

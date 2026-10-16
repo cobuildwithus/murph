@@ -39,7 +39,7 @@ export function gameMediaUrl(key: string): string {
 
 export interface GameTicketRow {
   id: string;
-  gameId: string | null;
+  gameId: string;
   stakeKey: string;
   owedBy: string;
   owedTo: string;
@@ -57,14 +57,14 @@ export interface GameViewInput {
   words: TermWords;
   /** Per member: the viewer's private label name, else their own first name. */
   names: ReadonlyMap<string, string>;
-  /** Per member: the viewer's label photo, else their own avatar. */
+  /** Per member: the photo the viewer attached when they invited them, if any. */
   avatarKeys: ReadonlyMap<string, string | null>;
   /** The invitee while nobody has joined (the challenger's own words). */
   invitee: { name: string; photoKey: string | null } | null;
   inviteToken: string | null;
   inviteExpiresAt: Date | null;
   /** Decrypted words for the entries `visibleEntryIds` allowed. */
-  entryWords: ReadonlyMap<string, { text: string | null; data: Record<string, unknown> | null }>;
+  entryWords: ReadonlyMap<string, { text: string | null }>;
   result: StoredResult | null;
   tickets: readonly GameTicketRow[];
 }
@@ -127,7 +127,6 @@ export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId
 function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
   const words = input.entryWords.get(entry.id);
   return {
-    data: words?.data ?? null,
     entryId: entry.id,
     kind: entry.kind,
     mediaUrls: entry.mediaKeys.map(gameMediaUrl),
@@ -159,7 +158,6 @@ export function buildGameView(input: GameViewInput): GameView {
     startedAt: input.startedAt?.toISOString() ?? null,
     status: game.status,
     terms: termsView(state, input.words),
-    termsVersion: currentTerms(game.terms).n,
     tickets: input.tickets
       .filter((ticket) => ticket.owedBy === viewerId || ticket.owedTo === viewerId)
       .map((ticket) => ticketView(ticket, input.words, viewerId)),

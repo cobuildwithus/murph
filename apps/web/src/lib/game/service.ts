@@ -9,7 +9,7 @@ import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
 import { generateHostedRandomPrefixedId, isRecord, sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { areGameDevToolsAllowed, isGameEnabled, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
-import { parseGameCommand, parseRequestId } from "./command";
+import { parseGameCommand } from "./command";
 import {
   GAME_ENTRY_KINDS,
   type GameCommand,
@@ -29,12 +29,12 @@ import {
   decidePost,
   decideSettle,
   decideStartNow,
-  decideVoid,
   decideWithdraw,
   GAME_ERROR_STATUS,
   GAME_INVITE_TTL_MS,
   GAME_SEATS_1V1,
   GameRuleError,
+  isGameDue,
   parseStoredResult,
   parseStoredTerms,
   parseTermWords,
@@ -45,7 +45,7 @@ import {
   type StoredResult,
   type TermWords,
 } from "./rules";
-import { buildGameView, gameMediaUrl, termsView, ticketView, visibleEntryIds, type GameTicketRow } from "./views";
+import { buildGameView, termsView, ticketView, visibleEntryIds, type GameTicketRow } from "./views";
 
 export { isGameEnabledFor, mediaKeyPrefixFor } from "./access";
 
@@ -61,11 +61,10 @@ export type GameCommandResult =
   | { ok: true; game: GameView | null }
   | { ok: false; error: GameError; status: number };
 
+const SYSTEM_ACTOR = "system";
 const HOME_CANDIDATE_LIMIT = 50;
 const HOME_SETTLED_SHOWN = 3;
 const WALLET_LIMIT = 200;
-const SETTLE_BATCH = 50;
-const SYSTEM_ACTOR = "system";
 
 // ------------------------------------------------------------------- writes
 
@@ -74,25 +73,22 @@ const SYSTEM_ACTOR = "system";
  * command is validated here, uploads are checked and words sealed before any
  * transaction; then every command runs in one short transaction that locks
  * the game row, reads the database clock, checks the rules, writes state and
- * one `game_event`, and commits. A retried `requestId` (a route's optional
- * Idempotency-Key) returns the current view without applying anything twice.
+ * one history row per accepted change, and commits. Every command is safe to
+ * repeat: it's keyed by its own ids (gameId, entryId) or state (an accepted
+ * invite, a redeemed ticket), and a repeat writes nothing.
  */
 export async function runGameCommand(input: {
   actorMemberId: string;
   command: unknown;
-  requestId?: unknown;
   now?: Date;
 }): Promise<GameCommandResult> {
   const actor = input.actorMemberId;
   let type: GameCommand["type"] | null = null;
   try {
-    const requestId = input.requestId === undefined || input.requestId === null
-      ? generateHostedRandomPrefixedId("req")
-      : parseRequestId(input.requestId);
     const command = parseGameCommand(input.command);
     type = command.type;
     await requireUploadedMedia(actor, command);
-    const gameId = await runCommand({ actor, now: input.now, requestId }, command);
+    const gameId = await runCommand({ actor, now: input.now }, command);
     return { game: gameId ? await readGame(gameId, actor) : null, ok: true };
   } catch (error) {
     if (error instanceof GameRuleError) {
@@ -109,7 +105,6 @@ export async function runGameCommand(input: {
 
 interface CommandContext {
   actor: string;
-  requestId: string;
   now?: Date;
 }
 
@@ -119,15 +114,10 @@ async function runCommand(context: CommandContext, command: GameCommand): Promis
     case "setProfile":
       await setProfile(context.actor, command);
       return null;
-    case "setLabel":
-      await setLabel(context.actor, command);
-      return null;
     case "createGame":
       return createGame(context, command);
     case "join":
       return join(context, command);
-    case "void":
-      return voidGame(context, command);
     case "post":
       return post(context, command);
     case "withdraw":
@@ -137,23 +127,10 @@ async function runCommand(context: CommandContext, command: GameCommand): Promis
   }
 }
 
-function mediaKeysOf(command: GameCommand): string[] {
-  switch (command.type) {
-    case "post":
-      return command.mediaKeys;
-    case "setProfile":
-    case "setLabel":
-      return command.photoKey ? [command.photoKey] : [];
-    case "createGame":
-      return command.inviteeLabel?.photoKey ? [command.inviteeLabel.photoKey] : [];
-    default:
-      return [];
-  }
-}
-
 /** Every media key a command names must be the actor's own finished upload. */
 async function requireUploadedMedia(actor: string, command: GameCommand): Promise<void> {
-  const keys = mediaKeysOf(command);
+  const labelPhoto = command.type === "createGame" ? command.inviteeLabel?.photoKey : null;
+  const keys = command.type === "post" ? command.mediaKeys : labelPhoto ? [labelPhoto] : [];
   if (keys.length === 0) return;
   const prefix = mediaKeyPrefixFor(actor);
   const owned = isGameMediaStorageAvailable() && keys.every((key) => key.startsWith(prefix));
@@ -166,38 +143,36 @@ interface LockedStep {
   loaded: LoadedGame;
   now: Date;
 }
-type GameEventDraft = { type: string; payload?: Record<string, string | number> } | null;
 
-async function runLocked(
-  context: CommandContext & { gameId: string },
-  step: (locked: LockedStep) => Promise<GameEventDraft>,
-): Promise<void> {
-  const { actor, gameId, requestId } = context;
-  try {
-    await getPrisma().$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
-      if (locked.length === 0) reject("GAME_NOT_FOUND", "Game not found.");
-      const now = context.now ?? await databaseNow(tx);
-      if (await findEvent(tx, actor, requestId)) return;
-      const [loaded] = await loadGames(tx, [gameId]);
-      const event = await step({ loaded, now, tx });
-      if (!event) return;
-      await tx.gameEvent.create({
-        data: { actorId: actor, gameId, payload: { v: 1, ...event.payload }, requestId, type: event.type },
-      });
-      // Murph seam: once a game is hosted in a Murph group chat, append the
-      // moment to HostedMailbox here, in this transaction, with dedupeKey =
-      // the event id. The MVP has no chat, so nothing is sent.
-    });
-  } catch (error) {
-    // A concurrent retry of the same request committed first.
-    if (isUniqueViolation(error) && await findEvent(getPrisma(), actor, requestId)) return;
-    throw error;
-  }
+type GameEventType = "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted";
+/** What changed, for the history: ids and numbers only, never words. */
+interface GameEventDraft {
+  type: GameEventType;
+  payload: Prisma.InputJsonObject;
 }
 
-function findEvent(db: Db, actorId: string, requestId: string) {
-  return db.gameEvent.findUnique({ select: { id: true }, where: { actorId_requestId: { actorId, requestId } } });
+async function writeEvents(tx: Tx, gameId: string, actor: string, events: readonly GameEventDraft[]): Promise<void> {
+  if (events.length === 0) return;
+  await tx.gameEvent.createMany({
+    data: events.map((event) => ({ actor, gameId, payload: { v: 1, ...event.payload }, type: event.type })),
+  });
+  // Murph seam: once a game is hosted in a Murph group chat, append these
+  // moments to HostedMailbox here, in this transaction. The MVP has no chat.
+}
+
+/** Locks the game, runs one step, and records what it changed. A step that changes nothing returns no events. */
+async function runLocked(
+  gameId: string,
+  context: CommandContext,
+  step: (locked: LockedStep) => Promise<GameEventDraft[]>,
+): Promise<void> {
+  await getPrisma().$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
+    if (locked.length === 0) reject("GAME_NOT_FOUND", "Game not found.");
+    const now = context.now ?? await databaseNow(tx);
+    const [loaded] = await loadGames(tx, [gameId]);
+    await writeEvents(tx, gameId, context.actor, await step({ loaded, now, tx }));
+  });
 }
 
 async function databaseNow(tx: Tx): Promise<Date> {
@@ -211,21 +186,8 @@ async function seal(target: GameSealTarget, value: string): Promise<string> {
   return sealed;
 }
 
-/** Undefined stays undefined (leave the field), null clears, words get sealed. */
-async function sealOptional(target: GameSealTarget, value: string | null | undefined): Promise<string | null | undefined> {
-  return value === undefined || value === null ? value : seal(target, value);
-}
-
 function gameTarget(game: { id: string; createdBy: string }, field: string): GameSealTarget {
   return { field, memberId: game.createdBy, rowId: game.id, table: "game" };
-}
-
-async function findInvite(token: string) {
-  const game = await getPrisma().game.findUnique({
-    select: { createdBy: true, id: true },
-    where: { inviteTokenHash: sha256Hex(token) },
-  });
-  return game ?? reject("INVITE_NOT_FOUND", "Invite not found.");
 }
 
 async function setProfile(actor: string, command: Extract<GameCommand, { type: "setProfile" }>): Promise<void> {
@@ -233,10 +195,9 @@ async function setProfile(actor: string, command: Extract<GameCommand, { type: "
     { field: "first_name", memberId: actor, rowId: actor, table: "game_profile" },
     command.firstName,
   );
-  const avatar = command.photoKey === undefined ? {} : { avatarKey: command.photoKey };
   await getPrisma().gameProfile.upsert({
-    create: { firstNameEncrypted, memberId: actor, timeZone: command.timeZone, ...avatar },
-    update: { firstNameEncrypted, timeZone: command.timeZone, ...avatar },
+    create: { firstNameEncrypted, memberId: actor, timeZone: command.timeZone },
+    update: { firstNameEncrypted, timeZone: command.timeZone },
     where: { memberId: actor },
   });
 }
@@ -257,32 +218,9 @@ function parsePendingLabel(value: Prisma.JsonValue | null): PendingLabel {
   };
 }
 
-async function setLabel(actor: string, command: Extract<GameCommand, { type: "setLabel" }>): Promise<void> {
-  const { memberId } = command;
-  const shared = memberId === actor ? null : await getPrisma().gamePlayer.findFirst({
-    select: { gameId: true },
-    where: { game: { players: { some: { memberId: actor } } }, memberId },
-  });
-  if (!shared) reject("INVALID_REQUEST", "Label someone you play with.");
-  const [nameEncrypted, relationshipEncrypted] = await Promise.all([
-    sealOptional(labelTarget(actor, "name"), command.name),
-    sealOptional(labelTarget(actor, "relationship"), command.relationship),
-  ]);
-  const changes = {
-    ...(nameEncrypted === undefined ? {} : { nameEncrypted }),
-    ...(relationshipEncrypted === undefined ? {} : { relationshipEncrypted }),
-    ...(command.photoKey === undefined ? {} : { photoKey: command.photoKey }),
-  };
-  await getPrisma().gameContactLabel.upsert({
-    create: { ownerMemberId: actor, subjectMemberId: memberId, ...changes },
-    update: changes,
-    where: { ownerMemberId_subjectMemberId: { ownerMemberId: actor, subjectMemberId: memberId } },
-  });
-}
-
 async function createGame(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>): Promise<string> {
-  const { actor, requestId } = context;
-  const { gameId } = command;
+  const { actor } = context;
+  const { gameId, inviteeLabel } = command;
   const prisma = getPrisma();
   const profile = await prisma.gameProfile.findUnique({ select: { timeZone: true }, where: { memberId: actor } });
   if (!profile) reject("PROFILE_REQUIRED", "Add your first name first.");
@@ -291,50 +229,39 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
     if (existing.createdBy !== actor) reject("INVALID_REQUEST", "That game id is taken.");
     return gameId;
   }
-  const previous = command.previousGameId ? await readRematchSource(actor, command.previousGameId) : null;
-  const newTerms = decideNewTerms(command.terms, {
-    newKey: () => generateHostedRandomPrefixedId("gsk"),
-    previousStakeKeys: new Set(previous?.stakeKeys ?? []),
-  });
+  const round = command.previousGameId ? await rematchRound(actor, command.previousGameId) : 1;
+  const newTerms = decideNewTerms(command.terms, { newKey: () => generateHostedRandomPrefixedId("gsk") });
   const token = randomBytes(24).toString("base64url");
   const where = { createdBy: actor, id: gameId };
   const [termsWordsEncrypted, inviteTokenEncrypted, nameEncrypted, relationshipEncrypted] = await Promise.all([
     seal(gameTarget(where, "terms_words"), JSON.stringify(newTerms.words)),
     seal(gameTarget(where, "invite_token"), token),
     seal(labelTarget(actor, "name"), command.inviteeFirstName),
-    sealOptional(labelTarget(actor, "relationship"), command.inviteeLabel?.relationship),
+    inviteeLabel?.relationship ? seal(labelTarget(actor, "relationship"), inviteeLabel.relationship) : null,
   ]);
-  const pendingLabel = {
-    nameEncrypted,
-    photoKey: command.inviteeLabel?.photoKey ?? null,
-    relationshipEncrypted: relationshipEncrypted ?? null,
-  };
   try {
     await prisma.$transaction(async (tx) => {
       const now = context.now ?? await databaseNow(tx);
-      const expiresAt = new Date(now.getTime() + GAME_INVITE_TTL_MS);
       await tx.game.create({
         data: {
           createdBy: actor,
           id: gameId,
-          inviteExpiresAt: expiresAt,
+          inviteExpiresAt: new Date(now.getTime() + GAME_INVITE_TTL_MS),
           inviteTokenEncrypted,
           inviteTokenHash: sha256Hex(token),
           lengthDays: newTerms.lengthDays,
-          nextDueAt: expiresAt,
-          pendingLabel,
+          pendingLabel: { nameEncrypted, photoKey: inviteeLabel?.photoKey ?? null, relationshipEncrypted },
           // The time zone here is a placeholder; it freezes when the game goes live.
-          players: { create: { agreedTermsVersion: 1, memberId: actor, seat: 0, timeZone: profile.timeZone } },
-          previousGameId: previous?.id ?? null,
-          round: previous?.nextRound ?? 1,
+          players: { create: { memberId: actor, seat: 0, timeZone: profile.timeZone } },
+          previousGameId: command.previousGameId ?? null,
+          round,
           status: "invited",
           terms: toPrismaJsonObject(newTerms.terms),
           termsWordsEncrypted,
         },
       });
-      await tx.gameEvent.create({
-        data: { actorId: actor, gameId, payload: { lengthDays: newTerms.lengthDays, v: 1 }, requestId, type: "created" },
-      });
+      const previous = command.previousGameId ? { previousGameId: command.previousGameId } : {};
+      await writeEvents(tx, gameId, actor, [{ payload: { round, ...previous }, type: "created" }]);
     });
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;
@@ -345,11 +272,10 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
 }
 
 /**
- * A rematch must follow a finished game the challenger played. It continues
- * the round count after a settled game (the joiner is checked at go-live) and
- * may keep that game's stake keys.
+ * A rematch must follow a finished game the challenger played, and continues
+ * the round count after a settled one (the joiner is checked at go-live).
  */
-async function readRematchSource(actor: string, previousGameId: string) {
+async function rematchRound(actor: string, previousGameId: string): Promise<number> {
   const previous = await getPrisma().game.findUnique({
     include: { players: { select: { memberId: true } } },
     where: { id: previousGameId },
@@ -358,21 +284,26 @@ async function readRematchSource(actor: string, previousGameId: string) {
   if (!previous || !finished || !previous.players.some((player) => player.memberId === actor)) {
     reject("INVALID_REQUEST", "A rematch needs a finished game you played.");
   }
-  return {
-    id: previous.id,
-    nextRound: previous.status === "settled" ? previous.round + 1 : 1,
-    stakeKeys: parseStoredTerms(previous.terms).versions.flatMap((version) => version.stakes.map((stake) => stake.key)),
-  };
+  return previous.status === "settled" ? previous.round + 1 : 1;
 }
 
 async function join(context: CommandContext, command: Extract<GameCommand, { type: "join" }>): Promise<string> {
   const { actor } = context;
-  const target = await findInvite(command.token);
-  const profile = await getPrisma().gameProfile.findUnique({ select: { memberId: true }, where: { memberId: actor } });
+  const prisma = getPrisma();
+  const target = await prisma.game.findUnique({
+    select: { createdBy: true, id: true },
+    where: { inviteTokenHash: sha256Hex(command.token) },
+  });
+  if (!target) reject("INVITE_NOT_FOUND", "Invite not found.");
+  const profile = await prisma.gameProfile.findUnique({ select: { memberId: true }, where: { memberId: actor } });
   if (!profile) reject("PROFILE_REQUIRED", "Add your first name first.");
   // A finished game nobody opened must not hold either player.
-  await settleOverdueGamesOf([actor, target.createdBy]);
-  await runLocked({ ...context, gameId: target.id }, async ({ loaded, now, tx }) => {
+  const held = await prisma.gamePlayer.findMany({
+    select: { gameId: true },
+    where: { activeMemberId: { in: [actor, target.createdBy] } },
+  });
+  await loadCurrent(held.map((player) => player.gameId));
+  await runLocked(target.id, context, async ({ loaded, now, tx }) => {
     const { row } = loaded;
     const decision = decideJoin(await withCurrentTimeZones(tx, loaded.state), {
       memberId: actor,
@@ -380,23 +311,24 @@ async function join(context: CommandContext, command: Extract<GameCommand, { typ
       termsVersion: command.termsVersion,
       timeZone: command.timeZone,
     });
-    if (decision.kind === "already-joined") return null;
+    if (decision.kind === "already-joined") return [];
     // The unique active_member_id index is the real guard; this gives the friendly error.
     const busy = await tx.gamePlayer.findFirst({
       select: { gameId: true },
       where: { activeMemberId: { in: decision.players.map((player) => player.memberId) } },
     });
     if (busy) reject("ALREADY_IN_A_GAME", "One of you is already in a game.");
-    await tx.gamePlayer.create({
-      data: { agreedTermsVersion: command.termsVersion, gameId: row.id, memberId: actor, seat: decision.seat, timeZone: command.timeZone },
-    });
+    await tx.gamePlayer.create({ data: { gameId: row.id, memberId: actor, seat: decision.seat, timeZone: command.timeZone } });
     await writeSchedule(tx, row.id, decision, { activate: true });
     await tx.game.update({
       data: { round: await roundAtGoLive(tx, row, actor), startedAt: decision.startedAt, status: "live" },
       where: { id: row.id },
     });
     await copyPendingLabel(tx, row, actor);
-    return { payload: { seat: decision.seat }, type: "joined" };
+    return [
+      { payload: { seat: decision.seat }, type: "joined" },
+      { payload: { startNow: false }, type: "started" },
+    ];
   });
   return target.id;
 }
@@ -426,15 +358,7 @@ async function roundAtGoLive(tx: Tx, row: GameRow, joinerId: string): Promise<nu
   return playedBefore ? row.round : 1;
 }
 
-async function settleOverdueGamesOf(memberIds: string[]): Promise<void> {
-  const held = await getPrisma().gamePlayer.findMany({
-    select: { gameId: true },
-    where: { activeMemberId: { in: memberIds }, game: { nextDueAt: { lte: new Date() } } },
-  });
-  for (const { gameId } of held) await settleGame(gameId);
-}
-
-/** Writes each player's frozen time zone and Day 1, and the settle time. */
+/** Writes each player's frozen time zone and Day 1. */
 async function writeSchedule(tx: Tx, gameId: string, schedule: Schedule, options: { activate?: boolean } = {}): Promise<void> {
   for (const player of schedule.players) {
     await tx.gamePlayer.update({
@@ -446,7 +370,6 @@ async function writeSchedule(tx: Tx, gameId: string, schedule: Schedule, options
       where: { gameId_memberId: { gameId, memberId: player.memberId } },
     });
   }
-  await tx.game.update({ data: { nextDueAt: schedule.nextDueAt }, where: { id: gameId } });
 }
 
 /** The challenger's invite label becomes their label for the joiner; existing fields win. */
@@ -464,39 +387,27 @@ async function copyPendingLabel(tx: Tx, row: GameRow, joinerId: string): Promise
       updated_at = EXCLUDED.updated_at`;
 }
 
-async function voidGame(context: CommandContext, command: Extract<GameCommand, { type: "void" }>): Promise<string> {
-  const gameId = command.reason === "declined" ? (await findInvite(command.token)).id : command.gameId;
-  await runLocked({ ...context, gameId }, async ({ loaded, tx }) => {
-    decideVoid(loaded.state, { memberId: context.actor, reason: command.reason });
-    await endGame(tx, gameId, { status: "void", voidReason: command.reason });
-    return { type: command.reason };
-  });
-  return gameId;
-}
-
 async function endGame(tx: Tx, gameId: string, data: Prisma.GameUpdateInput): Promise<void> {
-  await tx.game.update({ data: { ...data, nextDueAt: null }, where: { id: gameId } });
+  await tx.game.update({ data, where: { id: gameId } });
   await tx.gamePlayer.updateMany({ data: { activeMemberId: null }, where: { gameId } });
 }
 
 async function post(context: CommandContext, command: Extract<GameCommand, { type: "post" }>): Promise<string> {
   const { actor } = context;
   const { entryId, gameId, kind, mediaKeys } = command;
-  const existing = await getPrisma().gameEntry.findUnique({ select: { memberId: true }, where: { id: entryId } });
-  if (existing) {
-    if (existing.memberId !== actor) reject("INVALID_REQUEST", "That entry id is taken.");
-    return gameId;
-  }
-  const target = (field: string): GameSealTarget => ({ field, memberId: actor, rowId: entryId, table: "game_entry" });
-  const [textEncrypted, dataEncrypted] = await Promise.all([
-    command.text ? seal(target("text"), command.text) : null,
-    command.data ? seal(target("data"), JSON.stringify(command.data)) : null,
-  ]);
+  const textEncrypted = command.text
+    ? await seal({ field: "text", memberId: actor, rowId: entryId, table: "game_entry" }, command.text)
+    : null;
   const captureAgeMs = command.captureAgeMs ?? null;
-  await runLocked({ ...context, gameId }, async ({ loaded, now, tx }) => {
+  await runLocked(gameId, context, async ({ loaded, now, tx }) => {
+    // A repeat of a post that already landed (a retry, or the same tap twice) changes nothing.
+    const existing = await tx.gameEntry.findUnique({ select: { memberId: true }, where: { id: entryId } });
+    if (existing) {
+      if (existing.memberId !== actor) reject("INVALID_REQUEST", "That entry id is taken.");
+      return [];
+    }
     const decision = decidePost(loaded.state, {
       captureAgeMs,
-      hasText: Boolean(command.text),
       kind,
       mediaKeyPrefix: mediaKeyPrefixFor(actor),
       mediaKeys,
@@ -513,7 +424,6 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
       data: {
         attempt: decision.attempt,
         captureAgeMs,
-        dataEncrypted,
         dayIndex: decision.dayIndex,
         gameId,
         id: entryId,
@@ -524,18 +434,19 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
         textEncrypted,
       },
     });
-    return { payload: { attempt: decision.attempt, dayIndex: decision.dayIndex, entryId }, type: kind === "excuse" ? "excused" : "posted" };
+    const { attempt, dayIndex, graceUsed } = decision;
+    return [{ payload: { attempt, dayIndex, entryId, graceUsed, kind }, type: "posted" }];
   });
   return gameId;
 }
 
 async function withdraw(context: CommandContext, command: Extract<GameCommand, { type: "withdraw" }>): Promise<string> {
   const { entryId, gameId } = command;
-  await runLocked({ ...context, gameId }, async ({ loaded, now, tx }) => {
-    const { withdrawEntryId } = decideWithdraw(loaded.state, { entryId, memberId: context.actor, now });
-    if (!withdrawEntryId) return null;
-    await tx.gameEntry.update({ data: { withdrawnAt: now, withdrawnReason: "withdrawn" }, where: { id: withdrawEntryId } });
-    return { payload: { entryId }, type: "withdrew" };
+  await runLocked(gameId, context, async ({ loaded, now, tx }) => {
+    const { withdraw: change } = decideWithdraw(loaded.state, { entryId, memberId: context.actor, now });
+    if (!change) return [];
+    await tx.gameEntry.update({ data: { withdrawnAt: now, withdrawnReason: "withdrawn" }, where: { id: change.entryId } });
+    return [{ payload: change, type: "withdrew" }];
   });
   return gameId;
 }
@@ -544,72 +455,46 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
   const { actor } = context;
   const { ticketId } = command;
   const ticket = await getPrisma().gameTicket.findUnique({ select: { gameId: true, owedTo: true }, where: { id: ticketId } });
-  if (!ticket?.gameId || ticket.owedTo !== actor) reject("TICKET_NOT_HELD", "That ticket isn't yours to cash in.");
-  const gameId = ticket.gameId;
-  await runLocked({ ...context, gameId }, async ({ now, tx }) => {
+  if (!ticket || ticket.owedTo !== actor) reject("TICKET_NOT_HELD", "That ticket isn't yours to cash in.");
+  await runLocked(ticket.gameId, context, async ({ now, tx }) => {
+    // Already redeemed matches no row: a repeat, not an error.
     const changed = await tx.gameTicket.updateMany({
       data: { redeemedAt: now, status: "redeemed" },
       where: { id: ticketId, owedTo: actor, status: "open" },
     });
-    // Zero rows means it was already redeemed: a retry, not an error.
-    return changed.count === 1 ? { payload: { ticketId }, type: "redeemed" } : null;
+    return changed.count === 1 ? [{ payload: { ticketId }, type: "redeemed" }] : [];
   });
-  return gameId;
+  return ticket.gameId;
 }
 
 // ------------------------------------------------------------------- settle
 
 /**
- * Settles one game if it's due (or `force`): freezes the result on the game
- * row, issues tickets and logs the event in one transaction. An unclaimed
- * invite past its expiry is voided instead. Returns whether anything changed.
+ * Ends one game if it's due (or `force`), deciding with the database clock
+ * under the game lock: an unclaimed invite past its expiry becomes void; a
+ * live game past its last day freezes its result and issues tickets.
  */
-async function settleGame(gameId: string, options: { force?: boolean; now?: Date } = {}): Promise<boolean> {
-  return getPrisma().$transaction(async (tx) => {
+async function settleGame(gameId: string, options: { force?: boolean; actor?: string } = {}): Promise<void> {
+  await getPrisma().$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
-    if (locked.length === 0) return false;
-    const now = options.now ?? await databaseNow(tx);
-    const [loaded] = await loadGames(tx, [gameId]);
-    const { row, state } = loaded;
-    const due = options.force || (row.nextDueAt !== null && row.nextDueAt.getTime() <= now.getTime());
-    if (!due || (row.status !== "invited" && row.status !== "live")) return false;
-    if (row.status === "invited") {
-      await endGame(tx, gameId, { status: "void", voidReason: "expired" });
-      await tx.gameEvent.create({ data: { actorId: SYSTEM_ACTOR, gameId, payload: { v: 1 }, type: "expired" } });
-      return true;
+    if (locked.length === 0) return;
+    const now = await databaseNow(tx);
+    const [{ state }] = await loadGames(tx, [gameId]);
+    if (!options.force && !isGameDue(state, now)) return;
+    const actor = options.actor ?? SYSTEM_ACTOR;
+    if (state.game.status === "invited") {
+      await endGame(tx, gameId, { status: "void" });
+      await writeEvents(tx, gameId, actor, [{ payload: {}, type: "expired" }]);
+      return;
     }
+    if (state.game.status !== "live") return;
     const decision = decideSettle(state);
-    await tx.gameTicket.createMany({
-      data: decision.tickets.map((ticket) => ({
-        gameId,
-        id: generateHostedRandomPrefixedId("gtk"),
-        owedBy: ticket.owedBy,
-        owedTo: ticket.owedTo,
-        stakeKey: ticket.stakeKey,
-      })),
-    });
+    const tickets = decision.tickets.map((ticket) => ({ ...ticket, gameId, id: generateHostedRandomPrefixedId("gtk") }));
+    await tx.gameTicket.createMany({ data: tickets });
     await endGame(tx, gameId, { result: toPrismaJsonObject(decision.result), settledAt: now, status: "settled" });
-    await tx.gameEvent.create({
-      data: { actorId: SYSTEM_ACTOR, gameId, payload: { tickets: decision.tickets.length, v: 1 }, type: "settled" },
-    });
-    return true;
+    const scores = decision.result.scores.map(({ score, seat }) => ({ score, seat }));
+    await writeEvents(tx, gameId, actor, [{ payload: { scores, ticketIds: tickets.map((ticket) => ticket.id) }, type: "settled" }]);
   });
-}
-
-/** The settle timer: every game whose `next_due_at` has passed. Off while the game is dark. */
-export async function settleDueGames(now?: Date): Promise<{ settled: number }> {
-  if (!isGameEnabled()) return { settled: 0 };
-  const due = await getPrisma().game.findMany({
-    orderBy: { nextDueAt: "asc" },
-    select: { id: true },
-    take: SETTLE_BATCH,
-    where: { nextDueAt: { lte: now ?? new Date() }, status: { in: ["invited", "live"] } },
-  });
-  let settled = 0;
-  for (const { id } of due) {
-    if (await settleGame(id, { now })) settled += 1;
-  }
-  return { settled };
 }
 
 // --------------------------------------------------------------------- dev
@@ -618,10 +503,9 @@ function assertDevTools(): void {
   if (!areGameDevToolsAllowed()) throw new Error("Game dev tools are off in production.");
 }
 
-async function runDevStep(gameId: string, memberId: string, step: (locked: LockedStep) => Promise<GameEventDraft>): Promise<GameView> {
+async function runDevStep(gameId: string, memberId: string, step: (locked: LockedStep) => Promise<GameEventDraft[]>): Promise<GameView> {
   assertDevTools();
-  const requestId = generateHostedRandomPrefixedId("dev");
-  await runLocked({ actor: memberId, gameId, requestId }, async (locked) => {
+  await runLocked(gameId, { actor: memberId }, async (locked) => {
     if (!playerFor(locked.loaded.state, memberId)) reject("NOT_A_PLAYER", "You're not in this game.");
     return step(locked);
   });
@@ -632,7 +516,7 @@ export async function devStartNow(gameId: string, memberId: string): Promise<Gam
   return runDevStep(gameId, memberId, async ({ loaded, now, tx }) => {
     await writeSchedule(tx, gameId, decideStartNow(loaded.state, now));
     await tx.game.update({ data: { startedAt: now }, where: { id: gameId } });
-    return { type: "started_now" };
+    return [{ payload: { startNow: true }, type: "started" }];
   });
 }
 
@@ -643,16 +527,16 @@ export async function devAdvanceDays(gameId: string, memberId: string, days: num
       const startedAt = new Date(loaded.row.startedAt.getTime() - days * 24 * 60 * 60 * 1000);
       await tx.game.update({ data: { startedAt }, where: { id: gameId } });
     }
-    return { payload: { days }, type: "dev_advanced" };
+    return [{ payload: { days }, type: "time_shifted" }];
   });
 }
 
 export async function devSettleNow(gameId: string, memberId: string): Promise<GameView> {
   assertDevTools();
-  const loaded = await loadGames(getPrisma(), [gameId]);
-  if (!loaded[0] || !playerFor(loaded[0].state, memberId)) reject("GAME_NOT_FOUND", "Game not found.");
-  if (loaded[0].row.status !== "live") reject("GAME_NOT_LIVE", "This game isn't live.");
-  await settleGame(gameId, { force: true });
+  const [loaded] = await loadGames(getPrisma(), [gameId]);
+  if (!loaded || !playerFor(loaded.state, memberId)) reject("GAME_NOT_FOUND", "Game not found.");
+  if (loaded.row.status !== "live") reject("GAME_NOT_LIVE", "This game isn't live.");
+  await settleGame(gameId, { actor: memberId, force: true });
   return requireView(gameId, memberId);
 }
 
@@ -693,7 +577,6 @@ function toRuleState(row: GameRow, entries: readonly GameEntry[]): RuleState {
     game: toRuleStateGame(row, parseStoredTerms(row.terms)),
     players: row.players.map((player) => ({
       active: player.activeMemberId !== null,
-      agreedTermsVersion: player.agreedTermsVersion,
       dayOne: player.dayOne ? player.dayOne.toISOString().slice(0, 10) : null,
       memberId: player.memberId,
       seat: player.seat,
@@ -708,7 +591,6 @@ function toRuleStateGame(row: Game, terms: RuleState["game"]["terms"]): RuleStat
     id: row.id,
     inviteExpiresAt: row.inviteExpiresAt,
     lengthDays: row.lengthDays,
-    nextDueAt: row.nextDueAt,
     seats: GAME_SEATS_1V1,
     status: toStatus(row.status),
     terms,
@@ -730,28 +612,15 @@ function toDbDate(date: string): Date {
   return new Date(`${date}T00:00:00Z`);
 }
 
-function isDue(row: Game, now: Date): boolean {
-  return (row.status === "invited" || row.status === "live") && row.nextDueAt !== null && row.nextDueAt <= now;
-}
-
-/** Settles anything past due before showing it, so a missed timer can't strand a game. */
+/** Settles anything past due before showing it: there is no timer, any read ends a finished game. */
 async function loadCurrent(gameIds: readonly string[]): Promise<LoadedGame[]> {
   const prisma = getPrisma();
   const loaded = await loadGames(prisma, gameIds);
   const now = new Date();
-  const due = loaded.filter((game) => isDue(game.row, now)).map((game) => game.row.id);
+  const due = loaded.filter((game) => isGameDue(game.state, now));
   if (due.length === 0) return loaded;
-  for (const id of due) await settleGame(id);
+  for (const game of due) await settleGame(game.row.id);
   return loadGames(prisma, gameIds);
-}
-
-/** Membership alone, for checks that don't need the whole game (uploads). */
-export async function isGamePlayer(gameId: string, memberId: string): Promise<boolean> {
-  const player = await getPrisma().gamePlayer.findUnique({
-    select: { gameId: true },
-    where: { gameId_memberId: { gameId, memberId } },
-  });
-  return player !== null;
 }
 
 export async function readGame(gameId: string, memberId: string): Promise<GameView | null> {
@@ -781,6 +650,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
       where: { game: { status: { in: ["invited", "live", "settled"] } }, memberId },
     }),
     prisma.gameTicket.findMany({
+      include: { game: { select: { createdBy: true, id: true, termsWordsEncrypted: true } } },
       orderBy: { createdAt: "desc" },
       take: WALLET_LIMIT,
       where: { OR: [{ owedTo: memberId }, { owedBy: memberId }] },
@@ -788,22 +658,14 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
   ]);
   const games = homeGames(await loadCurrent(seats.map((seat) => seat.gameId)));
   const views = await buildViews(games, memberId);
-  const ticketGameIds = [...new Set(tickets.flatMap((ticket) => (ticket.gameId ? [ticket.gameId] : [])))];
-  const words = await readTermWords(ticketGameIds.length
-    ? await prisma.game.findMany({ select: { createdBy: true, id: true, termsWordsEncrypted: true }, where: { id: { in: ticketGameIds } } })
-    : []);
+  const words = await readTermWords([...new Map(tickets.map((ticket) => [ticket.gameId, ticket.game])).values()]);
   const [firstName] = await openGameTexts(profile
     ? [{ field: "first_name", memberId, rowId: memberId, table: "game_profile", value: profile.firstNameEncrypted }]
     : []);
-  const wallet = tickets.map((ticket) => ticketView(toTicketRow(ticket), ticket.gameId ? words.get(ticket.gameId) ?? null : null, memberId));
+  const wallet = tickets.map((ticket) => ticketView(toTicketRow(ticket), words.get(ticket.gameId) ?? null, memberId));
   return {
     games: views,
-    me: {
-      avatarUrl: profile?.avatarKey ? gameMediaUrl(profile.avatarKey) : null,
-      firstName: firstName ?? null,
-      memberId,
-      timeZone: profile?.timeZone ?? null,
-    },
+    me: { firstName: firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       held: wallet.filter((ticket) => ticket.status === "open" && ticket.youHold),
       owed: wallet.filter((ticket) => ticket.status === "open" && !ticket.youHold),
@@ -839,47 +701,33 @@ export async function readInvitePreview(token: string): Promise<GameInvitePrevie
 }
 
 /**
- * Who may see a stored file: its uploader; a co-player once they've posted
- * for that day (or after settle), never for an excuse; anyone who shares a
- * game with a player, for that player's profile photo.
+ * Who may see a stored file: its uploader (entries, excuses, invite label
+ * photos), and otherwise exactly the players whose game view shows the entry
+ * it belongs to (post-to-unlock, everything after settle, never an excuse).
  */
 export async function authorizeMediaRead(memberId: string, mediaKey: string): Promise<boolean> {
   const ownerId = mediaKeyOwner(mediaKey);
   if (!ownerId) return false;
   if (ownerId === memberId) return true;
-  const prisma = getPrisma();
-  const entries = await prisma.gameEntry.findMany({
-    select: { attempt: true, dayIndex: true, gameId: true, withdrawnAt: true },
+  // Keys come from the bytes, so one file can belong to several entries; check the latest few.
+  const entries = await getPrisma().gameEntry.findMany({
+    orderBy: { receivedAt: "desc" },
+    select: { gameId: true, id: true },
     take: 5,
     where: { mediaKeys: { has: mediaKey }, memberId: ownerId },
   });
-  for (const entry of entries) {
-    if (entry.attempt === 0 || entry.withdrawnAt) continue;
-    const game = await prisma.game.findUnique({
-      select: { players: { select: { memberId: true } }, status: true },
-      where: { id: entry.gameId },
-    });
-    if (!game?.players.some((player) => player.memberId === memberId)) continue;
-    if (game.status === "settled") return true;
-    const unlocked = await prisma.gameEntry.count({
-      where: { attempt: { gt: 0 }, dayIndex: entry.dayIndex, gameId: entry.gameId, memberId },
-    });
-    if (unlocked > 0) return true;
-  }
-  const avatar = await prisma.gameProfile.findFirst({ select: { memberId: true }, where: { avatarKey: mediaKey, memberId: ownerId } });
-  if (!avatar) return false;
-  const shared = await prisma.gamePlayer.findFirst({
-    select: { gameId: true },
-    where: { game: { players: { some: { memberId: ownerId } } }, memberId },
+  const games = await loadGames(getPrisma(), [...new Set(entries.map((entry) => entry.gameId))]);
+  return entries.some((entry) => {
+    const game = games.find((candidate) => candidate.row.id === entry.gameId);
+    return game !== undefined && visibleEntryIds(game.state, memberId).has(entry.id);
   });
-  return shared !== null;
 }
 
 // ------------------------------------------------------------ view assembly
 
 function toTicketRow(ticket: {
   id: string;
-  gameId: string | null;
+  gameId: string;
   stakeKey: string;
   owedBy: string;
   owedTo: string;
@@ -887,7 +735,16 @@ function toTicketRow(ticket: {
   createdAt: Date;
   redeemedAt: Date | null;
 }): GameTicketRow {
-  return { ...ticket, status: ticket.status === "redeemed" ? "redeemed" : "open" };
+  return {
+    createdAt: ticket.createdAt,
+    gameId: ticket.gameId,
+    id: ticket.id,
+    owedBy: ticket.owedBy,
+    owedTo: ticket.owedTo,
+    redeemedAt: ticket.redeemedAt,
+    stakeKey: ticket.stakeKey,
+    status: ticket.status === "redeemed" ? "redeemed" : "open",
+  };
 }
 
 async function readTermWords(
@@ -931,34 +788,25 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string): Promi
       token: ask(gameTarget(game.row, "invite_token"), game.row.inviteTokenEncrypted),
     };
   });
-  const entryAt = new Map<string, { text: number; data: number }>();
-  games.forEach((game) => {
+  const textAt = new Map<string, number>();
+  for (const game of games) {
     const visible = visibleEntryIds(game.state, viewerId);
     for (const entry of game.entries) {
       if (!visible.has(entry.id)) continue;
-      const target = (field: string): GameSealTarget => ({ field, memberId: entry.memberId, rowId: entry.id, table: "game_entry" });
-      entryAt.set(entry.id, { data: ask(target("data"), entry.dataEncrypted), text: ask(target("text"), entry.textEncrypted) });
+      textAt.set(entry.id, ask({ field: "text", memberId: entry.memberId, rowId: entry.id, table: "game_entry" }, entry.textEncrypted));
     }
-  });
+  }
   const plain = await openGameTexts(requests);
 
   const names = new Map<string, string>();
-  const avatarKeys = new Map<string, string | null>();
   for (const profile of profiles) {
     const labelIndex = labelNameAt.get(profile.memberId);
     const labelName = profile.memberId !== viewerId && labelIndex !== undefined ? plain[labelIndex] : null;
     names.set(profile.memberId, labelName ?? plain[profileNameAt.get(profile.memberId)!] ?? "");
-    const labelPhoto = profile.memberId !== viewerId
-      ? labels.find((label) => label.subjectMemberId === profile.memberId)?.photoKey
-      : null;
-    avatarKeys.set(profile.memberId, labelPhoto ?? profile.avatarKey);
   }
-  const entryWords = new Map<string, { text: string | null; data: Record<string, unknown> | null }>();
-  for (const [entryId, at] of entryAt) {
-    const data = plain[at.data];
-    const parsed: unknown = data ? JSON.parse(data) : null;
-    entryWords.set(entryId, { data: isRecord(parsed) ? parsed : null, text: plain[at.text] });
-  }
+  // Only the viewer's own invite photos: nobody else ever sees them.
+  const avatarKeys = new Map(labels.map((label) => [label.subjectMemberId, label.photoKey]));
+  const entryWords = new Map([...textAt].map(([entryId, at]) => [entryId, { text: plain[at] }]));
   const now = new Date();
   return games.map((game, index) => {
     const invite = inviteAt[index];

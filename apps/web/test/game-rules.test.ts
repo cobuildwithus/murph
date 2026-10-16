@@ -9,9 +9,9 @@ import {
   decidePost,
   decideSettle,
   decideStartNow,
-  decideVoid,
   decideWithdraw,
   GameRuleError,
+  isGameDue,
   outcomeFor,
   parseStoredTerms,
   playerFor,
@@ -40,12 +40,11 @@ function invited(schedule: GameSchedule = EVERY_DAY, stakes: StoredStake[] = [WI
       id: "game_rules_1",
       inviteExpiresAt: new Date("2026-10-23T00:00:00Z"),
       lengthDays: 7,
-      nextDueAt: null,
       seats: 2,
       status: "invited",
       terms: { v: 1, versions: [{ fromDay: 0, n: 1, schedule, stakes }] },
     },
-    players: [{ active: false, agreedTermsVersion: 1, dayOne: null, memberId: LEO, seat: 0, timeZone: NYC }],
+    players: [{ active: false, dayOne: null, memberId: LEO, seat: 0, timeZone: NYC }],
   };
 }
 
@@ -54,11 +53,11 @@ function live(state: RuleState = invited(), avaTimeZone = SYD, joinAt = JOIN_AT)
   if (decision.kind !== "join") throw new Error("expected a join");
   const players = [
     ...state.players,
-    { active: false, agreedTermsVersion: 1, dayOne: null, memberId: AVA, seat: decision.seat, timeZone: avaTimeZone },
+    { active: false, dayOne: null, memberId: AVA, seat: decision.seat, timeZone: avaTimeZone },
   ];
   return {
     ...state,
-    game: { ...state.game, nextDueAt: decision.nextDueAt, status: "live" },
+    game: { ...state.game, status: "live" },
     players: players.map((player) => ({ ...player, active: true, dayOne: dayOneOf(decision, player.memberId) })),
   };
 }
@@ -84,7 +83,6 @@ function post(
   const kind = options.kind ?? "photo";
   const decision = decidePost(state, {
     captureAgeMs: options.captureAgeMs ?? null,
-    hasText: false,
     kind,
     mediaKeyPrefix: mediaKeyPrefixFor(memberId),
     mediaKeys: [`${mediaKeyPrefixFor(memberId)}shot-${entrySeq}.jpg`],
@@ -110,10 +108,10 @@ function post(
 }
 
 function withdraw(state: RuleState, memberId: string, now: Date, entryId = state.entries.at(-1)!.id): RuleState {
-  const { withdrawEntryId } = decideWithdraw(state, { entryId, memberId, now });
+  const { withdraw: change } = decideWithdraw(state, { entryId, memberId, now });
   return {
     ...state,
-    entries: state.entries.map((entry) => (entry.id === withdrawEntryId ? { ...entry, withdrawnAt: now } : entry)),
+    entries: state.entries.map((entry) => (entry.id === change?.entryId ? { ...entry, withdrawnAt: now } : entry)),
   };
 }
 
@@ -128,7 +126,7 @@ function codeOf(run: () => unknown): string {
 }
 
 describe("weekly game: terms", () => {
-  it("validates the challenge and keeps stake keys only on a rematch", () => {
+  it("validates the challenge and gives every stake a fresh key", () => {
     let next = 0;
     const newKey = () => `gsk_new_${(next += 1)}`;
     const made = decideNewTerms(
@@ -140,14 +138,14 @@ describe("weekly game: terms", () => {
         ],
         tasks: [{ seat: 1, text: "10 min abs" }, { seat: 0, text: "100 pushups" }],
       },
-      { newKey, previousStakeKeys: new Set(["gsk_breakfast"]) },
+      { newKey },
     );
     expect(made.lengthDays).toBe(7);
     expect(made.terms.versions[0]).toEqual({
       fromDay: 0,
       n: 1,
       schedule: { days: [0, 2, 4] },
-      stakes: [{ key: "gsk_breakfast", kind: "winner_gets" }, { key: "gsk_new_1", kind: "per_miss" }],
+      stakes: [{ key: "gsk_new_1", kind: "winner_gets" }, { key: "gsk_new_2", kind: "per_miss" }],
     });
     expect(made.words.versions[0].tasks).toEqual([{ seat: 0, text: "100 pushups" }, { seat: 1, text: "10 min abs" }]);
     // Words stay out of the plain terms.
@@ -157,7 +155,7 @@ describe("weekly game: terms", () => {
 
   it("rejects bad schedules, counts and task lists", () => {
     const base = { stakes: [], tasks: [{ seat: 0, text: "Run" }, { seat: 1, text: "Swim" }] };
-    const options = { newKey: () => "gsk_x", previousStakeKeys: new Set<string>() };
+    const options = { newKey: () => "gsk_x" };
     expect(codeOf(() => decideNewTerms({ ...base, schedule: { days: [] } }, options))).toBe("INVALID_REQUEST");
     expect(codeOf(() => decideNewTerms({ ...base, schedule: { count: 8 } }, options))).toBe("INVALID_REQUEST");
     expect(codeOf(() => decideNewTerms({ ...base, schedule: { count: 5 }, tasks: [{ seat: 0, text: "Run" }] }, options)))
@@ -176,8 +174,10 @@ describe("weekly game: joining", () => {
       { dayOne: "2026-10-17", memberId: LEO, timeZone: NYC },
       { dayOne: "2026-10-18", memberId: AVA, timeZone: SYD },
     ]);
-    // Settles an hour after the later player's last day ends (Sydney, 3am Oct 25 local).
-    expect(decision.nextDueAt.toISOString()).toBe("2026-10-24T17:00:00.000Z");
+    // Due an hour after the later player's last day ends (Sydney, 3am Oct 25 local).
+    const state = live();
+    expect(isGameDue(state, new Date("2026-10-24T16:59:59Z"))).toBe(false);
+    expect(isGameDue(state, new Date("2026-10-24T17:00:00Z"))).toBe(true);
   });
 
   it("is single-use, expires, and holds everyone to the latest terms", () => {
@@ -193,10 +193,6 @@ describe("weekly game: joining", () => {
     }))).toBe("INVITE_EXPIRED");
     expect(codeOf(() => decideJoin(invited(), { memberId: AVA, now: JOIN_AT, termsVersion: 2, timeZone: SYD })))
       .toBe("TERMS_CHANGED");
-    const stale = invited();
-    stale.game.terms.versions.push({ ...stale.game.terms.versions[0], n: 2 });
-    expect(codeOf(() => decideJoin(stale, { memberId: AVA, now: JOIN_AT, termsVersion: 2, timeZone: SYD })))
-      .toBe("TERMS_CHANGED");
     const declined: RuleState = { ...invited(), game: { ...invited().game, status: "void" } };
     expect(codeOf(() => decideJoin(declined, { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: SYD })))
       .toBe("INVITE_EXPIRED");
@@ -211,14 +207,9 @@ describe("weekly game: joining", () => {
     expect(decision.players[0]).toEqual({ dayOne: "2026-10-17", memberId: LEO, timeZone: "Europe/London" });
   });
 
-  it("lets the invitee decline and the challenger cancel, only before anyone joins", () => {
-    expect(codeOf(() => decideVoid(invited(), { memberId: AVA, reason: "declined" }))).toBe("OK");
-    expect(codeOf(() => decideVoid(invited(), { memberId: LEO, reason: "declined" }))).toBe("INVALID_REQUEST");
-    expect(codeOf(() => decideVoid(invited(), { memberId: LEO, reason: "cancelled" }))).toBe("OK");
-    expect(codeOf(() => decideVoid(invited(), { memberId: AVA, reason: "cancelled" }))).toBe("NOT_A_PLAYER");
-    // A live game plays out.
-    expect(codeOf(() => decideVoid(live(), { memberId: LEO, reason: "cancelled" }))).toBe("GAME_NOT_LIVE");
-    expect(codeOf(() => decideVoid(live(), { memberId: "hbm_kat", reason: "declined" }))).toBe("GAME_NOT_LIVE");
+  it("calls an invite due at its expiry", () => {
+    expect(isGameDue(invited(), new Date("2026-10-22T23:59:59Z"))).toBe(false);
+    expect(isGameDue(invited(), new Date("2026-10-23T00:00:00Z"))).toBe(true);
   });
 });
 
@@ -288,6 +279,14 @@ describe("weekly game: posting", () => {
     const thirtyAfter = new Date(boundary.getTime() + 30 * 60 * 1000);
     // Captured 1 minute before the boundary, sent 30 minutes after it.
     expect(post(state, LEO, thirtyAfter, { captureAgeMs: 31 * 60 * 1000 }).entries[0].dayIndex).toBe(1);
+    expect(decidePost(state, {
+      captureAgeMs: 31 * 60 * 1000,
+      kind: "photo",
+      mediaKeyPrefix: mediaKeyPrefixFor(LEO),
+      mediaKeys: [`${mediaKeyPrefixFor(LEO)}late.jpg`],
+      memberId: LEO,
+      now: thirtyAfter,
+    })).toMatchObject({ dayIndex: 1, graceUsed: true });
     // Thirty seconds of clock slack is allowed; more is not.
     expect(post(state, LEO, thirtyAfter, { captureAgeMs: (30 * 60 - 25) * 1000 }).entries[0].dayIndex).toBe(1);
     expect(post(state, LEO, thirtyAfter, { captureAgeMs: (30 * 60 - 35) * 1000 }).entries[0].dayIndex).toBe(2);
@@ -390,7 +389,7 @@ describe("weekly game: dev time travel and start now", () => {
 
     const advanced = decideDevAdvance(state, 2);
     expect(dayOneOf(advanced, LEO)).toBe("2026-10-15");
-    expect(advanced.nextDueAt.getTime()).toBe(state.game.nextDueAt!.getTime() - 2 * 24 * 60 * 60 * 1000);
+    expect(dayOneOf(advanced, AVA)).toBe("2026-10-16");
   });
 });
 

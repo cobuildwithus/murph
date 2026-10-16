@@ -5,7 +5,7 @@ import { hostedOnboardingError } from "../../hosted-onboarding/errors";
 // Thrown so the shared route wrapper renders the {error:{code,message,retryable}}
 // envelope with Cache-Control: no-store.
 export function gameHttpError(
-  code: GameErrorCode | "GAME_MEDIA_UNAVAILABLE" | "IDEMPOTENCY_CONFLICT",
+  code: GameErrorCode | "GAME_MEDIA_UNAVAILABLE",
   httpStatus: number,
   message: string,
   retryable = false,

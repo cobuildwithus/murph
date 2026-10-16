@@ -1,8 +1,0 @@
-import { respondToGameCommand } from "@/src/lib/game/http/command-route";
-import { withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { resolveDecodedRouteParam } from "@/src/lib/http";
-
-export const POST = withJsonError(async (request: Request, context: { params: Promise<{ id: string }> }) => {
-  const gameId = await resolveDecodedRouteParam(context.params, "id");
-  return respondToGameCommand(request, () => ({ gameId, reason: "cancelled", type: "void" }), { body: false });
-});

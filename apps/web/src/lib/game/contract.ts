@@ -23,10 +23,7 @@ export interface GameStake {
   kind: GameStakeKind;
   /** In the player's own words: "Breakfast in bed". */
   item: string;
-  /**
-   * Stable id the server assigns. Send it back on a rematch (with
-   * `previousGameId`) to keep the same stake; omit it for a new one.
-   */
+  /** Assigned by the server (ignored on create); a ticket names its stake by it. */
   key?: string;
 }
 
@@ -54,7 +51,8 @@ export interface GameTermsInput {
   lengthDays?: number;
 }
 
-export const GAME_ENTRY_KINDS = ["photo", "video", "voice", "text", "workout", "number", "excuse"] as const;
+/** A photo, or an excuse: a voice memo (audio/m4a) with its transcript as text. */
+export const GAME_ENTRY_KINDS = ["photo", "excuse"] as const;
 export type GameEntryKind = (typeof GAME_ENTRY_KINDS)[number];
 
 /** The words a challenger attaches to whoever they invite; only they ever see them. */
@@ -64,15 +62,17 @@ export interface GameInviteeLabel {
   relationship?: string | null;
 }
 
-// Request bodies. Every write also sends an `Idempotency-Key` header
-// (8-64 letters, digits, - or _), minted per user action and reused on retry.
+// Request bodies. Every write is idempotent through its own ids (gameId,
+// entryId) or state (accepting twice, redeeming twice), so retries are safe.
+//
+// POST /media takes raw bytes (Content-Type image/jpeg, image/heic or
+// audio/m4a; 8 MB max) and returns { mediaKey }. The key is derived from the
+// bytes, so uploading the same file again returns the same key.
 
 /** PUT /me/profile */
 export interface SetProfileBody {
   firstName: string;
   timeZone: string;
-  /** Your own photo (an uploaded media key); null clears it. */
-  photoKey?: string | null;
 }
 
 /** POST /games */
@@ -87,7 +87,7 @@ export interface CreateGameBody {
 
 /** POST /invites/:token/accept */
 export interface AcceptInviteBody {
-  /** The terms version the invitee saw. */
+  /** The terms version the invitee saw (`terms.n`). */
   termsVersion: number;
   timeZone: string;
 }
@@ -98,33 +98,20 @@ export interface PostEntryBody {
   kind: GameEntryKind;
   mediaKeys: string[];
   text?: string;
-  data?: Record<string, unknown>;
   /** Milliseconds since capture, from a monotonic clock on the phone. */
   captureAgeMs?: number;
 }
 
-/** PUT /people/:memberId/label. Omitted fields stay; null clears. */
-export interface SetLabelBody {
-  name?: string | null;
-  photoKey?: string | null;
-  relationship?: string | null;
-}
-
-// POST /invites/:token/decline, POST /games/:id/cancel,
 // DELETE /games/:id/entries/:entryId and POST /tickets/:id/redeem have no body.
 
 export type GameCommand =
   | ({ type: "setProfile" } & SetProfileBody)
   | ({ type: "createGame" } & CreateGameBody)
   | ({ type: "join"; token: string } & AcceptInviteBody)
-  /** Declined by the invitee (who holds the link) or cancelled by the challenger, before anyone joins. */
-  | { type: "void"; reason: "declined"; token: string }
-  | { type: "void"; reason: "cancelled"; gameId: string }
   | ({ type: "post"; gameId: string } & PostEntryBody)
   /** Take back your own post for your current day (a retake follows, if one's left). */
   | { type: "withdraw"; gameId: string; entryId: string }
-  | { type: "redeem"; ticketId: string }
-  | ({ type: "setLabel"; memberId: string } & SetLabelBody);
+  | { type: "redeem"; ticketId: string };
 
 export type GameStatus = "invited" | "live" | "settled" | "void";
 
@@ -133,6 +120,7 @@ export interface GamePlayerView {
   seat: number;
   /** The viewer's private label name if set, else the player's own first name. */
   firstName: string;
+  /** The photo the viewer attached when they invited this person; only they see it. */
   avatarUrl: string | null;
   isMe: boolean;
   /** This player's current 0-based day, or null before Day 1 / after the end. */
@@ -147,8 +135,6 @@ export interface GameEntryView {
   kind: GameEntryKind;
   mediaUrls: string[];
   text: string | null;
-  /** The structured part of a workout or number entry, as posted. */
-  data?: Record<string, unknown> | null;
 }
 
 export interface GameDayView {
@@ -179,7 +165,6 @@ export interface GameView {
   status: GameStatus;
   /** 1 for the first game between these people, then 2, 3… */
   round: number;
-  termsVersion: number;
   terms: GameTermsVersion;
   lengthDays: number;
   startedAt: string | null;
@@ -194,7 +179,7 @@ export interface GameView {
 }
 
 export interface GameHomeView {
-  me: { memberId: string; firstName: string | null; avatarUrl: string | null; timeZone: string | null };
+  me: { memberId: string; firstName: string | null; timeZone: string | null };
   games: GameView[];
   wallet: { held: GameTicketView[]; owed: GameTicketView[]; redeemed: GameTicketView[] };
 }

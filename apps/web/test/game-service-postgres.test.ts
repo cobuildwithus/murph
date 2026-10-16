@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
-import { gameMediaKey, putGameMedia } from "@/src/lib/game/media";
+import { putGameMedia } from "@/src/lib/game/media";
 import {
   devAdvanceDays,
   devSettleNow,
@@ -17,7 +17,6 @@ import {
   readHome,
   readInvitePreview,
   runGameCommand,
-  settleDueGames,
 } from "@/src/lib/game/service";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -45,12 +44,12 @@ async function member(firstName: string, timeZone: string): Promise<string> {
   return id;
 }
 
-async function run(actor: string, command: GameCommand, requestId: string | null = randomUUID()) {
-  return runGameCommand({ actorMemberId: actor, command, requestId });
+async function run(actor: string, command: GameCommand) {
+  return runGameCommand({ actorMemberId: actor, command });
 }
 
-async function ok(actor: string, command: GameCommand, requestId?: string) {
-  const result = await run(actor, command, requestId);
+async function ok(actor: string, command: GameCommand) {
+  const result = await run(actor, command);
   if (!result.ok) throw new Error(`${command.type} failed: ${result.error.code} ${result.error.message}`);
   return result.game;
 }
@@ -60,11 +59,10 @@ async function errorCode(actor: string, command: GameCommand) {
   return result.ok ? "OK" : result.error.code;
 }
 
-/** A real finished upload under the member's prefix, as the media route stores it. */
+/** A real stored upload under the member's prefix, as POST /media stores it (distinct bytes per name). */
 async function upload(memberId: string, name: string): Promise<string> {
-  const key = gameMediaKey({ contentType: "image/jpeg", idempotencyKey: name, prefix: mediaKeyPrefixFor(memberId), role: "front" });
-  await putGameMedia({ bytes: JPEG, contentType: "image/jpeg", key });
-  return key;
+  const bytes = new Uint8Array([...JPEG, ...new TextEncoder().encode(name)]);
+  return putGameMedia({ bytes, contentType: "image/jpeg", prefix: mediaKeyPrefixFor(memberId) });
 }
 
 async function photo(actor: string, gameId: string, name: string, text?: string): Promise<GameCommand> {
@@ -109,9 +107,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const ava = await member("Ava", "Australia/Sydney");
     const kat = await member("Kat", "Europe/London");
 
-    // Create; a retry with the same ids returns the same game.
+    // Create; a retry with the same game id returns the same game.
     const gameId = randomUUID();
-    const createRequest = randomUUID();
     const create: GameCommand = {
       gameId,
       inviteeFirstName: "Ava",
@@ -119,17 +116,16 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       terms: TERMS,
       type: "createGame",
     };
-    const created = await ok(leo, create, createRequest);
+    const created = await ok(leo, create);
     expect(created).toMatchObject({ round: 1, status: "invited" });
     expect(created!.players.map((player) => player.firstName)).toEqual(["Leo", "Ava"]);
     const token = created!.inviteToken!;
-    expect((await ok(leo, create, createRequest))!.inviteToken).toBe(token);
+    expect((await ok(leo, create))!.inviteToken).toBe(token);
 
     const preview = await readInvitePreview(token);
     if (preview?.status !== "open") throw new Error("expected an open invite");
     expect(preview).toMatchObject({ inviteeFirstName: "Ava", inviterFirstName: "Leo" });
     expect(preview.terms.tasks[0].text).toBe("100 pushups");
-    const stakeKey = preview.terms.stakes[0].key!;
 
     // Accept; the invite is single-use and a used invite shows only its status.
     const joined = await ok(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token, type: "join" });
@@ -140,7 +136,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       where: { ownerMemberId_subjectMemberId: { ownerMemberId: leo, subjectMemberId: ava } },
     });
     expect(label?.nameEncrypted && label.relationshipEncrypted).toBeTruthy();
-    expect(await errorCode(leo, { gameId, reason: "cancelled", type: "void" })).toBe("GAME_NOT_LIVE");
+    // Accepting again is a repeat, not an error.
+    expect(await errorCode(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token, type: "join" })).toBe("OK");
 
     await devStartNow(gameId, leo);
 
@@ -154,20 +151,19 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await authorizeMediaRead(kat, avaKey)).toBe(false);
     // Nobody can post someone else's upload, or one that was never stored.
     expect(await errorCode(leo, { entryId: randomUUID(), gameId, kind: "photo", mediaKeys: [avaKey], type: "post" })).toBe("MEDIA_MISSING");
-    const missingKey = gameMediaKey({ contentType: "image/jpeg", idempotencyKey: "never", prefix: mediaKeyPrefixFor(leo), role: "front" });
+    const missingKey = `${mediaKeyPrefixFor(leo)}${"0".repeat(64)}.jpg`;
     expect(await errorCode(leo, { entryId: randomUUID(), gameId, kind: "photo", mediaKeys: [missingKey], type: "post" }))
       .toBe("MEDIA_MISSING");
 
     const firstShot = await photo(leo, gameId, "leo-d0-a");
-    const firstShotRequest = randomUUID();
-    await ok(leo, firstShot, firstShotRequest);
+    await ok(leo, firstShot);
     leoView = await readGame(gameId, leo);
     expect(leoView!.days[0].others[0]).toMatchObject({ entry: { text: "done" }, status: "posted" });
     expect(await authorizeMediaRead(leo, avaKey)).toBe(true);
     expect(leoView!.retakeAvailable).toBe(true);
 
-    // A retried request applies once; one retake per day.
-    await ok(leo, firstShot, firstShotRequest);
+    // Sending the same entry again changes nothing; one retake per day.
+    await ok(leo, firstShot);
     await ok(leo, await photo(leo, gameId, "leo-d0-b"));
     expect(await errorCode(leo, await photo(leo, gameId, "leo-d0-c"))).toBe("RETAKE_USED");
     expect(await getPrisma().gameEntry.count({ where: { gameId, memberId: leo } })).toBe(2);
@@ -201,16 +197,23 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(homeAfter.wallet).toMatchObject({ held: [], redeemed: [expect.objectContaining({ id: ticketId })] });
     expect(homeAfter.me).toMatchObject({ firstName: "Leo", timeZone: "America/New_York" });
 
-    // Rematch with the same person: round 2, same stake key; the earlier label wins over the new typed name.
+    // The history: one row per accepted change, none for repeats or rejections.
+    const events = await getPrisma().gameEvent.findMany({ orderBy: { id: "asc" }, where: { gameId } });
+    expect(events.map((event) => event.type)).toEqual([
+      "created", "joined", "started", "started", "posted", "posted", "posted",
+      "withdrew", "posted", "time_shifted", "posted", "settled", "redeemed",
+    ]);
+    expect(JSON.stringify(events.map((event) => event.payload))).not.toMatch(/pushups|Breakfast|done|girlfriend/u);
+
+    // Rematch with the same person: round 2; the earlier label wins over the new typed name.
     const rematch = await ok(leo, {
       gameId: randomUUID(),
       inviteeFirstName: "Ava B",
       previousGameId: gameId,
-      terms: { ...TERMS, stakes: [{ ...TERMS.stakes[0], key: stakeKey }] },
+      terms: TERMS,
       type: "createGame",
     });
     expect(rematch).toMatchObject({ round: 2 });
-    expect(rematch!.terms.stakes[0].key).toBe(stakeKey);
     const rejoined = await ok(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token: rematch!.inviteToken!, type: "join" });
     expect(rejoined).toMatchObject({ round: 2, status: "live" });
     expect(rejoined!.players[0].firstName).toBe("Leo");
@@ -229,29 +232,16 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(joined!.round).toBe(1);
   });
 
-  it("lets the invitee decline and the challenger cancel, only while invited", async () => {
-    const leo = await member("Leo", "America/New_York");
-    const ava = await member("Ava", "Australia/Sydney");
-    const declinedId = randomUUID();
-    const declined = await ok(leo, { gameId: declinedId, inviteeFirstName: "Ava", terms: TERMS, type: "createGame" });
-    expect(await errorCode(leo, { reason: "declined", token: declined!.inviteToken!, type: "void" })).toBe("INVALID_REQUEST");
-    expect(await ok(ava, { reason: "declined", token: declined!.inviteToken!, type: "void" })).toBeNull();
-    expect(await readInvitePreview(declined!.inviteToken!)).toEqual({ status: "expired" });
-    expect(await errorCode(ava, { termsVersion: 1, timeZone: "UTC", token: declined!.inviteToken!, type: "join" })).toBe("INVITE_EXPIRED");
-
-    const cancelledId = randomUUID();
-    await ok(leo, { gameId: cancelledId, inviteeFirstName: "Ava", terms: TERMS, type: "createGame" });
-    expect(await errorCode(ava, { gameId: cancelledId, reason: "cancelled", type: "void" })).toBe("NOT_A_PLAYER");
-    expect(await ok(leo, { gameId: cancelledId, reason: "cancelled", type: "void" })).toMatchObject({ status: "void" });
-  });
-
   it("settles a finished game nobody opened before its players join the next one", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");
     const kat = await member("Kat", "Europe/London");
     const stale = await startGame(leo, ava);
     // Past the last day and grace, with no read and no timer since.
-    await getPrisma().game.update({ data: { nextDueAt: new Date(Date.now() - 60_000) }, where: { id: stale.gameId } });
+    await getPrisma().gamePlayer.updateMany({
+      data: { dayOne: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000) },
+      where: { gameId: stale.gameId },
+    });
     expect((await getPrisma().game.findUniqueOrThrow({ where: { id: stale.gameId } })).status).toBe("live");
 
     const next = await ok(kat, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: TERMS, type: "createGame" });
@@ -275,20 +265,20 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await getPrisma().gamePlayer.count({ where: { activeMemberId: ava } })).toBe(1);
   });
 
-  it("applies the same request sent twice at once exactly once", async () => {
+  it("lands the same post sent twice at once exactly once", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");
     const { gameId } = await startGame(leo, ava);
     await devStartNow(gameId, leo);
     const shot = await photo(leo, gameId, "twice");
-    const requestId = randomUUID();
 
-    const [first, second] = await Promise.all([run(leo, shot, requestId), run(leo, shot, requestId)]);
+    const results = await Promise.all([run(leo, shot), run(leo, shot)]);
 
-    expect(first.ok && second.ok).toBe(true);
-    expect(second.ok ? second.game?.days[0].mine?.entryId : null).toBe(shot.type === "post" ? shot.entryId : "");
-    expect(await getPrisma().gameEntry.count({ where: { gameId, memberId: leo } })).toBe(1);
-    expect(await getPrisma().gameEvent.count({ where: { actorId: leo, requestId } })).toBe(1);
+    expect(results.every((result) => result.ok)).toBe(true);
+    const entries = await getPrisma().gameEntry.findMany({ where: { gameId, memberId: leo } });
+    // One post, not a post and a retake of itself.
+    expect(entries.map((entry) => [entry.attempt, entry.withdrawnAt])).toEqual([[1, null]]);
+    expect(await getPrisma().gameEvent.count({ where: { gameId, type: "posted" } })).toBe(1);
   });
 
   it("shows open games and the three latest settled ones at home", async () => {
@@ -306,7 +296,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(home.games.map((game) => game.id).sort()).toEqual([open!.id, ...settledIds.slice(1)].sort());
   });
 
-  it("voids an unclaimed invite when the settle timer passes its expiry", async () => {
+  it("voids an unclaimed invite past its expiry on the next read", async () => {
     const kat = await member("Kat", "Europe/London");
     const gameId = randomUUID();
     await ok(kat, {
@@ -315,9 +305,11 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       terms: { schedule: { count: 3 }, stakes: [], tasks: [{ seat: 0, text: "Swim" }, { seat: 1, text: "Run" }] },
       type: "createGame",
     });
-    await settleDueGames(new Date(Date.now() + 8 * 24 * 60 * 60 * 1000));
-    const row = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } });
-    expect(row).toMatchObject({ nextDueAt: null, status: "void", voidReason: "expired" });
+    await getPrisma().game.update({ data: { inviteExpiresAt: new Date(Date.now() - 60_000) }, where: { id: gameId } });
+    expect((await readHome(kat)).games).toEqual([]);
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void" });
+    expect((await getPrisma().gameEvent.findMany({ where: { gameId } })).map((event) => [event.type, event.actor]))
+      .toEqual([["created", kat], ["expired", "system"]]);
   });
 });
 

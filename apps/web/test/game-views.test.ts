@@ -24,7 +24,6 @@ function liveState(): RuleState {
       id: "game_views_1",
       inviteExpiresAt: null,
       lengthDays: 7,
-      nextDueAt: null,
       seats: 2,
       status: "invited",
       terms: {
@@ -32,16 +31,16 @@ function liveState(): RuleState {
         versions: [{ fromDay: 0, n: 1, schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ key: "gsk_breakfast", kind: "winner_gets" }] }],
       },
     },
-    players: [{ active: false, agreedTermsVersion: 1, dayOne: null, memberId: LEO, seat: 0, timeZone: "America/New_York" }],
+    players: [{ active: false, dayOne: null, memberId: LEO, seat: 0, timeZone: "America/New_York" }],
   };
   const join = decideJoin(invited, { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: "Australia/Sydney" });
   if (join.kind !== "join") throw new Error("expected a join");
   return {
     ...invited,
-    game: { ...invited.game, nextDueAt: join.nextDueAt, status: "live" },
+    game: { ...invited.game, status: "live" },
     players: [
       ...invited.players,
-      { active: true, agreedTermsVersion: 1, dayOne: null, memberId: AVA, seat: 1, timeZone: "Australia/Sydney" },
+      { active: true, dayOne: null, memberId: AVA, seat: 1, timeZone: "Australia/Sydney" },
     ].map((player) => ({
       ...player,
       active: true,
@@ -66,7 +65,7 @@ function entry(memberId: string, dayIndex: number, attempt: number, overrides: P
 function view(state: RuleState, viewerId: string, now: Date, overrides: Partial<GameViewInput> = {}) {
   return buildGameView({
     avatarKeys: new Map(),
-    entryWords: new Map(state.entries.map((item) => [item.id, { data: null, text: `caption ${item.id}` }])),
+    entryWords: new Map(state.entries.map((item) => [item.id, { text: `caption ${item.id}` }])),
     invitee: null,
     inviteExpiresAt: null,
     inviteToken: null,
