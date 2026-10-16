@@ -141,12 +141,12 @@ import {
   groupChallengeScoreResultSchema,
 } from '@murphai/assistant-engine'
 import {
-  knowledgeGetResultSchema as knowledgeShowResultSchema,
   knowledgeIndexRebuildResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
   knowledgeLogTailResultSchema,
   knowledgeSearchResultSchema,
+  knowledgeShowResultSchema,
   knowledgeUpsertResultSchema,
 } from '@murphai/query'
 import { registerReadCommands } from './commands/read.js'
@@ -1746,7 +1746,8 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['knowledge', 'show'],
-        description: 'Show one derived knowledge page by slug.',
+        description:
+          'Show one derived knowledge page by slug. `--if-exists` returns `page: null` only when absence is confirmed by a fully valid knowledge graph; invalid, unreadable, duplicate, and reserved pages still fail.',
         output: knowledgeShowResultSchema,
       },
       {

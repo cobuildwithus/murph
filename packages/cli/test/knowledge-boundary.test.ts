@@ -3,12 +3,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
-  knowledgeGetResultSchema,
   knowledgeIndexRebuildResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
   knowledgeLogTailResultSchema,
   knowledgeSearchResultSchema,
+  knowledgeShowResultSchema,
   knowledgeUpsertResultSchema,
 } from '@murphai/query'
 
@@ -47,7 +47,7 @@ describe('cli knowledge boundary', () => {
     expect(outputsByPath.get('knowledge upsert')).toBe(knowledgeUpsertResultSchema)
     expect(outputsByPath.get('knowledge list')).toBe(knowledgeListResultSchema)
     expect(outputsByPath.get('knowledge search')).toBe(knowledgeSearchResultSchema)
-    expect(outputsByPath.get('knowledge show')).toBe(knowledgeGetResultSchema)
+    expect(outputsByPath.get('knowledge show')).toBe(knowledgeShowResultSchema)
     expect(outputsByPath.get('knowledge lint')).toBe(knowledgeLintResultSchema)
     expect(outputsByPath.get('knowledge log tail')).toBe(knowledgeLogTailResultSchema)
     expect(outputsByPath.get('knowledge index rebuild')).toBe(knowledgeIndexRebuildResultSchema)

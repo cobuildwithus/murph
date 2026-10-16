@@ -5221,6 +5221,68 @@ describeRealCodex('real Codex missing knowledge recovery e2e', () => {
   }, 300_000)
 })
 
+describeRealCodex('real Codex optional knowledge show e2e', () => {
+  // Stage-one consumer capability only: the request names the new opt-in mode;
+  // saved production callers do not use it yet.
+  it('checks an absent wiki page once with the opt-in if-exists read and writes nothing', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-optional-show-e2e-'))
+    // Fixture scaffolding stays outside the vault so the snapshot covers all vault content.
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic optional show', timezone: 'UTC', vaultRoot })
+      await upsertKnowledgePage({
+        vault: vaultRoot, slug: 'trail-snacks', title: 'Trail snacks',
+        body: '# Trail snacks\n\nA small bag of almonds and one apple.',
+      })
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const vaultBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Do I have a saved wiki page with slug trail-gear-list? Check it once with the knowledge show if-exists option, and do not create or change anything.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        .filter((command) => !isRecordedVaultHelpCommand(command))
+      const knowledgeOutputs = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command' && action.command.includes('knowledge'))
+        .map((action) => action.output)
+      process.stdout.write(`[optional-show-e2e] ${JSON.stringify({ finalMessage: result.finalMessage })}\n`)
+      // Exactly one optional read of the target; no strict retry, alias, or other wiki command.
+      expect(commands.filter((command) => /^knowledge show trail-gear-list(?:\s|$)/u.test(command))).toHaveLength(1)
+      expect(commands.filter((command) => /^knowledge /u.test(command))).toEqual([
+        expect.stringMatching(/^knowledge show trail-gear-list .*--if-exists/u),
+      ])
+      expect(knowledgeOutputs.filter((output) => /knowledge_page_not_found|VALIDATION_ERROR/u.test(output))).toEqual([])
+      // Absence authorizes nothing: every canonical and derived vault file is unchanged.
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(vaultBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(result.finalMessage).toMatch(/no|not|isn.t|doesn.t|don.t/iu)
+      expect(result.finalMessage).not.toMatch(/almonds|apple|created|saved it|added/iu)
+      expect(result.finalMessage.length).toBeLessThan(500)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
+})
+
 describeRealCodex('real Codex workout capture default e2e', () => {
   it(
     'applies a saved workout duration default on a fresh later report',

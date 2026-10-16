@@ -22,6 +22,7 @@ import {
   type DeviceSyncServices,
 } from '../src/device-services.js'
 import type {
+  KnowledgeAbsentPageResult,
   KnowledgeGetResult as KnowledgeShowResult,
   KnowledgeIndexRebuildResult,
   KnowledgeLintResult,
@@ -801,4 +802,61 @@ test('missing wiki page recovery survives the production CLI error bridge', asyn
   assert.match(missing.envelope.error.hint ?? '', /Do not retry the same missing slug/u)
   assert.match(missing.envelope.error.hint ?? '', /authorized write/u)
   assert.match(missing.envelope.error.hint ?? '', /continue without the page/u)
+})
+
+test('optional knowledge show returns an absent page only when the graph confirms absence', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-knowledge-optional-show-')
+  cleanupPaths.push(parentRoot)
+  const page = (slug: string) => [
+    '---', 'title: Synthetic ledger', `slug: ${slug}`, 'pageType: ledger', 'status: active', '---', '',
+    '# Synthetic ledger', '', '{"version":1}', '',
+  ].join('\n')
+  await writeVaultFile(vaultRoot, 'derived/knowledge/pages/present-ledger.md', page('present-ledger'))
+  await writeVaultFile(vaultRoot, 'derived/knowledge/pages/group-room-model.md', page('group-room-model'))
+  const cli = createVaultCli()
+  const show = (...argv: string[]) => runInProcessJsonCli<KnowledgeShowResult | KnowledgeAbsentPageResult>(
+    cli, ['knowledge', 'show', ...argv, '--vault', vaultRoot],
+  )
+
+  const absent = await show('synthetic-ledger', '--if-exists')
+  assert.equal(absent.exitCode, null)
+  assert.equal(absent.envelope.ok, true)
+  assert.deepEqual(absent.envelope.data, { degradation: null, page: null, slug: 'synthetic-ledger', vault: vaultRoot })
+  const built = await runCli<KnowledgeAbsentPageResult>([
+    'knowledge', 'show', 'synthetic-ledger', '--if-exists', '--vault', vaultRoot,
+  ])
+  assert.equal(built.ok, true)
+  assert.equal(built.data.page, null)
+
+  const strictPresent = await show('present-ledger')
+  const optionalPresent = await show('present-ledger', '--if-exists')
+  assert.equal(strictPresent.envelope.ok, true)
+  assert.equal(optionalPresent.envelope.ok, true)
+  assert.deepEqual(optionalPresent.envelope.data, strictPresent.envelope.data)
+
+  const reserved = await show('group-room-model', '--if-exists')
+  assert.equal(reserved.exitCode, 1)
+  assert.equal(reserved.envelope.ok, false)
+  assert.equal(reserved.envelope.error.code, 'knowledge_page_reserved')
+
+  // A malformed page under another basename may declare the requested slug.
+  await writeVaultFile(vaultRoot, 'derived/knowledge/pages/legacy-name.md', [
+    '---', 'slug: synthetic-ledger', 'invalid-frontmatter-line', '---', '# Synthetic ledger', '',
+  ].join('\n'))
+  const unconfirmed = await show('synthetic-ledger', '--if-exists')
+  assert.equal(unconfirmed.exitCode, 1)
+  assert.equal(unconfirmed.envelope.ok, false)
+  assert.equal(unconfirmed.envelope.error.code, 'knowledge_page_invalid')
+  assert.equal(unconfirmed.envelope.error.stage, 'integrity')
+  assert.match(unconfirmed.envelope.error.message ?? '', /absence is unconfirmed/u)
+  const strictMissing = await show('synthetic-ledger')
+  assert.equal(strictMissing.exitCode, 1)
+  assert.equal(strictMissing.envelope.ok, false)
+  assert.equal(strictMissing.envelope.error.code, 'knowledge_page_not_found')
+  const degradedPresent = await show('present-ledger', '--if-exists')
+  assert.equal(degradedPresent.envelope.ok, true)
+  assert.equal(degradedPresent.envelope.data.degradation?.issueCount, 1)
+
+  await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/pages/synthetic-ledger.md'), 'utf8'))
+  await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/log.md'), 'utf8'))
 })
