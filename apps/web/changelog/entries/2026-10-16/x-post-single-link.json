@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-10-16",
+  "order": 100,
+  "item": {
+    "id": "x-post-single-link",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "One link per X post",
+    "summary": "When Murph reads an X post for you, it links each post once and gets straight to what the post says.",
+    "details": "Murph still says when a post could not be found or a detail could not be confirmed, and tells you how it checked if you ask.",
+    "relevanceTags": [
+      "x",
+      "replies"
+    ],
+    "sourcePullRequests": [
+      4165
+    ]
+  }
+}
