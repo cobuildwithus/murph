@@ -42,8 +42,9 @@ export function canonicalCodexLauncher(
     `shell_environment_policy={inherit="all",ignore_default_excludes=false,exclude=[],include_only=${JSON.stringify([...new Set([...Object.keys(env), 'MURPH_ASSISTANT_SKILLS_ROOT', 'MURPH_HEALTH_COMMONS_PACKAGE_ROOT'])].sort())},set={PATH=${JSON.stringify(env.PATH ?? path.dirname(process.execPath))}}}`,
   ]
   const args = overrides.map((value) => `-c '${value.replaceAll("'", "'\\''")}'`).join(' ')
+  // The adapter appends app-server after its global config/timing arguments.
   // exec preserves native process ownership, stdio, and the existing auth home.
-  return `#!/bin/sh\nif [ "$1" = "app-server" ]; then\n  if ! "$MURPH_CANONICAL_JOURNEY_CODEX" app-server --help | /usr/bin/grep -q -- --ignore-user-config; then\n    printf '%s\\n' 'Canonical journeys require the Murph native patch; select its binary with --codex-command.' >&2\n    exit 64\n  fi\n  shift\n  set -- app-server --ignore-user-config "$@"\nfi\nexec "$MURPH_CANONICAL_JOURNEY_CODEX" ${args} "$@"\n`
+  return `#!/bin/sh\ncommand=""\nfor arg; do command="$arg"; done\nif [ "$command" = "app-server" ]; then\n  if ! "$MURPH_CANONICAL_JOURNEY_CODEX" app-server --help | /usr/bin/grep -q -- --ignore-user-config; then\n    printf '%s\\n' 'Canonical journeys require the Murph native patch; select its binary with --codex-command.' >&2\n    exit 64\n  fi\n  set -- "$@" --ignore-user-config\nfi\nexec "$MURPH_CANONICAL_JOURNEY_CODEX" ${args} "$@"\n`
 }
 
 // The shared builders emit table headings and single-line TOML assignments.
