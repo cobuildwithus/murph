@@ -25,6 +25,7 @@ function liveState(): RuleState {
       inviteExpiresAt: null,
       lengthDays: 7,
       seats: 2,
+      startsOn: null,
       status: "invited",
       terms: {
         v: 1,
@@ -156,5 +157,8 @@ describe("weekly game views: post to unlock", () => {
     expect(leoView.players.map((player) => [player.memberId, player.firstName])).toEqual([[LEO, "Leo"], [null, "Ava"]]);
     expect(leoView.inviteToken).toBe("tok_123");
     expect(leoView.days).toEqual([]);
+    expect(leoView.startsOn).toBeNull();
+    const picked: RuleState = { ...invited, game: { ...invited.game, startsOn: "2026-10-19" } };
+    expect(view(picked, LEO, JOIN_AT, { invitee: { name: "Ava", photoKey: null } }).startsOn).toBe("2026-10-19");
   });
 });

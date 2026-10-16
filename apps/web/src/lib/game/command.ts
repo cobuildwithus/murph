@@ -1,4 +1,4 @@
-import { normalizeIanaTimeZone } from "@murphai/contracts";
+import { isStrictIsoDate, normalizeIanaTimeZone } from "@murphai/contracts";
 
 import {
   GAME_ENTRY_KINDS,
@@ -95,7 +95,14 @@ function terms(input: Record<string, unknown>): GameTermsInput {
       return { seat: integer(task.seat, "terms.tasks[].seat", 0), text: words(task.text, "terms.tasks[].text") };
     }),
     ...optional(input.lengthDays, (value) => ({ lengthDays: integer(value, "terms.lengthDays", 1) })),
+    ...optional(input.startsOn, (value) => ({ startsOn: calendarDate(value, "terms.startsOn") })),
   };
+}
+
+function calendarDate(value: unknown, field: string): string {
+  const date = string(value, field, 10);
+  if (!isStrictIsoDate(date)) reject("INVALID_REQUEST", `${field} must be a date like 2026-10-19.`);
+  return date;
 }
 
 function schedule(input: Record<string, unknown>): GameSchedule {

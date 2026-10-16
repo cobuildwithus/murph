@@ -2831,6 +2831,8 @@ model Game {
   inviteExpiresAt      DateTime?    @map("invite_expires_at")
   pendingLabel         Json?        @map("pending_label")
   lengthDays           Int          @default(7) @map("length_days")
+  // The challenger's picked Day 1; Day 1 is the day after accept, or this if later.
+  startsOn             DateTime?    @map("starts_on") @db.Date
   startedAt            DateTime?    @map("started_at")
   result               Json?
   settledAt            DateTime?    @map("settled_at")

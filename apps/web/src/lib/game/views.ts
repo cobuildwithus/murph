@@ -157,6 +157,7 @@ export function buildGameView(input: GameViewInput): GameView {
     round: input.round,
     startedAt: input.startedAt?.toISOString() ?? null,
     status: game.status,
+    startsOn: game.startsOn,
     terms: termsView(state, input.words),
     tickets: input.tickets
       .filter((ticket) => ticket.owedBy === viewerId || ticket.owedTo === viewerId)

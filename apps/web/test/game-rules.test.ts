@@ -32,7 +32,7 @@ const EVERY_DAY: GameSchedule = { days: [0, 1, 2, 3, 4, 5, 6] };
 const WINNER_GETS: StoredStake = { key: "gsk_breakfast", kind: "winner_gets" };
 const PER_MISS: StoredStake = { key: "gsk_massage", kind: "per_miss" };
 
-function invited(schedule: GameSchedule = EVERY_DAY, stakes: StoredStake[] = [WINNER_GETS]): RuleState {
+function invited(schedule: GameSchedule = EVERY_DAY, stakes: StoredStake[] = [WINNER_GETS], startsOn: string | null = null): RuleState {
   return {
     entries: [],
     game: {
@@ -41,6 +41,7 @@ function invited(schedule: GameSchedule = EVERY_DAY, stakes: StoredStake[] = [WI
       inviteExpiresAt: new Date("2026-10-23T00:00:00Z"),
       lengthDays: 7,
       seats: 2,
+      startsOn,
       status: "invited",
       terms: { v: 1, versions: [{ fromDay: 0, n: 1, schedule, stakes }] },
     },
@@ -138,7 +139,7 @@ describe("weekly game: terms", () => {
         ],
         tasks: [{ seat: 1, text: "10 min abs" }, { seat: 0, text: "100 pushups" }],
       },
-      { newKey },
+      { newKey, today: "2026-10-16" },
     );
     expect(made.lengthDays).toBe(7);
     expect(made.terms.versions[0]).toEqual({
@@ -155,12 +156,23 @@ describe("weekly game: terms", () => {
 
   it("rejects bad schedules, counts and task lists", () => {
     const base = { stakes: [], tasks: [{ seat: 0, text: "Run" }, { seat: 1, text: "Swim" }] };
-    const options = { newKey: () => "gsk_x" };
+    const options = { newKey: () => "gsk_x", today: "2026-10-16" };
     expect(codeOf(() => decideNewTerms({ ...base, schedule: { days: [] } }, options))).toBe("INVALID_REQUEST");
     expect(codeOf(() => decideNewTerms({ ...base, schedule: { count: 8 } }, options))).toBe("INVALID_REQUEST");
     expect(codeOf(() => decideNewTerms({ ...base, schedule: { count: 5 }, tasks: [{ seat: 0, text: "Run" }] }, options)))
       .toBe("INVALID_REQUEST");
     expect(codeOf(() => decideNewTerms({ ...base, lengthDays: 14, schedule: { count: 10 } }, options))).toBe("OK");
+  });
+
+  it("takes a picked start date from tomorrow to 60 days out in the challenger's zone", () => {
+    const base = { schedule: EVERY_DAY, stakes: [], tasks: [{ seat: 0, text: "Run" }, { seat: 1, text: "Swim" }] };
+    const options = { newKey: () => "gsk_x", today: "2026-10-16" };
+    expect(decideNewTerms({ ...base, startsOn: "2026-10-19" }, options).startsOn).toBe("2026-10-19");
+    expect(decideNewTerms(base, options).startsOn).toBeNull();
+    expect(codeOf(() => decideNewTerms({ ...base, startsOn: "2026-10-17" }, options))).toBe("OK");
+    expect(codeOf(() => decideNewTerms({ ...base, startsOn: "2026-10-16" }, options))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => decideNewTerms({ ...base, startsOn: "2026-12-15" }, options))).toBe("OK");
+    expect(codeOf(() => decideNewTerms({ ...base, startsOn: "2026-12-16" }, options))).toBe("INVALID_REQUEST");
   });
 });
 
@@ -204,6 +216,33 @@ describe("weekly game: joining", () => {
     const declined: RuleState = { ...invited(), game: { ...invited().game, status: "void" } };
     expect(codeOf(() => decideJoin(declined, { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: SYD })))
       .toBe("INVITE_EXPIRED");
+  });
+
+  it("starts on the picked date when it's later than the day after accept, the same date for everyone", () => {
+    // New York's default Day 1 is Saturday the 17th, Sydney's Sunday the 18th; Monday the 19th wins for both.
+    const picked = decideJoin(invited(EVERY_DAY, [WINNER_GETS], "2026-10-19"), { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: SYD });
+    if (picked.kind !== "join") throw new Error("expected a join");
+    expect(picked.players.map((player) => player.dayOne)).toEqual(["2026-10-19", "2026-10-19"]);
+    // A date between the two defaults: New York waits for it, Sydney is already there.
+    const between = decideJoin(invited(EVERY_DAY, [WINNER_GETS], "2026-10-18"), { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: SYD });
+    if (between.kind !== "join") throw new Error("expected a join");
+    expect(between.players.map((player) => player.dayOne)).toEqual(["2026-10-18", "2026-10-18"]);
+    // Picked days pair by day index like any other game.
+    const state = live(invited(EVERY_DAY, [WINNER_GETS], "2026-10-19"));
+    expect(post(state, LEO, at(state, LEO, 0, 9)).entries[0].dayIndex).toBe(0);
+    expect(codeOf(() => post(state, LEO, at(state, LEO, -1, 9)))).toBe("DAY_CLOSED");
+  });
+
+  it("lets the default win when the invite is accepted after the picked date", () => {
+    // Accepted Sunday evening in New York (Monday morning in Sydney), two days after the picked Saturday.
+    const decision = decideJoin(invited(EVERY_DAY, [WINNER_GETS], "2026-10-17"), {
+      memberId: AVA,
+      now: new Date("2026-10-19T00:00:00Z"),
+      termsVersion: 1,
+      timeZone: SYD,
+    });
+    if (decision.kind !== "join") throw new Error("expected a join");
+    expect(decision.players.map((player) => player.dayOne)).toEqual(["2026-10-19", "2026-10-20"]);
   });
 
   it("freezes each player's time zone at go-live, from the state it's given", () => {
@@ -387,9 +426,9 @@ describe("weekly game: schedules and scoring", () => {
 });
 
 describe("weekly game: dev time travel and start now", () => {
-  it("moves Day 1 so today moves forward, and starts today only before anyone has", () => {
+  it("moves Day 1 so today moves forward, and starts today (over any picked date) only before anyone has", () => {
     const state = live();
-    const started = decideStartNow(state, JOIN_AT);
+    const started = decideStartNow({ ...state, game: { ...state.game, startsOn: "2026-10-25" } }, JOIN_AT);
     expect(dayOneOf(started, LEO)).toBe("2026-10-16");
     expect(dayOneOf(started, AVA)).toBe("2026-10-17");
     const begun = { ...state, players: state.players.map((player) => ({ ...player, dayOne: dayOneOf(started, player.memberId) })) };

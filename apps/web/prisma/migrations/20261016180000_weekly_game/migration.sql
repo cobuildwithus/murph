@@ -35,6 +35,7 @@ CREATE TABLE "game" (
     "invite_expires_at" TIMESTAMP(3),
     "pending_label" JSONB,
     "length_days" INTEGER NOT NULL DEFAULT 7,
+    "starts_on" DATE,
     "started_at" TIMESTAMP(3),
     "result" JSONB,
     "settled_at" TIMESTAMP(3),

@@ -33,13 +33,14 @@ describe("weekly game command validator", () => {
       terms: {
         schedule: { days: [0, 2, 4] },
         stakes: [{ item: "Breakfast in bed", key: "gsk_mine", kind: "winner_gets" }],
+        startsOn: "2026-10-19",
         tasks: [{ seat: 0, text: "100 pushups" }, { seat: 1, text: "10 min abs" }],
       },
       type: "createGame",
     });
     expect(created).toMatchObject({
       inviteeLabel: { photoKey: PHOTO_KEY, relationship: "girlfriend" },
-      terms: { schedule: { days: [0, 2, 4] } },
+      terms: { schedule: { days: [0, 2, 4] }, startsOn: "2026-10-19" },
     });
     expect(created.type === "createGame" && created.terms.stakes).toEqual([{ item: "Breakfast in bed", kind: "winner_gets" }]);
   });
@@ -53,6 +54,18 @@ describe("weekly game command validator", () => {
     expect(codeOf(() => parseGameCommand({ ...post, mediaKeys: Array(5).fill(PHOTO_KEY) }))).toBe("INVALID_REQUEST");
     expect(parseGameCommand({ ...post, data: { route: [1, 2] } })).not.toHaveProperty("data");
     expect(codeOf(() => parseGameCommand({ ...post, captureAgeMs: -1 }))).toBe("INVALID_REQUEST");
+  });
+
+  it("takes a start date only as a real calendar date", () => {
+    const create = (startsOn: unknown) => ({
+      gameId: "game_0001",
+      inviteeFirstName: "Ava",
+      terms: { schedule: { count: 3 }, stakes: [], startsOn, tasks: [{ seat: 0, text: "Run" }, { seat: 1, text: "Swim" }] },
+      type: "createGame",
+    });
+    expect(codeOf(() => parseGameCommand(create("2026-02-30")))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => parseGameCommand(create("2026-10-19T00:00:00Z")))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => parseGameCommand(create(20261019)))).toBe("INVALID_REQUEST");
   });
 
   it("rejects unknown commands, bad ids and zones", () => {

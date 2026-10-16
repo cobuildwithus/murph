@@ -81,6 +81,8 @@ export interface RuleGame {
   seats: number;
   terms: StoredTerms;
   inviteExpiresAt: Date | null;
+  /** The challenger's picked Day 1 (YYYY-MM-DD), if any. */
+  startsOn: string | null;
 }
 
 export interface RuleState {
@@ -92,6 +94,7 @@ export interface RuleState {
 export const GAME_SEATS_1V1 = 2;
 export const GAME_DEFAULT_LENGTH_DAYS = 7;
 export const GAME_MAX_LENGTH_DAYS = 28;
+export const GAME_MAX_START_DAYS_OUT = 60;
 export const GAME_POSTS_PER_DAY = 2;
 export const GAME_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_STAKES = 3;
@@ -206,13 +209,20 @@ export interface NewTerms {
   terms: StoredTerms;
   words: TermWords;
   lengthDays: number;
+  startsOn: string | null;
 }
 
 /**
  * Turns what the challenger proposed into version 1 (words arrive checked and
- * trimmed). Every stake gets a fresh key; tickets name their stake by it.
+ * trimmed). Every stake gets a fresh key; tickets name their stake by it. A
+ * picked start date must fall from tomorrow to 60 days out, where `today` is
+ * the challenger's own game day.
  */
-export function decideNewTerms(input: GameTermsInput, options: { newKey: () => string }): NewTerms {
+export function decideNewTerms(input: GameTermsInput, options: { newKey: () => string; today: string }): NewTerms {
+  const startsOn = input.startsOn ?? null;
+  if (startsOn && (startsOn <= options.today || startsOn > addDays(options.today, GAME_MAX_START_DAYS_OUT))) {
+    reject("INVALID_REQUEST", `Pick a start date from tomorrow to ${GAME_MAX_START_DAYS_OUT} days out.`);
+  }
   const lengthDays = input.lengthDays ?? GAME_DEFAULT_LENGTH_DAYS;
   if (lengthDays < 1 || lengthDays > GAME_MAX_LENGTH_DAYS) {
     reject("INVALID_REQUEST", `A game runs 1 to ${GAME_MAX_LENGTH_DAYS} days.`);
@@ -226,6 +236,7 @@ export function decideNewTerms(input: GameTermsInput, options: { newKey: () => s
   const stakes = input.stakes.map((stake) => ({ item: stake.item, key: options.newKey(), kind: stake.kind }));
   return {
     lengthDays,
+    startsOn,
     terms: {
       v: 1,
       versions: [{ fromDay: 0, n: 1, schedule, stakes: stakes.map(({ key, kind }) => ({ key, kind })) }],
@@ -296,12 +307,16 @@ export function decideJoin(
     seat: state.players.length,
     timeZone: input.timeZone,
   };
-  // Day 1 is each player's next local day after the last one shakes on it.
+  // Day 1 is each player's next local day after the last one shakes on it,
+  // or the picked date if that's later: then it's one calendar date for all.
   return {
     kind: "join",
     seat: joiner.seat,
     startedAt: input.now,
-    ...scheduleFor([...state.players, joiner], (player) => addDays(gameLocalDate(input.now, player.timeZone), 1)),
+    ...scheduleFor([...state.players, joiner], (player) => {
+      const next = addDays(gameLocalDate(input.now, player.timeZone), 1);
+      return game.startsOn && game.startsOn > next ? game.startsOn : next;
+    }),
   };
 }
 

@@ -45,6 +45,7 @@ import {
   type StoredResult,
   type TermWords,
 } from "./rules";
+import { gameLocalDate } from "./time";
 import { buildGameView, termsView, ticketView, visibleEntryIds, type GameTicketRow } from "./views";
 
 export { isGameEnabledFor, mediaKeyPrefixFor } from "./access";
@@ -230,7 +231,10 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
     return gameId;
   }
   const round = command.previousGameId ? await rematchRound(actor, command.previousGameId) : 1;
-  const newTerms = decideNewTerms(command.terms, { newKey: () => generateHostedRandomPrefixedId("gsk") });
+  const newTerms = decideNewTerms(command.terms, {
+    newKey: () => generateHostedRandomPrefixedId("gsk"),
+    today: gameLocalDate(context.now ?? new Date(), profile.timeZone),
+  });
   const token = randomBytes(24).toString("base64url");
   const where = { createdBy: actor, id: gameId };
   const [termsWordsEncrypted, inviteTokenEncrypted, nameEncrypted, relationshipEncrypted] = await Promise.all([
@@ -250,6 +254,7 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
           inviteTokenEncrypted,
           inviteTokenHash: sha256Hex(token),
           lengthDays: newTerms.lengthDays,
+          startsOn: newTerms.startsOn ? toDbDate(newTerms.startsOn) : null,
           pendingLabel: { nameEncrypted, photoKey: inviteeLabel?.photoKey ?? null, relationshipEncrypted },
           // The time zone here is a placeholder; it freezes when the game goes live.
           players: { create: { memberId: actor, seat: 0, timeZone: profile.timeZone } },
@@ -577,7 +582,7 @@ function toRuleState(row: GameRow, entries: readonly GameEntry[]): RuleState {
     game: toRuleStateGame(row, parseStoredTerms(row.terms)),
     players: row.players.map((player) => ({
       active: player.activeMemberId !== null,
-      dayOne: player.dayOne ? player.dayOne.toISOString().slice(0, 10) : null,
+      dayOne: fromDbDate(player.dayOne),
       memberId: player.memberId,
       seat: player.seat,
       timeZone: player.timeZone,
@@ -592,6 +597,7 @@ function toRuleStateGame(row: Game, terms: RuleState["game"]["terms"]): RuleStat
     inviteExpiresAt: row.inviteExpiresAt,
     lengthDays: row.lengthDays,
     seats: GAME_SEATS_1V1,
+    startsOn: fromDbDate(row.startsOn),
     status: toStatus(row.status),
     terms,
   };
@@ -610,6 +616,10 @@ function toEntryKind(value: string): GameEntryKind {
 
 function toDbDate(date: string): Date {
   return new Date(`${date}T00:00:00Z`);
+}
+
+function fromDbDate(date: Date | null): string | null {
+  return date ? date.toISOString().slice(0, 10) : null;
 }
 
 /** Settles anything past due before showing it: there is no timer, any read ends a finished game. */
@@ -690,13 +700,14 @@ export async function readInvitePreview(token: string): Promise<GameInvitePrevie
     { ...labelTarget(row.createdBy, "name"), value: label.nameEncrypted },
     { ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted },
   ]);
-  const terms = parseStoredTerms(row.terms);
+  const game = toRuleStateGame(row, parseStoredTerms(row.terms));
   return {
     expiresAt: (row.inviteExpiresAt ?? row.createdAt).toISOString(),
     inviteeFirstName: inviteeFirstName ?? "",
     inviterFirstName: inviterFirstName ?? "",
+    startsOn: game.startsOn,
     status: "open",
-    terms: termsView({ entries: [], game: toRuleStateGame(row, terms), players: [] }, parseTermWords(words ?? "")),
+    terms: termsView({ entries: [], game, players: [] }, parseTermWords(words ?? "")),
   };
 }
 

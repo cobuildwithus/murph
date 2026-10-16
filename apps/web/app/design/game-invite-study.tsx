@@ -9,6 +9,7 @@ const OPEN_PREVIEW: OpenPreview = {
   expiresAt: "2026-10-23T15:00:00.000Z",
   inviteeFirstName: "Ava",
   inviterFirstName: "Leo",
+  startsOn: null,
   status: "open",
   terms: {
     fromDay: 0,

@@ -18,6 +18,7 @@ import {
   readInvitePreview,
   runGameCommand,
 } from "@/src/lib/game/service";
+import { addDays, gameLocalDate } from "@/src/lib/game/time";
 import { getPrisma } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -218,6 +219,31 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(rejoined).toMatchObject({ round: 2, status: "live" });
     expect(rejoined!.players[0].firstName).toBe("Leo");
     expect((await readGame(rematch!.id, leo))!.players[1].firstName).toBe("Ava");
+  });
+
+  it("starts on the challenger's picked date, shown before and after accept", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "Australia/Sydney");
+    const today = gameLocalDate(new Date(), "America/New_York");
+    const startsOn = addDays(today, 3);
+    expect(await errorCode(leo, {
+      gameId: randomUUID(),
+      inviteeFirstName: "Ava",
+      terms: { ...TERMS, startsOn: today },
+      type: "createGame",
+    })).toBe("INVALID_REQUEST");
+
+    const created = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: { ...TERMS, startsOn }, type: "createGame" });
+    expect(created!.startsOn).toBe(startsOn);
+    const preview = await readInvitePreview(created!.inviteToken!);
+    expect(preview).toMatchObject({ startsOn, status: "open" });
+
+    const joined = await ok(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token: created!.inviteToken!, type: "join" });
+    expect(joined).toMatchObject({ startsOn, status: "live" });
+    expect(joined!.days[0].localDate).toBe(startsOn);
+    expect((await readGame(created!.id, leo))!.days[0].localDate).toBe(startsOn);
+    const players = await getPrisma().gamePlayer.findMany({ where: { gameId: created!.id } });
+    expect(players.map((player) => player.dayOne?.toISOString().slice(0, 10))).toEqual([startsOn, startsOn]);
   });
 
   it("starts the round count over when someone new takes a rematch", async () => {

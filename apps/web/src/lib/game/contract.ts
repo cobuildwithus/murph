@@ -49,6 +49,12 @@ export interface GameTermsInput {
   schedule: GameSchedule;
   stakes: GameStake[];
   lengthDays?: number;
+  /**
+   * The challenger's picked Day 1 (YYYY-MM-DD, a calendar date): from tomorrow
+   * to 60 days out in their zone. Day 1 is the day after the invitee accepts,
+   * or this date if it's later.
+   */
+  startsOn?: string;
 }
 
 /** A photo, or an excuse: a voice memo (audio/m4a) with its transcript as text. */
@@ -166,6 +172,8 @@ export interface GameView {
   /** 1 for the first game between these people, then 2, 3… */
   round: number;
   terms: GameTermsVersion;
+  /** The picked Day 1, if the challenger chose one. */
+  startsOn: string | null;
   lengthDays: number;
   startedAt: string | null;
   players: GamePlayerView[];
@@ -191,6 +199,8 @@ export type GameInvitePreview =
       inviterFirstName: string;
       inviteeFirstName: string;
       terms: GameTermsVersion;
+      /** The picked Day 1, if the challenger chose one. */
+      startsOn: string | null;
       expiresAt: string;
     }
   | { status: "used" | "expired" };
