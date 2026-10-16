@@ -1,6 +1,6 @@
 # Correlate runner transport closures with their request and attempt
 
-Status: active
+Status: completed
 Created: 2026-10-16
 Updated: 2026-10-16
 
@@ -63,4 +63,12 @@ isolation, accepted invocation completion despite socket closure, later explicit
 abort and slot reuse, first-event-only logging, listener cleanup, and actual
 structured serialization. No external calls or awaits are added. All fixture
 content is synthetic. Provider delivery and semantic reply recovery remain
-separate facts. Final ReviewGPT and exact-head CI are pending.
+separate facts. Final ReviewGPT passed on `14b1ee9808411c4397182d7cc2a15106ab8ccc51` with zero
+findings. Exact response hash, accepted-turn identity, GPT-6 Pro model and
+minimum response interval were verified. This closing commit changes only the
+explanatory plan; production and tests remain byte-identical. Exact final-head
+CI, merge and canonical deployment remain external completion gates tracked in
+the PR and automation memory, not claimed completed here.
+
+Review: https://chatgpt.com/c/6ad26cca-2388-83e9-b62c-495d53628240
+Completed: 2026-10-16
