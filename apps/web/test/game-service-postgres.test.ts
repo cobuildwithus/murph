@@ -337,8 +337,18 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await devSettleNow(first.gameId, leo);
     const rematch = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Kat", previousGameId: first.gameId, terms: TERMS, type: "createGame" });
     expect(rematch!.round).toBe(2);
+    // Addressed to Ava while it's an invite.
+    expect(await readGame(rematch!.id, ava)).toMatchObject({ status: "invited" });
+    expect((await readHome(ava)).games.map((game) => game.id)).toContain(rematch!.id);
     const joined = await ok(kat, { termsVersion: 1, timeZone: "Europe/London", token: rematch!.inviteToken!, type: "join" });
     expect(joined!.round).toBe(1);
+    // Once someone else takes it, Ava no longer sees Leo and Kat's game, live or settled.
+    expect(await readGame(rematch!.id, ava)).toBeNull();
+    expect((await readHome(ava)).games.map((game) => game.id)).not.toContain(rematch!.id);
+    await devSettleNow(rematch!.id, leo);
+    expect(await readGame(rematch!.id, ava)).toBeNull();
+    expect(await readGame(rematch!.id, kat)).toMatchObject({ status: "settled" });
+    expect(await readGame(rematch!.id, leo)).toMatchObject({ status: "settled" });
   });
 
   it("settles a finished game between the same two people that nobody opened before their next one", async () => {

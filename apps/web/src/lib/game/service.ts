@@ -681,9 +681,13 @@ export async function readGame(gameId: string, memberId: string): Promise<GameVi
   return view;
 }
 
-/** Players see their games; a rematch's addressed invitee also sees its invite. */
+/**
+ * Players see their games; a rematch's addressed invitee sees it only while
+ * it's still an invite (someone else may take the link).
+ */
 function canView(game: LoadedGame, memberId: string): boolean {
-  return playerFor(game.state, memberId) !== null || game.row.inviteeMemberId === memberId;
+  if (playerFor(game.state, memberId)) return true;
+  return game.row.status === "invited" && game.row.inviteeMemberId === memberId;
 }
 
 /**
@@ -737,7 +741,8 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
     }),
   ]);
   const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])]);
-  const games = sortForHome(homeGames(current.games, current.clock), memberId, current.clock);
+  const visible = current.games.filter((game) => canView(game, memberId));
+  const games = sortForHome(homeGames(visible, current.clock), memberId, current.clock);
   const views = await buildViews(games, memberId, current.clock);
   const words = await readTermWords([...new Map(tickets.map((ticket) => [ticket.gameId, ticket.game])).values()]);
   const [firstName] = await openGameTexts(profile
