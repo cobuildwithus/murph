@@ -3,7 +3,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 const STATES = {
-  expired: "This invite expired. Ask Leo for a new link.",
+  expired: "This invite expired. Ask for a new link.",
   missing: "This invite isn't available",
   open: "Open in Murph",
   "open-any-days": "Any 5 days a week",
