@@ -64,16 +64,20 @@ interface StoredJobRow {
 
 const EXPIRED_JOB_LEASE_ERROR_CODE = "LEASE_EXPIRED";
 const EXPIRED_JOB_LEASE_ERROR_MESSAGE = "Device sync job lease expired before completion.";
+const DEFAULT_DEVICE_SYNC_JOB_MAX_ATTEMPTS = 5;
 // Lease recovery and dedupe share the retained validation predicate. This does
 // not grant the credential-independent authority of accepted companion work.
-const RETAINED_JUNCTION_VALIDATION_SQL = `
+function retainedJunctionValidationSql(errorCode: string): string {
+  return `
   provider = 'junction' and kind = 'resource' and (
     (coalesce(json_extract(payload_json, '$.resource'), '') = 'blood_oxygen'
-      and coalesce(last_error_code, '') = 'JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION')
+      and coalesce(${errorCode}, '') = 'JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION')
     or (coalesce(json_extract(payload_json, '$.resource'), '') = 'electrocardiogram_voltage'
-      and coalesce(last_error_code, '') = 'JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE')
+      and coalesce(${errorCode}, '') = 'JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE')
   )
 `;
+}
+const RETAINED_JUNCTION_VALIDATION_SQL = retainedJunctionValidationSql("last_error_code");
 export const DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT = 396;
 
 function readCanonicalImportReceipts(value: string): DeviceSyncCanonicalImportReceipt[] {
@@ -842,11 +846,19 @@ export function failDeviceSyncJobIfOwned(
     const replacementPayloadJson = input.replacementPayload === undefined
       ? null
       : stringifyJson(input.replacementPayload);
+    // A matching validation retry leaves at least the default job budget from
+    // this attempt, so a later transport failure keeps bounded ordinary retries.
+    // Only another matching validation failure refreshes it; warm restart keeps
+    // the count and hosted cold handoff carries the remaining attempts.
     const retryResult = database.prepare(`
       update device_job
       set status = 'queued',
           available_at = ?,
-          max_attempts = case when ? = 1 then max(max_attempts, attempts + 1) else max_attempts end,
+          max_attempts = case
+            when ? = 1 and (${retainedJunctionValidationSql("?")})
+              then max(max_attempts, attempts + ${DEFAULT_DEVICE_SYNC_JOB_MAX_ATTEMPTS})
+            when ? = 1 then max(max_attempts, attempts + 1)
+            else max_attempts end,
           payload_json = case when ? = 1 then ? else payload_json end,
           lease_owner = null,
           lease_expires_at = null,
@@ -862,6 +874,9 @@ export function failDeviceSyncJobIfOwned(
       returning attempts, max_attempts
     `).get(
       input.retryAt ?? input.now,
+      input.retainUntilSuccess ? 1 : 0,
+      input.code,
+      input.code,
       input.retainUntilSuccess ? 1 : 0,
       replacementPayloadJson === null ? 0 : 1,
       replacementPayloadJson,
@@ -1287,7 +1302,7 @@ export function enqueueDeviceSyncJobInTransaction(
     stringifyJson(input.payload ?? {}),
     input.priority ?? 0,
     input.availableAt ?? now,
-    input.maxAttempts ?? 5,
+    input.maxAttempts ?? DEFAULT_DEVICE_SYNC_JOB_MAX_ATTEMPTS,
     input.dedupeKey ?? null,
     now,
     now,

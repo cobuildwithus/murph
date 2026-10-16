@@ -1901,7 +1901,11 @@ to apply after cutover.
   For Junction resource jobs, blood-oxygen incomplete-normalization failures
   and ECG binding failures retain the existing queued job beyond its initial
   attempt allowance, rechecking after 30 minutes. `validationRetryDelayMs`
-  records that policy. Complete-day and ECG binding validation still fail before
+  records that policy. Each such failure leaves at least the default five-attempt
+  budget from that attempt, so a later retryable transport failure keeps ordinary
+  bounded retries; consecutive non-validation failures consume it and terminalize
+  normally. Warm restart keeps that count, and hosted cold handoff carries it as
+  `maxAttempts`. Complete-day and ECG binding validation still fail before
   canonical replacement. Numeric-zero blood-oxygen samples, including finite
   numeric-string aliases, are unusable and skipped; other invalid values and
   source/day validation still reject. A complete-source-day blood-oxygen response
