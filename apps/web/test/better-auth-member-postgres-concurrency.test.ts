@@ -1244,6 +1244,42 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     }
   });
 
+  it("signs the review account in natively with its configured code and sends it no email", async () => {
+    const prisma = getPrisma();
+    const baseURL = "http://localhost:3000";
+    vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+    vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 29).toString("base64url"));
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", baseURL);
+    vi.stubEnv("VERCEL", "1");
+    const value = `review-${randomUUID()}@example.test`;
+    const other = `route-${randomUUID()}@example.test`;
+    vi.stubEnv("HOSTED_AUTH_REVIEW_EMAIL", ` ${value.toUpperCase()} `);
+    vi.stubEnv("HOSTED_AUTH_REVIEW_CODE", "246810");
+    const rateIds = [value, other].flatMap((address) => [`send:contact:email:${address}`, `verify:contact:email:${address}`, `send:cooldown:email:${address}`])
+      .map((key) => `arl_${authLookupKey("verification", "rate-limit", key)}`);
+    const ip = `2001:db8::${randomUUID().slice(0, 4)}`;
+    const request = (body: unknown) => new Request(`${baseURL}/api/device-sync/companion/auth/otp/verify`, {
+      method: "POST", body: JSON.stringify(body),
+      headers: { "content-type": "application/json", origin: baseURL, "x-vercel-forwarded-for": ip },
+    });
+    let memberId: string | undefined;
+    try {
+      expect((await sendNativeCode(request({ kind: "email", value }))).status).toBe(200);
+      expect(provider.codes.has(value)).toBe(false);
+      expect((await verifyNativeCode(request({ kind: "email", value, code: "135791" }))).status).toBe(400);
+      const response = await verifyNativeCode(request({ kind: "email", value, code: "246810", timeZone: "America/New_York" }));
+      expect(response.status).toBe(200);
+      memberId = (await response.json()).memberId;
+      expect(memberId).toEqual(expect.any(String));
+      // Every other address keeps a random, emailed code.
+      expect((await sendNativeCode(request({ kind: "email", value: other }))).status).toBe(200);
+      expect(provider.codes.get(other)).toMatch(/^\d{6}$/u);
+    } finally {
+      if (memberId) await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+      await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: rateIds } } });
+    }
+  });
+
   it.each(["email", "phone"] as const)("claims a pristine referral member with %s proof without losing attribution", async (kind) => {
     const prisma = getPrisma(); const referrerMemberId = `auth-referrer-${randomUUID()}`;
     const value = kind === "email" ? `referral-${randomUUID()}@example.test` : "+12025550147";
