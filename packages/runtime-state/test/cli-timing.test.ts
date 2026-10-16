@@ -1298,13 +1298,14 @@ test.skipIf(!researchFailureCompatibilityBase)("actual pre-research reader colla
 });
 
 
-test("query rebuild admission is exactly twenty-one fixed phases without raising invocation caps", async () => {
+test("phase admission is exactly twenty-four fixed names without raising invocation caps", async () => {
   assert.deepEqual(CLI_TIMING_PHASES, [
     "total", "setup", "dispatch", "post-dispatch", "teardown", "unattributed",
     "query-freshness", "query-manifest", "query-status", "query-rebuild", "query-wait",
     "query-source-read", "query-wearable-dataset", "query-metric-projection",
     "query-wearable-summary", "query-search-documents", "query-publication",
     "query-entity-read", "query-wearable-compose", "query-metric-read", "query-pattern-report",
+    "service-runtime-load", "query-runtime-load", "query-projection-load",
   ]);
   assert.equal(CLI_TIMING_MAX_COMMANDS, 32);
   assert.equal(CLI_TIMING_MAX_SPANS, 64);
@@ -1312,7 +1313,7 @@ test("query rebuild admission is exactly twenty-one fixed phases without raising
   for (const phase of CLI_TIMING_PHASES.slice(1)) {
     assert.equal(addCliPhaseSample(report.commands[0]!.phases, phase, 37_000_000), true);
   }
-  assert.equal(report.commands[0]!.phases.length, 21);
+  assert.equal(report.commands[0]!.phases.length, 24);
   assert.deepEqual(normalizeCliTiming(report), report);
   // Unknown labels are rejected, not pattern-admitted or serialized as paths.
   for (const phase of ["query-publication/PRIVATE_SENTINEL", "QUERY-SOURCE-READ", "query-source-read "]) {
@@ -1355,6 +1356,28 @@ test("synchronous query stage timing preserves values, immediate execution and t
       phase => [phase.phase, phase.count, phase.sumUs]), [["query-entity-read", 1, 12], ["query-metric-read", 1, 34]]);
     assert.deepEqual(normalizeCliTiming(report), report);
   });
+});
+
+// Actual pre-admission reader from history; parent supplies the reviewed base.
+const loadPhaseCompatibilityBase = process.env.MURPH_CLI_LOAD_PHASE_COMPAT_BASE;
+test.skipIf(!loadPhaseCompatibilityBase)("actual pre-load-phase reader drops the whole optional object; new reader keeps old reports", async () => {
+  assert.match(loadPhaseCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${loadPhaseCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { CLI_TIMING_PHASES: readonly string[]; normalizeCliTiming: typeof normalizeCliTiming } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  assert.deepEqual(old.CLI_TIMING_PHASES, CLI_TIMING_PHASES.slice(0, 21), "compatibility base must precede admission");
+  const legacy = sample("wearables patterns", 1_000);
+  assert.deepEqual(old.normalizeCliTiming(legacy), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy);
+  for (const phase of CLI_TIMING_PHASES.slice(21)) {
+    const report = structuredClone(legacy);
+    assert.equal(addCliPhaseSample(report.commands[0]!.phases, phase, 500), true);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    // No partially stripped (falsely complete) record: the old reader rejects it all.
+    assert.equal(old.normalizeCliTiming(report), null);
+  }
 });
 
 test("new meal edit fields remain absent on every other command", () => {
