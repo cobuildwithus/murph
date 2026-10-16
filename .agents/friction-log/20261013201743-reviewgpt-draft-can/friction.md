@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT draft can stall at disabled Send after attachment readiness'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4143'
 ---
 
 ## Expected Behavior
