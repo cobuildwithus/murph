@@ -726,6 +726,7 @@ model HostedMember {
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
   conversationPolls              HostedConversationPoll[]
+  gameProfile                    GameProfile?
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
   physicalNoteRecoveries         HostedPhysicalNoteRecovery[]
@@ -2777,4 +2778,165 @@ model HostedConversationPollVote {
   @@id([pollId, voterKey])
   @@index([pollId, hasVote, voterKey], map: "hosted_conversation_poll_vote_page_idx")
   @@map("hosted_conversation_poll_vote")
+}
+
+// Weekly game. Words are sealed per member (see apps/web/src/lib/game/crypto.ts);
+// ids, numbers and dates stay plain.
+
+model GameProfile {
+  memberId           String             @id @map("member_id")
+  firstNameEncrypted String             @map("first_name_encrypted")
+  avatarKey          String?            @map("avatar_key")
+  timeZone           String             @map("time_zone")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  member             HostedMember       @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  gamesCreated       Game[]
+  players            GamePlayer[]
+  labelsOwned        GameContactLabel[] @relation("GameContactLabelOwner")
+  labelsAbout        GameContactLabel[] @relation("GameContactLabelSubject")
+  ticketsOwed        GameTicket[]       @relation("GameTicketOwedBy")
+  ticketsHeld        GameTicket[]       @relation("GameTicketOwedTo")
+
+  @@map("game_profile")
+}
+
+// One member's private name/photo/relationship for another; only its owner sees it.
+model GameContactLabel {
+  ownerMemberId         String      @map("owner_member_id")
+  subjectMemberId       String      @map("subject_member_id")
+  nameEncrypted         String?     @map("name_encrypted")
+  relationshipEncrypted String?     @map("relationship_encrypted")
+  photoKey              String?     @map("photo_key")
+  updatedAt             DateTime    @updatedAt @map("updated_at")
+  owner                 GameProfile @relation("GameContactLabelOwner", fields: [ownerMemberId], references: [memberId], onDelete: Cascade)
+  subject               GameProfile @relation("GameContactLabelSubject", fields: [subjectMemberId], references: [memberId], onDelete: Cascade)
+
+  @@id([ownerMemberId, subjectMemberId])
+  @@index([subjectMemberId])
+  @@map("game_contact_label")
+}
+
+// The people who play together; home of rematch history and, later, their Murph chat.
+model GameCircle {
+  id            String       @id
+  hostedGroupId String?      @map("hosted_group_id")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  games         Game[]
+  tickets       GameTicket[]
+
+  @@map("game_circle")
+}
+
+model Game {
+  id                   String       @id
+  circleId             String?      @map("circle_id")
+  createdBy            String       @map("created_by")
+  previousGameId       String?      @map("previous_game_id")
+  format               String       @default("habit_days@1")
+  status               String
+  voidReason           String?      @map("void_reason")
+  terms                Json
+  termsWordsEncrypted  String       @map("terms_words_encrypted")
+  inviteTokenHash      String?      @unique @map("invite_token_hash")
+  inviteTokenEncrypted String?      @map("invite_token_encrypted")
+  inviteExpiresAt      DateTime?    @map("invite_expires_at")
+  pendingLabel         Json?        @map("pending_label")
+  lengthDays           Int          @default(7) @map("length_days")
+  startedAt            DateTime?    @map("started_at")
+  nextDueAt            DateTime?    @map("next_due_at")
+  result               Json?
+  settledAt            DateTime?    @map("settled_at")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  circle               GameCircle?  @relation(fields: [circleId], references: [id])
+  creator              GameProfile  @relation(fields: [createdBy], references: [memberId], onDelete: Cascade)
+  players              GamePlayer[]
+  tickets              GameTicket[]
+  events               GameEvent[]
+
+  @@index([nextDueAt])
+  @@index([circleId, createdAt])
+  @@index([createdBy])
+  @@map("game")
+}
+
+model GamePlayer {
+  gameId             String      @map("game_id")
+  memberId           String      @map("member_id")
+  seat               Int
+  timeZone           String      @map("time_zone")
+  dayOne             DateTime?   @map("day_one") @db.Date
+  agreedTermsVersion Int         @map("agreed_terms_version")
+  // Equals member_id while the game is live, else null: one live game per person.
+  activeMemberId     String?     @unique @map("active_member_id")
+  joinedAt           DateTime    @default(now()) @map("joined_at")
+  game               Game        @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  profile            GameProfile @relation(fields: [memberId], references: [memberId], onDelete: Cascade)
+  entries            GameEntry[]
+
+  @@id([gameId, memberId])
+  @@unique([gameId, seat])
+  @@index([memberId])
+  @@map("game_player")
+}
+
+model GameEntry {
+  id              String     @id
+  gameId          String     @map("game_id")
+  memberId        String     @map("member_id")
+  dayIndex        Int        @map("day_index")
+  // 1 or 2 for posts (2 is the retake), 0 for an excuse: caps each player-day.
+  attempt         Int
+  kind            String
+  textEncrypted   String?    @map("text_encrypted")
+  dataEncrypted   String?    @map("data_encrypted")
+  mediaKeys       String[]   @default([]) @map("media_keys")
+  captureAgeMs    Int?       @map("capture_age_ms")
+  receivedAt      DateTime   @map("received_at")
+  withdrawnAt     DateTime?  @map("withdrawn_at")
+  withdrawnReason String?    @map("withdrawn_reason")
+  player          GamePlayer @relation(fields: [gameId, memberId], references: [gameId, memberId], onDelete: Cascade)
+
+  @@unique([gameId, memberId, dayIndex, attempt])
+  @@index([memberId])
+  @@map("game_entry")
+}
+
+// One IOU. Its words come from the game's stake with the same key.
+model GameTicket {
+  id         String      @id
+  circleId   String      @map("circle_id")
+  gameId     String?     @map("game_id")
+  stakeKey   String      @map("stake_key")
+  owedBy     String      @map("owed_by")
+  owedTo     String      @map("owed_to")
+  status     String      @default("open")
+  redeemedAt DateTime?   @map("redeemed_at")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  circle     GameCircle  @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  game       Game?       @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  debtor     GameProfile @relation("GameTicketOwedBy", fields: [owedBy], references: [memberId], onDelete: Cascade)
+  holder     GameProfile @relation("GameTicketOwedTo", fields: [owedTo], references: [memberId], onDelete: Cascade)
+
+  @@index([owedTo, status])
+  @@index([owedBy, status])
+  @@index([gameId])
+  @@map("game_ticket")
+}
+
+// Append-only audit log and recap material. Payloads hold ids and numbers only.
+model GameEvent {
+  id        BigInt   @id @default(autoincrement())
+  gameId    String   @map("game_id")
+  type      String
+  actorId   String   @map("actor_id")
+  requestId String?  @map("request_id")
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at")
+  game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([actorId, requestId])
+  @@index([gameId, id])
+  @@map("game_event")
 }
