@@ -6,7 +6,7 @@ import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
- * Game photos and voice memos, content-addressed: a key is
+ * Game photos, content-addressed: a key is
  * `<mediaKeyPrefixFor(member)><sha256 of the bytes>.<ext>`, so uploading the
  * same file twice lands on the same key and a key can never change contents.
  * The extension carries the type.
@@ -20,15 +20,14 @@ import path from "node:path";
 export const GAME_MEDIA_MAX_BYTES = 8 * 1024 * 1024;
 
 const EXTENSIONS = {
-  "audio/m4a": "m4a",
   "image/heic": "heic",
   "image/jpeg": "jpg",
 } as const;
 
 export type GameMediaContentType = keyof typeof EXTENSIONS;
 
-const CONTENT_TYPES: readonly GameMediaContentType[] = ["audio/m4a", "image/heic", "image/jpeg"];
-const KEY_PATTERN = /^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\/[a-f0-9]{64}\.(?:m4a|heic|jpg)$/u;
+const CONTENT_TYPES: readonly GameMediaContentType[] = ["image/heic", "image/jpeg"];
+const KEY_PATTERN = /^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\/[a-f0-9]{64}\.(?:heic|jpg)$/u;
 const KEY_MAX = 256;
 
 export function parseGameMediaContentType(header: string | null): GameMediaContentType | null {
@@ -40,18 +39,15 @@ export function isGameMediaKey(key: string): boolean {
   return key.length <= KEY_MAX && KEY_PATTERN.test(key);
 }
 
-/** ISO base media major brands ("ftyp" box) each container type may carry. */
-const FTYP_BRANDS: Record<Exclude<GameMediaContentType, "image/jpeg">, readonly string[]> = {
-  "audio/m4a": ["M4A ", "mp42", "isom"],
-  "image/heic": ["heic", "heix", "mif1", "msf1"],
-};
+/** HEIC major brands in the ISO base media "ftyp" box. */
+const HEIC_BRANDS = ["heic", "heix", "mif1", "msf1"];
 
 /** Cheap container check so a mislabeled upload is never served back under another type. */
 export function matchesGameMediaContentType(bytes: Uint8Array, contentType: GameMediaContentType): boolean {
   if (contentType === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  // HEIC and M4A are both ISO base media files: a size, "ftyp", then the major brand.
+  // HEIC: a size, "ftyp", then an image major brand (so an M4A or MP4 can't pass).
   const box = Buffer.from(bytes.subarray(4, 12)).toString("latin1");
-  return box.startsWith("ftyp") && FTYP_BRANDS[contentType].includes(box.slice(4));
+  return box.startsWith("ftyp") && HEIC_BRANDS.includes(box.slice(4));
 }
 
 export function isGameMediaStorageAvailable(): boolean {

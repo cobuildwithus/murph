@@ -337,7 +337,8 @@ describe("weekly game routes", () => {
 
     it.each([
       ["an unsupported type", { "content-type": "image/png" }],
-      ["bytes that aren't the declared type", { "content-type": "audio/m4a" }],
+      ["bytes that aren't the declared type", { "content-type": "image/heic" }],
+      ["audio", { "content-type": "audio/m4a" }],
       ["video", { "content-type": "video/mp4" }],
     ])("rejects %s", async (_label, headers) => {
       const response = await routes.upload.POST(uploadRequest({ headers }));
@@ -345,7 +346,7 @@ describe("weekly game routes", () => {
       expect(response.status).toBe(400);
     });
 
-    it("tells HEIC from M4A by the container's brand", async () => {
+    it("takes HEIC only with an image brand, so an M4A can't pass as a photo", async () => {
       const iso = (brand: string) => Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from(`ftyp${brand}`, "latin1"), Buffer.alloc(12)]);
 
       const heic = await routes.upload.POST(uploadRequest({ body: iso("heic"), headers: { "content-type": "image/heic" } }));

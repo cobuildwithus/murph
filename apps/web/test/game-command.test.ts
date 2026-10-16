@@ -73,8 +73,24 @@ describe("weekly game command validator", () => {
     });
     expect(codeOf(() => parseGameCommand(post("photo", ".jpg")))).toBe("OK");
     expect(codeOf(() => parseGameCommand(post("photo", ".heic")))).toBe("OK");
-    expect(codeOf(() => parseGameCommand(post("photo", ".m4a")))).toBe("INVALID_REQUEST");
-    expect(codeOf(() => parseGameCommand(post("excuse", ".jpg")))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => parseGameCommand(post("photo", ".m4a")))).toBe("MEDIA_MISSING");
+    expect(codeOf(() => parseGameCommand({ ...post("excuse", ".jpg"), text: "Sick today" }))).toBe("INVALID_REQUEST");
+  });
+
+  it("takes an excuse as its transcript only", () => {
+    const excuse = { entryId: "entry_0001", gameId: "game_0001", kind: "excuse", type: "post" };
+    expect(parseGameCommand({ ...excuse, text: "  Flight was delayed  " })).toEqual({
+      entryId: "entry_0001",
+      gameId: "game_0001",
+      kind: "excuse",
+      mediaKeys: [],
+      text: "Flight was delayed",
+      type: "post",
+    });
+    expect(codeOf(() => parseGameCommand(excuse))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => parseGameCommand({ ...excuse, text: "\u200B " }))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => parseGameCommand({ ...excuse, text: "x".repeat(501) }))).toBe("INVALID_REQUEST");
+    expect(codeOf(() => parseGameCommand({ ...excuse, text: "x".repeat(500) }))).toBe("OK");
   });
 
   it("takes a start date only as a real calendar date", () => {

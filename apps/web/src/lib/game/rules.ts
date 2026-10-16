@@ -349,16 +349,13 @@ export function decidePost(
   },
 ): PostDecision {
   const player = requireLivePlayer(state, input.memberId);
-  if (input.mediaKeys.length === 0) reject("MEDIA_MISSING", "Add the photo or voice memo first.");
+  if (input.kind === "excuse") return { attempt: 0, dayIndex: excuseDay(state, player, input.now), graceUsed: false, withdrawEntryId: null };
+  if (input.mediaKeys.length === 0) reject("MEDIA_MISSING", "Add the photo first.");
   if (input.mediaKeys.some((key) => !key.startsWith(input.mediaKeyPrefix))) {
     reject("MEDIA_MISSING", "Upload the media before posting it.");
   }
-  const dayIndex = postingDay(state, player, input.kind, input.captureAgeMs, input.now);
+  const dayIndex = postingDay(state, player, input.captureAgeMs, input.now);
   const graceUsed = dayIndex !== dayIndexAt(player, input.now);
-  if (input.kind === "excuse") {
-    if (hasExcuse(state.entries, player.memberId, dayIndex)) reject("RETAKE_USED", "You already sent an excuse for today.");
-    return { attempt: 0, dayIndex, graceUsed, withdrawEntryId: null };
-  }
   const used = attemptsUsed(state.entries, player.memberId, dayIndex);
   if (used >= GAME_POSTS_PER_DAY) reject("RETAKE_USED", "You already used today's retake.");
   return {
@@ -374,18 +371,25 @@ function hasExcuse(entries: readonly RuleEntry[], memberId: string, dayIndex: nu
 }
 
 /**
- * Which day a post counts for. Normally today. In the hour after a player's
+ * An excuse explains a day already missed: the most recent past scheduled
+ * day with no live photo and no excuse yet. Never today, never before Day 1.
+ */
+function excuseDay(state: RuleState, player: RulePlayer, now: Date): number {
+  const today = dayIndexAt(player, now)!;
+  for (let day = Math.min(today, state.game.lengthDays) - 1; day >= 0; day -= 1) {
+    const missed = isScheduledDay(state, day) && !liveEntry(state.entries, player.memberId, day);
+    if (missed && !hasExcuse(state.entries, player.memberId, day)) return day;
+  }
+  return reject("DAY_CLOSED", "There's no missed day to excuse.");
+}
+
+/**
+ * Which day a photo counts for. Normally today. In the hour after a player's
  * 3am boundary, a post captured before that boundary (by the phone's
  * monotonic capture age, an honor rule) counts for the day that just ended,
  * if that day was scheduled and still has no post.
  */
-function postingDay(
-  state: RuleState,
-  player: RulePlayer,
-  kind: GameEntryKind,
-  captureAgeMs: number | null,
-  now: Date,
-): number {
+function postingDay(state: RuleState, player: RulePlayer, captureAgeMs: number | null, now: Date): number {
   const today = dayIndexAt(player, now)!;
   const { lengthDays } = state.game;
   const yesterday = today - 1;
@@ -394,9 +398,7 @@ function postingDay(
     const capturedAt = now.getTime() - captureAgeMs;
     const open = isScheduledDay(state, yesterday)
       && !liveEntry(state.entries, player.memberId, yesterday)
-      && (kind === "excuse"
-        ? !hasExcuse(state.entries, player.memberId, yesterday)
-        : attemptsUsed(state.entries, player.memberId, yesterday) < GAME_POSTS_PER_DAY);
+      && attemptsUsed(state.entries, player.memberId, yesterday) < GAME_POSTS_PER_DAY;
     if (open && now.getTime() - boundary < GAME_GRACE_MS && capturedAt <= boundary + GAME_CAPTURE_SLACK_MS) {
       return yesterday;
     }

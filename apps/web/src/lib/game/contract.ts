@@ -57,7 +57,10 @@ export interface GameTermsInput {
   startsOn?: string;
 }
 
-/** A photo, or an excuse: a voice memo (audio/m4a) with its transcript as text. */
+/**
+ * A photo, or an excuse for a missed day: only its words (the transcript the
+ * phone made on-device). No audio is uploaded or stored.
+ */
 export const GAME_ENTRY_KINDS = ["photo", "excuse"] as const;
 export type GameEntryKind = (typeof GAME_ENTRY_KINDS)[number];
 
@@ -71,8 +74,8 @@ export interface GameInviteeLabel {
 // Request bodies. Every write is idempotent through its own ids (gameId,
 // entryId) or state (accepting twice, redeeming twice), so retries are safe.
 //
-// POST /media takes raw bytes (Content-Type image/jpeg, image/heic or
-// audio/m4a; 8 MB max) and returns { mediaKey }. The key is derived from the
+// POST /media takes a photo's raw bytes (Content-Type image/jpeg or
+// image/heic; 8 MB max) and returns { mediaKey }. The key is derived from the
 // bytes, so uploading the same file again returns the same key.
 
 /** PUT /me/profile */
@@ -98,7 +101,11 @@ export interface AcceptInviteBody {
   timeZone: string;
 }
 
-/** POST /games/:id/entries */
+/**
+ * POST /games/:id/entries. A photo needs 1-4 `mediaKeys` (.jpg/.heic); an
+ * excuse needs `text` (1-500 characters) and no media, and applies to your most
+ * recent missed scheduled day, never today.
+ */
 export interface PostEntryBody {
   entryId: string;
   kind: GameEntryKind;

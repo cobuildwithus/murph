@@ -295,12 +295,20 @@ describe("weekly game: posting", () => {
     expect(state.entries[0].withdrawnAt).not.toBeNull();
   });
 
-  it("lets an excuse sit beside a post without using it up", () => {
-    let state = live();
-    state = post(state, LEO, at(state, LEO, 0, 8), { kind: "excuse" });
-    state = post(state, LEO, at(state, LEO, 0, 9));
-    expect(state.entries.map((entry) => entry.attempt)).toEqual([0, 1]);
-    expect(codeOf(() => post(state, LEO, at(state, LEO, 0, 10), { kind: "excuse" }))).toBe("RETAKE_USED");
+  it("puts an excuse on the most recent missed scheduled day, never today", () => {
+    // Mon/Wed/Fri on Leo's calendar from Saturday the 17th: indices 2, 4 and 6 count.
+    let state = live(invited({ days: [0, 2, 4] }));
+    expect(codeOf(() => post(state, LEO, at(state, LEO, 2, 9), { kind: "excuse" }))).toBe("DAY_CLOSED");
+    state = post(state, LEO, at(state, LEO, 4, 9));
+    // On Friday: Wednesday has a photo, so the excuse lands on Monday (index 2), skipping days off.
+    state = post(state, LEO, at(state, LEO, 6, 9), { kind: "excuse" });
+    expect(state.entries.at(-1)).toMatchObject({ attempt: 0, dayIndex: 2, kind: "excuse" });
+    // It neither scores nor unlocks, and doesn't use up the day's photos.
+    expect(scorePlayer(state, playerFor(state, LEO)!)).toMatchObject({ misses: 2, score: 1 });
+    state = post(state, LEO, at(state, LEO, 6, 10));
+    expect(state.entries.at(-1)).toMatchObject({ attempt: 1, dayIndex: 6 });
+    // Nothing missed and unexcused remains.
+    expect(codeOf(() => post(state, LEO, at(state, LEO, 6, 11), { kind: "excuse" }))).toBe("DAY_CLOSED");
   });
 
   it("needs media for photo kinds and only your own uploads", () => {

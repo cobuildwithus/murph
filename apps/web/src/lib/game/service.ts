@@ -739,9 +739,9 @@ export async function readInvitePreview(token: string): Promise<GameInvitePrevie
 }
 
 /**
- * Who may see a stored file: its uploader (entries, excuses, invite label
- * photos), and otherwise exactly the players whose game view shows the entry
- * it belongs to (post-to-unlock, everything after settle, never an excuse).
+ * Who may see a stored photo: its uploader (entry and invite label photos),
+ * and otherwise exactly the players whose game view shows the entry it
+ * belongs to (post-to-unlock, everything after settle).
  */
 export async function authorizeMediaRead(memberId: string, mediaKey: string): Promise<boolean> {
   const ownerId = mediaKeyOwner(mediaKey);

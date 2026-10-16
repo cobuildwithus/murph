@@ -12,13 +12,13 @@ import { readRawBodyBuffer } from "../../http";
 import { gameHttpError, invalidGameRequest } from "./errors";
 
 /**
- * Stores an upload under the member's prefix, keyed by its bytes: a retry
- * returns the same key. Photos for entries and for invite labels share it.
+ * Stores a photo under the member's prefix, keyed by its bytes: a retry
+ * returns the same key. Entry photos and invite label photos share it.
  */
 export async function uploadGameMedia(input: { memberId: string; request: Request }): Promise<string> {
   const { request } = input;
   const contentType = parseGameMediaContentType(request.headers.get("content-type"));
-  if (!contentType) throw invalidGameRequest("Content-Type must be image/jpeg, image/heic or audio/m4a.");
+  if (!contentType) throw invalidGameRequest("Content-Type must be image/jpeg or image/heic.");
   requireStorage();
   const bytes = await readRawBodyBuffer(request, { limitBytes: GAME_MEDIA_MAX_BYTES });
   if (bytes.byteLength === 0 || !matchesGameMediaContentType(bytes, contentType)) {

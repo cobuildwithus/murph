@@ -5,7 +5,6 @@ import {
   GAME_STAKE_KINDS,
   GAME_WEEKDAYS,
   type GameCommand,
-  type GameEntryKind,
   type GameInviteeLabel,
   type GameSchedule,
   type GameStake,
@@ -62,15 +61,23 @@ const LIST_MAX = 8;
 const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/u;
 const INVISIBLE = /[\p{Cc}\p{Cf}]/gu;
 const ZWJ = "\u200D";
-/** Which uploads each entry kind takes, by key extension. */
-const MEDIA_EXTENSIONS: Record<GameEntryKind, readonly string[]> = { excuse: [".m4a"], photo: [".jpg", ".heic"] };
+const PHOTO_EXTENSIONS = [".jpg", ".heic"];
+const TRANSCRIPT_MAX = 500;
 
+/**
+ * A photo post carries 1-4 photo uploads (and optional words). An excuse is
+ * only words: the transcript the phone made on-device, 1-500 characters; no
+ * audio is ever uploaded.
+ */
 function post(input: Record<string, unknown>): GameCommand {
-  const text = input.text === undefined ? "" : string(input.text, "text", POST_TEXT_MAX).trim();
   const kind = oneOf(input.kind, "kind", GAME_ENTRY_KINDS);
   const mediaKeys = list(input.mediaKeys ?? [], "mediaKeys", MEDIA_KEYS_MAX).map(mediaKey);
-  if (mediaKeys.some((key) => !MEDIA_EXTENSIONS[kind].some((extension) => key.endsWith(extension)))) {
-    reject("INVALID_REQUEST", kind === "photo" ? "A photo post takes photos." : "An excuse takes a voice memo.");
+  const text = kind === "excuse"
+    ? transcript(input.text)
+    : input.text === undefined ? "" : string(input.text, "text", POST_TEXT_MAX).trim();
+  if (kind === "excuse" && mediaKeys.length > 0) reject("INVALID_REQUEST", "An excuse is words only.");
+  if (mediaKeys.some((key) => !PHOTO_EXTENSIONS.some((extension) => key.endsWith(extension)))) {
+    reject("INVALID_REQUEST", "A photo post takes photos.");
   }
   return {
     entryId: clientId(input.entryId, "entryId"),
@@ -162,6 +169,14 @@ function words(value: unknown, field: string): string {
     reject("INVALID_REQUEST", `${field} must be 1 to ${WORDS_MAX} characters.`);
   }
   return cleaned;
+}
+
+function transcript(value: unknown): string {
+  const text = string(value ?? "", "text", TRANSCRIPT_MAX * 2).replace(INVISIBLE, (char) => (char === ZWJ ? char : "")).trim();
+  if (!text.replaceAll(ZWJ, "").trim() || text.length > TRANSCRIPT_MAX) {
+    reject("INVALID_REQUEST", `An excuse needs its words: 1 to ${TRANSCRIPT_MAX} characters.`);
+  }
+  return text;
 }
 
 /** Ids the client mints (UUIDs): retries reuse them. */
