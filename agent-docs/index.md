@@ -63,6 +63,11 @@ Typing egress and mailbox runtime timing correlation is owned by
 implementation evidence is tracked in
 [the timing diagnostics plan](exec-plans/completed/2026-10-11-typing-phase-diagnostics.md).
 
+Internal fetch failure correlation is owned by
+[`Cloudflare private telemetry`](../apps/cloudflare/README.md#private-operational-telemetry);
+implementation and focused proof are tracked in
+[the failure correlation plan](exec-plans/active/2026-10-16-internal-fetch-failure-correlation.md).
+
 Private latest-meal recall uses the descending canonical timeline; the ordering
 contract and synthetic capture-identity proof are tracked in
 [the recall ordering plan](exec-plans/completed/2026-10-11-recent-meal-recall-order.md).

@@ -77,6 +77,7 @@ export function createCloudflareHostedInternalFetch(
       && url.pathname === HOSTED_RUNTIME_LATENCY_TRACE_PATH
       && headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
       && headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
+    let workspaceAttemptId: string | undefined;
     if (!hasSuppliedWorkspaceSnapshotWriteFence && !hasSuppliedLatencyTraceWriteFence) {
       const lease = await options.readCurrentLease?.() ?? null;
       if (!lease) {
@@ -85,6 +86,7 @@ export function createCloudflareHostedInternalFetch(
         );
       }
       writeRunnerRuntimeWriteFenceHeaders(headers, lease);
+      workspaceAttemptId = lease.attemptId;
     }
 
     return await fetchCloudflareHostedInternalRequest({
@@ -94,6 +96,7 @@ export function createCloudflareHostedInternalFetch(
       injectBoundUserIdHeader: options.injectBoundUserIdHeader ?? false,
       request,
       url,
+      workspaceAttemptId,
     });
   }) as typeof fetch;
 }
@@ -132,6 +135,7 @@ async function fetchCloudflareHostedInternalRequest(input: {
   injectBoundUserIdHeader: boolean;
   request: Request;
   url: URL;
+  workspaceAttemptId?: string;
 }): Promise<Response> {
   if (input.injectBoundUserIdHeader) {
     input.headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, input.boundUserId);
@@ -189,6 +193,7 @@ async function fetchCloudflareHostedInternalRequest(input: {
         details: {
           ...details,
           responseStatus: response.status,
+          workspaceAttemptId: input.workspaceAttemptId ?? null,
         },
         error,
         level: "warn",
@@ -214,7 +219,10 @@ async function fetchCloudflareHostedInternalRequest(input: {
     if (!isHostedRuntimeInternalAuthorityRejectedError(error)) {
       emitHostedExecutionStructuredLog({
         component: "assistant-delivery",
-        details,
+        details: {
+          ...details,
+          workspaceAttemptId: input.workspaceAttemptId ?? null,
+        },
         error,
         level: "warn",
         message: "Hosted runtime internal request failed.",

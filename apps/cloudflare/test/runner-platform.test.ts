@@ -128,6 +128,7 @@ import * as hostedExecutionParsers from "@murphai/hosted-execution/parsers";
 import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
+  createCloudflareHostedTrustedInternalFetch,
   createHostedBrowserVaultReplicaWriteHeaders,
   HostedRuntimeInternalAuthorityRejectedError,
   isHostedRuntimeInternalAuthorityRejectedError,
@@ -8075,6 +8076,134 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
     expect(readCurrentLease).toHaveBeenCalledTimes(1);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  describe("internal fetch attempt correlation", () => {
+    describe.each([
+      ["current lease", "http://web-control.worker/api/internal/hosted-runtime/log"],
+      ["supplied snapshot", "http://workspace-snapshots.worker/workspace-snapshots/start"],
+      ["supplied latency", "http://web-control.worker/api/internal/hosted-runtime/latency"],
+      ["trusted", "http://web-control.worker/api/internal/hosted-runtime/log"],
+    ] as const)("%s", (source, url) => {
+      it.each(["transport failure", "authority rejection", "success"] as const)(
+        "preserves %s with only the request-start lease correlation",
+        async (outcome) => {
+          const lease = {
+            attemptId: "attempt_started",
+            leaseGeneration: "7",
+            userId: "member_123",
+            workspaceVersion: "6",
+          };
+          let currentLease = lease;
+          const readCurrentLease = vi.fn(() => currentLease);
+          const started = createDeferred<void>();
+          const transport = createDeferred<Response>();
+          const fetchMock = vi.fn((..._args: Parameters<typeof fetch>) => {
+            started.resolve();
+            return transport.promise;
+          });
+          const hostedFetch = source === "trusted"
+            ? createCloudflareHostedTrustedInternalFetch("member_123", fetchMock as typeof fetch, {
+              injectBoundUserIdHeader: true,
+            })
+            : createCloudflareHostedProviderFetch("member_123", fetchMock as typeof fetch, {
+              injectBoundUserIdHeader: true,
+              readCurrentLease,
+            });
+          const privateHeader = "synthetic-private-header-sentinel";
+          const request = new Request(url, {
+            body: "synthetic-private-body",
+            headers: {
+              [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: privateHeader,
+              [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "1",
+              ...(source === "supplied latency" ? {} : {
+                [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "2",
+              }),
+              "x-synthetic-private": privateHeader,
+            },
+            method: "POST",
+          });
+          const pending = hostedFetch(request).then(
+            (value) => ({ status: "fulfilled" as const, value }),
+            (reason: unknown) => ({ status: "rejected" as const, reason }),
+          );
+          await started.promise;
+          lease.attemptId = "attempt_mutated";
+          currentLease = { ...lease, attemptId: "attempt_later" };
+
+          const readsLease = source === "current lease";
+          const forwarded = requireFetchRequest(fetchMock.mock.calls[0], "internal fetch");
+          expect(forwarded.url).toBe(request.url);
+          expect(forwarded.method).toBe("POST");
+          expect(Object.fromEntries(forwarded.headers)).toEqual({
+            ...Object.fromEntries(request.headers),
+            [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+            ...(readsLease ? {
+              [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_started",
+              [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "7",
+              [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "6",
+            } : {}),
+          });
+          await expect(forwarded.text()).resolves.toBe("synthetic-private-body");
+
+          const failure = new TypeError("fetch failed");
+          const response = new Response(null, {
+            status: outcome === "authority rejection" ? 401 : 204,
+          });
+          if (outcome === "transport failure") transport.reject(failure);
+          else transport.resolve(response);
+          const result = await pending;
+          expect(result.status).toBe(outcome === "success" ? "fulfilled" : "rejected");
+          if (result.status === "fulfilled") {
+            expect(result.value).toBe(response);
+          } else if (outcome === "authority rejection") {
+            expect(result.reason).toBeInstanceOf(HostedRuntimeInternalAuthorityRejectedError);
+            expect(result.reason).toMatchObject({ status: 401 });
+          } else {
+            expect(result.reason).toBe(failure);
+          }
+          expect(readCurrentLease).toHaveBeenCalledTimes(readsLease ? 1 : 0);
+          expect(fetchMock).toHaveBeenCalledTimes(1);
+
+          const logs = mocks.emitHostedExecutionStructuredLog.mock.calls.map(([input]) => input);
+          expect(logs.map((log) => log.message)).toEqual([
+            "Hosted runtime internal request started.",
+            ...(outcome === "transport failure" ? ["Hosted runtime internal request failed."] : [
+              "Hosted runtime internal request completed.",
+              ...(outcome === "authority rejection" ? [
+                "Hosted runtime internal authority rejected invocation.",
+              ] : []),
+            ]),
+          ]);
+          if (result.status === "rejected") expect(logs.at(-1)?.error).toBe(result.reason);
+          const records = logs.map((log) => buildHostedExecutionStructuredLogRecord(log));
+          for (const record of records) {
+            if (readsLease && record.level === "warn") {
+              expect(record.details?.workspaceAttemptId).toBe("attempt_started");
+            } else {
+              expect(record.details).not.toHaveProperty("workspaceAttemptId");
+            }
+          }
+          const serialized = JSON.stringify({ logs, records });
+          expect(serialized).not.toContain(privateHeader);
+          expect(serialized).not.toContain("synthetic-private-body");
+        },
+      );
+    });
+
+    it.each(["missing authority", "empty lease"])("preserves %s rejection before fetch or logging", async (source) => {
+      const readCurrentLease = vi.fn(() => null);
+      const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+      const hostedFetch = createCloudflareHostedProviderFetch("member_123", fetchMock as typeof fetch, {
+        ...(source === "empty lease" ? { readCurrentLease } : {}),
+      });
+      await expect(hostedFetch("http://web-control.worker/api/internal/hosted-runtime/log", {
+        headers: { [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "synthetic-private-header-sentinel" },
+      })).rejects.toThrow(`missing a runtime write-fence ${source === "empty lease" ? "lease" : "authority"}`);
+      expect(readCurrentLease).toHaveBeenCalledTimes(source === "empty lease" ? 1 : 0);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
+    });
   });
 
   it("overwrites caller-supplied web-control write-fence headers outside latency telemetry", async () => {
