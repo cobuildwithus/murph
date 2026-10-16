@@ -14,8 +14,21 @@ function matchesProxy(request: NextRequest): boolean {
   return unstable_doesMiddlewareMatch({ config, nextConfig: {}, url: request.url });
 }
 
-describe("referral path proxy", () => {
+describe("encoded public path proxy", () => {
   it.each([
+    "/%5C",
+    "/%5c",
+    "/%5Cchild",
+    "/%5c/child",
+    "/%5C%2Fchild",
+    "/%5c%5C",
+    "/%5C?next=%2Frefer&value=%5C",
+    "/%5c?next=%2F&literal=%255C&bad=%E0%A4%A",
+    "/%5C.rsc",
+    "/%5c.rsc?_rsc=synthetic",
+    "/_next/data/synthetic/%5C.json",
+    "/_next/data/synthetic/%5c.json?next=%2F&value=%5C",
+    "/_next/data/synthetic/%5c/child.json",
     "/refer%2F",
     "/refer%2f",
     "/refer%5C",
@@ -40,6 +53,19 @@ describe("referral path proxy", () => {
   });
 
   it.each([
+    "/%2F",
+    "/%2f",
+    "/%2Fchild",
+    "/%2f%5C",
+    "/%255C",
+    "/%255c",
+    "/%255Cchild",
+    "/%255c.rsc",
+    "/_next/data/synthetic/%255C.json",
+    "/_next/data/synthetic/%2f.json",
+    "/%5F",
+    "/unknown/%5C",
+    "/about?next=%2F%5C&literal=%255c",
     "/refer",
     "/refer/",
     "/refer?next=%2Frefer&value=%5C&literal=%252F&bad=%E0%A4%A",
@@ -63,6 +89,8 @@ describe("referral path proxy", () => {
     "/unknown?next=%2F&value=%5C",
     "/api/internal/hosted-runtime/linq-egress/delivery?signature=synthetic%2F%5C",
     "/api/internal/synthetic%2Fpath?signature=synthetic%252F",
+    "/api/internal/%5Ctoken?signature=synthetic%2F%5C",
+    "/api/internal/%5ctoken?signature=synthetic%255C",
   ])("does not invoke the proxy for %s", (pathname) => {
     const request = new NextRequest(`https://example.test${pathname}`);
     assert.equal(matchesProxy(request), false);
@@ -73,11 +101,25 @@ describe("referral path proxy", () => {
     assert.equal(response.headers.get("x-middleware-rewrite"), null);
     assert.equal(request.url, `https://example.test${pathname}`);
   });
+
+  it.each([
+    "/.well-known/workflow/v1/webhook/%5Ctoken?signature=synthetic%2F%5C",
+    "/.well-known/workflow/v1/webhook/%5ctoken?signature=synthetic%255C",
+  ])("preserves workflow handling for %s", (pathname) => {
+    const request = new NextRequest(`https://example.test${pathname}`, { method: "POST" });
+    assert.equal(matchesProxy(request), true);
+
+    const response = proxy(request);
+    assert.equal(response.headers.get("x-middleware-next"), "1");
+    assert.equal(response.headers.get("location"), null);
+    assert.equal(response.headers.get("x-middleware-rewrite"), null);
+    assert.equal(request.url, `https://example.test${pathname}`);
+  });
 });
 
 describe("homepage proxy selection", () => {
   it.each(["GET", "HEAD"])("preserves negotiated Markdown for %s", async (method) => {
-    const request = new NextRequest("https://example.test/?next=%2Frefer%5C", {
+    const request = new NextRequest("https://example.test/?next=%2Frefer%5C&root=%2F%5c&literal=%255C", {
       method,
       headers: { Accept: "text/html, text/markdown; q=0.9" },
     });
@@ -94,10 +136,11 @@ describe("homepage proxy selection", () => {
 
   it.each([
     ["GET", "text/html"],
+    ["HEAD", "text/html"],
     ["GET", "text/markdown; q=0"],
     ["POST", "text/markdown"],
   ])("preserves page handling for %s with %s", (method, accept) => {
-    const request = new NextRequest("https://example.test/?next=%2Frefer%5C", {
+    const request = new NextRequest("https://example.test/?next=%2Frefer%5C&root=%2F%5c&literal=%255C", {
       method,
       headers: { Accept: accept },
     });

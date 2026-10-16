@@ -3,6 +3,9 @@ shared behavior and permission proof are tracked in
 [the hosted journey repair plan](exec-plans/completed/2026-10-16-frog-hosted-live-config-4144.md).
 Authentication preservation follow-on: [active plan](exec-plans/active/2026-10-16-frog-hosted-auth-store-4144.md).
 
+Sleep-pattern focused freshness implementation and parent-verified results are recorded in
+[the completed sleep-pattern plan](exec-plans/completed/2026-10-09-sleep-pattern-focused-freshness.md).
+
 Entrypoint test worker build prerequisites are owned by
 `../packages/assistant-runtime/README.md#focused-tests`; repair evidence is tracked
 in [the worker preflight plan](exec-plans/completed/2026-10-09-frog-entrypoint-build-preflight.md).
@@ -44,6 +47,11 @@ Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
 # Murph Agent Docs Index
+
+Retained Junction validation jobs keep a bounded transport retry budget in the existing job store;
+[`RELIABILITY.md`](RELIABILITY.md) owns the retry and cold-handoff contract.
+Implementation and review proof are recorded in the
+[retry-budget plan](exec-plans/completed/2026-10-16-junction-validation-retry-budget.md).
 
 Typing egress and mailbox runtime timing correlation is owned by
 [`Cloudflare private telemetry`](../apps/cloudflare/README.md#private-operational-telemetry);
@@ -159,7 +167,7 @@ Structured provider failure diagnostic preservation is tracked in
 [the telemetry plan](exec-plans/completed/2026-10-09-structured-provider-failure-telemetry.md);
 its runtime contract remains in `packages/assistant-engine/README.md`.
 
-Bounded device-webhook enqueue recovery is owned by `RELIABILITY.md`;
+Bounded device-webhook enqueue recovery and ECG missing-instance diagnostics are owned by `RELIABILITY.md`;
 private SMS provider failure diagnostics are owned by
 `../docs/hosted-auth-migration.md` under "SMS verification owner".
 
@@ -321,6 +329,12 @@ recorded in
 Deployment remains blocked and not observation-ready; the live phase and
 reader-before-producer contract is owned by `docs/hosted-runtime-log-database.md`.
 
+Completed Patterns lazy load phase telemetry implementation, final review and
+candidate CI are recorded in
+[`2026-10-16-patterns-load-phase-telemetry.md`](exec-plans/completed/2026-10-16-patterns-load-phase-telemetry.md).
+Deployment remains blocked and not observation-ready; the live phase and
+reader-before-producer contract is owned by `docs/hosted-runtime-log-database.md`.
+
 Hosted-local pre-allocation barrier control recovery is tracked in
 [`2026-09-17-runtime-test-target-routing.md`](exec-plans/active/2026-09-17-runtime-test-target-routing.md).
 
@@ -388,6 +402,10 @@ its conditional delivery, reconciliation, and repair rules live in
 `packages/assistant-engine/skills/behavior-followthrough/references/support-runtime.md`.
 Goal-setup latency investigation and focused verification are recorded in
 [`2026-09-24-goal-turn-latency.md`](exec-plans/completed/2026-09-24-goal-turn-latency.md).
+
+Group shared-read timing telemetry (#3997) is recorded in
+[`2026-10-13-group-shared-read-timing.md`](exec-plans/completed/2026-10-13-group-shared-read-timing.md);
+its log contract is owned by `docs/hosted-runtime-log-database.md`.
 
 Runtime authority lock/read consolidation is recorded in
 [`2026-09-20-runtime-latency-delete-work.md`](exec-plans/active/2026-09-20-runtime-latency-delete-work.md).
@@ -788,6 +806,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-codex-0158-live-port.md` | Codex 0.158.0 public Live patch port, removal review, and native compatibility verification; deployment gates remain. | Historical implementation evidence | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-10-10-snapshot-failure-timeout-diagnostics.md` | Preserve existing snapshot failure diagnostics for supported long deadlines. | Assistant runtime telemetry | Medium | 2026-10-10 |
+| `agent-docs/exec-plans/completed/2026-10-10-sms-mobile-number-guidance.md` | Unsupported SMS destination guidance correction and focused proof. | Task plan | Medium | 2026-10-10 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/completed/2026-10-02-checkpoint-progress-generation.md` | Canonical checkpoint-generation ownership correction and composed regression proof. | Checkpoint generation execution plan | Medium | 2026-10-02 |
 | `agent-docs/exec-plans/completed/2026-10-02-otp-parameter-diagnostic.md` | Bounded Verify parameter-hint telemetry and unchanged authentication proof. | OTP diagnostic execution plan | Medium | 2026-10-02 |

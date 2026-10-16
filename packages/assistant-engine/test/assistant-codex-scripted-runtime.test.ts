@@ -127,6 +127,8 @@ import {
   buildAssistantSystemPrompt,
   buildAssistantSystemPromptLayers,
 } from '../src/assistant/system-prompt.ts'
+import { buildAssistantCliSurfaceContract } from '../src/assistant/cli-surface-bootstrap.ts'
+import { readAssistantCliLlmsFullManifestFromCliEntry } from '../src/assistant/cli-surface-manifest.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
 import {
   ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
@@ -3982,6 +3984,132 @@ text(result.output);
       expect(() => normalizeSharedSchemaFirstInputForEquality(JSON.stringify(body))).toThrow()
     }
   })
+
+  it.each(['direct', 'group'] as const)(
+    'common list limit description preserves complete first provider input (%s)',
+    { timeout: TURN_TIMEOUT_MS * 2 }, async (scope) => {
+      const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+        cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+        workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+      })
+      const description = 'Maximum number of results to return, from 1 to 200.'
+      expect(manifest.commands.find((command) => command.name === 'event list')
+        ?.schema?.options?.properties?.limit?.description).toBe(description)
+      // Reverse only the common limit description in the REAL complete manifest.
+      // Keep every command, numeric constraint, output contract and other field.
+      let restoredDescriptions = 0
+      const baselineManifest = JSON.parse(JSON.stringify(manifest, (key, value: unknown) => {
+        if (key === 'description' && value === description) {
+          restoredDescriptions += 1
+          return 'Maximum number of results to return.'
+        }
+        return value
+      })) as typeof manifest
+      expect(restoredDescriptions).toBeGreaterThan(0)
+      const contracts = [baselineManifest, manifest].map(buildAssistantCliSurfaceContract)
+      expect(contracts.every((contract) => typeof contract === 'string' && contract.length > 0)).toBe(true)
+      expect(contracts[1] === contracts[0]).toBe(true)
+      const groupConversation = scope === 'group'
+      const tools: readonly AssistantProviderDynamicTool[] = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, assistantConfigurationAvailable: !groupConversation,
+        automationAvailable: true, groupAssistantConfigurationAvailable: groupConversation,
+        groupAvailable: !groupConversation, groupChallengeResponseCardsAvailable: groupConversation,
+        groupSharedReadAvailable: groupConversation, imageGenerationAvailable: false,
+        progressUpdatesAvailable: false, responseCardsAvailable: !groupConversation,
+      })
+      const registeredToolsJson = JSON.stringify(tools)
+      const prompts = contracts.map((assistantCliContract) => {
+        const layers = buildAssistantSystemPromptLayers({
+          assistantCliContract, assistantHostedAutomationAvailable: true,
+          assistantHostedGroupToolSurface: groupConversation ? 'shared_read' : 'families',
+          assistantProgressUpdatesAvailable: false, assistantStyleSettingsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: scope, currentLocalDate: '2026-04-11',
+          currentInstant: '2026-04-11T12:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false, ordinaryInboundTurn: true,
+        })
+        return {
+          developerInstructions: [layers.staticCacheableCorePrompt,
+            layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
+          prompt: [layers.dynamicTurnContextPrompt,
+            'Pull up to 1,000 of my saved notes tagged trip-log and list their titles.'].join('\n\n'),
+        }
+      })
+      // Boolean equality avoids printing complete prompts on assertion failure.
+      expect(JSON.stringify(prompts[1]) === JSON.stringify(prompts[0])).toBe(true)
+      const scenario = await prepareScriptedTurnScenario()
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const captures = []
+      for (const composed of prompts) {
+        await stopWarmCodexAppServer()
+        scenario.stub.markRequestBaseline()
+        scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
+        scenario.stub.queue({ text: 'SYNTHETIC_LIST_LIMIT_INPUT_CAPTURED' })
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, ...composed, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools, groupConversation,
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
+        })
+        // One scripted provider request, no tool call, card, or runtime issue.
+        expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+        expect(result.finalMessage).toBe('SYNTHETIC_LIST_LIMIT_INPUT_CAPTURED')
+        expect(result.responseCard).toBeNull()
+        expect(result.runtimeIssueInputs).toEqual([])
+        expect(result.jsonEvents.filter((event) => readRecord(event)?.method === 'item/tool/call')).toEqual([])
+        expect(JSON.stringify(tools)).toBe(registeredToolsJson)
+        const summary = scenario.stub.requestSummariesSinceBaseline()[0]
+        const capture = summary?.completeProviderInput
+        const wire = summary?.providerRequestDiagnostics
+        if (!capture || !wire) throw new Error('Missing complete first provider input.')
+        for (const text of [MURPH_CODEX_BASE_INSTRUCTIONS, composed.developerInstructions, composed.prompt]) {
+          expect(capture.json.includes(JSON.stringify(text.trim()).slice(1, -1))).toBe(true)
+        }
+        const visible = readProviderNativeTools(capture.json).filter((tool) => tool.namespace === 'murph')
+        const eager = tools.filter((tool) => tool.deferLoading !== true)
+        expect(visible.map((tool) => tool.name).sort()).toEqual(eager.map((tool) => tool.name).sort())
+        for (const tool of eager) {
+          const observed = visible.find((candidate) => candidate.name === tool.name)
+          if (!observed) throw new Error(`Missing eager ${tool.name} on provider wire.`)
+          assertModelVisibleToolContract(tool, observed)
+        }
+        captures.push({
+          capture, wire, equality: normalizeSharedSchemaFirstInputForEquality(capture.json),
+        })
+      }
+      const [baseline, candidate] = captures
+      if (!baseline || !candidate) throw new Error('Missing paired provider captures.')
+      // Print counts/digests only; never dump prompts, tools, or transport identities.
+      process.stdout.write(`[list-limit-first-input] ${JSON.stringify({
+        scope, restoredDescriptions,
+        registeredToolCount: tools.length,
+        registeredDeferredCount: tools.filter((tool) => tool.deferLoading === true).length,
+        completeWire: {
+          baseline: { utf8Bytes: baseline.wire.bytes, sha256: baseline.wire.sha256 },
+          candidate: { utf8Bytes: candidate.wire.bytes, sha256: candidate.wire.sha256 },
+          utf8ByteDelta: candidate.wire.bytes - baseline.wire.bytes,
+        },
+        raw: {
+          baselineUtf8Bytes: Buffer.byteLength(baseline.capture.json, 'utf8'),
+          candidateUtf8Bytes: Buffer.byteLength(candidate.capture.json, 'utf8'),
+        },
+        equality: {
+          normalizedFields: candidate.equality.normalizedFields,
+          excludedTransportFields: candidate.capture.excludedTransportFields,
+          baselineSha256: createHash('sha256').update(baseline.equality.json).digest('hex'),
+          candidateSha256: createHash('sha256').update(candidate.equality.json).digest('hex'),
+          identical: candidate.equality.json === baseline.equality.json,
+        },
+        targetTokenizer: { countBaseline: null, countCandidate: null, delta: null,
+          reason: 'Exact target tokenization is not part of this capture; scripted usage is not a token count.' },
+      })}\n`)
+      expect(candidate.capture.excludedTransportFields).toEqual(baseline.capture.excludedTransportFields)
+      expect(candidate.equality.normalizedFields).toEqual(baseline.equality.normalizedFields)
+      expect(candidate.equality.json === baseline.equality.json).toBe(true)
+    },
+  )
 
   it.skipIf(process.env.MURPH_MEASURE_MEMORY_INPUT !== '1').each(['direct', 'group'] as const)(
     'memory profile complete provider input (%s)', { timeout: TURN_TIMEOUT_MS }, async (scope) => {

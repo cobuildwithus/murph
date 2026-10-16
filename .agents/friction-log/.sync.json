@@ -1881,6 +1881,10 @@
       "path": ".agents/friction-log/20261007232207-worker-upload-dry/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#4136",
+      "path": ".agents/friction-log/20261012103952-initial-provider-input/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#4137",
       "path": ".agents/friction-log/20261012103953-opt-in-live/friction.md"
     }

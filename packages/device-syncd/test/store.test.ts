@@ -3837,6 +3837,46 @@ test.each([
   }
 });
 
+test.each([
+  ["blood_oxygen", "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"],
+  ["electrocardiogram_voltage", "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE"],
+])("device sync store leaves retained %s validation a bounded transport budget", async (resource, code) => {
+  const tempDir = await makeTempDirectory("murph-validation-transport-budget");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+  const now = "2026-04-07T00:00:00.000Z";
+  try {
+    const account = store.upsertAccount({
+      provider: "junction", externalAccountId: "synthetic-validation-budget", displayName: "Junction",
+      scopes: [], credential: { kind: "provider_config", providerConfigKey: "junction" }, connectedAt: now,
+    });
+    const job = store.enqueueJob({ accountId: account.id, provider: "junction", kind: "resource",
+      maxAttempts: 1, availableAt: now,
+      payload: { resource, sourceProviderSlug: "withings", windowStart: now, windowEnd: "2026-04-08T00:00:00.000Z" } });
+    const fail = (minute: number, failureCode: string, retainUntilSuccess: boolean) => {
+      const at = `2026-04-07T00:0${minute}:00.000Z`;
+      assert.equal(store.claimDueJob("worker", at, 60_000)?.id, job.id);
+      return store.failJobIfOwned(job.id, "worker", at, failureCode, "Synthetic failure.", at, true,
+        retainUntilSuccess);
+    };
+    // Validation retention restores the default budget from the current attempt; it does not accumulate.
+    assert.deepEqual(fail(0, code, true), { attempts: 1, disposition: "queued", maxAttempts: 6, remainingAttempts: 5 });
+    assert.deepEqual(fail(1, code, true), { attempts: 2, disposition: "queued", maxAttempts: 7, remainingAttempts: 5 });
+    for (let attempts = 3; attempts <= 7; attempts += 1) {
+      assert.deepEqual(fail(attempts - 1, "JUNCTION_API_REQUEST_FAILED", false), {
+        attempts,
+        disposition: attempts < 7 ? "queued" : "dead",
+        maxAttempts: 7,
+        remainingAttempts: 7 - attempts,
+      });
+    }
+    assert.equal(store.claimDueJob("worker", "2026-04-07T01:00:00.000Z", 60_000), null);
+    assert.equal(store.getJobById(job.id)?.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("device sync store reclaims an expired retained companion lease on the same row past its attempt fence", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-companion-lease");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));

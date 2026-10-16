@@ -962,6 +962,127 @@ describeRealCodex('real Codex event-list family isolation', () => {
   }, 360_000)
 })
 
+const BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION = 'Maximum number of results to return, from 1 to 200.'
+
+function buildBoundedEventListPrompt(assistantCliContract: string, conversationScope: 'direct' | 'group') {
+  return buildAssistantSystemPrompt({
+    assistantCliContract, assistantHostedAutomationAvailable: false,
+    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    conversationScope, currentInstant: '2026-04-11T12:00:00.000Z',
+    currentLocalDate: '2026-04-11', currentTimeZone: 'America/New_York', hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+  })
+}
+
+async function readBoundedEventListManifest() {
+  return await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+    workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+  })
+}
+
+describe('bounded event list limit production contract', () => {
+  it('discloses the cap only in command help, leaving the composed CLI contract unchanged', async () => {
+    const manifest = await readBoundedEventListManifest()
+    expect(manifest.commands.find(command => command.name === 'event list')?.schema?.options?.properties?.limit)
+      .toMatchObject({ maximum: 200, default: 10, description: BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION })
+    // Substitute the prior description everywhere and rebuild through the same
+    // production builders: the compact index and composed prompts must not move.
+    const prior = JSON.parse(JSON.stringify(manifest).replaceAll(
+      BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION, 'Maximum number of results to return.',
+    )) as typeof manifest
+    const contract = buildAssistantCliSurfaceContract(manifest)
+    if (!contract) throw new Error('Expected the generated production CLI contract.')
+    expect(buildAssistantCliSurfaceContract(prior)).toBe(contract)
+    expect(contract).not.toContain(BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION)
+    expect(buildBoundedEventListPrompt(contract, 'direct')).toContain('read `vault-cli <command> --help`')
+    for (const scope of ['direct', 'group'] as const) {
+      expect(buildBoundedEventListPrompt(contract, scope)).not.toContain(BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION)
+    }
+  }, 120_000)
+})
+
+describeRealCodex('real Codex bounded event list limit e2e', () => {
+  it('bounded event list limit reads an oversized note request once within the cap', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-event-limit-e2e-'))
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      const assistantCliContract = buildAssistantCliSurfaceContract(await readBoundedEventListManifest())
+      if (!assistantCliContract) throw new Error('Expected the generated production CLI contract.')
+      const developerInstructions = buildBoundedEventListPrompt(assistantCliContract, 'direct')
+      await initializeVault({ vaultRoot, timezone: 'America/New_York' })
+      for (const [title, day, tag] of [
+        ['Pack the travel adapter.', '2026-04-08', 'trip-log'],
+        ['The hotel checkout is at eleven.', '2026-04-09', 'trip-log'],
+        ['The lighthouse tour starts at the north pier.', '2026-04-10', 'trip-log'],
+        ['Water the fern on Sunday.', '2026-04-10', 'home'],
+      ] as const) {
+        await upsertEvent({ vaultRoot, payload: {
+          kind: 'note', source: 'manual', title, note: title, tags: [tag],
+          occurredAt: `${day}T14:00:00Z`, timeZone: 'America/New_York',
+        } })
+      }
+      await writeFile(commandLogPath, '')
+      // The recorder runs the shipped source CLI; no event output is fixtured.
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const canonicalBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions,
+        env: config.env,
+        fixtureBinDirectory: binDirectory,
+        groupConversation: false,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: "Pull up to 1,000 of my saved notes tagged trip-log and list their titles. Don't change anything.",
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const reads = readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command'
+        && /\bvault-cli\b[^;\n]*\bevent\s+list\b/u.test(action.command)
+        && !isRecordedVaultHelpCommand(action.command))
+      const reply = result.finalMessage.trim()
+      const commands = expandRecordedVaultCommands((await readFile(commandLogPath, 'utf8'))
+        .split('\n').filter(Boolean)).filter((command) =>
+        !isRecordedVaultHelpCommand(command) && !/^--(?:llms(?:-full)?|version)(?:\s|$)/u.test(command)
+      )
+      const limits = commands.map((command) => command.match(/(?:^|\s)--limit(?:=|\s+)(\S+)/u)?.[1] ?? null)
+      process.stdout.write(`[event-list-limit-e2e] ${JSON.stringify({
+        scenario: 'oversized-note-limit', eventReads: reads.length, limits, reply,
+      })}\n`)
+      // One successful bounded read: no oversized attempt and no unchanged retry.
+      expect(commands).toHaveLength(1)
+      expect(commands[0]).toMatch(/^event list(?:\s|$)/u)
+      expect(limits.every((limit) => limit === null || (/^\d+$/u.test(limit) && Number(limit) >= 1 && Number(limit) <= 200))).toBe(true)
+      expect(reads).toHaveLength(1)
+      expect(reads[0]?.kind === 'command' && reads[0].ok).toBe(true)
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(canonicalBefore)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(reply).toMatch(/travel adapter/iu)
+      expect(reply).toMatch(/hotel checkout/iu)
+      expect(reply).toMatch(/lighthouse tour/iu)
+      expect(reply).not.toMatch(/fern/iu)
+      expect(reply).not.toMatch(/VALIDATION|too_big|invalid|error|\b200\b|\bcap(?:ped)?\b|maximum|retry|unable|couldn['’]t|could not/iu)
+      expect(reply.length).toBeLessThanOrEqual(400)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 async function seedFocusedFollowupVault(vaultRoot: string) {
   await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-04-01T00:00:00Z' })
   const { createExperiment } = await import('@murphai/core')
@@ -1488,6 +1609,132 @@ describeRealCodex('real Codex focused wearable activity projection e2e', () => {
       reply: [/12,?300/u, /6,?200/u, /garmin/iu, /oura/iu, /steps/iu],
       rejectedReply: /8,?800|\b(?:updated|changed|deleted|sent|scheduled)\b|\?/iu,
     })
+  }, 360_000)
+})
+
+async function seedFocusedSleepPatternProjectionVault(vaultRoot: string): Promise<void> {
+  await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-01-01T00:00:00Z' })
+  const events = ['2026-01-01', '2026-01-02', '2026-01-03'].flatMap(date =>
+    ['oura', 'garmin'].map(provider => {
+      const durationMinutes = provider === 'oura' ? 450 : 600
+      const endAt = `${date}T11:00:00.000Z`
+      const startAt = new Date(Date.parse(endAt) - durationMinutes * 60_000).toISOString()
+      return {
+        dayKey: date, durationMinutes, endAt,
+        externalRef: { system: provider, resourceType: 'sleep', resourceId: `focused-sleep-${provider}-${date}` },
+        id: `evt_focused_sleep_${provider}_${date.replaceAll('-', '')}`,
+        kind: 'sleep_session', occurredAt: startAt, recordedAt: `${date}T11:05:00.000Z`,
+        schemaVersion: 'murph.event.v1', sleepType: 'main_sleep', source: 'device',
+        startAt, title: 'Synthetic provider sleep',
+      }
+    }))
+  await mkdir(path.join(vaultRoot, 'ledger/events/2026'), { recursive: true })
+  await writeFile(path.join(vaultRoot, 'ledger/events/2026/2026-01.jsonl'),
+    `${events.map(event => JSON.stringify(event)).join('\n')}\n`, 'utf8')
+}
+
+async function buildFocusedSleepPatternProjectionInstructions() {
+  const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+    workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+  })
+  expect(manifest.commands.find(command => command.name === 'wearables sleep pattern')?.schema?.options?.properties)
+    .toMatchObject({
+      from: expect.any(Object), to: expect.any(Object), provider: expect.any(Object),
+      timeZone: expect.any(Object), windowDays: expect.any(Object),
+    })
+  const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+  if (!assistantCliContract) throw new Error('Expected the generated sleep-pattern CLI contract.')
+  const instructions = buildAssistantSystemPrompt({
+    assistantCliContract, assistantHostedAutomationAvailable: false,
+    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    conversationScope: 'direct', currentInstant: '2026-01-04T12:00:00.000Z',
+    currentLocalDate: '2026-01-04', currentTimeZone: 'UTC', hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+  })
+  expect(instructions).toContain(assistantCliContract)
+  expect(assistantCliContract).toContain('sleep pattern')
+  return instructions
+}
+
+function readFocusedSleepPatternProjectionCommand(command: string): string {
+  expect(command).not.toMatch(/[\r\n]/u)
+  const unwrapped = command.match(/^\/bin\/zsh -c '([^']+)'$/u)?.[1] ?? command
+  expect(unwrapped).toMatch(/^[ \t]*vault-cli[ \t]+wearables[ \t]+sleep[ \t]+pattern(?:[ \t]|$)/u)
+  expect(unwrapped).not.toMatch(/[^A-Za-z0-9_= \t-]/u)
+  return unwrapped
+}
+
+describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
+  it('answers duration and usable nights from one native sleep-pattern read without other reads or effects', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-sleep-pattern-projection-e2e-'))
+    const vaultRoot = path.join(root, 'vault'); const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await seedFocusedSleepPatternProjectionVault(vaultRoot)
+      const developerInstructions = await buildFocusedSleepPatternProjectionInstructions()
+      // Reuse the existing native production CLI wrapper, including its command log.
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions,
+        env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Read my Oura wearable sleep pattern from 2026-01-01 through 2026-01-03 once, using the native JSON format. Report the mean session duration in minutes (not total asleep time) and usable night count in one sentence. Use provider oura and those exact date bounds. No other reads, help commands, advice, messages to anyone, or changes.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      expect(commands).toHaveLength(1)
+      expect(commands[0]).toMatch(/^wearables sleep pattern(?:\s|$)/u)
+      const tokens = commands[0]!.split(/\s+/u).slice(3)
+      const options = new Map<string, string>()
+      while (tokens.length) {
+        const [flag, inline] = tokens.shift()!.split('=')
+        expect(['--from', '--to', '--provider', '--format']).toContain(flag)
+        expect(options.has(flag!)).toBe(false)
+        const value = inline ?? tokens.shift()
+        expect(value).toBeDefined(); options.set(flag!, value!)
+      }
+      expect(Object.fromEntries(options)).toEqual({
+        '--from': '2026-01-01', '--to': '2026-01-03', '--provider': 'oura', '--format': 'json',
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions).toHaveLength(1)
+      const action = actions[0]!
+      if (action.kind !== 'command') throw new Error('Only the focused native sleep-pattern read is permitted.')
+      expect(action.ok).toBe(true)
+      readFocusedSleepPatternProjectionCommand(action.command)
+      const document = readRecord(JSON.parse(action.output))
+      expect(document?.ok === true ? document.data : document).toMatchObject({
+        summary: {
+          from: '2026-01-01', to: '2026-01-03', providers: ['oura'],
+          validNightCount: 3, expectedNightCount: 3, reportingTimeZone: 'UTC',
+          sessionDurationMinutes: { average: 450, count: 3, median: 450 },
+        },
+      })
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(await getQueryProjectionStatus(vaultRoot)).toMatchObject({
+        exists: true, fresh: false, builtAt: null, entityCount: 0, searchDocumentCount: 0,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[focused-sleep-pattern-projection-e2e] ${JSON.stringify({ reads: commands.length, reply })}\n`)
+      const plainReply = reply.replace(/[*_`]/gu, '')
+      expect(plainReply).toMatch(/\b450\s*(?:minutes?|mins?)\b/iu)
+      expect(plainReply).toMatch(/\b(?:3|three)\s+(?:(?:usable|valid)\s+)?nights?\b|\bnights?\s*:\s*(?:3|three)\b/iu)
+      expect(plainReply).not.toMatch(/\b600\b|\b(?:updated|changed|deleted|sent|scheduled)\b|\?/iu)
+      expect(reply.length).toBeLessThanOrEqual(400)
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
   }, 360_000)
 })
 

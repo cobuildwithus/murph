@@ -7,7 +7,7 @@ import {
   addCliPhaseSample, CLI_TIMING_MAX_COMMANDS, CLI_TIMING_MAX_SPANS,
   CLI_TIMING_PHASES, cliTimingCommand, cliTimingFailureCode, emptyCliTiming, mergeCliTiming,
   normalizeCliTiming, cliTimingValidationFailure, CLI_TIMING_MAX_VALIDATION_ISSUES, type CliTiming, type CliValidationDiagnostic,
-  CLI_TIMING_REJECTIONS, cliTimingRejectionFailure,
+  CLI_TIMING_REJECTIONS, CLI_TIMING_PARSE_REJECTIONS, cliTimingRejectionFailure,
 } from "../src/cli-timing.ts";
 import {
   finishCliTimingAction, isCliTimingActive, noteCliTimingExit,
@@ -1151,6 +1151,105 @@ test.skipIf(!researchRejectionCompatibilityBase)("actual pre-rejection reader dr
   assert.deepEqual(normalizeCliTiming(legacy), legacy);
 });
 
+// The CLI bridge's timing-only copy of Incur's typed projection plus parser reason.
+function parseRejectionEnvelope(value?: unknown): object {
+  return { code: "VALIDATION_ERROR", stage: "validation", message: "PRIVATE_MESSAGE",
+    fieldErrors: [{ path: "arguments", code: "custom", missing: false }],
+    ...(value === undefined ? {} : { cliTimingRejection: value }) };
+}
+const parseValidation = { field: "arguments", code: "custom", missing: false } as const;
+
+test("knowledge upsert parse rejection is gated, finite and separate from research categories", async () => {
+  const capture = async (error: object, command = "knowledge upsert") => {
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw error; }),
+      (value) => { report = value; }), (caught) => caught === error);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    assert.ok(!JSON.stringify(report).includes("PRIVATE"));
+    return report.commands[0]!.failures;
+  };
+  const base = { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: parseValidation } as const;
+  for (const rejection of CLI_TIMING_PARSE_REJECTIONS) {
+    assert.deepEqual(await capture(parseRejectionEnvelope(rejection)), [{ ...base, rejection }]);
+    assert.deepEqual(await capture(parseRejectionEnvelope(rejection), "event list"),
+      [{ ...base, validation: { ...parseValidation } }]);
+    const research = Object.assign(new Error("PRIVATE_MESSAGE"), { code: "research_scout_invalid_batch_payload" });
+    Object.defineProperty(research, "cliTimingRejection", { value: rejection });
+    assert.deepEqual(await capture(research, "research scout-batch"),
+      [{ code: "research_scout_invalid_batch_payload", stage: "unknown", count: 1 }]);
+  }
+  let reads = 0;
+  for (const value of ["envelope", "PRIVATE_REASON", "Unknown_flag", new String("unknown_flag"), ["missing_value"], 1]) {
+    assert.deepEqual(await capture(parseRejectionEnvelope(value)), [{ ...base }]);
+  }
+  const accessor = Object.defineProperty(parseRejectionEnvelope(), "cliTimingRejection",
+    { enumerable: true, get: () => { reads += 1; return "unknown_flag"; } });
+  assert.deepEqual(await capture(accessor), [{ ...base }]);
+  assert.equal(reads, 0);
+  const other = { ...parseRejectionEnvelope("unknown_flag"), code: "knowledge_page_invalid" };
+  assert.deepEqual(cliTimingRejectionFailure("knowledge upsert", other.code, other, "cliTimingRejection"), {});
+});
+
+test("parse rejection variants coalesce, conserve counts and drop only malformed wire detail", () => {
+  const aggregate = emptyCliTiming();
+  for (const rejection of [...CLI_TIMING_PARSE_REJECTIONS, undefined, CLI_TIMING_PARSE_REJECTIONS[0]]) {
+    const incoming = sample("knowledge upsert");
+    incoming.commands[0]!.outcome = "error";
+    incoming.commands[0]!.failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 1,
+      validation: { ...parseValidation }, ...(rejection ? { rejection } : {}) }];
+    mergeCliTiming(aggregate, incoming);
+  }
+  const command = aggregate.commands[0]!;
+  assert.equal(command.calls, 4);
+  assert.deepEqual(command.failures!.map(({ rejection, count }) => ({ rejection, count })), [
+    { rejection: "unknown_flag", count: 2 }, { rejection: "missing_value", count: 1 }, { rejection: undefined, count: 1 },
+  ]);
+  assert.deepEqual(normalizeCliTiming(aggregate), aggregate);
+  const wire = sample("knowledge upsert");
+  wire.commands[0]!.outcome = "error";
+  wire.commands[0]!.calls = 4;
+  const entries = [
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, rejection: "PRIVATE_REASON" },
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, rejection: "envelope" },
+    { code: "knowledge_page_invalid", stage: "validation", count: 1, rejection: "unknown_flag" },
+    Object.defineProperty({ code: "VALIDATION_ERROR", stage: "validation", count: 1 }, "rejection",
+      { enumerable: true, get: () => "missing_value" }),
+  ];
+  const normalized = normalizeCliTiming({ ...wire, commands: [{ ...wire.commands[0]!, failures: entries }] });
+  assert.deepEqual(normalized?.commands[0]!.failures, [
+    { code: "VALIDATION_ERROR", stage: "validation", count: 3 },
+    { code: "knowledge_page_invalid", stage: "validation", count: 1 },
+  ]);
+  assert.ok(!JSON.stringify(normalized).includes("PRIVATE"));
+});
+
+// Actual pre-parse-rejection reader, never a copied parser.
+const parseRejectionCompatibilityBase = process.env.MURPH_CLI_PARSE_REJECTION_COMPAT_BASE;
+test.skipIf(!parseRejectionCompatibilityBase)("actual pre-parse-rejection reader drops only the reason and keeps counts", async () => {
+  assert.match(parseRejectionCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${parseRejectionCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; mergeCliTiming: typeof mergeCliTiming } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  const report = sample("knowledge upsert");
+  report.commands[0]!.outcome = "error";
+  report.commands[0]!.calls = 3;
+  report.commands[0]!.failures = [
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: { ...parseValidation }, rejection: "unknown_flag" },
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: { ...parseValidation }, rejection: "missing_value" },
+    { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation: { ...parseValidation } },
+  ];
+  assert.deepEqual(normalizeCliTiming(report), report);
+  const legacy = structuredClone(report);
+  legacy.commands[0]!.failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 3, validation: { ...parseValidation } }];
+  assert.deepEqual(old.normalizeCliTiming(report), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy, "New readers never invent a reason for old reports.");
+  const oldMerged = emptyCliTiming();
+  old.mergeCliTiming(oldMerged, report);
+  assert.deepEqual(oldMerged.commands, legacy.commands);
+});
+
 // Actual history-backed reader, not a copied parser or current-reader roundtrip.
 const researchFailureCompatibilityBase = process.env.MURPH_CLI_RESEARCH_FAILURE_COMPAT_BASE;
 test.skipIf(!researchFailureCompatibilityBase)("actual pre-research reader collapses only new evidence and preserves mixed counts", async () => {
@@ -1199,13 +1298,14 @@ test.skipIf(!researchFailureCompatibilityBase)("actual pre-research reader colla
 });
 
 
-test("query rebuild admission is exactly twenty-one fixed phases without raising invocation caps", async () => {
+test("phase admission is exactly twenty-four fixed names without raising invocation caps", async () => {
   assert.deepEqual(CLI_TIMING_PHASES, [
     "total", "setup", "dispatch", "post-dispatch", "teardown", "unattributed",
     "query-freshness", "query-manifest", "query-status", "query-rebuild", "query-wait",
     "query-source-read", "query-wearable-dataset", "query-metric-projection",
     "query-wearable-summary", "query-search-documents", "query-publication",
     "query-entity-read", "query-wearable-compose", "query-metric-read", "query-pattern-report",
+    "service-runtime-load", "query-runtime-load", "query-projection-load",
   ]);
   assert.equal(CLI_TIMING_MAX_COMMANDS, 32);
   assert.equal(CLI_TIMING_MAX_SPANS, 64);
@@ -1213,7 +1313,7 @@ test("query rebuild admission is exactly twenty-one fixed phases without raising
   for (const phase of CLI_TIMING_PHASES.slice(1)) {
     assert.equal(addCliPhaseSample(report.commands[0]!.phases, phase, 37_000_000), true);
   }
-  assert.equal(report.commands[0]!.phases.length, 21);
+  assert.equal(report.commands[0]!.phases.length, 24);
   assert.deepEqual(normalizeCliTiming(report), report);
   // Unknown labels are rejected, not pattern-admitted or serialized as paths.
   for (const phase of ["query-publication/PRIVATE_SENTINEL", "QUERY-SOURCE-READ", "query-source-read "]) {
@@ -1256,6 +1356,28 @@ test("synchronous query stage timing preserves values, immediate execution and t
       phase => [phase.phase, phase.count, phase.sumUs]), [["query-entity-read", 1, 12], ["query-metric-read", 1, 34]]);
     assert.deepEqual(normalizeCliTiming(report), report);
   });
+});
+
+// Actual pre-admission reader from history; parent supplies the reviewed base.
+const loadPhaseCompatibilityBase = process.env.MURPH_CLI_LOAD_PHASE_COMPAT_BASE;
+test.skipIf(!loadPhaseCompatibilityBase)("actual pre-load-phase reader drops the whole optional object; new reader keeps old reports", async () => {
+  assert.match(loadPhaseCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${loadPhaseCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { CLI_TIMING_PHASES: readonly string[]; normalizeCliTiming: typeof normalizeCliTiming } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  assert.deepEqual(old.CLI_TIMING_PHASES, CLI_TIMING_PHASES.slice(0, 21), "compatibility base must precede admission");
+  const legacy = sample("wearables patterns", 1_000);
+  assert.deepEqual(old.normalizeCliTiming(legacy), legacy);
+  assert.deepEqual(normalizeCliTiming(legacy), legacy);
+  for (const phase of CLI_TIMING_PHASES.slice(21)) {
+    const report = structuredClone(legacy);
+    assert.equal(addCliPhaseSample(report.commands[0]!.phases, phase, 500), true);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    // No partially stripped (falsely complete) record: the old reader rejects it all.
+    assert.equal(old.normalizeCliTiming(report), null);
+  }
 });
 
 test("new meal edit fields remain absent on every other command", () => {

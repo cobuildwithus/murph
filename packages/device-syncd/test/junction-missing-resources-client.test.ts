@@ -246,6 +246,7 @@ test("Junction ECG empty collection diagnostics include every traversed page", a
     assert.deepEqual(error.details, {
       reason: "voltage_collection_empty", pageCount: 2, groupCount: 0,
       providerMatchGroupCount: 0, instanceMatchGroupCount: 0, matchedGroupCount: 0,
+      instanceMissingGroupCount: 0,
     });
     return true;
   });
