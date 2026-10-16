@@ -7,6 +7,7 @@ import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runti
 import { resolveHostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hosted-local/config";
 
 import { waitForHostedJunctionReplayCompletion } from "./hosted-local-junction-replay-completion.js";
+import type { HostedLocalAssistantProviderStubRequest } from "./hosted-local-e2e-support.js";
 
 const mocks = vi.hoisted(() => ({
   issueHostedAppSessionForTest: vi.fn(async (input: { secureCookieMode: boolean }) => ({
@@ -92,6 +93,7 @@ import {
   buildHostedLocalRuntimeLogDatabaseNameForTest,
   buildHostedLocalFullStackHostProcessEnvOverrides,
   cleanupActiveHostedLocalFullStackScenarioSetups,
+  rethrowHostedLocalProviderCountFailure,
   shouldReuseExplicitHostedLocalScenarioDatabaseUrl,
 } from "./hosted-local-full-stack-scenario.js";
 
@@ -622,6 +624,195 @@ it("includes provider outcome metadata in failures without request text or ident
   } finally {
     await scenario.stop();
   }
+});
+
+describe("Linq recovery strict provider-count failure diagnostics", () => {
+  const promptMarker = "Give me the recovery link";
+
+  function providerRequest(
+    body = promptMarker,
+    requestKind: HostedLocalAssistantProviderStubRequest["requestKind"] = "turn",
+    fixtureMatch: HostedLocalAssistantProviderStubRequest["fixtureMatch"] = "scoped",
+  ): HostedLocalAssistantProviderStubRequest {
+    return { body, fixtureMatch, method: "POST", requestKind, url: "/v1/responses" };
+  }
+
+  async function assertOriginalGlobalCount(
+    scenario: Awaited<ReturnType<typeof startScenario>>,
+    providerBaseline: number,
+    observeFailure: (error: unknown) => void = () => {},
+  ): Promise<void> {
+    try {
+      expect(scenario.assistantProviderRequests.filter((request) =>
+        request.url === "/v1/responses"
+      ).length).toBe(providerBaseline + 1);
+    } catch (error) {
+      observeFailure(error);
+      await rethrowHostedLocalProviderCountFailure(error, {
+        promptMarker, providerBaseline, scenario, userId: "synthetic-private-member-sentinel",
+      });
+    }
+  }
+
+  it.each([
+    ["target replay", promptMarker, "turn", "none", true],
+    ["memory carrying the target marker", promptMarker, "memory", "not_applicable", true],
+    ["unrelated memory", "synthetic-private-memory-sentinel", "memory", "not_applicable", false],
+    ["unrelated prewarm", "synthetic-private-prewarm-sentinel", "prewarm", "not_applicable", false],
+    ["previous fixture turn", "synthetic-private-previous-sentinel", "turn", "unscoped", false],
+  ] as const)("retains the exact mismatch and distinguishes %s", async (_label, body, kind, match, markerPresent) => {
+    mocks.startHostedLocalDevHarness.mockResolvedValue(createScenarioHarness());
+    const scenario = await startScenario();
+    scenario.assistantProviderRequests.push(providerRequest());
+    const providerBaseline = scenario.assistantProviderRequests.length;
+    scenario.assistantProviderRequests.push(providerRequest(), providerRequest(body, kind, match));
+    const diagnostics = vi.spyOn(scenario, "buildFailureMessage");
+    let original: unknown;
+    let originalMessage = "";
+    try {
+      const failure: unknown = await assertOriginalGlobalCount(scenario, providerBaseline, (error) => {
+        original = error;
+        if (error instanceof Error) originalMessage = error.message;
+      }).catch((error: unknown) => error);
+      expect(originalMessage).not.toContain("assistant provider request counts:");
+      expect(failure).toBe(original);
+      expect(failure).toMatchObject({ actual: 3, expected: 2, name: "AssertionError" });
+      if (!(failure instanceof Error)) throw new Error("Expected the original assertion error.");
+      expect(failure.message).toContain(originalMessage);
+      expect(diagnostics).toHaveBeenCalledExactlyOnceWith(
+        "synthetic-private-member-sentinel", [], { promptMarker, providerBaseline },
+      );
+      const summaryLine = failure.message.split("\n").find((line) =>
+        line.startsWith("assistant provider request counts: ")
+      );
+      expect(JSON.parse(summaryLine!.slice("assistant provider request counts: ".length))).toEqual({
+        categories: [
+          { count: 1, fixtureMatch: "scoped", promptMarkerPresent: true, requestKind: "turn" },
+          { count: 1, fixtureMatch: match, promptMarkerPresent: markerPresent, requestKind: kind },
+        ],
+        observedGlobalCount: 3,
+        promptMarkerMatchesBeforeBaseline: 1,
+        promptMarkerMatchesSinceBaseline: markerPresent ? 2 : 1,
+        providerBaseline: 1,
+        requestsSinceBaseline: 2,
+      });
+      expect(failure.message).not.toContain("synthetic-private-");
+      expect(failure.message).not.toContain(promptMarker);
+    } finally {
+      await scenario.stop();
+    }
+  });
+
+  it("does no diagnostic work or output when the unchanged global assertion passes", async () => {
+    const harness = createScenarioHarness();
+    mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+    const scenario = await startScenario();
+    scenario.assistantProviderRequests.push(providerRequest(), providerRequest());
+    const diagnostics = vi.spyOn(scenario, "buildFailureMessage");
+    const outputs = ["debug", "error", "info", "log", "warn"] as const;
+    const outputSpies = outputs.map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
+    try {
+      await expect(assertOriginalGlobalCount(scenario, 1)).resolves.toBeUndefined();
+      expect(diagnostics).not.toHaveBeenCalled();
+      expect(harness.readUserStatus).not.toHaveBeenCalled();
+      for (const output of outputSpies) expect(output).not.toHaveBeenCalled();
+      expect(harness.stdoutTail).not.toHaveBeenCalled();
+      expect(harness.stderrTail).not.toHaveBeenCalled();
+    } finally {
+      await scenario.stop();
+    }
+  });
+
+  it("snapshots exact Responses counts before status awaits and exposes only bounded categories and status", async () => {
+    const harness = createScenarioHarness();
+    mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+    const scenario = await startScenario();
+    const unclassified = providerRequest("synthetic-private-body-sentinel");
+    Object.defineProperties(unclassified, {
+      fixtureMatch: { value: "synthetic-private-fixture-sentinel" },
+      headers: { value: { authorization: "synthetic-private-header-sentinel" } },
+      requestKind: { value: "synthetic-private-kind-sentinel" },
+    });
+    scenario.assistantProviderRequests.push(providerRequest(), providerRequest(), unclassified);
+    for (const url of ["/v1/responses?synthetic-private-query", "/synthetic-private-url"]) {
+      scenario.assistantProviderRequests.push({ ...providerRequest(), url });
+    }
+    harness.readUserStatus.mockImplementationOnce(async () => {
+      scenario.assistantProviderRequests.push(providerRequest());
+      const status = createCompletedStatus("1", "2026-07-10T12:00:00.000Z");
+      status.mailboxLag[0]!.lag = "1";
+      return Object.assign(status, {
+        lastErrorCode: "synthetic-private-error-sentinel",
+        userId: "synthetic-private-user-sentinel",
+      });
+    });
+    harness.stdoutTail.mockReturnValue("synthetic-private-stdout-sentinel");
+    harness.stderrTail.mockReturnValue("synthetic-private-stderr-sentinel");
+    try {
+      const failure = await scenario.buildFailureMessage("synthetic-private-member-sentinel", [], {
+        promptMarker, providerBaseline: 1,
+      });
+      const lines = failure.split("\n");
+      expect(lines).toHaveLength(2);
+      expect(JSON.parse(lines[0]!.slice("assistant provider request counts: ".length))).toEqual({
+        categories: [
+          { count: 1, fixtureMatch: "scoped", promptMarkerPresent: true, requestKind: "turn" },
+          { count: 1, fixtureMatch: "not_applicable", promptMarkerPresent: false, requestKind: "unknown" },
+        ],
+        observedGlobalCount: 3,
+        promptMarkerMatchesBeforeBaseline: 1,
+        promptMarkerMatchesSinceBaseline: 1,
+        providerBaseline: 1,
+        requestsSinceBaseline: 2,
+      });
+      expect(lines[1]).toBe('hosted count-check status: {"available":true,"lastErrorPresent":true,"mailboxLaggingLaneCount":1}');
+      expect(scenario.assistantProviderRequests.filter((request) => request.url === "/v1/responses")).toHaveLength(4);
+      for (const excluded of ["synthetic-private-", promptMarker, "bodyFingerprint", "bodyBytes"]) {
+        expect(failure).not.toContain(excluded);
+      }
+      expect(harness.stdoutTail).not.toHaveBeenCalled();
+      expect(harness.stderrTail).not.toHaveBeenCalled();
+    } finally {
+      await scenario.stop();
+    }
+  });
+
+  it.each(["status", "capture", "builder"] as const)(
+    "preserves the original count assertion when the %s diagnostic read fails",
+    async (fault) => {
+      const harness = createScenarioHarness();
+      mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+      const scenario = await startScenario();
+      scenario.assistantProviderRequests.push(providerRequest(), providerRequest());
+      const secondary = new Error("synthetic-private-secondary-sentinel");
+      if (fault === "status") harness.readUserStatus.mockRejectedValueOnce(secondary);
+      if (fault === "capture") Object.defineProperty(scenario.assistantProviderRequests[0], "body", {
+        get: () => { throw secondary; },
+      });
+      if (fault === "builder") vi.spyOn(scenario, "buildFailureMessage").mockRejectedValueOnce(secondary);
+      let original: unknown;
+      let originalMessage = "";
+      try {
+        const failure: unknown = await assertOriginalGlobalCount(scenario, 0, (error) => {
+          original = error;
+          if (error instanceof Error) originalMessage = error.message;
+        }).catch((error: unknown) => error);
+        expect(failure).toBe(original);
+        expect(failure).toMatchObject({ actual: 2, expected: 1, name: "AssertionError" });
+        if (!(failure instanceof Error)) throw new Error("Expected the original assertion error.");
+        expect(failure.message).not.toContain("synthetic-private-");
+        if (fault === "status") {
+          expect(failure.message).toContain(originalMessage);
+          expect(failure.message).toContain("assistant provider request counts: ");
+          expect(failure.message).toContain('hosted count-check status: {"available":false,"lastErrorPresent":null,"mailboxLaggingLaneCount":null}');
+        } else {
+          expect(failure.message).toBe(`${originalMessage}\nassistant provider count diagnostics: unavailable`);
+        }
+      } finally {
+        await scenario.stop();
+      }
+    },
+  );
 });
 
 async function startScenarioWithRealHarness() {
