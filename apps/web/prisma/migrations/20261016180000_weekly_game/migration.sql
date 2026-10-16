@@ -26,6 +26,7 @@ CREATE TABLE "game" (
     "id" TEXT NOT NULL,
     "created_by" TEXT NOT NULL,
     "previous_game_id" TEXT,
+    "invitee_member_id" TEXT,
     "round" INTEGER NOT NULL DEFAULT 1,
     "status" TEXT NOT NULL,
     "terms" JSONB NOT NULL,
@@ -117,6 +118,9 @@ CREATE UNIQUE INDEX "game_invite_token_hash_key" ON "game"("invite_token_hash");
 
 -- CreateIndex
 CREATE INDEX "game_created_by_idx" ON "game"("created_by");
+
+-- CreateIndex
+CREATE INDEX "game_invitee_member_id_idx" ON "game"("invitee_member_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "game_player_active_member_id_key" ON "game_player"("active_member_id");

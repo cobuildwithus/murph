@@ -61,8 +61,11 @@ export interface GameViewInput {
   names: ReadonlyMap<string, string>;
   /** Per member: the photo the viewer attached when they invited them, if any. */
   avatarKeys: ReadonlyMap<string, string | null>;
-  /** The invitee while nobody has joined (the challenger's own words). */
-  invitee: { name: string; photoKey: string | null } | null;
+  /**
+   * The invitee while nobody has joined: the challenger's own words for them,
+   * or, for an addressed rematch's invitee, their own name.
+   */
+  invitee: { memberId: string | null; name: string; photoKey: string | null } | null;
   inviteToken: string | null;
   inviteExpiresAt: Date | null;
   /** Decrypted words for the entries `visibleEntryIds` allowed. */
@@ -143,7 +146,7 @@ export function buildGameView(input: GameViewInput): GameView {
   const { game } = state;
   const players = [...state.players].sort((a, b) => a.seat - b.seat);
   const playerViews = players.map((player) => playerView(input, player));
-  if (input.invitee && players.length < game.seats) playerViews.push(inviteeView(input.invitee, players.length));
+  if (input.invitee && players.length < game.seats) playerViews.push(inviteeView(input.invitee, players.length, viewerId));
   return {
     days: dayViews(input, players),
     id: game.id,
@@ -187,13 +190,13 @@ function playerView(input: GameViewInput, player: RulePlayer): GamePlayerView {
 }
 
 /** The challenger's own name for whoever they invited, until that person joins. */
-function inviteeView(invitee: { name: string; photoKey: string | null }, seat: number): GamePlayerView {
+function inviteeView(invitee: NonNullable<GameViewInput["invitee"]>, seat: number, viewerId: string): GamePlayerView {
   return {
     avatarUrl: invitee.photoKey ? gameMediaUrl(invitee.photoKey) : null,
     dayIndex: null,
     firstName: invitee.name,
-    isMe: false,
-    memberId: null,
+    isMe: invitee.memberId === viewerId,
+    memberId: invitee.memberId,
     score: 0,
     seat,
   };

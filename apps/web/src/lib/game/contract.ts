@@ -189,7 +189,10 @@ export interface GameView {
   players: GamePlayerView[];
   days: GameDayView[];
   retakeAvailable: boolean;
-  /** Present while invited, for the challenger: the token to build the link from. */
+  /**
+   * Present while invited, for the challenger (to build the link) and for a
+   * rematch's addressed invitee (to accept with POST /invites/:token/accept).
+   */
   inviteToken: string | null;
   inviteExpiresAt: string | null;
   result: { scores: { seat: number; score: number }[]; outcome: "won" | "lost" | "tie" | "perfect" } | null;

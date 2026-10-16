@@ -235,6 +235,28 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(label.relationshipEncrypted).toBeTruthy();
   });
 
+  it("addresses a rematch to the previous opponent, on their Home and nobody else's", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "Australia/Sydney");
+    const kat = await member("Kat", "Europe/London");
+    const first = await startGame(leo, ava);
+    await devSettleNow(first.gameId, leo);
+    const rematch = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Babe", previousGameId: first.gameId, terms: TERMS, type: "createGame" });
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: rematch!.id } })).toMatchObject({ inviteeMemberId: ava });
+
+    const avaHome = await readHome(ava);
+    const addressed = avaHome.games.find((game) => game.id === rematch!.id);
+    expect(addressed).toMatchObject({ inviteToken: rematch!.inviteToken, round: 2, status: "invited" });
+    // She sees herself by her own name, never the challenger's private one for her.
+    expect(addressed!.players.map((player) => [player.firstName, player.isMe])).toEqual([["Leo", false], ["Ava", true]]);
+    expect(JSON.stringify(addressed)).not.toContain("Babe");
+    expect((await readHome(kat)).games.map((game) => game.id)).not.toContain(rematch!.id);
+    expect(await readGame(rematch!.id, kat)).toBeNull();
+
+    const accepted = await ok(ava, { termsVersion: 1, timeZone: "Australia/Sydney", token: addressed!.inviteToken!, type: "join" });
+    expect(accepted).toMatchObject({ inviteToken: null, round: 2, status: "live" });
+  });
+
   it("lets a ticket expire 14 days after it's issued, refusing to redeem it then", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");

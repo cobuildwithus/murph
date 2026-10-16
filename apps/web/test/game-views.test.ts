@@ -192,12 +192,12 @@ describe("weekly game views: post to unlock", () => {
   it("shows the invitee placeholder and invite token only to the challenger while invited", () => {
     const base = liveState();
     const invited: RuleState = { ...base, game: { ...base.game, status: "invited" }, players: [{ ...base.players[0], dayOne: null }] };
-    const leoView = view(invited, LEO, JOIN_AT, { invitee: { name: "Ava", photoKey: null }, inviteToken: "tok_123" });
+    const leoView = view(invited, LEO, JOIN_AT, { invitee: { memberId: null, name: "Ava", photoKey: null }, inviteToken: "tok_123" });
     expect(leoView.players.map((player) => [player.memberId, player.firstName])).toEqual([[LEO, "Leo"], [null, "Ava"]]);
     expect(leoView.inviteToken).toBe("tok_123");
     expect(leoView.days).toEqual([]);
     expect(leoView.startsOn).toBeNull();
     const picked: RuleState = { ...invited, game: { ...invited.game, startsOn: "2026-10-19" } };
-    expect(view(picked, LEO, JOIN_AT, { invitee: { name: "Ava", photoKey: null } }).startsOn).toBe("2026-10-19");
+    expect(view(picked, LEO, JOIN_AT, { invitee: { memberId: null, name: "Ava", photoKey: null } }).startsOn).toBe("2026-10-19");
   });
 });

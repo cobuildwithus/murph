@@ -239,7 +239,7 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
     if (existing.createdBy !== actor) reject("INVALID_REQUEST", "That game id is taken.");
     return gameId;
   }
-  const round = command.previousGameId ? await rematchRound(actor, command.previousGameId) : 1;
+  const rematch = command.previousGameId ? await readRematch(actor, command.previousGameId) : null;
   const newTerms = decideNewTerms(command.terms, {
     newKey: () => generateHostedRandomPrefixedId("gsk"),
     today: gameLocalDate(context.now ?? new Date(), profile.timeZone),
@@ -268,14 +268,15 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
           // The time zone here is a placeholder; it freezes when the game goes live.
           players: { create: { memberId: actor, seat: 0, timeZone: profile.timeZone } },
           previousGameId: command.previousGameId ?? null,
-          round,
+          inviteeMemberId: rematch?.inviteeMemberId ?? null,
+          round: rematch?.round ?? 1,
           status: "invited",
           terms: toPrismaJsonObject(newTerms.terms),
           termsWordsEncrypted,
         },
       });
       const previous = command.previousGameId ? { previousGameId: command.previousGameId } : {};
-      await writeEvents(tx, gameId, actor, [{ payload: { round, ...previous }, type: "created" }]);
+      await writeEvents(tx, gameId, actor, [{ payload: { round: rematch?.round ?? 1, ...previous }, type: "created" }]);
     });
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;
@@ -286,10 +287,11 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
 }
 
 /**
- * A rematch must follow a finished game the challenger played, and continues
- * the round count after a settled one (the joiner is checked at go-live).
+ * A rematch must follow a finished game the challenger played. After a settled
+ * game with exactly one other player, it continues the round count (the joiner
+ * is checked at go-live) and is addressed to that player, who sees it on Home.
  */
-async function rematchRound(actor: string, previousGameId: string): Promise<number> {
+async function readRematch(actor: string, previousGameId: string): Promise<{ round: number; inviteeMemberId: string | null }> {
   const previous = await getPrisma().game.findUnique({
     include: { players: { select: { memberId: true } } },
     where: { id: previousGameId },
@@ -298,7 +300,9 @@ async function rematchRound(actor: string, previousGameId: string): Promise<numb
   if (!previous || !finished || !previous.players.some((player) => player.memberId === actor)) {
     reject("INVALID_REQUEST", "A rematch needs a finished game you played.");
   }
-  return previous.status === "settled" ? previous.round + 1 : 1;
+  if (previous.status !== "settled") return { inviteeMemberId: null, round: 1 };
+  const others = previous.players.filter((player) => player.memberId !== actor);
+  return { inviteeMemberId: others.length === 1 ? others[0].memberId : null, round: previous.round + 1 };
 }
 
 async function join(context: CommandContext, command: Extract<GameCommand, { type: "join" }>): Promise<string> {
@@ -679,13 +683,18 @@ async function loadCurrent(gameIds: readonly string[]): Promise<{ games: LoadedG
 
 export async function readGame(gameId: string, memberId: string): Promise<GameView | null> {
   const { clock, games: [loaded] } = await loadCurrent([gameId]);
-  if (!loaded || !playerFor(loaded.state, memberId)) return null;
+  if (!loaded || !canView(loaded, memberId)) return null;
   const [view] = await buildViews([loaded], memberId, clock);
   return view;
 }
 
+/** Players see their games; a rematch's addressed invitee also sees its invite. */
+function canView(game: LoadedGame, memberId: string): boolean {
+  return playerFor(game.state, memberId) !== null || game.row.inviteeMemberId === memberId;
+}
+
 /**
- * Home shows what's open (invited, live), the three most recently settled
+ * Home shows what's open (invited, live, including a rematch addressed to you), the three most recently settled
  * games, and up to three invites that expired in the last week, so the
  * challenger sees "invite expired" rather than the game vanishing.
  */
@@ -703,7 +712,7 @@ function homeGames(games: readonly LoadedGame[], now: Date): LoadedGame[] {
 
 export async function readHome(memberId: string): Promise<GameHomeView> {
   const prisma = getPrisma();
-  const [profile, seats, tickets] = await Promise.all([
+  const [profile, seats, addressed, tickets] = await Promise.all([
     prisma.gameProfile.findUnique({ where: { memberId } }),
     prisma.gamePlayer.findMany({
       orderBy: { joinedAt: "desc" },
@@ -711,6 +720,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
       take: HOME_CANDIDATE_LIMIT,
       where: { game: { status: { in: ["invited", "live", "settled", "void"] } }, memberId },
     }),
+    prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { inviteeMemberId: memberId, status: "invited" } }),
     prisma.gameTicket.findMany({
       include: { game: { select: { createdBy: true, devClockOffsetMs: true, id: true, termsWordsEncrypted: true } } },
       orderBy: { createdAt: "desc" },
@@ -718,7 +728,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
       where: { OR: [{ owedTo: memberId }, { owedBy: memberId }] },
     }),
   ]);
-  const current = await loadCurrent(seats.map((seat) => seat.gameId));
+  const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])]);
   const games = homeGames(current.games, current.clock);
   const views = await buildViews(games, memberId, current.clock);
   const words = await readTermWords([...new Map(tickets.map((ticket) => [ticket.gameId, ticket.game])).values()]);
@@ -825,7 +835,7 @@ async function readTermWords(
 async function buildViews(games: readonly LoadedGame[], viewerId: string, clock: Date): Promise<GameView[]> {
   if (games.length === 0) return [];
   const prisma = getPrisma();
-  const memberIds = [...new Set(games.flatMap((game) => game.row.players.map((player) => player.memberId)))];
+  const memberIds = [...new Set([viewerId, ...games.flatMap((game) => game.row.players.map((player) => player.memberId))])];
   const [profiles, labels, tickets] = await Promise.all([
     prisma.gameProfile.findMany({ where: { memberId: { in: memberIds } } }),
     prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: memberIds } } }),
@@ -847,13 +857,16 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
   ]));
   const labelNameAt = new Map(labels.map((label) => [label.subjectMemberId, ask(labelTarget(viewerId, "name"), label.nameEncrypted)]));
   const inviteAt = games.map((game) => {
-    if (game.row.status !== "invited" || game.row.createdBy !== viewerId) return null;
-    const pending = parsePendingLabel(game.row.pendingLabel);
-    return {
-      name: ask(labelTarget(viewerId, "name"), pending.nameEncrypted),
-      photoKey: pending.photoKey,
-      token: ask(gameTarget(game.row, "invite_token"), game.row.inviteTokenEncrypted),
-    };
+    const { row } = game;
+    if (row.status !== "invited") return null;
+    const token = () => ask(gameTarget(row, "invite_token"), row.inviteTokenEncrypted);
+    if (row.createdBy === viewerId) {
+      const pending = parsePendingLabel(row.pendingLabel);
+      return { memberId: row.inviteeMemberId, name: ask(labelTarget(viewerId, "name"), pending.nameEncrypted), photoKey: pending.photoKey, token: token() };
+    }
+    // The addressed invitee sees themselves by their own name, never the challenger's private label.
+    if (row.inviteeMemberId === viewerId) return { memberId: viewerId, name: null, photoKey: null, token: token() };
+    return null;
   });
   const textAt = new Map<string, number>();
   for (const game of games) {
@@ -882,7 +895,9 @@ async function buildViews(games: readonly LoadedGame[], viewerId: string, clock:
       entryWords,
       inviteExpiresAt: game.row.inviteExpiresAt,
       inviteToken: invite ? plain[invite.token] : null,
-      invitee: invite ? { name: plain[invite.name] ?? "", photoKey: invite.photoKey } : null,
+      invitee: invite
+        ? { memberId: invite.memberId, name: (invite.name === null ? names.get(viewerId) : plain[invite.name]) ?? "", photoKey: invite.photoKey }
+        : null,
       names,
       now: gameNow(clock, game.row),
       result,
